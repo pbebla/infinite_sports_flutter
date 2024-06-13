@@ -3,14 +3,14 @@ import 'dart:ffi';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_application/login.dart';
-import 'package:flutter_application/model/basketballgame.dart';
-import 'package:flutter_application/navbar.dart';
-import 'package:flutter_application/leagues.dart';
+import 'package:infinite_sports_flutter/login.dart';
+import 'package:infinite_sports_flutter/model/basketballgame.dart';
+import 'package:infinite_sports_flutter/navbar.dart';
+import 'package:infinite_sports_flutter/leagues.dart';
 import 'package:stack_trace/stack_trace.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:flutter_application/model/game.dart';
+import 'package:infinite_sports_flutter/model/game.dart';
 
 typedef TitleCallback = void Function(String value);
 var cardList = <Card>[];
@@ -379,7 +379,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
                       child: CircularPercentIndicator(
                           radius: 30,
                           lineWidth: 4.0,
-                          percent: double.parse(game.percvote1),
+                          percent: 1.0,
                           center: new Text("100%"),
                           progressColor: Colors.green,
                       )
@@ -409,7 +409,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
                       child: CircularPercentIndicator(
                           radius: 30,
                           lineWidth: 4.0,
-                          percent: double.parse(game.percvote1),
+                          percent: 1.0,
                           center: new Text("100%"),
                           progressColor: Colors.green,
                         )
