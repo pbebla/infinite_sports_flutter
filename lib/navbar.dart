@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_application/login.dart';
+import 'package:infinite_sports_flutter/login.dart';
 
 
 class NavBar extends StatelessWidget {

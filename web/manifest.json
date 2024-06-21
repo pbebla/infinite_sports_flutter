@@ -1,6 +1,6 @@
 {
-    "name": "flutter_application",
-    "short_name": "flutter_application",
+    "name": "infinite_sports_flutter",
+    "short_name": "infinite_sports_flutter",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#FFFFFF",

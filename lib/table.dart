@@ -2,8 +2,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/widgets.dart';
-import 'package:flutter_application/model/futsalteaminfo.dart';
-import 'package:flutter_application/model/teaminfo.dart';
+import 'package:infinite_sports_flutter/model/basketballteaminfo.dart';
+import 'package:infinite_sports_flutter/model/futsalteaminfo.dart';
+import 'package:infinite_sports_flutter/model/teaminfo.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 
@@ -32,10 +33,10 @@ class _TablePageState extends State<TablePage> {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/${widget.sport}/${widget.season}");
     Map<String, TeamInfo> lineUp = <String, TeamInfo>{};
     var league = await getAllTeamLogo();
-    var futsal = league["Futsal"];
-    var logos = futsal![widget.season];
+    var sport = league[widget.sport];
     if (widget.sport == "Futsal")
     {
+      var logos = sport![widget.season];
       Map<String, FutsalTeamInfo> gottenlineUp = <String, FutsalTeamInfo>{};
       final event = await newClient.child("Teams").get();
       Map eventData = event.value as Map;
@@ -59,12 +60,26 @@ class _TablePageState extends State<TablePage> {
     }
     else
     {
-        var event = await newClient.child("Teams").once();
-        var gottenlineUp = event.snapshot.value as Map;
-        for (var team in gottenlineUp.keys)
-        {
-          lineUp[team] = gottenlineUp[team];
-        }
+      var logos = sport![widget.season];
+      Map<String, BasketballTeamInfo> gottenlineUp = <String, BasketballTeamInfo>{};
+      final event = await newClient.child("Teams").get();
+      Map eventData = event.value as Map;
+      eventData.forEach((key, value) {
+        var temp = BasketballTeamInfo();
+        temp.imagePath = logos![key]!;
+        temp.ppg = value["PPG"].toDouble();
+        temp.pcpg = value["PCPG"].toDouble();
+        temp.pd = value["PD"].toDouble();
+        temp.gp = value["GP"];
+        temp.wins = value["Wins"];
+        temp.losses = value["Losses"];
+        temp.points = value["Points"];
+        gottenlineUp[key] = temp;
+      });
+      for (var team in gottenlineUp.keys)
+      {
+        lineUp[team] = gottenlineUp[team] as TeamInfo;
+      }
     }
     return lineUp;
   }
@@ -76,6 +91,98 @@ class _TablePageState extends State<TablePage> {
     Map urls = event.snapshot.value as Map;
 
     return urls;
+  }
+
+  sortTable(List<DataRow> teamsList) {
+    if (widget.sport == "Futsal") {
+      teamsList.sort((a, b) {
+        int intA = int.parse((a.cells[6].child as Text).textSpan!.toPlainText());
+        int intB = int.parse((b.cells[6].child as Text).textSpan!.toPlainText());
+        int result = intB.compareTo(intA);
+        if (result == 0) {
+          intA = int.parse((a.cells[7].child as Text).textSpan!.toPlainText());
+          intB = int.parse((b.cells[7].child as Text).textSpan!.toPlainText());
+          return intB.compareTo(intA);
+        } else {
+          return result;
+        }
+        } 
+      );
+    } else {
+      teamsList.sort((a, b) {
+        int intA = int.parse((a.cells[5].child as Text).textSpan!.toPlainText());
+        int intB = int.parse((b.cells[5].child as Text).textSpan!.toPlainText());
+        int result = intB.compareTo(intA);
+        if (result == 0) {
+          double doubleA = double.parse((a.cells[6].child as Text).data!.toString());
+          double doubleB = double.parse((b.cells[6].child as Text).data!.toString());
+          return doubleB.compareTo(doubleA);
+        } else {
+          return result;
+        }
+        } 
+      );
+    }
+  }
+
+  DataTable buildTable(Map<String, TeamInfo> data) {
+    if (widget.sport == "Futsal") {
+      List<DataRow> teamsList = data.entries.map((key) => DataRow(cells: [
+        DataCell(Image.network(key.value.imagePath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)),
+        DataCell(Text(key.key.toString())),
+        DataCell(Text((key.value as FutsalTeamInfo).gp.toString())),
+        DataCell(Text(key.value.wins.toString())),
+        DataCell(Text((key.value as FutsalTeamInfo).draws.toString())),
+        DataCell(Text(key.value.losses.toString())),
+        DataCell(Text.rich(TextSpan(text: key.value.points.toString(), style: TextStyle(fontWeight: FontWeight.bold)))),
+        DataCell(Text((key.value as FutsalTeamInfo).gd.toString())),
+      ])).toList();
+      sortTable(teamsList);
+      return DataTable(
+        columnSpacing: 0,
+        headingRowColor: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
+          return Theme.of(context).colorScheme.inversePrimary; // Use the default value.
+        }),
+        columns: const [
+          DataColumn(label: Text("")),
+          DataColumn(label: Text("Team")),
+          DataColumn(label: Text("GP")),
+          DataColumn(label: Text("W")),
+          DataColumn(label: Text("D")),
+          DataColumn(label: Text("L")),
+          DataColumn(label: Text("P")),
+          DataColumn(label: Text("GD")),
+        ], 
+        rows: teamsList,
+      );
+    } else {
+      List<DataRow> teamsList = data.entries.map((key) => DataRow(cells: [
+        DataCell(Image.network(key.value.imagePath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)),
+        DataCell(Text(key.key.toString())),
+        DataCell(Text((key.value as BasketballTeamInfo).gp.toString())),
+        DataCell(Text(key.value.wins.toString())),
+        DataCell(Text(key.value.losses.toString())),
+        DataCell(Text.rich(TextSpan(text: key.value.points.toString(), style: TextStyle(fontWeight: FontWeight.bold)))),
+        DataCell(Text((key.value as BasketballTeamInfo).pd.toString())),
+      ])).toList();
+      sortTable(teamsList);
+      return DataTable(
+        columnSpacing: 0,
+        headingRowColor: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
+          return Theme.of(context).colorScheme.inversePrimary; // Use the default value.
+        }),
+        columns: const [
+          DataColumn(label: Text("")),
+          DataColumn(label: Text("Team")),
+          DataColumn(label: Text("GP")),
+          DataColumn(label: Text("W")),
+          DataColumn(label: Text("L")),
+          DataColumn(label: Text("P")),
+          DataColumn(label: Text("APD")),
+        ], 
+        rows: teamsList,
+      );
+    }
   }
 /*
   var teamInfos = await FirebaseGetter.getSeasonTable(leagueFromDB, seasonFromDB);
@@ -102,21 +209,6 @@ class _TablePageState extends State<TablePage> {
 */
   @override
   Widget build(BuildContext context) {
-    sortTable(List<DataRow> teamsList) {
-      teamsList.sort((a, b) {
-        int intA = int.parse((a.cells[6].child as Text).textSpan!.toPlainText());
-        int intB = int.parse((b.cells[6].child as Text).textSpan!.toPlainText());
-        int result = intB.compareTo(intA);
-        if (result == 0) {
-          intA = int.parse((a.cells[7].child as Text).textSpan!.toPlainText());
-          intB = int.parse((b.cells[7].child as Text).textSpan!.toPlainText());
-          return intB.compareTo(intA);
-        } else {
-          return result;
-        }
-      }
-      );
-    }
     return Scaffold(
       appBar: AppBar(
         title: Text("Table"),
@@ -130,37 +222,9 @@ class _TablePageState extends State<TablePage> {
             return DataTable(columns: [DataColumn(label: Text("Loading..."))], rows: []);
           }
           Map<String, TeamInfo> data = snapshot.data as Map<String, TeamInfo>;
-          List<DataRow> teamsList = data.entries.map((key) => DataRow(cells: [
-                DataCell(Image.network(key.value.imagePath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)),
-                DataCell(Text(key.key.toString())),
-                DataCell(Text((key.value as FutsalTeamInfo).gp.toString())),
-                DataCell(Text(key.value.wins.toString())),
-                DataCell(Text((key.value as FutsalTeamInfo).draws.toString())),
-                DataCell(Text(key.value.losses.toString())),
-                DataCell(Text.rich(TextSpan(text: key.value.points.toString(), style: TextStyle(fontWeight: FontWeight.bold)))),
-                DataCell(Text((key.value as FutsalTeamInfo).gd.toString())),
-              ])).toList();
-          sortTable(teamsList);
-          //teamsList.insert(4, DataRow(cells: List.filled(7, DataCell(Divider(thickness: 5, color: Colors.red,)))));
           return SizedBox(
             width: MediaQuery.of(context).size.width,
-            child: DataTable(
-              columnSpacing: 0,
-              headingRowColor: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
-                return Theme.of(context).colorScheme.inversePrimary; // Use the default value.
-              }),
-              columns: const [
-                DataColumn(label: Text("")),
-                DataColumn(label: Text("Team")),
-                DataColumn(label: Text("GP")),
-                DataColumn(label: Text("W")),
-                DataColumn(label: Text("D")),
-                DataColumn(label: Text("L")),
-                DataColumn(label: Text("P")),
-                DataColumn(label: Text("GD")),
-              ], 
-              rows: teamsList,
-            ));
+            child: buildTable(data));
         }
       )
     );

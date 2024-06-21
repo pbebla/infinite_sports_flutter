@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_application/login.dart';
-import 'package:flutter_application/navbar.dart';
-import 'package:flutter_application/leagues.dart';
-import 'package:flutter_application/livescore.dart';
-import 'package:flutter_application/table.dart';
+import 'package:infinite_sports_flutter/login.dart';
+import 'package:infinite_sports_flutter/navbar.dart';
+import 'package:infinite_sports_flutter/leagues.dart';
+import 'package:infinite_sports_flutter/livescore.dart';
+import 'package:infinite_sports_flutter/table.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 
@@ -124,7 +124,7 @@ class _MyHomePageState extends State<MyHomePage> {
               Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
                 initialEntries: [OverlayEntry(
                   builder: (context) {
-                    return TablePage(sport: "Futsal", season: "13");
+                    return TablePage(sport: "Basketball", season: "11");
                   })],
               )));
             },
@@ -146,6 +146,7 @@ class _MyHomePageState extends State<MyHomePage> {
         child: _widgetOptions.elementAt(_selectedIndex),
       ),
       bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(
             icon: ImageIcon(AssetImage('assets/scores.png')),

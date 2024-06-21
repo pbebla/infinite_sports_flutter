@@ -1,8 +1,8 @@
 
-import 'dart:typed_data';
-
+import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter_application/model/game.dart';
+import 'dart:core';
+import 'package:infinite_sports_flutter/model/game.dart';
 
 class BasketballGame implements Game
 {
@@ -98,9 +98,67 @@ class BasketballGame implements Game
   }
 
   @override
-  void SetUpVote() {
-    // TODO: implement SetUpVote
-  }
+  void SetUpVote()
+{
+    //signedIn = Utility.LoggedInUser != null;
+    signedIn = false;
+    if (team1vote.isNotEmpty)
+    {
+        vote1 = team1vote.values.reduce((value, element) => value + element);
+    }
+    else
+    {
+        vote1 = 0;
+    }
+
+    if (team2vote.isNotEmpty)
+    {
+        vote2 = team2vote.values.reduce((value, element) => value + element);;
+    }
+    else
+    {
+        vote2 = 0;
+    }
+
+    if (team1vote.isNotEmpty && team2vote.isNotEmpty && signedIn)
+    {
+        //voted = !((new List<string>(team1vote.Keys).Contains(Utility.LoggedInUser.User.Uid)) || (new List<string>(team2vote.Keys).Contains(Utility.LoggedInUser.User.Uid)));
+    }
+    else if (team1vote.isNotEmpty && signedIn)
+    {
+        //voted = !(new List<string>(team1vote.Keys).Contains(Utility.LoggedInUser.User.Uid));
+    }
+    else if (team2vote.isNotEmpty && signedIn)
+    {
+        //voted = !(new List<string>(team2vote.Keys).Contains(Utility.LoggedInUser.User.Uid));
+    }
+    else
+    {
+        voted = true;
+    }
+
+    signedIn = signedIn && voted;
+
+    if ((vote1 + vote2) != 0)
+    {
+        finalvote1 = ((vote1 + vote2) - vote2) / ((vote1 + vote2));
+        finalvote2 = 1 - finalvote1;
+
+        percvote1 = (finalvote1 * 100).round().toString() + "%";
+        percvote2 = (finalvote2 * 100).round().toString() + "%";
+    }
+    else
+    {
+        finalvote1 = 1.0;
+        finalvote2 = 1.0;
+
+        percvote1 = "0%";
+        percvote2 = "0%";
+    }
+
+    ProgressColor1 = Color(0xFFD80000);
+    ProgressColor2 = Color(0xFFD80000);
+}
   
 }
 /*
@@ -161,66 +219,5 @@ public async void GetLineUpImages()
 
     }
 }
-
-public void SetUpVote()
-{
-    signedIn = Utility.LoggedInUser != null;
-
-    if (team1vote != null)
-    {
-        vote1 = team1vote.Count;
-    }
-    else
-    {
-        vote1 = 0;
-    }
-
-    if (team2vote != null)
-    {
-        vote2 = team2vote.Count;
-    }
-    else
-    {
-        vote2 = 0;
-    }
-
-    if (team1vote != null && team2vote != null && signedIn)
-    {
-        voted = !((new List<string>(team1vote.Keys).Contains(Utility.LoggedInUser.User.Uid)) || (new List<string>(team2vote.Keys).Contains(Utility.LoggedInUser.User.Uid)));
-    }
-    else if (team1vote != null && signedIn)
-    {
-        voted = !(new List<string>(team1vote.Keys).Contains(Utility.LoggedInUser.User.Uid));
-    }
-    else if (team2vote != null && signedIn)
-    {
-        voted = !(new List<string>(team2vote.Keys).Contains(Utility.LoggedInUser.User.Uid));
-    }
-    else
-    {
-        voted = true;
-    }
-
-    signedIn = signedIn && voted;
-
-    if ((vote1 + vote2) != 0)
-    {
-        finalvote1 = ((vote1 + vote2) - vote2) / ((double)(vote1 + vote2));
-        finalvote2 = 1 - finalvote1;
-
-        percvote1 = (Math.Round(finalvote1, 2) * 100) + "%";
-        percvote2 = (Math.Round(finalvote2, 2) * 100) + "%";
-    }
-    else
-    {
-        finalvote1 = 1;
-        finalvote2 = 1;
-
-        percvote1 = "0%";
-        percvote2 = "0%";
-    }
-
-    ProgressColor1 = Color.FromHex("#D80000");
-    ProgressColor2 = Color.FromHex("#D80000");
-}
 */
+

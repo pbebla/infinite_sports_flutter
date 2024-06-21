@@ -1,4 +1,4 @@
-# flutter_application
+# infinite_sports_flutter
 
 A new Flutter project.
 

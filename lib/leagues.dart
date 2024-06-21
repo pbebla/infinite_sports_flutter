@@ -1,7 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_application/model/leaguemenu.dart';
-import 'package:flutter_application/navbar.dart';
+import 'package:infinite_sports_flutter/model/leaguemenu.dart';
+import 'package:infinite_sports_flutter/navbar.dart';
 
 class LeaguesPage extends StatefulWidget {
   const LeaguesPage({super.key});

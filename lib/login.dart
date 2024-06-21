@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_application/main.dart';
+import 'package:infinite_sports_flutter/main.dart';
 
 class LoginPage extends StatefulWidget {
   @override

@@ -338,14 +338,14 @@ class _LiveScorePageState extends State<LiveScorePage> {
           width: 300,
           height: 240,
           child: Container(
-            padding: const EdgeInsets.all(15),
+            padding: const EdgeInsets.all(13),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: <Widget>[
                 Row(
                   children: <Widget>[
-                    Expanded(child:Text(game.stringStatus,textAlign: TextAlign.left)),
-                    Expanded(child:Text('${game.Time.toString()}:00PM',textAlign: TextAlign.right)),
+                    Expanded(child:Text(game.stringStatus,textAlign: TextAlign.left, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
+                    Expanded(child:Text('${game.Time.toString()}:00PM',textAlign: TextAlign.right, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
                   ],
                 ),
                 Row(
@@ -375,14 +375,12 @@ class _LiveScorePageState extends State<LiveScorePage> {
                 ),
                 Row(
                   children: <Widget>[
-                    Expanded(
-                      child: CircularPercentIndicator(
+                    CircularPercentIndicator(
                           radius: 30,
                           lineWidth: 4.0,
-                          percent: 1.0,
-                          center: new Text("100%"),
+                          percent: game.finalvote1,
+                          center: Text(game.percvote1),
                           progressColor: Colors.green,
-                      )
                     ),
                     Expanded(
                       child: Column(
@@ -405,15 +403,13 @@ class _LiveScorePageState extends State<LiveScorePage> {
                         ],
                       ),
                     ),
-                    Expanded(
-                      child: CircularPercentIndicator(
+                    CircularPercentIndicator(
                           radius: 30,
                           lineWidth: 4.0,
-                          percent: 1.0,
-                          center: new Text("100%"),
+                          percent: game.finalvote2,
+                          center: Text(game.percvote2),
                           progressColor: Colors.green,
-                        )
-                    ),
+                    )
                   ],
                 ),
               ],
@@ -471,42 +467,5 @@ class _LiveScorePageState extends State<LiveScorePage> {
             children: cardList,
       )
       );
-    /*
-    return Scaffold(
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'You have pushed the button this many times:',
-            ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ),
-    ); */
   }
 }
