@@ -219,7 +219,7 @@ class _TablePageState extends State<TablePage> {
         future: getSeasonTable(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
-            return DataTable(columns: [DataColumn(label: Text("Loading..."))], rows: []);
+            return Text("Loading");
           }
           Map<String, TeamInfo> data = snapshot.data as Map<String, TeamInfo>;
           return SizedBox(

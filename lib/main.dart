@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/botnavbar.dart';
+import 'package:infinite_sports_flutter/globalappbar.dart';
 import 'package:infinite_sports_flutter/login.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/leagues.dart';
 import 'package:infinite_sports_flutter/livescore.dart';
+import 'package:infinite_sports_flutter/navigations/leagues_navigation.dart';
+import 'package:infinite_sports_flutter/showleague.dart';
 import 'package:infinite_sports_flutter/table.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
@@ -69,6 +74,9 @@ class _MyHomePageState extends State<MyHomePage> {
   int _selectedIndex = 0;
   String _title = "";
   String _liveScoresTitle = "Live Scores";
+  String currentSport = "";
+  String currentSeason = "";
+  String currentDate = "";
 
   @override
   void initState() {
@@ -90,11 +98,25 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  Future<int> setCurrentValues() async {
+    currentSport = await getCurrentSport();
+    currentSeason = await getCurrentSeason(currentSport);
+    currentDate = await getCurrentDate(currentSport, currentSeason);
+    tableSport = currentSport;
+    tableSeason = currentSeason;
+    return 1;
+  }
+
   @override
   Widget build(BuildContext context) {
     final List<Widget> _widgetOptions = <Widget>[
-      LiveScorePage(onTitleSelect: (String value) { setLiveScoreTitle(value); }),
-      LeaguesPage(),
+      FutureBuilder(future: setCurrentValues(), builder:(context, snapshot) {
+        if (!snapshot.hasData) {
+          return Text("Loading");
+        }
+        return LiveScorePage(sport: currentSport, season: currentSeason, date: currentDate ,onTitleSelect: (String value) { setLiveScoreTitle(value); });
+      },),
+      LeaguesNavigation(),
       Text('Index 2: School'),
     ];
     // This method is rerun every time setState is called, for instance as done
@@ -105,63 +127,30 @@ class _MyHomePageState extends State<MyHomePage> {
     // than having to individually change instances of widgets.
     return Scaffold(
       drawer: NavBar(),
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        leading: Builder(
-          builder: (context) {
-            return IconButton(
-              icon: const ImageIcon(AssetImage('assets/profile.png')),
-              onPressed: () {
-                Scaffold.of(context).openDrawer();
-              },);
-          },
-        ),
-        actions: [
-          IconButton(
-            onPressed: () {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-                initialEntries: [OverlayEntry(
-                  builder: (context) {
-                    return TablePage(sport: "Basketball", season: "11");
-                  })],
-              )));
-            },
-            icon: ImageIcon(AssetImage('assets/table.png')),
-          ),
-          IconButton(
-            onPressed: () {},
-            icon: ImageIcon(AssetImage('assets/leader.png')),
-          ),
-        ],
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(_title),
-        centerTitle: true,
-        foregroundColor: Colors.white,
-      ),
+      appBar: GlobalAppBar(title: _title, height: AppBar().preferredSize.height),
       body: Center(
-        child: _widgetOptions.elementAt(_selectedIndex),
+        child: IndexedStack(
+          index: _selectedIndex,
+          children: _widgetOptions
+        ),
       ),
       bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(
-            icon: ImageIcon(AssetImage('assets/scores.png')),
-            label: 'Live Scores'),
-          BottomNavigationBarItem(
-            icon: ImageIcon(AssetImage('assets/leagues.png')),
-            label: 'Leagues'),
-          BottomNavigationBarItem(
-            icon: ImageIcon(AssetImage('assets/aroundyou.png')),
-            label: 'Around You'),
-        ],
-        selectedItemColor: Theme.of(context).colorScheme.primary,
-        currentIndex: _selectedIndex,
-        onTap: _onItemTapped,
-        ), // This trailing comma makes auto-formatting nicer for build methods.
+      type: BottomNavigationBarType.fixed,
+      items: const [
+        BottomNavigationBarItem(
+          icon: ImageIcon(AssetImage('assets/scores.png')),
+          label: 'Live Scores'),
+        BottomNavigationBarItem(
+          icon: ImageIcon(AssetImage('assets/leagues.png')),
+          label: 'Leagues'),
+        BottomNavigationBarItem(
+          icon: ImageIcon(AssetImage('assets/aroundyou.png')),
+          label: 'Around You'),
+      ],
+      selectedItemColor: Theme.of(context).colorScheme.primary,
+      currentIndex: _selectedIndex,
+      onTap: _onItemTapped,
+      ) // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 
@@ -169,13 +158,14 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       _selectedIndex = index;
       switch(index) { 
-       case 0: { _title = _liveScoresTitle; } 
-       break; 
-       case 1: { _title = 'Leagues'; } 
-       break;
-       case 2: { _title = 'Around You'; } 
-       break;
+        case 0: { _title = _liveScoresTitle; } 
+        break; 
+        case 1: { _title = 'Leagues'; } 
+        break;
+        case 2: { _title = 'Around You'; } 
+        break;
       } 
     });
   }
 }
+
