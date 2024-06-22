@@ -64,24 +64,22 @@ class DefaultFirebaseOptions {
     appId: '1:248087010229:android:058f3dbffbc0a468',
     messagingSenderId: '248087010229',
     projectId: 'infinite-sports-app',
-    databaseURL:
-        'https://infinite-sports-app.firebaseio.com',
+    databaseURL: 'https://infinite-sports-app.firebaseio.com',
     storageBucket: 'infinite-sports-app.appspot.com',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyDooSUGSf63Ghq02_iIhtnmwMDs4HlWS6c',
-    appId: '1:406099696497:ios:1b423b89c63b82053574d0',
-    messagingSenderId: '406099696497',
+    apiKey: 'AIzaSyCKDhpIclCSKFouJlF9ouX0BUs_5DOn-VA',
+    appId: '1:248087010229:ios:87700ab7b56d8baa',
+    messagingSenderId: '248087010229',
     projectId: 'infinite-sports-app',
-    databaseURL:
-        'https://flutterfire-e2e-tests-default-rtdb.europe-west1.firebasedatabase.app',
+    databaseURL: 'https://infinite-sports-app.firebaseio.com',
     storageBucket: 'infinite-sports-app.appspot.com',
     androidClientId:
         '406099696497-17qn06u8a0dc717u8ul7s49ampk13lul.apps.googleusercontent.com',
     iosClientId:
-        '406099696497-irb7edfevfkhi6t5s9kbuq1mt1og95rg.apps.googleusercontent.com',
-    iosBundleId: 'io.flutter.plugins.firebase.messaging',
+        '248087010229-g45omq0n7ev5jtmbc1ei7a0nuaq02544.apps.googleusercontent.com',
+    iosBundleId: 'com.pbebla.Infinite-Sports',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
