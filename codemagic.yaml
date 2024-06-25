@@ -1,0 +1,17 @@
+workflows:
+  ios-workflow:
+    name: iOS Workflow
+    environment:
+      ios_signing:
+        distribution_type: development
+        bundle_identifier: com.pbebla.Infinite-Sports
+      flutter: stable
+      xcode: latest # <-- set to specific version e.g. 14.3, 15.0 to avoid unexpected updates.
+      cocoapods: default
+    scripts:
+      - name: Set up code signing settings on Xcode project
+        script: |
+          xcode-project use-profiles
+      - name: Get Flutter packages
+        script: |
+          flutter packages pub get
