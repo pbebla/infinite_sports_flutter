@@ -1,7 +1,19 @@
 import 'package:firebase_database/firebase_database.dart';
+import 'package:infinite_sports_flutter/model/basketballplayer.dart';
+import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 
 String tableSport = "";
 String tableSeason = "";
+Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
+Map<String, Map<String, Map<String, BasketballPlayer>>> basketballLineups = {};
+Map teamLogos = {};
+
+Future<void> getAllTeamLogo() async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref();
+  var event = await newClient.child("Logo Urls").once();
+  teamLogos = event.snapshot.value as Map;
+}
 
 String convertDateToDatabase(DateTime date) {
   String formattedDate = "";
@@ -110,4 +122,57 @@ Future<String> getMinSeason(sport) async {
   {
       return e.toString();
   }
+}
+
+Future<void> getAllFutsalLineUps(String season) async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("/Futsal/$season");
+  var event = await newClient.child("Line Ups").once();
+  var lineups = event.snapshot.value as Map;
+  Map<String, Map<String, FutsalPlayer>> result = {};
+  lineups.forEach((team, lineup) {
+    Map<String, FutsalPlayer> temp = {};
+    (lineup as Map).forEach((name, info) {
+      FutsalPlayer temp2 = FutsalPlayer();
+      temp2.assists = info["Assists"];
+      temp2.goals = info["Goals"];
+      temp2.number = info["number"];
+      temp2.uid = info["UID"];
+      temp2.name = name;
+      temp[name] = temp2;
+    });
+    result[team] = temp;
+  },);
+
+  futsalLineups[season] = result;
+}
+
+Future<void> getAllBasketballLineUps(String season) async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("/Basketball/$season");
+  var event = await newClient.child("Line Ups").once();
+  var lineups = event.snapshot.value as Map;
+  Map<String, Map<String, BasketballPlayer>> result = {};
+  lineups.forEach((team, lineup) {
+    Map<String, BasketballPlayer> temp = {};
+    (lineup as Map).forEach((name, info) {
+      BasketballPlayer temp2 = BasketballPlayer();
+      temp2.number = info["number"];
+      temp2.uid = info["UID"];
+      temp2.name = name;
+      temp2.onePoint = info["OnePoint"];
+      temp2.twoPoints = info["TwoPoints"];
+      temp2.threePoints = info["ThreePoints"];
+      temp2.total = info["Total"];
+      temp2.misses = info["Misses"];
+      temp2.rebounds = info["Rebounds"];
+      temp2.shotPercentage = ((temp2.twoPoints + temp2.threePoints) / (temp2.twoPoints + temp2.threePoints + temp2.misses)).toStringAsFixed(2);
+      temp[name] = temp2;
+
+    });
+    result[team] = temp;
+  },);
+  basketballLineups[season] = result;
+
+  //futsalLineups[season] = lineups;
 }

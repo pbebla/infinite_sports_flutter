@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/widgets.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/basketballteaminfo.dart';
 import 'package:infinite_sports_flutter/model/futsalteaminfo.dart';
 import 'package:infinite_sports_flutter/model/teaminfo.dart';
@@ -32,7 +33,7 @@ class _TablePageState extends State<TablePage> {
   Future<Map<String, TeamInfo>> getSeasonTable() async {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/${widget.sport}/${widget.season}");
     Map<String, TeamInfo> lineUp = <String, TeamInfo>{};
-    var league = await getAllTeamLogo();
+    var league = teamLogos;
     var sport = league[widget.sport];
     if (widget.sport == "Futsal")
     {
@@ -82,15 +83,6 @@ class _TablePageState extends State<TablePage> {
       }
     }
     return lineUp;
-  }
-
-  Future<Map> getAllTeamLogo() async
-  {
-    DatabaseReference newClient = FirebaseDatabase.instance.ref();
-    var event = await newClient.child("Logo Urls").once();
-    Map urls = event.snapshot.value as Map;
-
-    return urls;
   }
 
   sortTable(List<DataRow> teamsList) {
@@ -163,7 +155,7 @@ class _TablePageState extends State<TablePage> {
         DataCell(Text(key.value.wins.toString())),
         DataCell(Text(key.value.losses.toString())),
         DataCell(Text.rich(TextSpan(text: key.value.points.toString(), style: TextStyle(fontWeight: FontWeight.bold)))),
-        DataCell(Text((key.value as BasketballTeamInfo).pd.toString())),
+        DataCell(Text((key.value as BasketballTeamInfo).pd.toStringAsFixed(1))),
       ])).toList();
       sortTable(teamsList);
       return DataTable(

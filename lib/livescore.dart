@@ -4,6 +4,7 @@ import 'dart:ffi';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/login.dart';
+import 'package:infinite_sports_flutter/main.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
 import 'package:infinite_sports_flutter/model/futsalgame.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
@@ -280,7 +281,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
               children: <Widget>[
                 Row(
                   children: <Widget>[
-                    Expanded(child:Text(game.stringStatus,textAlign: TextAlign.left, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
+                    Expanded(child:Text(game.stringStatus,textAlign: TextAlign.left, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: game.statusColor))),
                     Expanded(child:Text('${game.Time.toString()}:00PM',textAlign: TextAlign.right, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
                   ],
                 ),
@@ -316,7 +317,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
                           lineWidth: 4.0,
                           percent: game.finalvote1,
                           center: Text(game.percvote1),
-                          progressColor: Colors.green,
+                          progressColor: infiniteSportsPrimaryColor,
                     ),
                     Expanded(
                       child: Visibility(
@@ -350,7 +351,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
                           lineWidth: 4.0,
                           percent: game.finalvote2,
                           center: Text(game.percvote2),
-                          progressColor: Colors.green,
+                          progressColor: infiniteSportsPrimaryColor,
                     )
                   ],
                 ),

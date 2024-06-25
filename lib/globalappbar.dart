@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/leaderboard.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/table.dart';
 
@@ -35,7 +36,14 @@ class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
           icon: ImageIcon(AssetImage('assets/table.png')),
         ),
         IconButton(
-          onPressed: () {},
+          onPressed: () {
+            Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
+              initialEntries: [OverlayEntry(
+                builder: (context) {
+                  return LeaderboardPage(sport: tableSport, season: tableSeason);
+                })],
+            )));
+          },
           icon: ImageIcon(AssetImage('assets/leader.png')),
         ),
       ],

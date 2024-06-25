@@ -12,6 +12,8 @@ import 'package:infinite_sports_flutter/table.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 
+var infiniteSportsPrimaryColor = const Color.fromARGB(255, 208, 0, 0);
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
@@ -44,7 +46,7 @@ class MyApp extends StatelessWidget {
         //
         // This works for code too, not just values: Most code changes can be
         // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Color.fromARGB(255, 208, 0, 0)),
+        colorScheme: ColorScheme.fromSeed(seedColor: infiniteSportsPrimaryColor, primary: infiniteSportsPrimaryColor),
         useMaterial3: true,
       ),
       home: LoginPage(),
@@ -104,6 +106,7 @@ class _MyHomePageState extends State<MyHomePage> {
     currentDate = await getCurrentDate(currentSport, currentSeason);
     tableSport = currentSport;
     tableSeason = currentSeason;
+    await getAllTeamLogo();
     return 1;
   }
 
