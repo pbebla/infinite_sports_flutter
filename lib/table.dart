@@ -28,6 +28,7 @@ class TablePage extends StatefulWidget {
 }
 
 class _TablePageState extends State<TablePage> {
+  Map<dynamic, dynamic> teams = {};
   static const int numItems = 6;
   List<bool> selected = List<bool>.generate(numItems, (int index) => false);
   Future<Map<String, TeamInfo>> getSeasonTable() async {
@@ -85,41 +86,10 @@ class _TablePageState extends State<TablePage> {
     return lineUp;
   }
 
-  sortTable(List<DataRow> teamsList) {
+  DataTable buildTable() {
+    sortTable();
     if (widget.sport == "Futsal") {
-      teamsList.sort((a, b) {
-        int intA = int.parse((a.cells[6].child as Text).textSpan!.toPlainText());
-        int intB = int.parse((b.cells[6].child as Text).textSpan!.toPlainText());
-        int result = intB.compareTo(intA);
-        if (result == 0) {
-          intA = int.parse((a.cells[7].child as Text).textSpan!.toPlainText());
-          intB = int.parse((b.cells[7].child as Text).textSpan!.toPlainText());
-          return intB.compareTo(intA);
-        } else {
-          return result;
-        }
-        } 
-      );
-    } else {
-      teamsList.sort((a, b) {
-        int intA = int.parse((a.cells[5].child as Text).textSpan!.toPlainText());
-        int intB = int.parse((b.cells[5].child as Text).textSpan!.toPlainText());
-        int result = intB.compareTo(intA);
-        if (result == 0) {
-          double doubleA = double.parse((a.cells[6].child as Text).data!.toString());
-          double doubleB = double.parse((b.cells[6].child as Text).data!.toString());
-          return doubleB.compareTo(doubleA);
-        } else {
-          return result;
-        }
-        } 
-      );
-    }
-  }
-
-  DataTable buildTable(Map<String, TeamInfo> data) {
-    if (widget.sport == "Futsal") {
-      List<DataRow> teamsList = data.entries.map((key) => DataRow(cells: [
+      List<DataRow> teamsList = teams.entries.map((key) => DataRow(cells: [
         DataCell(Image.network(key.value.imagePath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)),
         DataCell(Text(key.key.toString())),
         DataCell(Text((key.value as FutsalTeamInfo).gp.toString())),
@@ -129,8 +99,9 @@ class _TablePageState extends State<TablePage> {
         DataCell(Text.rich(TextSpan(text: key.value.points.toString(), style: TextStyle(fontWeight: FontWeight.bold)))),
         DataCell(Text((key.value as FutsalTeamInfo).gd.toString())),
       ])).toList();
-      sortTable(teamsList);
       return DataTable(
+        sortColumnIndex: 6,
+        sortAscending: false,
         columnSpacing: 0,
         headingRowColor: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
           return Theme.of(context).colorScheme.inversePrimary; // Use the default value.
@@ -138,17 +109,17 @@ class _TablePageState extends State<TablePage> {
         columns: const [
           DataColumn(label: Text("")),
           DataColumn(label: Text("Team")),
-          DataColumn(label: Text("GP")),
-          DataColumn(label: Text("W")),
-          DataColumn(label: Text("D")),
-          DataColumn(label: Text("L")),
-          DataColumn(label: Text("P")),
-          DataColumn(label: Text("GD")),
+          DataColumn(label: Text("GP"), numeric: true),
+          DataColumn(label: Text("W"), numeric: true),
+          DataColumn(label: Text("D"), numeric: true),
+          DataColumn(label: Text("L"), numeric: true),
+          DataColumn(label: Text("P"), numeric: true),
+          DataColumn(label: Text("GD"), numeric: true),
         ], 
         rows: teamsList,
       );
     } else {
-      List<DataRow> teamsList = data.entries.map((key) => DataRow(cells: [
+      List<DataRow> teamsList = teams.entries.map((key) => DataRow(cells: [
         DataCell(Image.network(key.value.imagePath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)),
         DataCell(Text(key.key.toString())),
         DataCell(Text((key.value as BasketballTeamInfo).gp.toString())),
@@ -157,8 +128,9 @@ class _TablePageState extends State<TablePage> {
         DataCell(Text.rich(TextSpan(text: key.value.points.toString(), style: TextStyle(fontWeight: FontWeight.bold)))),
         DataCell(Text((key.value as BasketballTeamInfo).pd.toStringAsFixed(1))),
       ])).toList();
-      sortTable(teamsList);
       return DataTable(
+        sortColumnIndex: 5,
+        sortAscending: false,
         columnSpacing: 0,
         headingRowColor: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
           return Theme.of(context).colorScheme.inversePrimary; // Use the default value.
@@ -166,14 +138,34 @@ class _TablePageState extends State<TablePage> {
         columns: const [
           DataColumn(label: Text("")),
           DataColumn(label: Text("Team")),
-          DataColumn(label: Text("GP")),
-          DataColumn(label: Text("W")),
-          DataColumn(label: Text("L")),
-          DataColumn(label: Text("P")),
-          DataColumn(label: Text("APD")),
+          DataColumn(label: Text("GP"), numeric: true),
+          DataColumn(label: Text("W"), numeric: true),
+          DataColumn(label: Text("L"), numeric: true),
+          DataColumn(label: Text("P"), numeric: true),
+          DataColumn(label: Text("APD"), numeric: true),
         ], 
         rows: teamsList,
       );
+    }
+  }
+
+  void sortTable() {
+    if (widget.sport == "Futsal") {
+      teams = Map.fromEntries(teams.entries.toList()..sort((a, b) {
+        int value = (b.value as FutsalTeamInfo).points.compareTo((a.value as FutsalTeamInfo).points);
+        if (value == 0) {
+          value = (b.value as FutsalTeamInfo).gd.compareTo((a.value as FutsalTeamInfo).gd);
+        }
+        return value;
+      },));
+    } else if (widget.sport == "Basketball") {
+      teams = Map.fromEntries(teams.entries.toList()..sort((a, b) {
+        int value = (b.value as BasketballTeamInfo).points.compareTo((a.value as BasketballTeamInfo).points);
+        if (value == 0) {
+          value = (b.value as BasketballTeamInfo).pd.compareTo((a.value as BasketballTeamInfo).pd);
+        }
+        return value;
+      },));
     }
   }
 /*
@@ -203,7 +195,7 @@ class _TablePageState extends State<TablePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Table"),
+        title: Text("${widget.sport} ${widget.season} Table"),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),
@@ -211,14 +203,21 @@ class _TablePageState extends State<TablePage> {
         future: getSeasonTable(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
-            return Text("Loading");
+            return Center(
+              child: CircularProgressIndicator(
+                color: Theme.of(context).colorScheme.primary,
+              )
+            );
           }
-          Map<String, TeamInfo> data = snapshot.data as Map<String, TeamInfo>;
+          teams = snapshot.data as Map<String, TeamInfo>;
           return SizedBox(
             width: MediaQuery.of(context).size.width,
-            child: buildTable(data));
+            child: buildTable());
         }
       )
     );
   }
+
+  int compareValues(dynamic value1, dynamic value2, bool ascending) =>
+    ascending ? value1.compareTo(value2) : value2.compareTo(value1);
 }

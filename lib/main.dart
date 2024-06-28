@@ -1,4 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
+import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/botnavbar.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
 import 'package:infinite_sports_flutter/login.dart';
@@ -6,6 +9,7 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/leagues.dart';
 import 'package:infinite_sports_flutter/livescore.dart';
+import 'package:infinite_sports_flutter/navigations/current_livescore_navigation.dart';
 import 'package:infinite_sports_flutter/navigations/leagues_navigation.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 import 'package:infinite_sports_flutter/table.dart';
@@ -104,8 +108,7 @@ class _MyHomePageState extends State<MyHomePage> {
     currentSport = await getCurrentSport();
     currentSeason = await getCurrentSeason(currentSport);
     currentDate = await getCurrentDate(currentSport, currentSeason);
-    tableSport = currentSport;
-    tableSeason = currentSeason;
+    headerNotifier.value = [currentSport, currentSeason];
     await getAllTeamLogo();
     return 1;
   }
@@ -115,9 +118,13 @@ class _MyHomePageState extends State<MyHomePage> {
     final List<Widget> _widgetOptions = <Widget>[
       FutureBuilder(future: setCurrentValues(), builder:(context, snapshot) {
         if (!snapshot.hasData) {
-          return Text("Loading");
+          return Center(
+              child: CircularProgressIndicator(
+                color: Theme.of(context).colorScheme.primary,
+              )
+            );
         }
-        return LiveScorePage(sport: currentSport, season: currentSeason, date: currentDate ,onTitleSelect: (String value) { setLiveScoreTitle(value); });
+        return CurrentLivescoreNavigation(currentSport: currentSport, currentSeason: currentSeason, currentDate: currentDate, onTitleSelect: setLiveScoreTitle);
       },),
       LeaguesNavigation(),
       Text('Index 2: School'),

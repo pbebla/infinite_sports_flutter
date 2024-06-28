@@ -24,28 +24,37 @@ class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
         },
       ),
       actions: [
-        IconButton(
-          onPressed: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-              initialEntries: [OverlayEntry(
-                builder: (context) {
-                  return TablePage(sport: tableSport, season: tableSeason);
-                })],
-            )));
-          },
-          icon: ImageIcon(AssetImage('assets/table.png')),
-        ),
-        IconButton(
-          onPressed: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-              initialEntries: [OverlayEntry(
-                builder: (context) {
-                  return LeaderboardPage(sport: tableSport, season: tableSeason);
-                })],
-            )));
-          },
-          icon: ImageIcon(AssetImage('assets/leader.png')),
-        ),
+        ValueListenableBuilder(
+          valueListenable: headerNotifier, 
+          builder:(context, value, child) {
+            return IconButton(
+              onPressed: () {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
+                  initialEntries: [OverlayEntry(
+                    builder: (context) {
+                      return TablePage(sport: value[0], season: value[1]);
+                    })],
+                )));
+              },
+              icon: ImageIcon(AssetImage('assets/table.png')),
+        );
+          },),
+        ValueListenableBuilder(
+          valueListenable: headerNotifier, 
+          builder: (context, value, child) {
+            return IconButton(
+              onPressed: () {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
+                  initialEntries: [OverlayEntry(
+                    builder: (context) {
+                      return LeaderboardPage(sport: value[0], season: value[1]);
+                    })],
+                )));
+              },
+              icon: ImageIcon(AssetImage('assets/leader.png')),
+            );
+          }
+          )
       ],
       backgroundColor: Theme.of(context).colorScheme.primary,
       // Here we take the value from the MyHomePage object that was created by

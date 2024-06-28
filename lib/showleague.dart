@@ -41,6 +41,7 @@ class ShowLeaguePage extends StatefulWidget {
 class _ShowLeaguePageState extends State<ShowLeaguePage> { 
   List<LiveScorePage> scoresList = <LiveScorePage>[];
   List<Tab> dateList = <Tab>[];
+  
   Future<DefaultTabController> buildLeague() async {
     var dates = await getDates(widget.sport, widget.season);
     dates.sort();
@@ -71,15 +72,27 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
   
   @override
   Widget build(BuildContext context) {
+    executeAfterBuild();
     return FutureBuilder(
       future: buildLeague(), 
       builder:(context, snapshot) {
         if (!snapshot.hasData) {
-          return Text("Loading");
+          return Center(
+              child: CircularProgressIndicator(
+                color: Theme.of(context).colorScheme.primary,
+              )
+            );
         }
         var data = snapshot.data as DefaultTabController;
         return data;
       },
     );
+  }
+
+  Future<void> executeAfterBuild() async {
+    await Future.delayed(Duration.zero);
+    headerNotifier.value = [widget.sport, widget.season];
+    // this code will get executed after the build method
+    // because of the way async functions are scheduled
   }
 }

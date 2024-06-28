@@ -139,8 +139,12 @@ class _LiveScorePageState extends State<LiveScorePage> {
               var futsal = league["Futsal"];
               var logos = futsal[widget.season];
 
-              game.team1SourcePath = logos[game.team1];
-              game.team2SourcePath = logos[game.team2];
+              if (logos.containsKey(game.team1)) {
+                game.team1SourcePath = logos[game.team1];
+              }
+              if (logos.containsKey(game.team2)) {
+                game.team2SourcePath = logos[game.team2];
+              }
           }
       }
       on Exception catch (_, e)
@@ -183,8 +187,13 @@ class _LiveScorePageState extends State<LiveScorePage> {
     try
     {
         DatabaseReference newClient = FirebaseDatabase.instance.ref("/${widget.sport}/${widget.season}");
-        var event = await newClient.child("Start Time").get();
-        int seasonStart = event.value as int;
+        var event = await newClient.child("Start Time").once();
+        late int seasonStart;
+        if (event.snapshot.value != null) {
+          seasonStart = event.snapshot.value as int;
+        } else {
+          seasonStart = 0;
+        }
 
         if (!times.containsKey(widget.sport))
         {
@@ -289,7 +298,9 @@ class _LiveScorePageState extends State<LiveScorePage> {
                   children: <Widget>[
                     Column(
                       children: <Widget>[
-                        Image.network(width: 70, game.team1SourcePath),
+                        Image.network(width: 70, game.team1SourcePath, errorBuilder: (context, error, stackTrace) {
+                          return Text("");
+                        },),
                         Text(game.team1, textAlign: TextAlign.center),
                       ],
                     ),
@@ -304,7 +315,9 @@ class _LiveScorePageState extends State<LiveScorePage> {
                           ))),
                     Column(
                       children: <Widget>[
-                        Image.network(width: 70, game.team2SourcePath),
+                        Image.network(width: 70, game.team2SourcePath, errorBuilder: (context, error, stackTrace) {
+                          return Text("");
+                        },),
                         Text(game.team2, textAlign: TextAlign.center),
                       ],
                     ),
@@ -381,8 +394,6 @@ class _LiveScorePageState extends State<LiveScorePage> {
     // The Flutter framework has been optimized to make rerunning build methods
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
-    tableSport = widget.sport;
-    tableSeason = widget.season;
     if (cardList.isEmpty) {
       return RefreshIndicator(
       onRefresh: () async {
@@ -392,7 +403,11 @@ class _LiveScorePageState extends State<LiveScorePage> {
         future: getGames(), 
         builder:(context, snapshot) {
           if (!snapshot.hasData) {
-              return Text("Loading");
+              return Center(
+              child: CircularProgressIndicator(
+                color: Theme.of(context).colorScheme.primary,
+              )
+            );
           }
           List<Game> gamesList = snapshot.data as List<Game>;
           cardList = populateCardList(gamesList); 

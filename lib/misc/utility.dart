@@ -1,12 +1,13 @@
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 
-String tableSport = "";
-String tableSeason = "";
 Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
 Map<String, Map<String, Map<String, BasketballPlayer>>> basketballLineups = {};
 Map teamLogos = {};
+
+ValueNotifier headerNotifier = ValueNotifier(["", ""]);
 
 Future<void> getAllTeamLogo() async
 {
@@ -134,10 +135,11 @@ Future<void> getAllFutsalLineUps(String season) async
     Map<String, FutsalPlayer> temp = {};
     (lineup as Map).forEach((name, info) {
       FutsalPlayer temp2 = FutsalPlayer();
-      temp2.assists = info["Assists"];
-      temp2.goals = info["Goals"];
-      temp2.number = info["number"];
-      temp2.uid = info["UID"];
+      temp2.assists = info["Assists"] ?? 0;
+      temp2.goals = info["Goals"] ?? 0;
+      temp2.number = info["number"] ?? '0';
+      temp2.saves = info["Saves"] ?? 0;
+      temp2.uid = info["UID"] ?? '0';
       temp2.name = name;
       temp[name] = temp2;
     });
@@ -157,16 +159,16 @@ Future<void> getAllBasketballLineUps(String season) async
     Map<String, BasketballPlayer> temp = {};
     (lineup as Map).forEach((name, info) {
       BasketballPlayer temp2 = BasketballPlayer();
-      temp2.number = info["number"];
-      temp2.uid = info["UID"];
+      temp2.number = info["number"] ?? 0;
+      temp2.uid = info["UID"] ?? 0;
       temp2.name = name;
-      temp2.onePoint = info["OnePoint"];
-      temp2.twoPoints = info["TwoPoints"];
-      temp2.threePoints = info["ThreePoints"];
-      temp2.total = info["Total"];
-      temp2.misses = info["Misses"];
-      temp2.rebounds = info["Rebounds"];
-      temp2.shotPercentage = ((temp2.twoPoints + temp2.threePoints) / (temp2.twoPoints + temp2.threePoints + temp2.misses)).toStringAsFixed(2);
+      temp2.onePoint = info["OnePoint"] ?? 0;
+      temp2.twoPoints = info["TwoPoints"] ?? 0;
+      temp2.threePoints = info["ThreePoints"] ?? 0;
+      temp2.total = info["Total"] ?? 0;
+      temp2.misses = info["Misses"] ?? 0;
+      temp2.rebounds = info["Rebounds"] ?? 0;
+      temp2.getPercentage();
       temp[name] = temp2;
 
     });

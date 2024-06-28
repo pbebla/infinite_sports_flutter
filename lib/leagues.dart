@@ -51,50 +51,6 @@ Future<List<ListTile>> getSeasonTiles(sport, context) async {
 
 class _LeaguesPageState extends State<LeaguesPage> {
   Future<List<ListTile>> populateMenus() async {
-    /*
-    var basketMin = int.parse(await getMinSeason("Basketball"));
-    var futsalMin = int.parse(await getMinSeason("Futsal"));
-    var basketCurrent = int.parse(await getCurrentSeason("Basketball"));
-    var futsalCurrent = int.parse(await getCurrentSeason("Futsal"));
-
-    int i = futsalMin;
-    int max = futsalCurrent;
-    while (i <= max)
-    {
-      var season = i.toString();
-      var seasonView = ListTile(
-        title: Text("Season $i"),
-        onTap: () {
-          Navigator.push(context, MaterialPageRoute(builder:(context) {
-            return ShowLeaguePage(sport: "Futsal", season: season.toString());
-          },));
-        }
-      );
-
-      futsalSeasons.add(seasonView);
-
-      i++;
-    }
-
-    i = basketMin;
-    max = basketCurrent;
-    while (i <= max)
-    {
-      var season = i.toString();
-      var seasonView = ListTile(
-        title: Text("Season $i"),
-        onTap: () {
-          Navigator.push(context, MaterialPageRoute(builder:(context) {
-            return ShowLeaguePage(sport: "Basketball", season: season.toString());
-          },));
-        }
-      );
-
-      basketballSeasons.add(seasonView);
-
-      i++;
-    }*/
-
     List<ListTile> list = [
       ListTile(leading: ImageIcon(AssetImage('assets/FutsalLeague.png')), title: Text("Assyrian Futsal League"),
       onTap: () {
@@ -119,13 +75,21 @@ class _LeaguesPageState extends State<LeaguesPage> {
       future: populateMenus(), 
       builder:(context, snapshot) {
         if (!snapshot.hasData) {
-          return Text("Loading");
+          return Center(
+              child: CircularProgressIndicator(
+                color: Theme.of(context).colorScheme.primary,
+              )
+            );
         }
         return Scaffold(
-          body: ListView(
-          children: snapshot.data!,
-          )
-        );
+          body: ListView.separated(
+            separatorBuilder: (context, index) => Divider(
+              color: Colors.black,
+            ),
+            itemCount: snapshot.data!.length,
+            itemBuilder: (context, index) => snapshot.data![index]
+            ),
+          );
       },
     );
   }

@@ -22,20 +22,17 @@ class BasketballPlayer implements Player {
   int misses = 0;
   int total = 0;
   String teamPath = "";
-  String shotPercentage = "N/A";
+  String shotPercentage = "";
 
   void getPercentage() {
-    total = onePoint + twoPoints + threePoints;
     var totalShots = twoPoints + threePoints + misses + 0.0;
-    var percentage = (((totalShots - misses) / totalShots) * 100.0).round();
+    var percentageCheck = (totalShots - misses) / totalShots;
 
-    if (percentage.isNaN)
-    {
-        shotPercentage = "N/A";
-    }
-    else
-    {
-        shotPercentage = "$percentage%";
+    if (percentageCheck.isNaN) {
+      shotPercentage = "0%";
+    } else {
+      var percentage = (percentageCheck * 100.0).round();
+      shotPercentage = "$percentage%";
     }
   }
 

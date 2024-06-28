@@ -1,3 +1,4 @@
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
@@ -33,6 +34,10 @@ class LeaderboardPage extends StatefulWidget {
 }
 
 class _LeaderboardPageState extends State<LeaderboardPage> {
+  List<dynamic> players = List.empty();
+  int? sortColumnIndex;
+  bool isAscending = false;
+
   Future<List<Player>> getPlayersList() async {
     if (widget.sport == "Futsal") {
       await getAllFutsalLineUps(widget.season);
@@ -61,86 +66,87 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     }
   }
 
-  sortTable(List<DataRow> playersList) {
-    if (widget.sport == "Futsal") {
-      playersList.sort((a, b) {
-        int intA = int.parse((a.cells[2].child as Text).textSpan!.toPlainText());
-        int intB = int.parse((b.cells[2].child as Text).textSpan!.toPlainText());
-        int result = intB.compareTo(intA);
-        if (result == 0) {
-          intA = int.parse((a.cells[3].child as Text).textSpan!.toPlainText());
-          intB = int.parse((b.cells[3].child as Text).textSpan!.toPlainText());
-          return intB.compareTo(intA);
-        } else {
-          return result;
-        }
-        } 
-      );
-    } else {
-      playersList.sort((a, b) {
-        int intA = int.parse((a.cells[2].child as Text).data!);
-        int intB = int.parse((b.cells[2].child as Text).data!);
-        int result = intB.compareTo(intA);
-        if (result == 0) {
-          double doubleA = double.parse((a.cells[4].child as Text).data!.toString());
-          double doubleB = double.parse((b.cells[4].child as Text).data!.toString());
-          return doubleB.compareTo(doubleA);
-        } else {
-          return result;
-        }
-        } 
-      );
+  void sortTable(int columnIndex, bool ascending) {
+    if (columnIndex == 1) {
+      players.sort((a, b) => 
+        compareValues(a.name, b.name));
+    } else if (columnIndex == 2) {
+      if (widget.sport == "Futsal") {
+        players.sort((a, b) => compareValues((a as FutsalPlayer).goals, (b as FutsalPlayer).goals));
+      } else if (widget.sport == "Basketball") {
+        players.sort((a, b) => compareValues((a as BasketballPlayer).total, (b as BasketballPlayer).total));
+      }
+    } else if (columnIndex == 3) {
+      if (widget.sport == "Futsal") {
+        players.sort((a, b) => compareValues((a as FutsalPlayer).assists, (b as FutsalPlayer).assists));
+      } else if (widget.sport == "Basketball") {
+        players.sort((a, b) => compareValues((a as BasketballPlayer).rebounds, (b as BasketballPlayer).rebounds));
+      }
+    } else if (columnIndex == 4) {
+      if (widget.sport == "Futsal") {
+        players.sort((a, b) => compareValues((a as FutsalPlayer).saves, (b as FutsalPlayer).saves));
+      } else if (widget.sport == "Basketball") {
+        players.sort((a, b) => compareValues(int.parse(((a as BasketballPlayer).shotPercentage).replaceFirst('%', '')), int.parse(((b as BasketballPlayer).shotPercentage).replaceFirst('%', ''))));
+      }
     }
   }
 
-  DataTable buildLeaderboard(List<Player> data) {
+  void onSort(int columnIndex, bool ascending) {
+    setState(() {
+      sortColumnIndex = columnIndex;
+      isAscending = ascending;
+    });
+    sortTable(columnIndex, ascending);
+  }
+
+  DataTable buildLeaderboard() {
     if (widget.sport == "Futsal") {
-      List<DataRow> teamsList = data.map((key) => DataRow(cells: [
-        DataCell(Image.network((key as FutsalPlayer).teamPath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)),
+      List<DataRow> teamsList = players.map((key) => DataRow(cells: [
+        DataCell(Row(children: [Text(key.number), Spacer(), Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)])),
         DataCell(Text(key.name.toString())),
         DataCell(Text(key.goals.toString())),
         DataCell(Text(key.assists.toString())),
         DataCell(Text(key.saves.toString())),
       ])).toList();
-      sortTable(teamsList);
       return DataTable(
-        sortColumnIndex: 2,
-        sortAscending: false,
+        horizontalMargin: 10,
+        sortColumnIndex: sortColumnIndex,
+        sortAscending: isAscending,
         columnSpacing: 0,
         headingRowColor: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
           return Theme.of(context).colorScheme.inversePrimary; // Use the default value.
         }),
-        columns: const [
+        columns: [
           DataColumn(label: Text("")),
-          DataColumn(label: Text("Name")),
-          DataColumn(label: Text("Goals (G)")),
-          DataColumn(label: Text("Assists (A)")),
-          DataColumn(label: Text("Saves (S)")),
+          DataColumn(label: Text("Name"), onSort: onSort),
+          DataColumn(label: Text("Goals"), numeric: true, onSort: onSort),
+          DataColumn(label: Text("Assists"), numeric: true, onSort: onSort),
+          DataColumn(label: Text("Saves"), numeric: true, onSort: onSort),
         ], 
         rows: teamsList,
       );
     } else if (widget.sport == "Basketball") {
-      List<DataRow> teamsList = data.map((key) => DataRow(cells: [
-        DataCell(Image.network((key as BasketballPlayer).teamPath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)),
+      List<DataRow> teamsList = players.map((key) => DataRow(cells: [
+        DataCell(Row(children: [Text(key.number), Spacer(), Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)])),
         DataCell(Text(key.name.toString())),
         DataCell(Text(key.total.toString())),
         DataCell(Text(key.rebounds.toString())),
         DataCell(Text(key.shotPercentage)),
       ])).toList();
-      sortTable(teamsList);
       return DataTable(
-        sortColumnIndex: 2,
-        sortAscending: false,
-        columnSpacing: 0,
+        horizontalMargin: 10,
+        sortColumnIndex: sortColumnIndex,
+        sortAscending: isAscending,
+        columnSpacing: 16,
         headingRowColor: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
           return Theme.of(context).colorScheme.inversePrimary; // Use the default value.
         }),
-        columns: const [
+        columns: [
           DataColumn(label: Text("")),
-          DataColumn(label: Text("Name")),
-          DataColumn(label: Text("Points (P)")),
-          DataColumn(label: Text("Rebounds (R)")),
-          DataColumn(label: Text("Field Goal Percentage (FG%)")),
+          DataColumn(label: Text("Name"), onSort: onSort),
+          DataColumn(label: Text("PTS"), numeric: true, onSort: onSort),
+          DataColumn(label: Text("REB"), numeric: true, onSort: onSort),
+          DataColumn(label: Text("FG%"), numeric: true, onSort: onSort),
         ], 
         rows: teamsList,
       );
@@ -160,18 +166,22 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         future: getPlayersList(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
-            return Text("Loading");
+            return Center(
+              child: CircularProgressIndicator(
+                color: Theme.of(context).colorScheme.primary,
+              )
+            );
           }
-          List<Player> data = snapshot.data!;
-          return InteractiveViewer(
-            constrained: false,
-            child: SizedBox(
-              width: MediaQuery.of(context).size.width,
-              child: buildLeaderboard(data)
-            )
-          );
+          if (players.isEmpty) {
+            players = snapshot.data!;
+            sortTable(2, isAscending);
+          }
+          return SingleChildScrollView(child: buildLeaderboard(), scrollDirection: Axis.vertical);
         }
       )
     );
   }
+  
+  int compareValues(dynamic value1, dynamic value2) =>
+      isAscending ? value1.compareTo(value2) : value2.compareTo(value1);
 }
