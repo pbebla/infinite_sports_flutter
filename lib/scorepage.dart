@@ -171,7 +171,7 @@ class _ScorePageState extends State<ScorePage> {
       return DataTable(
         sortColumnIndex: tableSortColumnIndex,
         sortAscending: tableIsAscending,
-        columnSpacing: 2,
+        columnSpacing: 0,
         horizontalMargin: 10,
         headingRowColor: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
           return teamColor.inversePrimary; // Use the default value.
@@ -326,11 +326,11 @@ class _ScorePageState extends State<ScorePage> {
         tabNames.add(Tab(text: widget.game.date));
         if (widget.game.status != 0) {
           if (widget.sport == "Futsal") {
-            table1 = SingleChildScrollView(child: buildStatsTable(widget.game.team1, widget.game.team1SourcePath, (widget.game as FutsalGame).team1lineup, team1color, widget.game.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1));
-            table2 = SingleChildScrollView(child: buildStatsTable(widget.game.team2, widget.game.team2SourcePath, (widget.game as FutsalGame).team2lineup, team2color, widget.game.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2));
+            table1 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width), child: buildStatsTable(widget.game.team1, widget.game.team1SourcePath, (widget.game as FutsalGame).team1lineup, team1color, widget.game.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1)));
+            table2 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width), child: buildStatsTable(widget.game.team2, widget.game.team2SourcePath, (widget.game as FutsalGame).team2lineup, team2color, widget.game.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2)));
           } else if (widget.sport == "Basketball") {
-            table1 = SingleChildScrollView(child: buildStatsTable(widget.game.team1, widget.game.team1SourcePath, (widget.game as BasketballGame).team1lineup, team1color, widget.game.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1));
-            table2 = SingleChildScrollView(child: buildStatsTable(widget.game.team2, widget.game.team2SourcePath, (widget.game as BasketballGame).team2lineup, team2color, widget.game.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2));
+            table1 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(widget.game.team1, widget.game.team1SourcePath, (widget.game as BasketballGame).team1lineup, team1color, widget.game.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1)));
+            table2 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(widget.game.team2, widget.game.team2SourcePath, (widget.game as BasketballGame).team2lineup, team2color, widget.game.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2)));
           }
           tabs.add(RefreshIndicator(onRefresh: _refreshData, child: ListView(children: [table1],)));
           tabs.add(RefreshIndicator(onRefresh: _refreshData, child: ListView(children: [table2],)));

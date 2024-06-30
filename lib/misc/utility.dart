@@ -263,7 +263,7 @@ Future<List<Game>> getGames(widget, sport, season, date, times) async {
       allGames.add(game);
       i++;
   }
-  widget.onTitleSelect(allGames[0].date);
+  //widget.onTitleSelect(allGames[0].date);
   return allGames;
 }
 
