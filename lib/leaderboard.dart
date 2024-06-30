@@ -69,24 +69,24 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
   void sortTable(int columnIndex, bool ascending) {
     if (columnIndex == 1) {
       players.sort((a, b) => 
-        compareValues(a.name, b.name));
+        compareValues(a.name, b.name, isAscending));
     } else if (columnIndex == 2) {
       if (widget.sport == "Futsal") {
-        players.sort((a, b) => compareValues((a as FutsalPlayer).goals, (b as FutsalPlayer).goals));
+        players.sort((a, b) => compareValues((a as FutsalPlayer).goals, (b as FutsalPlayer).goals, isAscending));
       } else if (widget.sport == "Basketball") {
-        players.sort((a, b) => compareValues((a as BasketballPlayer).total, (b as BasketballPlayer).total));
+        players.sort((a, b) => compareValues((a as BasketballPlayer).total, (b as BasketballPlayer).total, isAscending));
       }
     } else if (columnIndex == 3) {
       if (widget.sport == "Futsal") {
-        players.sort((a, b) => compareValues((a as FutsalPlayer).assists, (b as FutsalPlayer).assists));
+        players.sort((a, b) => compareValues((a as FutsalPlayer).assists, (b as FutsalPlayer).assists, isAscending));
       } else if (widget.sport == "Basketball") {
-        players.sort((a, b) => compareValues((a as BasketballPlayer).rebounds, (b as BasketballPlayer).rebounds));
+        players.sort((a, b) => compareValues((a as BasketballPlayer).rebounds, (b as BasketballPlayer).rebounds, isAscending));
       }
     } else if (columnIndex == 4) {
       if (widget.sport == "Futsal") {
-        players.sort((a, b) => compareValues((a as FutsalPlayer).saves, (b as FutsalPlayer).saves));
+        players.sort((a, b) => compareValues((a as FutsalPlayer).saves, (b as FutsalPlayer).saves, isAscending));
       } else if (widget.sport == "Basketball") {
-        players.sort((a, b) => compareValues(int.parse(((a as BasketballPlayer).shotPercentage).replaceFirst('%', '')), int.parse(((b as BasketballPlayer).shotPercentage).replaceFirst('%', ''))));
+        players.sort((a, b) => compareValues(int.parse(((a as BasketballPlayer).shotPercentage).replaceFirst('%', '')), int.parse(((b as BasketballPlayer).shotPercentage).replaceFirst('%', '')), isAscending));
       }
     }
   }
@@ -181,7 +181,4 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       )
     );
   }
-  
-  int compareValues(dynamic value1, dynamic value2) =>
-      isAscending ? value1.compareTo(value2) : value2.compareTo(value1);
 }

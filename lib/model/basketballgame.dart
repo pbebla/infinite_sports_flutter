@@ -1,6 +1,7 @@
 
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'dart:core';
 import 'package:infinite_sports_flutter/model/game.dart';
 
@@ -58,7 +59,7 @@ class BasketballGame implements Game
   String team1SourcePath = "";
 
   @override
-  Map<String, List<Map<String, String>>> team1activity = {};
+  Map<dynamic, dynamic> team1activity = {};
 
   @override
   String team1score = "";
@@ -73,7 +74,7 @@ class BasketballGame implements Game
   String team2SourcePath = "";
 
   @override
-  Map<String, List<Map<String, String>>> team2activity = {};
+  Map<dynamic, dynamic> team2activity = {};
 
   @override
   String team2score = "";
@@ -90,8 +91,8 @@ class BasketballGame implements Game
   @override
   late bool voted;
 
-  //late Map<String, BasketballPlayer> team1lineup;
-  //late Map<String, BasketballPlayer> team2lineup;
+  Map<String, BasketballPlayer> team1lineup = {};
+  Map<String, BasketballPlayer> team2lineup = {};
 
   @override
   void GetLineUpImages() async {

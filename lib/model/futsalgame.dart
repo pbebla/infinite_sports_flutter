@@ -1,5 +1,6 @@
 import 'dart:ui';
 
+import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
 
 class FutsalGame implements Game {
@@ -55,7 +56,7 @@ class FutsalGame implements Game {
   String team1SourcePath = "";
 
   @override
-  Map<String, List<Map<String, String>>> team1activity = {};
+  Map<dynamic, dynamic> team1activity = {};
 
   @override
   String team1score = "";
@@ -70,7 +71,7 @@ class FutsalGame implements Game {
   String team2SourcePath = "";
 
   @override
-  Map<String, List<Map<String, String>>> team2activity = {};
+  Map<dynamic, dynamic> team2activity = {};
 
   @override
   String team2score = "";
@@ -86,6 +87,10 @@ class FutsalGame implements Game {
 
   @override
   late bool voted;
+
+  Map<String, FutsalPlayer> team1lineup = {};
+
+  Map<String, FutsalPlayer> team2lineup = {};
 
   @override
   void GetLineUpImages() async {

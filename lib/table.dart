@@ -217,7 +217,4 @@ class _TablePageState extends State<TablePage> {
       )
     );
   }
-
-  int compareValues(dynamic value1, dynamic value2, bool ascending) =>
-    ascending ? value1.compareTo(value2) : value2.compareTo(value1);
 }

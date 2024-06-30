@@ -15,8 +15,8 @@ abstract class Game
   late Color statusColor;
   String team1SourcePath = "";
   String team2SourcePath = "";
-  Map<String, List<Map<String, String>>> team1activity = {};
-  Map<String, List<Map<String, String>>> team2activity = {};
+  Map<dynamic, dynamic> team1activity = {};
+  Map<dynamic, dynamic> team2activity = {};
   Map<dynamic, dynamic> team1vote = {};
   Map<dynamic, dynamic> team2vote = {};
   late bool signedIn;

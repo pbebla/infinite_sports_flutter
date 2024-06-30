@@ -6,9 +6,12 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/main.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
+import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/futsalgame.dart';
+import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/leagues.dart';
+import 'package:infinite_sports_flutter/scorepage.dart';
 import 'package:stack_trace/stack_trace.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:percent_indicator/percent_indicator.dart';
@@ -41,240 +44,10 @@ class LiveScorePage extends StatefulWidget {
 
 class _LiveScorePageState extends State<LiveScorePage> {
   Map<String, Map<String, int>> times = {};
-  var cardList = <Card>[];
+  var cardList = <GestureDetector>[];
 
-  Future<Map<String, List<FutsalGame>>> getAllFutsalGames() async {
-    try
-    {
-      DatabaseReference newClient = FirebaseDatabase.instance.ref("/${widget.sport}/${widget.season}");
-      var games = await newClient.child("Date").get();
-      dynamic data = games.value;
-      var result = <String, List<FutsalGame>>{};
-      data.forEach((key, value) {
-        var list = <FutsalGame>[];
-        for (var val in value) {
-          var game = FutsalGame();
-          if (val.containsKey("team1vote")) {
-            game.team1vote = val["team1vote"] as Map<dynamic, dynamic>;
-          }
-          if (val.containsKey("team2vote")) {
-            game.team2vote = val["team2vote"] as Map<dynamic, dynamic>;
-          }
-          //game.team1activity = val["team1activity"];
-          //game.team2activity = val["team2activity"];
-          game.team1 = val["team1"];
-          game.team2 = val["team2"];
-          game.team1score = val["team1score"].toString();
-          game.team2score = val["team2score"].toString();
-          game.date = val["Date"];
-          game.status = val["status"];
-          list.add(game);
-        }
-        result[key] = list;
-      });
-      return result;
-    }
-    catch (e)
-    {
-        return {};
-    }
-  }
-
-  Future<Map<String, List<BasketballGame>>> getAllBasketballGames() async {
-    try
-    {
-      DatabaseReference newClient = FirebaseDatabase.instance.ref("/${widget.sport}/${widget.season}");
-      var games = await newClient.child("Date").get();
-      dynamic data = games.value;
-      var result = <String, List<BasketballGame>>{};
-      data.forEach((key, value) {
-        var list = <BasketballGame>[];
-        for (var val in value) {
-          var game = BasketballGame();
-          if (val.containsKey("team1vote")) {
-            game.team1vote = val["team1vote"] as Map<dynamic, dynamic>;
-          }
-          if (val.containsKey("team2vote")) {
-            game.team2vote = val["team2vote"] as Map<dynamic, dynamic>;
-          }
-          //game.team1activity = val["team1activity"];
-          //game.team2activity = val["team2activity"];
-          game.team1 = val["team1"];
-          game.team2 = val["team2"];
-          game.team1score = val["team1score"].toString();
-          game.team2score = val["team2score"].toString();
-          game.date = val["Date"];
-          game.status = val["status"];
-          list.add(game);
-        }
-        result[key] = list;
-      });
-      return result;
-    }
-    catch (e)
-    {
-        return {};
-    }
-  }
-
-  Future<Map> getAllTeamLogo() async
-  {
-    DatabaseReference newClient = FirebaseDatabase.instance.ref();
-    var event = await newClient.child("Logo Urls").once();
-    Map urls = event.snapshot.value as Map;
-
-    return urls;
-  }
-
-  Future<void> fillInNull(game) async {
-    if (game is FutsalGame) {
-      try
-      {
-          //gameF.team1lineup = await getBasketballLineUp(season, game.team1);
-          //gameF.team2lineup = await getBasketballLineUp(season, game.team2);
-
-          if (game.team1SourcePath == "")
-          {
-              var league = await getAllTeamLogo();
-              var futsal = league["Futsal"];
-              var logos = futsal[widget.season];
-
-              if (logos.containsKey(game.team1)) {
-                game.team1SourcePath = logos[game.team1];
-              }
-              if (logos.containsKey(game.team2)) {
-                game.team2SourcePath = logos[game.team2];
-              }
-          }
-      }
-      on Exception catch (_, e)
-      {
-          var message = e.toString();
-      }
-    }
-    if (game is BasketballGame) {
-      try
-      {
-          //gameF.team1lineup = await getBasketballLineUp(season, game.team1);
-          //gameF.team2lineup = await getBasketballLineUp(season, game.team2);
-
-          if (game.team1SourcePath == "")
-          {
-              var league = await getAllTeamLogo();
-              var basketball = league["Basketball"];
-              var logos = basketball[widget.season];
-
-              game.team1SourcePath = logos[game.team1];
-              game.team2SourcePath = logos[game.team2];
-          }
-      }
-      on Exception catch (_, e)
-      {
-          var message = e.toString();
-      }
-    }
-  }
-
-  Future<int> getSeasonStartTime() async {
-    if (times.containsKey(widget.sport))
-    {
-        if (times[widget.sport]!.containsKey(widget.season))
-        {
-            return times[widget.sport]![widget.season]!;
-        }
-    }
-
-    try
-    {
-        DatabaseReference newClient = FirebaseDatabase.instance.ref("/${widget.sport}/${widget.season}");
-        var event = await newClient.child("Start Time").once();
-        late int seasonStart;
-        if (event.snapshot.value != null) {
-          seasonStart = event.snapshot.value as int;
-        } else {
-          seasonStart = 0;
-        }
-
-        if (!times.containsKey(widget.sport))
-        {
-            var dictionary = <String, int>{};
-            dictionary[widget.season] = seasonStart;
-            times[widget.sport] = dictionary;
-        }
-        else
-        {
-            times[widget.sport]![widget.season] = seasonStart;
-        }
-
-        return seasonStart;
-    }
-    on Exception catch (_, e)
-    {
-        return 5;
-    }
-  }
-
-  Future<List<Game>> getGames() async {
-    List<Game> allGames = <Game>[];
-    //if (!await isSeasonFinished(widget.sport, widget.season))
-    List<Game> games = <Game>[];
-
-    if (widget.sport == "Futsal")
-    {
-      var all = await getAllFutsalGames();
-      games = List<Game>.from(all[widget.date] as List<Game>);
-    }
-    else
-    {
-      var all = await getAllBasketballGames();
-      games = List<Game>.from(all[widget.date] as List<Game>);
-    }
-
-    int i = 0;
-    for (var game in games)
-    {
-        await fillInNull(game);
-        game.Time = (await getSeasonStartTime()) + i;
-
-        switch (game.status)
-        {
-            case 0:
-                game.stringStatus = "Upcoming";
-                game.statusColor = Colors.grey;
-                break;
-            case 1:
-                game.stringStatus = "Live";
-                game.statusColor = Colors.red;
-                break;
-            case 2:
-                game.stringStatus = "Final";
-                game.statusColor = Colors.green;
-                break;
-        }
-
-        game.UrlPath = "https://infinite-sports-app.firebaseio.com/${widget.sport}/${widget.season}/Date/${widget.date}";
-        game.GameNum = i;
-
-        game.SetUpVote();
-        game.GetLineUpImages();
-        allGames.add(game);
-        i++;
-    }
-    /*
-    ToolbarItems.Add(new ToolbarItem("Leader", "Leader.png", async() =>
-    {
-        Title = "";
-        await Navigation.PushAsync(new LeaderboardPage(currentLeague, currentSeason));
-    }));
-
-    await addShortcut(currentLeague, currentSeason);
-    */
-    widget.onTitleSelect(allGames[0].date);
-    return allGames;
-  }
-
-  List<Card> populateCardList(List<Game> gamesList) {
-    List<Card> cardList = [];
+  List<GestureDetector> populateCardList(List<Game> gamesList) {
+    List<GestureDetector> cardList = [];
     for (var game in gamesList) {
       Card card = Card(
         elevation: 2,
@@ -373,14 +146,24 @@ class _LiveScorePageState extends State<LiveScorePage> {
           ), //Padding
         ), //SizedBox
       );
-      cardList.add(card);
+      cardList.add(GestureDetector(
+        child: card,
+        onTap: () {
+          Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
+            initialEntries: [OverlayEntry(
+              builder: (context) {
+                return ScorePage(sport: widget.sport, season: widget.season, game: game, times: times);
+              })],
+          )));
+        },
+      ));
     }
     return cardList;
   }
 
   Future<void> _refreshData() async { 
     // Add new items or update the data here 
-    List<Game> gamesList = await getGames();
+    List<Game> gamesList = await getGames(widget, widget.sport, widget.season, widget.date, times);
     setState(() { 
       cardList = populateCardList(gamesList); 
     }); 
@@ -400,7 +183,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
         _refreshData;
       },
       child: FutureBuilder(
-        future: getGames(), 
+        future: getGames(widget, widget.sport, widget.season, widget.date, times), 
         builder:(context, snapshot) {
           if (!snapshot.hasData) {
               return Center(
@@ -410,6 +193,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
             );
           }
           List<Game> gamesList = snapshot.data as List<Game>;
+          //widget.onTitleSelect(gamesList[0].date);
           cardList = populateCardList(gamesList); 
           return ListView(
             padding: const EdgeInsets.all(15),
