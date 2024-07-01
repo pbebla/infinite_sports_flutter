@@ -176,7 +176,9 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
             players = snapshot.data!;
             sortTable(2, isAscending);
           }
-          return SingleChildScrollView(child: buildLeaderboard(), scrollDirection: Axis.vertical);
+          return SizedBox(
+            width: MediaQuery.of(context).size.width,
+            child: SingleChildScrollView(child: buildLeaderboard(), scrollDirection: Axis.vertical));
         }
       )
     );

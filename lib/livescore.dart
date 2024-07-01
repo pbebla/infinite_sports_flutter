@@ -163,9 +163,8 @@ class _LiveScorePageState extends State<LiveScorePage> {
 
   Future<void> _refreshData() async { 
     // Add new items or update the data here 
-    List<Game> gamesList = await getGames(widget, widget.sport, widget.season, widget.date, times);
     setState(() { 
-      cardList = populateCardList(gamesList); 
+      cardList = []; 
     }); 
   } 
 
@@ -177,13 +176,11 @@ class _LiveScorePageState extends State<LiveScorePage> {
     // The Flutter framework has been optimized to make rerunning build methods
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
-    if (cardList.isEmpty) {
-      return RefreshIndicator(
-      onRefresh: () async {
-        _refreshData;
-      },
+    
+    return RefreshIndicator(
+      onRefresh: _refreshData,
       child: FutureBuilder(
-        future: getGames(widget, widget.sport, widget.season, widget.date, times), 
+        future: getGames(widget.sport, widget.season, widget.date, times), 
         builder:(context, snapshot) {
           if (!snapshot.hasData) {
               return Center(
@@ -200,16 +197,6 @@ class _LiveScorePageState extends State<LiveScorePage> {
             children: cardList,
           );
         }), 
-      );
-    }
-    return RefreshIndicator(
-      onRefresh: () async {
-        _refreshData;
-      },
-      child: ListView(
-            padding: const EdgeInsets.all(15),
-            children: cardList,
-      )
-      );
+    );
   }
 }

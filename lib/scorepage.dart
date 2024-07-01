@@ -36,6 +36,15 @@ class FutsalPlayerStats extends PlayerStats {
   }
 }
 
+class GameActivity {
+  String name;
+  String action;
+  String time;
+  Color color;
+  String teamImagePath;
+  GameActivity(this.name, this.action, this.time, this.color, this.teamImagePath);
+}
+
 class BasketballPlayerStats extends PlayerStats {
   int ones;
   int twos;
@@ -92,7 +101,30 @@ class _ScorePageState extends State<ScorePage> {
     return 1;
   }
 
-  DataTable buildStatsTable(teamName, teamSourcePath, teamLineup, teamColor, teamActivity, teamPlayers, tableSortColumnIndex, tableIsAscending, onSort) {
+  List<Container> buildActivityList(activities) {
+    List<Container> rows = List.empty(growable: true);
+    activities.sort((a, b) {
+      return compareValues(int.parse(a.time.substring(0, a.time.length-1)), int.parse(b.time.substring(0, b.time.length-1)), false);
+    },);
+    for (var activity in activities) {
+      rows.add(Container(
+        color: activity.color,
+        child: Row(
+          children: [
+            Text(activity.time), 
+            Image.network(activity.teamImagePath, height: windowsDefaultIconSize.toDouble()/1.5 , fit: BoxFit.scaleDown, alignment: FractionalOffset.centerLeft),
+            Text(activity.name),
+            Spacer(),
+            Text(activity.action),],
+          )
+        )
+      );
+    }
+    return rows;
+  }
+
+  DataTable buildStatsTable(teamName, teamSourcePath, teamLineup, teamColor, teamActivity, teamPlayers, tableSortColumnIndex, tableIsAscending, onSort, activities) {
+    var time = DateTime.now().second;
     if (widget.sport == "Futsal") {
       if (teamPlayers.isEmpty) {
         teamLineup.forEach((name, profile) {
@@ -107,13 +139,14 @@ class _ScorePageState extends State<ScorePage> {
                   } else if (action == "Assist") {
                     assists+=1;
                   }
+                  activities.add(GameActivity(name, action, k, teamColor.inversePrimary, teamSourcePath));
                 }
               }
             }
           });
           teamPlayers.add(FutsalPlayerStats(name, profile.number, goals, assists));
         });
-        sortTable(2, false, teamPlayers);
+        sortTable(tableSortColumnIndex ?? 2, tableIsAscending, teamPlayers);
       }
       return DataTable(
         sortColumnIndex: tableSortColumnIndex,
@@ -160,13 +193,14 @@ class _ScorePageState extends State<ScorePage> {
                   } else if (action == "Rebound") {
                     rebounds+=1;
                   }
+                  activities.add(GameActivity(name, action, k, teamColor.inversePrimary, teamSourcePath));
                 }
               }
             }
           });
           teamPlayers.add(BasketballPlayerStats(name, profile.number, ones, twos, threes, fouls, rebounds));
         });
-        sortTable(2, false, teamPlayers);
+        sortTable(tableSortColumnIndex ?? 2, tableIsAscending, teamPlayers);
       }
       return DataTable(
         sortColumnIndex: tableSortColumnIndex,
@@ -208,105 +242,103 @@ class _ScorePageState extends State<ScorePage> {
     // The Flutter framework has been optimized to make rerunning build methods
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
-    if (items.isEmpty) {
-      items.add(Card(
-        elevation: 2,
-        shadowColor: Colors.black,
-        color: Colors.white,
-        child: SizedBox(
-          width: 300,
-          height: 240,
-          child: Container(
-            padding: const EdgeInsets.all(13),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    Expanded(child:Text(widget.game.stringStatus,textAlign: TextAlign.left, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: widget.game.statusColor))),
-                    Expanded(child:Text('${widget.game.Time.toString()}:00PM',textAlign: TextAlign.right, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
-                  ],
-                ),
-                Row(
-                  children: <Widget>[
-                    Column(
+    items.add(Card(
+      elevation: 2,
+      shadowColor: Colors.black,
+      color: Colors.white,
+      child: SizedBox(
+        width: 300,
+        height: 240,
+        child: Container(
+          padding: const EdgeInsets.all(13),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Expanded(child:Text(widget.game.stringStatus,textAlign: TextAlign.left, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: widget.game.statusColor))),
+                  Expanded(child:Text('${widget.game.Time.toString()}:00PM',textAlign: TextAlign.right, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
+                ],
+              ),
+              Row(
+                children: <Widget>[
+                  Column(
+                    children: <Widget>[
+                      Image.network(width: 70, widget.game.team1SourcePath, errorBuilder: (context, error, stackTrace) {
+                        return Text("");
+                      },),
+                      Text(widget.game.team1, textAlign: TextAlign.center),
+                    ],
+                  ),
+                  Expanded(
+                    child:
+                      Text(
+                        '${widget.game.team1score}-${widget.game.team2score}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 35,
+                          fontWeight: FontWeight.bold,
+                        ))),
+                  Column(
+                    children: <Widget>[
+                      Image.network(width: 70, widget.game.team2SourcePath, errorBuilder: (context, error, stackTrace) {
+                        return Text("");
+                      },),
+                      Text(widget.game.team2, textAlign: TextAlign.center),
+                    ],
+                  ),
+                ],
+              ),
+              Row(
+                children: <Widget>[
+                  CircularPercentIndicator(
+                        radius: 30,
+                        lineWidth: 4.0,
+                        percent: widget.game.finalvote1,
+                        center: Text(widget.game.percvote1),
+                        progressColor: infiniteSportsPrimaryColor,
+                  ),
+                  Expanded(
+                    child: Visibility(
+                    maintainSize: true, 
+                    maintainAnimation: true,
+                    maintainState: true,
+                    visible: widget.game.status == 0,
+                    child: Column(
                       children: <Widget>[
-                        Image.network(width: 70, widget.game.team1SourcePath, errorBuilder: (context, error, stackTrace) {
-                          return Text("");
-                        },),
-                        Text(widget.game.team1, textAlign: TextAlign.center),
-                      ],
-                    ),
-                    Expanded(
-                      child:
-                        Text(
-                          '${widget.game.team1score}-${widget.game.team2score}',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 35,
-                            fontWeight: FontWeight.bold,
-                          ))),
-                    Column(
-                      children: <Widget>[
-                        Image.network(width: 70, widget.game.team2SourcePath, errorBuilder: (context, error, stackTrace) {
-                          return Text("");
-                        },),
-                        Text(widget.game.team2, textAlign: TextAlign.center),
-                      ],
-                    ),
-                  ],
-                ),
-                Row(
-                  children: <Widget>[
-                    CircularPercentIndicator(
-                          radius: 30,
-                          lineWidth: 4.0,
-                          percent: widget.game.finalvote1,
-                          center: Text(widget.game.percvote1),
-                          progressColor: infiniteSportsPrimaryColor,
-                    ),
-                    Expanded(
-                      child: Visibility(
-                      maintainSize: true, 
-                      maintainAnimation: true,
-                      maintainState: true,
-                      visible: widget.game.status == 0,
-                      child: Column(
-                        children: <Widget>[
-                          Text('Poll', textAlign: TextAlign.center),
-                          Container(
-                            height: 40,
-                            width: 80,
-                            decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(15)),
-                            child: TextButton(
-                              onPressed: () {
-                              },
-                              child: const Text(
-                                'Vote',
-                                style: TextStyle(color: Colors.white, fontSize: 18),
-                              ),
+                        Text('Poll', textAlign: TextAlign.center),
+                        Container(
+                          height: 40,
+                          width: 80,
+                          decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(15)),
+                          child: TextButton(
+                            onPressed: () {
+                            },
+                            child: const Text(
+                              'Vote',
+                              style: TextStyle(color: Colors.white, fontSize: 18),
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                    ),
-                    CircularPercentIndicator(
-                          radius: 30,
-                          lineWidth: 4.0,
-                          percent: widget.game.finalvote2,
-                          center: Text(widget.game.percvote2),
-                          progressColor: infiniteSportsPrimaryColor,
-                    )
-                  ],
-                ),
-              ],
-            )
-          ), //Padding
-        ), //SizedBox
-      ),);
-    }
+                  ),
+                  ),
+                  CircularPercentIndicator(
+                        radius: 30,
+                        lineWidth: 4.0,
+                        percent: widget.game.finalvote2,
+                        center: Text(widget.game.percvote2),
+                        progressColor: infiniteSportsPrimaryColor,
+                  )
+                ],
+              ),
+            ],
+          )
+        ), //Padding
+      ), //SizedBox
+    ),);
     return FutureBuilder(
       future: getTeamColors(), 
       builder: (context, snapshot) {
@@ -319,24 +351,28 @@ class _ScorePageState extends State<ScorePage> {
         }
         List<Widget> tabs = List.empty(growable: true);
         List<Tab> tabNames = List.empty(growable: true);
-        tabs.add(RefreshIndicator(child: ListView(
-          padding: const EdgeInsets.all(15),
-          children: items
-        ), onRefresh: _refreshData));
-        tabNames.add(Tab(text: widget.game.date));
+        List<GameActivity> activities = List.empty(growable: true);
         if (widget.game.status != 0) {
           if (widget.sport == "Futsal") {
-            table1 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width), child: buildStatsTable(widget.game.team1, widget.game.team1SourcePath, (widget.game as FutsalGame).team1lineup, team1color, widget.game.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1)));
-            table2 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width), child: buildStatsTable(widget.game.team2, widget.game.team2SourcePath, (widget.game as FutsalGame).team2lineup, team2color, widget.game.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2)));
+            table1 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(widget.game.team1, widget.game.team1SourcePath, (widget.game as FutsalGame).team1lineup, team1color, widget.game.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1, activities)));
+            table2 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(widget.game.team2, widget.game.team2SourcePath, (widget.game as FutsalGame).team2lineup, team2color, widget.game.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2, activities)));
           } else if (widget.sport == "Basketball") {
-            table1 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(widget.game.team1, widget.game.team1SourcePath, (widget.game as BasketballGame).team1lineup, team1color, widget.game.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1)));
-            table2 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(widget.game.team2, widget.game.team2SourcePath, (widget.game as BasketballGame).team2lineup, team2color, widget.game.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2)));
+            table1 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(widget.game.team1, widget.game.team1SourcePath, (widget.game as BasketballGame).team1lineup, team1color, widget.game.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1, activities)));
+            table2 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(widget.game.team2, widget.game.team2SourcePath, (widget.game as BasketballGame).team2lineup, team2color, widget.game.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2, activities)));
           }
+        } 
+        items.add(Column(children: buildActivityList(activities)));   
+        tabs.add(RefreshIndicator(onRefresh: _refreshData, child: ListView(
+          padding: const EdgeInsets.all(15),
+          children: items
+        ),));
+        tabNames.add(Tab(text: widget.game.date));
+        if (widget.game.status != 0) {
           tabs.add(RefreshIndicator(onRefresh: _refreshData, child: ListView(children: [table1],)));
           tabs.add(RefreshIndicator(onRefresh: _refreshData, child: ListView(children: [table2],)));
           tabNames.add(Tab(text: widget.game.team1));
           tabNames.add(Tab(text: widget.game.team2));
-        }    
+        }
         return DefaultTabController(
           length: tabs.length, 
           child: Scaffold(
@@ -360,15 +396,9 @@ class _ScorePageState extends State<ScorePage> {
     // Add new items or update the data here 
     widget.game = await getGame(widget, widget.sport, widget.season, convertStringDateToDatabase(widget.game.date), widget.times, widget.game.GameNum);
     setState(() { 
-      if (widget.game.status != 0) {
-        if (widget.sport == "Futsal") {
-          table1 = SingleChildScrollView(child: buildStatsTable(widget.game.team1, widget.game.team1SourcePath, (widget.game as FutsalGame).team1lineup, team1color, widget.game.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1));
-          table2 = SingleChildScrollView(child: buildStatsTable(widget.game.team2, widget.game.team2SourcePath, (widget.game as FutsalGame).team2lineup, team2color, widget.game.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2));
-        } else if (widget.sport == "Basketball") {
-          table1 = SingleChildScrollView(child: buildStatsTable(widget.game.team1, widget.game.team1SourcePath, (widget.game as BasketballGame).team1lineup, team1color, widget.game.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1));
-          table2 = SingleChildScrollView(child: buildStatsTable(widget.game.team2, widget.game.team2SourcePath, (widget.game as BasketballGame).team2lineup, team2color, widget.game.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2));
-        }
-      }  
+      items = [];
+      team1Players = [];
+      team2Players = [];
     }); 
   } 
 

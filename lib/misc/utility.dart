@@ -217,7 +217,7 @@ Future<void> getAllBasketballLineUps(String season) async
 int compareValues(dynamic value1, dynamic value2, bool ascending) =>
   ascending ? value1.compareTo(value2) : value2.compareTo(value1);
 
-Future<List<Game>> getGames(widget, sport, season, date, times) async {
+Future<List<Game>> getGames(sport, season, date, times) async {
   List<Game> allGames = <Game>[];
   //if (!await isSeasonFinished(widget.sport, widget.season))
   List<Game> games = <Game>[];
@@ -263,7 +263,6 @@ Future<List<Game>> getGames(widget, sport, season, date, times) async {
       allGames.add(game);
       i++;
   }
-  //widget.onTitleSelect(allGames[0].date);
   return allGames;
 }
 
@@ -458,7 +457,7 @@ Future<void> getAllTeamLogo() async
 
 Future<Game> getGame(widget, sport, season, date, times, num) async {
   try {
-    var games = await getGames(widget, sport, season, date, times);
+    var games = await getGames(sport, season, date, times);
     return games[num];
   }
   on Exception catch (_, e)
