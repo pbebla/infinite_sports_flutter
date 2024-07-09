@@ -9,6 +9,7 @@ import 'package:infinite_sports_flutter/model/game.dart';
 Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
 Map<String, Map<String, Map<String, BasketballPlayer>>> basketballLineups = {};
 Map teamLogos = {};
+const String YOUTUBE_API_KEY = "AIzaSyAHK-KknpxePRDP_lvAs9zJIFvHCrr56GQ";
 
 ValueNotifier headerNotifier = ValueNotifier(["", ""]);
 
@@ -195,12 +196,12 @@ Future<void> getAllBasketballLineUps(String season) async
     (lineup as Map).forEach((name, info) {
       BasketballPlayer temp2 = BasketballPlayer();
       temp2.number = info["number"] ?? 0;
-      temp2.uid = info["UID"] ?? 0;
+      temp2.uid = info["UID"] ?? '0';
       temp2.name = name;
       temp2.onePoint = info["OnePoint"] ?? 0;
       temp2.twoPoints = info["TwoPoints"] ?? 0;
       temp2.threePoints = info["ThreePoints"] ?? 0;
-      temp2.total = info["Total"] ?? 0;
+      temp2.total = info["Total"] ?? temp2.onePoint + (temp2.twoPoints*2) + (temp2.threePoints*3);
       temp2.misses = info["Misses"] ?? 0;
       temp2.rebounds = info["Rebounds"] ?? 0;
       temp2.getPercentage();
@@ -295,6 +296,9 @@ Future<Map<String, List<FutsalGame>>> getAllFutsalGames(sport, season) async {
         game.team2score = val["team2score"].toString();
         game.date = val["Date"];
         game.status = val["status"];
+        if(val.containsKey("link")) {
+          game.link = val["link"];
+        }
         list.add(game);
       }
       result[key] = list;
@@ -336,6 +340,9 @@ Future<Map<String, List<BasketballGame>>> getAllBasketballGames(sport, season) a
         game.team2score = val["team2score"].toString();
         game.date = val["Date"];
         game.status = val["status"];
+        if(val.containsKey("link")) {
+          game.link = val["link"];
+        }
         list.add(game);
       }
       result[key] = list;
