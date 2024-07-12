@@ -32,12 +32,12 @@ class _TablePageState extends State<TablePage> {
   static const int numItems = 6;
   List<bool> selected = List<bool>.generate(numItems, (int index) => false);
   Future<Map<String, TeamInfo>> getSeasonTable() async {
-    DatabaseReference newClient = FirebaseDatabase.instance.ref("/${widget.sport}/${widget.season}");
+    DatabaseReference newClient =
+        FirebaseDatabase.instance.ref("/${widget.sport}/${widget.season}");
     Map<String, TeamInfo> lineUp = <String, TeamInfo>{};
     var league = teamLogos;
     var sport = league[widget.sport];
-    if (widget.sport == "Futsal")
-    {
+    if (widget.sport == "Futsal") {
       var logos = sport![widget.season];
       Map<String, FutsalTeamInfo> gottenlineUp = <String, FutsalTeamInfo>{};
       final event = await newClient.child("Teams").get();
@@ -55,15 +55,13 @@ class _TablePageState extends State<TablePage> {
         temp.points = value["Points"];
         gottenlineUp[key] = temp;
       });
-      for (var team in gottenlineUp.keys)
-      {
+      for (var team in gottenlineUp.keys) {
         lineUp[team] = gottenlineUp[team] as TeamInfo;
       }
-    }
-    else
-    {
+    } else {
       var logos = sport![widget.season];
-      Map<String, BasketballTeamInfo> gottenlineUp = <String, BasketballTeamInfo>{};
+      Map<String, BasketballTeamInfo> gottenlineUp =
+          <String, BasketballTeamInfo>{};
       final event = await newClient.child("Teams").get();
       Map eventData = event.value as Map;
       eventData.forEach((key, value) {
@@ -75,11 +73,10 @@ class _TablePageState extends State<TablePage> {
         temp.gp = value["GP"];
         temp.wins = value["Wins"];
         temp.losses = value["Losses"];
-        temp.points = value["Points"];
+        temp.pct = (temp.gp > 0 ? (temp.wins / temp.gp) : 0).toStringAsFixed(3);
         gottenlineUp[key] = temp;
       });
-      for (var team in gottenlineUp.keys)
-      {
+      for (var team in gottenlineUp.keys) {
         lineUp[team] = gottenlineUp[team] as TeamInfo;
       }
     }
@@ -89,22 +86,32 @@ class _TablePageState extends State<TablePage> {
   DataTable buildTable() {
     sortTable();
     if (widget.sport == "Futsal") {
-      List<DataRow> teamsList = teams.entries.map((key) => DataRow(cells: [
-        DataCell(Image.network(key.value.imagePath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)),
-        DataCell(Text(key.key.toString())),
-        DataCell(Text((key.value as FutsalTeamInfo).gp.toString())),
-        DataCell(Text(key.value.wins.toString())),
-        DataCell(Text((key.value as FutsalTeamInfo).draws.toString())),
-        DataCell(Text(key.value.losses.toString())),
-        DataCell(Text.rich(TextSpan(text: key.value.points.toString(), style: TextStyle(fontWeight: FontWeight.bold)))),
-        DataCell(Text((key.value as FutsalTeamInfo).gd.toString())),
-      ])).toList();
+      List<DataRow> teamsList = teams.entries
+          .map((key) => DataRow(cells: [
+                DataCell(Image.network(key.value.imagePath,
+                    width: windowsDefaultIconSize.toDouble(),
+                    fit: BoxFit.scaleDown,
+                    alignment: FractionalOffset.center)),
+                DataCell(Text(key.key.toString())),
+                DataCell(Text((key.value as FutsalTeamInfo).gp.toString())),
+                DataCell(Text(key.value.wins.toString())),
+                DataCell(Text((key.value as FutsalTeamInfo).draws.toString())),
+                DataCell(Text(key.value.losses.toString())),
+                DataCell(Text.rich(TextSpan(
+                    text: key.value.points.toString(),
+                    style: TextStyle(fontWeight: FontWeight.bold)))),
+                DataCell(Text((key.value as FutsalTeamInfo).gd.toString())),
+              ]))
+          .toList();
       return DataTable(
         sortColumnIndex: 6,
         sortAscending: false,
         columnSpacing: 0,
-        headingRowColor: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
-          return Theme.of(context).colorScheme.inversePrimary; // Use the default value.
+        headingRowColor: MaterialStateProperty.resolveWith<Color?>(
+            (Set<MaterialState> states) {
+          return Theme.of(context)
+              .colorScheme
+              .inversePrimary; // Use the default value.
         }),
         columns: const [
           DataColumn(label: Text("")),
@@ -115,25 +122,36 @@ class _TablePageState extends State<TablePage> {
           DataColumn(label: Text("L"), numeric: true),
           DataColumn(label: Text("P"), numeric: true),
           DataColumn(label: Text("GD"), numeric: true),
-        ], 
+        ],
         rows: teamsList,
       );
     } else {
-      List<DataRow> teamsList = teams.entries.map((key) => DataRow(cells: [
-        DataCell(Image.network(key.value.imagePath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)),
-        DataCell(Text(key.key.toString())),
-        DataCell(Text((key.value as BasketballTeamInfo).gp.toString())),
-        DataCell(Text(key.value.wins.toString())),
-        DataCell(Text(key.value.losses.toString())),
-        DataCell(Text.rich(TextSpan(text: key.value.points.toString(), style: TextStyle(fontWeight: FontWeight.bold)))),
-        DataCell(Text((key.value as BasketballTeamInfo).pd.toStringAsFixed(1))),
-      ])).toList();
+      List<DataRow> teamsList = teams.entries
+          .map((key) => DataRow(cells: [
+                DataCell(Image.network(key.value.imagePath,
+                    width: windowsDefaultIconSize.toDouble(),
+                    fit: BoxFit.scaleDown,
+                    alignment: FractionalOffset.center)),
+                DataCell(Text(key.key.toString())),
+                DataCell(Text((key.value as BasketballTeamInfo).gp.toString())),
+                DataCell(Text(key.value.wins.toString())),
+                DataCell(Text(key.value.losses.toString())),
+                DataCell(Text.rich(TextSpan(
+                    text: key.value.pct,
+                    style: TextStyle(fontWeight: FontWeight.bold)))),
+                DataCell(Text(
+                    (key.value as BasketballTeamInfo).pd.toStringAsFixed(1))),
+              ]))
+          .toList();
       return DataTable(
         sortColumnIndex: 5,
         sortAscending: false,
         columnSpacing: 0,
-        headingRowColor: MaterialStateProperty.resolveWith<Color?>((Set<MaterialState> states) {
-          return Theme.of(context).colorScheme.inversePrimary; // Use the default value.
+        headingRowColor: MaterialStateProperty.resolveWith<Color?>(
+            (Set<MaterialState> states) {
+          return Theme.of(context)
+              .colorScheme
+              .inversePrimary; // Use the default value.
         }),
         columns: const [
           DataColumn(label: Text("")),
@@ -141,9 +159,9 @@ class _TablePageState extends State<TablePage> {
           DataColumn(label: Text("GP"), numeric: true),
           DataColumn(label: Text("W"), numeric: true),
           DataColumn(label: Text("L"), numeric: true),
-          DataColumn(label: Text("P"), numeric: true),
+          DataColumn(label: Text("Pct"), numeric: true),
           DataColumn(label: Text("APD"), numeric: true),
-        ], 
+        ],
         rows: teamsList,
       );
     }
@@ -151,23 +169,37 @@ class _TablePageState extends State<TablePage> {
 
   void sortTable() {
     if (widget.sport == "Futsal") {
-      teams = Map.fromEntries(teams.entries.toList()..sort((a, b) {
-        int value = (b.value as FutsalTeamInfo).points.compareTo((a.value as FutsalTeamInfo).points);
-        if (value == 0) {
-          value = (b.value as FutsalTeamInfo).gd.compareTo((a.value as FutsalTeamInfo).gd);
-        }
-        return value;
-      },));
+      teams = Map.fromEntries(teams.entries.toList()
+        ..sort(
+          (a, b) {
+            int value = (b.value as FutsalTeamInfo)
+                .points
+                .compareTo((a.value as FutsalTeamInfo).points);
+            if (value == 0) {
+              value = (b.value as FutsalTeamInfo)
+                  .gd
+                  .compareTo((a.value as FutsalTeamInfo).gd);
+            }
+            return value;
+          },
+        ));
     } else if (widget.sport == "Basketball") {
-      teams = Map.fromEntries(teams.entries.toList()..sort((a, b) {
-        int value = (b.value as BasketballTeamInfo).points.compareTo((a.value as BasketballTeamInfo).points);
-        if (value == 0) {
-          value = (b.value as BasketballTeamInfo).pd.compareTo((a.value as BasketballTeamInfo).pd);
-        }
-        return value;
-      },));
+      teams = Map.fromEntries(teams.entries.toList()
+        ..sort(
+          (a, b) {
+            int value = double.parse((b.value as BasketballTeamInfo).pct)
+                .compareTo(double.parse((a.value as BasketballTeamInfo).pct));
+            if (value == 0) {
+              value = (b.value as BasketballTeamInfo)
+                  .pd
+                  .compareTo((a.value as BasketballTeamInfo).pd);
+            }
+            return value;
+          },
+        ));
     }
   }
+
 /*
   var teamInfos = await FirebaseGetter.getSeasonTable(leagueFromDB, seasonFromDB);
   var teams = teamInfo.Keys;
@@ -194,27 +226,24 @@ class _TablePageState extends State<TablePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text("${widget.sport} ${widget.season} Table"),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
-      ),
-      body: FutureBuilder(
-        future: getSeasonTable(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return Center(
-              child: CircularProgressIndicator(
-                color: Theme.of(context).colorScheme.primary,
-              )
-            );
-          }
-          teams = snapshot.data as Map<String, TeamInfo>;
-          return SizedBox(
-            width: MediaQuery.of(context).size.width,
-            child: buildTable());
-        }
-      )
-    );
+        appBar: AppBar(
+          title: Text("${widget.sport} ${widget.season} Table"),
+          backgroundColor: Theme.of(context).colorScheme.primary,
+          foregroundColor: Colors.white,
+        ),
+        body: FutureBuilder(
+            future: getSeasonTable(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return Center(
+                    child: CircularProgressIndicator(
+                  color: Theme.of(context).colorScheme.primary,
+                ));
+              }
+              teams = snapshot.data as Map<String, TeamInfo>;
+              return SizedBox(
+                  width: MediaQuery.of(context).size.width,
+                  child: buildTable());
+            }));
   }
 }
