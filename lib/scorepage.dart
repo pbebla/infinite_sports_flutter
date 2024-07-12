@@ -10,7 +10,7 @@ import 'package:infinite_sports_flutter/model/playerstats.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
-import 'package:youtube_player_flutter/youtube_player_flutter.dart';
+import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 
 Map<String,Widget> stringToGameAction = {
   "OnePointer": Row(children: [Text("FT"), Image.asset("assets/onepointer.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
@@ -340,102 +340,99 @@ class _ScorePageState extends State<ScorePage> {
     // The Flutter framework has been optimized to make rerunning build methods
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
-    return YoutubePlayerBuilder(
-      player: YoutubePlayer(
-        showVideoProgressIndicator: true,
-        controller: YoutubePlayerController(
-          initialVideoId: YoutubePlayer.convertUrlToId(widget.game.link)?? "",
-          flags: YoutubePlayerFlags(
-              autoPlay: false,
-              mute: true,
-          ),
-        )
+    YoutubePlayerController _controller = YoutubePlayerController(
+      params: YoutubePlayerParams(
+        mute: false,
+        showControls: true,
+        showFullscreenButton: false,
       ),
-      builder: (context, player) {
-        _player = player;
-        return FutureBuilder(
-          future: getGameData(setState), 
-          builder: (context, snapshot) {
-            if(snapshot.connectionState == ConnectionState.waiting) {
-              return Center(
-                  child: CircularProgressIndicator(
-                    color: Theme.of(context).colorScheme.primary,
-                  )
-                );
-            }
-            if (widget.sport == "Futsal") {
-              buildTeamPlayers(team1Players, (widget.game as FutsalGame).team1lineup, widget.game.team1activity, team1color, widget.game.team1SourcePath);
-              buildTeamPlayers(team2Players, (widget.game as FutsalGame).team2lineup, widget.game.team2activity, team2color, widget.game.team2SourcePath);
-            } else if (widget.sport == "Basketball") {
-              buildTeamPlayers(team1Players, (widget.game as BasketballGame).team1lineup, widget.game.team1activity, team1color, widget.game.team1SourcePath);
-              buildTeamPlayers(team2Players, (widget.game as BasketballGame).team2lineup, widget.game.team2activity, team2color, widget.game.team2SourcePath);
-            }
-            sortTable(table1SortColumnIndex ?? 2, table1isAscending, team1Players);
-            sortTable(table2SortColumnIndex ?? 2, table2isAscending, team2Players);
-            buildItemList();
-            List<Widget> tabs = List.empty(growable: true);
-            List<Tab> tabNames = List.empty(growable: true);
-            tabs.add(StatefulBuilder(
-              builder: (context, setState) {
-                return RefreshIndicator(
-                  onRefresh: () async {
-                    return _refreshData(setState);
-                  },
-                  child: ListView(
-                        padding: const EdgeInsets.all(15),
-                        children: items
-                    )
-                  );
-              },
-            )
-            );
-            tabNames.add(Tab(text: widget.game.date));
-            if (widget.game.status != 0) {
-              tabs.add(StatefulBuilder(
-                builder: (context, setState) {
-                  buildTeamTables(setState);
-                  return RefreshIndicator(
-                    onRefresh: () async {
-                      return _refreshData(setState);
-                    },
-                    child: ListView(children: [table1],)
-                    );
-                }
-                )
-              );
-              tabs.add(StatefulBuilder(
-                builder: (context, setState) {
-                  buildTeamTables(setState);
-                  return RefreshIndicator(
-                    onRefresh: () async {
-                      return _refreshData(setState);
-                    },
-                    child: ListView(children: [table2],)
-                    );
-                }
-                )
-              );
-              tabNames.add(Tab(text: widget.game.team1));
-              tabNames.add(Tab(text: widget.game.team2));
-            }
-            return DefaultTabController(
-              length: tabs.length, 
-              child: Scaffold(
-                appBar: AppBar(
-                  title: Text("${widget.sport} Season ${widget.season}"),
-                  bottom: TabBar(
-                    tabs: tabNames,
-                    isScrollable: false,
-                    )
-                ),
-                body: TabBarView(
-                  children: tabs,
-                )
+    );
+    _controller.cueVideoById(videoId: convertUrlToId(widget.game.link) ?? "");
+    _player = YoutubePlayer(
+      controller: _controller,
+      aspectRatio: 16 / 9,
+    );
+    return FutureBuilder(
+      future: getGameData(setState), 
+      builder: (context, snapshot) {
+        if(snapshot.connectionState == ConnectionState.waiting) {
+          return Center(
+              child: CircularProgressIndicator(
+                color: Theme.of(context).colorScheme.primary,
               )
             );
-          }
+        }
+        if (widget.sport == "Futsal") {
+          buildTeamPlayers(team1Players, (widget.game as FutsalGame).team1lineup, widget.game.team1activity, team1color, widget.game.team1SourcePath);
+          buildTeamPlayers(team2Players, (widget.game as FutsalGame).team2lineup, widget.game.team2activity, team2color, widget.game.team2SourcePath);
+        } else if (widget.sport == "Basketball") {
+          buildTeamPlayers(team1Players, (widget.game as BasketballGame).team1lineup, widget.game.team1activity, team1color, widget.game.team1SourcePath);
+          buildTeamPlayers(team2Players, (widget.game as BasketballGame).team2lineup, widget.game.team2activity, team2color, widget.game.team2SourcePath);
+        }
+        sortTable(table1SortColumnIndex ?? 2, table1isAscending, team1Players);
+        sortTable(table2SortColumnIndex ?? 2, table2isAscending, team2Players);
+        buildItemList();
+        List<Widget> tabs = List.empty(growable: true);
+        List<Tab> tabNames = List.empty(growable: true);
+        tabs.add(StatefulBuilder(
+          builder: (context, setState) {
+            return RefreshIndicator(
+              onRefresh: () async {
+                return _refreshData(setState);
+              },
+              child: ListView(
+                    padding: const EdgeInsets.all(15),
+                    children: items
+                )
+              );
+          },
+        )
         );
-      },
+        tabNames.add(Tab(text: widget.game.date));
+        if (widget.game.status != 0) {
+          tabs.add(StatefulBuilder(
+            builder: (context, setState) {
+              buildTeamTables(setState);
+              return RefreshIndicator(
+                onRefresh: () async {
+                  return _refreshData(setState);
+                },
+                child: ListView(children: [table1],)
+                );
+            }
+            )
+          );
+          tabs.add(StatefulBuilder(
+            builder: (context, setState) {
+              buildTeamTables(setState);
+              return RefreshIndicator(
+                onRefresh: () async {
+                  return _refreshData(setState);
+                },
+                child: ListView(children: [table2],)
+                );
+            }
+            )
+          );
+          tabNames.add(Tab(text: widget.game.team1));
+          tabNames.add(Tab(text: widget.game.team2));
+        }
+        return DefaultTabController(
+          length: tabs.length, 
+          child: Scaffold(
+            appBar: AppBar(
+              title: Text("${widget.sport} Season ${widget.season}"),
+              bottom: TabBar(
+                tabs: tabNames,
+                isScrollable: false,
+                )
+            ),
+            body: TabBarView(
+              children: tabs,
+            )
+          )
+        );
+      }
     );
   }
 
