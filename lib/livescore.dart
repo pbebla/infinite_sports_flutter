@@ -48,6 +48,13 @@ class _LiveScorePageState extends State<LiveScorePage> {
 
   List<GestureDetector> populateCardList(List<Game> gamesList) {
     List<GestureDetector> cardList = [];
+    if (gamesList.isEmpty) {
+      cardList.add(GestureDetector(
+        child: Card(child: Center(child: Text("No Upcoming Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold),),)),
+        onTap: () {
+        },
+      ));
+    } 
     for (var game in gamesList) {
       Card card = Card(
         elevation: 2,

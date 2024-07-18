@@ -84,6 +84,7 @@ class _MyHomePageState extends State<MyHomePage> {
   String currentSport = "";
   String currentSeason = "";
   String currentDate = "";
+  bool isCurrentFinished = false;
 
   @override
   void initState() {
@@ -109,6 +110,7 @@ class _MyHomePageState extends State<MyHomePage> {
     currentSport = await getCurrentSport();
     currentSeason = await getCurrentSeason(currentSport);
     currentDate = await getCurrentDate(currentSport, currentSeason);
+    isCurrentFinished = await isSeasonFinished(currentSport, currentSeason);
     headerNotifier.value = [currentSport, currentSeason];
     await getAllTeamLogo();
     return 1;
@@ -116,10 +118,6 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    SystemChrome.setPreferredOrientations([
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.portraitDown,
-      ]);
     final List<Widget> _widgetOptions = <Widget>[
       FutureBuilder(future: setCurrentValues(), builder:(context, snapshot) {
         if (!snapshot.hasData) {
@@ -128,6 +126,9 @@ class _MyHomePageState extends State<MyHomePage> {
                 color: Theme.of(context).colorScheme.primary,
               )
             );
+        }
+        if (isCurrentFinished) {
+          return Center(child: Card(child: Text("No Current Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold))));
         }
         return CurrentLivescoreNavigation(currentSport: currentSport, currentSeason: currentSeason, currentDate: currentDate, onTitleSelect: setLiveScoreTitle);
       },),

@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
@@ -137,13 +139,19 @@ Future<String> getCurrentDate(String sport, String season) async {
 
   while (Sunday.weekday != DateTime.sunday)
   {
-      Sunday = Sunday.add(const Duration(days: 1));
+    Sunday = Sunday.add(const Duration(days: 1));
   }
 
   List<String> dates = await getDates(sport, season);
+
+  var latestDate = dates.reduce((current, next) => current.compareTo(next)>0 ? current : next);
+  if (convertDateToDatabase(Sunday).compareTo(latestDate) > 0) {
+    return latestDate;
+  }
+
   while (!dates.contains(convertDateToDatabase(Sunday)))
   {
-      Sunday = Sunday.add(const Duration(days: 7));
+    Sunday = Sunday.add(const Duration(days: 7));
   }
   return convertDateToDatabase(Sunday);
 }
@@ -157,7 +165,7 @@ Future<String> getMinSeason(sport) async {
   }
   catch (e)
   {
-      return e.toString();
+    return e.toString();
   }
 }
 
@@ -211,8 +219,6 @@ Future<void> getAllBasketballLineUps(String season) async
     result[team] = temp;
   },);
   basketballLineups[season] = result;
-
-  //futsalLineups[season] = lineups;
 }
 
 int compareValues(dynamic value1, dynamic value2, bool ascending) =>
@@ -220,7 +226,9 @@ int compareValues(dynamic value1, dynamic value2, bool ascending) =>
 
 Future<List<Game>> getGames(sport, season, date, times) async {
   List<Game> allGames = <Game>[];
-  //if (!await isSeasonFinished(widget.sport, widget.season))
+  if (date == "") {
+    return [];
+  }
   List<Game> games = <Game>[];
 
   if (sport == "Futsal")
@@ -393,8 +401,8 @@ Future<void> fillInNull(game, season) async {
             var basketball = teamLogos["Basketball"];
             var logos = basketball[season];
 
-            game.team1SourcePath = logos[game.team1];
-            game.team2SourcePath = logos[game.team2];
+            game.team1SourcePath = logos[game.team1] ?? "";
+            game.team2SourcePath = logos[game.team2] ?? "";
         }
     }
     on Exception catch (_, e)
@@ -445,13 +453,13 @@ Future<int> getSeasonStartTime(times, sport, season) async {
 
 Future<Map<String, FutsalPlayer>> getFutsalLineUp(season, team) async {
   await getAllFutsalLineUps(season);
-  Map<String, FutsalPlayer> lineup = futsalLineups[season]![team]!;
+  Map<String, FutsalPlayer> lineup = futsalLineups[season]?[team] ?? {};
   return lineup;
 }
 
 Future<Map<String, BasketballPlayer>> getBasketballLineUp(season, team) async {
   await getAllBasketballLineUps(season);
-  Map<String, BasketballPlayer> lineup = basketballLineups[season]![team]!;
+  Map<String, BasketballPlayer> lineup = basketballLineups[season]?[team] ?? {};
   return lineup;
 }
 

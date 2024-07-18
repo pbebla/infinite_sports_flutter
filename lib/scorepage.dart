@@ -10,14 +10,14 @@ import 'package:infinite_sports_flutter/model/playerstats.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
-import 'package:youtube_player_iframe/youtube_player_iframe.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 Map<String,Widget> stringToGameAction = {
   "OnePointer": Row(children: [Text("FT"), Image.asset("assets/onepointer.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
   "TwoPointer": Row(children: [Text("FG"), Image.asset("assets/twopointer.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
   "ThreePointer": Row(children: [Text("3PT"), Image.asset("assets/threepointer.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
   "Rebound": Row(children: [Text("REB"), Image.asset("assets/rebound.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
-  "Foul": Row(children: [Text("PF"), Image.asset("assets/foul.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
+  "Foul": Row(children: [Text("Foul"), Image.asset("assets/foul.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
   "Goal": Row(children: [Text("Goal"), Image.asset("assets/goal.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
   "Assist": Row(children: [Text("Assist"), Image.asset("assets/assist.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
   "Yellow": Row(children: [Text("Yellow"), Image.asset("assets/yellow.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
@@ -55,8 +55,8 @@ class _ScorePageState extends State<ScorePage> {
   List<PlayerStats> team1Players = List.empty(growable: true);
   List<PlayerStats> team2Players = List.empty(growable: true);
   List<GameActivity> activities = List.empty(growable: true);
-  late ColorScheme team1color;
-  late ColorScheme team2color;
+  ColorScheme team1color  = ColorScheme.dark();
+  ColorScheme team2color = ColorScheme.dark();
   int? table1SortColumnIndex;
   int? table2SortColumnIndex;
   bool table1isAscending = false;
@@ -66,8 +66,12 @@ class _ScorePageState extends State<ScorePage> {
   late Widget _player;
 
   Future<int> getGameData(setState) async {
-    team1color = await ColorScheme.fromImageProvider(provider: NetworkImage(widget.game.team1SourcePath));
-    team2color = await ColorScheme.fromImageProvider(provider: NetworkImage(widget.game.team2SourcePath));
+    if (widget.game.team1SourcePath != "") {
+      team1color = await ColorScheme.fromImageProvider(provider: NetworkImage(widget.game.team1SourcePath));
+    }
+    if (widget.game.team2SourcePath != "") {
+      team2color = await ColorScheme.fromImageProvider(provider: NetworkImage(widget.game.team2SourcePath));
+    }
     return 1;
   }
 
@@ -204,7 +208,9 @@ class _ScorePageState extends State<ScorePage> {
         child: Row(
           children: [
             Text(activity.time), 
-            Image.network(activity.teamImagePath, width: windowsDefaultIconSize.toDouble()/1.5 , fit: BoxFit.scaleDown, alignment: FractionalOffset.centerLeft),
+            Image.network(activity.teamImagePath, errorBuilder: (context, error, stackTrace) {
+                          return Text("");
+                        }, width: windowsDefaultIconSize.toDouble()/1.5 , fit: BoxFit.scaleDown, alignment: FractionalOffset.centerLeft),
             Text(activity.name),
             Spacer(),
             stringToGameAction[activity.action]!,],
@@ -285,7 +291,9 @@ class _ScorePageState extends State<ScorePage> {
           return teamColor.inversePrimary; // Use the default value.
         }),
         columns: [
-          DataColumn(label: Image.network(teamSourcePath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.centerLeft)),
+          DataColumn(label: Image.network(teamSourcePath, errorBuilder: (context, error, stackTrace) {
+                          return Text("");
+                        }, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.centerLeft,)),
           DataColumn(label: Text(teamName), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn(label: Text("Goals"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn(label: Text("Assists"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
@@ -310,7 +318,9 @@ class _ScorePageState extends State<ScorePage> {
         }),
         columns: [
           DataColumn(label: Text("")),
-          DataColumn(label: Image.network(teamSourcePath, width: windowsDefaultIconSize.toDouble(), alignment: FractionalOffset.center), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn(label: Image.network(teamSourcePath, errorBuilder: (context, error, stackTrace) {
+                          return Text("");
+                        }, width: windowsDefaultIconSize.toDouble(), alignment: FractionalOffset.center), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn(label: Text("PTS"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn(label: Text("REB"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn(label: Text("2PM"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
@@ -340,18 +350,6 @@ class _ScorePageState extends State<ScorePage> {
     // The Flutter framework has been optimized to make rerunning build methods
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
-    YoutubePlayerController _controller = YoutubePlayerController(
-      params: YoutubePlayerParams(
-        mute: false,
-        showControls: true,
-        showFullscreenButton: false,
-      ),
-    );
-    _controller.cueVideoById(videoId: convertUrlToId(widget.game.link) ?? "");
-    _player = YoutubePlayer(
-      controller: _controller,
-      aspectRatio: 16 / 9,
-    );
     return FutureBuilder(
       future: getGameData(setState), 
       builder: (context, snapshot) {
@@ -422,6 +420,40 @@ class _ScorePageState extends State<ScorePage> {
           child: Scaffold(
             appBar: AppBar(
               title: Text("${widget.sport} Season ${widget.season}"),
+              actions: [
+                IconButton(
+                  onPressed: widget.game.link == "" ? null : () {
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
+                    initialEntries: [OverlayEntry(
+                      builder: (context) {
+                        WebViewController webController = WebViewController()
+                          ..setJavaScriptMode(JavaScriptMode.unrestricted)
+                          ..setBackgroundColor(const Color(0x00000000))
+                          ..setNavigationDelegate(
+                            NavigationDelegate(
+                              onProgress: (int progress) {
+                                // Update loading bar.
+                              },
+                              onPageStarted: (String url) {},
+                              onPageFinished: (String url) {},
+                              onHttpError: (HttpResponseError error) {},
+                              onWebResourceError: (WebResourceError error) {},
+                              onNavigationRequest: (NavigationRequest request) {
+                                return NavigationDecision.navigate;
+                              },
+                            ),
+                          )
+                          ..loadRequest(Uri.parse(widget.game.link));
+                        return Scaffold(
+                          appBar: AppBar(title: const Text("")),
+                          body: WebViewWidget(controller: webController),
+                        );
+                      })],
+                    )));
+                  },
+                icon: ImageIcon(AssetImage('assets/watch.png')),
+                )
+              ],
               bottom: TabBar(
                 tabs: tabNames,
                 isScrollable: false,
@@ -547,10 +579,7 @@ class _ScorePageState extends State<ScorePage> {
         ), //Padding
       ), //SizedBox
     ),);
-    if (widget.game.link != "") {
-      items.add(_player);
-    }
-    if (widget.game.status != 0) {
+    if (widget.game.status != 0 && team1Players.isNotEmpty && team2Players.isNotEmpty) {
       items.add(buildTeamLeaders());
       items.add(Column(children: buildActivityList()));   
     }
