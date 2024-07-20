@@ -12,6 +12,7 @@ import 'package:infinite_sports_flutter/leagues.dart';
 import 'package:infinite_sports_flutter/livescore.dart';
 import 'package:infinite_sports_flutter/navigations/current_livescore_navigation.dart';
 import 'package:infinite_sports_flutter/navigations/leagues_navigation.dart';
+import 'package:infinite_sports_flutter/playerpage.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 import 'package:infinite_sports_flutter/table.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -120,7 +121,7 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) {
     final List<Widget> _widgetOptions = <Widget>[
       FutureBuilder(future: setCurrentValues(), builder:(context, snapshot) {
-        if (!snapshot.hasData) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
           return Center(
               child: CircularProgressIndicator(
                 color: Theme.of(context).colorScheme.primary,
@@ -133,7 +134,7 @@ class _MyHomePageState extends State<MyHomePage> {
         return CurrentLivescoreNavigation(currentSport: currentSport, currentSeason: currentSeason, currentDate: currentDate, onTitleSelect: setLiveScoreTitle);
       },),
       LeaguesNavigation(),
-      Text('Index 2: School'),
+      //PlayerPage(uid: "7zOsOETnTPOXpUrqS5R0GAPyqU03"),
     ];
     // This method is rerun every time setState is called, for instance as done
     // by the _incrementCounter method above.

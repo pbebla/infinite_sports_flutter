@@ -24,7 +24,7 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                 return FutureBuilder(
                   future: getSeasonTiles("Futsal", context), 
                   builder:(context, snapshot) {
-                    if (!snapshot.hasData) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
                       return Center(
                         child: CircularProgressIndicator(
                           color: Theme.of(context).colorScheme.primary,
@@ -46,7 +46,7 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                 return FutureBuilder(
                   future: getSeasonTiles("Basketball", context), 
                   builder:(context, snapshot) {
-                    if (!snapshot.hasData) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
                       return Center(
                         child: CircularProgressIndicator(
                           color: Theme.of(context).colorScheme.primary,

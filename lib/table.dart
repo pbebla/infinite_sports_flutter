@@ -234,7 +234,7 @@ class _TablePageState extends State<TablePage> {
         body: FutureBuilder(
             future: getSeasonTable(),
             builder: (context, snapshot) {
-              if (!snapshot.hasData) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
                 return Center(
                     child: CircularProgressIndicator(
                   color: Theme.of(context).colorScheme.primary,

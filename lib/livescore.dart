@@ -185,11 +185,13 @@ class _LiveScorePageState extends State<LiveScorePage> {
     // than having to individually change instances of widgets.
     
     return RefreshIndicator(
-      onRefresh: _refreshData,
+      onRefresh: () async {
+        return _refreshData();
+      },
       child: FutureBuilder(
         future: getGames(widget.sport, widget.season, widget.date, times), 
         builder:(context, snapshot) {
-          if (!snapshot.hasData) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
               return Center(
               child: CircularProgressIndicator(
                 color: Theme.of(context).colorScheme.primary,

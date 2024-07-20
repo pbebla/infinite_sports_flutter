@@ -11,6 +11,7 @@ import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/leaguemenu.dart';
 import 'package:infinite_sports_flutter/model/player.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
+import 'package:infinite_sports_flutter/playerpage.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 
 class LeaderboardPage extends StatefulWidget {
@@ -103,7 +104,14 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     if (widget.sport == "Futsal") {
       List<DataRow> teamsList = players.map((key) => DataRow(cells: [
         DataCell(Row(children: [Text(key.number), Spacer(), Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)])),
-        DataCell(Text(key.name.toString())),
+        DataCell(Text(key.name.toString()), onTap: () {
+          Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
+                  initialEntries: [OverlayEntry(
+                    builder: (context) {
+                      return PlayerPage(uid: key.uid);
+                    })],
+                )));
+        },),
         DataCell(Text(key.goals.toString())),
         DataCell(Text(key.assists.toString())),
         DataCell(Text(key.saves.toString())),
@@ -128,7 +136,15 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     } else if (widget.sport == "Basketball") {
       List<DataRow> teamsList = players.map((key) => DataRow(cells: [
         DataCell(Row(children: [Text(key.number), Spacer(), Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)])),
-        DataCell(Text(key.name.toString())),
+        //DataCell(Row(children: [Text(key.number), Spacer(), ])),
+        DataCell(Text(key.name.toString()), onTap: () {
+          Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
+                  initialEntries: [OverlayEntry(
+                    builder: (context) {
+                      return PlayerPage(uid: key.uid);
+                    })],
+                )));
+        },),
         DataCell(Text(key.total.toString())),
         DataCell(Text(key.rebounds.toString())),
         DataCell(Text(key.shotPercentage)),
@@ -165,7 +181,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       body: FutureBuilder(
         future: getPlayersList(),
         builder: (context, snapshot) {
-          if (!snapshot.hasData) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
             return Center(
               child: CircularProgressIndicator(
                 color: Theme.of(context).colorScheme.primary,

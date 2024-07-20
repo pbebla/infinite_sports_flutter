@@ -76,7 +76,7 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
     return FutureBuilder(
       future: buildLeague(), 
       builder:(context, snapshot) {
-        if (!snapshot.hasData) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
           return Center(
               child: CircularProgressIndicator(
                 color: Theme.of(context).colorScheme.primary,
