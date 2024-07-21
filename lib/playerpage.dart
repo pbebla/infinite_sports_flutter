@@ -171,7 +171,7 @@ class _PlayerPageState extends State<PlayerPage> {
                         Text(sportPositions[sports[index]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
                         DataTable(
                           horizontalMargin: 5,
-                          columnSpacing: 10.0,
+                          columnSpacing: 5,
                           columns: [
                             DataColumn(label: Text("Season"), numeric: true),
                             DataColumn(label: Text("Team")),
@@ -208,7 +208,7 @@ class _PlayerPageState extends State<PlayerPage> {
                         Text(sportPositions[sports[index]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
                         DataTable(
                           horizontalMargin: 5,
-                          columnSpacing: 10.0,
+                          columnSpacing: 5,
                           columns: [
                             DataColumn(label: Text("Season"), numeric: true),
                             DataColumn(label: Text("Team")),
