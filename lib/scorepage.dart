@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/main.dart';
@@ -8,6 +9,7 @@ import 'package:infinite_sports_flutter/model/futsalplayerstats.dart';
 import 'package:infinite_sports_flutter/model/gameactivity.dart';
 import 'package:infinite_sports_flutter/model/playerstats.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/playerpage.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -242,7 +244,7 @@ class _ScorePageState extends State<ScorePage> {
               }
             }
           });
-          teamPlayers.add(FutsalPlayerStats(name, profile.number, goals, assists));
+          teamPlayers.add(FutsalPlayerStats(name, profile.number, profile.uid, goals, assists));
         });
       } else if (widget.sport == "Basketball") {
         teamLineup.forEach((name, profile) {
@@ -271,7 +273,7 @@ class _ScorePageState extends State<ScorePage> {
               }
             }
           });
-          teamPlayers.add(BasketballPlayerStats(name.toString(), profile.number, ones, twos, threes, fouls, rebounds));
+          teamPlayers.add(BasketballPlayerStats(name.toString(), profile.number, profile.uid, ones, twos, threes, fouls, rebounds));
         });
       }
     }
@@ -301,7 +303,14 @@ class _ScorePageState extends State<ScorePage> {
         rows: (teamPlayers as List).map((key) {
           return DataRow(cells: [
             DataCell(Text(key.number)),
-            DataCell(Text(key.name)),
+            DataCell(Text(key.name), onTap: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
+                  initialEntries: [OverlayEntry(
+                    builder: (context) {
+                      return PlayerPage(uid: key.uid);
+                    })],
+                )));
+            },),
             DataCell(Text(key.goals.toString())),
             DataCell(Text(key.assists.toString())),
           ]);
@@ -330,7 +339,14 @@ class _ScorePageState extends State<ScorePage> {
         ], 
         rows: (teamPlayers as List).map((key) => DataRow(cells: [
             DataCell(Text(key.number)),
-            DataCell(Text(key.name)),
+            DataCell(Text(key.name), onTap: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
+                  initialEntries: [OverlayEntry(
+                    builder: (context) {
+                      return PlayerPage(uid: key.uid);
+                    })],
+                )));
+            },),
             DataCell(Text(key.total.toString())),
             DataCell(Text(key.rebounds.toString())),
             DataCell(Text(key.twos.toString())),

@@ -7,11 +7,11 @@ import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/futsalgame.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
+import 'package:intl/intl.dart';
 
 Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
 Map<String, Map<String, Map<String, BasketballPlayer>>> basketballLineups = {};
 Map teamLogos = {};
-const String YOUTUBE_API_KEY = "AIzaSyAHK-KknpxePRDP_lvAs9zJIFvHCrr56GQ";
 
 ValueNotifier headerNotifier = ValueNotifier(["", ""]);
 
@@ -29,6 +29,13 @@ final List<String> months = [
     "November",
     "December"
 ];
+
+String convertDatabaseDateToFormatDate(String databaseDate) {
+  int year = int.parse(databaseDate.substring(4));
+  int day = int.parse(databaseDate.substring(2,4));
+  int month = int.parse(databaseDate.substring(0,2));
+  return DateFormat.yMMMMd('en_US').format(DateTime.utc(year, month=month, day=day));
+}
 
 String convertStringDateToDatabase(String date)
 {
@@ -347,7 +354,7 @@ Future<Map<String, List<BasketballGame>>> getAllBasketballGames(sport, season) a
         game.team1score = val["team1score"].toString();
         game.team2score = val["team2score"].toString();
         game.date = val["Date"];
-        game.status = val["status"];
+        game.status = val["status"] ?? 0;
         if(val.containsKey("link")) {
           game.link = val["link"];
         }

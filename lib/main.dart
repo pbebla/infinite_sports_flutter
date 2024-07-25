@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/botnavbar.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
@@ -22,6 +23,7 @@ var infiniteSportsPrimaryColor = const Color.fromARGB(255, 208, 0, 0);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: ".env");
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
@@ -131,7 +133,7 @@ class _MyHomePageState extends State<MyHomePage> {
         if (isCurrentFinished) {
           return Center(child: Card(child: Text("No Current Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold))));
         }
-        return CurrentLivescoreNavigation(currentSport: currentSport, currentSeason: currentSeason, currentDate: currentDate, onTitleSelect: setLiveScoreTitle);
+        return CurrentLivescoreNavigation(currentSport: currentSport, currentSeason: currentSeason, currentDate: currentDate, onTitleSelect: setLiveScoreTitle, isSeasonFinished: isCurrentFinished,);
       },),
       LeaguesNavigation(),
       //PlayerPage(uid: "7zOsOETnTPOXpUrqS5R0GAPyqU03"),

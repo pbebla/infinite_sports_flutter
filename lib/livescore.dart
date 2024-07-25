@@ -168,10 +168,11 @@ class _LiveScorePageState extends State<LiveScorePage> {
     return cardList;
   }
 
-  Future<void> _refreshData() async { 
+  Future<void> _refreshData(setState) async { 
     // Add new items or update the data here 
-    setState(() { 
-      cardList = []; 
+    List<Game> gamesList = await getGames(widget.sport, widget.season, widget.date, times);
+    cardList = populateCardList(gamesList); 
+    setState(() {
     }); 
   } 
 
@@ -184,28 +185,36 @@ class _LiveScorePageState extends State<LiveScorePage> {
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
     
-    return RefreshIndicator(
-      onRefresh: () async {
-        return _refreshData();
-      },
-      child: FutureBuilder(
-        future: getGames(widget.sport, widget.season, widget.date, times), 
-        builder:(context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-              return Center(
-              child: CircularProgressIndicator(
-                color: Theme.of(context).colorScheme.primary,
+    return FutureBuilder(
+      future: getGames(widget.sport, widget.season, widget.date, times), 
+      builder:(context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(
+            child: CircularProgressIndicator(
+              color: Theme.of(context).colorScheme.primary,
+            )
+          );
+        }
+        if (!snapshot.hasData) {
+          return Center(child: Card(child: Text("No Upcoming Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold),),),);
+        }
+        List<Game> gamesList = snapshot.data as List<Game>;
+        //widget.onTitleSelect(gamesList[0].date);
+        cardList = populateCardList(gamesList); 
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return RefreshIndicator(
+              onRefresh: () async {
+                return _refreshData(setState);
+              },
+              child: ListView(
+                padding: const EdgeInsets.all(15),
+                children: cardList,
               )
             );
           }
-          List<Game> gamesList = snapshot.data as List<Game>;
-          //widget.onTitleSelect(gamesList[0].date);
-          cardList = populateCardList(gamesList); 
-          return ListView(
-            padding: const EdgeInsets.all(15),
-            children: cardList,
-          );
-        }), 
+        );
+      }
     );
   }
 }

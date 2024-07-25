@@ -7,6 +7,7 @@
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// Default [FirebaseOptions] for use with your Firebase apps.
 ///
@@ -59,8 +60,8 @@ class DefaultFirebaseOptions {
     measurementId: 'G-JN95N1JV2E',
   );
 
-  static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyCdRjCVZlhrq72RuEklEyyxYlBRCYhI2Sw',
+  static FirebaseOptions android = FirebaseOptions(
+    apiKey: dotenv.env['ANDROID_API_KEY'] ?? "",
     appId: '1:248087010229:android:058f3dbffbc0a468',
     messagingSenderId: '248087010229',
     projectId: 'infinite-sports-app',
@@ -68,8 +69,8 @@ class DefaultFirebaseOptions {
     storageBucket: 'infinite-sports-app.appspot.com',
   );
 
-  static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyCKDhpIclCSKFouJlF9ouX0BUs_5DOn-VA',
+  static FirebaseOptions ios = FirebaseOptions(
+    apiKey: dotenv.env['IOS_API_KEY'] ?? "",
     appId: '1:248087010229:ios:87700ab7b56d8baa',
     messagingSenderId: '248087010229',
     projectId: 'infinite-sports-app',
@@ -97,5 +98,3 @@ class DefaultFirebaseOptions {
     iosBundleId: 'io.flutter.plugins.firebase.messaging',
   );
 }
-
-//Youtube - AIzaSyAHK-KknpxePRDP_lvAs9zJIFvHCrr56GQ

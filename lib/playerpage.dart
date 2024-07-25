@@ -48,7 +48,7 @@ class _PlayerPageState extends State<PlayerPage> {
   int age = 0;
   Map player = {};
 
-  Future<(String, Color, Player)> extractPlayerStats(sport, season, team) async {
+  Future<(String, Color, Player)> extractPlayerStatsHelper(sport, season, team) async {
     await getAllTeamLogo();
     (String, Color, Player) data = ("", Colors.black, BasketballPlayer());
     if (sport == "Basketball") {
@@ -58,29 +58,57 @@ class _PlayerPageState extends State<PlayerPage> {
         if (info.uid == widget.uid) {
           var color = await ColorScheme.fromImageProvider(provider: NetworkImage(teamLogos[sport][season][team]));
           info.teamPath = teamLogos[sport][season][team];
-          data = (team, color.inversePrimary, info);
           if (firstName.isEmpty) {
             firstName = info.name.split(' ')[0];
             lastName = info.name.split(' ')[1];
           }
+          data = (team, color.inversePrimary, info);
+          
         }
       });
-    } else {
+    } else if (sport == "Futsal") {
       await Future.forEach((futsalLineups[season]![team]!.entries), (entry) async {
         var name = entry.key;
         var info = entry.value;
         if (info.uid == widget.uid) {
           var color = await ColorScheme.fromImageProvider(provider: NetworkImage(teamLogos[sport][season][team]));
           info.teamPath = teamLogos[sport][season][team];
-          data = (team, color.inversePrimary, info);
           if (firstName.isEmpty) {
             firstName = info.name.split(' ')[0];
             lastName = info.name.split(' ')[1];
           }
+          data = (team, color.inversePrimary, info);
         }
       });
     }
     return data;
+  }
+
+  Future<(String, Color, Player)> extractPlayerStats(sport, season, team) async {
+    var val = await extractPlayerStatsHelper(sport, season, team);
+    if (val.$1 != "") {
+      return val;
+    }
+    if (sport == "Basketball") {
+      for (var other in basketballLineups[season]!.keys) {
+        if (other != team) {
+          val = await extractPlayerStatsHelper(sport, season, other);
+          if (val.$1 != "") {
+            return val;
+          }
+        }
+      }
+    } else if (sport == "Futsal") {
+      for (var other in futsalLineups[season]!.keys) {
+        if (other != team) {
+          val = await extractPlayerStatsHelper(sport, season, other);
+          if (val.$1 != "") {
+            return val;
+          }
+        }
+      }
+    }
+    return val;
   }
 
   Future<int> getPlayerData() async {
@@ -134,12 +162,14 @@ class _PlayerPageState extends State<PlayerPage> {
         return Scaffold(
           appBar: AppBar(
             title: Text("Profile"),
+            backgroundColor: Theme.of(context).colorScheme.primary,
+            foregroundColor: Colors.white,
           ),
           body: Column(
             children: [
               Row(
                 children: [
-                  Expanded(child: profileImagePath != "" ? Image.network(profileImagePath) : Image.asset("assets/portraitplaceholder.png")),
+                  Expanded(child: profileImagePath != "" ? Image.network(profileImagePath, ) : Image.asset("assets/portraitplaceholder.png")),
                   Expanded(child: Column(children: [
                     FittedBox(fit: BoxFit.fitWidth, child: Text(firstName, style: TextStyle(fontSize: Theme.of(context).textTheme.displayMedium!.fontSize)),),
                     FittedBox(fit: BoxFit.fitWidth, child: Text(lastName, style: TextStyle(fontSize: Theme.of(context).textTheme.displaySmall!.fontSize))),
@@ -166,6 +196,7 @@ class _PlayerPageState extends State<PlayerPage> {
                           DataCell(Text((info.$3 as BasketballPlayer).shotPercentage)),
                         ]));
                       });
+                      rows.sort((a, b) => (int.parse((b.cells[0].child as Text).data.toString() ?? '0').compareTo(int.parse((a.cells[0].child as Text).data.toString() ?? '0'),)));
                       return Column(children: [
                         Text(sports[index], style: TextStyle(fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineLarge!.fontSize), ),
                         Text(sportPositions[sports[index]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
@@ -203,6 +234,7 @@ class _PlayerPageState extends State<PlayerPage> {
                             DataCell(Text((info.$3 as FutsalPlayer).saves.toString())),
                           ]));
                       });
+                      rows.sort((a, b) => (int.parse((b.cells[0].child as Text).data.toString() ?? '0').compareTo(int.parse((a.cells[0].child as Text).data.toString() ?? '0'),)));
                       return Column(children: [
                         Text(sports[index], style: TextStyle(fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineLarge!.fontSize), ),
                         Text(sportPositions[sports[index]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
