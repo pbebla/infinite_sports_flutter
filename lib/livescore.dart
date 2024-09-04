@@ -9,6 +9,7 @@ import 'package:infinite_sports_flutter/model/basketballgame.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/futsalgame.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
+import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/leagues.dart';
 import 'package:infinite_sports_flutter/scorepage.dart';
@@ -50,12 +51,108 @@ class _LiveScorePageState extends State<LiveScorePage> {
     List<GestureDetector> cardList = [];
     if (gamesList.isEmpty) {
       cardList.add(GestureDetector(
-        child: Card(child: Center(child: Text("No Upcoming Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold),),)),
+        child: const Card(child: Center(child: Text("No Upcoming Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold),),)),
         onTap: () {
         },
       ));
     } 
     for (var game in gamesList) {
+      List<Widget> informationRows = [
+        Row(
+          children: <Widget>[
+            Expanded(child:Text(game.stringStatus,textAlign: TextAlign.left, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: game.statusColor))),
+            Expanded(child:Text(game is SoccerGame && game.startTime != "" ? game.startTime : '${game.Time.toString()}:00PM',textAlign: TextAlign.right, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
+          ],
+        ),
+        Row(
+          children: <Widget>[
+            Column(
+              children: <Widget>[
+                Image.network(width: 70, game.team1SourcePath, errorBuilder: (context, error, stackTrace) {
+                  return const Text("");
+                },),
+                SizedBox(width: 100, child: Text(game.team1, textAlign: TextAlign.center,),),
+              ],
+            ),
+            Expanded(
+              child:
+                Text(
+                  '${game.team1score}-${game.team2score}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 35,
+                    fontWeight: FontWeight.bold,
+                  ))),
+            Column(
+              children: <Widget>[
+                Image.network(width: 70, game.team2SourcePath, errorBuilder: (context, error, stackTrace) {
+                  return const Text("");
+                },),
+                SizedBox(width: 100, child: Text(game.team2, textAlign: TextAlign.center,),),
+              ],
+            ),
+          ],
+        ),
+      ];
+      if (game is SoccerGame && widget.sport == "AFC San Jose") {
+        informationRows.add(
+          Row(
+            children: [
+              SizedBox(width: 150, child: Text(game.location, textAlign: TextAlign.left,),),
+              Expanded(child: SizedBox(width: 150, child: Text(game.type, textAlign: TextAlign.right,),),)
+            ],
+          )
+        );
+      } else {
+        informationRows.add(
+          Row(
+            children: <Widget>[
+              CircularPercentIndicator(
+                    radius: 30,
+                    lineWidth: 4.0,
+                    percent: game.finalvote1,
+                    center: Text(game.percvote1),
+                    progressColor: infiniteSportsPrimaryColor,
+              ),
+              Expanded(
+                child: Visibility(
+                maintainSize: true, 
+                maintainAnimation: true,
+                maintainState: true,
+                visible: game.status == 0,
+                child: Column(
+                  children: <Widget>[
+                    const Text('Poll', textAlign: TextAlign.center),
+                    Container(
+                      height: 40,
+                      width: 80,
+                      decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(15)),
+                      child: TextButton(
+                        onPressed: () {
+                        },
+                        child: const Text(
+                          'Vote',
+                          style: TextStyle(color: Colors.white, fontSize: 18),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              ),
+              CircularPercentIndicator(
+                    radius: 30,
+                    lineWidth: 4.0,
+                    percent: game.finalvote2,
+                    center: Text(game.percvote2),
+                    progressColor: infiniteSportsPrimaryColor,
+              )
+            ],
+          )
+        );
+      }
+
       Card card = Card(
         elevation: 2,
         shadowColor: Colors.black,
@@ -67,88 +164,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
             padding: const EdgeInsets.all(13),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    Expanded(child:Text(game.stringStatus,textAlign: TextAlign.left, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: game.statusColor))),
-                    Expanded(child:Text('${game.Time.toString()}:00PM',textAlign: TextAlign.right, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
-                  ],
-                ),
-                Row(
-                  children: <Widget>[
-                    Column(
-                      children: <Widget>[
-                        Image.network(width: 70, game.team1SourcePath, errorBuilder: (context, error, stackTrace) {
-                          return Text("");
-                        },),
-                        Text(game.team1, textAlign: TextAlign.center),
-                      ],
-                    ),
-                    Expanded(
-                      child:
-                        Text(
-                          '${game.team1score}-${game.team2score}',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 35,
-                            fontWeight: FontWeight.bold,
-                          ))),
-                    Column(
-                      children: <Widget>[
-                        Image.network(width: 70, game.team2SourcePath, errorBuilder: (context, error, stackTrace) {
-                          return Text("");
-                        },),
-                        Text(game.team2, textAlign: TextAlign.center),
-                      ],
-                    ),
-                  ],
-                ),
-                Row(
-                  children: <Widget>[
-                    CircularPercentIndicator(
-                          radius: 30,
-                          lineWidth: 4.0,
-                          percent: game.finalvote1,
-                          center: Text(game.percvote1),
-                          progressColor: infiniteSportsPrimaryColor,
-                    ),
-                    Expanded(
-                      child: Visibility(
-                      maintainSize: true, 
-                      maintainAnimation: true,
-                      maintainState: true,
-                      visible: game.status == 0,
-                      child: Column(
-                        children: <Widget>[
-                          Text('Poll', textAlign: TextAlign.center),
-                          Container(
-                            height: 40,
-                            width: 80,
-                            decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(15)),
-                            child: TextButton(
-                              onPressed: () {
-                              },
-                              child: const Text(
-                                'Vote',
-                                style: TextStyle(color: Colors.white, fontSize: 18),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    ),
-                    CircularPercentIndicator(
-                          radius: 30,
-                          lineWidth: 4.0,
-                          percent: game.finalvote2,
-                          center: Text(game.percvote2),
-                          progressColor: infiniteSportsPrimaryColor,
-                    )
-                  ],
-                ),
-              ],
+              children: informationRows
             )
           ), //Padding
         ), //SizedBox
@@ -196,7 +212,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
           );
         }
         if (!snapshot.hasData) {
-          return Center(child: Card(child: Text("No Upcoming Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold),),),);
+          return const Center(child: Card(child: Text("No Upcoming Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold),),),);
         }
         List<Game> gamesList = snapshot.data as List<Game>;
         //widget.onTitleSelect(gamesList[0].date);

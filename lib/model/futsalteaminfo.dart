@@ -1,8 +1,6 @@
 // ignore_for_file: no_leading_underscores_for_local_identifiers
 
-import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/model/teaminfo.dart';
 
 class FutsalTeamInfo implements TeamInfo {

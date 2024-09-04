@@ -1,20 +1,8 @@
-import 'dart:convert';
-import 'dart:ffi';
 import 'package:intl/intl.dart';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/livescore.dart';
-import 'package:infinite_sports_flutter/login.dart';
-import 'package:infinite_sports_flutter/model/basketballgame.dart';
-import 'package:infinite_sports_flutter/navbar.dart';
-import 'package:infinite_sports_flutter/leagues.dart';
-import 'package:stack_trace/stack_trace.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
-import 'package:percent_indicator/percent_indicator.dart';
-import 'package:firebase_database/firebase_database.dart';
-import 'package:infinite_sports_flutter/model/game.dart';
-import 'package:infinite_sports_flutter/main.dart';
 
 typedef TitleCallback = void Function(String value);
 
@@ -56,7 +44,21 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
       length: dateList.length,
       child: Scaffold(
         appBar: AppBar(
-          title: Text("${widget.sport} Season ${widget.season}"),
+          title: RichText(
+                  textAlign: TextAlign.left,
+                  text: TextSpan(
+                      text: widget.sport,
+                      style: TextStyle(fontSize: 20, color: Colors.black),
+                      children: <TextSpan>[
+                        TextSpan(
+                          text: '\n${widget.season}',
+                          style: TextStyle(
+                            fontSize: 16,
+                          ),
+                        ),
+                      ]
+                  ),
+                ),
           bottom: TabBar(
             tabAlignment: TabAlignment.start,
             isScrollable: true,

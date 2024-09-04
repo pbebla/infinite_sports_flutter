@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/main.dart';
 
 class LoginPage extends StatefulWidget {
+  const LoginPage({super.key});
+
   @override
   _LoginDemoState createState() => _LoginDemoState();
 }
@@ -12,7 +14,7 @@ class _LoginDemoState extends State<LoginPage> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text("Login or Sign Up"),
+        title: const Text("Login or Sign Up"),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),
@@ -22,7 +24,7 @@ class _LoginDemoState extends State<LoginPage> {
             Padding(
               padding: const EdgeInsets.only(top: 60.0),
               child: Center(
-                child: Container(
+                child: SizedBox(
                     width: 200,
                     height: 150,
                     /*decoration: BoxDecoration(
@@ -42,18 +44,18 @@ class _LoginDemoState extends State<LoginPage> {
               ),
             ),
             Padding(
-              padding: EdgeInsets.only(
+              padding: const EdgeInsets.only(
                   left: 15.0, right: 15.0, top: 15, bottom: 0),
               //padding: EdgeInsets.symmetric(horizontal: 15),
               child: TextField(
                 obscureText: true,
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                     border: OutlineInputBorder(),
                     labelText: 'Password',
                     hintText: 'Enter secure password'),
                 onSubmitted: (value) {
                   Navigator.pushReplacement(
-                      context, MaterialPageRoute(builder: (_) => MyHomePage()));
+                      context, MaterialPageRoute(builder: (_) => const MyHomePage()));
                 },
               ),
             ),
@@ -74,7 +76,7 @@ class _LoginDemoState extends State<LoginPage> {
               child: TextButton(
                 onPressed: () {
                   Navigator.pushReplacement(
-                      context, MaterialPageRoute(builder: (_) => MyHomePage()));
+                      context, MaterialPageRoute(builder: (_) => const MyHomePage()));
                 },
                 child: const Text(
                   'Login',

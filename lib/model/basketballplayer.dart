@@ -1,6 +1,5 @@
 import 'package:infinite_sports_flutter/model/player.dart';
 import 'dart:core';
-import 'dart:ui';
 
 class BasketballPlayer implements Player {
   @override

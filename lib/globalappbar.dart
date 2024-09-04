@@ -36,7 +36,7 @@ class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
                     })],
                 )));
               },
-              icon: ImageIcon(AssetImage('assets/table.png')),
+              icon: const ImageIcon(AssetImage('assets/table.png')),
         );
           },),
         ValueListenableBuilder(
@@ -51,7 +51,7 @@ class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
                     })],
                 )));
               },
-              icon: ImageIcon(AssetImage('assets/leader.png')),
+              icon: const ImageIcon(AssetImage('assets/leader.png')),
             );
           }
           )

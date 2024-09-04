@@ -48,12 +48,12 @@ class CurrentLivescoreNavigationState extends State<CurrentLivescoreNavigation> 
                       height: 70,
                       child: Container(
                         padding: const EdgeInsets.all(13),
-                        child: Row(children: [Text("Assyrian ${widget.currentSport} League Season ${widget.currentSeason}", style: TextStyle(fontWeight: FontWeight.bold),), Spacer(), Image.asset('assets/BasketLeague.png', width: windowsDefaultIconSize.toDouble(),)],),),
+                        child: Row(children: [Text("Assyrian ${widget.currentSport} League Season ${widget.currentSeason}", style: const TextStyle(fontWeight: FontWeight.bold),), const Spacer(), Image.asset('assets/BasketLeague.png', width: windowsDefaultIconSize.toDouble(),)],),),
                     )
                   ),
                 ),
-                Divider(color: Colors.black,),
-                Text(convertDatabaseDateToFormatDate(widget.currentDate), style: TextStyle(fontWeight: FontWeight.bold),),
+                const Divider(color: Colors.black,),
+                Text(convertDatabaseDateToFormatDate(widget.currentDate), style: const TextStyle(fontWeight: FontWeight.bold),),
                 Expanded(
                   child: LiveScorePage(sport: widget.currentSport, season: widget.currentSeason, date: widget.currentDate ,onTitleSelect: (String value) {widget.onTitleSelect(value); })
                 )
@@ -70,7 +70,7 @@ class CurrentLivescoreNavigationState extends State<CurrentLivescoreNavigation> 
                 height: 70,
                 child: Container(
                   padding: const EdgeInsets.all(13),
-                  child: Text("No Upcoming Games,\nStay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.center,),),
+                  child: const Text("No Upcoming Games,\nStay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.center,),),
               )
             ),);
           }

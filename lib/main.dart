@@ -121,7 +121,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final List<Widget> _widgetOptions = <Widget>[
+    final List<Widget> widgetOptions = <Widget>[
       FutureBuilder(future: setCurrentValues(), builder:(context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Center(
@@ -131,11 +131,11 @@ class _MyHomePageState extends State<MyHomePage> {
             );
         }
         if (isCurrentFinished) {
-          return Center(child: Card(child: Text("No Current Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold))));
+          return const Center(child: Card(child: Text("No Current Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold))));
         }
         return CurrentLivescoreNavigation(currentSport: currentSport, currentSeason: currentSeason, currentDate: currentDate, onTitleSelect: setLiveScoreTitle, isSeasonFinished: isCurrentFinished,);
       },),
-      LeaguesNavigation(),
+      const LeaguesNavigation(),
       //PlayerPage(uid: "7zOsOETnTPOXpUrqS5R0GAPyqU03"),
     ];
     // This method is rerun every time setState is called, for instance as done
@@ -145,12 +145,12 @@ class _MyHomePageState extends State<MyHomePage> {
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
     return Scaffold(
-      drawer: NavBar(),
+      drawer: const NavBar(),
       appBar: GlobalAppBar(title: _title, height: AppBar().preferredSize.height),
       body: Center(
         child: IndexedStack(
           index: _selectedIndex,
-          children: _widgetOptions
+          children: widgetOptions
         ),
       ),
       bottomNavigationBar: BottomNavigationBar(

@@ -34,7 +34,7 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                     return Scaffold(
                       appBar: AppBar(title: const Text("Futsal")), 
                       body: ListView.separated(
-                        separatorBuilder: (context, index) => Divider(
+                        separatorBuilder: (context, index) => const Divider(
                               color: Colors.black,
                             ),
                         itemCount: snapshot.data!.length,
@@ -56,7 +56,7 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                     return Scaffold(
                       appBar: AppBar(title: const Text("Basketball")), 
                       body: ListView.separated(
-                        separatorBuilder: (context, index) => Divider(
+                        separatorBuilder: (context, index) => const Divider(
                               color: Colors.black,
                             ),
                         itemCount: snapshot.data!.length,
@@ -66,8 +66,30 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                   },);
               } else if (settings.name == '/currentLeague') {
                 return ShowLeaguePage(sport: (settings.arguments as List<String>)[0], season: (settings.arguments as List<String>)[1]);
+              } else if (settings.name == '/afcsanjose') {
+                return FutureBuilder(
+                  future: getSeasonTiles("AFC San Jose", context), 
+                  builder:(context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return Center(
+                        child: CircularProgressIndicator(
+                          color: Theme.of(context).colorScheme.primary,
+                        )
+                      );
+                    }
+                    return Scaffold(
+                      appBar: AppBar(title: const Text("AFC San Jose")), 
+                      body: ListView.separated(
+                        separatorBuilder: (context, index) => const Divider(
+                              color: Colors.black,
+                            ),
+                        itemCount: snapshot.data!.length,
+                        itemBuilder: (context, index) => snapshot.data![index]
+                      )
+                    );
+                  },);
               }
-              return LeaguesPage();
+              return const LeaguesPage();
             });
       },
     );

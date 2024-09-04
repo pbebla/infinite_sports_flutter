@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/basketballteaminfo.dart';
 import 'package:infinite_sports_flutter/model/futsalteaminfo.dart';
+import 'package:infinite_sports_flutter/model/soccerteaminfo.dart';
 import 'package:infinite_sports_flutter/model/teaminfo.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_launcher_icons/constants.dart';
@@ -58,6 +59,27 @@ class _TablePageState extends State<TablePage> {
       for (var team in gottenlineUp.keys) {
         lineUp[team] = gottenlineUp[team] as TeamInfo;
       }
+    } else if (widget.sport == "AFC San Jose") {
+      newClient =
+        FirebaseDatabase.instance.ref("/${widget.sport}/Seasons/${widget.season}");
+        Map<String, SoccerTeamInfo> gottenlineUp = <String, SoccerTeamInfo>{};
+        final event = await newClient.child("Table").get();
+        Map eventData = event.value as Map;
+        eventData.forEach((key, value) {
+          var temp = SoccerTeamInfo();
+          temp.draws = value["Draws"];
+          temp.gc = value["GA"];
+          temp.gs = value["GF"];
+          temp.wins = value["Wins"];
+          temp.losses = value["Losses"];
+          temp.gp = temp.wins + temp.losses + temp.draws;
+          temp.gd = temp.gs - temp.gc;
+          temp.points = (temp.wins * 3) + temp.draws;
+          gottenlineUp[key] = temp;
+        });
+        for (var team in gottenlineUp.keys) {
+          lineUp[team] = gottenlineUp[team] as TeamInfo;
+        }
     } else {
       var logos = sport![widget.season];
       Map<String, BasketballTeamInfo> gottenlineUp =
@@ -91,7 +113,10 @@ class _TablePageState extends State<TablePage> {
                 DataCell(Image.network(key.value.imagePath,
                     width: windowsDefaultIconSize.toDouble(),
                     fit: BoxFit.scaleDown,
-                    alignment: FractionalOffset.center)),
+                    alignment: FractionalOffset.center,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const Text("");
+                    })),
                 DataCell(Text(key.key.toString())),
                 DataCell(Text((key.value as FutsalTeamInfo).gp.toString())),
                 DataCell(Text(key.value.wins.toString())),
@@ -99,7 +124,7 @@ class _TablePageState extends State<TablePage> {
                 DataCell(Text(key.value.losses.toString())),
                 DataCell(Text.rich(TextSpan(
                     text: key.value.points.toString(),
-                    style: TextStyle(fontWeight: FontWeight.bold)))),
+                    style: const TextStyle(fontWeight: FontWeight.bold)))),
                 DataCell(Text((key.value as FutsalTeamInfo).gd.toString())),
               ]))
           .toList();
@@ -107,14 +132,49 @@ class _TablePageState extends State<TablePage> {
         sortColumnIndex: 6,
         sortAscending: false,
         columnSpacing: 0,
-        headingRowColor: MaterialStateProperty.resolveWith<Color?>(
-            (Set<MaterialState> states) {
+        headingRowColor: WidgetStateProperty.resolveWith<Color?>(
+            (Set<WidgetState> states) {
           return Theme.of(context)
               .colorScheme
               .inversePrimary; // Use the default value.
         }),
         columns: const [
           DataColumn(label: Text("")),
+          DataColumn(label: Text("Team")),
+          DataColumn(label: Text("GP"), numeric: true),
+          DataColumn(label: Text("W"), numeric: true),
+          DataColumn(label: Text("D"), numeric: true),
+          DataColumn(label: Text("L"), numeric: true),
+          DataColumn(label: Text("P"), numeric: true),
+          DataColumn(label: Text("GD"), numeric: true),
+        ],
+        rows: teamsList,
+      );
+    } else if (widget.sport == "AFC San Jose") {
+      List<DataRow> teamsList = teams.entries
+          .map((key) => DataRow(cells: [
+                DataCell(Text(key.key.toString(), style: const TextStyle(fontWeight: FontWeight.bold),)),
+                DataCell(Text((key.value as SoccerTeamInfo).gp.toString())),
+                DataCell(Text(key.value.wins.toString())),
+                DataCell(Text((key.value as SoccerTeamInfo).draws.toString())),
+                DataCell(Text(key.value.losses.toString())),
+                DataCell(Text.rich(TextSpan(
+                    text: key.value.points.toString(),
+                    style: const TextStyle(fontWeight: FontWeight.bold)))),
+                DataCell(Text((key.value as SoccerTeamInfo).gd.toString())),
+              ]))
+          .toList();
+      return DataTable(
+        sortColumnIndex: 5,
+        sortAscending: false,
+        columnSpacing: 15,
+        headingRowColor: WidgetStateProperty.resolveWith<Color?>(
+            (Set<WidgetState> states) {
+          return Theme.of(context)
+              .colorScheme
+              .inversePrimary; // Use the default value.
+        }),
+        columns: const [
           DataColumn(label: Text("Team")),
           DataColumn(label: Text("GP"), numeric: true),
           DataColumn(label: Text("W"), numeric: true),
@@ -138,7 +198,7 @@ class _TablePageState extends State<TablePage> {
                 DataCell(Text(key.value.losses.toString())),
                 DataCell(Text.rich(TextSpan(
                     text: key.value.pct,
-                    style: TextStyle(fontWeight: FontWeight.bold)))),
+                    style: const TextStyle(fontWeight: FontWeight.bold)))),
                 DataCell(Text(
                     (key.value as BasketballTeamInfo).pd.toStringAsFixed(1))),
               ]))
@@ -147,8 +207,8 @@ class _TablePageState extends State<TablePage> {
         sortColumnIndex: 5,
         sortAscending: false,
         columnSpacing: 0,
-        headingRowColor: MaterialStateProperty.resolveWith<Color?>(
-            (Set<MaterialState> states) {
+        headingRowColor: WidgetStateProperty.resolveWith<Color?>(
+            (Set<WidgetState> states) {
           return Theme.of(context)
               .colorScheme
               .inversePrimary; // Use the default value.
@@ -183,7 +243,24 @@ class _TablePageState extends State<TablePage> {
             return value;
           },
         ));
-    } else if (widget.sport == "Basketball") {
+    }
+    else if (widget.sport == "AFC San Jose") {
+      teams = Map.fromEntries(teams.entries.toList()
+        ..sort(
+          (a, b) {
+            int value = (b.value as SoccerTeamInfo)
+                .points
+                .compareTo((a.value as SoccerTeamInfo).points);
+            if (value == 0) {
+              value = (b.value as SoccerTeamInfo)
+                  .gd
+                  .compareTo((a.value as SoccerTeamInfo).gd);
+            }
+            return value;
+          },
+        ));
+    } 
+    else if (widget.sport == "Basketball") {
       teams = Map.fromEntries(teams.entries.toList()
         ..sort(
           (a, b) {

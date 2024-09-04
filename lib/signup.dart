@@ -4,13 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/botnavbar.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
 import 'package:infinite_sports_flutter/main.dart';
+import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/model/leaguemenu.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
-class LeaguesPage extends StatefulWidget {
-  const LeaguesPage({super.key});
+class Signup extends StatefulWidget {
+  const Signup({super.key, required this.nextleague, required this.season});
 
   // This widget is the home page of your application. It is stateful, meaning
   // that it has a State object (defined below) that contains fields that affect
@@ -22,69 +25,45 @@ class LeaguesPage extends StatefulWidget {
   // always marked "final".
 
   //final String title;
+  final String nextleague;
+  final String season;
 
   @override
-  State<LeaguesPage> createState() => _LeaguesPageState();
+  State<Signup> createState() => _SignupState();
 }
 
-Future<List<ListTile>> getSeasonTiles(sport, context) async {
-  List<ListTile> seasons = List<ListTile>.empty(growable: true);
-  if (sport == "AFC San Jose") {
-    DatabaseReference newClient = FirebaseDatabase.instance.ref("/AFC San Jose/");
-    var event = await newClient.child("Seasons").once();
-    var seasonsMap = event.snapshot.value as Map;
-    seasonsMap.forEach((k, v) {
-      var seasonView = ListTile(
-      title: Text("$k"),
-        onTap: () {
-          Navigator.push(context, MaterialPageRoute(builder:(context) {
-            return ShowLeaguePage(sport: sport, season: k);
-          },));
-        }
-      );
-
-      seasons.add(seasonView);
-    });
-    
-    return seasons;
-  }
-  var i = int.parse(await getMinSeason(sport));
-  var max = int.parse(await getCurrentSeason(sport));
-  while (i <= max)
-  {
-    var season = i.toString();
-    var seasonView = ListTile(
-      title: Text("Season $i"),
-      onTap: () {
-        Navigator.push(context, MaterialPageRoute(builder:(context) {
-          return ShowLeaguePage(sport: sport, season: season.toString());
-        },));
-      }
-    );
-
-    seasons.add(seasonView);
-
-    i++;
-  }
-  return seasons;
-}
-
-class _LeaguesPageState extends State<LeaguesPage> {
+class _SignupState extends State<Signup> {
   Future<List<ListTile>> populateMenus() async {
-    List<ListTile> list = [
-      ListTile(leading: const ImageIcon(AssetImage('assets/FutsalLeague.png')), title: const Text("Assyrian Futsal League"),
-      onTap: () {
-        Navigator.pushNamed(context, "/futsalLeagues");
-      },),
-      ListTile(leading: const ImageIcon(AssetImage('assets/BasketLeague.png')), title: const Text("Assyrian Basketball League"),
-      onTap:() {
-        Navigator.pushNamed(context, "/basketballLeagues");
-      },),
-      ListTile(leading: const ImageIcon(AssetImage('assets/FutsalLeague.png')), title: const Text("AFC San Jose"),
-      onTap:() {
-        Navigator.pushNamed(context, "/afcsanjose");
-      },),
-    ];
+    List<ListTile> list = List<ListTile>.empty(growable: true);
+    ListTile nextSeasonTile = ListTile(title: Text("${widget.nextleague} Season ${widget.season}"),);
+    list.add(nextSeasonTile);
+
+    var signups = await getOtherSignups();
+    signups.forEach((k, v) {
+      try {
+        if (v.containsKey("Sign Up Status") && v["Sign Up Status"] == 1) {
+          ListTile tile = ListTile(
+            title: Text(v["Name"] ?? ""),
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(builder:(context) {
+                WebViewController controller = WebViewController()..loadRequest(Uri.parse(v["Form URL"] != "\"\"" ? v["Form URL"] : "https://google.com"));
+                return Scaffold(
+                  appBar: AppBar(
+                    title: Text(v["Name"]),
+                    actions: [
+                      NavigationControls(controller: controller)
+                    ],
+                  ),
+                  body: WebViewStack(controller: controller,)
+                );
+              },));
+            },
+          );
+          list.add(tile);
+        }
+      } catch (e) {
+      }
+    });
     return list;
   }
   @override
@@ -106,6 +85,7 @@ class _LeaguesPageState extends State<LeaguesPage> {
             );
         }
         return Scaffold(
+          appBar: AppBar(title: Text("Sign Up List"), backgroundColor: Theme.of(context).primaryColor, foregroundColor: Colors.white,),
           body: ListView.separated(
             separatorBuilder: (context, index) => const Divider(
               color: Colors.black,

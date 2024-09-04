@@ -114,7 +114,7 @@ class BasketballGame implements Game
 
     if (team2vote.isNotEmpty)
     {
-        vote2 = team2vote.values.reduce((value, element) => value + element);;
+        vote2 = team2vote.values.reduce((value, element) => value + element);
     }
     else
     {
@@ -145,8 +145,8 @@ class BasketballGame implements Game
         finalvote1 = ((vote1 + vote2) - vote2) / ((vote1 + vote2));
         finalvote2 = 1 - finalvote1;
 
-        percvote1 = (finalvote1 * 100).round().toString() + "%";
-        percvote2 = (finalvote2 * 100).round().toString() + "%";
+        percvote1 = "${(finalvote1 * 100).round()}%";
+        percvote2 = "${(finalvote2 * 100).round()}%";
     }
     else
     {
@@ -157,8 +157,8 @@ class BasketballGame implements Game
         percvote2 = "0%";
     }
 
-    ProgressColor1 = Color(0xFFD80000);
-    ProgressColor2 = Color(0xFFD80000);
+    ProgressColor1 = const Color(0xFFD80000);
+    ProgressColor2 = const Color(0xFFD80000);
 }
   
 }

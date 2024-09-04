@@ -4,8 +4,8 @@ class LeagueMenu
     String image = "";
     String league = "";
 
-  LeagueMenu(String _title, String _image) {
-    title = _title;
-    image = _image;
+  LeagueMenu(String title, String image) {
+    title = title;
+    image = image;
   }
 }

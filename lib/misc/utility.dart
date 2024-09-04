@@ -7,6 +7,9 @@ import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/futsalgame.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
+import 'package:infinite_sports_flutter/model/player.dart';
+import 'package:infinite_sports_flutter/model/soccergame.dart';
+import 'package:infinite_sports_flutter/model/soccerplayer.dart';
 import 'package:intl/intl.dart';
 
 Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
@@ -127,6 +130,9 @@ Future<bool> isSeasonFinished(sport, season) async {
 Future<List<String>> getDates(String sport, String season) async {
   try
   {
+    if (sport == "AFC San Jose") {
+      sport = "AFC San Jose/Seasons";
+    }
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
     var event = await newClient.child("Date").once();
     var datesGotten = event.snapshot.value as Map<dynamic, dynamic>;
@@ -174,6 +180,39 @@ Future<String> getMinSeason(sport) async {
   {
     return e.toString();
   }
+}
+
+Future<List<String>> getSoccerSeasons(sport) async {
+  if (sport == "AFC San Jose") {
+    DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/");
+    var event = await newClient.child("Seasons").once();
+    var seasons = event.snapshot.value as Map<dynamic, dynamic>;
+    return seasons.keys.toList().cast<String>();
+  }
+  return [];
+}
+
+Future<Map<String, SoccerPlayer>> getSoccerRoster(sport, season) async {
+  Map<String, SoccerPlayer> roster = {};
+  if (sport == "AFC San Jose") {
+    DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/Seasons/$season");
+    var event = await newClient.child("Roster").once();
+    var lineup = event.snapshot.value as Map;
+    lineup.forEach((name, info) {
+      SoccerPlayer temp = SoccerPlayer();
+      temp.assists = info["Assists"] ?? 0;
+      temp.goals = info["Goals"] ?? 0;
+      temp.number = info["Number"].toString() ?? "";
+      temp.saves = info["Saves"] ?? 0;
+      temp.uid = info["UID"] ?? '0';
+      temp.position = info["Position"] ?? "";
+      temp.name = name;
+      temp.red = info["Red"] ?? 0;
+      temp.yellow = info["Yellow"] ?? 0;
+      roster[name] = temp;
+    });
+  }
+  return roster;
 }
 
 Future<void> getAllFutsalLineUps(String season) async
@@ -243,6 +282,11 @@ Future<List<Game>> getGames(sport, season, date, times) async {
     var all = await getAllFutsalGames(sport, season);
     games = List<Game>.from(all[date] as List<Game>);
   }
+  else if (sport == "AFC San Jose")
+  {
+    var all = await getAllSoccerGames(sport, season);
+    games = List<Game>.from(all[date] as List<Game>);
+  }
   else
   {
     var all = await getAllBasketballGames(sport, season);
@@ -252,9 +296,11 @@ Future<List<Game>> getGames(sport, season, date, times) async {
   int i = 0;
   for (var game in games)
   {
-      await fillInNull(game, season);
-      game.Time = (await getSeasonStartTime(times, sport, season)) + i;
-
+      await fillInNull(game, sport, season);
+      if (sport != "AFC San Jose") {
+        game.Time = (await getSeasonStartTime(times, sport, season)) + i;
+      }
+      
       switch (game.status)
       {
           case 0:
@@ -282,6 +328,58 @@ Future<List<Game>> getGames(sport, season, date, times) async {
   return allGames;
 }
 
+Future<Map<String, List<SoccerGame>>> getAllSoccerGames(sport, season) async {
+  try
+  {
+    DatabaseReference newClient;
+    if (sport == "AFC San Jose") {
+      newClient = FirebaseDatabase.instance.ref("/$sport/Seasons/$season");
+    } else {
+      newClient = FirebaseDatabase.instance.ref("/$sport/$season");
+    }
+    var games = await newClient.child("Date").get();
+    dynamic data = games.value;
+    var result = <String, List<SoccerGame>>{};
+    data.forEach((key, value) {
+      var list = <SoccerGame>[];
+      for (var val in value) {
+        var game = SoccerGame();
+        if (val.containsKey("team1vote")) {
+          game.team1vote = val["team1vote"] as Map<dynamic, dynamic>;
+        }
+        if (val.containsKey("team2vote")) {
+          game.team2vote = val["team2vote"] as Map<dynamic, dynamic>;
+        }
+        if (val.containsKey("team1activity")) {
+          game.team1activity = val["team1activity"] as Map<dynamic, dynamic>;
+        }
+        if (val.containsKey("team2activity")) {
+          game.team2activity = val["team2activity"] as Map<dynamic, dynamic>;
+        }
+        game.team1 = val["team1"];
+        game.team2 = val["team2"];
+        game.team1score = (val["team1score"] ?? val["team1Score"]).toString();
+        game.team2score = (val["team2score"] ?? val["team2Score"]).toString();
+        game.date = val["Date"] ?? val["date"];
+        game.startTime = val["startTime"] ?? "";
+        game.location = val["location"] ?? "";
+        game.type = val["type"] ?? "";
+        game.status = val["status"];
+        if(val.containsKey("link")) {
+          game.link = val["link"];
+        }
+        list.add(game);
+      }
+      result[key] = list;
+    });
+    return result;
+  }
+  catch (e)
+  {
+      return {};
+  }
+}
+
 Future<Map<String, List<FutsalGame>>> getAllFutsalGames(sport, season) async {
   try
   {
@@ -307,9 +405,9 @@ Future<Map<String, List<FutsalGame>>> getAllFutsalGames(sport, season) async {
         }
         game.team1 = val["team1"];
         game.team2 = val["team2"];
-        game.team1score = val["team1score"].toString();
-        game.team2score = val["team2score"].toString();
-        game.date = val["Date"];
+        game.team1score = (val["team1score"] ?? val["team1Score"]).toString();
+        game.team2score = (val["team2score"] ?? val["team2Score"]).toString();
+        game.date = val["Date"] ?? val["date"];
         game.status = val["status"];
         if(val.containsKey("link")) {
           game.link = val["link"];
@@ -370,26 +468,43 @@ Future<Map<String, List<BasketballGame>>> getAllBasketballGames(sport, season) a
   }
 }
 
-Future<void> fillInNull(game, season) async {
+Future<void> fillInNull(game, sport, season) async {
+  if (game is SoccerGame) {
+    if (game.team1SourcePath == "")
+      {
+          await getAllTeamLogo();
+
+          if (game.team1 == "AFC San Jose") {
+            game.team1lineup = await getSoccerRoster(sport, season);
+            game.team1SourcePath = teamLogos[game.team1];
+          }
+          if (game.team2 == "AFC San Jose") {
+            game.team2lineup = await getSoccerRoster(sport, season);
+            game.team2SourcePath = teamLogos[game.team2];
+          }
+      }
+
+  }
   if (game is FutsalGame) {
     try
     {
-        game.team1lineup = await getFutsalLineUp(season, game.team1);
-        game.team2lineup = await getFutsalLineUp(season, game.team2);
+      game.team1lineup = await getFutsalLineUp(season, game.team1);
+      game.team2lineup = await getFutsalLineUp(season, game.team2);
 
-        if (game.team1SourcePath == "")
-        {
-            await getAllTeamLogo();
-            var futsal = teamLogos["Futsal"];
-            var logos = futsal[season];
+      if (game.team1SourcePath == "")
+      {
+          await getAllTeamLogo();
+          var futsal = teamLogos["Futsal"];
+          var logos = futsal[season];
 
-            if (logos.containsKey(game.team1)) {
-              game.team1SourcePath = logos[game.team1];
-            }
-            if (logos.containsKey(game.team2)) {
-              game.team2SourcePath = logos[game.team2];
-            }
-        }
+          if (logos.containsKey(game.team1)) {
+            game.team1SourcePath = logos[game.team1];
+          }
+          if (logos.containsKey(game.team2)) {
+            game.team2SourcePath = logos[game.team2];
+          }
+      }
+
     }
     on Exception catch (_, e)
     {
@@ -452,7 +567,7 @@ Future<int> getSeasonStartTime(times, sport, season) async {
 
       return seasonStart;
   }
-  on Exception catch (_, e)
+  on Exception catch (_)
   {
       return 5;
   }
@@ -475,6 +590,10 @@ Future<void> getAllTeamLogo() async
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   var event = await newClient.child("Logo Urls").once();
   teamLogos = event.snapshot.value as Map;
+
+  newClient = FirebaseDatabase.instance.ref("AFC San Jose");
+  event = await newClient.child("Logo URL").once();
+  teamLogos["AFC San Jose"] = event.snapshot.value as String;
 }
 
 Future<Game> getGame(widget, sport, season, date, times, num) async {
@@ -511,4 +630,109 @@ String? convertUrlToId(String url, {bool trimWhitespaces = true}) {
   }
 
   return null;
+}
+
+Future<int> getSignUpStatus() async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("/Sign Ups/");
+
+  try
+  {
+    var event = await newClient.child("Sign Up Status").once();
+    var status = event.snapshot.value as int;
+    return status;
+  }
+  on Exception catch (_, e)
+  {
+    throw e;
+  }
+}
+
+Future<String> getSignUpDue() async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("/Sign Ups/");
+
+  try
+  {
+    var event = await newClient.child("Due").once();
+    var status = event.snapshot.value as String;
+    return status;
+  }
+  on Exception catch (_, e)
+  {
+    throw e;
+  }
+}
+
+Future<String> getSignUpInformation() async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("/Sign Ups/");
+
+  try
+  {
+    var event = await newClient.child("Information").once();
+    var status = event.snapshot.value as String;
+    return status;
+  }
+  on Exception catch (_, e)
+  {
+    throw e;
+  }
+}
+
+Future<String> getSignUpRules() async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("/Sign Ups/");
+
+  try
+  {
+    var event = await newClient.child("Rules").once();
+    var status = event.snapshot.value as String;
+    return status;
+  }
+  on Exception catch (_, e)
+  {
+    throw e;
+  }
+}
+
+Future<String> getSignUpWaiver() async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("/Sign Ups/");
+
+  try
+  {
+    var event = await newClient.child("Waiver").once();
+    var status = event.snapshot.value as String;
+    return status;
+  }
+  on Exception catch (_, e)
+  {
+    throw e;
+  }
+}
+
+Future<String> getSeason(league) async {
+  DatabaseReference newClient = FirebaseDatabase.instance.ref();
+  try
+  {
+      var event = await newClient.child(league + " Season").once();
+      var seasonNum = event.snapshot.value.toString();
+      return seasonNum;
+  }
+  on Exception catch (_, e)
+  {
+    throw e;
+  }
+}
+
+Future<Map<dynamic, dynamic>> getOtherSignups() async {
+  try {
+    DatabaseReference newClient = FirebaseDatabase.instance.ref();
+    var event = await newClient.child("Sign Ups").once();
+    var status = event.snapshot.value as Map<dynamic, dynamic>;
+  return status;
+  } on Exception catch (_, e) {
+    return {};
+  }
 }

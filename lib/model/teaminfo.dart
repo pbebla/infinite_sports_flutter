@@ -1,6 +1,5 @@
 // ignore_for_file: unused_element
 
-import 'package:flutter/material.dart';
 
 abstract class TeamInfo {
   int wins = 0;

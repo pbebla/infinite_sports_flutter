@@ -2,8 +2,9 @@ import 'dart:ui';
 
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
+import 'package:infinite_sports_flutter/model/soccerplayer.dart';
 
-class FutsalGame implements Game {
+class SoccerGame implements Game {
   @override
   late int GameNum;
 
@@ -15,6 +16,11 @@ class FutsalGame implements Game {
 
   @override
   late int Time;
+
+  String startTime = "";
+
+  String location = "";
+  String type = "";
 
   @override
   String UrlPath = "";
@@ -88,9 +94,9 @@ class FutsalGame implements Game {
   @override
   late bool voted;
 
-  Map<String, FutsalPlayer> team1lineup = {};
+  Map<String, SoccerPlayer> team1lineup = {};
 
-  Map<String, FutsalPlayer> team2lineup = {};
+  Map<String, SoccerPlayer> team2lineup = {};
 
   @override
   void GetLineUpImages() async {
