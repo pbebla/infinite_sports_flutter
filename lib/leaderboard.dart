@@ -109,7 +109,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     if (widget.sport == "Futsal") {
       List<DataRow> teamsList = players.map((key) => DataRow(cells: [
         DataCell(Row(children: [Text(key.number), const Spacer(), Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)])),
-        DataCell(Text(key.name.toString()), onTap: () {
+        DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
                   initialEntries: [OverlayEntry(
                     builder: (context) {
@@ -122,7 +122,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         DataCell(Text(key.saves.toString())),
       ])).toList();
       return DataTable(
-        horizontalMargin: 10,
+        horizontalMargin: 5,
         sortColumnIndex: sortColumnIndex,
         sortAscending: isAscending,
         columnSpacing: 0,
@@ -142,7 +142,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       List<DataRow> teamsList = players.map((key) => DataRow(cells: [
         DataCell(Row(children: [Text(key.number), const Spacer(), Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)])),
         //DataCell(Row(children: [Text(key.number), Spacer(), ])),
-        DataCell(Text(key.name.toString()), onTap: () {
+        DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
                   initialEntries: [OverlayEntry(
                     builder: (context) {
@@ -155,10 +155,10 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         DataCell(Text(key.shotPercentage)),
       ])).toList();
       return DataTable(
-        horizontalMargin: 10,
+        horizontalMargin: 5,
         sortColumnIndex: sortColumnIndex,
         sortAscending: isAscending,
-        columnSpacing: 16,
+        columnSpacing: 0,
         headingRowColor: WidgetStateProperty.resolveWith<Color?>((Set<WidgetState> states) {
           return Theme.of(context).colorScheme.inversePrimary; // Use the default value.
         }),
@@ -175,7 +175,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       List<DataRow> teamsList = players.map((key) => DataRow(cells: [
         DataCell(Text(key.position)),
         DataCell(Text(key.number)),
-        DataCell(Text(key.name.toString()), onTap: () {
+        DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
                   initialEntries: [OverlayEntry(
                     builder: (context) {
@@ -188,7 +188,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         DataCell(Text(key.saves.toString())),
       ])).toList();
       return DataTable(
-        horizontalMargin: 10,
+        horizontalMargin: 5,
         sortColumnIndex: sortColumnIndex,
         sortAscending: isAscending,
         columnSpacing: 0,
@@ -231,9 +231,9 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
             players = snapshot.data!;
             sortTable(2, isAscending);
           }
-          return SizedBox(
+          return SingleChildScrollView(scrollDirection: Axis.horizontal, child: SizedBox(
             width: MediaQuery.of(context).size.width,
-            child: SingleChildScrollView(scrollDirection: Axis.vertical, child: buildLeaderboard()));
+            child: SingleChildScrollView(scrollDirection: Axis.vertical, child: buildLeaderboard())));
         }
       )
     );
