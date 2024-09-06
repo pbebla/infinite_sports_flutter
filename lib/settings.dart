@@ -1,0 +1,229 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_launcher_icons/constants.dart';
+import 'package:flutter_sticky_header/flutter_sticky_header.dart';
+import 'package:infinite_sports_flutter/main.dart';
+import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
+import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
+import 'package:infinite_sports_flutter/model/basketballgame.dart';
+import 'package:infinite_sports_flutter/model/basketballplayerstats.dart';
+import 'package:infinite_sports_flutter/model/futsalgame.dart';
+import 'package:infinite_sports_flutter/model/futsalplayerstats.dart';
+import 'package:infinite_sports_flutter/model/gameactivity.dart';
+import 'package:infinite_sports_flutter/model/playerstats.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/soccergame.dart';
+import 'package:infinite_sports_flutter/playerpage.dart';
+import 'package:percent_indicator/percent_indicator.dart';
+import 'package:infinite_sports_flutter/model/game.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+
+
+class Settings extends StatefulWidget {
+  Settings({super.key});
+  //final TitleCallback onTitleSelect;
+
+  // This widget is the home page of your application. It is stateful, meaning
+  // that it has a State object (defined below) that contains fields that affect
+  // how it looks.
+
+  // This class is the configuration for the state. It holds the values (in this
+  // case the title) provided by the parent (in this case the App widget) and
+  // used by the build method of the State. Fields in a Widget subclass are
+  // always marked "final".
+
+  //final String title;
+
+  @override
+  State<Settings> createState() => _SettingsState();
+}
+
+class _SettingsState extends State<Settings> {
+  @override
+  Widget build(BuildContext context) {
+    // This method is rerun every time setState is called, for instance as done
+    // by the _incrementCounter method above.
+    //
+    // The Flutter framework has been optimized to make rerunning build methods
+    // fast, so that you can just rebuild anything that needs updating rather
+    // than having to individually change instances of widgets.
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Settings"),
+        backgroundColor: Theme.of(context).primaryColor,
+        foregroundColor: Colors.white,
+      ),
+      body: Padding(padding: EdgeInsetsDirectional.all(10.0),
+      child: CustomScrollView(slivers: [
+        SliverStickyHeader(
+          header: Text("Profile"),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate(
+              [
+                Divider(color: Colors.grey),
+                ListTile(title: Text("Change Password"), minTileHeight: 40),
+                Divider(color: Colors.grey),
+                ListTile(title: Text("Auto Log In"), minTileHeight: 40),
+                Divider(color: Colors.grey),
+              ]
+            ),
+          ), 
+        ),
+        SliverStickyHeader(
+          header: Text("League Table Info"),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate(
+              [
+                Divider(color: Colors.grey),
+                ListTile(title: Text("Futsal"), minTileHeight: 40, onTap: () {
+                  Navigator.push(context, MaterialPageRoute(builder:(context) {
+                    return Scaffold(
+                      appBar: AppBar(
+                        title: Text("Futsal"),
+                        backgroundColor: Theme.of(context).primaryColor,
+                        foregroundColor: Colors.white,
+                      ),
+                      body: ListView(
+                        children: [
+                          Text("Game Activity Legend", style: Theme.of(context).textTheme.headlineSmall,),
+                          ListTile(leading: Image.asset("assets/goal.png", width: windowsDefaultIconSize.toDouble(),), title: Text("Goal"),),
+                          ListTile(leading: Image.asset("assets/assist.png", width: windowsDefaultIconSize.toDouble(),), title: Text("Assist"),),
+                          ListTile(leading: Image.asset("assets/blue.png", width: windowsDefaultIconSize.toDouble(),), title: Text("Blue Card"),),
+                          ListTile(leading: Image.asset("assets/yellow.png", width: windowsDefaultIconSize.toDouble(),), title: Text("Yellow Card"),),
+                          ListTile(leading: Image.asset("assets/red.png", width: windowsDefaultIconSize.toDouble(),), title: Text("Red Card"),),
+                          ListTile(leading: Image.asset("assets/foul.png", width: windowsDefaultIconSize.toDouble(),), title: Text("Foul"),),
+                          Text("League Table Legend", style: Theme.of(context).textTheme.headlineSmall),
+                          ListTile(leading: Text("GP", style: TextStyle(fontWeight: FontWeight.bold, fontSize: windowsDefaultIconSize.toDouble()/1.5),), title: Text("Games Played"),),
+                          ListTile(leading: Text("L", style: TextStyle(fontWeight: FontWeight.bold, fontSize: windowsDefaultIconSize.toDouble()/1.5),), title: Text("Losses"),),
+                          ListTile(leading: Text("D", style: TextStyle(fontWeight: FontWeight.bold, fontSize: windowsDefaultIconSize.toDouble()/1.5),), title: Text("Draws"),),
+                          ListTile(leading: Text("W", style: TextStyle(fontWeight: FontWeight.bold, fontSize: windowsDefaultIconSize.toDouble()/1.5),), title: Text("Wins"),),
+                          ListTile(leading: Text("P", style: TextStyle(fontWeight: FontWeight.bold, fontSize: windowsDefaultIconSize.toDouble()/1.5),), title: Text("Points"),),
+                          ListTile(leading: Text("GD", style: TextStyle(fontWeight: FontWeight.bold, fontSize: windowsDefaultIconSize.toDouble()/1.5),), title: Text("Goal Differential"),)
+                        ],
+                      ),
+                    );
+                  },)); 
+                },),
+                Divider(color: Colors.grey),
+                ListTile(title: Text("Basketball"), minTileHeight: 40, onTap: () {
+                  Navigator.push(context, MaterialPageRoute(builder:(context) {
+                    return Scaffold(
+                      appBar: AppBar(
+                        title: Text("Basketball"),
+                        backgroundColor: Theme.of(context).primaryColor,
+                        foregroundColor: Colors.white,
+                      ),
+                      body: ListView(
+                        children: [
+                          Text("Game Activity Legend", style: Theme.of(context).textTheme.headlineSmall,),
+                          ListTile(leading: Image.asset("assets/onepointer.png", width: windowsDefaultIconSize.toDouble(),), title: Text("One Point"),),
+                          ListTile(leading: Image.asset("assets/twopointer.png", width: windowsDefaultIconSize.toDouble(),), title: Text("Two Points"),),
+                          ListTile(leading: Image.asset("assets/threepointer.png", width: windowsDefaultIconSize.toDouble(),), title: Text("Three Points"),),
+                          ListTile(leading: Image.asset("assets/rebound.png", width: windowsDefaultIconSize.toDouble(),), title: Text("Rebound"),),
+                          ListTile(leading: Image.asset("assets/foul.png", width: windowsDefaultIconSize.toDouble(),), title: Text("Foul"),),
+                          Text("League Table Legend", style: Theme.of(context).textTheme.headlineSmall),
+                          ListTile(leading: Text("GP", style: TextStyle(fontWeight: FontWeight.bold, fontSize: windowsDefaultIconSize.toDouble()/1.5),), title: Text("Games Played"),),
+                          ListTile(leading: Text("L", style: TextStyle(fontWeight: FontWeight.bold, fontSize: windowsDefaultIconSize.toDouble()/1.5),), title: Text("Losses"),),
+                          ListTile(leading: Text("W", style: TextStyle(fontWeight: FontWeight.bold, fontSize: windowsDefaultIconSize.toDouble()/1.5),), title: Text("Wins"),),
+                          ListTile(leading: Text("Pct", style: TextStyle(fontWeight: FontWeight.bold, fontSize: windowsDefaultIconSize.toDouble()/1.5),), title: Text("Win Percentage"),),
+                          ListTile(leading: Text("APD", style: TextStyle(fontWeight: FontWeight.bold, fontSize: windowsDefaultIconSize.toDouble()/1.5),), title: Text("Avg. Point Differential"),)
+                        ],
+                      ),
+                    );
+                  },)); 
+                },),
+                Divider(color: Colors.grey),
+              ]
+            ),
+          ), 
+        ),
+        SliverStickyHeader(
+          header: Text("General Info"),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate(
+              [
+                Divider(color: Colors.grey),
+                ListTile(title: Text("About Infinite Sports Association"), minTileHeight: 40, onTap: () {
+                  Navigator.push(context, MaterialPageRoute(builder:(context) {
+                    return Scaffold(
+                      appBar: AppBar(
+                        title: Text("About Infinite Sports Association"),
+                      ),
+                      body: Column(children: [
+                        Image.asset("assets/infinite.png"),
+                        SingleChildScrollView(child: Text("Infinite Sports Association is a San Jose-based non-profit Assyrian organization that runs Soccer, Basketball and Volleyball leagues, games, and tournaments for the Assyrian community"),)],)
+                    );
+                  },)); 
+                },),
+                Divider(color: Colors.grey),
+                ListTile(title: Text("About NinevehWare"), minTileHeight: 40, onTap: () {
+                  Navigator.push(context, MaterialPageRoute(builder:(context) {
+                    return Scaffold(
+                      appBar: AppBar(
+                        title: Text("About Infinite Sports Association"),
+                      ),
+                      body: Column(children: [
+                        Image.asset("assets/ninevehware.png"),
+                        SingleChildScrollView(child: Text("NinevehWare is a San Jose-based Software Development brand by Bronsin Benyamin that specializes in Mobile App Development."),)],)
+                    );
+                  },)); 
+                },),
+                Divider(color: Colors.grey),
+                ListTile(title: Text("Terms and Conditions"), minTileHeight: 40, onTap: () {
+                  Navigator.push(context, MaterialPageRoute(builder:(context) {
+                    WebViewController controller = WebViewController()..loadRequest(Uri.parse("https://docs.google.com/document/d/1EifPlImldFfq4yLMZA5m7brbnwH8mfP8Kxf9UpHaF74/edit?usp=sharing"));
+                    return Scaffold(
+                      appBar: AppBar(
+                        title: Text("Terms and Conditions"),
+                      ),
+                      body: WebViewStack(controller: controller,)
+                    );
+                  },));  
+                },),
+                Divider(color: Colors.grey),
+                ListTile(title: Text("Privacy Poilicy"), minTileHeight: 40, onTap: () {
+                  Navigator.push(context, MaterialPageRoute(builder:(context) {
+                    WebViewController controller = WebViewController()..loadRequest(Uri.parse("https://docs.google.com/document/d/1cT9lJEUyvMsFUAfkpNtzHBBqeM3Em3nvK3lONvK-shk/edit?usp=sharing"));
+                    return Scaffold(
+                      appBar: AppBar(
+                        title: Text("Privacy Policy"),
+                      ),
+                      body: WebViewStack(controller: controller,)
+                    );
+                  },));             
+                },),
+                Divider(color: Colors.grey),
+                ListTile(title: Text("End-User License Agreement"), minTileHeight: 40, onTap: () {
+                  Navigator.push(context, MaterialPageRoute(builder:(context) {
+                    return Scaffold(
+                      appBar: AppBar(
+                        title: Text("End-User License Agreement"),
+                      ),
+                      body: SingleChildScrollView(child: Text("End-User License Agreement (EULA) of Infinite Sports App \n \n This End-User License Agreement (\"EULA\") is a legal agreement between you, Infinite Sports Association and NinevehWare \n \n This EULA agreement governs your acquisition and use of our Infinite Sports App software (\"Software\") directly from Infinite Sports Association and NinevehWare or indirectly through a Infinite Sports Association and NinevehWare authorized reseller or distributor (a \"Reseller\"). \n \n Please read this EULA agreement carefully before completing the installation process and using the Infinite Sports App software. It provides a license to use the Infinite Sports App software and contains warranty information and liability disclaimers. \n \n If you register for a free trial of the Infinite Sports App software, this EULA agreement will also govern that trial. By clicking \"accept\" or installing and/or using the Infinite Sports App software, you are confirming your acceptance of the Software and agreeing to become bound by the terms of this EULA agreement. \n \n If you are entering into this EULA agreement on behalf of a company or other legal entity, you represent that you have the authority to bind such entity and its affiliates to these terms and conditions. If you do not have such authority or if you do not agree with the terms and conditions of this EULA agreement, do not install or use the Software, and you must not accept this EULA agreement. \n \n This EULA agreement shall apply only to the Software supplied by Infinite Sports Association and NinevehWare herewith regardless of whether other software is referred to or described herein. The terms also apply to any Infinite Sports Association and NinevehWare updates, supplements, Internet-based services, and support services for the Software, unless other terms accompany those items on delivery. If so, those terms apply. \n \n License Grant \n \n Infinite Sports Association and NinevehWare hereby grants you a personal, non-transferable, non-exclusive licence to use the Infinite Sports App software on your devices in accordance with the terms of this EULA agreement. \n \n You are permitted to load the Infinite Sports App software (for example a PC, laptop, mobile or tablet) under your control. You are responsible for ensuring your device meets the minimum requirements of the Infinite Sports App software. \n \n You are not permitted to: \n \n \n - Edit, alter, modify, adapt, translate or otherwise change the whole or any part of the Software nor permit the whole or any part of the Software to be combined with or become incorporated in any other software, nor decompile, disassemble or reverse engineer the Software or attempt to do any such things \n - Reproduce, copy, distribute, resell or otherwise use the Software for any commercial purpose \n - Allow any third party to use the Software on behalf of or for the benefit of any third party \n - Use the Software in any way which breaches any applicable local, national or international law \n - use the Software for any purpose that Infinite Sports Association and NinevehWare considers is a breach of this EULA agreement \n \n \n Intellectual Property and Ownership \n \n Infinite Sports Association and NinevehWare shall at all times retain ownership of the Software as originally downloaded by you and all subsequent downloads of the Software by you. The Software (and the copyright, and other intellectual property rights of whatever nature in the Software, including any modifications made thereto) are and shall remain the property of Infinite Sports Association and NinevehWare. \n \n Infinite Sports Association and NinevehWare reserves the right to grant licences to use the Software to third parties. \n \n Termination \n \n This EULA agreement is effective from the date you first use the Software and shall continue until terminated. You may terminate it at any time upon written notice to Infinite Sports Association and NinevehWare. \n \n This EULA was created by eulatemplate.com for Infinite Sports App \n \n It will also terminate immediately if you fail to comply with any term of this EULA agreement. Upon such termination, the licenses granted by this EULA agreement will immediately terminate and you agree to stop all access and use of the Software. The provisions that by their nature continue and survive will survive any termination of this EULA agreement. \n \n Governing Law \n \n This EULA agreement, and any dispute arising out of or in connection with this EULA agreement, shall be governed by and construed in accordance with the laws of United States of America."),)
+                    );
+                  },)); 
+                },),
+                Divider(color: Colors.grey),
+              ]
+            ),
+          ), 
+        ),
+        SliverStickyHeader(
+          header: Text("Contact Info"),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate(
+              [
+                Divider(color: Colors.grey),
+                ListTile(title: Text("Infinite Sports Association"), subtitle: Text("Email: InfiniteSportsAssociation@gmail.com\nIG/FB: Infinite Sports Association") , minTileHeight: 40),
+                Divider(color: Colors.grey),
+                ListTile(title: Text("NinevehWare"), subtitle: Text("Email: NinevehWare@gmail.com\nIG/FB: NinevehWare"), minTileHeight: 40),
+                Divider(color: Colors.grey),
+              ]
+            ),
+          ), 
+        ),
+    ],),)
+    );
+  }
+  
+}

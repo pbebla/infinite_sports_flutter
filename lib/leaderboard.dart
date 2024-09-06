@@ -73,22 +73,22 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
   }
 
   void sortTable(int columnIndex, bool ascending) {
-    if (columnIndex == 1) {
+    if (columnIndex == 2) {
       players.sort((a, b) => 
         compareValues(a.name, b.name, isAscending));
-    } else if (columnIndex == 2) {
+    } else if (columnIndex == 3) {
       if (widget.sport == "Futsal") {
         players.sort((a, b) => compareValues((a as FutsalPlayer).goals, (b as FutsalPlayer).goals, isAscending));
       } else if (widget.sport == "Basketball") {
         players.sort((a, b) => compareValues((a as BasketballPlayer).total, (b as BasketballPlayer).total, isAscending));
       }
-    } else if (columnIndex == 3) {
+    } else if (columnIndex == 4) {
       if (widget.sport == "Futsal") {
         players.sort((a, b) => compareValues((a as FutsalPlayer).assists, (b as FutsalPlayer).assists, isAscending));
       } else if (widget.sport == "Basketball") {
         players.sort((a, b) => compareValues((a as BasketballPlayer).rebounds, (b as BasketballPlayer).rebounds, isAscending));
       }
-    } else if (columnIndex == 4) {
+    } else if (columnIndex == 5) {
       if (widget.sport == "Futsal") {
         players.sort((a, b) => compareValues((a as FutsalPlayer).saves, (b as FutsalPlayer).saves, isAscending));
       } else if (widget.sport == "Basketball") {
@@ -97,7 +97,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     }
   }
 
-  void onSort(int columnIndex, bool ascending) {
+  void onSort(int columnIndex, bool ascending, setState) {
     setState(() {
       sortColumnIndex = columnIndex;
       isAscending = ascending;
@@ -105,10 +105,11 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     sortTable(columnIndex, ascending);
   }
 
-  DataTable buildLeaderboard() {
+  DataTable buildLeaderboard(setState) {
     if (widget.sport == "Futsal") {
       List<DataRow> teamsList = players.map((key) => DataRow(cells: [
-        DataCell(Row(children: [Text(key.number), const Spacer(), Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)])),
+        DataCell(Text(key.number)),
+        DataCell(Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/1.75, fit: BoxFit.scaleDown, alignment: FractionalOffset.center)),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
                   initialEntries: [OverlayEntry(
@@ -130,17 +131,19 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           return Theme.of(context).colorScheme.inversePrimary; // Use the default value.
         }),
         columns: [
+          const DataColumn(label: Text(""), numeric: true),
           const DataColumn(label: Text("")),
-          DataColumn(label: const Text("Name"), onSort: onSort),
-          DataColumn(label: const Text("Goals"), numeric: true, onSort: onSort),
-          DataColumn(label: const Text("Assists"), numeric: true, onSort: onSort),
-          DataColumn(label: const Text("Saves"), numeric: true, onSort: onSort),
+          DataColumn(label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn(label: const Text("Goals"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn(label: const Text("Assists"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn(label: const Text("Saves"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
         ], 
         rows: teamsList,
       );
     } else if (widget.sport == "Basketball") {
       List<DataRow> teamsList = players.map((key) => DataRow(cells: [
-        DataCell(Row(children: [Text(key.number), const Spacer(), Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center)])),
+        DataCell(Text(key.number)),
+        DataCell(Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/1.75, fit: BoxFit.scaleDown, alignment: FractionalOffset.center)),
         //DataCell(Row(children: [Text(key.number), Spacer(), ])),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
@@ -163,11 +166,12 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           return Theme.of(context).colorScheme.inversePrimary; // Use the default value.
         }),
         columns: [
+          const DataColumn(label: Text(""), numeric: true),
           const DataColumn(label: Text("")),
-          DataColumn(label: const Text("Name"), onSort: onSort),
-          DataColumn(label: const Text("PTS"), numeric: true, onSort: onSort),
-          DataColumn(label: const Text("REB"), numeric: true, onSort: onSort),
-          DataColumn(label: const Text("FG%"), numeric: true, onSort: onSort),
+          DataColumn(label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn(label: const Text("PTS"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn(label: const Text("REB"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn(label: const Text("FG%"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
         ], 
         rows: teamsList,
       );
@@ -198,10 +202,10 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         columns: [
           const DataColumn(label: Text("Pos")),
           const DataColumn(label: Text("#")),
-          DataColumn(label: const Text("Name"), onSort: onSort),
-          DataColumn(label: const Text("Goals"), numeric: true, onSort: onSort),
-          DataColumn(label: const Text("Assists"), numeric: true, onSort: onSort),
-          DataColumn(label: const Text("Saves"), numeric: true, onSort: onSort),
+          DataColumn(label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn(label: const Text("Goals"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn(label: const Text("Assists"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn(label: const Text("Saves"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
         ], 
         rows: teamsList,
       );
@@ -231,9 +235,13 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
             players = snapshot.data!;
             sortTable(2, isAscending);
           }
-          return SingleChildScrollView(scrollDirection: Axis.horizontal, child: SizedBox(
-            width: MediaQuery.of(context).size.width,
-            child: SingleChildScrollView(scrollDirection: Axis.vertical, child: buildLeaderboard())));
+          return StatefulBuilder(
+            builder: (context, setState) {
+              return SingleChildScrollView(scrollDirection: Axis.horizontal, child: SizedBox(
+                width: MediaQuery.of(context).size.width,
+                child: SingleChildScrollView(scrollDirection: Axis.vertical, child: buildLeaderboard(setState))));
+            }
+          );
         }
       )
     );

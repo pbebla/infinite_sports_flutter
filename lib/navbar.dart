@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/settings.dart';
 import 'package:infinite_sports_flutter/signup.dart';
 
 
@@ -90,10 +91,15 @@ class _NavBarState extends State<NavBar> {
                 title: Text("Notifications", style: TextStyle(fontWeight: FontWeight.bold),),
                 textColor: Colors.white,
               ),
-              const ListTile(
+              ListTile(
                 leading: ImageIcon(AssetImage("assets/settings.png"), color: Colors.white,),
                 title: Text("Settings", style: TextStyle(fontWeight: FontWeight.bold),),
                 textColor: Colors.white,
+                onTap: () {
+                  Navigator.push(context, MaterialPageRoute(builder:(context) {
+                    return Settings();
+                  },));
+                },
               ),
               ListTile(
                 title: const Center(child: Text("Log Out", style: TextStyle(fontWeight: FontWeight.bold),)),
