@@ -77,20 +77,20 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       players.sort((a, b) => 
         compareValues(a.name, b.name, isAscending));
     } else if (columnIndex == 3) {
-      if (widget.sport == "Futsal") {
-        players.sort((a, b) => compareValues((a as FutsalPlayer).goals, (b as FutsalPlayer).goals, isAscending));
+      if (widget.sport == "Futsal" || widget.sport == "AFC San Jose") {
+        players.sort((a, b) => compareValues(a.goals, b.goals, isAscending));
       } else if (widget.sport == "Basketball") {
         players.sort((a, b) => compareValues((a as BasketballPlayer).total, (b as BasketballPlayer).total, isAscending));
       }
     } else if (columnIndex == 4) {
-      if (widget.sport == "Futsal") {
-        players.sort((a, b) => compareValues((a as FutsalPlayer).assists, (b as FutsalPlayer).assists, isAscending));
+      if (widget.sport == "Futsal" || widget.sport == "AFC San Jose") {
+        players.sort((a, b) => compareValues(a.assists, b.assists, isAscending));
       } else if (widget.sport == "Basketball") {
         players.sort((a, b) => compareValues((a as BasketballPlayer).rebounds, (b as BasketballPlayer).rebounds, isAscending));
       }
     } else if (columnIndex == 5) {
-      if (widget.sport == "Futsal") {
-        players.sort((a, b) => compareValues((a as FutsalPlayer).saves, (b as FutsalPlayer).saves, isAscending));
+      if (widget.sport == "Futsal" || widget.sport == "AFC San Jose") {
+        players.sort((a, b) => compareValues(a.saves, b.saves, isAscending));
       } else if (widget.sport == "Basketball") {
         players.sort((a, b) => compareValues(int.parse(((a as BasketballPlayer).shotPercentage).replaceFirst('%', '')), int.parse(((b as BasketballPlayer).shotPercentage).replaceFirst('%', '')), isAscending));
       }

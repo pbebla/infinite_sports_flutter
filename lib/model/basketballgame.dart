@@ -1,6 +1,7 @@
 
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'dart:core';
 import 'package:infinite_sports_flutter/model/game.dart';
@@ -98,68 +99,67 @@ class BasketballGame implements Game
   void GetLineUpImages() async {
   }
 
-  @override
+    @override
   void SetUpVote()
-{
-    //signedIn = Utility.LoggedInUser != null;
-    signedIn = false;
-    if (team1vote.isNotEmpty)
-    {
-        vote1 = team1vote.values.reduce((value, element) => value + element);
-    }
-    else
-    {
-        vote1 = 0;
-    }
+  {
+      signedIn = auth.credential?.user != null ?? false;
 
-    if (team2vote.isNotEmpty)
-    {
-        vote2 = team2vote.values.reduce((value, element) => value + element);
-    }
-    else
-    {
-        vote2 = 0;
-    }
+      if (team1vote.isNotEmpty)
+      {
+          vote1 = team1vote.values.length;
+      }
+      else{
+          vote1 = 0;
+      }
 
-    if (team1vote.isNotEmpty && team2vote.isNotEmpty && signedIn)
-    {
-        //voted = !((new List<string>(team1vote.Keys).Contains(Utility.LoggedInUser.User.Uid)) || (new List<string>(team2vote.Keys).Contains(Utility.LoggedInUser.User.Uid)));
-    }
-    else if (team1vote.isNotEmpty && signedIn)
-    {
-        //voted = !(new List<string>(team1vote.Keys).Contains(Utility.LoggedInUser.User.Uid));
-    }
-    else if (team2vote.isNotEmpty && signedIn)
-    {
-        //voted = !(new List<string>(team2vote.Keys).Contains(Utility.LoggedInUser.User.Uid));
-    }
-    else
-    {
-        voted = true;
-    }
+      if (team2vote.isNotEmpty)
+      {
+          vote2 = team2vote.values.length;
+      }
+      else
+      {
+          vote2 = 0;
+      }
 
-    signedIn = signedIn && voted;
+      if (team1vote.isNotEmpty  && team2vote.isNotEmpty  && signedIn)
+      {
+          voted = team1vote.containsKey(auth.credential.user!.uid) || team2vote.containsKey(auth.credential.user!.uid);
+      }
+      else if (team1vote.isNotEmpty && signedIn)
+      {
+          voted = team1vote.containsKey(auth.credential.user!.uid);
+      }
+      else if (team2vote.isNotEmpty && signedIn)
+      {
+          voted = team2vote.containsKey(auth.credential.user!.uid);
+      }
+      else
+      {
+          voted = false;
+      }
 
-    if ((vote1 + vote2) != 0)
-    {
-        finalvote1 = ((vote1 + vote2) - vote2) / ((vote1 + vote2));
-        finalvote2 = 1 - finalvote1;
+      signedIn = signedIn && voted;
 
-        percvote1 = "${(finalvote1 * 100).round()}%";
-        percvote2 = "${(finalvote2 * 100).round()}%";
-    }
-    else
-    {
-        finalvote1 = 1.0;
-        finalvote2 = 1.0;
+      if ((vote1 + vote2) != 0)
+      {
+          finalvote1 = ((vote1 + vote2) - vote2) / ((vote1 + vote2));
+          finalvote2 = 1 - finalvote1;
 
-        percvote1 = "0%";
-        percvote2 = "0%";
-    }
+          percvote1 = "${(finalvote1 * 100).round()}%";
+          percvote2 = "${(finalvote2 * 100).round()}%";
+      }
+      else
+      {
+          finalvote1 = 1.0;
+          finalvote2 = 1.0;
 
-    ProgressColor1 = const Color(0xFFD80000);
-    ProgressColor2 = const Color(0xFFD80000);
-}
+          percvote1 = "0%";
+          percvote2 = "0%";
+      }
+
+      ProgressColor1 = const Color(0xFFD80000);
+      ProgressColor2 = const Color(0xFFD80000);
+  }
   
 }
 /*

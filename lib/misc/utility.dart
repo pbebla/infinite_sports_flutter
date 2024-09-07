@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/futsalgame.dart';
@@ -11,10 +12,20 @@ import 'package:infinite_sports_flutter/model/player.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/model/soccerplayer.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
 Map<String, Map<String, Map<String, BasketballPlayer>>> basketballLineups = {};
 Map teamLogos = {};
+FirebaseAuthService auth = FirebaseAuthService();
+bool signedIn = false;
+bool autoSignIn = false;
+
+// Create storage
+final secureStorage = new FlutterSecureStorage();
+
+// Read value
+//String value = await storage.read(key: key);
 
 ValueNotifier headerNotifier = ValueNotifier(["", ""]);
 

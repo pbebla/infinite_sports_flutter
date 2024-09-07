@@ -1,3 +1,4 @@
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
@@ -602,7 +603,7 @@ class _ScorePageState extends State<ScorePage> {
                 maintainSize: true, 
                 maintainAnimation: true,
                 maintainState: true,
-                visible: widget.game.status == 0,
+                visible: signedIn && !widget.game.voted && widget.game.status == 0,
                 child: Column(
                   children: <Widget>[
                     const Text('Poll', textAlign: TextAlign.center),
@@ -613,6 +614,38 @@ class _ScorePageState extends State<ScorePage> {
                           color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(15)),
                       child: TextButton(
                         onPressed: () {
+                          showDialog<String>(
+                            context: context,
+                            builder: (BuildContext context) => Dialog(
+                              child: Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: <Widget>[
+                                    TextButton(onPressed: () async {
+                                      DatabaseReference newClient = FirebaseDatabase.instance.refFromURL(widget.game.UrlPath+"/"+widget.game.GameNum.toString()+"/team1vote/");
+                                      await newClient.child(auth.credential.user!.uid).set(1);
+                                      Navigator.pop(context);
+                                      await _refreshData(setState);
+                                    }, child: Text(widget.game.team1),),
+                                    TextButton(onPressed: () async {
+                                      DatabaseReference newClient = FirebaseDatabase.instance.refFromURL(widget.game.UrlPath+"/"+widget.game.GameNum.toString()+"/team2vote/");
+                                      await newClient.child(auth.credential.user!.uid).set(1);
+                                      Navigator.pop(context);
+                                      await _refreshData(setState);
+                                    }, child: Text(widget.game.team2),),
+                                    SizedBox(width: 15, height: 15,),
+                                    TextButton(
+                                      onPressed: () {
+                                        Navigator.pop(context);
+                                      },
+                                      child: const Text('Close'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),);
                         },
                         child: const Text(
                           'Vote',

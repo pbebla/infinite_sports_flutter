@@ -1,5 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/createaccountpage.dart';
+import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
 import 'package:infinite_sports_flutter/main.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -9,6 +13,23 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginDemoState extends State<LoginPage> {
+  late TextEditingController _emailController;
+  late TextEditingController _passwordController;
+
+  @override
+  void initState() {
+    super.initState();
+    _emailController = TextEditingController();
+    _passwordController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -33,10 +54,11 @@ class _LoginDemoState extends State<LoginPage> {
                     child: Image.asset('assets/infinite.png')),
               ),
             ),
-            const Padding(
+            Padding(
               //padding: const EdgeInsets.only(left:15.0,right: 15.0,top:0,bottom: 0),
               padding: EdgeInsets.symmetric(horizontal: 15),
               child: TextField(
+                controller: _emailController,
                 decoration: InputDecoration(
                     border: OutlineInputBorder(),
                     labelText: 'Email',
@@ -48,14 +70,14 @@ class _LoginDemoState extends State<LoginPage> {
                   left: 15.0, right: 15.0, top: 15, bottom: 0),
               //padding: EdgeInsets.symmetric(horizontal: 15),
               child: TextField(
+                controller: _passwordController,
                 obscureText: true,
                 decoration: const InputDecoration(
                     border: OutlineInputBorder(),
                     labelText: 'Password',
                     hintText: 'Enter secure password'),
-                onSubmitted: (value) {
-                  Navigator.pushReplacement(
-                      context, MaterialPageRoute(builder: (_) => const MyHomePage()));
+                onSubmitted: (value) async {
+                  _signIn();
                 },
               ),
             ),
@@ -74,23 +96,54 @@ class _LoginDemoState extends State<LoginPage> {
               decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(20)),
               child: TextButton(
-                onPressed: () {
-                  Navigator.pushReplacement(
-                      context, MaterialPageRoute(builder: (_) => const MyHomePage()));
-                },
+                onPressed: _signIn,
                 child: const Text(
                   'Login',
                   style: TextStyle(color: Colors.white, fontSize: 25),
                 ),
               ),
             ),
+            Padding(padding: const EdgeInsets.only(
+                  left: 15.0, right: 15.0, top: 5, bottom: 0), child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [Text("Auto Sign In"), Checkbox(value: autoSignIn, onChanged: (value) {
+              setState(() {
+                autoSignIn = value!;
+              });
+            })],),),
             const SizedBox(
               height: 130,
             ),
-            const Text('New User? Create Account')
+            TextButton(
+              onPressed: (){
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const CreateAccountPage()));
+              },
+              child: Text(
+                'New User? Create Account',
+                style: TextStyle(color: Theme.of(context).colorScheme.primary, fontSize: 15),
+              ),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  void _signIn() async {
+    String email = _emailController.text;
+    String password = _passwordController.text;
+    User? user = await auth.signInWithEmailAndPassword(email, password);
+
+    if (user != null) {
+      signedIn = true;
+      auth.password = password;
+      if (autoSignIn) {
+        await secureStorage.write(key: "Email", value: email);
+        await secureStorage.write(key: "Password", value: password);
+      }
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MyHomePage()));
+    } else {
+      print("Error for login");
+    }
   }
 }

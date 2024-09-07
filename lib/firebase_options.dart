@@ -62,22 +62,23 @@ class DefaultFirebaseOptions {
 
   static FirebaseOptions android = FirebaseOptions(
     apiKey: dotenv.env['ANDROID_API_KEY'] ?? "",
+    authDomain: "infinite-sports-app.firebaseapp.com",
     appId: '1:248087010229:android:058f3dbffbc0a468',
     messagingSenderId: '248087010229',
     projectId: 'infinite-sports-app',
     databaseURL: 'https://infinite-sports-app.firebaseio.com',
     storageBucket: 'infinite-sports-app.appspot.com',
+    androidClientId: "248087010229-0ko6d3n8v74aok3avl6h54chpc1qbrhe.apps.googleusercontent.com",
   );
 
   static FirebaseOptions ios = FirebaseOptions(
     apiKey: dotenv.env['IOS_API_KEY'] ?? "",
+    authDomain: "infinite-sports-app.firebaseapp.com",
     appId: '1:248087010229:ios:87700ab7b56d8baa',
     messagingSenderId: '248087010229',
     projectId: 'infinite-sports-app',
     databaseURL: 'https://infinite-sports-app.firebaseio.com',
     storageBucket: 'infinite-sports-app.appspot.com',
-    androidClientId:
-        '406099696497-17qn06u8a0dc717u8ul7s49ampk13lul.apps.googleusercontent.com',
     iosClientId:
         '248087010229-g45omq0n7ev5jtmbc1ei7a0nuaq02544.apps.googleusercontent.com',
     iosBundleId: 'com.pbebla.Infinite-Sports',

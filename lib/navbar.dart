@@ -1,6 +1,10 @@
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
 import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/playerpage.dart';
 import 'package:infinite_sports_flutter/settings.dart';
 import 'package:infinite_sports_flutter/signup.dart';
 
@@ -24,6 +28,7 @@ class NavBar extends StatefulWidget {
 class _NavBarState extends State<NavBar> {
   String nextleague = "";
   String season = "";
+  bool signUpsOpen = false;
   bool signUpEnabled = false;
   String signUpDetail = "";
 
@@ -32,23 +37,23 @@ class _NavBarState extends State<NavBar> {
     switch (status) {
       case 0:
         signUpDetail = "Sign Ups Closed";
-        signUpEnabled = false;
+        signUpsOpen = false;
         break;
       case 1:
         nextleague = "Futsal";
         season = (int.parse(await getSeason(nextleague)) + 1).toString();
         signUpDetail = "Sign Up for Futsal Season " + season;
-        signUpEnabled = true;
+        signUpsOpen = true;
         break;
       case 2:
         nextleague = "Basketball";
         season = (int.parse(await getSeason(nextleague)) + 1).toString();
         signUpDetail = "Sign Up for Basketball Season " + season;
-        signUpEnabled = true;
+        signUpsOpen = true;
         break;
       default:
         signUpDetail = "Sign Ups Closed";
-        signUpEnabled = false;
+        signUpsOpen = false;
         break;
     }
   }
@@ -65,15 +70,38 @@ class _NavBarState extends State<NavBar> {
               )
             );
         }
+        signUpEnabled = signUpsOpen && signedIn;
         return Drawer(
           backgroundColor: Theme.of(context).colorScheme.primary,
           child: ListView(
             children: [
-              const ListTile(
+              Visibility(
+                visible: signedIn,
+                child: Column(
+                  children: [
+                    signedIn && (auth.credential.additionalUserInfo?.profile?["ProfileUrl"] ?? false) ? CircleAvatar(backgroundImage: NetworkImage(auth.credential.additionalUserInfo?.profile?["ProfileUrl"]), radius: 50) : CircleAvatar(backgroundImage: AssetImage("assets/portraitplaceholder.png"), radius: 50),
+                    Text(FirebaseAuth.instance.currentUser?.displayName ?? "", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineMedium!.fontSize)),
+                  ],)),
+              Visibility(
+                visible: !signedIn,
+                child: ListTile(
+                leading: ImageIcon(AssetImage("assets/profile.png"), color: Colors.white,),
+                title: Text("Login or Sign Up", style: TextStyle(fontWeight: FontWeight.bold),),
+                textColor: Colors.white,
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => LoginPage())),
+              ),),
+              Visibility(
+                visible: signedIn,
+                child: ListTile(
                 leading: ImageIcon(AssetImage("assets/playerstats.png"), color: Colors.white,),
                 title: Text("Stats", style: TextStyle(fontWeight: FontWeight.bold),),
                 textColor: Colors.white,
-              ),
+                onTap: () {
+                  Navigator.push(context, MaterialPageRoute(builder:(context) {
+                    return PlayerPage(uid: auth.credential.user!.uid,);
+                  },));
+                },
+              ),),
               ListTile(
                 enabled: signUpEnabled,
                 leading: ImageIcon(AssetImage("assets/events.png"), color: Colors.white,),
@@ -101,11 +129,22 @@ class _NavBarState extends State<NavBar> {
                   },));
                 },
               ),
-              ListTile(
-                title: const Center(child: Text("Log Out", style: TextStyle(fontWeight: FontWeight.bold),)),
-                textColor: Colors.white,
-                onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => LoginPage()))
-              ),
+              Visibility(
+                visible: signedIn,
+                child: ListTile(
+                  title: const Center(child: Text("Log Out", style: TextStyle(fontWeight: FontWeight.bold),)),
+                  textColor: Colors.white,
+                  onTap: () async {
+                    print(FirebaseAuth.instance.currentUser);
+                    await auth.signOut();
+                    print("Signed out");
+                    signedIn = false;
+                    setState(() {
+                      
+                    });
+                  }
+              ),)
+
             ],
           ),
         );

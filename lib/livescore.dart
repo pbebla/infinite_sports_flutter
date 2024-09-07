@@ -119,7 +119,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
                 maintainSize: true, 
                 maintainAnimation: true,
                 maintainState: true,
-                visible: game.status == 0,
+                visible: signedIn && !game.voted && game.status == 0,
                 child: Column(
                   children: <Widget>[
                     const Text('Poll', textAlign: TextAlign.center),
@@ -130,6 +130,38 @@ class _LiveScorePageState extends State<LiveScorePage> {
                           color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(15)),
                       child: TextButton(
                         onPressed: () {
+                          showDialog<String>(
+                            context: context,
+                            builder: (BuildContext context) => Dialog(
+                              child: Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: <Widget>[
+                                    TextButton(onPressed: () async {
+                                      DatabaseReference newClient = FirebaseDatabase.instance.refFromURL(game.UrlPath+"/"+game.GameNum.toString()+"/team1vote/");
+                                      await newClient.child(auth.credential.user!.uid).set(1);
+                                      Navigator.pop(context);
+                                      await _refreshData(setState);
+                                    }, child: Text(game.team1),),
+                                    TextButton(onPressed: () async {
+                                      DatabaseReference newClient = FirebaseDatabase.instance.refFromURL(game.UrlPath+"/"+game.GameNum.toString()+"/team2vote/");
+                                      await newClient.child(auth.credential.user!.uid).set(1);
+                                      Navigator.pop(context);
+                                      await _refreshData(setState);
+                                    }, child: Text(game.team2),),
+                                    SizedBox(width: 15, height: 15,),
+                                    TextButton(
+                                      onPressed: () {
+                                        Navigator.pop(context);
+                                      },
+                                      child: const Text('Close'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),);
                         },
                         child: const Text(
                           'Vote',

@@ -45,7 +45,7 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
       child: Scaffold(
         appBar: AppBar(
           title: RichText(
-                  textAlign: TextAlign.left,
+                  textAlign: TextAlign.center,
                   text: TextSpan(
                       text: widget.sport,
                       style: TextStyle(fontSize: 20, color: Colors.black),

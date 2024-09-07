@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -5,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/botnavbar.dart';
+import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
 import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -57,7 +59,7 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: infiniteSportsPrimaryColor, primary: infiniteSportsPrimaryColor),
         useMaterial3: true,
       ),
-      home: LoginPage(),
+      home: const MyHomePage(),
     );
   }
 }
@@ -110,6 +112,16 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<int> setCurrentValues() async {
+    String? email = await secureStorage.read(key: "Email");
+    String? password = await secureStorage.read(key: "Password");
+    if (email != null && password != null) {
+      User? user = await auth.signInWithEmailAndPassword(email, password);
+      if (user != null) {
+        auth.password = password;
+        autoSignIn = true;
+        signedIn = true;
+      }
+    }
     currentSport = await getCurrentSport();
     currentSeason = await getCurrentSeason(currentSport);
     currentDate = await getCurrentDate(currentSport, currentSeason);
@@ -136,7 +148,6 @@ class _MyHomePageState extends State<MyHomePage> {
         return CurrentLivescoreNavigation(currentSport: currentSport, currentSeason: currentSeason, currentDate: currentDate, onTitleSelect: setLiveScoreTitle, isSeasonFinished: isCurrentFinished,);
       },),
       const LeaguesNavigation(),
-      //PlayerPage(uid: "7zOsOETnTPOXpUrqS5R0GAPyqU03"),
     ];
     // This method is rerun every time setState is called, for instance as done
     // by the _incrementCounter method above.
