@@ -233,7 +233,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           }
           if (players.isEmpty) {
             players = snapshot.data!;
-            sortTable(2, isAscending);
+            sortTable(3, isAscending);
           }
           return StatefulBuilder(
             builder: (context, setState) {

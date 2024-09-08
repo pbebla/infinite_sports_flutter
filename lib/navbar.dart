@@ -79,7 +79,7 @@ class _NavBarState extends State<NavBar> {
                 visible: signedIn,
                 child: Column(
                   children: [
-                    signedIn && (auth.credential.additionalUserInfo?.profile?["ProfileUrl"] ?? false) ? CircleAvatar(backgroundImage: NetworkImage(auth.credential.additionalUserInfo?.profile?["ProfileUrl"]), radius: 50) : CircleAvatar(backgroundImage: AssetImage("assets/portraitplaceholder.png"), radius: 50),
+                    signedIn && (auth.credential?.additionalUserInfo?.profile?["ProfileUrl"] ?? false) ? CircleAvatar(backgroundImage: NetworkImage(auth.credential?.additionalUserInfo?.profile?["ProfileUrl"]), radius: 50) : CircleAvatar(backgroundImage: AssetImage("assets/portraitplaceholder.png"), radius: 50),
                     Text(FirebaseAuth.instance.currentUser?.displayName ?? "", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineMedium!.fontSize)),
                   ],)),
               Visibility(
@@ -88,7 +88,11 @@ class _NavBarState extends State<NavBar> {
                 leading: ImageIcon(AssetImage("assets/profile.png"), color: Colors.white,),
                 title: Text("Login or Sign Up", style: TextStyle(fontWeight: FontWeight.bold),),
                 textColor: Colors.white,
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => LoginPage())),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => LoginPage())).then((value) => setState(() {
+                  if (signedIn) {
+                    Navigator.pop(context);
+                  }
+                })),
               ),),
               Visibility(
                 visible: signedIn,
@@ -98,7 +102,7 @@ class _NavBarState extends State<NavBar> {
                 textColor: Colors.white,
                 onTap: () {
                   Navigator.push(context, MaterialPageRoute(builder:(context) {
-                    return PlayerPage(uid: auth.credential.user!.uid,);
+                    return PlayerPage(uid: auth.credential!.user!.uid,);
                   },));
                 },
               ),),

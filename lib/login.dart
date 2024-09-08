@@ -141,7 +141,7 @@ class _LoginDemoState extends State<LoginPage> {
         await secureStorage.write(key: "Email", value: email);
         await secureStorage.write(key: "Password", value: password);
       }
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MyHomePage()));
+      Navigator.pop(context);
     } else {
       print("Error for login");
     }

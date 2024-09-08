@@ -141,13 +141,13 @@ class _LiveScorePageState extends State<LiveScorePage> {
                                   children: <Widget>[
                                     TextButton(onPressed: () async {
                                       DatabaseReference newClient = FirebaseDatabase.instance.refFromURL(game.UrlPath+"/"+game.GameNum.toString()+"/team1vote/");
-                                      await newClient.child(auth.credential.user!.uid).set(1);
+                                      await newClient.child(auth.credential!.user!.uid).set(1);
                                       Navigator.pop(context);
                                       await _refreshData(setState);
                                     }, child: Text(game.team1),),
                                     TextButton(onPressed: () async {
                                       DatabaseReference newClient = FirebaseDatabase.instance.refFromURL(game.UrlPath+"/"+game.GameNum.toString()+"/team2vote/");
-                                      await newClient.child(auth.credential.user!.uid).set(1);
+                                      await newClient.child(auth.credential!.user!.uid).set(1);
                                       Navigator.pop(context);
                                       await _refreshData(setState);
                                     }, child: Text(game.team2),),

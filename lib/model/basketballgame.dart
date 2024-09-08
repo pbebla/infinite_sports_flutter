@@ -123,15 +123,15 @@ class BasketballGame implements Game
 
       if (team1vote.isNotEmpty  && team2vote.isNotEmpty  && signedIn)
       {
-          voted = team1vote.containsKey(auth.credential.user!.uid) || team2vote.containsKey(auth.credential.user!.uid);
+          voted = team1vote.containsKey(auth.credential!.user!.uid) || team2vote.containsKey(auth.credential!.user!.uid);
       }
       else if (team1vote.isNotEmpty && signedIn)
       {
-          voted = team1vote.containsKey(auth.credential.user!.uid);
+          voted = team1vote.containsKey(auth.credential!.user!.uid);
       }
       else if (team2vote.isNotEmpty && signedIn)
       {
-          voted = team2vote.containsKey(auth.credential.user!.uid);
+          voted = team2vote.containsKey(auth.credential!.user!.uid);
       }
       else
       {
