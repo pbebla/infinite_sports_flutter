@@ -1,13 +1,16 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/botnavbar.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
+import 'package:infinite_sports_flutter/leagueform.dart';
 import 'package:infinite_sports_flutter/main.dart';
 import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/model/leaguemenu.dart';
+import 'package:infinite_sports_flutter/model/userinformation.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -34,8 +37,14 @@ class Signup extends StatefulWidget {
 
 class _SignupState extends State<Signup> {
   Future<List<ListTile>> populateMenus() async {
+    UserInformation? oldInfo = await getInformation();
+    String? phoneNumber = await getPhone();
     List<ListTile> list = List<ListTile>.empty(growable: true);
-    ListTile nextSeasonTile = ListTile(title: Text("${widget.nextleague} Season ${widget.season}"),);
+    ListTile nextSeasonTile = ListTile(title: Text("${widget.nextleague} Season ${widget.season}"), onTap: () {
+      Navigator.push(context, MaterialPageRoute(builder:(context) {
+        return LeagueForm(sport: widget.nextleague, season: widget.season, oldInfo: oldInfo ?? UserInformation(), phoneNumber: phoneNumber ?? "",);
+      },));
+    },);
     list.add(nextSeasonTile);
 
     var signups = await getOtherSignups();

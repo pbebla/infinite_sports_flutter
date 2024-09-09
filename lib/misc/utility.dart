@@ -1,6 +1,9 @@
+import 'dart:io';
 import 'dart:math';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
@@ -11,6 +14,7 @@ import 'package:infinite_sports_flutter/model/game.dart';
 import 'package:infinite_sports_flutter/model/player.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/model/soccerplayer.dart';
+import 'package:infinite_sports_flutter/model/userinformation.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -688,6 +692,170 @@ Future<String> getSignUpInformation() async
   on Exception catch (_, e)
   {
     throw e;
+  }
+}
+
+Future<UserInformation?> getInformation() async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref();
+  try
+  {
+    var event = await newClient.child("Users/"+auth.credential!.user!.uid+"/Information/").once();
+    var info = event.snapshot.value as Map<dynamic, dynamic>;
+    var result = UserInformation();
+    result.age = info["Age"] ?? info["age"];
+    result.height = info["Height"] ?? info["height"];
+    result.basketballPosition = info["BasketballPosition"] ?? info["basketballPosition"] ?? "";
+    result.futsalPosition = info["FutsalPosition"] ?? info["futsalPosition"] ?? "";
+    return result;
+  }
+  on Exception catch (_, e)
+  {
+      return null;
+  }
+}
+
+Future<void> addUpdateInfo(UserInformation information, String phone) async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("Users/" + auth.credential!.user!.uid);
+  try
+  {
+    var client = await newClient.child("/Information/");
+    await client.set(information);
+    var phoneClient = await newClient.child("/Phone Number/");
+    await phoneClient.set(phone);
+  }
+  on Exception catch (_, e)
+  {
+
+  }
+}
+
+Future<void> signUpToPlay(String league, String season) async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("Sign Ups/" + league + "/" + season + "/NotPaid/" + auth.credential!.user!.uid);
+
+  try
+  {
+    await newClient.set(auth.credential!.user!.displayName);
+  }
+  on Exception catch (_, e)
+  {
+
+  }
+}
+
+Future<void> setImage(FileImage fileImage) async
+{
+  if (fileImage != null)
+  {
+    DatabaseReference newClient = FirebaseDatabase.instance.ref();
+    Reference storage = FirebaseStorage.instance.ref();
+    try
+    {
+      var storageUser = storage.child("Users").child(auth.credential!.user!.uid).child("profileimage.jpg");
+      await storageUser.putFile(fileImage.file);
+      var url = await storageUser.getDownloadURL();
+
+      var imageCLient = newClient.child("Users/" + auth.credential!.user!.uid + "/ProfileUrl");
+      await imageCLient.set(url);
+
+      auth.credential!.additionalUserInfo!.profile!["PhotoUrl"] = url;
+    }
+    catch (e)
+    {
+      var mess = e.toString();
+    }
+  }
+}
+
+Future<void> createDatabaseLocation(FileImage? fileImage, String phoneNumber) async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref();
+  if (fileImage != null) {
+    await setImage(fileImage);
+  }
+
+  var firstClient = newClient.child("Users/" + auth.credential!.user!.uid + "/First Name");
+
+  await firstClient.set(auth.credential!.user!.displayName!.split(' ')[0]);
+
+  var lastClient = newClient.child("Users/" + auth.credential!.user!.uid + "/Last Name");
+
+  await lastClient.set(auth.credential!.user!.displayName!.split(' ')[1]);
+
+  var numberClient = newClient.child("Users/" + auth.credential!.user!.uid + "/Phone Number");
+
+  await numberClient.set(phoneNumber);
+
+  var dateClient = newClient.child("Users/" + auth.credential!.user!.uid + "/Date Joined");
+
+  await dateClient.set(DateTime.now().toString());
+}
+
+Future<void> uploadToken(String token) async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref();
+  try
+  {
+      var dateClient = newClient.child("Users/" + auth.credential!.user!.uid + "/Token");
+
+      await dateClient.set(token);
+  }
+  on Exception catch (_, e) {
+
+  }
+}
+
+Future<void> addComment(String league, String season, String comment) async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref();
+  var client = newClient.child("Sign Ups/" + league + "/" + season + "/Comments/" + auth.credential!.user!.displayName!);
+
+  try
+  {
+      await client.set(auth.credential!.user!.uid + ":" + comment);
+  }
+  on Exception catch (_, e) 
+  {
+
+  }
+}
+
+Future<bool> isSignedUp(String league, String season) async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref();
+  var client = newClient.child("Sign Ups/" + league + "/" + season + "/NotPaid/");
+  var client2 = newClient.child("Sign Ups/" + league + "/" + season + "/Paid/");
+
+  try
+  {
+    var event = await client.once();
+    var listNP = event.snapshot.value as Map;
+    event = await client2.once();
+    var listP = event.snapshot.value as  Map;
+
+    return (listP.containsKey(auth.credential!.user!.uid) || listNP.containsKey(auth.credential!.user!.uid));
+  }
+  on Exception catch (_, e) 
+  {
+    return false;
+  }
+}
+
+Future<String?> getPhone() async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("");
+  try
+  {
+    var event = await newClient.child("Users/"+auth.credential!.user!.uid+"/Phone Number/").once();
+    var info = event.snapshot.value.toString();
+
+      return info;
+  }
+  on Exception catch (_, e)
+  {
+      return null;
   }
 }
 

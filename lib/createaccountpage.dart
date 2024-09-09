@@ -1,3 +1,4 @@
+import 'dart:ffi';
 import 'dart:io';
 
 import 'package:email_validator/email_validator.dart';
@@ -299,7 +300,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     }
     String email = _emailController.text;
     String password = _passwordController.text;
-    User? user = await auth.signInWithEmailAndPassword(email, password);
+    User? user = await auth.signUpWithEmailAndPassword(email, password);
 
     if (user != null) {
       signedIn = true;
@@ -308,9 +309,36 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
         await secureStorage.write(key: "Email", value: email);
         await secureStorage.write(key: "Password", value: password);
       }
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MyHomePage()));
+
+      auth.credential!.additionalUserInfo!.profile!["FirstName"] = _firstNameController.value.text;
+      auth.credential!.additionalUserInfo!.profile!["LastName"] = _lastNameController.value.text;
+
+      if (profileImage != null) {
+        await createDatabaseLocation(profileImage, _phoneController.value.text);
+      } else {
+        await createDatabaseLocation(null, _phoneController.value.text);
+      }
+      //await uploadToken();
+      showDialog<String>(
+        context: context, 
+        builder: (context) => Dialog(
+          child: Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Column(
+              children: [
+                Text("You are registered and logged in. Verify your account using the link sent to your email."),
+                TextButton(child: Text("OK"), onPressed: () {
+                  Navigator.pop(context);
+                },)
+              ],
+            ),
+          ),
+        )
+      );
+      Navigator.pop(context);
+      Navigator.pop(context);
     } else {
-      print("Error for login");
+      print("Error for signup");
     }
   }
   

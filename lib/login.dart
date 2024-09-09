@@ -116,7 +116,13 @@ class _LoginDemoState extends State<LoginPage> {
             ),
             TextButton(
               onPressed: (){
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const CreateAccountPage()));
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const CreateAccountPage())).then((value) {
+                  setState(() {
+                    if (signedIn) {
+                      Navigator.pop(context);
+                    }
+                  });
+                });
               },
               child: Text(
                 'New User? Create Account',
@@ -141,6 +147,7 @@ class _LoginDemoState extends State<LoginPage> {
         await secureStorage.write(key: "Email", value: email);
         await secureStorage.write(key: "Password", value: password);
       }
+      //await uploadToken();
       Navigator.pop(context);
     } else {
       print("Error for login");
