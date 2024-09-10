@@ -48,11 +48,11 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
                   textAlign: TextAlign.center,
                   text: TextSpan(
                       text: widget.sport,
-                      style: TextStyle(fontSize: 20, color: Colors.black),
+                      style: const TextStyle(fontSize: 20, color: Colors.black),
                       children: <TextSpan>[
                         TextSpan(
                           text: '\n${widget.season}',
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 16,
                           ),
                         ),

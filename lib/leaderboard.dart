@@ -1,19 +1,10 @@
-import 'package:firebase_database/firebase_database.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
-import 'package:infinite_sports_flutter/botnavbar.dart';
-import 'package:infinite_sports_flutter/globalappbar.dart';
-import 'package:infinite_sports_flutter/main.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
-import 'package:infinite_sports_flutter/model/leaguemenu.dart';
 import 'package:infinite_sports_flutter/model/player.dart';
-import 'package:infinite_sports_flutter/model/soccerplayer.dart';
-import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/playerpage.dart';
-import 'package:infinite_sports_flutter/showleague.dart';
 
 class LeaderboardPage extends StatefulWidget {
   const LeaderboardPage({super.key, required this.sport, required this.season});

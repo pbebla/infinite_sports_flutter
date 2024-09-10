@@ -56,10 +56,10 @@ class _LoginDemoState extends State<LoginPage> {
             ),
             Padding(
               //padding: const EdgeInsets.only(left:15.0,right: 15.0,top:0,bottom: 0),
-              padding: EdgeInsets.symmetric(horizontal: 15),
+              padding: const EdgeInsets.symmetric(horizontal: 15),
               child: TextField(
                 controller: _emailController,
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                     border: OutlineInputBorder(),
                     labelText: 'Email',
                     hintText: 'Enter valid email id as abc@gmail.com'),
@@ -106,7 +106,7 @@ class _LoginDemoState extends State<LoginPage> {
             Padding(padding: const EdgeInsets.only(
                   left: 15.0, right: 15.0, top: 5, bottom: 0), child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: [Text("Auto Sign In"), Checkbox(value: autoSignIn, onChanged: (value) {
+              children: [const Text("Auto Sign In"), Checkbox(value: autoSignIn, onChanged: (value) {
               setState(() {
                 autoSignIn = value!;
               });

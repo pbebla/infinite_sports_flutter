@@ -153,11 +153,11 @@ class _ScorePageState extends State<ScorePage> {
           padding: const EdgeInsets.all(13),
           child: Table(
             columnWidths: const {
-              0: const FlexColumnWidth(4),
-              1: const FlexColumnWidth(1),
-              2: const FlexColumnWidth(3),
-              3: const FlexColumnWidth(1),
-              4: const FlexColumnWidth(4),
+              0: FlexColumnWidth(4),
+              1: FlexColumnWidth(1),
+              2: FlexColumnWidth(3),
+              3: FlexColumnWidth(1),
+              4: FlexColumnWidth(4),
             },
             defaultVerticalAlignment: TableCellVerticalAlignment.middle,
             children: [
@@ -497,7 +497,7 @@ class _ScorePageState extends State<ScorePage> {
                           ..loadRequest(Uri.parse(widget.game.link));
                         return Scaffold(
                           appBar: AppBar(
-                          title: Text(""),
+                          title: const Text(""),
                           actions: [
                             NavigationControls(controller: webController)
                           ],
@@ -624,18 +624,18 @@ class _ScorePageState extends State<ScorePage> {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: <Widget>[
                                     TextButton(onPressed: () async {
-                                      DatabaseReference newClient = FirebaseDatabase.instance.refFromURL(widget.game.UrlPath+"/"+widget.game.GameNum.toString()+"/team1vote/");
+                                      DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${widget.game.UrlPath}/${widget.game.GameNum}/team1vote/");
                                       await newClient.child(auth.credential!.user!.uid).set(1);
                                       Navigator.pop(context);
                                       await _refreshData(setState);
                                     }, child: Text(widget.game.team1),),
                                     TextButton(onPressed: () async {
-                                      DatabaseReference newClient = FirebaseDatabase.instance.refFromURL(widget.game.UrlPath+"/"+widget.game.GameNum.toString()+"/team2vote/");
+                                      DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${widget.game.UrlPath}/${widget.game.GameNum}/team2vote/");
                                       await newClient.child(auth.credential!.user!.uid).set(1);
                                       Navigator.pop(context);
                                       await _refreshData(setState);
                                     }, child: Text(widget.game.team2),),
-                                    SizedBox(width: 15, height: 15,),
+                                    const SizedBox(width: 15, height: 15,),
                                     TextButton(
                                       onPressed: () {
                                         Navigator.pop(context);

@@ -46,13 +46,13 @@ class _NavBarState extends State<NavBar> {
       case 1:
         nextleague = "Futsal";
         season = (int.parse(await getSeason(nextleague)) + 1).toString();
-        signUpDetail = "Sign Up for Futsal Season " + season;
+        signUpDetail = "Sign Up for Futsal Season $season";
         signUpsOpen = true;
         break;
       case 2:
         nextleague = "Basketball";
         season = (int.parse(await getSeason(nextleague)) + 1).toString();
-        signUpDetail = "Sign Up for Basketball Season " + season;
+        signUpDetail = "Sign Up for Basketball Season $season";
         signUpsOpen = true;
         break;
       default:
@@ -101,7 +101,7 @@ class _NavBarState extends State<NavBar> {
                                   final ImagePicker picker = ImagePicker();
                                   final XFile? file = await picker.pickImage(source: ImageSource.gallery);
                                   if (file != null) {
-                                    await setImage(FileImage(File(file!.path)));
+                                    await setImage(FirebaseAuth.instance.currentUser!, FileImage(File(file.path)));
                                   }
                                   setState(() {
                                   });
@@ -113,7 +113,7 @@ class _NavBarState extends State<NavBar> {
                                   final ImagePicker picker = ImagePicker();
                                   final XFile? file = await picker.pickImage(source: ImageSource.camera);
                                   if (file != null) {
-                                    await setImage(FileImage(File(file!.path)));
+                                    await setImage(FirebaseAuth.instance.currentUser!, FileImage(File(file.path)));
                                   }
                                   setState(() {
                                   });
@@ -125,17 +125,17 @@ class _NavBarState extends State<NavBar> {
                       },
                       child: signedIn && (auth.credential?.additionalUserInfo?.profile?["ProfileUrl"] ?? false) ? 
                       CircleAvatar(backgroundImage: NetworkImage(auth.credential?.additionalUserInfo?.profile?["ProfileUrl"]), radius: 50) : 
-                      CircleAvatar(backgroundImage: AssetImage("assets/portraitplaceholder.png"), radius: 50),
+                      const CircleAvatar(backgroundImage: AssetImage("assets/portraitplaceholder.png"), radius: 50),
                     ),
                     Text(FirebaseAuth.instance.currentUser?.displayName ?? "", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineMedium!.fontSize)),
                   ],)),
               Visibility(
                 visible: !signedIn,
                 child: ListTile(
-                leading: ImageIcon(AssetImage("assets/profile.png"), color: Colors.white,),
-                title: Text("Login or Sign Up", style: TextStyle(fontWeight: FontWeight.bold),),
+                leading: const ImageIcon(AssetImage("assets/profile.png"), color: Colors.white,),
+                title: const Text("Login or Sign Up", style: TextStyle(fontWeight: FontWeight.bold),),
                 textColor: Colors.white,
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => LoginPage())).then((value) => setState(() {
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const LoginPage())).then((value) => setState(() {
                   if (signedIn) {
                     Navigator.pop(context);
                   }
@@ -144,8 +144,8 @@ class _NavBarState extends State<NavBar> {
               Visibility(
                 visible: signedIn,
                 child: ListTile(
-                leading: ImageIcon(AssetImage("assets/playerstats.png"), color: Colors.white,),
-                title: Text("Stats", style: TextStyle(fontWeight: FontWeight.bold),),
+                leading: const ImageIcon(AssetImage("assets/playerstats.png"), color: Colors.white,),
+                title: const Text("Stats", style: TextStyle(fontWeight: FontWeight.bold),),
                 textColor: Colors.white,
                 onTap: () {
                   Navigator.push(context, MaterialPageRoute(builder:(context) {
@@ -154,9 +154,9 @@ class _NavBarState extends State<NavBar> {
                 },
               ),),
               ListTile(
-                enabled: true,
-                leading: ImageIcon(AssetImage("assets/events.png"), color: Colors.white,),
-                title: Text("Sign Up List", style: TextStyle(fontWeight: FontWeight.bold),),
+                enabled: signUpEnabled,
+                leading: const ImageIcon(AssetImage("assets/events.png"), color: Colors.white,),
+                title: const Text("Sign Up List", style: TextStyle(fontWeight: FontWeight.bold),),
                 subtitle: Text(signUpDetail),
                 textColor: Colors.white,
                 onTap: () {
@@ -171,8 +171,8 @@ class _NavBarState extends State<NavBar> {
                 textColor: Colors.white,
               ),
               ListTile(
-                leading: ImageIcon(AssetImage("assets/settings.png"), color: Colors.white,),
-                title: Text("Settings", style: TextStyle(fontWeight: FontWeight.bold),),
+                leading: const ImageIcon(AssetImage("assets/settings.png"), color: Colors.white,),
+                title: const Text("Settings", style: TextStyle(fontWeight: FontWeight.bold),),
                 textColor: Colors.white,
                 onTap: () {
                   Navigator.push(context, MaterialPageRoute(builder:(context) {

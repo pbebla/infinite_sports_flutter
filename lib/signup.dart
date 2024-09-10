@@ -39,8 +39,12 @@ class _SignupState extends State<Signup> {
   Future<List<ListTile>> populateMenus() async {
     UserInformation? oldInfo = await getInformation();
     String? phoneNumber = await getPhone();
+    bool isSignedUpForNextSeason = await isSignedUp(FirebaseAuth.instance.currentUser!, widget.nextleague, widget.season);
     List<ListTile> list = List<ListTile>.empty(growable: true);
-    ListTile nextSeasonTile = ListTile(title: Text("${widget.nextleague} Season ${widget.season}"), onTap: () {
+    ListTile nextSeasonTile = ListTile(
+      enabled: !isSignedUpForNextSeason,
+      title: Text("${widget.nextleague} Season ${widget.season}"), 
+      onTap: () {
       Navigator.push(context, MaterialPageRoute(builder:(context) {
         return LeagueForm(sport: widget.nextleague, season: widget.season, oldInfo: oldInfo ?? UserInformation(), phoneNumber: phoneNumber ?? "",);
       },));
@@ -94,7 +98,7 @@ class _SignupState extends State<Signup> {
             );
         }
         return Scaffold(
-          appBar: AppBar(title: Text("Sign Up List"), backgroundColor: Theme.of(context).primaryColor, foregroundColor: Colors.white,),
+          appBar: AppBar(title: const Text("Sign Up List"), backgroundColor: Theme.of(context).primaryColor, foregroundColor: Colors.white,),
           body: ListView.separated(
             separatorBuilder: (context, index) => const Divider(
               color: Colors.black,

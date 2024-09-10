@@ -26,7 +26,7 @@ bool signedIn = false;
 bool autoSignIn = false;
 
 // Create storage
-final secureStorage = new FlutterSecureStorage();
+final secureStorage = FlutterSecureStorage();
 
 // Read value
 //String value = await storage.read(key: key);
@@ -156,9 +156,9 @@ Future<List<String>> getDates(String sport, String season) async {
 
     return dates;
   }
-  on Exception catch (_, e)
+  catch (e)
   {
-    throw e;
+    return [];
   }
 }
 
@@ -521,7 +521,7 @@ Future<void> fillInNull(game, sport, season) async {
       }
 
     }
-    on Exception catch (_, e)
+    catch (e)
     {
         var message = e.toString();
     }
@@ -542,7 +542,7 @@ Future<void> fillInNull(game, sport, season) async {
             game.team2SourcePath = logos[game.team2] ?? "";
         }
     }
-    on Exception catch (_, e)
+    catch (e)
     {
         var message = e.toString();
     }
@@ -582,7 +582,7 @@ Future<int> getSeasonStartTime(times, sport, season) async {
 
       return seasonStart;
   }
-  on Exception catch (_)
+  catch (e)
   {
       return 5;
   }
@@ -616,7 +616,7 @@ Future<Game> getGame(widget, sport, season, date, times, num) async {
     var games = await getGames(sport, season, date, times);
     return games[num];
   }
-  on Exception catch (_, e)
+  catch (e)
   {
     throw e;
   }
@@ -657,9 +657,9 @@ Future<int> getSignUpStatus() async
     var status = event.snapshot.value as int;
     return status;
   }
-  on Exception catch (_, e)
+  catch (e)
   {
-    throw e;
+    return 0;
   }
 }
 
@@ -673,9 +673,9 @@ Future<String> getSignUpDue() async
     var status = event.snapshot.value as String;
     return status;
   }
-  on Exception catch (_, e)
+  catch (e)
   {
-    throw e;
+    return "";
   }
 }
 
@@ -689,9 +689,9 @@ Future<String> getSignUpInformation() async
     var status = event.snapshot.value as String;
     return status;
   }
-  on Exception catch (_, e)
+  catch (e)
   {
-    throw e;
+    return "";
   }
 }
 
@@ -700,7 +700,7 @@ Future<UserInformation?> getInformation() async
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   try
   {
-    var event = await newClient.child("Users/"+auth.credential!.user!.uid+"/Information/").once();
+    var event = await newClient.child("Users/${auth.credential!.user!.uid}/Information/").once();
     var info = event.snapshot.value as Map<dynamic, dynamic>;
     var result = UserInformation();
     result.age = info["Age"] ?? info["age"];
@@ -709,7 +709,7 @@ Future<UserInformation?> getInformation() async
     result.futsalPosition = info["FutsalPosition"] ?? info["futsalPosition"] ?? "";
     return result;
   }
-  on Exception catch (_, e)
+  catch (e)
   {
       return null;
   }
@@ -717,15 +717,15 @@ Future<UserInformation?> getInformation() async
 
 Future<void> addUpdateInfo(UserInformation information, String phone) async
 {
-  DatabaseReference newClient = FirebaseDatabase.instance.ref("Users/" + auth.credential!.user!.uid);
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("Users/${auth.credential!.user!.uid}");
   try
   {
-    var client = await newClient.child("/Information/");
+    var client = newClient.child("/Information/");
     await client.set(information);
-    var phoneClient = await newClient.child("/Phone Number/");
+    var phoneClient = newClient.child("/Phone Number/");
     await phoneClient.set(phone);
   }
-  on Exception catch (_, e)
+  catch (e)
   {
 
   }
@@ -733,62 +733,57 @@ Future<void> addUpdateInfo(UserInformation information, String phone) async
 
 Future<void> signUpToPlay(String league, String season) async
 {
-  DatabaseReference newClient = FirebaseDatabase.instance.ref("Sign Ups/" + league + "/" + season + "/NotPaid/" + auth.credential!.user!.uid);
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("Sign Ups/$league/$season/NotPaid/${auth.credential!.user!.uid}");
 
   try
   {
     await newClient.set(auth.credential!.user!.displayName);
   }
-  on Exception catch (_, e)
+  catch (e)
   {
 
   }
 }
 
-Future<void> setImage(FileImage fileImage) async
+Future<void> setImage(User user, FileImage fileImage) async
 {
-  if (fileImage != null)
+  DatabaseReference newClient = FirebaseDatabase.instance.ref();
+  Reference storage = FirebaseStorage.instance.ref();
+  try
   {
-    DatabaseReference newClient = FirebaseDatabase.instance.ref();
-    Reference storage = FirebaseStorage.instance.ref();
-    try
-    {
-      var storageUser = storage.child("Users").child(auth.credential!.user!.uid).child("profileimage.jpg");
-      await storageUser.putFile(fileImage.file);
-      var url = await storageUser.getDownloadURL();
+    var storageUser = storage.child("Users").child(user.uid).child("profileimage.jpg");
+    await storageUser.putFile(fileImage.file);
+    var url = await storageUser.getDownloadURL();
 
-      var imageCLient = newClient.child("Users/" + auth.credential!.user!.uid + "/ProfileUrl");
-      await imageCLient.set(url);
+    await user.updatePhotoURL(url);
 
-      auth.credential!.additionalUserInfo!.profile!["PhotoUrl"] = url;
-    }
-    catch (e)
-    {
-      var mess = e.toString();
-    }
+  }
+  catch (e)
+  {
+    var mess = e.toString();
   }
 }
 
-Future<void> createDatabaseLocation(FileImage? fileImage, String phoneNumber) async
+Future<void> createDatabaseLocation(User user, FileImage? fileImage, String phoneNumber) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   if (fileImage != null) {
-    await setImage(fileImage);
+    await setImage(user, fileImage);
   }
 
-  var firstClient = newClient.child("Users/" + auth.credential!.user!.uid + "/First Name");
+  var firstClient = newClient.child("Users/${user.uid}/First Name");
 
-  await firstClient.set(auth.credential!.user!.displayName!.split(' ')[0]);
+  await firstClient.set(user.displayName!.split(' ')[0]);
 
-  var lastClient = newClient.child("Users/" + auth.credential!.user!.uid + "/Last Name");
+  var lastClient = newClient.child("Users/${user.uid}/Last Name");
 
-  await lastClient.set(auth.credential!.user!.displayName!.split(' ')[1]);
+  await lastClient.set(user.displayName!.split(' ')[1]);
 
-  var numberClient = newClient.child("Users/" + auth.credential!.user!.uid + "/Phone Number");
+  var numberClient = newClient.child("Users/${user.uid}/Phone Number");
 
   await numberClient.set(phoneNumber);
 
-  var dateClient = newClient.child("Users/" + auth.credential!.user!.uid + "/Date Joined");
+  var dateClient = newClient.child("Users/${user.uid}/Date Joined");
 
   await dateClient.set(DateTime.now().toString());
 }
@@ -798,11 +793,11 @@ Future<void> uploadToken(String token) async
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   try
   {
-      var dateClient = newClient.child("Users/" + auth.credential!.user!.uid + "/Token");
+      var dateClient = newClient.child("Users/${auth.credential!.user!.uid}/Token");
 
       await dateClient.set(token);
   }
-  on Exception catch (_, e) {
+  catch (e) {
 
   }
 }
@@ -810,34 +805,34 @@ Future<void> uploadToken(String token) async
 Future<void> addComment(String league, String season, String comment) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
-  var client = newClient.child("Sign Ups/" + league + "/" + season + "/Comments/" + auth.credential!.user!.displayName!);
+  var client = newClient.child("Sign Ups/$league/$season/Comments/${auth.credential!.user!.displayName!}");
 
   try
   {
-      await client.set(auth.credential!.user!.uid + ":" + comment);
+      await client.set("${auth.credential!.user!.uid}:$comment");
   }
-  on Exception catch (_, e) 
+  catch (e)
   {
 
   }
 }
 
-Future<bool> isSignedUp(String league, String season) async
+Future<bool> isSignedUp(User user, String league, String season) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
-  var client = newClient.child("Sign Ups/" + league + "/" + season + "/NotPaid/");
-  var client2 = newClient.child("Sign Ups/" + league + "/" + season + "/Paid/");
+  var client = newClient.child("Sign Ups/$league/$season/NotPaid/");
+  var client2 = newClient.child("Sign Ups/$league/$season/Paid/");
 
   try
   {
     var event = await client.once();
     var listNP = event.snapshot.value as Map;
     event = await client2.once();
-    var listP = event.snapshot.value as  Map;
+    var listP = event.snapshot.value ?? {};
 
-    return (listP.containsKey(auth.credential!.user!.uid) || listNP.containsKey(auth.credential!.user!.uid));
+    return ((listP as Map).containsKey(user.uid) || listNP.containsKey(user.uid));
   }
-  on Exception catch (_, e) 
+  catch (e) 
   {
     return false;
   }
@@ -848,12 +843,12 @@ Future<String?> getPhone() async
   DatabaseReference newClient = FirebaseDatabase.instance.ref("");
   try
   {
-    var event = await newClient.child("Users/"+auth.credential!.user!.uid+"/Phone Number/").once();
+    var event = await newClient.child("Users/${auth.credential!.user!.uid}/Phone Number/").once();
     var info = event.snapshot.value.toString();
 
       return info;
   }
-  on Exception catch (_, e)
+  catch (e)
   {
       return null;
   }
@@ -869,9 +864,9 @@ Future<String> getSignUpRules() async
     var status = event.snapshot.value as String;
     return status;
   }
-  on Exception catch (_, e)
+  catch (e)
   {
-    throw e;
+    return "";
   }
 }
 
@@ -885,9 +880,9 @@ Future<String> getSignUpWaiver() async
     var status = event.snapshot.value as String;
     return status;
   }
-  on Exception catch (_, e)
+  catch (e)
   {
-    throw e;
+    return "";
   }
 }
 
@@ -899,9 +894,9 @@ Future<String> getSeason(league) async {
       var seasonNum = event.snapshot.value.toString();
       return seasonNum;
   }
-  on Exception catch (_, e)
+  catch (e)
   {
-    throw e;
+    return "";
   }
 }
 
@@ -911,7 +906,7 @@ Future<Map<dynamic, dynamic>> getOtherSignups() async {
     var event = await newClient.child("Sign Ups").once();
     var status = event.snapshot.value as Map<dynamic, dynamic>;
   return status;
-  } on Exception catch (_, e) {
+  } catch (e) {
     return {};
   }
 }

@@ -25,7 +25,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
   late TextEditingController _phoneController;
   late TextEditingController _passwordController;
   late TextEditingController _verifyPasswordController;
-  var profileImage = null;
+  FileImage? profileImage;
 
   String? _firstNameErrorText;
   String? _lastNameErrorText;
@@ -71,12 +71,12 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
   }
 
   void _nameValidate() {
-    if (_firstNameController.value.text.length == 0) {
+    if (_firstNameController.value.text.isEmpty) {
       _firstNameErrorText = "First Name Required";
     } else {
       _firstNameErrorText = null;
     }
-    if (_lastNameController.value.text.length == 0) {
+    if (_lastNameController.value.text.isEmpty) {
       _lastNameErrorText = "Last Name Required";
     } else {
       _lastNameErrorText = null;
@@ -163,12 +163,12 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                   },
                   child: CircleAvatar(
                     radius: 100,
-                    backgroundImage: (profileImage != null) ? profileImage : AssetImage('assets/portraitplaceholder.png')
+                    backgroundImage: profileImage ?? const AssetImage("assets/portraitplaceholder.png") as ImageProvider
                   ),
                 )
               ),
             ),
-            Text("Tap Image to Change Profile Picture", style: TextStyle(fontWeight: FontWeight.bold),),
+            const Text("Tap Image to Change Profile Picture", style: TextStyle(fontWeight: FontWeight.bold),),
             Padding(
               padding: const EdgeInsets.only(
                   left: 15.0, right: 15.0, top: 15, bottom: 0),
@@ -177,7 +177,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                 controller: _firstNameController,
                 decoration: InputDecoration(
                   errorText: _firstNameErrorText,
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
                   labelText: 'First Name',
                   hintText: 'Enter First Name'),
               ),
@@ -190,7 +190,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                 controller: _lastNameController,
                 decoration: InputDecoration(
                   errorText: _lastNameErrorText,
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
                   labelText: 'Last Name',
                   hintText: 'Enter Last Name'),
               ),
@@ -208,7 +208,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       errorText: (_emailErrorText != null) ? _emailErrorText : null,
                       suffixIcon: (_emailErrorText == null && EmailValidator.validate(_emailController.value.text))
         ? const Icon(Icons.done, color: Colors.green,) : null,
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
                       labelText: 'Email',
                       hintText: 'Enter valid email id as abc@gmail.com'),
                   ),
@@ -221,7 +221,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
               child: TextField(
                 keyboardType: TextInputType.phone,
                 controller: _phoneController,
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                     border: OutlineInputBorder(),
                     labelText: 'Phone Number',
                     hintText: 'Enter phone number'),
@@ -241,7 +241,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       errorText: (_passwordErrorText != null) ? _passwordErrorText : null,
                       suffixIcon: (_passwordErrorText == null && _passwordController.value.text.length > 4)
         ? const Icon(Icons.done, color: Colors.green,) : null,
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
                       labelText: 'Password',
                       hintText: 'Enter secure password'),
                   ),
@@ -262,7 +262,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                       errorText: (_verifyPasswordErrorText != null) ? _verifyPasswordErrorText : null,
                       suffixIcon: (_verifyPasswordErrorText == null && _verifyPasswordController.value.text.length > 4 && _verifyPasswordController.value.text == _passwordController.value.text)
         ? const Icon(Icons.done, color: Colors.green,) : null,
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
                       labelText: 'Verify Password',
                       hintText: 'Reenter password',
                     ),
@@ -276,7 +276,41 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
               decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(20)),
               child: TextButton(
-                onPressed: () {_signUp();},
+                onPressed: () {
+                  setState(() {});
+                  showDialog(
+                    context: context,
+                    builder: (context) {
+                      return FutureBuilder(
+                        future: _signUp(), 
+                        builder: (context, snapshot) {
+                          if(snapshot.connectionState == ConnectionState.waiting) {
+                            return Center(
+                                child: CircularProgressIndicator(
+                                  color: Theme.of(context).colorScheme.primary,
+                                )
+                              );
+                          }
+                          if (snapshot.data!) {
+                            return AlertDialog(
+                              title: const Text("You are registered and logged in. Verify your account using the link sent to your email."),
+                              actions: [TextButton(child: const Text("OK"), onPressed: () {
+                                    Navigator.pop(context);
+                                    Navigator.pop(context);
+                              },)],
+                            );
+                          }
+                          return AlertDialog(
+                            title: const Text("Error Registering. Please validate information and try again."),
+                            actions: [TextButton(child: const Text("OK"), onPressed: () {
+                                    Navigator.pop(context);
+                            },)],
+                          );
+                        }
+                      );
+                    },
+                  );
+                },
                 child: const Text(
                   'Register',
                   style: TextStyle(color: Colors.white, fontSize: 25),
@@ -289,14 +323,13 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     );
   }
   
-  void _signUp() async {
-    setState(() {});
+  Future<bool> _signUp() async {
     _nameValidate();
     _emailValidate(_emailController.value.text);
     _passwordValidate();
     _verifyPasswordValidate();
     if (_firstNameErrorText != null || _lastNameErrorText != null || _emailErrorText != null || _passwordErrorText != null || _verifyPasswordErrorText != null) {
-      return;
+      return false;
     }
     String email = _emailController.text;
     String password = _passwordController.text;
@@ -309,37 +342,13 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
         await secureStorage.write(key: "Email", value: email);
         await secureStorage.write(key: "Password", value: password);
       }
-
-      auth.credential!.additionalUserInfo!.profile!["FirstName"] = _firstNameController.value.text;
-      auth.credential!.additionalUserInfo!.profile!["LastName"] = _lastNameController.value.text;
-
-      if (profileImage != null) {
-        await createDatabaseLocation(profileImage, _phoneController.value.text);
-      } else {
-        await createDatabaseLocation(null, _phoneController.value.text);
-      }
+      await auth.credential!.user!.updateDisplayName('${_firstNameController.value.text} ${_lastNameController.value.text}');
+      auth.credential!.user!.reload();
+      await createDatabaseLocation(FirebaseAuth.instance.currentUser!, profileImage, _phoneController.value.text);
       //await uploadToken();
-      showDialog<String>(
-        context: context, 
-        builder: (context) => Dialog(
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Column(
-              children: [
-                Text("You are registered and logged in. Verify your account using the link sent to your email."),
-                TextButton(child: Text("OK"), onPressed: () {
-                  Navigator.pop(context);
-                },)
-              ],
-            ),
-          ),
-        )
-      );
-      Navigator.pop(context);
-      Navigator.pop(context);
-    } else {
-      print("Error for signup");
+      return true;
     }
+    return false;
   }
   
 }

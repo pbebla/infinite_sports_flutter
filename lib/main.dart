@@ -1,23 +1,11 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:flutter_launcher_icons/constants.dart';
-import 'package:infinite_sports_flutter/botnavbar.dart';
-import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
-import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
-import 'package:infinite_sports_flutter/leagues.dart';
-import 'package:infinite_sports_flutter/livescore.dart';
 import 'package:infinite_sports_flutter/navigations/current_livescore_navigation.dart';
 import 'package:infinite_sports_flutter/navigations/leagues_navigation.dart';
-import 'package:infinite_sports_flutter/playerpage.dart';
-import 'package:infinite_sports_flutter/showleague.dart';
-import 'package:infinite_sports_flutter/table.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 

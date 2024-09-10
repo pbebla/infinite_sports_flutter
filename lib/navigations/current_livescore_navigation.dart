@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
-import 'package:infinite_sports_flutter/leagues.dart';
 import 'package:infinite_sports_flutter/livescore.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/showleague.dart';

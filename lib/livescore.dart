@@ -140,18 +140,18 @@ class _LiveScorePageState extends State<LiveScorePage> {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: <Widget>[
                                     TextButton(onPressed: () async {
-                                      DatabaseReference newClient = FirebaseDatabase.instance.refFromURL(game.UrlPath+"/"+game.GameNum.toString()+"/team1vote/");
+                                      DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${game.UrlPath}/${game.GameNum}/team1vote/");
                                       await newClient.child(auth.credential!.user!.uid).set(1);
                                       Navigator.pop(context);
                                       await _refreshData(setState);
                                     }, child: Text(game.team1),),
                                     TextButton(onPressed: () async {
-                                      DatabaseReference newClient = FirebaseDatabase.instance.refFromURL(game.UrlPath+"/"+game.GameNum.toString()+"/team2vote/");
+                                      DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${game.UrlPath}/${game.GameNum}/team2vote/");
                                       await newClient.child(auth.credential!.user!.uid).set(1);
                                       Navigator.pop(context);
                                       await _refreshData(setState);
                                     }, child: Text(game.team2),),
-                                    SizedBox(width: 15, height: 15,),
+                                    const SizedBox(width: 15, height: 15,),
                                     TextButton(
                                       onPressed: () {
                                         Navigator.pop(context);

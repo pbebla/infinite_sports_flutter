@@ -1,6 +1,5 @@
 import 'dart:ui';
 
-import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
 import 'package:infinite_sports_flutter/model/soccerplayer.dart';
 
