@@ -47,5 +47,10 @@
 	<true/>
 	<key>io.flutter.embedded_views_preview</key>
 	<string>YES</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Need photo library access for saving and uploading images</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Need camera access for uploading images</string>
+
 </dict>
 </plist>
