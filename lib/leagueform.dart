@@ -34,7 +34,6 @@ class _LeagueFormState extends State<LeagueForm> {
   late TextEditingController _ageController;
   late TextEditingController _heightInchesController;
   late TextEditingController _phoneController;
-  late TextEditingController _positionController;
   late TextEditingController _commentController;
   bool seasonRulesRead = false;
   bool waiverRead = false;
@@ -57,7 +56,6 @@ class _LeagueFormState extends State<LeagueForm> {
       _heightFeetController = TextEditingController();
       _heightInchesController = TextEditingController();
     }
-    _positionController = TextEditingController();
     _phoneController = TextEditingController(text: widget.phoneNumber);
     _commentController = TextEditingController();
   }
@@ -66,7 +64,6 @@ class _LeagueFormState extends State<LeagueForm> {
   void dispose() {
     _heightFeetController.dispose();
     _heightInchesController.dispose();
-    _positionController.dispose();
     _phoneController.dispose();
     _commentController.dispose();
     _ageController.dispose();
@@ -244,7 +241,10 @@ class _LeagueFormState extends State<LeagueForm> {
               width: 250,
               padding: const EdgeInsets.only(bottom: 15),
               child: ElevatedButton(
-                onPressed: (!seasonRulesRead || !waiverRead || _heightFeetController.value.text.isEmpty || _heightInchesController.value.text.isEmpty || _ageController.value.text.isEmpty || _positionController.value.text.isEmpty || _phoneController.value.text.isEmpty) ? null : () async {await _register();},
+                onPressed: 
+                (!seasonRulesRead || !waiverRead || _heightFeetController.value.text.isEmpty || 
+                _heightInchesController.value.text.isEmpty || _selectedPosition == null || _ageController.value.text.isEmpty
+                 || _phoneController.value.text.isEmpty) ? null : () async => await _register(),
                 /*onPressed: () async {
                   await _register();
                 },*/
@@ -253,9 +253,9 @@ class _LeagueFormState extends State<LeagueForm> {
                   style: TextStyle(color: Colors.white, fontSize: 25),
                 ),
                 style: ButtonStyle(
-                    backgroundColor: MaterialStateProperty.resolveWith(
+                    backgroundColor: WidgetStateProperty.resolveWith(
                       (states) {
-                        if (states.contains(MaterialState.disabled)) {
+                        if (states.contains(WidgetState.disabled)) {
                           return Colors.grey;
                         } else {
                           return Theme.of(context).primaryColor;
@@ -273,7 +273,7 @@ class _LeagueFormState extends State<LeagueForm> {
   
   Future<void> _register() async {
     var alertInfo = await getSignUpInformation();
-    showDialog<String>(
+    return showDialog<void>(
       context: context,
       builder: (BuildContext context) => Dialog(
         child: Padding(

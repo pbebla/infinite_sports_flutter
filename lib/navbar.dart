@@ -1,6 +1,10 @@
 
+import 'dart:io';
+
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
 import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -79,7 +83,50 @@ class _NavBarState extends State<NavBar> {
                 visible: signedIn,
                 child: Column(
                   children: [
-                    signedIn && (auth.credential?.additionalUserInfo?.profile?["ProfileUrl"] ?? false) ? CircleAvatar(backgroundImage: NetworkImage(auth.credential?.additionalUserInfo?.profile?["ProfileUrl"]), radius: 50) : CircleAvatar(backgroundImage: AssetImage("assets/portraitplaceholder.png"), radius: 50),
+                    GestureDetector(
+                      onTap: () {
+                        showCupertinoModalPopup(
+                          context: context, 
+                          builder: (context) => CupertinoActionSheet(
+                            title: const Text('Image from...'),
+                            cancelButton: CupertinoActionSheetAction(
+                                onPressed: () {
+                                  Navigator.pop(context);
+                                },
+                                child: const Text('Cancel'),
+                              ),
+                            actions: <CupertinoActionSheetAction>[
+                              CupertinoActionSheetAction(
+                                onPressed: () async {
+                                  final ImagePicker picker = ImagePicker();
+                                  final XFile? file = await picker.pickImage(source: ImageSource.gallery);
+                                  if (file != null) {
+                                    await setImage(FileImage(File(file!.path)));
+                                  }
+                                  setState(() {
+                                  });
+                                },
+                                child: const Text('Photos'),
+                              ),
+                              CupertinoActionSheetAction(
+                                onPressed: () async {
+                                  final ImagePicker picker = ImagePicker();
+                                  final XFile? file = await picker.pickImage(source: ImageSource.camera);
+                                  if (file != null) {
+                                    await setImage(FileImage(File(file!.path)));
+                                  }
+                                  setState(() {
+                                  });
+                                },
+                                child: const Text('Camera'),
+                              ),
+                            ],
+                          ));
+                      },
+                      child: signedIn && (auth.credential?.additionalUserInfo?.profile?["ProfileUrl"] ?? false) ? 
+                      CircleAvatar(backgroundImage: NetworkImage(auth.credential?.additionalUserInfo?.profile?["ProfileUrl"]), radius: 50) : 
+                      CircleAvatar(backgroundImage: AssetImage("assets/portraitplaceholder.png"), radius: 50),
+                    ),
                     Text(FirebaseAuth.instance.currentUser?.displayName ?? "", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineMedium!.fontSize)),
                   ],)),
               Visibility(
@@ -107,7 +154,7 @@ class _NavBarState extends State<NavBar> {
                 },
               ),),
               ListTile(
-                enabled: signUpEnabled,
+                enabled: true,
                 leading: ImageIcon(AssetImage("assets/events.png"), color: Colors.white,),
                 title: Text("Sign Up List", style: TextStyle(fontWeight: FontWeight.bold),),
                 subtitle: Text(signUpDetail),
