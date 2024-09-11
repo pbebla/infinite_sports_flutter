@@ -18,7 +18,7 @@ class PushNotifications {
   static Future initLocalNotifications() async {
     const AndroidInitializationSettings androidInitializationSettings = AndroidInitializationSettings('@mipmap/launcher_icon');
     final DarwinInitializationSettings iOSinitializationSettings = DarwinInitializationSettings(
-      onDidReceiveLocalNotification: (id, title, body, payload) => null,
+      onDidReceiveLocalNotification: (id, title, body, payload) {},
     );
     final InitializationSettings initializationSettings = InitializationSettings(
       android: androidInitializationSettings,

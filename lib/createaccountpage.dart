@@ -1,14 +1,11 @@
-import 'dart:ffi';
 import 'dart:io';
 
 import 'package:email_validator/email_validator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
-import 'package:infinite_sports_flutter/main.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
-import 'package:infinite_sports_flutter/signup.dart';
 import 'package:image_picker/image_picker.dart';
 
 class CreateAccountPage extends StatefulWidget {
@@ -345,7 +342,10 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
       await auth.credential!.user!.updateDisplayName('${_firstNameController.value.text} ${_lastNameController.value.text}');
       auth.credential!.user!.reload();
       await createDatabaseLocation(FirebaseAuth.instance.currentUser!, profileImage, _phoneController.value.text);
-      //await uploadToken();
+      String? token = await FirebaseMessaging.instance.getToken();
+      if (token != null) {
+        await uploadToken(user, token);
+      }
       return true;
     }
     return false;

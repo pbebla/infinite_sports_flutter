@@ -1,21 +1,9 @@
-import 'package:flutter/foundation.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:flutter_sticky_header/flutter_sticky_header.dart';
-import 'package:infinite_sports_flutter/main.dart';
-import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
-import 'package:infinite_sports_flutter/model/basketballgame.dart';
-import 'package:infinite_sports_flutter/model/basketballplayerstats.dart';
-import 'package:infinite_sports_flutter/model/futsalgame.dart';
-import 'package:infinite_sports_flutter/model/futsalplayerstats.dart';
-import 'package:infinite_sports_flutter/model/gameactivity.dart';
-import 'package:infinite_sports_flutter/model/playerstats.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
-import 'package:infinite_sports_flutter/model/soccergame.dart';
-import 'package:infinite_sports_flutter/playerpage.dart';
-import 'package:percent_indicator/percent_indicator.dart';
-import 'package:infinite_sports_flutter/model/game.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 
@@ -61,7 +49,31 @@ class _SettingsState extends State<Settings> {
             delegate: SliverChildListDelegate(
               [
                 const Divider(color: Colors.grey),
-                const ListTile(title: Text("Change Password"), minTileHeight: 40),
+                ListTile(title: Text("Change Password"), minTileHeight: 40, onTap: () async {
+                  showDialog(
+                    context: context,
+                    builder: (context) {
+                      return FutureBuilder(
+                        future: FirebaseAuth.instance.sendPasswordResetEmail(email: FirebaseAuth.instance.currentUser!.email!),
+                        builder: (context, snapshot) {
+                          if(snapshot.connectionState == ConnectionState.waiting) {
+                            return Center(
+                              child: CircularProgressIndicator(
+                                color: Theme.of(context).colorScheme.primary,
+                              )
+                            );
+                          }
+                          return AlertDialog(
+                            title: Text("Success! Reset Email Sent to\n${FirebaseAuth.instance.currentUser!.email!}", style: TextStyle(fontSize: 16),),
+                            actions: [TextButton(child: const Text("OK"), onPressed: () {
+                                Navigator.pop(context);
+                            },)],
+                          );
+                        },
+                      );
+                    }
+                  );
+                },),
                 const Divider(color: Colors.grey),
                 ListTile(title: const Text("Auto Log In"), minTileHeight: 40, trailing: Checkbox(value: autoSignIn, onChanged: (value) async {
                   if (value == true) {

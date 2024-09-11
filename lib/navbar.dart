@@ -177,7 +177,7 @@ class _NavBarState extends State<NavBar> {
                 textColor: Colors.white,
                 onTap: () {
                   Navigator.push(context, MaterialPageRoute(builder:(context) {
-                    return Settings();
+                    return const Settings();
                   },));
                 },
               ),
@@ -187,13 +187,31 @@ class _NavBarState extends State<NavBar> {
                   title: const Center(child: Text("Log Out", style: TextStyle(fontWeight: FontWeight.bold),)),
                   textColor: Colors.white,
                   onTap: () async {
-                    print(FirebaseAuth.instance.currentUser);
-                    await auth.signOut();
-                    print("Signed out");
-                    signedIn = false;
-                    setState(() {
-                      
-                    });
+                    showDialog(
+                      context: context, 
+                      builder: (context) {
+                        return AlertDialog(
+                          title: const Text("Are you sure you want to logout?"),
+                          actions: [
+                            TextButton(
+                              onPressed: () async {
+                                print(FirebaseAuth.instance.currentUser);
+                                await auth.signOut();
+                                print("Signed out");
+                                signedIn = false;
+                                setState(() {});
+                                Navigator.pop(context);
+                              }, 
+                              child: const Text("Yes")
+                            ),
+                            TextButton(
+                              onPressed: () {Navigator.pop(context);}, 
+                              child: const Text("No")
+                            ),
+                          ],
+                        );
+                      }
+                    );
                   }
               ),)
 

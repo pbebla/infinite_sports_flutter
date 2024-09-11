@@ -35,6 +35,11 @@ Future<void> main() async {
   if (message != null) {
     print("Launched from terminated state");
   }
+  FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
+    if (signedIn) {
+      await uploadToken(auth.credential!.user!, newToken);
+    }
+  });
   runApp(const MyApp());
 }
 
@@ -123,6 +128,10 @@ class _MyHomePageState extends State<MyHomePage> {
     if (email != null && password != null) {
       User? user = await auth.signInWithEmailAndPassword(email, password);
       if (user != null) {
+        String? token = await FirebaseMessaging.instance.getToken();
+        if (token != null) {
+          await uploadToken(user, token);
+        }
         auth.password = password;
         autoSignIn = true;
         signedIn = true;

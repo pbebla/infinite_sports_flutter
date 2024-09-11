@@ -26,7 +26,7 @@ bool signedIn = false;
 bool autoSignIn = false;
 
 // Create storage
-final secureStorage = FlutterSecureStorage();
+final secureStorage = const FlutterSecureStorage();
 
 // Read value
 //String value = await storage.read(key: key);
@@ -618,7 +618,7 @@ Future<Game> getGame(widget, sport, season, date, times, num) async {
   }
   catch (e)
   {
-    throw e;
+    rethrow;
   }
 }
 
@@ -788,12 +788,12 @@ Future<void> createDatabaseLocation(User user, FileImage? fileImage, String phon
   await dateClient.set(DateTime.now().toString());
 }
 
-Future<void> uploadToken(String token) async
+Future<void> uploadToken(User user, String token) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   try
   {
-      var dateClient = newClient.child("Users/${auth.credential!.user!.uid}/Token");
+      var dateClient = newClient.child("Users/${user.uid}/Token");
 
       await dateClient.set(token);
   }

@@ -1,19 +1,8 @@
-import 'dart:convert';
-import 'dart:ffi';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/main.dart';
-import 'package:infinite_sports_flutter/model/basketballgame.dart';
-import 'package:infinite_sports_flutter/model/basketballplayer.dart';
-import 'package:infinite_sports_flutter/model/futsalgame.dart';
-import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
-import 'package:infinite_sports_flutter/navbar.dart';
-import 'package:infinite_sports_flutter/leagues.dart';
 import 'package:infinite_sports_flutter/scorepage.dart';
-import 'package:stack_trace/stack_trace.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:firebase_database/firebase_database.dart';

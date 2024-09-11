@@ -1,8 +1,9 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/createaccountpage.dart';
-import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
-import 'package:infinite_sports_flutter/main.dart';
+import 'package:infinite_sports_flutter/forgotpasswordpage.dart';
+import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 
 class LoginPage extends StatefulWidget {
@@ -83,7 +84,9 @@ class _LoginDemoState extends State<LoginPage> {
             ),
             TextButton(
               onPressed: (){
-                //TODO FORGOT PASSWORD SCREEN GOES HERE
+                Navigator.push(context, MaterialPageRoute(builder:(context) {
+                    return ForgotPasswordPage();
+                },));
               },
               child: Text(
                 'Forgot Password',
@@ -147,7 +150,10 @@ class _LoginDemoState extends State<LoginPage> {
         await secureStorage.write(key: "Email", value: email);
         await secureStorage.write(key: "Password", value: password);
       }
-      //await uploadToken();
+      String? token = await FirebaseMessaging.instance.getToken();
+      if (token != null) {
+        await uploadToken(user, token);
+      }
       Navigator.pop(context);
     } else {
       print("Error for login");

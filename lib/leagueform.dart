@@ -276,7 +276,7 @@ class _LeagueFormState extends State<LeagueForm> {
     return showDialog<void>(
       context: context,
       builder: (BuildContext context) => AlertDialog(
-        title: Text("Before Proceeding, $alertInfo", style: TextStyle(fontSize: 16),),
+        title: Text("Before Proceeding, $alertInfo", style: const TextStyle(fontSize: 16),),
         actions: [
           TextButton(
             onPressed: () async {
@@ -296,7 +296,7 @@ class _LeagueFormState extends State<LeagueForm> {
                     }
                     if (true) {
                       return AlertDialog(
-                        title: Text("Success! You have registered for ${widget.sport} League Season ${widget.season}! Make sure to pay by the due date or click Open Venmo to pay now! Thank You!", style: TextStyle(fontSize: 16),),
+                        title: Text("Success! You have registered for ${widget.sport} League Season ${widget.season}! Make sure to pay by the due date or click Open Venmo to pay now! Thank You!", style: const TextStyle(fontSize: 16),),
                         actions: [
                           TextButton(child: const Text("Open Venmo"), onPressed: () {
                             Navigator.push(context, MaterialPageRoute(builder:(context) {
