@@ -1,65 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="14113" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" colorMatched="YES" initialViewController="01J-lp-oVM">
-    <device id="retina5_9" orientation="portrait">
-        <adaptation id="fullscreen"/>
-    </device>
-    <dependencies>
-        <deployment identifier="iOS"/>
-        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="14088"/>
-        <capability name="Aspect ratio constraints" minToolsVersion="5.1"/>
-        <capability name="Constraints to layout margins" minToolsVersion="6.0"/>
-        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
-    </dependencies>
-    <scenes>
-        <!--View Controller-->
-        <scene sceneID="EHf-IW-A2E">
-            <objects>
-                <viewController id="01J-lp-oVM" sceneMemberID="viewController">
-                    <layoutGuides>
-                        <viewControllerLayoutGuide type="top" id="Llm-lL-Icb"/>
-                        <viewControllerLayoutGuide type="bottom" id="xb3-aO-Qok"/>
-                    </layoutGuides>
-                    <view key="view" contentMode="scaleToFill" id="Ze5-6b-2t3">
-                        <rect key="frame" x="0.0" y="0.0" width="375" height="812"/>
-                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
-                        <subviews>
-                            <imageView userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="logo" translatesAutoresizingMaskIntoConstraints="NO" id="pFF-Ha-1Ka">
-                                <rect key="frame" x="67.666666666666686" y="286" width="240" height="240"/>
-                                <constraints>
-                                    <constraint firstAttribute="width" constant="240" id="q5n-bC-8Ma"/>
-                                    <constraint firstAttribute="width" secondItem="pFF-Ha-1Ka" secondAttribute="height" multiplier="1:1" id="qcf-GT-b6t"/>
-                                </constraints>
-                            </imageView>
-                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="Infinite Sports Association - Developed by NinevehWare" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" minimumScaleFactor="0.5" translatesAutoresizingMaskIntoConstraints="NO" id="PEX-YZ-FJA">
-                                <rect key="frame" x="16" y="753.66666666666663" width="343" height="15"/>
-                                <fontDescription key="fontDescription" type="system" weight="medium" pointSize="12"/>
-                                <color key="textColor" white="0.33333333333333331" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
-                                <nil key="highlightedColor"/>
-                            </label>
-                        </subviews>
-                        <color key="backgroundColor" red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                        <constraints>
-                            <constraint firstItem="pFF-Ha-1Ka" firstAttribute="centerY" secondItem="Ze5-6b-2t3" secondAttribute="centerY" id="0Y5-zc-Sl8"/>
-                            <constraint firstItem="PEX-YZ-FJA" firstAttribute="leading" secondItem="Ze5-6b-2t3" secondAttribute="leadingMargin" id="2k4-49-BIX"/>
-                            <constraint firstItem="xb3-aO-Qok" firstAttribute="top" secondItem="PEX-YZ-FJA" secondAttribute="bottom" constant="10" id="kSX-mG-WgQ"/>
-                            <constraint firstAttribute="trailingMargin" secondItem="PEX-YZ-FJA" secondAttribute="trailing" id="tAL-c7-h1X"/>
-                            <constraint firstItem="pFF-Ha-1Ka" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="uiD-j2-yfs"/>
-                        </constraints>
-                    </view>
-                </viewController>
-                <placeholder placeholderIdentifier="IBFirstResponder" id="iYj-Kq-Ea1" userLabel="First Responder" sceneMemberID="firstResponder"/>
-            </objects>
-            <point key="canvasLocation" x="52" y="373.89162561576359"/>
-        </scene>
-    </scenes>
-    <resources>
-        <image name="logo" width="400" height="400"/>
-    </resources>
-    <color key="tintColor" red="0.84880672089041098" green="0.0" blue="0.0" alpha="1" colorSpace="calibratedRGB"/>
-</document>
-
-
-<!-- <?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="12121" systemVersion="16G29" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" colorMatched="YES" initialViewController="01J-lp-oVM">
     <dependencies>
         <deployment identifier="iOS"/>
@@ -95,6 +34,6 @@
     <resources>
         <image name="LaunchImage" width="168" height="185"/>
     </resources>
-</document>  -->
+</document>
 
 
