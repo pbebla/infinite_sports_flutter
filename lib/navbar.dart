@@ -166,6 +166,7 @@ class _NavBarState extends State<NavBar> {
                 },
               ),
               const ListTile(
+                enabled: false,
                 leading: ImageIcon(AssetImage("assets/notifnew.png"), color: Colors.white,),
                 title: Text("Notifications", style: TextStyle(fontWeight: FontWeight.bold),),
                 textColor: Colors.white,

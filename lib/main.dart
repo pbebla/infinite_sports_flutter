@@ -1,7 +1,11 @@
+import 'dart:convert';
+
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
+import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/navigations/current_livescore_navigation.dart';
@@ -17,6 +21,20 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  await PushNotifications.init();
+  await PushNotifications.initLocalNotifications();
+  FirebaseMessaging.onMessage.listen((message) {
+    String payloadData = jsonEncode(message.data);
+    print("Received notification in foreground");
+    if (message.notification != null) {
+      PushNotifications.showSimpleNotification(title: message.notification!.title!, body: message.notification!.body!, payload: payloadData);
+    }
+  },);
+  final RemoteMessage? message = 
+    await FirebaseMessaging.instance.getInitialMessage();
+  if (message != null) {
+    print("Launched from terminated state");
+  }
   runApp(const MyApp());
 }
 
