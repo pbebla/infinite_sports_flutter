@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -9,24 +10,26 @@ class PushNotifications {
     await _firebaseMessaging.requestPermission(
       provisional: true
     );
-
+    final apns = await _firebaseMessaging.getAPNSToken();
     final token = await _firebaseMessaging.getToken();
     print("device token: $token");
   }
 
   static Future initLocalNotifications() async {
     const AndroidInitializationSettings androidInitializationSettings = AndroidInitializationSettings('@mipmap/launcher_icon');
-    /*final DarwinInitializationSettings iOSinitializationSettings = DarwinInitializationSettings(
+    final DarwinInitializationSettings iOSinitializationSettings = DarwinInitializationSettings(
       onDidReceiveLocalNotification: (id, title, body, payload) => null,
-    );*/
+    );
     final InitializationSettings initializationSettings = InitializationSettings(
       android: androidInitializationSettings,
-      //iOS: iOSinitializationSettings
+      iOS: iOSinitializationSettings
     );
 
-    _flutterLocalNotificationsPlugin
-      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()!
-      .requestNotificationsPermission();
+    if (Platform.isAndroid) {
+      _flutterLocalNotificationsPlugin
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()!
+          .requestNotificationsPermission();
+    }
 
     _flutterLocalNotificationsPlugin.initialize(initializationSettings,
       onDidReceiveNotificationResponse: onNotificationTap,
