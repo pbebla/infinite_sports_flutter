@@ -16,12 +16,12 @@ class PushNotifications {
 
   static Future initLocalNotifications() async {
     const AndroidInitializationSettings androidInitializationSettings = AndroidInitializationSettings('@mipmap/launcher_icon');
-    final DarwinInitializationSettings iOSinitializationSettings = DarwinInitializationSettings(
+    /*final DarwinInitializationSettings iOSinitializationSettings = DarwinInitializationSettings(
       onDidReceiveLocalNotification: (id, title, body, payload) => null,
-    );
+    );*/
     final InitializationSettings initializationSettings = InitializationSettings(
       android: androidInitializationSettings,
-      iOS: iOSinitializationSettings
+      //iOS: iOSinitializationSettings
     );
 
     _flutterLocalNotificationsPlugin
