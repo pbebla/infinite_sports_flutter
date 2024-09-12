@@ -53,6 +53,7 @@ dependencies:
   flutter_local_notifications: ^17.2.2
   provider: ^6.1.2
   palette_generator: ^0.3.3+4
+  shared_preferences: ^2.3.2
 
 dev_dependencies:
   flutter_test:

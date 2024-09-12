@@ -101,23 +101,11 @@ class _ScorePageState extends State<ScorePage> {
   Future<int> getGameData() async {
     if (widget.game.team1SourcePath != "") {
       var palette = await PaletteGenerator.fromImageProvider(NetworkImage(widget.game.team1SourcePath));
-      if (widget.sport == "Futsal" && widget.season == "13" && widget.game.team1 == "Ashur") {
-        team1color = Color.fromRGBO(207, 82, 36, 1.0);
-      } else if (palette.dominantColor != null) {
-        team1color = palette.dominantColor!.color;
-      } else {
-        team1color = const Color.fromARGB(255, 124, 124, 124);
-      }
+      team1color = palette.dominantColor?.color ?? const Color.fromARGB(255, 124, 124, 124);
     }
     if (widget.game.team2SourcePath != "") {
       var palette = await PaletteGenerator.fromImageProvider(NetworkImage(widget.game.team2SourcePath));
-      if (palette.dominantColor != null) {
-        team2color = palette.dominantColor!.color;
-      } else if (widget.sport == "Futsal" && widget.season == "13" && widget.game.team2 == "Ashur") {
-        team2color = Color.fromRGBO(207, 82, 36, 1.0);
-      } else {
-        team2color = const Color.fromARGB(255, 124, 124, 124);
-      }
+      team2color = palette.dominantColor?.color ?? const Color.fromARGB(255, 124, 124, 124);
     }
     if (widget.sport == "Futsal") {
       buildTeamPlayers(team1Players, (widget.game as FutsalGame).team1lineup, widget.game.team1activity, team1color, widget.game.team1SourcePath);

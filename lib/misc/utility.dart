@@ -26,6 +26,7 @@ Map teamLogos = {};
 FirebaseAuthService auth = FirebaseAuthService();
 bool signedIn = false;
 bool autoSignIn = false;
+bool darkModeEnabled = false;
 
 // Create storage
 final secureStorage = const FlutterSecureStorage();

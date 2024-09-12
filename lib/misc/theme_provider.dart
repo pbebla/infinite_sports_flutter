@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 ThemeData lightMode = ThemeData(
   // This is the theme of your application.
@@ -27,20 +28,38 @@ ThemeData darkMode = ThemeData(
   colorScheme: ColorScheme.fromSeed(brightness: Brightness.dark, seedColor: infiniteSportsPrimaryColor, primary: infiniteSportsPrimaryColor, dynamicSchemeVariant: DynamicSchemeVariant.fidelity,),
   useMaterial3: true,
 );
+
+enum ThemeModes{
+  light,
+  dark
+}
 class ThemeProvider with ChangeNotifier {
   ThemeData _themeData = lightMode;
   ThemeData get themeData => _themeData;
+  
   set themeData(ThemeData themeData) {
     _themeData = themeData;
     notifyListeners();
   }
 
-  void toggleTheme() {
-    if (_themeData == lightMode) {
+  ThemeProvider(bool darkModeEnabled) {
+    if (darkModeEnabled) {
       themeData = darkMode;
     } else {
       themeData = lightMode;
     }
   }
+
+  void toggleTheme() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    if (_themeData == lightMode) {
+      themeData = darkMode;
+      prefs.setBool('darkMode', true);
+    } else {
+      themeData = lightMode;
+      prefs.setBool('darkMode', false);
+    }
+  }
+
 
 }

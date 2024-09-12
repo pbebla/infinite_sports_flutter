@@ -13,6 +13,7 @@ import 'package:infinite_sports_flutter/navigations/current_livescore_navigation
 import 'package:infinite_sports_flutter/navigations/leagues_navigation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
 
 Future<void> main() async {
@@ -40,7 +41,9 @@ Future<void> main() async {
       await uploadToken(auth.credential!.user!, newToken);
     }
   });
-  runApp(ChangeNotifierProvider(create: (context) => ThemeProvider(), child: const MyApp()));
+  SharedPreferences prefs = await SharedPreferences.getInstance();
+  darkModeEnabled = prefs.getBool('darkMode') ?? false;
+  runApp(ChangeNotifierProvider(create: (context) => ThemeProvider(darkModeEnabled), child: const MyApp()));
 }
 
 class MyApp extends StatelessWidget {

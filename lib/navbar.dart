@@ -177,6 +177,27 @@ class _NavBarState extends State<NavBar> {
                   },));
                 },
               ),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: StatefulBuilder(
+                builder: (context, setState) {
+                  return ListTile(
+                    title: Text("Dark Theme", style: TextStyle(fontWeight: FontWeight.bold),),
+                    textColor: Colors.white,
+                    trailing: Switch(
+                      value: darkModeEnabled, 
+                      activeColor: Colors.black,
+                      onChanged: (value) {
+                      Provider.of<ThemeProvider>(context, listen: false).toggleTheme();
+                      setState(() {
+                        darkModeEnabled = value;
+                      });
+                    },),
+                  );
+                },
+              ),
+              )),
               Visibility(
                 visible: signedIn,
                 child: ListTile(
@@ -210,14 +231,6 @@ class _NavBarState extends State<NavBar> {
                     );
                   }
               ),),
-              ListTile(
-                title: Text("Toggle Dark Mode", style: TextStyle(fontWeight: FontWeight.bold),),
-                textColor: Colors.white,
-                onTap: () {
-                  Provider.of<ThemeProvider>(context, listen: false).toggleTheme();
-                },
-              ),
-
             ],
           ),
         );
