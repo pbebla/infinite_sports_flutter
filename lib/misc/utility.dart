@@ -18,6 +18,8 @@ import 'package:infinite_sports_flutter/model/userinformation.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+var infiniteSportsPrimaryColor = const Color.fromARGB(255, 208, 0, 0);
+
 Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
 Map<String, Map<String, Map<String, BasketballPlayer>>> basketballLineups = {};
 Map teamLogos = {};

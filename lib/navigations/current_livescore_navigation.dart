@@ -40,8 +40,8 @@ class CurrentLivescoreNavigationState extends State<CurrentLivescoreNavigation> 
                   },
                   child: Card(
                     elevation: 2,
-                    shadowColor: Colors.black,
-                    color: Colors.white,
+                    shadowColor: Theme.of(context).shadowColor,
+                    color: Theme.of(context).cardColor,
                     child: SizedBox(
                       width: 350,
                       height: 70,
@@ -51,7 +51,7 @@ class CurrentLivescoreNavigationState extends State<CurrentLivescoreNavigation> 
                     )
                   ),
                 ),
-                const Divider(color: Colors.black,),
+                Divider(color: Theme.of(context).dividerColor),
                 Text(convertDatabaseDateToFormatDate(widget.currentDate), style: const TextStyle(fontWeight: FontWeight.bold),),
                 Expanded(
                   child: LiveScorePage(sport: widget.currentSport, season: widget.currentSeason, date: widget.currentDate ,onTitleSelect: (String value) {widget.onTitleSelect(value); })

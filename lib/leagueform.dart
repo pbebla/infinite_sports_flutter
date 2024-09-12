@@ -81,7 +81,7 @@ class _LeagueFormState extends State<LeagueForm> {
     }
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text("Sign Up Form"),
         backgroundColor: Theme.of(context).colorScheme.primary,
@@ -177,7 +177,7 @@ class _LeagueFormState extends State<LeagueForm> {
                 height: 50,
                 width: MediaQuery.sizeOf(context).width,
                 decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.inversePrimary, borderRadius: BorderRadius.circular(20)),
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20)),
                 child: ListTile(
                   title: const Text("Season Rules", style: TextStyle(fontWeight: FontWeight.bold),),
                   trailing: Checkbox(value: seasonRulesRead, onChanged: (value) {
@@ -210,7 +210,7 @@ class _LeagueFormState extends State<LeagueForm> {
               height: 50,
               width: MediaQuery.sizeOf(context).width,
               decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.inversePrimary, borderRadius: BorderRadius.circular(20)),
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20)),
               child: ListTile(
                 title: const Text("Waiver Conditions", style: TextStyle(fontWeight: FontWeight.bold),),
                 trailing: Checkbox(value: waiverRead, onChanged: (value) {

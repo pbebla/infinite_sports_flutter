@@ -70,6 +70,12 @@ class _ScorePageState extends State<ScorePage> {
   late SingleChildScrollView table2;
   late Widget _player;
 
+  @override
+  void initState() {
+    super.initState();
+
+  }
+
   Future<int> getGameData(setState) async {
     if (widget.game.team1SourcePath != "") {
       team1color = await ColorScheme.fromImageProvider(provider: NetworkImage(widget.game.team1SourcePath));
@@ -146,8 +152,8 @@ class _ScorePageState extends State<ScorePage> {
     }
     return Card(
       elevation: 2,
-      shadowColor: Colors.black,
-      color: Colors.white,
+      shadowColor: Theme.of(context).shadowColor,
+      color: Theme.of(context).cardColor,
       child: Container(
           padding: const EdgeInsets.all(13),
           child: Table(
@@ -222,7 +228,7 @@ class _ScorePageState extends State<ScorePage> {
           )
         )
       );
-      rows.add(const Divider(height: 1, thickness: 1, color: Colors.black,));
+      rows.add(Divider(height: 1, thickness: 1, color: Theme.of(context).dividerColor,));
     }
     return rows;
   }
@@ -242,7 +248,7 @@ class _ScorePageState extends State<ScorePage> {
                   } else if (action == "Assist") {
                     assists+=1;
                   }
-                  activities.add(GameActivity(name, action, k, teamColor.inversePrimary, teamSourcePath));
+                  activities.add(GameActivity(name, action, k, teamColor.primary, teamSourcePath));
                 }
               }
             }
@@ -271,7 +277,7 @@ class _ScorePageState extends State<ScorePage> {
                   } else if (action == "Rebound") {
                     rebounds+=1;
                   }
-                  activities.add(GameActivity(name.toString(), action, k, teamColor.inversePrimary, teamSourcePath));
+                  activities.add(GameActivity(name.toString(), action, k, teamColor.primary, teamSourcePath));
                 }
               }
             }
@@ -293,7 +299,7 @@ class _ScorePageState extends State<ScorePage> {
         sortAscending: tableIsAscending,
         columnSpacing: 0,
         headingRowColor: WidgetStateProperty.resolveWith<Color?>((Set<WidgetState> states) {
-          return teamColor.inversePrimary; // Use the default value.
+          return teamColor.primary; // Use the default value.
         }),
         columns: [
           DataColumn(label: Image.network(teamSourcePath, errorBuilder: (context, error, stackTrace) {
@@ -326,7 +332,7 @@ class _ScorePageState extends State<ScorePage> {
         columnSpacing: 0,
         horizontalMargin: 10,
         headingRowColor: WidgetStateProperty.resolveWith<Color?>((Set<WidgetState> states) {
-          return teamColor.inversePrimary; // Use the default value.
+          return teamColor.primary; // Use the default value.
         }),
         columns: [
           const DataColumn(label: Text("")),
@@ -540,150 +546,153 @@ class _ScorePageState extends State<ScorePage> {
   }
 
   void buildItemList() {
+    if(items.isNotEmpty) {
+      return;
+    }
     List<Widget> informationRows = [
+      Row(
+        children: <Widget>[
+          Expanded(child:Text(widget.game.stringStatus,textAlign: TextAlign.left, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: widget.game.statusColor))),
+          Expanded(child:Text(widget.game is SoccerGame && (widget.game as SoccerGame).startTime != "" ? (widget.game as SoccerGame).startTime : '${widget.game.Time.toString()}:00PM',textAlign: TextAlign.right, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
+        ],
+      ),
+      Row(
+        children: <Widget>[
+          Column(
+            children: <Widget>[
+              Image.network(width: 70, widget.game.team1SourcePath, errorBuilder: (context, error, stackTrace) {
+                return const Text("");
+              },),
+              SizedBox(width: 100, child: Text(widget.game.team1, textAlign: TextAlign.center,),),
+            ],
+          ),
+          Expanded(
+            child:
+              Text(
+                '${widget.game.team1score}-${widget.game.team2score}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 35,
+                  fontWeight: FontWeight.bold,
+                ))),
+          Column(
+            children: <Widget>[
+              Image.network(width: 70, widget.game.team2SourcePath, errorBuilder: (context, error, stackTrace) {
+                return const Text("");
+              },),
+              SizedBox(width: 100, child: Text(widget.game.team2, textAlign: TextAlign.center,),),
+            ],
+          ),
+        ],
+      ),
+    ];
+    if (widget.game is SoccerGame && widget.sport == "AFC San Jose") {
+      informationRows.add(
         Row(
-          children: <Widget>[
-            Expanded(child:Text(widget.game.stringStatus,textAlign: TextAlign.left, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: widget.game.statusColor))),
-            Expanded(child:Text(widget.game is SoccerGame && (widget.game as SoccerGame).startTime != "" ? (widget.game as SoccerGame).startTime : '${widget.game.Time.toString()}:00PM',textAlign: TextAlign.right, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
+          children: [
+            SizedBox(width: 150, child: Text((widget.game as SoccerGame).location, textAlign: TextAlign.left,),),
+            Expanded(child: SizedBox(width: 150, child: Text((widget.game as SoccerGame).type, textAlign: TextAlign.right,),),)
           ],
-        ),
+        )
+      );
+    } else {
+      informationRows.add(
         Row(
           children: <Widget>[
-            Column(
-              children: <Widget>[
-                Image.network(width: 70, widget.game.team1SourcePath, errorBuilder: (context, error, stackTrace) {
-                  return const Text("");
-                },),
-                SizedBox(width: 100, child: Text(widget.game.team1, textAlign: TextAlign.center,),),
-              ],
+            CircularPercentIndicator(
+                  radius: 30,
+                  lineWidth: 4.0,
+                  percent: widget.game.finalvote1,
+                  center: Text(widget.game.percvote1),
+                  progressColor: infiniteSportsPrimaryColor,
             ),
             Expanded(
-              child:
-                Text(
-                  '${widget.game.team1score}-${widget.game.team2score}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 35,
-                    fontWeight: FontWeight.bold,
-                  ))),
-            Column(
-              children: <Widget>[
-                Image.network(width: 70, widget.game.team2SourcePath, errorBuilder: (context, error, stackTrace) {
-                  return const Text("");
-                },),
-                SizedBox(width: 100, child: Text(widget.game.team2, textAlign: TextAlign.center,),),
-              ],
-            ),
-          ],
-        ),
-      ];
-      if (widget.game is SoccerGame && widget.sport == "AFC San Jose") {
-        informationRows.add(
-          Row(
-            children: [
-              SizedBox(width: 150, child: Text((widget.game as SoccerGame).location, textAlign: TextAlign.left,),),
-              Expanded(child: SizedBox(width: 150, child: Text((widget.game as SoccerGame).type, textAlign: TextAlign.right,),),)
-            ],
-          )
-        );
-      } else {
-        informationRows.add(
-          Row(
-            children: <Widget>[
-              CircularPercentIndicator(
-                    radius: 30,
-                    lineWidth: 4.0,
-                    percent: widget.game.finalvote1,
-                    center: Text(widget.game.percvote1),
-                    progressColor: infiniteSportsPrimaryColor,
-              ),
-              Expanded(
-                child: Visibility(
-                maintainSize: true, 
-                maintainAnimation: true,
-                maintainState: true,
-                visible: signedIn && !widget.game.voted && widget.game.status == 0,
-                child: Column(
-                  children: <Widget>[
-                    const Text('Poll', textAlign: TextAlign.center),
-                    Container(
-                      height: 40,
-                      width: 80,
-                      decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(15)),
-                      child: TextButton(
-                        onPressed: () {
-                          showDialog<String>(
-                            context: context,
-                            builder: (BuildContext context) => Dialog(
-                              child: Padding(
-                                padding: const EdgeInsets.all(8.0),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: <Widget>[
-                                    TextButton(onPressed: () async {
-                                      DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${widget.game.UrlPath}/${widget.game.GameNum}/team1vote/");
-                                      await newClient.child(auth.credential!.user!.uid).set(1);
+              child: Visibility(
+              maintainSize: true, 
+              maintainAnimation: true,
+              maintainState: true,
+              visible: signedIn && !widget.game.voted && widget.game.status == 0,
+              child: Column(
+                children: <Widget>[
+                  const Text('Poll', textAlign: TextAlign.center),
+                  Container(
+                    height: 40,
+                    width: 80,
+                    decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(15)),
+                    child: TextButton(
+                      onPressed: () {
+                        showDialog<String>(
+                          context: context,
+                          builder: (BuildContext context) => Dialog(
+                            child: Padding(
+                              padding: const EdgeInsets.all(8.0),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: <Widget>[
+                                  TextButton(onPressed: () async {
+                                    DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${widget.game.UrlPath}/${widget.game.GameNum}/team1vote/");
+                                    await newClient.child(auth.credential!.user!.uid).set(1);
+                                    Navigator.pop(context);
+                                    await _refreshData(setState);
+                                  }, child: Text(widget.game.team1),),
+                                  TextButton(onPressed: () async {
+                                    DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${widget.game.UrlPath}/${widget.game.GameNum}/team2vote/");
+                                    await newClient.child(auth.credential!.user!.uid).set(1);
+                                    Navigator.pop(context);
+                                    await _refreshData(setState);
+                                  }, child: Text(widget.game.team2),),
+                                  const SizedBox(width: 15, height: 15,),
+                                  TextButton(
+                                    onPressed: () {
                                       Navigator.pop(context);
-                                      await _refreshData(setState);
-                                    }, child: Text(widget.game.team1),),
-                                    TextButton(onPressed: () async {
-                                      DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${widget.game.UrlPath}/${widget.game.GameNum}/team2vote/");
-                                      await newClient.child(auth.credential!.user!.uid).set(1);
-                                      Navigator.pop(context);
-                                      await _refreshData(setState);
-                                    }, child: Text(widget.game.team2),),
-                                    const SizedBox(width: 15, height: 15,),
-                                    TextButton(
-                                      onPressed: () {
-                                        Navigator.pop(context);
-                                      },
-                                      child: const Text('Close'),
-                                    ),
-                                  ],
-                                ),
+                                    },
+                                    child: const Text('Close'),
+                                  ),
+                                ],
                               ),
-                            ),);
-                        },
-                        child: const Text(
-                          'Vote',
-                          style: TextStyle(color: Colors.white, fontSize: 18),
-                        ),
+                            ),
+                          ),);
+                      },
+                      child: const Text(
+                        'Vote',
+                        style: TextStyle(color: Colors.white, fontSize: 18),
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              ),
-              CircularPercentIndicator(
-                    radius: 30,
-                    lineWidth: 4.0,
-                    percent: widget.game.finalvote2,
-                    center: Text(widget.game.percvote2),
-                    progressColor: infiniteSportsPrimaryColor,
-              )
-            ],
-          )
-        );
-      }
-
-      Card card = Card(
-        elevation: 2,
-        shadowColor: Colors.black,
-        color: Colors.white,
-        child: SizedBox(
-          width: 300,
-          height: 240,
-          child: Container(
-            padding: const EdgeInsets.all(13),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: informationRows
+            ),
+            ),
+            CircularPercentIndicator(
+                  radius: 30,
+                  lineWidth: 4.0,
+                  percent: widget.game.finalvote2,
+                  center: Text(widget.game.percvote2),
+                  progressColor: infiniteSportsPrimaryColor,
             )
-          ), //Padding
-        ), //SizedBox
+          ],
+        )
       );
+    }
+
+    Card card = Card(
+      elevation: 2,
+      shadowColor: Theme.of(context).shadowColor,
+      color: Theme.of(context).cardColor,
+      child: SizedBox(
+        width: 300,
+        height: 240,
+        child: Container(
+          padding: const EdgeInsets.all(13),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: informationRows
+          )
+        ), //Padding
+      ), //SizedBox
+    );
     items.add(card);
     if (widget.game.status != 0 && team1Players.isNotEmpty && team2Players.isNotEmpty) {
       items.add(buildTeamLeaders());
@@ -691,18 +700,22 @@ class _ScorePageState extends State<ScorePage> {
     }
   }
 
+  void _update() {
+    setState(() {});
+  }
+
   Future<void> _refreshData(setState) async { 
     // Add new items or update the data here 
     widget.game = await getGame(widget, widget.sport, widget.season, convertStringDateToDatabase(widget.game.date), widget.times, widget.game.GameNum);
-    team1Players = [];
-    team2Players = [];
-    activities = [];
+    team1Players.clear();
+    team2Players.clear();
+    activities.clear();
     await getGameData(setState);
     await buildTeamTables(setState);
-    items = [];
+    items.clear();
     buildItemList();
-    setState(() {
-    });
+    setState(() {});
+    //_update();
   } 
 
   void sortTable(int columnIndex, bool ascending, players) {

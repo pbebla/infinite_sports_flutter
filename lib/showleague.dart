@@ -37,28 +37,30 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
       int year = int.parse(date.substring(4));
       int day = int.parse(date.substring(2,4));
       int month = int.parse(date.substring(0,2));
-      dateList.add(Tab(text: DateFormat.yMMMMd('en_US').format(DateTime.utc(year, month=month, day=day))));
-      scoresList.add(LiveScorePage(onTitleSelect:(value) {}, sport: widget.sport, season: widget.season, date: date));
+      if (dateList.length < dates.length && scoresList.length < dates.length) {
+        dateList.add(Tab(text: DateFormat.yMMMMd('en_US').format(DateTime.utc(year, month=month, day=day))));
+        scoresList.add(LiveScorePage(onTitleSelect:(value) {}, sport: widget.sport, season: widget.season, date: date));
+      }
     }
     return DefaultTabController(
       length: dateList.length,
       child: Scaffold(
         appBar: AppBar(
           title: RichText(
-                  textAlign: TextAlign.center,
-                  text: TextSpan(
-                      text: widget.sport,
-                      style: const TextStyle(fontSize: 20, color: Colors.black),
-                      children: <TextSpan>[
-                        TextSpan(
-                          text: '\n${widget.season}',
-                          style: const TextStyle(
-                            fontSize: 16,
-                          ),
-                        ),
-                      ]
+            textAlign: TextAlign.center,
+            text: TextSpan(
+                text: widget.sport,
+                style: TextStyle(fontSize: 20, color: Theme.of(context).colorScheme.inverseSurface),
+                children: <TextSpan>[
+                  TextSpan(
+                    text: '\n${widget.season}',
+                    style: const TextStyle(
+                      fontSize: 16,
+                    ),
                   ),
-                ),
+                ]
+            ),
+          ),
           bottom: TabBar(
             tabAlignment: TabAlignment.start,
             isScrollable: true,

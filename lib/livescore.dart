@@ -176,8 +176,8 @@ class _LiveScorePageState extends State<LiveScorePage> {
 
       Card card = Card(
         elevation: 2,
-        shadowColor: Colors.black,
-        color: Colors.white,
+        shadowColor: Theme.of(context).shadowColor,
+        color: Theme.of(context).cardColor,
         child: SizedBox(
           width: 300,
           height: 240,

@@ -90,10 +90,10 @@ class _SignupState extends State<Signup> {
             );
         }
         return Scaffold(
-          appBar: AppBar(title: const Text("Sign Up List"), backgroundColor: Theme.of(context).primaryColor, foregroundColor: Colors.white,),
+          appBar: AppBar(title: const Text("Sign Up List"), backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Colors.white,),
           body: ListView.separated(
-            separatorBuilder: (context, index) => const Divider(
-              color: Colors.black,
+            separatorBuilder: (context, index) => Divider(
+              color: Theme.of(context).dividerColor,
             ),
             itemCount: snapshot.data!.length,
             itemBuilder: (context, index) => snapshot.data![index]

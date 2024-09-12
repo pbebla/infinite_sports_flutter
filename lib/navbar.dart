@@ -7,10 +7,12 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
 import 'package:infinite_sports_flutter/login.dart';
+import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/playerpage.dart';
 import 'package:infinite_sports_flutter/settings.dart';
 import 'package:infinite_sports_flutter/signup.dart';
+import 'package:provider/provider.dart';
 
 
 class NavBar extends StatefulWidget {
@@ -165,12 +167,6 @@ class _NavBarState extends State<NavBar> {
                   },));
                 },
               ),
-              const ListTile(
-                enabled: false,
-                leading: ImageIcon(AssetImage("assets/notifnew.png"), color: Colors.white,),
-                title: Text("Notifications", style: TextStyle(fontWeight: FontWeight.bold),),
-                textColor: Colors.white,
-              ),
               ListTile(
                 leading: const ImageIcon(AssetImage("assets/settings.png"), color: Colors.white,),
                 title: const Text("Settings", style: TextStyle(fontWeight: FontWeight.bold),),
@@ -213,7 +209,14 @@ class _NavBarState extends State<NavBar> {
                       }
                     );
                   }
-              ),)
+              ),),
+              ListTile(
+                title: Text("Toggle Dark Mode", style: TextStyle(fontWeight: FontWeight.bold),),
+                textColor: Colors.white,
+                onTap: () {
+                  Provider.of<ThemeProvider>(context, listen: false).toggleTheme();
+                },
+              ),
 
             ],
           ),

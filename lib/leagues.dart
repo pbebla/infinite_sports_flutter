@@ -1,4 +1,5 @@
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
@@ -101,8 +102,8 @@ class _LeaguesPageState extends State<LeaguesPage> {
         }
         return Scaffold(
           body: ListView.separated(
-            separatorBuilder: (context, index) => const Divider(
-              color: Colors.black,
+            separatorBuilder: (context, index) => Divider(
+              color: Theme.of(context).dividerColor,
             ),
             itemCount: snapshot.data!.length,
             itemBuilder: (context, index) => snapshot.data![index]

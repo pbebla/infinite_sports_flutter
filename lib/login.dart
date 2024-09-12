@@ -34,7 +34,7 @@ class _LoginDemoState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text("Login or Sign Up"),
         backgroundColor: Theme.of(context).colorScheme.primary,

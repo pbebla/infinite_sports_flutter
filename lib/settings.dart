@@ -38,7 +38,7 @@ class _SettingsState extends State<Settings> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Settings"),
-        backgroundColor: Theme.of(context).primaryColor,
+        backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),
       body: Padding(padding: const EdgeInsetsDirectional.all(10.0),
@@ -105,7 +105,7 @@ class _SettingsState extends State<Settings> {
                     return Scaffold(
                       appBar: AppBar(
                         title: const Text("Futsal"),
-                        backgroundColor: Theme.of(context).primaryColor,
+                        backgroundColor: Theme.of(context).colorScheme.primary,
                         foregroundColor: Colors.white,
                       ),
                       body: ListView(
@@ -135,7 +135,7 @@ class _SettingsState extends State<Settings> {
                     return Scaffold(
                       appBar: AppBar(
                         title: const Text("Basketball"),
-                        backgroundColor: Theme.of(context).primaryColor,
+                        backgroundColor: Theme.of(context).colorScheme.primary,
                         foregroundColor: Colors.white,
                       ),
                       body: ListView(
@@ -185,7 +185,7 @@ class _SettingsState extends State<Settings> {
                   Navigator.push(context, MaterialPageRoute(builder:(context) {
                     return Scaffold(
                       appBar: AppBar(
-                        title: const Text("About Infinite Sports Association"),
+                        title: const Text("About NinevehWare"),
                       ),
                       body: Column(children: [
                         Image.asset("assets/ninevehware.png"),
