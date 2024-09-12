@@ -29,8 +29,15 @@ class ShowLeaguePage extends StatefulWidget {
 class _ShowLeaguePageState extends State<ShowLeaguePage> { 
   List<LiveScorePage> scoresList = <LiveScorePage>[];
   List<Tab> dateList = <Tab>[];
+  Future<int>? _league;
+
+  @override
+  void initState() {
+    _league = buildLeague();
+    super.initState();
+  }
   
-  Future<DefaultTabController> buildLeague() async {
+  Future<int> buildLeague() async {
     var dates = await getDates(widget.sport, widget.season);
     dates.sort();
     for (var date in dates) {
@@ -42,43 +49,14 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
         scoresList.add(LiveScorePage(onTitleSelect:(value) {}, sport: widget.sport, season: widget.season, date: date));
       }
     }
-    return DefaultTabController(
-      length: dateList.length,
-      child: Scaffold(
-        appBar: AppBar(
-          title: RichText(
-            textAlign: TextAlign.center,
-            text: TextSpan(
-                text: widget.sport,
-                style: TextStyle(fontSize: 20, color: Theme.of(context).colorScheme.inverseSurface),
-                children: <TextSpan>[
-                  TextSpan(
-                    text: '\n${widget.season}',
-                    style: const TextStyle(
-                      fontSize: 16,
-                    ),
-                  ),
-                ]
-            ),
-          ),
-          bottom: TabBar(
-            tabAlignment: TabAlignment.start,
-            isScrollable: true,
-            tabs: dateList
-          ),
-        ),
-        body: TabBarView(
-          children: scoresList,
-        )
-      )
-    );
+    return 1;
   }
   
   @override
   Widget build(BuildContext context) {
     executeAfterBuild();
     return FutureBuilder(
-      future: buildLeague(), 
+      future: _league, 
       builder:(context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Center(
@@ -87,8 +65,36 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
               )
             );
         }
-        var data = snapshot.data as DefaultTabController;
-        return data;
+        return DefaultTabController(
+          length: dateList.length,
+          child: Scaffold(
+            appBar: AppBar(
+              title: RichText(
+                textAlign: TextAlign.center,
+                text: TextSpan(
+                    text: widget.sport,
+                    style: TextStyle(fontSize: 20, color: Theme.of(context).colorScheme.inverseSurface),
+                    children: <TextSpan>[
+                      TextSpan(
+                        text: '\n${widget.season}',
+                        style: const TextStyle(
+                          fontSize: 16,
+                        ),
+                      ),
+                    ]
+                ),
+              ),
+              bottom: TabBar(
+                tabAlignment: TabAlignment.start,
+                isScrollable: true,
+                tabs: dateList
+              ),
+            ),
+            body: TabBarView(
+              children: scoresList,
+            )
+          )
+        );
       },
     );
   }

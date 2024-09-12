@@ -40,8 +40,6 @@ class CurrentLivescoreNavigationState extends State<CurrentLivescoreNavigation> 
                   },
                   child: Card(
                     elevation: 2,
-                    shadowColor: Theme.of(context).shadowColor,
-                    color: Theme.of(context).cardColor,
                     child: SizedBox(
                       width: 350,
                       height: 70,

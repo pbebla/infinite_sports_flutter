@@ -1,5 +1,6 @@
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/main.dart';
 import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
@@ -16,18 +17,32 @@ import 'package:infinite_sports_flutter/playerpage.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:palette_generator/palette_generator.dart';
+
+Map<String, String> stringToGameText = {
+  "OnePointer": "FT",
+  "TwoPointer": "FG",
+  "ThreePointer": "3PT",
+  "Rebound": "REB",
+  "Foul": "Foul",
+  "Goal": "Goal",
+  "Assist": "Assist",
+  "Yellow": "Yellow",
+  "Blue": "Blue",
+  "Red": "Red"
+};
 
 Map<String,Widget> stringToGameAction = {
-  "OnePointer": Row(children: [const Text("FT"), Image.asset("assets/onepointer.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
-  "TwoPointer": Row(children: [const Text("FG"), Image.asset("assets/twopointer.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
-  "ThreePointer": Row(children: [const Text("3PT"), Image.asset("assets/threepointer.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
-  "Rebound": Row(children: [const Text("REB"), Image.asset("assets/rebound.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
-  "Foul": Row(children: [const Text("Foul"), Image.asset("assets/foul.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
-  "Goal": Row(children: [const Text("Goal"), Image.asset("assets/goal.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
-  "Assist": Row(children: [const Text("Assist"), Image.asset("assets/assist.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
-  "Yellow": Row(children: [const Text("Yellow"), Image.asset("assets/yellow.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
-  "Blue": Row(children: [const Text("Blue"), Image.asset("assets/blue.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
-  "Red": Row(children: [const Text("Red"), Image.asset("assets/red.png", height: windowsDefaultIconSize.toDouble()/1.5,)],),
+  "OnePointer": Image.asset("assets/onepointer.png", height: windowsDefaultIconSize.toDouble()/1.5,),
+  "TwoPointer": Image.asset("assets/twopointer.png", height: windowsDefaultIconSize.toDouble()/1.5,),
+  "ThreePointer": Image.asset("assets/threepointer.png", height: windowsDefaultIconSize.toDouble()/1.5,),
+  "Rebound": Image.asset("assets/rebound.png", height: windowsDefaultIconSize.toDouble()/1.5,),
+  "Foul": Image.asset("assets/foul.png", height: windowsDefaultIconSize.toDouble()/1.5,),
+  "Goal": Image.asset("assets/goal.png", height: windowsDefaultIconSize.toDouble()/1.5,),
+  "Assist": Image.asset("assets/assist.png", height: windowsDefaultIconSize.toDouble()/1.5,),
+  "Yellow": Image.asset("assets/yellow.png", height: windowsDefaultIconSize.toDouble()/1.5,),
+  "Blue": Image.asset("assets/blue.png", height: windowsDefaultIconSize.toDouble()/1.5,),
+  "Red": Image.asset("assets/red.png", height: windowsDefaultIconSize.toDouble()/1.5,),
 };
 
 typedef TitleCallback = void Function(String value);
@@ -56,32 +71,76 @@ class ScorePage extends StatefulWidget {
 }
 
 class _ScorePageState extends State<ScorePage> {
+
   List<Widget> items = List.empty(growable: true);
   List<PlayerStats> team1Players = List.empty(growable: true);
   List<PlayerStats> team2Players = List.empty(growable: true);
   List<GameActivity> activities = List.empty(growable: true);
-  ColorScheme team1color  = const ColorScheme.dark();
-  ColorScheme team2color = const ColorScheme.dark();
+  Color team1color = Colors.white;
+  Color team2color = Colors.white;
   int? table1SortColumnIndex;
   int? table2SortColumnIndex;
   bool table1isAscending = false;
   bool table2isAscending = false;
   late SingleChildScrollView table1;
   late SingleChildScrollView table2;
-  late Widget _player;
+  late Future<int> _loadingGame;
 
   @override
   void initState() {
+    _loadingGame = getGameData();
     super.initState();
-
   }
 
-  Future<int> getGameData(setState) async {
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    buildItemList();
+  }
+
+  Future<int> getGameData() async {
     if (widget.game.team1SourcePath != "") {
-      team1color = await ColorScheme.fromImageProvider(provider: NetworkImage(widget.game.team1SourcePath));
+      var palette = await PaletteGenerator.fromImageProvider(NetworkImage(widget.game.team1SourcePath));
+      if (widget.sport == "Futsal" && widget.season == "13" && widget.game.team1 == "Ashur") {
+        team1color = Color.fromRGBO(207, 82, 36, 1.0);
+      } else if (palette.dominantColor != null) {
+        team1color = palette.dominantColor!.color;
+      } else {
+        team1color = const Color.fromARGB(255, 124, 124, 124);
+      }
     }
     if (widget.game.team2SourcePath != "") {
-      team2color = await ColorScheme.fromImageProvider(provider: NetworkImage(widget.game.team2SourcePath));
+      var palette = await PaletteGenerator.fromImageProvider(NetworkImage(widget.game.team2SourcePath));
+      if (palette.dominantColor != null) {
+        team2color = palette.dominantColor!.color;
+      } else if (widget.sport == "Futsal" && widget.season == "13" && widget.game.team2 == "Ashur") {
+        team2color = Color.fromRGBO(207, 82, 36, 1.0);
+      } else {
+        team2color = const Color.fromARGB(255, 124, 124, 124);
+      }
+    }
+    if (widget.sport == "Futsal") {
+      buildTeamPlayers(team1Players, (widget.game as FutsalGame).team1lineup, widget.game.team1activity, team1color, widget.game.team1SourcePath);
+      buildTeamPlayers(team2Players, (widget.game as FutsalGame).team2lineup, widget.game.team2activity, team2color, widget.game.team2SourcePath);
+    } else if (widget.sport == "AFC San Jose") {
+      if (widget.game.team1 == "AFC San Jose") {
+        buildTeamPlayers(team1Players, (widget.game as SoccerGame).team1lineup, widget.game.team1activity, team1color, widget.game.team1SourcePath);
+      } else {
+        buildTeamPlayers(team2Players, (widget.game as SoccerGame).team2lineup, widget.game.team2activity, team2color, widget.game.team2SourcePath);
+      }
+    } else if (widget.sport == "Basketball") {
+      buildTeamPlayers(team1Players, (widget.game as BasketballGame).team1lineup, widget.game.team1activity, team1color, widget.game.team1SourcePath);
+      buildTeamPlayers(team2Players, (widget.game as BasketballGame).team2lineup, widget.game.team2activity, team2color, widget.game.team2SourcePath);
+    }
+    if (widget.sport == "AFC San Jose") {
+      if (widget.game.team1 == "AFC San Jose") {
+        sortTable(table1SortColumnIndex ?? 2, table1isAscending, team1Players);
+      } else {
+        sortTable(table2SortColumnIndex ?? 2, table2isAscending, team2Players);
+      }
+    } else {
+      sortTable(table1SortColumnIndex ?? 2, table1isAscending, team1Players);
+      sortTable(table2SortColumnIndex ?? 2, table2isAscending, team2Players);
     }
     return 1;
   }
@@ -152,8 +211,6 @@ class _ScorePageState extends State<ScorePage> {
     }
     return Card(
       elevation: 2,
-      shadowColor: Theme.of(context).shadowColor,
-      color: Theme.of(context).cardColor,
       child: Container(
           padding: const EdgeInsets.all(13),
           child: Table(
@@ -218,22 +275,27 @@ class _ScorePageState extends State<ScorePage> {
         color: activity.color,
         child: Row(
           children: [
-            Text(activity.time), 
+            Text(activity.time, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white)), 
             Image.network(activity.teamImagePath, errorBuilder: (context, error, stackTrace) {
                           return const Text("");
                         }, width: windowsDefaultIconSize.toDouble()/1.5 , fit: BoxFit.scaleDown, alignment: FractionalOffset.centerLeft),
-            Text(activity.name),
+            Text(activity.name, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white)),
             const Spacer(),
-            stringToGameAction[activity.action]!,],
-          )
+            Row(
+              children: [
+                Text(stringToGameText[activity.action]!, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white)),
+                stringToGameAction[activity.action]!
+              ],
+            )
+          ]
         )
-      );
+      ));
       rows.add(Divider(height: 1, thickness: 1, color: Theme.of(context).dividerColor,));
     }
     return rows;
   }
 
-  void buildTeamPlayers(teamPlayers, teamLineup, teamActivity, teamColor, teamSourcePath) {
+  void buildTeamPlayers(teamPlayers, teamLineup, teamActivity, Color teamColor, teamSourcePath) {
     if (teamPlayers.isEmpty) {
       if (widget.sport == "Futsal" || widget.sport == "AFC San Jose") {
         teamLineup.forEach((name, profile) {
@@ -248,7 +310,7 @@ class _ScorePageState extends State<ScorePage> {
                   } else if (action == "Assist") {
                     assists+=1;
                   }
-                  activities.add(GameActivity(name, action, k, teamColor.primary, teamSourcePath));
+                  activities.add(GameActivity(name, action, k, teamColor, teamSourcePath));
                 }
               }
             }
@@ -277,7 +339,7 @@ class _ScorePageState extends State<ScorePage> {
                   } else if (action == "Rebound") {
                     rebounds+=1;
                   }
-                  activities.add(GameActivity(name.toString(), action, k, teamColor.primary, teamSourcePath));
+                  activities.add(GameActivity(name.toString(), action, k, teamColor, teamSourcePath));
                 }
               }
             }
@@ -288,7 +350,7 @@ class _ScorePageState extends State<ScorePage> {
     }
   }
 
-  DataTable buildStatsTable(teamName, teamSourcePath, teamLineup, teamColor, teamActivity, teamPlayers, tableSortColumnIndex, tableIsAscending, onSort, setState) {
+  DataTable buildStatsTable(teamName, teamSourcePath, teamLineup, Color teamColor, teamActivity, teamPlayers, tableSortColumnIndex, tableIsAscending, onSort, setState) {
     if (teamPlayers.isEmpty) {
         buildTeamPlayers(teamPlayers, teamLineup, teamActivity, teamColor, teamSourcePath);
         sortTable(tableSortColumnIndex ?? 2, tableIsAscending, teamPlayers);
@@ -298,8 +360,9 @@ class _ScorePageState extends State<ScorePage> {
         sortColumnIndex: tableSortColumnIndex,
         sortAscending: tableIsAscending,
         columnSpacing: 0,
+        headingTextStyle: TextStyle(color: teamColor.computeLuminance() > 0.5 ? Colors.black : Colors.white),
         headingRowColor: WidgetStateProperty.resolveWith<Color?>((Set<WidgetState> states) {
-          return teamColor.primary; // Use the default value.
+          return teamColor; // Use the default value.
         }),
         columns: [
           DataColumn(label: Image.network(teamSourcePath, errorBuilder: (context, error, stackTrace) {
@@ -330,9 +393,10 @@ class _ScorePageState extends State<ScorePage> {
         sortColumnIndex: tableSortColumnIndex,
         sortAscending: tableIsAscending,
         columnSpacing: 0,
+        headingTextStyle: TextStyle(color: teamColor.computeLuminance() > 0.5 ? Colors.black : Colors.white),
         horizontalMargin: 10,
         headingRowColor: WidgetStateProperty.resolveWith<Color?>((Set<WidgetState> states) {
-          return teamColor.primary; // Use the default value.
+          return teamColor; // Use the default value.
         }),
         columns: [
           const DataColumn(label: Text("")),
@@ -367,6 +431,7 @@ class _ScorePageState extends State<ScorePage> {
     }
     return DataTable(columns: const [DataColumn(label: Spacer())], rows: const []);
   }
+
   @override
   Widget build(BuildContext context) {
     // This method is rerun every time setState is called, for instance as done
@@ -376,7 +441,7 @@ class _ScorePageState extends State<ScorePage> {
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
     return FutureBuilder(
-      future: getGameData(setState), 
+      future: _loadingGame, 
       builder: (context, snapshot) {
         if(snapshot.connectionState == ConnectionState.waiting) {
           return Center(
@@ -385,30 +450,6 @@ class _ScorePageState extends State<ScorePage> {
               )
             );
         }
-        if (widget.sport == "Futsal") {
-          buildTeamPlayers(team1Players, (widget.game as FutsalGame).team1lineup, widget.game.team1activity, team1color, widget.game.team1SourcePath);
-          buildTeamPlayers(team2Players, (widget.game as FutsalGame).team2lineup, widget.game.team2activity, team2color, widget.game.team2SourcePath);
-        } else if (widget.sport == "AFC San Jose") {
-          if (widget.game.team1 == "AFC San Jose") {
-            buildTeamPlayers(team1Players, (widget.game as SoccerGame).team1lineup, widget.game.team1activity, team1color, widget.game.team1SourcePath);
-          } else {
-            buildTeamPlayers(team2Players, (widget.game as SoccerGame).team2lineup, widget.game.team2activity, team2color, widget.game.team2SourcePath);
-          }
-        } else if (widget.sport == "Basketball") {
-          buildTeamPlayers(team1Players, (widget.game as BasketballGame).team1lineup, widget.game.team1activity, team1color, widget.game.team1SourcePath);
-          buildTeamPlayers(team2Players, (widget.game as BasketballGame).team2lineup, widget.game.team2activity, team2color, widget.game.team2SourcePath);
-        }
-        if (widget.sport == "AFC San Jose") {
-          if (widget.game.team1 == "AFC San Jose") {
-            sortTable(table1SortColumnIndex ?? 2, table1isAscending, team1Players);
-          } else {
-            sortTable(table2SortColumnIndex ?? 2, table2isAscending, team2Players);
-          }
-        } else {
-          sortTable(table1SortColumnIndex ?? 2, table1isAscending, team1Players);
-          sortTable(table2SortColumnIndex ?? 2, table2isAscending, team2Players);
-        }
-        buildItemList();
         List<Widget> tabs = List.empty(growable: true);
         List<Tab> tabNames = List.empty(growable: true);
         tabs.add(StatefulBuilder(
@@ -419,7 +460,7 @@ class _ScorePageState extends State<ScorePage> {
               },
               child: ListView(
                     padding: const EdgeInsets.all(15),
-                    children: items
+                    children: buildItemList()
                 )
               );
           },
@@ -431,7 +472,6 @@ class _ScorePageState extends State<ScorePage> {
             if (widget.game.team1 == "AFC San Jose") {
               tabs.add(StatefulBuilder(
                 builder: (context, setState) {
-                  buildTeamTables(setState);
                   return RefreshIndicator(
                     onRefresh: () async {
                       return _refreshData(setState);
@@ -445,7 +485,6 @@ class _ScorePageState extends State<ScorePage> {
             } else {
               tabs.add(StatefulBuilder(
                 builder: (context, setState) {
-                  buildTeamTables(setState);
                   return RefreshIndicator(
                     onRefresh: () async {
                       return _refreshData(setState);
@@ -545,10 +584,8 @@ class _ScorePageState extends State<ScorePage> {
     return 1;
   }
 
-  void buildItemList() {
-    if(items.isNotEmpty) {
-      return;
-    }
+  List<Widget> buildItemList() {
+    List<Widget> items = List<Widget>.empty(growable: true);
     List<Widget> informationRows = [
       Row(
         children: <Widget>[
@@ -676,11 +713,17 @@ class _ScorePageState extends State<ScorePage> {
         )
       );
     }
+    items.add(buildScoreCard(informationRows));
+    if (widget.game.status != 0 && team1Players.isNotEmpty && team2Players.isNotEmpty) {
+      items.add(buildTeamLeaders());
+      items.add(Column(children: buildActivityList()));   
+    }
+    return items;
+  }
 
-    Card card = Card(
+  Card buildScoreCard(informationRows) {
+    return Card(
       elevation: 2,
-      shadowColor: Theme.of(context).shadowColor,
-      color: Theme.of(context).cardColor,
       child: SizedBox(
         width: 300,
         height: 240,
@@ -693,29 +736,17 @@ class _ScorePageState extends State<ScorePage> {
         ), //Padding
       ), //SizedBox
     );
-    items.add(card);
-    if (widget.game.status != 0 && team1Players.isNotEmpty && team2Players.isNotEmpty) {
-      items.add(buildTeamLeaders());
-      items.add(Column(children: buildActivityList()));   
-    }
   }
 
-  void _update() {
-    setState(() {});
-  }
-
-  Future<void> _refreshData(setState) async { 
+  Future<void> _refreshData(localSetState) async { 
     // Add new items or update the data here 
     widget.game = await getGame(widget, widget.sport, widget.season, convertStringDateToDatabase(widget.game.date), widget.times, widget.game.GameNum);
     team1Players.clear();
     team2Players.clear();
     activities.clear();
-    await getGameData(setState);
-    await buildTeamTables(setState);
-    items.clear();
-    buildItemList();
-    setState(() {});
-    //_update();
+    await getGameData();
+    await buildTeamTables(localSetState);
+    localSetState(() {});
   } 
 
   void sortTable(int columnIndex, bool ascending, players) {

@@ -1,6 +1,7 @@
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/main.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/scorepage.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -34,7 +35,14 @@ class LiveScorePage extends StatefulWidget {
 
 class _LiveScorePageState extends State<LiveScorePage> {
   Map<String, Map<String, int>> times = {};
-  var cardList = <GestureDetector>[];
+  List<Game>? gamesList;
+  Future<List<Game>>? _fetchGamesList;
+
+  @override
+  void initState() {
+    _fetchGamesList = getGames(widget.sport, widget.season, widget.date, times);
+    super.initState();
+  }
 
   List<GestureDetector> populateCardList(List<Game> gamesList) {
     List<GestureDetector> cardList = [];
@@ -176,8 +184,6 @@ class _LiveScorePageState extends State<LiveScorePage> {
 
       Card card = Card(
         elevation: 2,
-        shadowColor: Theme.of(context).shadowColor,
-        color: Theme.of(context).cardColor,
         child: SizedBox(
           width: 300,
           height: 240,
@@ -205,12 +211,10 @@ class _LiveScorePageState extends State<LiveScorePage> {
     return cardList;
   }
 
-  Future<void> _refreshData(setState) async { 
+  Future<void> _refreshData(localsetState) async { 
     // Add new items or update the data here 
-    List<Game> gamesList = await getGames(widget.sport, widget.season, widget.date, times);
-    cardList = populateCardList(gamesList); 
-    setState(() {
-    }); 
+    gamesList = await getGames(widget.sport, widget.season, widget.date, times);
+    localsetState(() {}); 
   } 
 
   @override
@@ -223,7 +227,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
     // than having to individually change instances of widgets.
     
     return FutureBuilder(
-      future: getGames(widget.sport, widget.season, widget.date, times), 
+      future: _fetchGamesList, 
       builder:(context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
             return Center(
@@ -235,9 +239,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
         if (!snapshot.hasData) {
           return const Center(child: Card(child: Text("No Upcoming Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold),),),);
         }
-        List<Game> gamesList = snapshot.data as List<Game>;
-        //widget.onTitleSelect(gamesList[0].date);
-        cardList = populateCardList(gamesList); 
+        gamesList = snapshot.data!;
         return StatefulBuilder(
           builder: (context, setState) {
             return RefreshIndicator(
@@ -246,7 +248,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
               },
               child: ListView(
                 padding: const EdgeInsets.all(15),
-                children: cardList,
+                children: populateCardList(gamesList!),
               )
             );
           }
