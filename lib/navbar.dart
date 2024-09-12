@@ -177,10 +177,7 @@ class _NavBarState extends State<NavBar> {
                   },));
                 },
               ),
-              Expanded(
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: StatefulBuilder(
+              StatefulBuilder(
                 builder: (context, setState) {
                   return ListTile(
                     title: Text("Dark Theme", style: TextStyle(fontWeight: FontWeight.bold),),
@@ -197,7 +194,6 @@ class _NavBarState extends State<NavBar> {
                   );
                 },
               ),
-              )),
               Visibility(
                 visible: signedIn,
                 child: ListTile(
