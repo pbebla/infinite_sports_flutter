@@ -460,6 +460,7 @@ class _ScorePageState extends State<ScorePage> {
             if (widget.game.team1 == "AFC San Jose") {
               tabs.add(StatefulBuilder(
                 builder: (context, setState) {
+                  buildTeamTables(setState);
                   return RefreshIndicator(
                     onRefresh: () async {
                       return _refreshData(setState);
@@ -473,6 +474,7 @@ class _ScorePageState extends State<ScorePage> {
             } else {
               tabs.add(StatefulBuilder(
                 builder: (context, setState) {
+                  buildTeamTables(setState);
                   return RefreshIndicator(
                     onRefresh: () async {
                       return _refreshData(setState);
