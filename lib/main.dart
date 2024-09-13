@@ -86,12 +86,14 @@ class _MyHomePageState extends State<MyHomePage> {
   String currentSeason = "";
   String currentDate = "";
   bool isCurrentFinished = false;
+  Future<int>? _fetchCurrentValues;
 
   @override
-  void initState() {
+  void initState() async {
     // TODO: implement initState
-    super.initState();
     setTitle(_liveScoresTitle);
+    super.initState();
+    _fetchCurrentValues = setCurrentValues();
   }
 
   void setTitle(String value) {
@@ -134,7 +136,7 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   Widget build(BuildContext context) {
     final List<Widget> widgetOptions = <Widget>[
-      FutureBuilder(future: setCurrentValues(), builder:(context, snapshot) {
+      FutureBuilder(future: _fetchCurrentValues, builder:(context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Center(
               child: CircularProgressIndicator(
