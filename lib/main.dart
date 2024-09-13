@@ -3,7 +3,8 @@ import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_config/flutter_config.dart';
+import 'package:infinite_sports_flutter/aroundyou.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
 import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
@@ -18,7 +19,7 @@ import 'firebase_options.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(fileName: ".env");
+  await FlutterConfig.loadEnvVariables();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
@@ -89,11 +90,11 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<int>? _fetchCurrentValues;
 
   @override
-  void initState() async {
+  void initState() {
     // TODO: implement initState
     setTitle(_liveScoresTitle);
-    super.initState();
     _fetchCurrentValues = setCurrentValues();
+    super.initState();
   }
 
   void setTitle(String value) {
@@ -150,6 +151,7 @@ class _MyHomePageState extends State<MyHomePage> {
         return CurrentLivescoreNavigation(currentSport: currentSport, currentSeason: currentSeason, currentDate: currentDate, onTitleSelect: setLiveScoreTitle, isSeasonFinished: isCurrentFinished,);
       },),
       const LeaguesNavigation(),
+      const AroundYou(),
     ];
     // This method is rerun every time setState is called, for instance as done
     // by the _incrementCounter method above.

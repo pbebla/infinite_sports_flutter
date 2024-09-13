@@ -133,7 +133,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
             }
             if (snapshot.data!) {
               return AlertDialog(
-                title: Text("Success! Reset Email Sent to\n${_emailController.value.text}", style: TextStyle(fontSize: 16),),
+                title: Text("Success! Reset Email Sent to\n${_emailController.value.text}", style: const TextStyle(fontSize: 16),),
                 actions: [TextButton(child: const Text("OK"), onPressed: () {
                     Navigator.pop(context);
                     Navigator.pop(context);

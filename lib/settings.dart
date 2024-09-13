@@ -49,7 +49,7 @@ class _SettingsState extends State<Settings> {
             delegate: SliverChildListDelegate(
               [
                 const Divider(color: Colors.grey),
-                ListTile(title: Text("Change Password"), minTileHeight: 40, onTap: () async {
+                ListTile(title: const Text("Change Password"), minTileHeight: 40, onTap: () async {
                   showDialog(
                     context: context,
                     builder: (context) {
@@ -64,7 +64,7 @@ class _SettingsState extends State<Settings> {
                             );
                           }
                           return AlertDialog(
-                            title: Text("Success! Reset Email Sent to\n${FirebaseAuth.instance.currentUser!.email!}", style: TextStyle(fontSize: 16),),
+                            title: Text("Success! Reset Email Sent to\n${FirebaseAuth.instance.currentUser!.email!}", style: const TextStyle(fontSize: 16),),
                             actions: [TextButton(child: const Text("OK"), onPressed: () {
                                 Navigator.pop(context);
                             },)],

@@ -85,7 +85,7 @@ class _LoginDemoState extends State<LoginPage> {
             TextButton(
               onPressed: (){
                 Navigator.push(context, MaterialPageRoute(builder:(context) {
-                    return ForgotPasswordPage();
+                    return const ForgotPasswordPage();
                 },));
               },
               child: Text(

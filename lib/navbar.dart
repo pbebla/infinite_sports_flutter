@@ -180,7 +180,7 @@ class _NavBarState extends State<NavBar> {
               StatefulBuilder(
                 builder: (context, setState) {
                   return ListTile(
-                    title: Text("Dark Theme", style: TextStyle(fontWeight: FontWeight.bold),),
+                    title: const Text("Dark Theme", style: TextStyle(fontWeight: FontWeight.bold),),
                     textColor: Colors.white,
                     trailing: Switch(
                       value: darkModeEnabled, 

@@ -1,20 +1,9 @@
-import 'dart:io';
 
-import 'package:email_validator/email_validator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
-import 'package:infinite_sports_flutter/main.dart';
-import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/model/userinformation.dart';
-import 'package:infinite_sports_flutter/navigations/current_livescore_navigation.dart';
-import 'package:infinite_sports_flutter/signup.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 class LeagueForm extends StatefulWidget {

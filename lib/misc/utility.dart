@@ -29,7 +29,7 @@ bool autoSignIn = false;
 bool darkModeEnabled = false;
 
 // Create storage
-final secureStorage = const FlutterSecureStorage();
+const secureStorage = FlutterSecureStorage();
 
 // Read value
 //String value = await storage.read(key: key);
