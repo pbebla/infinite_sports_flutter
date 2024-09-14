@@ -104,6 +104,8 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
       }
     }
     _googleMap = GoogleMap(
+      padding: EdgeInsets.only(
+         bottom:45),
       onMapCreated: _onMapCreated,
       initialCameraPosition: CameraPosition(
         target: _center!,
@@ -275,21 +277,21 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                                     },) : Text(""),),
                                               Container(
                                                 color: Theme.of(context).colorScheme.surfaceContainer,
-                                                child: ListTile(title: Text("Website"), onTap: () {
-                                                      Navigator.push(context, MaterialPageRoute(builder: (context) {
-                                                        WebViewController controller = WebViewController()
-                                                        ..loadRequest(Uri.parse(businesses![index].url ?? ""));
-                                                        return Scaffold(
-                                                          appBar: AppBar(
-                                                            title: const Text(""),
-                                                            actions: [
-                                                              NavigationControls(controller: controller)
-                                                            ],
-                                                          ),
-                                                          body: WebViewStack(controller: controller,),
-                                                        );
-                                                      },));
-                                                    },),
+                                                child: ListTile(title: Text("Website"), enabled: businesses![index].url?.isNotEmpty ?? false, onTap: () {
+                                                  Navigator.push(context, MaterialPageRoute(builder: (context) {
+                                                    WebViewController controller = WebViewController()
+                                                    ..loadRequest(Uri.parse(businesses![index].url ?? ""));
+                                                    return Scaffold(
+                                                      appBar: AppBar(
+                                                        title: const Text(""),
+                                                        actions: [
+                                                          NavigationControls(controller: controller)
+                                                        ],
+                                                      ),
+                                                      body: WebViewStack(controller: controller,),
+                                                    );
+                                                  },));
+                                                },),
                                               ),
                                               Container(
                                                 color: Theme.of(context).colorScheme.surfaceContainer,
