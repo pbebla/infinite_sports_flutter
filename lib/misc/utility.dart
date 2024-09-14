@@ -1,5 +1,3 @@
-import 'dart:io';
-import 'dart:math';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -8,10 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
+import 'package:infinite_sports_flutter/model/business.dart';
+import 'package:infinite_sports_flutter/model/event.dart';
 import 'package:infinite_sports_flutter/model/futsalgame.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
-import 'package:infinite_sports_flutter/model/player.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/model/soccerplayer.dart';
 import 'package:infinite_sports_flutter/model/userinformation.dart';
@@ -911,5 +910,58 @@ Future<Map<dynamic, dynamic>> getOtherSignups() async {
   return status;
   } catch (e) {
     return {};
+  }
+}
+
+Future<List<Business>> getBusinesses() async {
+  DatabaseReference newClient = FirebaseDatabase.instance.ref();
+  var businesses = List<Business>.empty(growable: true);
+  try {
+    var event = await newClient.child("Map").once();
+    var list = event.snapshot.value as List;
+    list.forEach((value) {
+      Business business = Business();
+      business.description = value["Description"] ?? "";
+      business.logoUrl = value["LogoUrl"] ?? "";
+      business.name = value["Name"] ?? "";
+      business.url = value["Url"];
+      business.phone = value["Phone"] ?? "";
+      business.lat = value["Lat"] ?? double.nan;
+      business.long = value["Long"] ?? double.nan;
+      if (business.logoUrl != null) {
+        business.logo = Image.network(business.logoUrl!);
+      }
+      businesses.add(business);
+    });
+    return businesses;
+  } catch (e) {
+    return businesses;
+  }
+}
+
+Future<List<Event>> getEvents() async {
+  DatabaseReference newClient = FirebaseDatabase.instance.ref();
+  var events = List<Event>.empty(growable: true);
+  try {
+    var snapshot = await newClient.child("Events").once();
+    var list = snapshot.snapshot.value as List;
+    list.forEach((value) {
+      Event event = Event();
+      event.address = value["Address"] ?? "";
+      event.date = value["Date"] ?? "";
+      event.endTime = value["EndTime"] ?? "";
+      event.eventDate = value["EventDate"] ?? "";
+      event.imageUrl = value["ImageUrl"] ?? "";
+      event.info = value["Info"] ?? "";
+      event.location = value["Location"] ?? "";
+      event.startTime = value["StartTime"] ?? "";
+      event.endTime = value["EndTime"] ?? "";
+      event.title = value["Title"] ?? "";
+      event.format();
+      events.add(event);
+    });
+    return events.reversed.toList();
+  } catch (e) {
+    return events.reversed.toList();
   }
 }

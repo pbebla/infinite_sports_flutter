@@ -529,11 +529,11 @@ class _ScorePageState extends State<ScorePage> {
                           ..loadRequest(Uri.parse(widget.game.link));
                         return Scaffold(
                           appBar: AppBar(
-                          title: const Text(""),
-                          actions: [
-                            NavigationControls(controller: webController)
-                          ],
-                        ),
+                            title: const Text(""),
+                            actions: [
+                              NavigationControls(controller: webController)
+                            ],
+                          ),
                         body: WebViewStack(controller: webController,)
                         );
                       })],

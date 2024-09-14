@@ -45,7 +45,7 @@ class CurrentLivescoreNavigationState extends State<CurrentLivescoreNavigation> 
                       height: 70,
                       child: Container(
                         padding: const EdgeInsets.all(13),
-                        child: Row(children: [Text("Assyrian ${widget.currentSport} League Season ${widget.currentSeason}", style: const TextStyle(fontWeight: FontWeight.bold),), const Spacer(), Image.asset('assets/BasketLeague.png', width: windowsDefaultIconSize.toDouble(),)],),),
+                        child: Row(children: [Text("Assyrian ${widget.currentSport} League Season ${widget.currentSeason}", style: const TextStyle(fontWeight: FontWeight.bold),), const Spacer(), ImageIcon(AssetImage(widget.currentSport == "Futsal" ? 'assets/FutsalLeague.png' : 'assets/BasketLeague.png'), size: windowsDefaultIconSize.toDouble(),)],),),
                     )
                   ),
                 ),

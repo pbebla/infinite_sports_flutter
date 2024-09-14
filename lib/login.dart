@@ -3,7 +3,6 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/createaccountpage.dart';
 import 'package:infinite_sports_flutter/forgotpasswordpage.dart';
-import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 
 class LoginPage extends StatefulWidget {
