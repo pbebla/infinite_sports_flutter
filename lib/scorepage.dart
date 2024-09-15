@@ -462,7 +462,7 @@ class _ScorePageState extends State<ScorePage> {
                   onRefresh: () async {
                     return _refreshData(setState);
                   },
-                  child: ListView(children: [table1 ?? Text("")],)
+                  child: ListView(children: [table1 ?? const Text("")],)
                   );
               }
               )
@@ -476,7 +476,7 @@ class _ScorePageState extends State<ScorePage> {
                   onRefresh: () async {
                     return _refreshData(setState);
                   },
-                  child: ListView(children: [table2 ?? Text("")],)
+                  child: ListView(children: [table2 ?? const Text("")],)
                   );
               }
               )
@@ -491,7 +491,7 @@ class _ScorePageState extends State<ScorePage> {
                 onRefresh: () async {
                   return _refreshData(setState);
                 },
-                child: ListView(children: [table1 ?? Text("")],)
+                child: ListView(children: [table1 ?? const Text("")],)
                 );
             }
             )
@@ -503,7 +503,7 @@ class _ScorePageState extends State<ScorePage> {
                 onRefresh: () async {
                   return _refreshData(setState);
                 },
-                child: ListView(children: [table2 ?? Text("")],)
+                child: ListView(children: [table2 ?? const Text("")],)
                 );
             }
             )

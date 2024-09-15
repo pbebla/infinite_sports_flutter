@@ -85,8 +85,8 @@ class _LoginDemoState extends State<LoginPage> {
                 controller: _passwordController,
                 obscureText: true,
                 decoration: InputDecoration(
-                    border: OutlineInputBorder(),
-                    errorText: (_loginErrorText ?? null),
+                    border: const OutlineInputBorder(),
+                    errorText: (_loginErrorText),
                     labelText: 'Password',
                     hintText: 'Enter secure password'),
                 onSubmitted: (value) async {

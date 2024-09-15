@@ -1,6 +1,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/scorepage.dart';
@@ -127,7 +128,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
                           color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(15)),
                       child: TextButton(
                         onPressed: () {
-                          showDialog<String>(
+                          showCupertinoDialog<String>(
                             context: context,
                             builder: (BuildContext context) => Dialog(
                               child: Padding(
@@ -213,7 +214,8 @@ class _LiveScorePageState extends State<LiveScorePage> {
 
   Future<void> _refreshData(localsetState) async { 
     // Add new items or update the data here 
-    gamesList = await getGames(widget.sport, widget.season, widget.date, times);
+    _fetchGamesList = getGames(widget.sport, widget.season, widget.date, times);
+    await _fetchGamesList;
     localsetState(() {}); 
   } 
 

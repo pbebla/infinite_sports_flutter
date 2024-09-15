@@ -181,7 +181,7 @@ class _PlayerPageState extends State<PlayerPage> {
                   Expanded(child: ClipRRect(
                     borderRadius: BorderRadius.circular(0),
                     child: SizedBox.fromSize(
-                      size: Size.fromHeight(200),
+                      size: const Size.fromHeight(200),
                       child: profileImagePath != "" ? Image.network(profileImagePath, fit: BoxFit.contain,) : Image.asset("assets/portraitplaceholder.png"),
                     ),
                   ),),

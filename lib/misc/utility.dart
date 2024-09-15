@@ -919,7 +919,7 @@ Future<List<Business>> getBusinesses() async {
   try {
     var event = await newClient.child("Map").once();
     var list = event.snapshot.value as List;
-    list.forEach((value) {
+    for (var value in list) {
       Business business = Business();
       business.description = value["Description"] ?? "";
       business.logoUrl = value["LogoUrl"] ?? "";
@@ -932,7 +932,7 @@ Future<List<Business>> getBusinesses() async {
         business.logo = Image.network(business.logoUrl!);
       }
       businesses.add(business);
-    });
+    }
     return businesses;
   } catch (e) {
     return businesses;
@@ -945,7 +945,7 @@ Future<List<Event>> getEvents() async {
   try {
     var snapshot = await newClient.child("Events").once();
     var list = snapshot.snapshot.value as List;
-    list.forEach((value) {
+    for (var value in list) {
       Event event = Event();
       event.address = value["Address"] ?? "";
       event.date = value["Date"] ?? "";
@@ -959,7 +959,7 @@ Future<List<Event>> getEvents() async {
       event.title = value["Title"] ?? "";
       event.format();
       events.add(event);
-    });
+    }
     return events.reversed.toList();
   } catch (e) {
     return events.reversed.toList();

@@ -42,7 +42,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
   bool isSheetExpanded = false;
   List<Business>? businesses;
   List<Event>? events;
-  Set<Marker> markers = Set();
+  Set<Marker> markers = {};
   Marker? currentPositionMarker;
   GoogleMap? _googleMap;
 
@@ -86,7 +86,6 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
   Future<int> _getBusinessesAndEvents() async {
     businesses = await getBusinesses();
     events = await getEvents();
-    markers = Set();
     currentPositionMarker = Marker(
       markerId: const MarkerId('user_location'),
       position: _center!,
@@ -104,7 +103,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
       }
     }
     _googleMap = GoogleMap(
-      padding: EdgeInsets.only(
+      padding: const EdgeInsets.only(
          bottom:45),
       onMapCreated: _onMapCreated,
       initialCameraPosition: CameraPosition(
@@ -137,7 +136,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
         future: _getBusinessesAndEvents(), 
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
-            return CircularProgressIndicator();
+            return const CircularProgressIndicator();
           }
           return Stack(
             children: [
@@ -159,7 +158,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                     length: 2, 
                     child: CustomScrollView(
                       controller: scrollController,
-                      physics: ClampingScrollPhysics(),
+                      physics: const ClampingScrollPhysics(),
                       slivers: [
                         SliverAppBar(
                           leading: IconButton(
@@ -181,9 +180,9 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                 isSheetExpanded = !isSheetExpanded;
                               });
                             },
-                            icon: isSheetExpanded ? Icon(Icons.arrow_drop_down) : Icon(Icons.arrow_drop_up),
+                            icon: isSheetExpanded ? const Icon(Icons.arrow_drop_down) : const Icon(Icons.arrow_drop_up),
                           ),
-                          title: TabBar(
+                          title: const TabBar(
                             tabs: [
                               Tab(child: Text("Businesses", style: TextStyle(fontSize: 13),),),
                               Tab(child: Text("Events"),)
@@ -197,7 +196,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                               onPressed: () async {
                                 await _refreshData();
                               },
-                              icon: Icon(Icons.refresh)
+                              icon: const Icon(Icons.refresh)
                             ),
                             IconButton(
                               onPressed: () {
@@ -205,10 +204,10 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                   context: context,
                                   builder: (context) {
                                     return AlertDialog(
-                                      title: Text("Around You is a place to discover Assyrian Businesses and Events.\nIf you want us to feature your Business or Event, contact us for more info!"),
+                                      title: const Text("Around You is a place to discover Assyrian Businesses and Events.\nIf you want us to feature your Business or Event, contact us for more info!"),
                                       actions: [
                                         TextButton(
-                                          child: Text("OK"),
+                                          child: const Text("OK"),
                                           onPressed: () {
                                             Navigator.pop(context);
                                           },
@@ -218,7 +217,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                   },
                                 );
                               },
-                              icon: Icon(Icons.info_outline_rounded)
+                              icon: const Icon(Icons.info_outline_rounded)
                             )
                           ],
                         ),
@@ -228,13 +227,13 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                               ListView.builder(
                                 itemCount: businesses?.length ?? 0,
                                 //controller: scrollController,
-                                physics: ClampingScrollPhysics(),
+                                physics: const ClampingScrollPhysics(),
                                 padding: EdgeInsets.zero,
                                 itemBuilder: (context, index) => ListTile(
-                                  leading: businesses![index].logo ?? Text(""),
+                                  leading: businesses![index].logo ?? const Text(""),
                                   title: Text('${businesses![index].name}'),
                                   subtitle: Text('${businesses![index].description}', overflow: TextOverflow.ellipsis,),
-                                  trailing: (!businesses![index].lat.isNaN) ? Text('${businesses![index].getMiles(_currentPosition!).toString().substring(0,4)} mi' ) : Text(""),
+                                  trailing: (!businesses![index].lat.isNaN) ? Text('${businesses![index].getMiles(_currentPosition!).toString().substring(0,4)} mi' ) : const Text(""),
                                   onTap: () async {
                                     var address = "";
                                     if (!businesses![index].lat.isNaN) {
@@ -249,7 +248,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                         body: SingleChildScrollView(
                                           child: Column(
                                             children: [
-                                              Container(child: businesses![index].logo, height: 250,),
+                                              SizedBox(height: 250,child: businesses![index].logo,),
                                               Container(
                                                 color: Theme.of(context).colorScheme.surfaceContainer,
                                                 child: !businesses![index].lat.isNaN ? 
@@ -274,10 +273,10 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                                           throw 'Could not open the map.';
                                                         }
                                                       }
-                                                    },) : Text(""),),
+                                                    },) : const Text(""),),
                                               Container(
                                                 color: Theme.of(context).colorScheme.surfaceContainer,
-                                                child: ListTile(title: Text("Website"), enabled: businesses![index].url?.isNotEmpty ?? false, onTap: () {
+                                                child: ListTile(title: const Text("Website"), enabled: businesses![index].url?.isNotEmpty ?? false, onTap: () {
                                                   Navigator.push(context, MaterialPageRoute(builder: (context) {
                                                     WebViewController controller = WebViewController()
                                                     ..loadRequest(Uri.parse(businesses![index].url ?? ""));
@@ -295,7 +294,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                               ),
                                               Container(
                                                 color: Theme.of(context).colorScheme.surfaceContainer,
-                                                child: ListTile(title: Text("Call"), onTap: () async {
+                                                child: ListTile(title: const Text("Call"), onTap: () async {
                                                   var url = Uri.parse("tel:${businesses![index].phone ?? ""}");
                                                   bool canCall = await canLaunchUrl(url);
                                                   if (canCall) {
@@ -315,10 +314,10 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                               ListView.builder(
                                 itemCount: events?.length ?? 0,
                                 //controller: scrollController,
-                                physics: ClampingScrollPhysics(),
+                                physics: const ClampingScrollPhysics(),
                                 padding: EdgeInsets.zero,
                                 itemBuilder: (context, index) => ListTile(
-                                  leading: events![index].imageSrc ?? Text(""),
+                                  leading: events![index].imageSrc ?? const Text(""),
                                   title: Text('${events![index].title}'),
                                   subtitle: Text('on ${events![index].eventDate}\nat ${events![index].location}\n${events![index].startTime} - ${events![index].endTime}'),
                                 ),
