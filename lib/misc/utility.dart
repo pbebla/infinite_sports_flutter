@@ -11,6 +11,7 @@ import 'package:infinite_sports_flutter/model/event.dart';
 import 'package:infinite_sports_flutter/model/futsalgame.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
+import 'package:infinite_sports_flutter/model/myuser.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/model/soccerplayer.dart';
 import 'package:infinite_sports_flutter/model/userinformation.dart';
@@ -957,11 +958,44 @@ Future<List<Event>> getEvents() async {
       event.startTime = value["StartTime"] ?? "";
       event.endTime = value["EndTime"] ?? "";
       event.title = value["Title"] ?? "";
+      if ((value as Map).containsKey("Attendees")) {
+        event.attendees = {};
+        value["Attendees"].forEach((uid, value) {
+          event.attendees![uid] = value.toString();
+        });
+      }
       event.format();
       events.add(event);
     }
-    return events.reversed.toList();
+    return events.toList();
   } catch (e) {
-    return events.reversed.toList();
+    return events.toList();
+  }
+}
+
+Future<Event> getEvent(index) async {
+  List<Event> events = await getEvents();
+  return events[index];
+}
+
+Future<Map<String, MyUser>> getAllUsers() async {
+  DatabaseReference newClient = FirebaseDatabase.instance.ref();
+  Map<String, MyUser> users = {};
+  try
+  {
+    var event = await newClient.child("Users").once();
+    var list = event.snapshot.value as Map;
+    list.forEach((uid, info) {
+      if(info.containsKey("ProfileUrl")) {
+        users[uid] = MyUser(info["First Name"] ?? "", info["Last Name"] ?? "", info["Date Joined"] ?? "", uid, info["ProfileUrl"]);
+      } else {
+        users[uid] = MyUser(info["First Name"] ?? "", info["Last Name"] ?? "", info["Date Joined"] ?? "", uid);
+      }
+    });
+    return users;
+  }
+  catch (e)
+  {
+    return users;
   }
 }

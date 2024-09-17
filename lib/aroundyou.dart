@@ -6,6 +6,8 @@ import 'package:flutter/widgets.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:infinite_sports_flutter/businesspage.dart';
+import 'package:infinite_sports_flutter/eventpage.dart';
 import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
@@ -39,12 +41,12 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
   LatLng? _center;
   Position? _currentPosition;
   final DraggableScrollableController sheetController = DraggableScrollableController();
-  bool isSheetExpanded = false;
+  bool isSheetExpanded = true;
   List<Business>? businesses;
   List<Event>? events;
   Set<Marker> markers = {};
-  Marker? currentPositionMarker;
   GoogleMap? _googleMap;
+  List<Location> eventLocations = List.empty(growable: true);
 
   @override
   void initState() {
@@ -86,12 +88,6 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
   Future<int> _getBusinessesAndEvents() async {
     businesses = await getBusinesses();
     events = await getEvents();
-    currentPositionMarker = Marker(
-      markerId: const MarkerId('user_location'),
-      position: _center!,
-      infoWindow: const InfoWindow(title: 'Your Location'),
-    );
-    markers.add(currentPositionMarker!);
     for (var i = 0; i < businesses!.length ; i++) {
       if (!businesses![i].lat.isNaN) {
         Marker marker = Marker(
@@ -102,7 +98,22 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
         markers.add(marker);
       }
     }
+    for (var i = 0; i < events!.length ; i++) {
+      if (events![i].address != null) {
+        List<Location> locations = await GeocodingPlatform.instance!.locationFromAddress(events![i].address!);
+        Marker marker = Marker(
+          markerId: MarkerId(((businesses?.length ?? 0) + i).toString()),
+          position: LatLng(locations[0].latitude, locations[0].longitude),
+          infoWindow: InfoWindow(title: events![i].title),
+        );
+        markers.add(marker);
+        eventLocations.add(locations[0]);
+      } else {
+        eventLocations.add(Location(longitude: 0, latitude: 0, timestamp: DateTime.now()));
+      }
+    }
     _googleMap = GoogleMap(
+      myLocationEnabled: true,
       padding: const EdgeInsets.only(
          bottom:45),
       onMapCreated: _onMapCreated,
@@ -116,8 +127,6 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
   }
 
   Future<void> _refreshData() async {
-    businesses = await getBusinesses();
-    events = await getEvents();
     setState(() {});
   }
 
@@ -136,7 +145,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
         future: _getBusinessesAndEvents(), 
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
-            return const CircularProgressIndicator();
+            return const Center(child:  CircularProgressIndicator(),);
           }
           return Stack(
             children: [
@@ -148,7 +157,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                 controller: sheetController,
                 minChildSize: 0.08,
                 maxChildSize: 0.5,
-                initialChildSize: 0.08,
+                initialChildSize: 0.5,
                 builder: (BuildContext context, scrollController) {
                   return Container(
                     decoration: BoxDecoration(
@@ -240,73 +249,11 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                       mapController!.animateCamera(CameraUpdate.newLatLng(LatLng(businesses![index].lat-0.08, businesses![index].long)));
                                       address = await getAddress(LatLng(businesses![index].lat,  businesses![index].long));
                                     }
-                                    Navigator.push(context, MaterialPageRoute(builder: (context) {
-                                      return Scaffold(
-                                        appBar: AppBar(
-                                          title: Text(businesses![index].name ?? "")
-                                        ),
-                                        body: SingleChildScrollView(
-                                          child: Column(
-                                            children: [
-                                              SizedBox(height: 250,child: businesses![index].logo,),
-                                              Container(
-                                                color: Theme.of(context).colorScheme.surfaceContainer,
-                                                child: !businesses![index].lat.isNaN ? 
-                                                    ListTile(title: Text(address), onTap: () async {
-                                                      String appleUrl = 'https://maps.apple.com/?saddr=&daddr=${businesses![index].lat},${businesses![index].long}&directionsmode=driving';
-                                                      String googleUrl = 'https://www.google.com/maps/search/?api=1&query=${businesses![index].lat},${businesses![index].long}';
-
-                                                      if (Platform.isIOS) {
-                                                        if (await canLaunch(appleUrl)) {
-                                                          await launch(appleUrl);
-                                                        } else {
-                                                          if (await canLaunch(googleUrl)) {
-                                                            await launch(googleUrl);
-                                                          } else {
-                                                            throw 'Could not open the map.';
-                                                          }
-                                                        }
-                                                      } else {
-                                                        if (await canLaunch(googleUrl)) {
-                                                          await launch(googleUrl);
-                                                        } else {
-                                                          throw 'Could not open the map.';
-                                                        }
-                                                      }
-                                                    },) : const Text(""),),
-                                              Container(
-                                                color: Theme.of(context).colorScheme.surfaceContainer,
-                                                child: ListTile(title: const Text("Website"), enabled: businesses![index].url?.isNotEmpty ?? false, onTap: () {
-                                                  Navigator.push(context, MaterialPageRoute(builder: (context) {
-                                                    WebViewController controller = WebViewController()
-                                                    ..loadRequest(Uri.parse(businesses![index].url ?? ""));
-                                                    return Scaffold(
-                                                      appBar: AppBar(
-                                                        title: const Text(""),
-                                                        actions: [
-                                                          NavigationControls(controller: controller)
-                                                        ],
-                                                      ),
-                                                      body: WebViewStack(controller: controller,),
-                                                    );
-                                                  },));
-                                                },),
-                                              ),
-                                              Container(
-                                                color: Theme.of(context).colorScheme.surfaceContainer,
-                                                child: ListTile(title: const Text("Call"), onTap: () async {
-                                                  var url = Uri.parse("tel:${businesses![index].phone ?? ""}");
-                                                  bool canCall = await canLaunchUrl(url);
-                                                  if (canCall) {
-                                                    await launchUrl(url);
-                                                  }
-                                                },),
-                                              ),
-                                              Text(businesses![index].description ?? ""),
-                                            ],
-                                          )
-                                        ),   
-                                      );
+                                    Navigator.push(context, ModalBottomSheetRoute(
+                                      isScrollControlled: true,
+                                      modalBarrierColor: Colors.transparent,
+                                      builder: (context) {
+                                      return BusinessPage(business: businesses![index], address: address);
                                     }));
                                   },
                                 ),
@@ -320,6 +267,17 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                   leading: events![index].imageSrc ?? const Text(""),
                                   title: Text('${events![index].title}'),
                                   subtitle: Text('on ${events![index].eventDate}\nat ${events![index].location}\n${events![index].startTime} - ${events![index].endTime}'),
+                                  onTap: () async {
+                                    if (events?[index].address != null) {
+                                      mapController!.animateCamera(CameraUpdate.newLatLng(LatLng(eventLocations[index].latitude-0.08, eventLocations[index].longitude)));
+                                    }
+                                    Navigator.push(context, ModalBottomSheetRoute(
+                                      isScrollControlled: true,
+                                      modalBarrierColor: Colors.transparent,
+                                      builder: (context) {
+                                      return EventPage(index: index,);
+                                    }));
+                                  },
                                 ),
                               ),
                             ],

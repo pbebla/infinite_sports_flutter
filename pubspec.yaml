@@ -59,6 +59,7 @@ dependencies:
   flutter_config: ^2.0.2
   url_launcher: ^6.3.0
   geocoding: ^3.0.0
+  share_plus: ^10.0.0
 
 dev_dependencies:
   flutter_test:
