@@ -1,22 +1,15 @@
 
 import 'dart:io';
 
-import 'package:email_validator/email_validator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
-import 'package:geocoding/geocoding.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
-import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/model/attendee.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
 import 'package:infinite_sports_flutter/model/myuser.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 class EventPage extends StatefulWidget {
   const EventPage({super.key, required this.index});
@@ -100,24 +93,22 @@ class _EventPageState extends State<EventPage> {
             body: SingleChildScrollView(
               child: Column(
                 children: [
-                  SizedBox(height: 250,child: event.imageSrc ?? const Text(""),),
-                  Container(
-                    color: Theme.of(context).colorScheme.surfaceContainer,
-                    child: (event.address?.isNotEmpty ?? false) ? 
-                        ListTile(title: Text(event.address!), onTap: () async {
-                          String appleUrl = 'https://maps.apple.com/?saddr=&daddr=${event.address}&directionsmode=driving';
-                          String googleUrl = 'https://www.google.com/maps/search/?api=1&query=${event.address}';
+                  event.imageSrc ?? const Text(""),
+                  Visibility(
+                    visible: event.address?.isNotEmpty ?? false,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(10)),
+                      ),),
+                      child: Text(event.address!),
+                      onPressed: () async {
+                        String appleUrl = 'https://maps.apple.com/?saddr=&daddr=${event.address}&directionsmode=driving';
+                        String googleUrl = 'https://www.google.com/maps/search/?api=1&query=${event.address}';
 
-                          if (Platform.isIOS) {
-                            if (await canLaunch(appleUrl)) {
-                              await launch(appleUrl);
-                            } else {
-                              if (await canLaunch(googleUrl)) {
-                                await launch(googleUrl);
-                              } else {
-                                throw 'Could not open the map.';
-                              }
-                            }
+                        if (Platform.isIOS) {
+                          if (await canLaunch(appleUrl)) {
+                            await launch(appleUrl);
                           } else {
                             if (await canLaunch(googleUrl)) {
                               await launch(googleUrl);
@@ -125,36 +116,65 @@ class _EventPageState extends State<EventPage> {
                               throw 'Could not open the map.';
                             }
                           }
-                        },) : const Text(""),),
-                  ListView.builder(
-                    shrinkWrap: true,
-                      itemCount: attendees.length,
-                      itemBuilder: (context, index) {
-                        return ListTile(
-                          leading: CircleAvatar(backgroundImage: attendees[index].img?.image ?? const AssetImage("assets/portraitplaceholder.png"),),
-                          title: Text(attendees[index].name ?? ""),
-                        );
+                        } else {
+                          if (await canLaunch(googleUrl)) {
+                            await launch(googleUrl);
+                          } else {
+                            throw 'Could not open the map.';
+                          }
+                        }
                       },
-                    ),
-                  Container(
-                    color: Theme.of(context).colorScheme.surfaceContainer,
-                    child: ListTile(title: Text(attending ? "Remove" : "Attend"), onTap: () async {
-                      await attend_Clicked();
-                      setState(() {
-                      });
-                    },),
+                    )
                   ),
-                  Container(
-                    color: Theme.of(context).colorScheme.surfaceContainer,
-                    child: ListTile(title: const Text("Share"), onTap: () async {
-                      await share_Clicked();
-                      setState(() {
-                      });
-                    },),
-                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child:ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                              shape: const RoundedRectangleBorder(
+                              borderRadius: BorderRadius.all(Radius.circular(10)),
+                            ),),
+                          onPressed: () async {
+                            await attend_Clicked();
+                            setState(() {
+                            });
+                          }, 
+                          child: Text(attending ? "Remove" : "Attend")
+                        ),
+                      ),
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                              shape: const RoundedRectangleBorder(
+                              borderRadius: BorderRadius.all(Radius.circular(10)),
+                            ),),
+                          onPressed: () async {
+                            await share_Clicked();
+                            setState(() {
+                            });
+                          },
+                          child: const Text("Share")
+                        ),
+                      ),
+                  ],),
                   Padding(
                     padding: const EdgeInsets.all(15),
                     child: Text(event.info ?? ""),
+                  ),
+                  Column(
+                    children: [
+                      Text(attendees.isNotEmpty ? "Attendees" : "", style: Theme.of(context).textTheme.headlineMedium,),
+                      ListView.builder(
+                        shrinkWrap: true,
+                          itemCount: attendees.length,
+                          itemBuilder: (context, index) {
+                            return ListTile(
+                              leading: CircleAvatar(backgroundImage: attendees[index].img?.image ?? const AssetImage("assets/portraitplaceholder.png"),),
+                              title: Text(attendees[index].name ?? ""),
+                            );
+                          },
+                      ),
+                    ],
                   )
                 ],
               )

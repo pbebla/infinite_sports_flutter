@@ -77,7 +77,7 @@ class _NavBarState extends State<NavBar> {
         }
         signUpEnabled = signUpsOpen && signedIn;
         return Drawer(
-          backgroundColor: Theme.of(context).colorScheme.primary,
+          backgroundColor: Theme.of(context).brightness == Brightness.light ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.surface,
           child: ListView(
             children: [
               Visibility(
@@ -183,7 +183,7 @@ class _NavBarState extends State<NavBar> {
                     textColor: Colors.white,
                     trailing: Switch(
                       value: darkModeEnabled, 
-                      activeColor: Colors.black,
+                      activeColor: Theme.of(context).colorScheme.primary,
                       onChanged: (value) {
                       Provider.of<ThemeProvider>(context, listen: false).toggleTheme();
                       setState(() {

@@ -81,7 +81,7 @@ class DefaultFirebaseOptions {
     storageBucket: 'infinite-sports-app.appspot.com',
     iosClientId:
         '248087010229-g45omq0n7ev5jtmbc1ei7a0nuaq02544.apps.googleusercontent.com',
-    iosBundleId: 'com.infinitesports.Infinite-Sports',
+    iosBundleId: 'com.pbebla.Infinite-Sports',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(

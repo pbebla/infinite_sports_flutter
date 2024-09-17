@@ -1,21 +1,13 @@
-import 'dart:io';
 
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:infinite_sports_flutter/businesspage.dart';
 import 'package:infinite_sports_flutter/eventpage.dart';
-import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
-import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/model/business.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
-import 'package:infinite_sports_flutter/scorepage.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 class AroundYou extends StatefulWidget {
   const AroundYou({super.key});
@@ -46,7 +38,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
   List<Event>? events;
   Set<Marker> markers = {};
   GoogleMap? _googleMap;
-  List<Location> eventLocations = List.empty(growable: true);
+  List<Location?> eventLocations = List.empty(growable: true);
 
   @override
   void initState() {
@@ -100,16 +92,20 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
     }
     for (var i = 0; i < events!.length ; i++) {
       if (events![i].address != null) {
-        List<Location> locations = await GeocodingPlatform.instance!.locationFromAddress(events![i].address!);
-        Marker marker = Marker(
-          markerId: MarkerId(((businesses?.length ?? 0) + i).toString()),
-          position: LatLng(locations[0].latitude, locations[0].longitude),
-          infoWindow: InfoWindow(title: events![i].title),
-        );
-        markers.add(marker);
-        eventLocations.add(locations[0]);
+        try {
+          List<Location> locations = await GeocodingPlatform.instance!.locationFromAddress(events![i].address!);
+          Marker marker = Marker(
+            markerId: MarkerId(((businesses?.length ?? 0) + i).toString()),
+            position: LatLng(locations[0].latitude, locations[0].longitude),
+            infoWindow: InfoWindow(title: events![i].title),
+          );
+          markers.add(marker);
+          eventLocations.add(locations[0]);
+        } catch (e) {
+          eventLocations.add(null);
+        }
       } else {
-        eventLocations.add(Location(longitude: 0, latitude: 0, timestamp: DateTime.now()));
+        eventLocations.add(null);
       }
     }
     _googleMap = GoogleMap(
@@ -268,12 +264,10 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                   title: Text('${events![index].title}'),
                                   subtitle: Text('on ${events![index].eventDate}\nat ${events![index].location}\n${events![index].startTime} - ${events![index].endTime}'),
                                   onTap: () async {
-                                    if (events?[index].address != null) {
-                                      mapController!.animateCamera(CameraUpdate.newLatLng(LatLng(eventLocations[index].latitude-0.08, eventLocations[index].longitude)));
+                                    if (eventLocations[index] != null) {
+                                      mapController!.animateCamera(CameraUpdate.newLatLng(LatLng(eventLocations[index]!.latitude-0.08, eventLocations[index]!.longitude)));
                                     }
-                                    Navigator.push(context, ModalBottomSheetRoute(
-                                      isScrollControlled: true,
-                                      modalBarrierColor: Colors.transparent,
+                                    Navigator.push(context, MaterialPageRoute(
                                       builder: (context) {
                                       return EventPage(index: index,);
                                     }));
