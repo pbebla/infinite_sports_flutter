@@ -333,14 +333,10 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     User? user = await auth.signUpWithEmailAndPassword(email, password);
 
     if (user != null) {
+      currentUser = user;
       signedIn = true;
-      auth.password = password;
-      if (autoSignIn) {
-        await secureStorage.write(key: "Email", value: email);
-        await secureStorage.write(key: "Password", value: password);
-      }
-      await auth.credential!.user!.updateDisplayName('${_firstNameController.value.text} ${_lastNameController.value.text}');
-      auth.credential!.user!.reload();
+      await currentUser!.updateDisplayName('${_firstNameController.value.text} ${_lastNameController.value.text}');
+      currentUser!.reload();
       await createDatabaseLocation(FirebaseAuth.instance.currentUser!, profileImage, _phoneController.value.text);
       String? token = await FirebaseMessaging.instance.getToken();
       if (token != null) {

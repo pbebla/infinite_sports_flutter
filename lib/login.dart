@@ -178,11 +178,7 @@ class _LoginDemoState extends State<LoginPage> {
 
     if (user != null) {
       signedIn = true;
-      auth.password = password;
-      if (autoSignIn) {
-        await secureStorage.write(key: "Email", value: email);
-        await secureStorage.write(key: "Password", value: password);
-      }
+      currentUser = user;
       String? token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
         await uploadToken(user, token);

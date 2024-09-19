@@ -76,15 +76,6 @@ class _SettingsState extends State<Settings> {
                 },),
                 const Divider(color: Colors.grey),
                 ListTile(title: const Text("Auto Log In"), minTileHeight: 40, trailing: Checkbox(value: autoSignIn, onChanged: (value) async {
-                  if (value == true) {
-                    // Write value
-                    await secureStorage.write(key: "Email", value: auth.credential!.user!.email);
-                    await secureStorage.write(key: "Password", value: auth.password);
-                  } else {
-                    // Delete value
-                    await secureStorage.delete(key: "Email");
-                    await secureStorage.delete(key: "Password");
-                  }
                   setState(() {
                     autoSignIn = value!;
                   });

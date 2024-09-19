@@ -39,7 +39,7 @@ Future<void> main() async {
   }
   FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
     if (signedIn) {
-      await uploadToken(auth.credential!.user!, newToken);
+      await uploadToken(currentUser!, newToken);
     }
   });
   SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -111,18 +111,12 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<int> setCurrentValues() async {
-    String? email = await secureStorage.read(key: "Email");
-    String? password = await secureStorage.read(key: "Password");
-    if (email != null && password != null) {
-      User? user = await auth.signInWithEmailAndPassword(email, password);
-      if (user != null) {
-        String? token = await FirebaseMessaging.instance.getToken();
-        if (token != null) {
-          await uploadToken(user, token);
-        }
-        auth.password = password;
-        autoSignIn = true;
-        signedIn = true;
+    if (FirebaseAuth.instance.currentUser != null) {
+      signedIn = true;
+      currentUser = FirebaseAuth.instance.currentUser;
+      String? token = await FirebaseMessaging.instance.getToken();
+      if (token != null) {
+        await uploadToken(currentUser!, token);
       }
     }
     currentSport = await getCurrentSport();
@@ -191,7 +185,10 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       _selectedIndex = index;
       switch(index) { 
-        case 0: { _title = _liveScoresTitle; } 
+        case 0: { 
+          _title = _liveScoresTitle; 
+          headerNotifier.value = [currentSport, currentSeason];
+        } 
         break; 
         case 1: { _title = 'Leagues'; } 
         break;

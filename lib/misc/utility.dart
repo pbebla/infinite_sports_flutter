@@ -16,7 +16,6 @@ import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/model/soccerplayer.dart';
 import 'package:infinite_sports_flutter/model/userinformation.dart';
 import 'package:intl/intl.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 var infiniteSportsPrimaryColor = const Color.fromARGB(255, 208, 0, 0);
 
@@ -24,15 +23,10 @@ Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
 Map<String, Map<String, Map<String, BasketballPlayer>>> basketballLineups = {};
 Map teamLogos = {};
 FirebaseAuthService auth = FirebaseAuthService();
+User? currentUser;
 bool signedIn = false;
 bool autoSignIn = false;
 bool darkModeEnabled = false;
-
-// Create storage
-const secureStorage = FlutterSecureStorage();
-
-// Read value
-//String value = await storage.read(key: key);
 
 ValueNotifier headerNotifier = ValueNotifier(["", ""]);
 
@@ -338,8 +332,8 @@ Future<List<Game>> getGames(sport, season, date, times) async {
       game.UrlPath = "https://infinite-sports-app.firebaseio.com/$sport/$season/Date/$date";
       game.GameNum = i;
 
-      game.SetUpVote();
-      game.GetLineUpImages();
+      game.setUpVote();
+      //game.getLineUpImages();
       allGames.add(game);
       i++;
   }
@@ -703,7 +697,7 @@ Future<UserInformation?> getInformation() async
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   try
   {
-    var event = await newClient.child("Users/${auth.credential!.user!.uid}/Information/").once();
+    var event = await newClient.child("Users/${currentUser!.uid}/Information/").once();
     var info = event.snapshot.value as Map<dynamic, dynamic>;
     var result = UserInformation();
     result.age = info["Age"] ?? info["age"];
@@ -720,7 +714,7 @@ Future<UserInformation?> getInformation() async
 
 Future<void> addUpdateInfo(UserInformation information, String phone) async
 {
-  DatabaseReference newClient = FirebaseDatabase.instance.ref("Users/${auth.credential!.user!.uid}");
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("Users/${currentUser!.uid}");
   try
   {
     var client = newClient.child("/Information/");
@@ -736,11 +730,11 @@ Future<void> addUpdateInfo(UserInformation information, String phone) async
 
 Future<void> signUpToPlay(String league, String season) async
 {
-  DatabaseReference newClient = FirebaseDatabase.instance.ref("Sign Ups/$league/$season/NotPaid/${auth.credential!.user!.uid}");
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("Sign Ups/$league/$season/NotPaid/${currentUser!.uid}");
 
   try
   {
-    await newClient.set(auth.credential!.user!.displayName);
+    await newClient.set(currentUser!.displayName);
   }
   catch (e)
   {
@@ -808,11 +802,11 @@ Future<void> uploadToken(User user, String token) async
 Future<void> addComment(String league, String season, String comment) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
-  var client = newClient.child("Sign Ups/$league/$season/Comments/${auth.credential!.user!.displayName!}");
+  var client = newClient.child("Sign Ups/$league/$season/Comments/${currentUser!.displayName!}");
 
   try
   {
-      await client.set("${auth.credential!.user!.uid}:$comment");
+      await client.set("${currentUser!.uid}:$comment");
   }
   catch (e)
   {
@@ -846,7 +840,7 @@ Future<String?> getPhone() async
   DatabaseReference newClient = FirebaseDatabase.instance.ref("");
   try
   {
-    var event = await newClient.child("Users/${auth.credential!.user!.uid}/Phone Number/").once();
+    var event = await newClient.child("Users/${currentUser!.uid}/Phone Number/").once();
     var info = event.snapshot.value.toString();
 
       return info;

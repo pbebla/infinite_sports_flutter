@@ -124,8 +124,8 @@ class _NavBarState extends State<NavBar> {
                             ],
                           ));
                       },
-                      child: signedIn && (auth.credential?.additionalUserInfo?.profile?["ProfileUrl"] ?? false) ? 
-                      CircleAvatar(backgroundImage: NetworkImage(auth.credential?.additionalUserInfo?.profile?["ProfileUrl"]), radius: 50) : 
+                      child: signedIn && (currentUser?.photoURL?.isNotEmpty ?? false) ? 
+                      CircleAvatar(backgroundImage: NetworkImage(currentUser!.photoURL!), radius: 50) : 
                       const CircleAvatar(backgroundImage: AssetImage("assets/portraitplaceholder.png"), radius: 50),
                     ),
                     Text(FirebaseAuth.instance.currentUser?.displayName ?? "", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineMedium!.fontSize)),
@@ -150,7 +150,7 @@ class _NavBarState extends State<NavBar> {
                 textColor: Colors.white,
                 onTap: () {
                   Navigator.push(context, MaterialPageRoute(builder:(context) {
-                    return PlayerPage(uid: auth.credential!.user!.uid,);
+                    return PlayerPage(uid: currentUser!.uid,);
                   },));
                 },
               ),),
