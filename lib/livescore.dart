@@ -37,13 +37,6 @@ class LiveScorePage extends StatefulWidget {
 class _LiveScorePageState extends State<LiveScorePage> {
   Map<String, Map<String, int>> times = {};
   List<Game>? gamesList;
-  Future<List<Game>>? _fetchGamesList;
-
-  @override
-  void initState() {
-    _fetchGamesList = getGames(widget.sport, widget.season, widget.date, times);
-    super.initState();
-  }
 
   List<GestureDetector> populateCardList(List<Game> gamesList) {
     List<GestureDetector> cardList = [];
@@ -214,8 +207,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
 
   Future<void> _refreshData(localsetState) async { 
     // Add new items or update the data here 
-    _fetchGamesList = getGames(widget.sport, widget.season, widget.date, times);
-    await _fetchGamesList;
+    gamesList = await getGames(widget.sport, widget.season, widget.date, times);
     localsetState(() {}); 
   } 
 
@@ -229,7 +221,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
     // than having to individually change instances of widgets.
     
     return FutureBuilder(
-      future: _fetchGamesList, 
+      future: getGames(widget.sport, widget.season, widget.date, times), 
       builder:(context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
             return Center(

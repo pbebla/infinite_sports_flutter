@@ -167,7 +167,7 @@ class _SettingsState extends State<Settings> {
                       ),
                       body: Column(children: [
                         Image.asset("assets/infinite.png"),
-                        const SingleChildScrollView(child: Text("Infinite Sports Association is a San Jose-based non-profit Assyrian organization that runs Soccer, Basketball and Volleyball leagues, games, and tournaments for the Assyrian community"),)],)
+                        const SingleChildScrollView(child: Padding(padding: EdgeInsets.all(15), child: Text("Infinite Sports Association is a San Jose-based non-profit Assyrian organization that runs Soccer, Basketball and Volleyball leagues, games, and tournaments for the Assyrian community")))],)
                     );
                   },)); 
                 },),
@@ -180,7 +180,7 @@ class _SettingsState extends State<Settings> {
                       ),
                       body: Column(children: [
                         Image.asset("assets/ninevehware.png"),
-                        const SingleChildScrollView(child: Text("NinevehWare is a San Jose-based Software Development brand by Bronsin Benyamin that specializes in Mobile App Development."),)],)
+                        const SingleChildScrollView(child: Padding(padding: EdgeInsets.all(15), child: Text("NinevehWare is a San Jose-based Software Development brand by Bronsin Benyamin that specializes in Mobile App Development."),))],)
                     );
                   },)); 
                 },),
