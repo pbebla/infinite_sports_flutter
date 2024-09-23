@@ -37,6 +37,13 @@ class LiveScorePage extends StatefulWidget {
 class _LiveScorePageState extends State<LiveScorePage> {
   Map<String, Map<String, int>> times = {};
   List<Game>? gamesList;
+  late Future<List<Game>> _fetchGamesList;
+
+  @override
+  void initState() {
+    _fetchGamesList = getGames(widget.sport, widget.season, widget.date, times);
+    super.initState();
+  }
 
   List<GestureDetector> populateCardList(List<Game> gamesList) {
     List<GestureDetector> cardList = [];
@@ -196,7 +203,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
             initialEntries: [OverlayEntry(
               builder: (context) {
-                return ScorePage(sport: widget.sport, season: widget.season, game: game, times: times);
+                return ScorePage(sport: widget.sport, season: widget.season, date: game.date, gameNum: game.GameNum, times: times);
               })],
           )));
         },
@@ -207,7 +214,8 @@ class _LiveScorePageState extends State<LiveScorePage> {
 
   Future<void> _refreshData(localsetState) async { 
     // Add new items or update the data here 
-    gamesList = await getGames(widget.sport, widget.season, widget.date, times);
+    _fetchGamesList = getGames(widget.sport, widget.season, widget.date, times);
+    gamesList = await _fetchGamesList;
     localsetState(() {}); 
   } 
 
@@ -221,7 +229,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
     // than having to individually change instances of widgets.
     
     return FutureBuilder(
-      future: getGames(widget.sport, widget.season, widget.date, times), 
+      future: _fetchGamesList, 
       builder:(context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
             return Center(
