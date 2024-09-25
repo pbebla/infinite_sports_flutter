@@ -46,7 +46,7 @@ Map<String,Widget> stringToGameAction = {
 typedef TitleCallback = void Function(String value);
 
 class ScorePage extends StatefulWidget {
-  const ScorePage({super.key, required this.sport, required this.season, required this.date, required this.gameNum, required this.times});
+  const ScorePage({super.key, required this.sport, required this.season, required this.times, required this.game});
   //final TitleCallback onTitleSelect;
 
   // This widget is the home page of your application. It is stateful, meaning
@@ -61,9 +61,8 @@ class ScorePage extends StatefulWidget {
   //final String title;
   final String sport;
   final String season;
-  final String date;
-  final int gameNum;
   final Map<String, Map<String, int>> times;
+  final Game game;
 
   @override
   State<ScorePage> createState() => _ScorePageState();
@@ -88,12 +87,12 @@ class _ScorePageState extends State<ScorePage> {
 
   @override
   void initState() {
+    game = widget.game;
     _loadingGame = getGameData();
     super.initState();
   }
 
   Future<int> getGameData() async {
-    game = await getGame(widget, widget.sport, widget.season, convertStringDateToDatabase(widget.date), widget.times, widget.gameNum);
     if (game!.team1SourcePath != "") {
       var palette = await PaletteGenerator.fromImageProvider(NetworkImage(game!.team1SourcePath));
       team1color = palette.dominantColor?.color ?? const Color.fromARGB(255, 124, 124, 124);
@@ -727,6 +726,7 @@ class _ScorePageState extends State<ScorePage> {
     team1Players.clear();
     team2Players.clear();
     activities.clear();
+    game = await getGame(widget, widget.sport, widget.season, convertStringDateToDatabase(game!.date), widget.times, game!.GameNum);
     _loadingGame = getGameData();
     await _loadingGame;
     await buildTeamTables(localSetState);

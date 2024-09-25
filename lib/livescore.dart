@@ -38,6 +38,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
   Map<String, Map<String, int>> times = {};
   List<Game>? gamesList;
   late Future<List<Game>> _fetchGamesList;
+  final _controller = ScrollController(keepScrollOffset: true);
 
   @override
   void initState() {
@@ -45,7 +46,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
     super.initState();
   }
 
-  List<GestureDetector> populateCardList(List<Game> gamesList) {
+  List<GestureDetector> populateCardList(List<Game> gamesList, localSetState) {
     List<GestureDetector> cardList = [];
     if (gamesList.isEmpty) {
       cardList.add(GestureDetector(
@@ -203,9 +204,11 @@ class _LiveScorePageState extends State<LiveScorePage> {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
             initialEntries: [OverlayEntry(
               builder: (context) {
-                return ScorePage(sport: widget.sport, season: widget.season, date: game.date, gameNum: game.GameNum, times: times);
+                return ScorePage(sport: widget.sport, season: widget.season, game: game, times: times);
               })],
-          )));
+          ))).then((value) async {
+            await _refreshData(localSetState);
+          });
         },
       ));
     }
@@ -249,8 +252,9 @@ class _LiveScorePageState extends State<LiveScorePage> {
                 return _refreshData(setState);
               },
               child: ListView(
+                controller: _controller,
                 padding: const EdgeInsets.all(15),
-                children: populateCardList(gamesList!),
+                children: populateCardList(gamesList!, setState),
               )
             );
           }
