@@ -253,6 +253,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
               },
               child: ListView(
                 controller: _controller,
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(15),
                 children: populateCardList(gamesList!, setState),
               )

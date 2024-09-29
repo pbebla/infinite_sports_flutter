@@ -358,9 +358,9 @@ class _ScorePageState extends State<ScorePage> {
           return DataRow(cells: [
             DataCell(Text(key.number)),
             DataCell(Text(key.name), onTap: () {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
+              Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
                   initialEntries: [OverlayEntry(
-                    builder: (context) {
+                    builder: (mainContext) {
                       return PlayerPage(uid: key.uid);
                     })],
                 )));
@@ -699,8 +699,8 @@ class _ScorePageState extends State<ScorePage> {
     items.add(buildScoreCard(informationRows));
     if (game!.status != 0 && team1Players.isNotEmpty && team2Players.isNotEmpty) {
       items.add(buildTeamLeaders());
-      items.add(Padding(padding: const EdgeInsets.all(5), child: Column(children: buildActivityList()),));   
     }
+    items.add(Padding(padding: const EdgeInsets.all(5), child: Column(children: buildActivityList()),));   
     return items;
   }
 

@@ -27,6 +27,7 @@ User? currentUser;
 bool signedIn = false;
 bool autoSignIn = false;
 bool darkModeEnabled = false;
+BuildContext? mainContext;
 
 ValueNotifier headerNotifier = ValueNotifier(["", ""]);
 

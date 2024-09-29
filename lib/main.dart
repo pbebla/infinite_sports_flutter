@@ -130,6 +130,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    mainContext = context;
     final List<Widget> widgetOptions = <Widget>[
       FutureBuilder(future: _fetchCurrentValues, builder:(context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
