@@ -46,7 +46,7 @@ Map<String,Widget> stringToGameAction = {
 typedef TitleCallback = void Function(String value);
 
 class ScorePage extends StatefulWidget {
-  const ScorePage({super.key, required this.sport, required this.season, required this.times, required this.game});
+  const ScorePage({super.key, required this.sport, required this.season, required this.times, required this.game, required this.refreshCallback});
   //final TitleCallback onTitleSelect;
 
   // This widget is the home page of your application. It is stateful, meaning
@@ -63,6 +63,7 @@ class ScorePage extends StatefulWidget {
   final String season;
   final Map<String, Map<String, int>> times;
   final Game game;
+  final VoidCallback refreshCallback;
 
   @override
   State<ScorePage> createState() => _ScorePageState();
@@ -731,6 +732,7 @@ class _ScorePageState extends State<ScorePage> {
     await _loadingGame;
     await buildTeamTables(localSetState);
     localSetState(() {});
+    widget.refreshCallback();
   } 
 
   void sortTable(int columnIndex, bool ascending, players) {
