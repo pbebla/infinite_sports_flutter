@@ -54,6 +54,13 @@ dependencies:
   provider: ^6.1.2
   palette_generator: ^0.3.3+4
   shared_preferences: ^2.3.2
+  google_maps_flutter: ^2.9.0
+  geolocator: ^12.0.0
+  flutter_config: ^2.0.2
+  url_launcher: ^6.3.0
+  geocoding: ^3.0.0
+  share_plus: ^10.0.0
+  flutter_native_splash: ^2.4.1
 
 dev_dependencies:
   flutter_test:

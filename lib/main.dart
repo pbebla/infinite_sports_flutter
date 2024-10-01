@@ -3,7 +3,8 @@ import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_config/flutter_config.dart';
+import 'package:infinite_sports_flutter/aroundyou.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
 import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
@@ -18,7 +19,7 @@ import 'firebase_options.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(fileName: ".env");
+  await FlutterConfig.loadEnvVariables();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
@@ -38,7 +39,7 @@ Future<void> main() async {
   }
   FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
     if (signedIn) {
-      await uploadToken(auth.credential!.user!, newToken);
+      await uploadToken(currentUser!, newToken);
     }
   });
   SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -89,11 +90,11 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<int>? _fetchCurrentValues;
 
   @override
-  void initState() async {
+  void initState() {
     // TODO: implement initState
     setTitle(_liveScoresTitle);
-    super.initState();
     _fetchCurrentValues = setCurrentValues();
+    super.initState();
   }
 
   void setTitle(String value) {
@@ -110,18 +111,12 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<int> setCurrentValues() async {
-    String? email = await secureStorage.read(key: "Email");
-    String? password = await secureStorage.read(key: "Password");
-    if (email != null && password != null) {
-      User? user = await auth.signInWithEmailAndPassword(email, password);
-      if (user != null) {
-        String? token = await FirebaseMessaging.instance.getToken();
-        if (token != null) {
-          await uploadToken(user, token);
-        }
-        auth.password = password;
-        autoSignIn = true;
-        signedIn = true;
+    if (FirebaseAuth.instance.currentUser != null) {
+      signedIn = true;
+      currentUser = FirebaseAuth.instance.currentUser;
+      String? token = await FirebaseMessaging.instance.getToken();
+      if (token != null) {
+        await uploadToken(currentUser!, token);
       }
     }
     currentSport = await getCurrentSport();
@@ -135,6 +130,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    mainContext = context;
     final List<Widget> widgetOptions = <Widget>[
       FutureBuilder(future: _fetchCurrentValues, builder:(context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -150,6 +146,7 @@ class _MyHomePageState extends State<MyHomePage> {
         return CurrentLivescoreNavigation(currentSport: currentSport, currentSeason: currentSeason, currentDate: currentDate, onTitleSelect: setLiveScoreTitle, isSeasonFinished: isCurrentFinished,);
       },),
       const LeaguesNavigation(),
+      const AroundYou(),
     ];
     // This method is rerun every time setState is called, for instance as done
     // by the _incrementCounter method above.
@@ -189,7 +186,10 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       _selectedIndex = index;
       switch(index) { 
-        case 0: { _title = _liveScoresTitle; } 
+        case 0: { 
+          _title = _liveScoresTitle; 
+          headerNotifier.value = [currentSport, currentSeason];
+        } 
         break; 
         case 1: { _title = 'Leagues'; } 
         break;

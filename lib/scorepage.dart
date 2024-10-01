@@ -1,8 +1,6 @@
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
 import 'package:flutter_launcher_icons/constants.dart';
-import 'package:infinite_sports_flutter/main.dart';
 import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
@@ -48,7 +46,7 @@ Map<String,Widget> stringToGameAction = {
 typedef TitleCallback = void Function(String value);
 
 class ScorePage extends StatefulWidget {
-  ScorePage({super.key, required this.sport, required this.season, required this.game, required this.times});
+  const ScorePage({super.key, required this.sport, required this.season, required this.times, required this.game});
   //final TitleCallback onTitleSelect;
 
   // This widget is the home page of your application. It is stateful, meaning
@@ -61,10 +59,10 @@ class ScorePage extends StatefulWidget {
   // always marked "final".
 
   //final String title;
-  Game game;
   final String sport;
   final String season;
   final Map<String, Map<String, int>> times;
+  final Game game;
 
   @override
   State<ScorePage> createState() => _ScorePageState();
@@ -82,46 +80,42 @@ class _ScorePageState extends State<ScorePage> {
   int? table2SortColumnIndex;
   bool table1isAscending = false;
   bool table2isAscending = false;
-  late SingleChildScrollView table1;
-  late SingleChildScrollView table2;
+  SingleChildScrollView? table1;
+  SingleChildScrollView? table2;
   late Future<int> _loadingGame;
+  Game? game;
 
   @override
   void initState() {
+    game = widget.game;
     _loadingGame = getGameData();
     super.initState();
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    buildItemList();
-  }
-
   Future<int> getGameData() async {
-    if (widget.game.team1SourcePath != "") {
-      var palette = await PaletteGenerator.fromImageProvider(NetworkImage(widget.game.team1SourcePath));
+    if (game!.team1SourcePath != "") {
+      var palette = await PaletteGenerator.fromImageProvider(NetworkImage(game!.team1SourcePath));
       team1color = palette.dominantColor?.color ?? const Color.fromARGB(255, 124, 124, 124);
     }
-    if (widget.game.team2SourcePath != "") {
-      var palette = await PaletteGenerator.fromImageProvider(NetworkImage(widget.game.team2SourcePath));
+    if (game!.team2SourcePath != "") {
+      var palette = await PaletteGenerator.fromImageProvider(NetworkImage(game!.team2SourcePath));
       team2color = palette.dominantColor?.color ?? const Color.fromARGB(255, 124, 124, 124);
     }
     if (widget.sport == "Futsal") {
-      buildTeamPlayers(team1Players, (widget.game as FutsalGame).team1lineup, widget.game.team1activity, team1color, widget.game.team1SourcePath);
-      buildTeamPlayers(team2Players, (widget.game as FutsalGame).team2lineup, widget.game.team2activity, team2color, widget.game.team2SourcePath);
+      buildTeamPlayers(team1Players, (game as FutsalGame).team1lineup, game!.team1activity, team1color, game!.team1SourcePath);
+      buildTeamPlayers(team2Players, (game as FutsalGame).team2lineup, game!.team2activity, team2color, game!.team2SourcePath);
     } else if (widget.sport == "AFC San Jose") {
-      if (widget.game.team1 == "AFC San Jose") {
-        buildTeamPlayers(team1Players, (widget.game as SoccerGame).team1lineup, widget.game.team1activity, team1color, widget.game.team1SourcePath);
+      if (game!.team1 == "AFC San Jose") {
+        buildTeamPlayers(team1Players, (game as SoccerGame).team1lineup, game!.team1activity, team1color, game!.team1SourcePath);
       } else {
-        buildTeamPlayers(team2Players, (widget.game as SoccerGame).team2lineup, widget.game.team2activity, team2color, widget.game.team2SourcePath);
+        buildTeamPlayers(team2Players, (game as SoccerGame).team2lineup, game!.team2activity, team2color, game!.team2SourcePath);
       }
     } else if (widget.sport == "Basketball") {
-      buildTeamPlayers(team1Players, (widget.game as BasketballGame).team1lineup, widget.game.team1activity, team1color, widget.game.team1SourcePath);
-      buildTeamPlayers(team2Players, (widget.game as BasketballGame).team2lineup, widget.game.team2activity, team2color, widget.game.team2SourcePath);
+      buildTeamPlayers(team1Players, (game as BasketballGame).team1lineup, game!.team1activity, team1color, game!.team1SourcePath);
+      buildTeamPlayers(team2Players, (game as BasketballGame).team2lineup, game!.team2activity, team2color, game!.team2SourcePath);
     }
     if (widget.sport == "AFC San Jose") {
-      if (widget.game.team1 == "AFC San Jose") {
+      if (game!.team1 == "AFC San Jose") {
         sortTable(table1SortColumnIndex ?? 2, table1isAscending, team1Players);
       } else {
         sortTable(table2SortColumnIndex ?? 2, table2isAscending, team2Players);
@@ -364,9 +358,9 @@ class _ScorePageState extends State<ScorePage> {
           return DataRow(cells: [
             DataCell(Text(key.number)),
             DataCell(Text(key.name), onTap: () {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
+              Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
                   initialEntries: [OverlayEntry(
-                    builder: (context) {
+                    builder: (mainContext) {
                       return PlayerPage(uid: key.uid);
                     })],
                 )));
@@ -454,38 +448,22 @@ class _ScorePageState extends State<ScorePage> {
           },
         )
         );
-        tabNames.add(Tab(text: widget.game.date));
-        if (widget.game.status != 0) {
-          if (widget.game is SoccerGame) {
-            if (widget.game.team1 == "AFC San Jose") {
-              tabs.add(StatefulBuilder(
-                builder: (context, setState) {
-                  buildTeamTables(setState);
-                  return RefreshIndicator(
-                    onRefresh: () async {
-                      return _refreshData(setState);
-                    },
-                    child: ListView(children: [table1],)
-                    );
-                }
-                )
-              );
-              tabNames.add(Tab(text: widget.game.team1));
-            } else {
-              tabs.add(StatefulBuilder(
-                builder: (context, setState) {
-                  buildTeamTables(setState);
-                  return RefreshIndicator(
-                    onRefresh: () async {
-                      return _refreshData(setState);
-                    },
-                    child: ListView(children: [table2],)
-                    );
-                }
-                )
-              );
-              tabNames.add(Tab(text: widget.game.team2));
-            }
+        tabNames.add(Tab(text: game!.date));
+        if (game is SoccerGame) {
+          if (game!.team1 == "AFC San Jose") {
+            tabs.add(StatefulBuilder(
+              builder: (context, setState) {
+                buildTeamTables(setState);
+                return RefreshIndicator(
+                  onRefresh: () async {
+                    return _refreshData(setState);
+                  },
+                  child: ListView(children: [table1 ?? const Text("")],)
+                  );
+              }
+              )
+            );
+            tabNames.add(Tab(text: game!.team1));
           } else {
             tabs.add(StatefulBuilder(
               builder: (context, setState) {
@@ -494,26 +472,40 @@ class _ScorePageState extends State<ScorePage> {
                   onRefresh: () async {
                     return _refreshData(setState);
                   },
-                  child: ListView(children: [table1],)
+                  child: ListView(children: [table2 ?? const Text("")],)
                   );
               }
               )
             );
-            tabs.add(StatefulBuilder(
-              builder: (context, setState) {
-                buildTeamTables(setState);
-                return RefreshIndicator(
-                  onRefresh: () async {
-                    return _refreshData(setState);
-                  },
-                  child: ListView(children: [table2],)
-                  );
-              }
-              )
-            );
-            tabNames.add(Tab(text: widget.game.team1));
-            tabNames.add(Tab(text: widget.game.team2));
+            tabNames.add(Tab(text: game!.team2));
           }
+        } else {
+          tabs.add(StatefulBuilder(
+            builder: (context, setState) {
+              buildTeamTables(setState);
+              return RefreshIndicator(
+                onRefresh: () async {
+                  return _refreshData(setState);
+                },
+                child: ListView(children: [table1 ?? const Text("")],)
+                );
+            }
+            )
+          );
+          tabs.add(StatefulBuilder(
+            builder: (context, setState) {
+              buildTeamTables(setState);
+              return RefreshIndicator(
+                onRefresh: () async {
+                  return _refreshData(setState);
+                },
+                child: ListView(children: [table2 ?? const Text("")],)
+                );
+            }
+            )
+          );
+          tabNames.add(Tab(text: game!.team1));
+          tabNames.add(Tab(text: game!.team2));
         }
         return DefaultTabController(
           length: tabs.length, 
@@ -522,20 +514,20 @@ class _ScorePageState extends State<ScorePage> {
               title: Text("${widget.sport} Season ${widget.season}"),
               actions: [
                 IconButton(
-                  onPressed: widget.game.link == "" ? null : () {
+                  onPressed: game!.link == "" ? null : () {
                     Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
                     initialEntries: [OverlayEntry(
                       builder: (context) {
                         WebViewController webController = WebViewController()
                           ..setBackgroundColor(const Color(0x00000000))
-                          ..loadRequest(Uri.parse(widget.game.link));
+                          ..loadRequest(Uri.parse(game!.link));
                         return Scaffold(
                           appBar: AppBar(
-                          title: const Text(""),
-                          actions: [
-                            NavigationControls(controller: webController)
-                          ],
-                        ),
+                            title: const Text(""),
+                            actions: [
+                              NavigationControls(controller: webController)
+                            ],
+                          ),
                         body: WebViewStack(controller: webController,)
                         );
                       })],
@@ -559,44 +551,45 @@ class _ScorePageState extends State<ScorePage> {
   }
 
   Future<int> buildTeamTables(setState) async {
-    if (widget.game.status != 0) {
-      if (widget.sport == "Futsal") {
-        table1 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(widget.game.team1, widget.game.team1SourcePath, (widget.game as FutsalGame).team1lineup, team1color, widget.game.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1, setState)));
-        table2 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(widget.game.team2, widget.game.team2SourcePath, (widget.game as FutsalGame).team2lineup, team2color, widget.game.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2, setState)));
-      } else if (widget.sport == "AFC San Jose") {
-        table1 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(widget.game.team1, widget.game.team1SourcePath, (widget.game as SoccerGame).team1lineup, team1color, widget.game.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1, setState)));
-        table2 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(widget.game.team2, widget.game.team2SourcePath, (widget.game as SoccerGame).team2lineup, team2color, widget.game.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2, setState)));
-      } else if (widget.sport == "Basketball") {
-        table1 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(widget.game.team1, widget.game.team1SourcePath, (widget.game as BasketballGame).team1lineup, team1color, widget.game.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1, setState)));
-        table2 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(widget.game.team2, widget.game.team2SourcePath, (widget.game as BasketballGame).team2lineup, team2color, widget.game.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2, setState)));
-      }
+    if (widget.sport == "Futsal") {
+      table1 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(game!.team1, game!.team1SourcePath, (game! as FutsalGame).team1lineup, team1color, game!.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1, setState)));
+      table2 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(game!.team2, game!.team2SourcePath, (game! as FutsalGame).team2lineup, team2color, game!.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2, setState)));
+    } else if (widget.sport == "AFC San Jose") {
+      table1 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(game!.team1, game!.team1SourcePath, (game! as SoccerGame).team1lineup, team1color, game!.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1, setState)));
+      table2 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(game!.team2, game!.team2SourcePath, (game! as SoccerGame).team2lineup, team2color, game!.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2, setState)));
+    } else if (widget.sport == "Basketball") {
+      table1 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(game!.team1, game!.team1SourcePath, (game! as BasketballGame).team1lineup, team1color, game!.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1, setState)));
+      table2 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(game!.team2, game!.team2SourcePath, (game! as BasketballGame).team2lineup, team2color, game!.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2, setState)));
     } 
     return 1;
   }
 
   List<Widget> buildItemList() {
+    if (game == null) {
+      return List<Widget>.empty();
+    }
     List<Widget> items = List<Widget>.empty(growable: true);
     List<Widget> informationRows = [
       Row(
         children: <Widget>[
-          Expanded(child:Text(widget.game.stringStatus,textAlign: TextAlign.left, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: widget.game.statusColor))),
-          Expanded(child:Text(widget.game is SoccerGame && (widget.game as SoccerGame).startTime != "" ? (widget.game as SoccerGame).startTime : '${widget.game.Time.toString()}:00PM',textAlign: TextAlign.right, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
+          Expanded(child:Text(game!.stringStatus,textAlign: TextAlign.left, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: game!.statusColor))),
+          Expanded(child:Text(game is SoccerGame && (game! as SoccerGame).startTime != "" ? (game! as SoccerGame).startTime : '${game!.Time.toString()}:00PM',textAlign: TextAlign.right, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
         ],
       ),
       Row(
         children: <Widget>[
           Column(
             children: <Widget>[
-              Image.network(width: 70, widget.game.team1SourcePath, errorBuilder: (context, error, stackTrace) {
+              Image.network(width: 70, game!.team1SourcePath, errorBuilder: (context, error, stackTrace) {
                 return const Text("");
               },),
-              SizedBox(width: 100, child: Text(widget.game.team1, textAlign: TextAlign.center,),),
+              SizedBox(width: 100, child: Text(game!.team1, textAlign: TextAlign.center,),),
             ],
           ),
           Expanded(
             child:
               Text(
-                '${widget.game.team1score}-${widget.game.team2score}',
+                '${game!.team1score}-${game!.team2score}',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 35,
@@ -604,21 +597,21 @@ class _ScorePageState extends State<ScorePage> {
                 ))),
           Column(
             children: <Widget>[
-              Image.network(width: 70, widget.game.team2SourcePath, errorBuilder: (context, error, stackTrace) {
+              Image.network(width: 70, game!.team2SourcePath, errorBuilder: (context, error, stackTrace) {
                 return const Text("");
               },),
-              SizedBox(width: 100, child: Text(widget.game.team2, textAlign: TextAlign.center,),),
+              SizedBox(width: 100, child: Text(game!.team2, textAlign: TextAlign.center,),),
             ],
           ),
         ],
       ),
     ];
-    if (widget.game is SoccerGame && widget.sport == "AFC San Jose") {
+    if (game! is SoccerGame && widget.sport == "AFC San Jose") {
       informationRows.add(
         Row(
           children: [
-            SizedBox(width: 150, child: Text((widget.game as SoccerGame).location, textAlign: TextAlign.left,),),
-            Expanded(child: SizedBox(width: 150, child: Text((widget.game as SoccerGame).type, textAlign: TextAlign.right,),),)
+            SizedBox(width: 150, child: Text((game! as SoccerGame).location, textAlign: TextAlign.left,),),
+            Expanded(child: SizedBox(width: 150, child: Text((game! as SoccerGame).type, textAlign: TextAlign.right,),),)
           ],
         )
       );
@@ -629,8 +622,8 @@ class _ScorePageState extends State<ScorePage> {
             CircularPercentIndicator(
                   radius: 30,
                   lineWidth: 4.0,
-                  percent: widget.game.finalvote1,
-                  center: Text(widget.game.percvote1),
+                  percent: game!.finalvote1,
+                  center: Text(game!.percvote1),
                   progressColor: infiniteSportsPrimaryColor,
             ),
             Expanded(
@@ -638,7 +631,7 @@ class _ScorePageState extends State<ScorePage> {
               maintainSize: true, 
               maintainAnimation: true,
               maintainState: true,
-              visible: signedIn && !widget.game.voted && widget.game.status == 0,
+              visible: signedIn && !game!.voted && game!.status == 0,
               child: Column(
                 children: <Widget>[
                   const Text('Poll', textAlign: TextAlign.center),
@@ -659,17 +652,17 @@ class _ScorePageState extends State<ScorePage> {
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: <Widget>[
                                   TextButton(onPressed: () async {
-                                    DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${widget.game.UrlPath}/${widget.game.GameNum}/team1vote/");
-                                    await newClient.child(auth.credential!.user!.uid).set(1);
+                                    DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${game!.UrlPath}/${game!.GameNum}/team1vote/");
+                                    await newClient.child(currentUser!.uid).set(1);
                                     Navigator.pop(context);
                                     await _refreshData(setState);
-                                  }, child: Text(widget.game.team1),),
+                                  }, child: Text(game!.team1),),
                                   TextButton(onPressed: () async {
-                                    DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${widget.game.UrlPath}/${widget.game.GameNum}/team2vote/");
-                                    await newClient.child(auth.credential!.user!.uid).set(1);
+                                    DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${game!.UrlPath}/${game!.GameNum}/team2vote/");
+                                    await newClient.child(currentUser!.uid).set(1);
                                     Navigator.pop(context);
                                     await _refreshData(setState);
-                                  }, child: Text(widget.game.team2),),
+                                  }, child: Text(game!.team2),),
                                   const SizedBox(width: 15, height: 15,),
                                   TextButton(
                                     onPressed: () {
@@ -695,8 +688,8 @@ class _ScorePageState extends State<ScorePage> {
             CircularPercentIndicator(
                   radius: 30,
                   lineWidth: 4.0,
-                  percent: widget.game.finalvote2,
-                  center: Text(widget.game.percvote2),
+                  percent: game!.finalvote2,
+                  center: Text(game!.percvote2),
                   progressColor: infiniteSportsPrimaryColor,
             )
           ],
@@ -704,10 +697,10 @@ class _ScorePageState extends State<ScorePage> {
       );
     }
     items.add(buildScoreCard(informationRows));
-    if (widget.game.status != 0 && team1Players.isNotEmpty && team2Players.isNotEmpty) {
+    if (game!.status != 0 && team1Players.isNotEmpty && team2Players.isNotEmpty) {
       items.add(buildTeamLeaders());
-      items.add(Column(children: buildActivityList()));   
     }
+    items.add(Padding(padding: const EdgeInsets.all(5), child: Column(children: buildActivityList()),));   
     return items;
   }
 
@@ -730,11 +723,12 @@ class _ScorePageState extends State<ScorePage> {
 
   Future<void> _refreshData(localSetState) async { 
     // Add new items or update the data here 
-    widget.game = await getGame(widget, widget.sport, widget.season, convertStringDateToDatabase(widget.game.date), widget.times, widget.game.GameNum);
     team1Players.clear();
     team2Players.clear();
     activities.clear();
-    await getGameData();
+    game = await getGame(widget, widget.sport, widget.season, convertStringDateToDatabase(game!.date), widget.times, game!.GameNum);
+    _loadingGame = getGameData();
+    await _loadingGame;
     await buildTeamTables(localSetState);
     localSetState(() {});
   } 

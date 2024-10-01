@@ -1,5 +1,3 @@
-import 'dart:io';
-import 'dart:math';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -8,15 +6,16 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
+import 'package:infinite_sports_flutter/model/business.dart';
+import 'package:infinite_sports_flutter/model/event.dart';
 import 'package:infinite_sports_flutter/model/futsalgame.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
-import 'package:infinite_sports_flutter/model/player.dart';
+import 'package:infinite_sports_flutter/model/myuser.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/model/soccerplayer.dart';
 import 'package:infinite_sports_flutter/model/userinformation.dart';
 import 'package:intl/intl.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 var infiniteSportsPrimaryColor = const Color.fromARGB(255, 208, 0, 0);
 
@@ -24,15 +23,11 @@ Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
 Map<String, Map<String, Map<String, BasketballPlayer>>> basketballLineups = {};
 Map teamLogos = {};
 FirebaseAuthService auth = FirebaseAuthService();
+User? currentUser;
 bool signedIn = false;
 bool autoSignIn = false;
 bool darkModeEnabled = false;
-
-// Create storage
-final secureStorage = const FlutterSecureStorage();
-
-// Read value
-//String value = await storage.read(key: key);
+BuildContext? mainContext;
 
 ValueNotifier headerNotifier = ValueNotifier(["", ""]);
 
@@ -338,8 +333,8 @@ Future<List<Game>> getGames(sport, season, date, times) async {
       game.UrlPath = "https://infinite-sports-app.firebaseio.com/$sport/$season/Date/$date";
       game.GameNum = i;
 
-      game.SetUpVote();
-      game.GetLineUpImages();
+      game.setUpVote();
+      //game.getLineUpImages();
       allGames.add(game);
       i++;
   }
@@ -703,7 +698,7 @@ Future<UserInformation?> getInformation() async
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   try
   {
-    var event = await newClient.child("Users/${auth.credential!.user!.uid}/Information/").once();
+    var event = await newClient.child("Users/${currentUser!.uid}/Information/").once();
     var info = event.snapshot.value as Map<dynamic, dynamic>;
     var result = UserInformation();
     result.age = info["Age"] ?? info["age"];
@@ -720,7 +715,7 @@ Future<UserInformation?> getInformation() async
 
 Future<void> addUpdateInfo(UserInformation information, String phone) async
 {
-  DatabaseReference newClient = FirebaseDatabase.instance.ref("Users/${auth.credential!.user!.uid}");
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("Users/${currentUser!.uid}");
   try
   {
     var client = newClient.child("/Information/");
@@ -736,11 +731,11 @@ Future<void> addUpdateInfo(UserInformation information, String phone) async
 
 Future<void> signUpToPlay(String league, String season) async
 {
-  DatabaseReference newClient = FirebaseDatabase.instance.ref("Sign Ups/$league/$season/NotPaid/${auth.credential!.user!.uid}");
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("Sign Ups/$league/$season/NotPaid/${currentUser!.uid}");
 
   try
   {
-    await newClient.set(auth.credential!.user!.displayName);
+    await newClient.set(currentUser!.displayName);
   }
   catch (e)
   {
@@ -808,11 +803,11 @@ Future<void> uploadToken(User user, String token) async
 Future<void> addComment(String league, String season, String comment) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
-  var client = newClient.child("Sign Ups/$league/$season/Comments/${auth.credential!.user!.displayName!}");
+  var client = newClient.child("Sign Ups/$league/$season/Comments/${currentUser!.displayName!}");
 
   try
   {
-      await client.set("${auth.credential!.user!.uid}:$comment");
+      await client.set("${currentUser!.uid}:$comment");
   }
   catch (e)
   {
@@ -846,7 +841,7 @@ Future<String?> getPhone() async
   DatabaseReference newClient = FirebaseDatabase.instance.ref("");
   try
   {
-    var event = await newClient.child("Users/${auth.credential!.user!.uid}/Phone Number/").once();
+    var event = await newClient.child("Users/${currentUser!.uid}/Phone Number/").once();
     var info = event.snapshot.value.toString();
 
       return info;
@@ -911,5 +906,91 @@ Future<Map<dynamic, dynamic>> getOtherSignups() async {
   return status;
   } catch (e) {
     return {};
+  }
+}
+
+Future<List<Business>> getBusinesses() async {
+  DatabaseReference newClient = FirebaseDatabase.instance.ref();
+  var businesses = List<Business>.empty(growable: true);
+  try {
+    var event = await newClient.child("Map").once();
+    var list = event.snapshot.value as List;
+    for (var value in list) {
+      Business business = Business();
+      business.description = value["Description"] ?? "";
+      business.logoUrl = value["LogoUrl"] ?? "";
+      business.name = value["Name"] ?? "";
+      business.url = value["Url"];
+      business.phone = value["Phone"] ?? "";
+      business.lat = value["Lat"] ?? double.nan;
+      business.long = value["Long"] ?? double.nan;
+      if (business.logoUrl != null) {
+        business.logo = Image.network(business.logoUrl!);
+      }
+      businesses.add(business);
+    }
+    return businesses;
+  } catch (e) {
+    return businesses;
+  }
+}
+
+Future<List<Event>> getEvents() async {
+  DatabaseReference newClient = FirebaseDatabase.instance.ref();
+  var events = List<Event>.empty(growable: true);
+  try {
+    var snapshot = await newClient.child("Events").once();
+    var list = snapshot.snapshot.value as List;
+    for (var value in list) {
+      Event event = Event();
+      event.address = value["Address"] ?? "";
+      event.date = value["Date"] ?? "";
+      event.endTime = value["EndTime"] ?? "";
+      event.eventDate = value["EventDate"] ?? "";
+      event.imageUrl = value["ImageUrl"] ?? "";
+      event.info = value["Info"] ?? "";
+      event.location = value["Location"] ?? "";
+      event.startTime = value["StartTime"] ?? "";
+      event.endTime = value["EndTime"] ?? "";
+      event.title = value["Title"] ?? "";
+      if ((value as Map).containsKey("Attendees")) {
+        event.attendees = {};
+        value["Attendees"].forEach((uid, value) {
+          event.attendees![uid] = value.toString();
+        });
+      }
+      event.format();
+      events.add(event);
+    }
+    return events.toList();
+  } catch (e) {
+    return events.toList();
+  }
+}
+
+Future<Event> getEvent(index) async {
+  List<Event> events = await getEvents();
+  return events[index];
+}
+
+Future<Map<String, MyUser>> getAllUsers() async {
+  DatabaseReference newClient = FirebaseDatabase.instance.ref();
+  Map<String, MyUser> users = {};
+  try
+  {
+    var event = await newClient.child("Users").once();
+    var list = event.snapshot.value as Map;
+    list.forEach((uid, info) {
+      if(info.containsKey("ProfileUrl")) {
+        users[uid] = MyUser(info["First Name"] ?? "", info["Last Name"] ?? "", info["Date Joined"] ?? "", uid, info["ProfileUrl"]);
+      } else {
+        users[uid] = MyUser(info["First Name"] ?? "", info["Last Name"] ?? "", info["Date Joined"] ?? "", uid);
+      }
+    });
+    return users;
+  }
+  catch (e)
+  {
+    return users;
   }
 }

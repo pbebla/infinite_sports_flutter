@@ -96,13 +96,13 @@ class BasketballGame implements Game
   Map<String, BasketballPlayer> team2lineup = {};
 
   @override
-  void GetLineUpImages() async {
+  void getLineUpImages() async {
   }
 
     @override
-  void SetUpVote()
+  void setUpVote()
   {
-      signedIn = auth.credential?.user != null ?? false;
+      signedIn = currentUser != null;
 
       if (team1vote.isNotEmpty)
       {
@@ -123,15 +123,15 @@ class BasketballGame implements Game
 
       if (team1vote.isNotEmpty  && team2vote.isNotEmpty  && signedIn)
       {
-          voted = team1vote.containsKey(auth.credential!.user!.uid) || team2vote.containsKey(auth.credential!.user!.uid);
+          voted = team1vote.containsKey(currentUser!.uid) || team2vote.containsKey(currentUser!.uid);
       }
       else if (team1vote.isNotEmpty && signedIn)
       {
-          voted = team1vote.containsKey(auth.credential!.user!.uid);
+          voted = team1vote.containsKey(currentUser!.uid);
       }
       else if (team2vote.isNotEmpty && signedIn)
       {
-          voted = team2vote.containsKey(auth.credential!.user!.uid);
+          voted = team2vote.containsKey(currentUser!.uid);
       }
       else
       {

@@ -7,7 +7,7 @@
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_config/flutter_config.dart';
 
 /// Default [FirebaseOptions] for use with your Firebase apps.
 ///
@@ -61,7 +61,7 @@ class DefaultFirebaseOptions {
   );
 
   static FirebaseOptions android = FirebaseOptions(
-    apiKey: dotenv.env['ANDROID_API_KEY'] ?? "",
+    apiKey: FlutterConfig.get('ANDROID_API_KEY') ?? "",
     authDomain: "infinite-sports-app.firebaseapp.com",
     appId: '1:248087010229:android:058f3dbffbc0a468',
     messagingSenderId: '248087010229',
@@ -72,7 +72,7 @@ class DefaultFirebaseOptions {
   );
 
   static FirebaseOptions ios = FirebaseOptions(
-    apiKey: dotenv.env['IOS_API_KEY'] ?? "",
+    apiKey: FlutterConfig.get('IOS_API_KEY') ?? "",
     authDomain: "infinite-sports-app.firebaseapp.com",
     appId: '1:248087010229:ios:87700ab7b56d8baa',
     messagingSenderId: '248087010229',

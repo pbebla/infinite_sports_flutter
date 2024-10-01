@@ -5,7 +5,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
 import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -78,7 +77,7 @@ class _NavBarState extends State<NavBar> {
         }
         signUpEnabled = signUpsOpen && signedIn;
         return Drawer(
-          backgroundColor: Theme.of(context).colorScheme.primary,
+          backgroundColor: Theme.of(context).brightness == Brightness.light ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.surface,
           child: ListView(
             children: [
               Visibility(
@@ -125,8 +124,8 @@ class _NavBarState extends State<NavBar> {
                             ],
                           ));
                       },
-                      child: signedIn && (auth.credential?.additionalUserInfo?.profile?["ProfileUrl"] ?? false) ? 
-                      CircleAvatar(backgroundImage: NetworkImage(auth.credential?.additionalUserInfo?.profile?["ProfileUrl"]), radius: 50) : 
+                      child: signedIn && (currentUser?.photoURL?.isNotEmpty ?? false) ? 
+                      CircleAvatar(backgroundImage: NetworkImage(currentUser!.photoURL!), radius: 50) : 
                       const CircleAvatar(backgroundImage: AssetImage("assets/portraitplaceholder.png"), radius: 50),
                     ),
                     Text(FirebaseAuth.instance.currentUser?.displayName ?? "", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineMedium!.fontSize)),
@@ -151,7 +150,7 @@ class _NavBarState extends State<NavBar> {
                 textColor: Colors.white,
                 onTap: () {
                   Navigator.push(context, MaterialPageRoute(builder:(context) {
-                    return PlayerPage(uid: auth.credential!.user!.uid,);
+                    return PlayerPage(uid: currentUser!.uid,);
                   },));
                 },
               ),),
@@ -180,11 +179,11 @@ class _NavBarState extends State<NavBar> {
               StatefulBuilder(
                 builder: (context, setState) {
                   return ListTile(
-                    title: Text("Dark Theme", style: TextStyle(fontWeight: FontWeight.bold),),
+                    title: const Text("Dark Theme", style: TextStyle(fontWeight: FontWeight.bold),),
                     textColor: Colors.white,
                     trailing: Switch(
                       value: darkModeEnabled, 
-                      activeColor: Colors.black,
+                      activeColor: Theme.of(context).colorScheme.primary,
                       onChanged: (value) {
                       Provider.of<ThemeProvider>(context, listen: false).toggleTheme();
                       setState(() {

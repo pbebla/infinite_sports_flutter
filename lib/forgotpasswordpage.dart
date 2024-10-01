@@ -1,11 +1,7 @@
-import 'dart:io';
 
 import 'package:email_validator/email_validator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
-import 'package:image_picker/image_picker.dart';
 
 class ForgotPasswordPage extends StatefulWidget {
   const ForgotPasswordPage({super.key});
@@ -133,7 +129,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
             }
             if (snapshot.data!) {
               return AlertDialog(
-                title: Text("Success! Reset Email Sent to\n${_emailController.value.text}", style: TextStyle(fontSize: 16),),
+                title: Text("Success! Reset Email Sent to\n${_emailController.value.text}", style: const TextStyle(fontSize: 16),),
                 actions: [TextButton(child: const Text("OK"), onPressed: () {
                     Navigator.pop(context);
                     Navigator.pop(context);

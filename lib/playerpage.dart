@@ -178,7 +178,14 @@ class _PlayerPageState extends State<PlayerPage> {
             children: [
               Row(
                 children: [
-                  Expanded(child: profileImagePath != "" ? Image.network(profileImagePath, ) : Image.asset("assets/portraitplaceholder.png")),
+                  Expanded(child: ClipRRect(
+                    borderRadius: BorderRadius.circular(0),
+                    child: SizedBox.fromSize(
+                      size: const Size.fromHeight(200),
+                      child: profileImagePath != "" ? Image.network(profileImagePath, fit: BoxFit.contain,) : Image.asset("assets/portraitplaceholder.png"),
+                    ),
+                  ),),
+                  //Expanded(child: profileImagePath != "" ? Image.network(profileImagePath, ) : Image.asset("assets/portraitplaceholder.png")),
                   Expanded(child: Column(children: [
                     FittedBox(fit: BoxFit.fitWidth, child: Text(firstName, style: TextStyle(fontSize: Theme.of(context).textTheme.displayMedium!.fontSize)),),
                     FittedBox(fit: BoxFit.fitWidth, child: Text(lastName, style: TextStyle(fontSize: Theme.of(context).textTheme.displaySmall!.fontSize))),

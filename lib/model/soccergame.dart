@@ -98,11 +98,11 @@ class SoccerGame implements Game {
   Map<String, SoccerPlayer> team2lineup = {};
 
   @override
-  void GetLineUpImages() async {
+  void getLineUpImages() async {
   }
 
   @override
-  void SetUpVote()
+  void setUpVote()
 {
     //signedIn = Utility.LoggedInUser != null;
     signedIn = false;

@@ -1,6 +1,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/scorepage.dart';
@@ -36,7 +37,8 @@ class LiveScorePage extends StatefulWidget {
 class _LiveScorePageState extends State<LiveScorePage> {
   Map<String, Map<String, int>> times = {};
   List<Game>? gamesList;
-  Future<List<Game>>? _fetchGamesList;
+  late Future<List<Game>> _fetchGamesList;
+  final _controller = ScrollController(keepScrollOffset: true);
 
   @override
   void initState() {
@@ -44,7 +46,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
     super.initState();
   }
 
-  List<GestureDetector> populateCardList(List<Game> gamesList) {
+  List<GestureDetector> populateCardList(List<Game> gamesList, localSetState) {
     List<GestureDetector> cardList = [];
     if (gamesList.isEmpty) {
       cardList.add(GestureDetector(
@@ -127,7 +129,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
                           color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(15)),
                       child: TextButton(
                         onPressed: () {
-                          showDialog<String>(
+                          showCupertinoDialog<String>(
                             context: context,
                             builder: (BuildContext context) => Dialog(
                               child: Padding(
@@ -138,13 +140,13 @@ class _LiveScorePageState extends State<LiveScorePage> {
                                   children: <Widget>[
                                     TextButton(onPressed: () async {
                                       DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${game.UrlPath}/${game.GameNum}/team1vote/");
-                                      await newClient.child(auth.credential!.user!.uid).set(1);
+                                      await newClient.child(currentUser!.uid).set(1);
                                       Navigator.pop(context);
                                       await _refreshData(setState);
                                     }, child: Text(game.team1),),
                                     TextButton(onPressed: () async {
                                       DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${game.UrlPath}/${game.GameNum}/team2vote/");
-                                      await newClient.child(auth.credential!.user!.uid).set(1);
+                                      await newClient.child(currentUser!.uid).set(1);
                                       Navigator.pop(context);
                                       await _refreshData(setState);
                                     }, child: Text(game.team2),),
@@ -204,7 +206,9 @@ class _LiveScorePageState extends State<LiveScorePage> {
               builder: (context) {
                 return ScorePage(sport: widget.sport, season: widget.season, game: game, times: times);
               })],
-          )));
+          ))).then((value) async {
+            await _refreshData(localSetState);
+          });
         },
       ));
     }
@@ -213,7 +217,8 @@ class _LiveScorePageState extends State<LiveScorePage> {
 
   Future<void> _refreshData(localsetState) async { 
     // Add new items or update the data here 
-    gamesList = await getGames(widget.sport, widget.season, widget.date, times);
+    _fetchGamesList = getGames(widget.sport, widget.season, widget.date, times);
+    gamesList = await _fetchGamesList;
     localsetState(() {}); 
   } 
 
@@ -247,8 +252,10 @@ class _LiveScorePageState extends State<LiveScorePage> {
                 return _refreshData(setState);
               },
               child: ListView(
+                controller: _controller,
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(15),
-                children: populateCardList(gamesList!),
+                children: populateCardList(gamesList!, setState),
               )
             );
           }

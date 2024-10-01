@@ -32,6 +32,6 @@ abstract class Game
   String UrlPath = "";
   late int GameNum;
   late int Time;
-  void SetUpVote();
-  void GetLineUpImages();
+  void setUpVote();
+  void getLineUpImages();
 }
