@@ -132,8 +132,7 @@ class _TablePageState extends State<TablePage> {
         headingRowColor: WidgetStateProperty.resolveWith<Color?>(
             (Set<WidgetState> states) {
           return Theme.of(context)
-              .colorScheme
-              .inversePrimary; // Use the default value.
+              .colorScheme.surfaceContainerHighest; // Use the default value.
         }),
         columns: const [
           DataColumn(label: Text("")),
@@ -168,8 +167,7 @@ class _TablePageState extends State<TablePage> {
         headingRowColor: WidgetStateProperty.resolveWith<Color?>(
             (Set<WidgetState> states) {
           return Theme.of(context)
-              .colorScheme
-              .inversePrimary; // Use the default value.
+              .colorScheme.surfaceContainerHighest; // Use the default value.
         }),
         columns: const [
           DataColumn(label: Text("Team")),
@@ -207,8 +205,7 @@ class _TablePageState extends State<TablePage> {
         headingRowColor: WidgetStateProperty.resolveWith<Color?>(
             (Set<WidgetState> states) {
           return Theme.of(context)
-              .colorScheme
-              .inversePrimary; // Use the default value.
+              .colorScheme.surfaceContainerHighest; // Use the default value.
         }),
         columns: const [
           DataColumn(label: Text("")),

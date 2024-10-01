@@ -1,6 +1,8 @@
 
+import 'dart:async';
+
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/main.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/scorepage.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -34,9 +36,17 @@ class LiveScorePage extends StatefulWidget {
 
 class _LiveScorePageState extends State<LiveScorePage> {
   Map<String, Map<String, int>> times = {};
-  var cardList = <GestureDetector>[];
+  List<Game>? gamesList;
+  late Future<List<Game>> _fetchGamesList;
+  final _controller = ScrollController(keepScrollOffset: true);
 
-  List<GestureDetector> populateCardList(List<Game> gamesList) {
+  @override
+  void initState() {
+    _fetchGamesList = getGames(widget.sport, widget.season, widget.date, times);
+    super.initState();
+  }
+
+  List<GestureDetector> populateCardList(List<Game> gamesList, localSetState) {
     List<GestureDetector> cardList = [];
     if (gamesList.isEmpty) {
       cardList.add(GestureDetector(
@@ -119,7 +129,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
                           color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(15)),
                       child: TextButton(
                         onPressed: () {
-                          showDialog<String>(
+                          showCupertinoDialog<String>(
                             context: context,
                             builder: (BuildContext context) => Dialog(
                               child: Padding(
@@ -130,13 +140,13 @@ class _LiveScorePageState extends State<LiveScorePage> {
                                   children: <Widget>[
                                     TextButton(onPressed: () async {
                                       DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${game.UrlPath}/${game.GameNum}/team1vote/");
-                                      await newClient.child(auth.credential!.user!.uid).set(1);
+                                      await newClient.child(currentUser!.uid).set(1);
                                       Navigator.pop(context);
                                       await _refreshData(setState);
                                     }, child: Text(game.team1),),
                                     TextButton(onPressed: () async {
                                       DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${game.UrlPath}/${game.GameNum}/team2vote/");
-                                      await newClient.child(auth.credential!.user!.uid).set(1);
+                                      await newClient.child(currentUser!.uid).set(1);
                                       Navigator.pop(context);
                                       await _refreshData(setState);
                                     }, child: Text(game.team2),),
@@ -176,8 +186,6 @@ class _LiveScorePageState extends State<LiveScorePage> {
 
       Card card = Card(
         elevation: 2,
-        shadowColor: Colors.black,
-        color: Colors.white,
         child: SizedBox(
           width: 300,
           height: 240,
@@ -198,19 +206,20 @@ class _LiveScorePageState extends State<LiveScorePage> {
               builder: (context) {
                 return ScorePage(sport: widget.sport, season: widget.season, game: game, times: times);
               })],
-          )));
+          ))).then((value) async {
+            await _refreshData(localSetState);
+          });
         },
       ));
     }
     return cardList;
   }
 
-  Future<void> _refreshData(setState) async { 
+  Future<void> _refreshData(localsetState) async { 
     // Add new items or update the data here 
-    List<Game> gamesList = await getGames(widget.sport, widget.season, widget.date, times);
-    cardList = populateCardList(gamesList); 
-    setState(() {
-    }); 
+    _fetchGamesList = getGames(widget.sport, widget.season, widget.date, times);
+    gamesList = await _fetchGamesList;
+    localsetState(() {}); 
   } 
 
   @override
@@ -223,7 +232,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
     // than having to individually change instances of widgets.
     
     return FutureBuilder(
-      future: getGames(widget.sport, widget.season, widget.date, times), 
+      future: _fetchGamesList, 
       builder:(context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
             return Center(
@@ -235,9 +244,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
         if (!snapshot.hasData) {
           return const Center(child: Card(child: Text("No Upcoming Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold),),),);
         }
-        List<Game> gamesList = snapshot.data as List<Game>;
-        //widget.onTitleSelect(gamesList[0].date);
-        cardList = populateCardList(gamesList); 
+        gamesList = snapshot.data!;
         return StatefulBuilder(
           builder: (context, setState) {
             return RefreshIndicator(
@@ -245,8 +252,10 @@ class _LiveScorePageState extends State<LiveScorePage> {
                 return _refreshData(setState);
               },
               child: ListView(
+                controller: _controller,
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(15),
-                children: cardList,
+                children: populateCardList(gamesList!, setState),
               )
             );
           }

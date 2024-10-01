@@ -1,20 +1,9 @@
-import 'dart:io';
 
-import 'package:email_validator/email_validator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
-import 'package:infinite_sports_flutter/main.dart';
-import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/model/userinformation.dart';
-import 'package:infinite_sports_flutter/navigations/current_livescore_navigation.dart';
-import 'package:infinite_sports_flutter/signup.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 class LeagueForm extends StatefulWidget {
@@ -81,7 +70,7 @@ class _LeagueFormState extends State<LeagueForm> {
     }
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text("Sign Up Form"),
         backgroundColor: Theme.of(context).colorScheme.primary,
@@ -177,7 +166,7 @@ class _LeagueFormState extends State<LeagueForm> {
                 height: 50,
                 width: MediaQuery.sizeOf(context).width,
                 decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.inversePrimary, borderRadius: BorderRadius.circular(20)),
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20)),
                 child: ListTile(
                   title: const Text("Season Rules", style: TextStyle(fontWeight: FontWeight.bold),),
                   trailing: Checkbox(value: seasonRulesRead, onChanged: (value) {
@@ -210,7 +199,7 @@ class _LeagueFormState extends State<LeagueForm> {
               height: 50,
               width: MediaQuery.sizeOf(context).width,
               decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.inversePrimary, borderRadius: BorderRadius.circular(20)),
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(20)),
               child: ListTile(
                 title: const Text("Waiver Conditions", style: TextStyle(fontWeight: FontWeight.bold),),
                 trailing: Checkbox(value: waiverRead, onChanged: (value) {

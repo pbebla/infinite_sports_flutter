@@ -34,8 +34,8 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                     return Scaffold(
                       appBar: AppBar(title: const Text("Futsal")), 
                       body: ListView.separated(
-                        separatorBuilder: (context, index) => const Divider(
-                              color: Colors.black,
+                        separatorBuilder: (context, index) => Divider(
+                              color: Theme.of(context).dividerColor,
                             ),
                         itemCount: snapshot.data!.length,
                         itemBuilder: (context, index) => snapshot.data![index]
@@ -56,8 +56,8 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                     return Scaffold(
                       appBar: AppBar(title: const Text("Basketball")), 
                       body: ListView.separated(
-                        separatorBuilder: (context, index) => const Divider(
-                              color: Colors.black,
+                        separatorBuilder: (context, index) => Divider(
+                              color: Theme.of(context).dividerColor,
                             ),
                         itemCount: snapshot.data!.length,
                         itemBuilder: (context, index) => snapshot.data![index]
@@ -80,8 +80,8 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                     return Scaffold(
                       appBar: AppBar(title: const Text("AFC San Jose")), 
                       body: ListView.separated(
-                        separatorBuilder: (context, index) => const Divider(
-                              color: Colors.black,
+                        separatorBuilder: (context, index) => Divider(
+                              color: Theme.of(context).dividerColor,
                             ),
                         itemCount: snapshot.data!.length,
                         itemBuilder: (context, index) => snapshot.data![index]

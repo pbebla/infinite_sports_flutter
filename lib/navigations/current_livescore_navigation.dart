@@ -40,18 +40,16 @@ class CurrentLivescoreNavigationState extends State<CurrentLivescoreNavigation> 
                   },
                   child: Card(
                     elevation: 2,
-                    shadowColor: Colors.black,
-                    color: Colors.white,
                     child: SizedBox(
                       width: 350,
                       height: 70,
                       child: Container(
                         padding: const EdgeInsets.all(13),
-                        child: Row(children: [Text("Assyrian ${widget.currentSport} League Season ${widget.currentSeason}", style: const TextStyle(fontWeight: FontWeight.bold),), const Spacer(), Image.asset('assets/BasketLeague.png', width: windowsDefaultIconSize.toDouble(),)],),),
+                        child: Row(children: [Text("Assyrian ${widget.currentSport} League Season ${widget.currentSeason}", style: const TextStyle(fontWeight: FontWeight.bold),), const Spacer(), ImageIcon(AssetImage(widget.currentSport == "Futsal" ? 'assets/FutsalLeague.png' : 'assets/BasketLeague.png'), size: windowsDefaultIconSize.toDouble(),)],),),
                     )
                   ),
                 ),
-                const Divider(color: Colors.black,),
+                Divider(color: Theme.of(context).dividerColor),
                 Text(convertDatabaseDateToFormatDate(widget.currentDate), style: const TextStyle(fontWeight: FontWeight.bold),),
                 Expanded(
                   child: LiveScorePage(sport: widget.currentSport, season: widget.currentSeason, date: widget.currentDate ,onTitleSelect: (String value) {widget.onTitleSelect(value); })

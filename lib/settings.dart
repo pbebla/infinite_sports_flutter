@@ -38,7 +38,7 @@ class _SettingsState extends State<Settings> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Settings"),
-        backgroundColor: Theme.of(context).primaryColor,
+        backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),
       body: Padding(padding: const EdgeInsetsDirectional.all(10.0),
@@ -49,7 +49,7 @@ class _SettingsState extends State<Settings> {
             delegate: SliverChildListDelegate(
               [
                 const Divider(color: Colors.grey),
-                ListTile(title: Text("Change Password"), minTileHeight: 40, onTap: () async {
+                ListTile(title: const Text("Change Password"), minTileHeight: 40, onTap: () async {
                   showDialog(
                     context: context,
                     builder: (context) {
@@ -64,7 +64,7 @@ class _SettingsState extends State<Settings> {
                             );
                           }
                           return AlertDialog(
-                            title: Text("Success! Reset Email Sent to\n${FirebaseAuth.instance.currentUser!.email!}", style: TextStyle(fontSize: 16),),
+                            title: Text("Success! Reset Email Sent to\n${FirebaseAuth.instance.currentUser!.email!}", style: const TextStyle(fontSize: 16),),
                             actions: [TextButton(child: const Text("OK"), onPressed: () {
                                 Navigator.pop(context);
                             },)],
@@ -76,15 +76,6 @@ class _SettingsState extends State<Settings> {
                 },),
                 const Divider(color: Colors.grey),
                 ListTile(title: const Text("Auto Log In"), minTileHeight: 40, trailing: Checkbox(value: autoSignIn, onChanged: (value) async {
-                  if (value == true) {
-                    // Write value
-                    await secureStorage.write(key: "Email", value: auth.credential!.user!.email);
-                    await secureStorage.write(key: "Password", value: auth.password);
-                  } else {
-                    // Delete value
-                    await secureStorage.delete(key: "Email");
-                    await secureStorage.delete(key: "Password");
-                  }
                   setState(() {
                     autoSignIn = value!;
                   });
@@ -105,7 +96,7 @@ class _SettingsState extends State<Settings> {
                     return Scaffold(
                       appBar: AppBar(
                         title: const Text("Futsal"),
-                        backgroundColor: Theme.of(context).primaryColor,
+                        backgroundColor: Theme.of(context).colorScheme.primary,
                         foregroundColor: Colors.white,
                       ),
                       body: ListView(
@@ -135,7 +126,7 @@ class _SettingsState extends State<Settings> {
                     return Scaffold(
                       appBar: AppBar(
                         title: const Text("Basketball"),
-                        backgroundColor: Theme.of(context).primaryColor,
+                        backgroundColor: Theme.of(context).colorScheme.primary,
                         foregroundColor: Colors.white,
                       ),
                       body: ListView(
@@ -176,7 +167,7 @@ class _SettingsState extends State<Settings> {
                       ),
                       body: Column(children: [
                         Image.asset("assets/infinite.png"),
-                        const SingleChildScrollView(child: Text("Infinite Sports Association is a San Jose-based non-profit Assyrian organization that runs Soccer, Basketball and Volleyball leagues, games, and tournaments for the Assyrian community"),)],)
+                        const SingleChildScrollView(child: Padding(padding: EdgeInsets.all(15), child: Text("Infinite Sports Association is a San Jose-based non-profit Assyrian organization that runs Soccer, Basketball and Volleyball leagues, games, and tournaments for the Assyrian community")))],)
                     );
                   },)); 
                 },),
@@ -185,11 +176,11 @@ class _SettingsState extends State<Settings> {
                   Navigator.push(context, MaterialPageRoute(builder:(context) {
                     return Scaffold(
                       appBar: AppBar(
-                        title: const Text("About Infinite Sports Association"),
+                        title: const Text("About NinevehWare"),
                       ),
                       body: Column(children: [
                         Image.asset("assets/ninevehware.png"),
-                        const SingleChildScrollView(child: Text("NinevehWare is a San Jose-based Software Development brand by Bronsin Benyamin that specializes in Mobile App Development."),)],)
+                        const SingleChildScrollView(child: Padding(padding: EdgeInsets.all(15), child: Text("NinevehWare is a San Jose-based Software Development brand by Bronsin Benyamin that specializes in Mobile App Development."),))],)
                     );
                   },)); 
                 },),

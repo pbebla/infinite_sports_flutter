@@ -3,7 +3,6 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/createaccountpage.dart';
 import 'package:infinite_sports_flutter/forgotpasswordpage.dart';
-import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 
 class LoginPage extends StatefulWidget {
@@ -16,12 +15,24 @@ class LoginPage extends StatefulWidget {
 class _LoginDemoState extends State<LoginPage> {
   late TextEditingController _emailController;
   late TextEditingController _passwordController;
+  String? _loginErrorText;
 
   @override
   void initState() {
     super.initState();
     _emailController = TextEditingController();
     _passwordController = TextEditingController();
+  }
+
+  @override
+  void didChangeDependencies() {
+    /*
+    every time we navigate to another TextField
+    the build method called and can causing some UX issue
+    to prevent that issue, we reassign the errorTexts to null.
+    */
+    _loginErrorText = null;
+    super.didChangeDependencies();
   }
 
   @override
@@ -34,7 +45,7 @@ class _LoginDemoState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text("Login or Sign Up"),
         backgroundColor: Theme.of(context).colorScheme.primary,
@@ -73,19 +84,20 @@ class _LoginDemoState extends State<LoginPage> {
               child: TextField(
                 controller: _passwordController,
                 obscureText: true,
-                decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                    border: const OutlineInputBorder(),
+                    errorText: (_loginErrorText),
                     labelText: 'Password',
                     hintText: 'Enter secure password'),
                 onSubmitted: (value) async {
-                  _signIn();
+                  _processSignIn();
                 },
               ),
             ),
             TextButton(
               onPressed: (){
                 Navigator.push(context, MaterialPageRoute(builder:(context) {
-                    return ForgotPasswordPage();
+                    return const ForgotPasswordPage();
                 },));
               },
               child: Text(
@@ -99,7 +111,9 @@ class _LoginDemoState extends State<LoginPage> {
               decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(20)),
               child: TextButton(
-                onPressed: _signIn,
+                onPressed: () async {
+                  _processSignIn();
+                },
                 child: const Text(
                   'Login',
                   style: TextStyle(color: Colors.white, fontSize: 25),
@@ -138,25 +152,44 @@ class _LoginDemoState extends State<LoginPage> {
     );
   }
 
-  void _signIn() async {
+  void _processSignIn() async {
+    showDialog(
+      barrierDismissible: false,
+      context: context, 
+      builder: (context) {
+        return Center(
+          child: CircularProgressIndicator(
+            color: Theme.of(context).colorScheme.primary,
+          )
+        );
+      }
+    );
+    await _signIn();
+    Navigator.pop(context);
+    if (signedIn) {
+      Navigator.pop(context);
+    }
+  }
+
+  Future<bool> _signIn() async {
     String email = _emailController.text;
     String password = _passwordController.text;
     User? user = await auth.signInWithEmailAndPassword(email, password);
 
     if (user != null) {
       signedIn = true;
-      auth.password = password;
-      if (autoSignIn) {
-        await secureStorage.write(key: "Email", value: email);
-        await secureStorage.write(key: "Password", value: password);
-      }
+      currentUser = user;
       String? token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
         await uploadToken(user, token);
       }
-      Navigator.pop(context);
+      return true;
     } else {
+      _loginErrorText = "Username or password is incorrect. Try again.";
       print("Error for login");
+      setState(() {
+      });
+      return false;
     }
   }
 }

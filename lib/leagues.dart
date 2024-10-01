@@ -101,8 +101,8 @@ class _LeaguesPageState extends State<LeaguesPage> {
         }
         return Scaffold(
           body: ListView.separated(
-            separatorBuilder: (context, index) => const Divider(
-              color: Colors.black,
+            separatorBuilder: (context, index) => Divider(
+              color: Theme.of(context).dividerColor,
             ),
             itemCount: snapshot.data!.length,
             itemBuilder: (context, index) => snapshot.data![index]

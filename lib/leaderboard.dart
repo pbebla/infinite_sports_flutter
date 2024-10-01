@@ -119,7 +119,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         sortAscending: isAscending,
         columnSpacing: 0,
         headingRowColor: WidgetStateProperty.resolveWith<Color?>((Set<WidgetState> states) {
-          return Theme.of(context).colorScheme.inversePrimary; // Use the default value.
+          return Theme.of(context).colorScheme.surfaceContainerHighest; // Use the default value.
         }),
         columns: [
           const DataColumn(label: Text(""), numeric: true),
@@ -154,7 +154,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         sortAscending: isAscending,
         columnSpacing: 0,
         headingRowColor: WidgetStateProperty.resolveWith<Color?>((Set<WidgetState> states) {
-          return Theme.of(context).colorScheme.inversePrimary; // Use the default value.
+          return Theme.of(context).colorScheme.surfaceContainerHighest; // Use the default value.
         }),
         columns: [
           const DataColumn(label: Text(""), numeric: true),
@@ -188,7 +188,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         sortAscending: isAscending,
         columnSpacing: 0,
         headingRowColor: WidgetStateProperty.resolveWith<Color?>((Set<WidgetState> states) {
-          return Theme.of(context).colorScheme.inversePrimary; // Use the default value.
+          return Theme.of(context).colorScheme.surfaceContainerHighest; // Use the default value.
         }),
         columns: [
           const DataColumn(label: Text("Pos")),
