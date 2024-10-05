@@ -204,11 +204,11 @@ class _LiveScorePageState extends State<LiveScorePage> {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
             initialEntries: [OverlayEntry(
               builder: (context) {
-                return ScorePage(sport: widget.sport, season: widget.season, game: game, times: times);
+                return ScorePage(sport: widget.sport, season: widget.season, game: game, times: times, refreshCallback: () async {
+                  await _refreshData(localSetState);
+                },);
               })],
-          ))).then((value) async {
-            await _refreshData(localSetState);
-          });
+          )));
         },
       ));
     }
