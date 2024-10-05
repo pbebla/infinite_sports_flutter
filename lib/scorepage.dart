@@ -106,11 +106,8 @@ class _ScorePageState extends State<ScorePage> {
       buildTeamPlayers(team1Players, (game as FutsalGame).team1lineup, game!.team1activity, team1color, game!.team1SourcePath);
       buildTeamPlayers(team2Players, (game as FutsalGame).team2lineup, game!.team2activity, team2color, game!.team2SourcePath);
     } else if (widget.sport == "AFC San Jose") {
-      if (game!.team1 == "AFC San Jose") {
-        buildTeamPlayers(team1Players, (game as SoccerGame).team1lineup, game!.team1activity, team1color, game!.team1SourcePath);
-      } else {
-        buildTeamPlayers(team2Players, (game as SoccerGame).team2lineup, game!.team2activity, team2color, game!.team2SourcePath);
-      }
+      buildTeamPlayers(team1Players, (game as SoccerGame).team1lineup, game!.team1activity, team1color, game!.team1SourcePath);
+      buildTeamPlayers(team2Players, (game as SoccerGame).team2lineup, game!.team2activity, team2color, game!.team2SourcePath);
     } else if (widget.sport == "Basketball") {
       buildTeamPlayers(team1Players, (game as BasketballGame).team1lineup, game!.team1activity, team1color, game!.team1SourcePath);
       buildTeamPlayers(team2Players, (game as BasketballGame).team2lineup, game!.team2activity, team2color, game!.team2SourcePath);
@@ -250,6 +247,25 @@ class _ScorePageState extends State<ScorePage> {
 
   List<Widget> buildActivityList() {
     List<Widget> rows = List.empty(growable: true);
+    if (widget.sport == "AFC San Jose" && activities.length != widget.game.team1activity.length + widget.game.team2activity.length) {
+      if (widget.game.team1 != "AFC San Jose") {
+        widget.game.team1activity.forEach((k, v) {
+          for(var history in v) {
+            for(var action in history.keys) {
+              activities.add(GameActivity(history[action], action, k, Colors.white, ""));
+            }
+          }
+        });
+      } else {
+        widget.game.team2activity.forEach((k, v) {
+          for(var history in v) {
+            for(var action in history.keys) {
+              activities.add(GameActivity(history[action], action, k, Colors.white, ""));
+            }
+          }
+        });
+      }
+    }
     activities.sort((a, b) {
       return compareValues(int.parse(a.time.substring(0, a.time.length-1)), int.parse(b.time.substring(0, b.time.length-1)), false);
     },);
@@ -512,7 +528,21 @@ class _ScorePageState extends State<ScorePage> {
           length: tabs.length, 
           child: Scaffold(
             appBar: AppBar(
-              title: Text("${widget.sport} Season ${widget.season}"),
+              title:  RichText(
+                textAlign: TextAlign.center,
+                text: TextSpan(
+                    text: widget.sport,
+                    style: TextStyle(fontSize: 20, color: Theme.of(context).colorScheme.inverseSurface),
+                    children: <TextSpan>[
+                      TextSpan(
+                        text: '\n${widget.season}',
+                        style: const TextStyle(
+                          fontSize: 16,
+                        ),
+                      ),
+                    ]
+                ),
+              ),
               actions: [
                 IconButton(
                   onPressed: game!.link == "" ? null : () {
