@@ -770,13 +770,13 @@ class _ScorePageState extends State<ScorePage> {
       players.sort((a, b) => 
         compareValues(a.name, b.name, ascending));
     } else if (columnIndex == 2) {
-      if (widget.sport == "Futsal") {
+      if (widget.sport == "Futsal" || widget.sport == "AFC San Jose") {
         players.sort((a, b) => compareValues((a as FutsalPlayerStats).goals, (b as FutsalPlayerStats).goals, ascending));
       } else if (widget.sport == "Basketball") {
         players.sort((a, b) => compareValues((a as BasketballPlayerStats).total, (b as BasketballPlayerStats).total, ascending));
-      }
+      } 
     } else if (columnIndex == 3) {
-      if (widget.sport == "Futsal") {
+      if (widget.sport == "Futsal" || widget.sport == "AFC San Jose") {
         players.sort((a, b) => compareValues((a as FutsalPlayerStats).assists, (b as FutsalPlayerStats).assists, ascending));
       } else if (widget.sport == "Basketball") {
         players.sort((a, b) => compareValues((a as BasketballPlayerStats).rebounds, (b as BasketballPlayerStats).rebounds, ascending));
