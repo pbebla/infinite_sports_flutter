@@ -158,23 +158,23 @@ class _PlayerPageState extends State<PlayerPage> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder(
-      future: getPlayerData(), 
-      builder: (context, snapshot) {
-        if(snapshot.connectionState == ConnectionState.waiting) {
-          return Center(
-              child: CircularProgressIndicator(
-                color: Theme.of(context).colorScheme.primary,
-              )
-            );
-        }
-        return Scaffold(
-          appBar: AppBar(
-            title: const Text("Profile"),
-            backgroundColor: Theme.of(context).colorScheme.primary,
-            foregroundColor: Colors.white,
-          ),
-          body: Column(
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Profile"),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.white,
+      ),
+      body: FutureBuilder(
+        future: getPlayerData(),
+        builder: (context, snapshot) {
+          if(snapshot.connectionState == ConnectionState.waiting) {
+            return Center(
+                child: CircularProgressIndicator(
+                  color: Theme.of(context).colorScheme.primary,
+                )
+              );
+          }
+          return Column(
             children: [
               Row(
                 children: [
@@ -358,9 +358,10 @@ class _PlayerPageState extends State<PlayerPage> {
             )
           )
               ]
-            )
-        );
-      }
+            );
+        }
+      )
+      
     );
   }
 }
