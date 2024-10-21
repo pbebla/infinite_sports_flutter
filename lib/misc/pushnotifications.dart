@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class PushNotifications {
@@ -17,21 +18,29 @@ class PushNotifications {
 
   static Future initLocalNotifications() async {
     const AndroidInitializationSettings androidInitializationSettings = AndroidInitializationSettings('@mipmap/launcher_icon');
-    final DarwinInitializationSettings iOSinitializationSettings = DarwinInitializationSettings(
-      onDidReceiveLocalNotification: (id, title, body, payload) {},
-    );
+    final DarwinInitializationSettings iOSinitializationSettings = DarwinInitializationSettings();
     final InitializationSettings initializationSettings = InitializationSettings(
       android: androidInitializationSettings,
       iOS: iOSinitializationSettings
     );
 
     if (Platform.isAndroid) {
-      _flutterLocalNotificationsPlugin
+      await _flutterLocalNotificationsPlugin
           .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()!
           .requestNotificationsPermission();
     }
 
-    _flutterLocalNotificationsPlugin.initialize(initializationSettings,
+    if (Platform.isIOS) {
+      await _flutterLocalNotificationsPlugin
+        .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
+        ?.requestPermissions(
+          alert: true,
+          badge: true,
+          sound: true
+        );
+    }
+
+    await _flutterLocalNotificationsPlugin.initialize(initializationSettings,
       onDidReceiveNotificationResponse: onNotificationTap,
       onDidReceiveBackgroundNotificationResponse: onNotificationTap);
   }
@@ -51,9 +60,11 @@ class PushNotifications {
         importance: Importance.max,
         priority: Priority.high,
         ticker: 'ticker');
+    const iosNotificationDetails = DarwinNotificationDetails();
     const NotificationDetails notificationDetails =
       NotificationDetails(
-        android: androidNotificationDetails
+        android: androidNotificationDetails,
+        iOS: iosNotificationDetails
       );
     await _flutterLocalNotificationsPlugin
       .show(0, title, body, notificationDetails, payload: payload);

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>248087010229-g45omq0n7ev5jtmbc1ei7a0nuaq02544.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.248087010229-g45omq0n7ev5jtmbc1ei7a0nuaq02544</string>
+	<key>ANDROID_CLIENT_ID</key>
+	<string>248087010229-7h149qao18fpi5rtfds7qvcj5kdb8hfe.apps.googleusercontent.com</string>
+	<key>API_KEY</key>
+	<string>AIzaSyCKDhpIclCSKFouJlF9ouX0BUs_5DOn-VA</string>
+	<key>GCM_SENDER_ID</key>
+	<string>248087010229</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.infinitesports.Infinite-Sports</string>
+	<key>PROJECT_ID</key>
+	<string>infinite-sports-app</string>
+	<key>STORAGE_BUCKET</key>
+	<string>infinite-sports-app.appspot.com</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:248087010229:ios:87700ab7b56d8baa</string>
+	<key>DATABASE_URL</key>
+	<string>https://infinite-sports-app.firebaseio.com</string>
+</dict>
+</plist>

@@ -80,6 +80,7 @@ flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
   image_path: "assets/infinitelarge.png"
+  image_path_ios_dark_transparent: "assets/infinitelarge_dark.png"
   min_sdk_android: 21 # android min sdk min:16, default 21
   web:
     generate: true
