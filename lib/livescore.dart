@@ -219,7 +219,9 @@ class _LiveScorePageState extends State<LiveScorePage> {
     // Add new items or update the data here 
     _fetchGamesList = getGames(widget.sport, widget.season, widget.date, times);
     gamesList = await _fetchGamesList;
-    localsetState(() {}); 
+    if (mounted) {
+      localsetState(() {}); 
+    }
   } 
 
   @override

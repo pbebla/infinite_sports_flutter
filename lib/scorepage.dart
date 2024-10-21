@@ -112,6 +112,8 @@ class _ScorePageState extends State<ScorePage> {
       buildTeamPlayers(team1Players, (game as BasketballGame).team1lineup, game!.team1activity, team1color, game!.team1SourcePath);
       buildTeamPlayers(team2Players, (game as BasketballGame).team2lineup, game!.team2activity, team2color, game!.team2SourcePath);
     }
+    populateActivities(widget.game.team1activity, team1Players, activities, team1color, widget.game.team1SourcePath);
+    populateActivities(widget.game.team2activity, team2Players, activities, team2color, widget.game.team2SourcePath);
     if (widget.sport == "AFC San Jose") {
       if (game!.team1 == "AFC San Jose") {
         sortTable(table1SortColumnIndex ?? 2, table1isAscending, team1Players);
@@ -245,27 +247,18 @@ class _ScorePageState extends State<ScorePage> {
     );
   }
 
+  void populateActivities(Map<dynamic, dynamic> teamActivity, List<PlayerStats> teamPlayers, List<GameActivity> activities, Color color, String sourcePath) {
+    teamActivity.forEach((k, v) {
+      for (var history in v) {
+        for (var action in history.keys) {
+          activities.add(GameActivity(history[action], action, k, color, sourcePath));
+        }
+      }
+    });
+  }
+
   List<Widget> buildActivityList() {
     List<Widget> rows = List.empty(growable: true);
-    if (widget.sport == "AFC San Jose" && activities.length != widget.game.team1activity.length + widget.game.team2activity.length) {
-      if (widget.game.team1 != "AFC San Jose") {
-        widget.game.team1activity.forEach((k, v) {
-          for(var history in v) {
-            for(var action in history.keys) {
-              activities.add(GameActivity(history[action], action, k, Colors.white, ""));
-            }
-          }
-        });
-      } else {
-        widget.game.team2activity.forEach((k, v) {
-          for(var history in v) {
-            for(var action in history.keys) {
-              activities.add(GameActivity(history[action], action, k, Colors.white, ""));
-            }
-          }
-        });
-      }
-    }
     activities.sort((a, b) {
       return compareValues(int.parse(a.time.substring(0, a.time.length-1)), int.parse(b.time.substring(0, b.time.length-1)), false);
     },);
@@ -309,7 +302,6 @@ class _ScorePageState extends State<ScorePage> {
                   } else if (action == "Assist") {
                     assists+=1;
                   }
-                  activities.add(GameActivity(name, action, k, teamColor, teamSourcePath));
                 }
               }
             }
@@ -338,7 +330,6 @@ class _ScorePageState extends State<ScorePage> {
                   } else if (action == "Rebound") {
                     rebounds+=1;
                   }
-                  activities.add(GameActivity(name.toString(), action, k, teamColor, teamSourcePath));
                 }
               }
             }
@@ -466,37 +457,7 @@ class _ScorePageState extends State<ScorePage> {
         )
         );
         tabNames.add(Tab(text: game!.date));
-        if (game is SoccerGame) {
-          if (game!.team1 == "AFC San Jose") {
-            tabs.add(StatefulBuilder(
-              builder: (context, setState) {
-                buildTeamTables(setState);
-                return RefreshIndicator(
-                  onRefresh: () async {
-                    return _refreshData(setState);
-                  },
-                  child: ListView(children: [table1 ?? const Text("")],)
-                  );
-              }
-              )
-            );
-            tabNames.add(Tab(text: game!.team1));
-          } else {
-            tabs.add(StatefulBuilder(
-              builder: (context, setState) {
-                buildTeamTables(setState);
-                return RefreshIndicator(
-                  onRefresh: () async {
-                    return _refreshData(setState);
-                  },
-                  child: ListView(children: [table2 ?? const Text("")],)
-                  );
-              }
-              )
-            );
-            tabNames.add(Tab(text: game!.team2));
-          }
-        } else {
+        if (game is FutsalGame || game is BasketballGame || (game is SoccerGame && widget.game.team1 == "AFC San Jose")) {
           tabs.add(StatefulBuilder(
             builder: (context, setState) {
               buildTeamTables(setState);
@@ -509,6 +470,9 @@ class _ScorePageState extends State<ScorePage> {
             }
             )
           );
+          tabNames.add(Tab(text: game!.team1));
+        }
+        if (game is FutsalGame || game is BasketballGame || (game is SoccerGame && widget.game.team2 == "AFC San Jose")) {
           tabs.add(StatefulBuilder(
             builder: (context, setState) {
               buildTeamTables(setState);
@@ -521,7 +485,6 @@ class _ScorePageState extends State<ScorePage> {
             }
             )
           );
-          tabNames.add(Tab(text: game!.team1));
           tabNames.add(Tab(text: game!.team2));
         }
         return DefaultTabController(
@@ -761,7 +724,9 @@ class _ScorePageState extends State<ScorePage> {
     _loadingGame = getGameData();
     await _loadingGame;
     await buildTeamTables(localSetState);
-    localSetState(() {});
+    if (mounted) {
+      localSetState(() {});
+    }
     widget.refreshCallback();
   } 
 

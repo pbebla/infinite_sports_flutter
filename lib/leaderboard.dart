@@ -208,7 +208,21 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("${widget.sport} ${widget.season} Leaderboard"),
+        title: RichText(
+          textAlign: TextAlign.center,
+          text: TextSpan(
+              text: widget.sport,
+              style: TextStyle(fontSize: 20, color: Theme.of(context).colorScheme.inverseSurface),
+              children: <TextSpan>[
+                TextSpan(
+                  text: '\n${widget.season} Leaderboard',
+                  style: const TextStyle(
+                    fontSize: 16,
+                  ),
+                ),
+              ]
+          ),
+        ),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),

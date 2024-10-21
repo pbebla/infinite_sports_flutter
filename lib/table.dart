@@ -298,7 +298,21 @@ class _TablePageState extends State<TablePage> {
   Widget build(BuildContext context) {
     return Scaffold(
         appBar: AppBar(
-          title: Text("${widget.sport} ${widget.season} Table"),
+          title: RichText(
+                textAlign: TextAlign.center,
+                text: TextSpan(
+                    text: widget.sport,
+                    style: TextStyle(fontSize: 20, color: Theme.of(context).colorScheme.inverseSurface),
+                    children: <TextSpan>[
+                      TextSpan(
+                        text: '\n${widget.season} Table',
+                        style: const TextStyle(
+                          fontSize: 16,
+                        ),
+                      ),
+                    ]
+                ),
+              ),
           backgroundColor: Theme.of(context).colorScheme.primary,
           foregroundColor: Colors.white,
         ),

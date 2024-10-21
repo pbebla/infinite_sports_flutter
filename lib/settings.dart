@@ -238,6 +238,13 @@ class _SettingsState extends State<Settings> {
             ),
           ), 
         ),
+        SliverList(
+          delegate: SliverChildListDelegate(
+            [
+              const ListTile(title: Text("Infinite Sports App\nRewritten by Pauldin Bebla"),)
+            ]
+          )
+        )
     ],),)
     );
   }
