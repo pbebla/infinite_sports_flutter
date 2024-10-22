@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Need camera access for uploading images</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Need location access when using Around You page<string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>Need location access when using Infinte Sports app</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
