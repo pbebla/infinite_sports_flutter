@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>LSMinimumSystemVersion</key>
+	<string>12.0.0</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
@@ -29,7 +31,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Need camera access for uploading images</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Need location access when using Around You page<string>
+	<string>Need location access when using Around You page</string>
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>Need location access when using Infinte Sports app</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
