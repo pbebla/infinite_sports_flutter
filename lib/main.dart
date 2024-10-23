@@ -44,6 +44,7 @@ Future<void> main() async {
   });
   SharedPreferences prefs = await SharedPreferences.getInstance();
   darkModeEnabled = prefs.getBool('darkMode') ?? false;
+  autoSignIn = prefs.getBool('autoSignIn') ?? false;
   runApp(ChangeNotifierProvider(create: (context) => ThemeProvider(darkModeEnabled), child: const MyApp()));
 }
 
@@ -111,13 +112,15 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<int> setCurrentValues() async {
-    if (FirebaseAuth.instance.currentUser != null) {
+    if (FirebaseAuth.instance.currentUser != null && autoSignIn) {
       signedIn = true;
       currentUser = FirebaseAuth.instance.currentUser;
       String? token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
         await uploadToken(currentUser!, token);
       }
+    } else {
+      FirebaseAuth.instance.signOut();
     }
     currentSport = await getCurrentSport();
     currentSeason = await getCurrentSeason(currentSport);

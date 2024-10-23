@@ -4,6 +4,7 @@ import 'package:flutter_launcher_icons/constants.dart';
 import 'package:flutter_sticky_header/flutter_sticky_header.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 
@@ -43,47 +44,52 @@ class _SettingsState extends State<Settings> {
       ),
       body: Padding(padding: const EdgeInsetsDirectional.all(10.0),
       child: CustomScrollView(slivers: [
-        SliverStickyHeader(
-          header: const Text("Profile"),
-          sliver: SliverList(
-            delegate: SliverChildListDelegate(
-              [
-                const Divider(color: Colors.grey),
-                ListTile(title: const Text("Change Password"), minTileHeight: 40, onTap: () async {
-                  showDialog(
-                    context: context,
-                    builder: (context) {
-                      return FutureBuilder(
-                        future: FirebaseAuth.instance.sendPasswordResetEmail(email: FirebaseAuth.instance.currentUser!.email!),
-                        builder: (context, snapshot) {
-                          if(snapshot.connectionState == ConnectionState.waiting) {
-                            return Center(
-                              child: CircularProgressIndicator(
-                                color: Theme.of(context).colorScheme.primary,
-                              )
+        SliverVisibility(
+          visible: signedIn,
+          sliver: SliverStickyHeader(
+            header: const Text("Profile"),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate(
+                [
+                  const Divider(color: Colors.grey),
+                  ListTile(title: const Text("Change Password"), minTileHeight: 40, onTap: () async {
+                    showDialog(
+                      context: context,
+                      builder: (context) {
+                        return FutureBuilder(
+                          future: FirebaseAuth.instance.sendPasswordResetEmail(email: FirebaseAuth.instance.currentUser!.email!),
+                          builder: (context, snapshot) {
+                            if(snapshot.connectionState == ConnectionState.waiting) {
+                              return Center(
+                                child: CircularProgressIndicator(
+                                  color: Theme.of(context).colorScheme.primary,
+                                )
+                              );
+                            }
+                            return AlertDialog(
+                              title: Text("Success! Reset Email Sent to\n${FirebaseAuth.instance.currentUser!.email!}", style: const TextStyle(fontSize: 16),),
+                              actions: [TextButton(child: const Text("OK"), onPressed: () {
+                                  Navigator.pop(context);
+                              },)],
                             );
-                          }
-                          return AlertDialog(
-                            title: Text("Success! Reset Email Sent to\n${FirebaseAuth.instance.currentUser!.email!}", style: const TextStyle(fontSize: 16),),
-                            actions: [TextButton(child: const Text("OK"), onPressed: () {
-                                Navigator.pop(context);
-                            },)],
-                          );
-                        },
-                      );
-                    }
-                  );
-                },),
-                const Divider(color: Colors.grey),
-                ListTile(title: const Text("Auto Log In"), minTileHeight: 40, trailing: Checkbox(value: autoSignIn, onChanged: (value) async {
-                  setState(() {
-                    autoSignIn = value!;
-                  });
-                },),),
-                const Divider(color: Colors.grey),
-              ]
-            ),
-          ), 
+                          },
+                        );
+                      }
+                    );
+                  },),
+                  const Divider(color: Colors.grey),
+                  ListTile(title: const Text("Auto Log In"), minTileHeight: 40, trailing: Checkbox(value: autoSignIn, onChanged: (value) async {
+                    SharedPreferences prefs = await SharedPreferences.getInstance();
+                    await prefs.setBool('autoSignIn', value!);
+                    setState(() {
+                      autoSignIn = value;
+                    });
+                  },),),
+                  const Divider(color: Colors.grey),
+                ]
+              ),
+            ), 
+          ),
         ),
         SliverStickyHeader(
           header: const Text("League Table Info"),

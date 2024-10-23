@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/createaccountpage.dart';
 import 'package:infinite_sports_flutter/forgotpasswordpage.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -123,9 +124,11 @@ class _LoginDemoState extends State<LoginPage> {
             Padding(padding: const EdgeInsets.only(
                   left: 15.0, right: 15.0, top: 5, bottom: 0), child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: [const Text("Auto Sign In"), Checkbox(value: autoSignIn, onChanged: (value) {
+              children: [const Text("Auto Sign In"), Checkbox(value: autoSignIn, onChanged: (value) async {
+              SharedPreferences prefs = await SharedPreferences.getInstance();
+              await prefs.setBool('autoSignIn', value!);
               setState(() {
-                autoSignIn = value!;
+                autoSignIn = value;
               });
             })],),),
             const SizedBox(
