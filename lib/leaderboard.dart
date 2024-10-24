@@ -212,7 +212,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           textAlign: TextAlign.center,
           text: TextSpan(
               text: widget.sport,
-              style: TextStyle(fontSize: 20, color: Theme.of(context).colorScheme.inverseSurface),
+              style: TextStyle(fontSize: 20, color: Colors.white),
               children: <TextSpan>[
                 TextSpan(
                   text: '\n${widget.season} Leaderboard',

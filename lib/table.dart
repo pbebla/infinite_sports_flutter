@@ -302,7 +302,7 @@ class _TablePageState extends State<TablePage> {
                 textAlign: TextAlign.center,
                 text: TextSpan(
                     text: widget.sport,
-                    style: TextStyle(fontSize: 20, color: Theme.of(context).colorScheme.inverseSurface),
+                    style: TextStyle(fontSize: 20, color: Colors.white),
                     children: <TextSpan>[
                       TextSpan(
                         text: '\n${widget.season} Table',
