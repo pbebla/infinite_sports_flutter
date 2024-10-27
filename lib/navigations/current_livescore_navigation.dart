@@ -102,9 +102,9 @@ class CurrentLivescoreNavigationState extends State<CurrentLivescoreNavigation> 
                     title: TabBar(
                       tabs: tabNames,
                       onTap: (value) {
-                        if (value == 0) {
+                        if (tabNames[value].text == "Infinite Sports") {
                           headerNotifier.value = [widget.currentSport, widget.currentSeason];
-                        } else if (value == 1) {
+                        } else if (tabNames[value].text == "AFC San Jose") {
                           headerNotifier.value = ["AFC San Jose", widget.currentAFCSeason];
                         }
                       },
