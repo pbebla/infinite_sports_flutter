@@ -69,21 +69,21 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         compareValues(a.name, b.name, isAscending));
     } else if (columnIndex == 3) {
       if (widget.sport == "Futsal" || widget.sport == "AFC San Jose") {
-        players.sort((a, b) => compareValues(a.goals, b.goals, isAscending));
+        players.sort((a, b) => a.goals == b.goals ? compareValues(a.assists, b.assists, isAscending) : compareValues(a.goals, b.goals, isAscending));
       } else if (widget.sport == "Basketball") {
-        players.sort((a, b) => compareValues((a as BasketballPlayer).total, (b as BasketballPlayer).total, isAscending));
+        players.sort((a, b) => a.total == b.total ? compareValues(a.rebounds, b.rebounds, isAscending) : compareValues((a as BasketballPlayer).total, (b as BasketballPlayer).total, isAscending));
       }
     } else if (columnIndex == 4) {
       if (widget.sport == "Futsal" || widget.sport == "AFC San Jose") {
-        players.sort((a, b) => compareValues(a.assists, b.assists, isAscending));
+        players.sort((a, b) => a.assists == b.assists ? compareValues(a.goals, b.goals, isAscending) : compareValues(a.assists, b.assists, isAscending));
       } else if (widget.sport == "Basketball") {
-        players.sort((a, b) => compareValues((a as BasketballPlayer).rebounds, (b as BasketballPlayer).rebounds, isAscending));
+        players.sort((a, b) => a.rebounds == b.rebounds ? compareValues(a.total, b.total, isAscending) : compareValues((a as BasketballPlayer).rebounds, (b as BasketballPlayer).rebounds, isAscending));
       }
     } else if (columnIndex == 5) {
       if (widget.sport == "Futsal" || widget.sport == "AFC San Jose") {
-        players.sort((a, b) => compareValues(a.saves, b.saves, isAscending));
+        players.sort((a, b) => a.saves == b.saves ? compareValues(a.assists, b.assists, isAscending) : compareValues(a.saves, b.saves, isAscending));
       } else if (widget.sport == "Basketball") {
-        players.sort((a, b) => compareValues(int.parse(((a as BasketballPlayer).shotPercentage).replaceFirst('%', '')), int.parse(((b as BasketballPlayer).shotPercentage).replaceFirst('%', '')), isAscending));
+        players.sort((a, b) => int.parse(((a as BasketballPlayer).shotPercentage).replaceFirst('%', '')) == int.parse(((b as BasketballPlayer).shotPercentage).replaceFirst('%', '')) ? compareValues(a.total, b.total, isAscending) : compareValues(int.parse(((a as BasketballPlayer).shotPercentage).replaceFirst('%', '')), int.parse(((b as BasketballPlayer).shotPercentage).replaceFirst('%', '')), isAscending));
       }
     }
   }

@@ -86,8 +86,10 @@ class _MyHomePageState extends State<MyHomePage> {
   String _liveScoresTitle = "Live Scores";
   String currentSport = "";
   String currentSeason = "";
+  String currentAFCSeason = "";
   String currentDate = "";
   bool isCurrentFinished = false;
+  bool isCurrentAFCFinished = false;
   Future<int>? _fetchCurrentValues;
 
   @override
@@ -124,8 +126,10 @@ class _MyHomePageState extends State<MyHomePage> {
     }
     currentSport = await getCurrentSport();
     currentSeason = await getCurrentSeason(currentSport);
+    currentAFCSeason = await getAFCCurrentSeason();
     currentDate = await getCurrentDate(currentSport, currentSeason);
     isCurrentFinished = await isSeasonFinished(currentSport, currentSeason);
+    isCurrentAFCFinished = await isAFCSeasonFinished(currentAFCSeason);
     headerNotifier.value = [currentSport, currentSeason];
     await getAllTeamLogo();
     return 1;
@@ -146,7 +150,7 @@ class _MyHomePageState extends State<MyHomePage> {
         if (isCurrentFinished) {
           return const Center(child: Card(child: Text("No Current Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold))));
         }
-        return CurrentLivescoreNavigation(currentSport: currentSport, currentSeason: currentSeason, currentDate: currentDate, onTitleSelect: setLiveScoreTitle, isSeasonFinished: isCurrentFinished,);
+        return CurrentLivescoreNavigation(currentSport: currentSport, currentSeason: currentSeason, currentDate: currentDate, onTitleSelect: setLiveScoreTitle, isISSeasonFinished: isCurrentFinished, currentAFCSeason: currentAFCSeason, isAFCSeasonFinished: isCurrentAFCFinished,);
       },),
       const LeaguesNavigation(),
       const AroundYou(),

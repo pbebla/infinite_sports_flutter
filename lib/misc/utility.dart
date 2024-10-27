@@ -140,6 +140,33 @@ Future<bool> isSeasonFinished(sport, season) async {
   }
 }
 
+Future<String> getAFCCurrentSeason() async {
+  try
+  {
+    DatabaseReference newClient = FirebaseDatabase.instance.ref("/AFC San Jose/");
+    var seasonNum = await newClient.child("Current Season").get();
+    return seasonNum.value.toString();
+  }
+  catch (e)
+  {
+      return e.toString();
+  }
+}
+
+Future<bool> isAFCSeasonFinished(season) async {
+  try
+  {
+
+    DatabaseReference newClient = FirebaseDatabase.instance.ref("/AFC San Jose/Seasons/$season");
+    var seasonFinished = await newClient.child("Finished").get();
+    return seasonFinished.value as bool;
+  }
+  catch (e)
+  {
+    return true;
+  }
+}
+
 Future<List<String>> getDates(String sport, String season) async {
   try
   {

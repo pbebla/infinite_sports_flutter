@@ -736,15 +736,15 @@ class _ScorePageState extends State<ScorePage> {
         compareValues(a.name, b.name, ascending));
     } else if (columnIndex == 2) {
       if (widget.sport == "Futsal" || widget.sport == "AFC San Jose") {
-        players.sort((a, b) => compareValues((a as FutsalPlayerStats).goals, (b as FutsalPlayerStats).goals, ascending));
+        players.sort((a, b) => a.goals == b.goals ? compareValues(a.assists, b.assists, ascending) : compareValues(a.goals, b.goals, ascending));
       } else if (widget.sport == "Basketball") {
-        players.sort((a, b) => compareValues((a as BasketballPlayerStats).total, (b as BasketballPlayerStats).total, ascending));
+        players.sort((a, b) => a.total == b.total ? compareValues(a.rebounds, b.rebounds, ascending) : compareValues((a as BasketballPlayerStats).total, (b as BasketballPlayerStats).total, ascending));
       } 
     } else if (columnIndex == 3) {
       if (widget.sport == "Futsal" || widget.sport == "AFC San Jose") {
-        players.sort((a, b) => compareValues((a as FutsalPlayerStats).assists, (b as FutsalPlayerStats).assists, ascending));
+        players.sort((a, b) => a.assists == b.assists ? compareValues(a.goals, b.goals, ascending) : compareValues(a.assists, b.assists, ascending));
       } else if (widget.sport == "Basketball") {
-        players.sort((a, b) => compareValues((a as BasketballPlayerStats).rebounds, (b as BasketballPlayerStats).rebounds, ascending));
+        players.sort((a, b) => a.rebounds == b.rebounds ? compareValues(a.total, b.total, ascending) : compareValues((a as BasketballPlayerStats).rebounds, (b as BasketballPlayerStats).rebounds, ascending));
       }
     } else if (columnIndex == 4) {
       if (widget.sport == "Basketball") {
