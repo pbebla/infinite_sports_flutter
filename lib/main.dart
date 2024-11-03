@@ -5,6 +5,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_config/flutter_config.dart';
 import 'package:infinite_sports_flutter/aroundyou.dart';
+import 'package:infinite_sports_flutter/frontpage.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
 import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
@@ -88,6 +89,7 @@ class _MyHomePageState extends State<MyHomePage> {
   String currentSeason = "";
   String currentAFCSeason = "";
   String currentDate = "";
+  String currentAFCDate = "";
   bool isCurrentFinished = false;
   bool isCurrentAFCFinished = false;
   Future<int>? _fetchCurrentValues;
@@ -126,10 +128,6 @@ class _MyHomePageState extends State<MyHomePage> {
     }
     currentSport = await getCurrentSport();
     currentSeason = await getCurrentSeason(currentSport);
-    currentAFCSeason = await getAFCCurrentSeason();
-    currentDate = await getCurrentDate(currentSport, currentSeason);
-    isCurrentFinished = await isSeasonFinished(currentSport, currentSeason);
-    isCurrentAFCFinished = await isAFCSeasonFinished(currentAFCSeason);
     headerNotifier.value = [currentSport, currentSeason];
     await getAllTeamLogo();
     return 1;
@@ -150,7 +148,7 @@ class _MyHomePageState extends State<MyHomePage> {
         if (isCurrentFinished) {
           return const Center(child: Card(child: Text("No Current Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold))));
         }
-        return CurrentLivescoreNavigation(currentSport: currentSport, currentSeason: currentSeason, currentDate: currentDate, onTitleSelect: setLiveScoreTitle, isISSeasonFinished: isCurrentFinished, currentAFCSeason: currentAFCSeason, isAFCSeasonFinished: isCurrentAFCFinished,);
+        return CurrentLivescoreNavigation(onTitleSelect: setLiveScoreTitle);
       },),
       const LeaguesNavigation(),
       const AroundYou(),
@@ -195,7 +193,6 @@ class _MyHomePageState extends State<MyHomePage> {
       switch(index) { 
         case 0: { 
           _title = _liveScoresTitle; 
-          headerNotifier.value = [currentSport, currentSeason];
         } 
         break; 
         case 1: { _title = 'Leagues'; } 

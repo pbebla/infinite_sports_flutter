@@ -201,7 +201,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
       cardList.add(GestureDetector(
         child: card,
         onTap: () {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
+          Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
             initialEntries: [OverlayEntry(
               builder: (context) {
                 return ScorePage(sport: widget.sport, season: widget.season, game: game, times: times, refreshCallback: () async {

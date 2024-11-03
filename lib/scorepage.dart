@@ -112,8 +112,8 @@ class _ScorePageState extends State<ScorePage> {
       buildTeamPlayers(team1Players, (game as BasketballGame).team1lineup, game!.team1activity, team1color, game!.team1SourcePath);
       buildTeamPlayers(team2Players, (game as BasketballGame).team2lineup, game!.team2activity, team2color, game!.team2SourcePath);
     }
-    populateActivities(widget.game.team1activity, team1Players, activities, team1color, widget.game.team1SourcePath);
-    populateActivities(widget.game.team2activity, team2Players, activities, team2color, widget.game.team2SourcePath);
+    populateActivities(game!.team1activity, team1Players, activities, team1color, widget.game.team1SourcePath);
+    populateActivities(game!.team2activity, team2Players, activities, team2color, widget.game.team2SourcePath);
     if (widget.sport == "AFC San Jose") {
       if (game!.team1 == "AFC San Jose") {
         sortTable(table1SortColumnIndex ?? 2, table1isAscending, team1Players);
@@ -430,117 +430,124 @@ class _ScorePageState extends State<ScorePage> {
     // The Flutter framework has been optimized to make rerunning build methods
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
-    return FutureBuilder(
-      future: _loadingGame, 
-      builder: (context, snapshot) {
-        if(snapshot.connectionState == ConnectionState.waiting) {
-          return Center(
-              child: CircularProgressIndicator(
-                color: Theme.of(context).colorScheme.primary,
-              )
-            );
-        }
-        List<Widget> tabs = List.empty(growable: true);
-        List<Tab> tabNames = List.empty(growable: true);
-        tabs.add(StatefulBuilder(
-          builder: (context, setState) {
-            return RefreshIndicator(
-              onRefresh: () async {
-                return _refreshData(setState);
-              },
-              child: ListView(
-                    padding: const EdgeInsets.all(15),
-                    children: buildItemList()
+    return Scaffold(
+      appBar: AppBar(
+        foregroundColor: Colors.white,
+        title:  RichText(
+          textAlign: TextAlign.center,
+          text: TextSpan(
+              text: widget.sport,
+              style: TextStyle(fontSize: 20, color: Colors.white),
+              children: <TextSpan>[
+                TextSpan(
+                  text: '\n${widget.season}',
+                  style: const TextStyle(
+                    fontSize: 16,
+                  ),
+                ),
+              ]
+          ),
+        ),
+        actions: [
+          IconButton(
+            onPressed: game!.link == "" ? null : () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
+              initialEntries: [OverlayEntry(
+                builder: (context) {
+                  WebViewController webController = WebViewController()
+                    ..setBackgroundColor(const Color(0x00000000))
+                    ..loadRequest(Uri.parse(game!.link));
+                  return Scaffold(
+                    appBar: AppBar(
+                      title: const Text(""),
+                      actions: [
+                        NavigationControls(controller: webController)
+                      ],
+                    ),
+                  body: WebViewStack(controller: webController,)
+                  );
+                })],
+              )));
+            },
+          icon: const ImageIcon(AssetImage('assets/watch.png')),
+          )
+        ],
+        backgroundColor: Theme.of(context).colorScheme.primary,
+      ),
+      body: FutureBuilder(
+        future: _loadingGame, 
+        builder: (context, snapshot) {
+          if(snapshot.connectionState == ConnectionState.waiting) {
+            return Center(
+                child: CircularProgressIndicator(
+                  color: Theme.of(context).colorScheme.primary,
                 )
               );
-          },
-        )
-        );
-        tabNames.add(Tab(text: game!.date));
-        if (game is FutsalGame || game is BasketballGame || (game is SoccerGame && widget.game.team1 == "AFC San Jose")) {
+          }
+          List<Widget> tabs = List.empty(growable: true);
+          List<Tab> tabNames = List.empty(growable: true);
           tabs.add(StatefulBuilder(
             builder: (context, setState) {
-              buildTeamTables(setState);
               return RefreshIndicator(
                 onRefresh: () async {
                   return _refreshData(setState);
                 },
-                child: ListView(children: [table1 ?? const Text("")],)
+                child: ListView(
+                      padding: const EdgeInsets.all(15),
+                      children: buildItemList()
+                  )
                 );
-            }
-            )
+            },
+          )
           );
-          tabNames.add(Tab(text: game!.team1));
-        }
-        if (game is FutsalGame || game is BasketballGame || (game is SoccerGame && widget.game.team2 == "AFC San Jose")) {
-          tabs.add(StatefulBuilder(
-            builder: (context, setState) {
-              buildTeamTables(setState);
-              return RefreshIndicator(
-                onRefresh: () async {
-                  return _refreshData(setState);
-                },
-                child: ListView(children: [table2 ?? const Text("")],)
-                );
-            }
-            )
-          );
-          tabNames.add(Tab(text: game!.team2));
-        }
-        return DefaultTabController(
-          length: tabs.length, 
-          child: Scaffold(
-            appBar: AppBar(
-              title:  RichText(
-                textAlign: TextAlign.center,
-                text: TextSpan(
-                    text: widget.sport,
-                    style: TextStyle(fontSize: 20, color: Theme.of(context).colorScheme.inverseSurface),
-                    children: <TextSpan>[
-                      TextSpan(
-                        text: '\n${widget.season}',
-                        style: const TextStyle(
-                          fontSize: 16,
-                        ),
-                      ),
-                    ]
+          tabNames.add(Tab(text: game!.date));
+          if (game is FutsalGame || game is BasketballGame || (game is SoccerGame && widget.game.team1 == "AFC San Jose")) {
+            tabs.add(StatefulBuilder(
+              builder: (context, setState) {
+                buildTeamTables(setState);
+                return RefreshIndicator(
+                  onRefresh: () async {
+                    return _refreshData(setState);
+                  },
+                  child: ListView(children: [table1 ?? const Text("")],)
+                  );
+              }
+              )
+            );
+            tabNames.add(Tab(text: game!.team1));
+          }
+          if (game is FutsalGame || game is BasketballGame || (game is SoccerGame && widget.game.team2 == "AFC San Jose")) {
+            tabs.add(StatefulBuilder(
+              builder: (context, setState) {
+                buildTeamTables(setState);
+                return RefreshIndicator(
+                  onRefresh: () async {
+                    return _refreshData(setState);
+                  },
+                  child: ListView(children: [table2 ?? const Text("")],)
+                  );
+              }
+              )
+            );
+            tabNames.add(Tab(text: game!.team2));
+          }
+          return DefaultTabController(
+            length: tabs.length, 
+            child: Scaffold(
+              appBar: AppBar(
+                automaticallyImplyLeading: false,
+                title: TabBar(
+                  tabs: tabNames,
+                  isScrollable: true,
                 ),
               ),
-              actions: [
-                IconButton(
-                  onPressed: game!.link == "" ? null : () {
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-                    initialEntries: [OverlayEntry(
-                      builder: (context) {
-                        WebViewController webController = WebViewController()
-                          ..setBackgroundColor(const Color(0x00000000))
-                          ..loadRequest(Uri.parse(game!.link));
-                        return Scaffold(
-                          appBar: AppBar(
-                            title: const Text(""),
-                            actions: [
-                              NavigationControls(controller: webController)
-                            ],
-                          ),
-                        body: WebViewStack(controller: webController,)
-                        );
-                      })],
-                    )));
-                  },
-                icon: const ImageIcon(AssetImage('assets/watch.png')),
-                )
-              ],
-              bottom: TabBar(
-                tabs: tabNames,
-                isScrollable: false,
-                )
-            ),
-            body: TabBarView(
-              children: tabs,
+              body: TabBarView(
+                children: tabs,
+              )
             )
-          )
-        );
-      }
+          );
+        }
+      )
     );
   }
 
