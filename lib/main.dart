@@ -160,12 +160,16 @@ class _MyHomePageState extends State<MyHomePage> {
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       drawer: const NavBar(),
-      appBar: GlobalAppBar(title: _title, height: AppBar().preferredSize.height),
-      body: IndexedStack(
-          index: _selectedIndex,
-          children: widgetOptions
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: Builder(
+        builder: (context) {
+          mainScaffoldContext = context;
+          return IndexedStack(
+              index: _selectedIndex,
+              children: widgetOptions
+          );
+        }
       ),
       bottomNavigationBar: BottomNavigationBar(
       type: BottomNavigationBarType.fixed,

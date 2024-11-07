@@ -1,6 +1,9 @@
+import 'package:data_table_2/data_table_2.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
+import 'package:infinite_sports_flutter/globalappbar.dart';
+import 'package:infinite_sports_flutter/leaderboard.dart';
 import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
@@ -12,6 +15,7 @@ import 'package:infinite_sports_flutter/model/playerstats.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/playerpage.dart';
+import 'package:infinite_sports_flutter/table.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -81,8 +85,8 @@ class _ScorePageState extends State<ScorePage> {
   int? table2SortColumnIndex;
   bool table1isAscending = false;
   bool table2isAscending = false;
-  SingleChildScrollView? table1;
-  SingleChildScrollView? table2;
+  DataTable2? table1;
+  DataTable2? table2;
   late Future<int> _loadingGame;
   Game? game;
 
@@ -340,27 +344,29 @@ class _ScorePageState extends State<ScorePage> {
     }
   }
 
-  DataTable buildStatsTable(teamName, teamSourcePath, teamLineup, Color teamColor, teamActivity, teamPlayers, tableSortColumnIndex, tableIsAscending, onSort, setState) {
+  DataTable2 buildStatsTable(teamName, teamSourcePath, teamLineup, Color teamColor, teamActivity, teamPlayers, tableSortColumnIndex, tableIsAscending, onSort, setState) {
     if (teamPlayers.isEmpty) {
         buildTeamPlayers(teamPlayers, teamLineup, teamActivity, teamColor, teamSourcePath);
         sortTable(tableSortColumnIndex ?? 2, tableIsAscending, teamPlayers);
       }
     if (widget.sport == "Futsal" || widget.sport == "AFC San Jose") {
-      return DataTable(
+      return DataTable2(
         sortColumnIndex: tableSortColumnIndex,
         sortAscending: tableIsAscending,
         columnSpacing: 0,
+        fixedTopRows: 1,
+        bottomMargin: 10,
         headingTextStyle: TextStyle(color: teamColor.computeLuminance() > 0.5 ? Colors.black : Colors.white),
         headingRowColor: WidgetStateProperty.resolveWith<Color?>((Set<WidgetState> states) {
           return teamColor; // Use the default value.
         }),
         columns: [
-          DataColumn(label: Image.network(teamSourcePath, errorBuilder: (context, error, stackTrace) {
+          DataColumn2(size: ColumnSize.S, label: Image.network(teamSourcePath, errorBuilder: (context, error, stackTrace) {
                           return const Text("");
                         }, width: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.centerLeft,)),
-          DataColumn(label: Text(teamName), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("Goals"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("Assists"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.L, label: Text(teamName), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.S, label: const Text("Goals"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.S, label: const Text("Assists"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
         ], 
         rows: (teamPlayers as List).map((key) {
           return DataRow(cells: [
@@ -379,26 +385,28 @@ class _ScorePageState extends State<ScorePage> {
         }).toList(),
       );
     } else if (widget.sport == "Basketball") {
-      return DataTable(
+      return DataTable2(
+        horizontalMargin: 19,
+        bottomMargin: 10,
         sortColumnIndex: tableSortColumnIndex,
         sortAscending: tableIsAscending,
         columnSpacing: 0,
         headingTextStyle: TextStyle(color: teamColor.computeLuminance() > 0.5 ? Colors.black : Colors.white),
-        horizontalMargin: 10,
+        fixedTopRows: 1,
         headingRowColor: WidgetStateProperty.resolveWith<Color?>((Set<WidgetState> states) {
           return teamColor; // Use the default value.
         }),
         columns: [
-          const DataColumn(label: Text("")),
-          DataColumn(label: Image.network(teamSourcePath, errorBuilder: (context, error, stackTrace) {
+          DataColumn2(fixedWidth: 20.0, size: ColumnSize.S, label: Text("")),
+          DataColumn2(label: Image.network(teamSourcePath, errorBuilder: (context, error, stackTrace) {
                           return const Text("");
                         }, width: windowsDefaultIconSize.toDouble(), alignment: FractionalOffset.center), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("PTS"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("REB"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("2PM"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("3PM"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("FTM"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("PF"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(fixedWidth: 40.0, label: Text("PTS", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(fixedWidth: 40.0, label: Text("REB", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(fixedWidth: 45.0, label: Text("2PM", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(fixedWidth: 45.0, label: Text("3PM", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(fixedWidth: 45.0, label: Text("FTM", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(fixedWidth: 35.0, label: Text("PF", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
         ], 
         rows: (teamPlayers as List).map((key) => DataRow(cells: [
             DataCell(Text(key.number)),
@@ -419,7 +427,7 @@ class _ScorePageState extends State<ScorePage> {
           ])).toList(),
       );
     }
-    return DataTable(columns: const [DataColumn(label: Spacer())], rows: const []);
+    return DataTable2(columns: const [DataColumn(label: Spacer())], rows: const []);
   }
 
   @override
@@ -432,8 +440,10 @@ class _ScorePageState extends State<ScorePage> {
     // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
+        backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
-        title:  RichText(
+        centerTitle: true,
+        title: RichText(
           textAlign: TextAlign.center,
           text: TextSpan(
               text: widget.sport,
@@ -447,32 +457,31 @@ class _ScorePageState extends State<ScorePage> {
                 ),
               ]
           ),
-        ),
+        ), 
         actions: [
           IconButton(
-            onPressed: game!.link == "" ? null : () {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-              initialEntries: [OverlayEntry(
-                builder: (context) {
-                  WebViewController webController = WebViewController()
-                    ..setBackgroundColor(const Color(0x00000000))
-                    ..loadRequest(Uri.parse(game!.link));
-                  return Scaffold(
-                    appBar: AppBar(
-                      title: const Text(""),
-                      actions: [
-                        NavigationControls(controller: webController)
-                      ],
-                    ),
-                  body: WebViewStack(controller: webController,)
-                  );
-                })],
+            onPressed: () {
+              Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
+                initialEntries: [OverlayEntry(
+                  builder: (context) {
+                    return TablePage(sport: widget.sport, season: widget.season);
+                  })],
               )));
             },
-          icon: const ImageIcon(AssetImage('assets/watch.png')),
+            icon: const ImageIcon(AssetImage('assets/table.png')),
+          ),
+          IconButton(
+            onPressed: () {
+              Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
+                initialEntries: [OverlayEntry(
+                  builder: (context) {
+                    return LeaderboardPage(sport: widget.sport, season: widget.season);
+                  })],
+              )));
+            },
+            icon: const ImageIcon(AssetImage('assets/leader.png')),
           )
         ],
-        backgroundColor: Theme.of(context).colorScheme.primary,
       ),
       body: FutureBuilder(
         future: _loadingGame, 
@@ -509,7 +518,7 @@ class _ScorePageState extends State<ScorePage> {
                   onRefresh: () async {
                     return _refreshData(setState);
                   },
-                  child: ListView(children: [table1 ?? const Text("")],)
+                  child: table1 ?? const Text("")
                   );
               }
               )
@@ -524,7 +533,7 @@ class _ScorePageState extends State<ScorePage> {
                   onRefresh: () async {
                     return _refreshData(setState);
                   },
-                  child: ListView(children: [table2 ?? const Text("")],)
+                  child: table2 ?? const Text("")
                   );
               }
               )
@@ -537,9 +546,36 @@ class _ScorePageState extends State<ScorePage> {
               appBar: AppBar(
                 automaticallyImplyLeading: false,
                 title: TabBar(
+                  tabAlignment: TabAlignment.start,
                   tabs: tabNames,
                   isScrollable: true,
                 ),
+                actions: [
+                  IconButton(
+                    onPressed: game!.link == "" ? null : () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
+                      initialEntries: [OverlayEntry(
+                        builder: (context) {
+                          WebViewController webController = WebViewController()
+                            ..setBackgroundColor(const Color(0x00000000))
+                            ..loadRequest(Uri.parse(game!.link));
+                          return Scaffold(
+                            appBar: AppBar(
+                              backgroundColor: Theme.of(context).colorScheme.primary,
+                              foregroundColor: Colors.white,
+                              title: const Text(""),
+                              actions: [
+                                NavigationControls(controller: webController)
+                              ],
+                            ),
+                          body: WebViewStack(controller: webController,)
+                          );
+                        })],
+                      )));
+                    },
+                  icon: const ImageIcon(AssetImage('assets/watch.png')),
+                  )
+                ],
               ),
               body: TabBarView(
                 children: tabs,
@@ -553,14 +589,14 @@ class _ScorePageState extends State<ScorePage> {
 
   Future<int> buildTeamTables(setState) async {
     if (widget.sport == "Futsal") {
-      table1 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(game!.team1, game!.team1SourcePath, (game! as FutsalGame).team1lineup, team1color, game!.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1, setState)));
-      table2 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(game!.team2, game!.team2SourcePath, (game! as FutsalGame).team2lineup, team2color, game!.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2, setState)));
+      table1 = buildStatsTable(game!.team1, game!.team1SourcePath, (game! as FutsalGame).team1lineup, team1color, game!.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1, setState);
+      table2 = buildStatsTable(game!.team2, game!.team2SourcePath, (game! as FutsalGame).team2lineup, team2color, game!.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2, setState);
     } else if (widget.sport == "AFC San Jose") {
-      table1 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(game!.team1, game!.team1SourcePath, (game! as SoccerGame).team1lineup, team1color, game!.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1, setState)));
-      table2 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(game!.team2, game!.team2SourcePath, (game! as SoccerGame).team2lineup, team2color, game!.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2, setState)));
+      table1 = buildStatsTable(game!.team1, game!.team1SourcePath, (game! as SoccerGame).team1lineup, team1color, game!.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1, setState);
+      table2 = buildStatsTable(game!.team2, game!.team2SourcePath, (game! as SoccerGame).team2lineup, team2color, game!.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2, setState);
     } else if (widget.sport == "Basketball") {
-      table1 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(game!.team1, game!.team1SourcePath, (game! as BasketballGame).team1lineup, team1color, game!.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1, setState)));
-      table2 = SingleChildScrollView(child: ConstrainedBox(constraints: BoxConstraints.expand(width: MediaQuery.of(context).size.width, height: MediaQuery.of(context).size.height), child: buildStatsTable(game!.team2, game!.team2SourcePath, (game! as BasketballGame).team2lineup, team2color, game!.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2, setState)));
+      table1 = buildStatsTable(game!.team1, game!.team1SourcePath, (game! as BasketballGame).team1lineup, team1color, game!.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1, setState);
+      table2 = buildStatsTable(game!.team2, game!.team2SourcePath, (game! as BasketballGame).team2lineup, team2color, game!.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2, setState);
     } 
     return 1;
   }

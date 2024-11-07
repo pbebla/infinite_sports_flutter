@@ -72,6 +72,7 @@ class _LeagueFormState extends State<LeagueForm> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
+        centerTitle: true,
         title: const Text("Sign Up Form"),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
@@ -179,6 +180,9 @@ class _LeagueFormState extends State<LeagueForm> {
                       WebViewController controller = WebViewController()..loadRequest(Uri.parse(rulesUrl));
                       return Scaffold(
                         appBar: AppBar(
+                          centerTitle: true,
+                          backgroundColor: Theme.of(context).colorScheme.primary,
+                          foregroundColor: Colors.white,
                           title: const Text("Season Rules"),
                         ),
                         body: WebViewStack(controller: controller,)
@@ -212,6 +216,9 @@ class _LeagueFormState extends State<LeagueForm> {
                     WebViewController controller = WebViewController()..loadRequest(Uri.parse(rulesUrl));
                     return Scaffold(
                       appBar: AppBar(
+                        centerTitle: true,
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor: Colors.white,
                         title: const Text("Waiver Conditions"),
                       ),
                       body: WebViewStack(controller: controller,)
@@ -292,6 +299,9 @@ class _LeagueFormState extends State<LeagueForm> {
                               WebViewController controller = WebViewController()..loadRequest(Uri.parse("https://venmo.com/infinite-sports"));
                               return Scaffold(
                                 appBar: AppBar(
+                                  centerTitle: true,
+                                  backgroundColor: Theme.of(context).colorScheme.primary,
+                                  foregroundColor: Colors.white,
                                   title: const Text("Venmo"),
                                 ),
                                 body: WebViewStack(controller: controller,)

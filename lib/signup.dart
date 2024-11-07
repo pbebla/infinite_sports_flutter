@@ -54,6 +54,9 @@ class _SignupState extends State<Signup> {
                 WebViewController controller = WebViewController()..loadRequest(Uri.parse(v["Form URL"] != "\"\"" ? v["Form URL"] : "https://google.com"));
                 return Scaffold(
                   appBar: AppBar(
+                    centerTitle: true,
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Colors.white,
                     title: Text(v["Name"]),
                     actions: [
                       NavigationControls(controller: controller)
@@ -90,7 +93,12 @@ class _SignupState extends State<Signup> {
             );
         }
         return Scaffold(
-          appBar: AppBar(title: const Text("Sign Up List"), backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Colors.white,),
+          appBar: AppBar(
+            centerTitle: true,
+            title: const Text("Sign Up List"),
+            backgroundColor: Theme.of(context).colorScheme.primary, 
+            foregroundColor: Colors.white,
+          ),
           body: ListView.separated(
             separatorBuilder: (context, index) => Divider(
               color: Theme.of(context).dividerColor,

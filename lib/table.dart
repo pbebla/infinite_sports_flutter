@@ -298,6 +298,7 @@ class _TablePageState extends State<TablePage> {
   Widget build(BuildContext context) {
     return Scaffold(
         appBar: AppBar(
+          centerTitle: true,
           title: RichText(
                 textAlign: TextAlign.center,
                 text: TextSpan(

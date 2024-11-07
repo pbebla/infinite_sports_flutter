@@ -27,7 +27,8 @@ class _BusinessPageState extends State<BusinessPage> {
       height: MediaQuery.of(context).size.height * 0.5,
       child: Scaffold(
       appBar: AppBar(
-        title: Text(business.name ?? "")
+        centerTitle: true,
+        title: Text(business.name ?? ""),
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -78,6 +79,8 @@ class _BusinessPageState extends State<BusinessPage> {
                             ..loadRequest(Uri.parse(business.url ?? ""));
                             return Scaffold(
                               appBar: AppBar(
+                                backgroundColor: Theme.of(context).colorScheme.primary,
+                                foregroundColor: Colors.white,
                                 title: const Text(""),
                                 actions: [
                                   NavigationControls(controller: controller)

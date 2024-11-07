@@ -28,6 +28,7 @@ bool signedIn = false;
 bool autoSignIn = false;
 bool darkModeEnabled = false;
 BuildContext? mainContext;
+BuildContext? mainScaffoldContext;
 
 ValueNotifier headerNotifier = ValueNotifier(["", ""]);
 

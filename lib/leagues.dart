@@ -1,6 +1,8 @@
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/globalappbar.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 
 class LeaguesPage extends StatefulWidget {
@@ -100,6 +102,7 @@ class _LeaguesPageState extends State<LeaguesPage> {
             );
         }
         return Scaffold(
+          appBar: GlobalAppBar(title: Text("Leagues"), height: AppBar().preferredSize.height, showTables: false),
           body: ListView.separated(
             separatorBuilder: (context, index) => Divider(
               color: Theme.of(context).dividerColor,

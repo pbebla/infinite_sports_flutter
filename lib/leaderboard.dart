@@ -5,6 +5,7 @@ import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/player.dart';
 import 'package:infinite_sports_flutter/playerpage.dart';
+import 'package:data_table_2/data_table_2.dart';
 
 class LeaderboardPage extends StatefulWidget {
   const LeaderboardPage({super.key, required this.sport, required this.season});
@@ -96,11 +97,11 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     sortTable(columnIndex, ascending);
   }
 
-  DataTable buildLeaderboard(setState) {
+  DataTable2 buildLeaderboard(setState) {
     if (widget.sport == "Futsal") {
-      List<DataRow> teamsList = players.map((key) => DataRow(cells: [
+      List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Text(key.number)),
-        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/1.75, fit: BoxFit.scaleDown, alignment: FractionalOffset.center),)),
+        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, fit: BoxFit.scaleDown, alignment: FractionalOffset.center),)),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
                   initialEntries: [OverlayEntry(
@@ -113,26 +114,27 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         DataCell(Text(key.assists.toString())),
         DataCell(Text(key.saves.toString())),
       ])).toList();
-      return DataTable(
-        horizontalMargin: 5,
+      return DataTable2(
         sortColumnIndex: sortColumnIndex,
         sortAscending: isAscending,
         columnSpacing: 0,
+        fixedTopRows: 1,
+        bottomMargin: 10,
         headingRowColor: WidgetStateProperty.resolveWith<Color?>((Set<WidgetState> states) {
           return Theme.of(context).colorScheme.surfaceContainerHighest; // Use the default value.
         }),
         columns: [
-          const DataColumn(label: Text(""), numeric: true),
-          const DataColumn(label: Text("")),
-          DataColumn(label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("Goals"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("Assists"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("Saves"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          const DataColumn2(fixedWidth: 30.0, label: Text(""), numeric: true),
+          DataColumn2(fixedWidth: windowsDefaultIconSize.toDouble()/1.5, label: Text("")),
+          DataColumn2(label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(fixedWidth: 50.0, label: const Text("G"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(fixedWidth: 50.0, label: const Text("A"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(fixedWidth: 50.0, label: const Text("S"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
         ], 
         rows: teamsList,
       );
     } else if (widget.sport == "Basketball") {
-      List<DataRow> teamsList = players.map((key) => DataRow(cells: [
+      List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Text(key.number)),
         DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/1.75, fit: BoxFit.scaleDown, alignment: FractionalOffset.center),)),
         //DataCell(Row(children: [Text(key.number), Spacer(), ])),
@@ -148,26 +150,27 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         DataCell(Text(key.rebounds.toString())),
         DataCell(Text(key.shotPercentage)),
       ])).toList();
-      return DataTable(
-        horizontalMargin: 5,
+      return DataTable2(
         sortColumnIndex: sortColumnIndex,
         sortAscending: isAscending,
         columnSpacing: 0,
+        fixedTopRows: 1,
+        bottomMargin: 10,
         headingRowColor: WidgetStateProperty.resolveWith<Color?>((Set<WidgetState> states) {
           return Theme.of(context).colorScheme.surfaceContainerHighest; // Use the default value.
         }),
         columns: [
-          const DataColumn(label: Text(""), numeric: true),
-          const DataColumn(label: Text("")),
-          DataColumn(label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("PTS"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("REB"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("FG%"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          const DataColumn2(fixedWidth: 30.0, label: Text(""), numeric: true),
+          DataColumn2(fixedWidth: windowsDefaultIconSize.toDouble()/1.5, label: Text("")),
+          DataColumn2(label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(fixedWidth: 50.0, label: const Text("PTS"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(fixedWidth: 50.0, label: const Text("REB"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(fixedWidth: 50.0, label: const Text("FG%"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
         ], 
         rows: teamsList,
       );
     } else if (widget.sport == "AFC San Jose") {
-      List<DataRow> teamsList = players.map((key) => DataRow(cells: [
+      List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Text(key.position)),
         DataCell(Text(key.number)),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
@@ -182,32 +185,34 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         DataCell(Text(key.assists.toString())),
         DataCell(Text(key.saves.toString())),
       ])).toList();
-      return DataTable(
-        horizontalMargin: 5,
+      return DataTable2(
         sortColumnIndex: sortColumnIndex,
         sortAscending: isAscending,
         columnSpacing: 0,
+        fixedTopRows: 1,
+        bottomMargin: 10,
         headingRowColor: WidgetStateProperty.resolveWith<Color?>((Set<WidgetState> states) {
           return Theme.of(context).colorScheme.surfaceContainerHighest; // Use the default value.
         }),
         columns: [
-          const DataColumn(label: Text("Pos")),
-          const DataColumn(label: Text("#")),
-          DataColumn(label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("Goals"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("Assists"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn(label: const Text("Saves"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          const DataColumn2(fixedWidth: 30.0, label: Text("Pos")),
+          const DataColumn2(fixedWidth: 30.0, label: Text("#")),
+          DataColumn2(label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(fixedWidth: 50.0, label: const Text("G"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(fixedWidth: 50.0, label: const Text("A"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(fixedWidth: 50.0, label: const Text("S"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
         ], 
         rows: teamsList,
       );
     }
-    return DataTable(columns: const [DataColumn(label: Text("Error"))], rows: const []);
+    return DataTable2(columns: const [DataColumn(label: Text("Error"))], rows: const []);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        centerTitle: true,
         title: RichText(
           textAlign: TextAlign.center,
           text: TextSpan(
@@ -242,9 +247,10 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           }
           return StatefulBuilder(
             builder: (context, setState) {
-              return SingleChildScrollView(scrollDirection: Axis.horizontal, child: SizedBox(
-                width: MediaQuery.of(context).size.width,
-                child: SingleChildScrollView(scrollDirection: Axis.vertical, child: buildLeaderboard(setState))));
+              return SizedBox(
+                width: MediaQuery.sizeOf(context).width,
+                child: buildLeaderboard(setState),
+              );
             }
           );
         }

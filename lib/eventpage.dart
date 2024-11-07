@@ -88,6 +88,9 @@ class _EventPageState extends State<EventPage> {
           height: MediaQuery.sizeOf(context).height * 0.5,
           child: Scaffold(
             appBar: AppBar(
+              centerTitle: true,
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              foregroundColor: Colors.white,
               title: Text(event.title ?? "", style: const TextStyle(fontSize: 16),),
             ),
             body: SingleChildScrollView(

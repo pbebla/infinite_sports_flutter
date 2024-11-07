@@ -160,6 +160,7 @@ class _PlayerPageState extends State<PlayerPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        centerTitle: true,
         title: const Text("Profile"),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,

@@ -61,6 +61,7 @@ dependencies:
   geocoding: ^3.0.0
   share_plus: ^10.0.0
   flutter_native_splash: ^2.4.1
+  data_table_2: ^2.5.15
 
 dev_dependencies:
   flutter_test:

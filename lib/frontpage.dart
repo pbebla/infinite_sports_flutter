@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
+import 'package:infinite_sports_flutter/globalappbar.dart';
 import 'package:infinite_sports_flutter/livescore.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 
 class FrontPage extends StatefulWidget {
@@ -133,26 +135,35 @@ class _FrontPageState extends State<FrontPage> {
           return DefaultTabController(
             length: tabs.length, 
             child: Scaffold(
-              appBar: AppBar(
-                leading: IconButton(
-                    onPressed: () async { 
-                      await _refreshData();
-                    }, 
-                    icon: const Icon(Icons.refresh)
+              appBar: GlobalAppBar(title: Text("Live Scores"), height: AppBar().preferredSize.height, showTables: true),
+              body: CustomScrollView(
+                controller: ScrollController(),
+                physics: const ClampingScrollPhysics(),
+                slivers: [
+                  SliverAppBar(
+                    leading: IconButton(
+                      onPressed: () async { 
+                        await _refreshData();
+                      }, 
+                      icon: const Icon(Icons.refresh)
+                    ),
+                    title: TabBar(
+                      tabs: tabNames,
+                      onTap: (value) {
+                        if (tabNames[value].text == "Infinite Sports") {
+                          headerNotifier.value = [currentSport, currentSeason];
+                        } else if (tabNames[value].text == "AFC San Jose") {
+                          headerNotifier.value = ["AFC San Jose", currentAFCSeason];
+                        }
+                      },
+                    ),
                   ),
-                title: TabBar(
-                  tabs: tabNames,
-                  onTap: (value) {
-                    if (tabNames[value].text == "Infinite Sports") {
-                      headerNotifier.value = [currentSport, currentSeason];
-                    } else if (tabNames[value].text == "AFC San Jose") {
-                      headerNotifier.value = ["AFC San Jose", currentAFCSeason];
-                    }
-                  },
-                ),
-              ),
-              body: TabBarView(
-                children: tabs,
+                  SliverFillRemaining(
+                    child: TabBarView(
+                      children: tabs,
+                    ),
+                  )
+                ],
               )
             )
           );

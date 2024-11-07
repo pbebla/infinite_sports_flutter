@@ -1,3 +1,7 @@
+import 'package:infinite_sports_flutter/globalappbar.dart';
+import 'package:infinite_sports_flutter/leaderboard.dart';
+import 'package:infinite_sports_flutter/navbar.dart';
+import 'package:infinite_sports_flutter/table.dart';
 import 'package:intl/intl.dart';
 
 import 'package:flutter/material.dart';
@@ -68,12 +72,12 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
         return DefaultTabController(
           length: dateList.length,
           child: Scaffold(
-            appBar: AppBar(
+            appBar: GlobalAppBar(
               title: RichText(
                 textAlign: TextAlign.center,
                 text: TextSpan(
                     text: widget.sport,
-                    style: TextStyle(fontSize: 20, color: Theme.of(context).colorScheme.inverseSurface),
+                    style: TextStyle(fontSize: 20),
                     children: <TextSpan>[
                       TextSpan(
                         text: '\n${widget.season}',
@@ -83,15 +87,30 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
                       ),
                     ]
                 ),
-              ),
-              bottom: TabBar(
-                tabAlignment: TabAlignment.start,
-                isScrollable: true,
-                tabs: dateList
-              ),
+              ), 
+              height: AppBar().preferredSize.height, 
+              showTables: true
             ),
-            body: TabBarView(
-              children: scoresList,
+            body: CustomScrollView(
+              controller: ScrollController(),
+              slivers: [
+                SliverAppBar(
+                  leading: IconButton(
+                    onPressed: () => Navigator.pop(context), 
+                    icon: Icon(Icons.arrow_back)
+                  ),
+                  title: TabBar(
+                    tabAlignment: TabAlignment.start,
+                    isScrollable: true,
+                    tabs: dateList
+                  ),
+                ),
+                SliverFillRemaining(
+                  child: TabBarView(
+                    children: scoresList,
+                  ),
+                )
+              ],
             )
           )
         );

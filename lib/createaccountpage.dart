@@ -111,6 +111,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
+        centerTitle: true,
         title: const Text("Sign Up"),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,

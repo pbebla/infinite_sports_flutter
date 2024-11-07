@@ -32,7 +32,12 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                       );
                     }
                     return Scaffold(
-                      appBar: AppBar(title: const Text("Futsal")), 
+                      appBar: AppBar(
+                        foregroundColor: Colors.white,
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        centerTitle: true,
+                        title: Text("Futsal")
+                      ),
                       body: ListView.separated(
                         separatorBuilder: (context, index) => Divider(
                               color: Theme.of(context).dividerColor,
@@ -54,7 +59,12 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                       );
                     }
                     return Scaffold(
-                      appBar: AppBar(title: const Text("Basketball")), 
+                      appBar: AppBar(
+                        foregroundColor: Colors.white,
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        centerTitle: true,
+                        title: Text("Basketball")
+                      ),
                       body: ListView.separated(
                         separatorBuilder: (context, index) => Divider(
                               color: Theme.of(context).dividerColor,
@@ -78,7 +88,12 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                       );
                     }
                     return Scaffold(
-                      appBar: AppBar(title: const Text("AFC San Jose")), 
+                      appBar: AppBar(
+                        foregroundColor: Colors.white,
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        centerTitle: true,
+                        title: Text("AFC San Jose")
+                      ),
                       body: ListView.separated(
                         separatorBuilder: (context, index) => Divider(
                               color: Theme.of(context).dividerColor,
