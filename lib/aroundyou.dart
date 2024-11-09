@@ -30,7 +30,7 @@ class AroundYou extends StatefulWidget {
 
 class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMixin {
   GoogleMapController? mapController;
-  LatLng? _center;
+  LatLng? _center = null;
   Position? _currentPosition;
   final DraggableScrollableController sheetController = DraggableScrollableController();
   bool isSheetExpanded = true;
@@ -76,6 +76,17 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
     _currentPosition = await Geolocator.getCurrentPosition();
     setState(() {
       _center = LatLng(_currentPosition!.latitude, _currentPosition!.longitude);
+      _googleMap = GoogleMap(
+        myLocationEnabled: true,
+        padding: const EdgeInsets.only(
+          bottom:45),
+        onMapCreated: _onMapCreated,
+        initialCameraPosition: CameraPosition(
+          target: _center!,
+          zoom: 11.0,
+        ),
+        markers: markers,
+      );
     });
   }
   
@@ -110,17 +121,6 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
         eventLocations.add(null);
       }
     }
-    _googleMap = GoogleMap(
-      myLocationEnabled: true,
-      padding: const EdgeInsets.only(
-         bottom:45),
-      onMapCreated: _onMapCreated,
-      initialCameraPosition: CameraPosition(
-        target: _center!,
-        zoom: 11.0,
-      ),
-      markers: markers,
-    );
     return 1;
   }
 
@@ -141,57 +141,58 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
   Widget build(BuildContext context) {
     return _center == null
       ? const Center(child: CircularProgressIndicator())
-      : FutureBuilder(
-        future: _loadBusinessesAndEvents, 
-        builder: (context, snapshot) {
+      : Scaffold(
+        appBar: AppBar(
+          leading: Builder(
+            builder: (context) {
+              return IconButton(
+                icon: const ImageIcon(AssetImage('assets/profile.png')),
+                onPressed: () {
+                  Scaffold.of(mainScaffoldContext!).openDrawer();
+                },);
+            },
+          ),
+          backgroundColor: Theme.of(context).colorScheme.primary,
+          centerTitle: true,
+          foregroundColor: Colors.white,
+          title: Text("Around You"),
+          actions: [
+            IconButton(
+              onPressed: () async {
+                await _refreshData();
+              },
+              icon: const Icon(Icons.refresh)
+            ),
+            IconButton(
+              onPressed: () {
+                showDialog(
+                  context: context,
+                  builder: (context) {
+                    return AlertDialog(
+                      title: const Text("Around You is a place to discover Assyrian Businesses and Events.\nIf you want us to feature your Business or Event, contact us for more info!"),
+                      actions: [
+                        TextButton(
+                          child: const Text("OK"),
+                          onPressed: () {
+                            Navigator.pop(context);
+                          },
+                        )
+                      ],
+                    );
+                  },
+                );
+              },
+              icon: const Icon(Icons.info_outline_rounded)
+            )
+          ],
+        ),
+        body: FutureBuilder(
+          future: _loadBusinessesAndEvents, 
+          builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return const Center(child:  CircularProgressIndicator(),);
           }
           return Scaffold(
-            appBar: AppBar(
-              leading: Builder(
-                builder: (context) {
-                  return IconButton(
-                    icon: const ImageIcon(AssetImage('assets/profile.png')),
-                    onPressed: () {
-                      Scaffold.of(mainScaffoldContext!).openDrawer();
-                    },);
-                },
-              ),
-              backgroundColor: Theme.of(context).colorScheme.primary,
-              centerTitle: true,
-              foregroundColor: Colors.white,
-              title: Text("Around You"),
-              actions: [
-                IconButton(
-                  onPressed: () async {
-                    await _refreshData();
-                  },
-                  icon: const Icon(Icons.refresh)
-                ),
-                IconButton(
-                  onPressed: () {
-                    showDialog(
-                      context: context,
-                      builder: (context) {
-                        return AlertDialog(
-                          title: const Text("Around You is a place to discover Assyrian Businesses and Events.\nIf you want us to feature your Business or Event, contact us for more info!"),
-                          actions: [
-                            TextButton(
-                              child: const Text("OK"),
-                              onPressed: () {
-                                Navigator.pop(context);
-                              },
-                            )
-                          ],
-                        );
-                      },
-                    );
-                  },
-                  icon: const Icon(Icons.info_outline_rounded)
-                )
-              ],
-            ),
             body: Stack(
               children: [
                 SizedBox(
@@ -307,6 +308,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
             ),
           );
         }
+        ),
       );
       
   }

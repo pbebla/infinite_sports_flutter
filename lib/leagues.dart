@@ -91,27 +91,27 @@ class _LeaguesPageState extends State<LeaguesPage> {
     // The Flutter framework has been optimized to make rerunning build methods
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
-    return FutureBuilder(
-      future: populateMenus(), 
-      builder:(context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(
-              child: CircularProgressIndicator(
-                color: Theme.of(context).colorScheme.primary,
-              )
-            );
-        }
-        return Scaffold(
-          appBar: GlobalAppBar(title: Text("Leagues"), height: AppBar().preferredSize.height, showTables: false),
-          body: ListView.separated(
+    return Scaffold(
+      appBar: GlobalAppBar(title: Text("Leagues"), height: AppBar().preferredSize.height, showTables: false),
+      body: FutureBuilder(
+        future: populateMenus(), 
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(
+                child: CircularProgressIndicator(
+                  color: Theme.of(context).colorScheme.primary,
+                )
+              );
+          }
+          return ListView.separated(
             separatorBuilder: (context, index) => Divider(
               color: Theme.of(context).dividerColor,
             ),
             itemCount: snapshot.data!.length,
             itemBuilder: (context, index) => snapshot.data![index]
-            ),
           );
-      },
+        },
+      )
     );
   }
 }

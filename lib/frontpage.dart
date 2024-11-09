@@ -63,9 +63,11 @@ class _FrontPageState extends State<FrontPage> {
     // The Flutter framework has been optimized to make rerunning build methods
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
-    return FutureBuilder(
-      future: _loadingPage, 
-      builder: (context, snapshot) {
+    return Scaffold(
+      appBar: GlobalAppBar(title: Text("Live Scores"), height: AppBar().preferredSize.height, showTables: true),
+      body: FutureBuilder(
+        future: _loadingPage, 
+        builder: (context, snapshot) {
         if(snapshot.connectionState == ConnectionState.waiting) {
           return Center(
               child: CircularProgressIndicator(
@@ -135,7 +137,6 @@ class _FrontPageState extends State<FrontPage> {
           return DefaultTabController(
             length: tabs.length, 
             child: Scaffold(
-              appBar: GlobalAppBar(title: Text("Live Scores"), height: AppBar().preferredSize.height, showTables: true),
               body: CustomScrollView(
                 controller: ScrollController(),
                 physics: const ClampingScrollPhysics(),
@@ -182,7 +183,9 @@ class _FrontPageState extends State<FrontPage> {
           )
         ),);
       }
+      )
     );
+    
   }
 
   Future<void> _refreshData() async {
