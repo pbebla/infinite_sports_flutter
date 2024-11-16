@@ -73,7 +73,7 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
           length: dateList.length,
           child: Scaffold(
             appBar: GlobalAppBar(
-              title: Flexible(child: RichText(
+              title: RichText(
                 textAlign: TextAlign.center,
                 text: TextSpan(
                     text: widget.sport,
@@ -87,7 +87,7 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
                       ),
                     ]
                 ),
-              ),),
+              ),
               height: AppBar().preferredSize.height, 
               showTables: true,
             ),

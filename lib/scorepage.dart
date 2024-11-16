@@ -439,7 +439,7 @@ class _ScorePageState extends State<ScorePage> {
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
-        title: Flexible(child: RichText(
+        title: RichText(
           textAlign: TextAlign.center,
           text: TextSpan(
               text: widget.sport,
@@ -453,7 +453,7 @@ class _ScorePageState extends State<ScorePage> {
                 ),
               ]
           ),
-        ),), 
+        ), 
         actions: [
           IconButton(
             onPressed: () {
@@ -623,17 +623,12 @@ class _ScorePageState extends State<ScorePage> {
               ],
             ),
           ),
-          Expanded(
-            child: Center(
-              child: Text(
-                '${game!.team1score} - ${game!.team2score}',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 35,
-                  fontWeight: FontWeight.bold,
-                )),
-            ),
+          Expanded(child: Text(game!.team1score, textAlign: TextAlign.right, style: TextStyle(fontSize: 35, fontWeight: FontWeight.bold))),
+          SizedBox(
+           width: 25,
+           child: Center(child: Text("-", style: TextStyle(fontSize: 35, fontWeight: FontWeight.bold))),
           ),
+          Expanded(child: Text(game!.team2score, textAlign: TextAlign.left, style: TextStyle(fontSize: 35, fontWeight: FontWeight.bold))),
           SizedBox(
             width: 70,
             child: Column(

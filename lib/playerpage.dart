@@ -176,18 +176,21 @@ class _PlayerPageState extends State<PlayerPage> {
                 )
               );
           }
-          return Column(
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              return Column(
             children: [
               Container(
                 color: Theme.of(context).colorScheme.surfaceContainer,
                 child: SizedBox(
-                  width: MediaQuery.sizeOf(context).width,
-                  height: 150,
+                  width: constraints.maxWidth,
+                  height: 125,
                   child: Padding(padding: EdgeInsets.fromLTRB(13, 0, 13, 0), child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Expanded(child: profileImagePath != "" ?
-                          CircleAvatar(backgroundImage: NetworkImage(profileImagePath), radius: 70) :
-                          CircleAvatar(backgroundImage: AssetImage("assets/portraitplaceholder.png"), radius: 70),
+                          Center(child: CircleAvatar(backgroundImage: NetworkImage(profileImagePath), radius: 50),) :
+                          Center(child: CircleAvatar(backgroundImage: AssetImage("assets/portraitplaceholder.png"), radius: 50),),
                       ),
                       //Expanded(child: profileImagePath != "" ? Image.network(profileImagePath, ) : Image.asset("assets/portraitplaceholder.png")),
                       Expanded(
@@ -211,7 +214,7 @@ class _PlayerPageState extends State<PlayerPage> {
                   ),),
                 ),
               ),
-              Flexible(
+              Expanded(
                 child: ListView.builder(
                     itemCount: sports.length,
                     itemBuilder: (context, index) {
@@ -225,7 +228,7 @@ class _PlayerPageState extends State<PlayerPage> {
                                 return info.$2;
                               }),
                               cells: [
-                                DataCell(Text(season, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
+                                DataCell(Center(child: Text(season, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white)))),
                                 DataCell(Image.network((info.$3 as BasketballPlayer).teamPath, width: windowsDefaultIconSize.toDouble()/1.5, errorBuilder:(context, error, stackTrace) => const Text("")),),
                                 DataCell(Text(info.$1, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
                                 //DataCell(Text(info.$1, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
@@ -243,7 +246,7 @@ class _PlayerPageState extends State<PlayerPage> {
                             career.rebounds += (info.$3 as BasketballPlayer).rebounds;
                             career.misses += (info.$3 as BasketballPlayer).misses;
                           });
-                          rows.sort((a, b) => (int.parse((a.cells[0].child as Text).data.toString() ?? '0').compareTo(int.parse((b.cells[0].child as Text).data.toString() ?? '0'),)));
+                          rows.sort((a, b) => (int.parse(((a.cells[0].child as Center).child as Text).data.toString() ?? '0').compareTo(int.parse(((b.cells[0].child as Center).child as Text).data.toString() ?? '0'),)));
                           career.getPercentage();
                           rows.add(DataRow(cells: [
                             const DataCell(Text("")),
@@ -261,9 +264,9 @@ class _PlayerPageState extends State<PlayerPage> {
                               Text(sportPositions[sports[index]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
                               DataTable(
                                 horizontalMargin: 13,
-                                columnSpacing: 9,
+                                columnSpacing: 5,
                                 columns: const [
-                                  DataColumn(label: Text("Season"), numeric: true),
+                                  DataColumn(label: Text("Season"), numeric: false),
                                   DataColumn(label: Text("")),
                                   DataColumn(label: Text("Team")),
                                   DataColumn(label: Text("PTS"), numeric: true),
@@ -289,7 +292,7 @@ class _PlayerPageState extends State<PlayerPage> {
                                   return info.$2;
                                 }),
                                 cells: [
-                                  DataCell(Text(season, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
+                                  DataCell(Center(child: Text(season, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white)))),
                                   DataCell(Image.network((info.$3 as FutsalPlayer).teamPath, width: windowsDefaultIconSize.toDouble()/1.5, errorBuilder:(context, error, stackTrace) => const Text(""),)),
                                   DataCell(Text(info.$1, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
                                   //DataCell(Text(info.$3.number)),
@@ -301,7 +304,7 @@ class _PlayerPageState extends State<PlayerPage> {
                               career.assists += (info.$3 as FutsalPlayer).assists;
                               career.saves += (info.$3 as FutsalPlayer).saves;
                           });
-                          rows.sort((a, b) => (int.parse((a.cells[0].child as Text).data.toString() ?? '0').compareTo(int.parse((b.cells[0].child as Text).data.toString() ?? '0'),)));
+                          rows.sort((a, b) => (int.parse(((a.cells[0].child as Center).child as Text).data.toString() ?? '0').compareTo(int.parse(((b.cells[0].child as Center).child as Text).data.toString() ?? '0'),)));
                           rows.add(DataRow(cells: [
                               const DataCell(Text("")),
                               const DataCell(Text("")),
@@ -313,27 +316,20 @@ class _PlayerPageState extends State<PlayerPage> {
                           return Column(children: [
                               Text(sports[index], style: TextStyle(fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineLarge!.fontSize), ),
                               Text(sportPositions[sports[index]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
-                              LayoutBuilder(
-                                builder:(context, constraints) {
-                                  return ConstrainedBox(
-                                    constraints: constraints,
-                                    child: DataTable(
-                                      horizontalMargin: 13,
-                                      columnSpacing: 23,
-                                      columns: const [
-                                        DataColumn(label: Text("Season"), numeric: true),
-                                        DataColumn(label: Text("")),
-                                        DataColumn(label: Text("Team")),
-                                        //DataColumn(label: Text("#"), numeric: true),
-                                        DataColumn(label: Text("Goals"), numeric: true),
-                                        DataColumn(label: Text("Assists"), numeric: true),
-                                        DataColumn(label: Text("Saves"), numeric: true),
-                                      ], 
-                                      rows: rows
-                                    ),
-                                  );
-                                },
-                              )
+                              DataTable(
+                                horizontalMargin: 13,
+                                columnSpacing: 16,
+                                columns: const [
+                                  DataColumn(label: Text("Season")),
+                                  DataColumn(label: Text("")),
+                                  DataColumn(label: Text("Team")),
+                                  //DataColumn(label: Text("#"), numeric: true),
+                                  DataColumn(label: Text("Goals"), numeric: true),
+                                  DataColumn(label: Text("Assists"), numeric: true),
+                                  DataColumn(label: Text("Saves"), numeric: true),
+                                ], 
+                                rows: rows
+                              ),
                           ],
                           );
                         }
@@ -384,6 +380,8 @@ class _PlayerPageState extends State<PlayerPage> {
           )
               ]
             );
+          }
+          );
         }
       )
       

@@ -213,7 +213,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
-        title: Flexible(child: RichText(
+        title: RichText(
           textAlign: TextAlign.center,
           text: TextSpan(
               text: widget.sport,
@@ -227,7 +227,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
                 ),
               ]
           ),
-        ),),
+        ),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),
