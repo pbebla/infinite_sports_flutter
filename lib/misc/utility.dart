@@ -23,7 +23,6 @@ Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
 Map<String, Map<String, Map<String, BasketballPlayer>>> basketballLineups = {};
 Map teamLogos = {};
 FirebaseAuthService auth = FirebaseAuthService();
-User? currentUser;
 bool signedIn = false;
 bool autoSignIn = false;
 bool darkModeEnabled = false;
@@ -726,7 +725,7 @@ Future<UserInformation?> getInformation() async
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   try
   {
-    var event = await newClient.child("Users/${currentUser!.uid}/Information/").once();
+    var event = await newClient.child("Users/${FirebaseAuth.instance.currentUser!.uid}/Information/").once();
     var info = event.snapshot.value as Map<dynamic, dynamic>;
     var result = UserInformation();
     result.age = info["Age"] ?? info["age"];
@@ -743,7 +742,7 @@ Future<UserInformation?> getInformation() async
 
 Future<void> addUpdateInfo(UserInformation information, String phone) async
 {
-  DatabaseReference newClient = FirebaseDatabase.instance.ref("Users/${currentUser!.uid}");
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("Users/${FirebaseAuth.instance.currentUser!.uid}");
   try
   {
     var client = newClient.child("/Information/");
@@ -759,11 +758,11 @@ Future<void> addUpdateInfo(UserInformation information, String phone) async
 
 Future<void> signUpToPlay(String league, String season) async
 {
-  DatabaseReference newClient = FirebaseDatabase.instance.ref("Sign Ups/$league/$season/NotPaid/${currentUser!.uid}");
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("Sign Ups/$league/$season/NotPaid/${FirebaseAuth.instance.currentUser!.uid}");
 
   try
   {
-    await newClient.set(currentUser!.displayName);
+    await newClient.set(FirebaseAuth.instance.currentUser!.displayName);
   }
   catch (e)
   {
@@ -782,6 +781,23 @@ Future<void> setImage(User user, FileImage fileImage) async
     var url = await storageUser.getDownloadURL();
 
     await user.updatePhotoURL(url);
+
+  }
+  catch (e)
+  {
+    var mess = e.toString();
+  }
+}
+
+Future<void> removeImage(User user) async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref();
+  Reference storage = FirebaseStorage.instance.ref();
+  try
+  {
+    var storageUser = storage.child("Users").child(user.uid).child("profileimage.jpg");
+    await storageUser.delete();
+    await user.updatePhotoURL(null);
 
   }
   catch (e)
@@ -831,11 +847,11 @@ Future<void> uploadToken(User user, String token) async
 Future<void> addComment(String league, String season, String comment) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
-  var client = newClient.child("Sign Ups/$league/$season/Comments/${currentUser!.displayName!}");
+  var client = newClient.child("Sign Ups/$league/$season/Comments/${FirebaseAuth.instance.currentUser!.displayName!}");
 
   try
   {
-      await client.set("${currentUser!.uid}:$comment");
+      await client.set("${FirebaseAuth.instance.currentUser!.uid}:$comment");
   }
   catch (e)
   {
@@ -869,7 +885,7 @@ Future<String?> getPhone() async
   DatabaseReference newClient = FirebaseDatabase.instance.ref("");
   try
   {
-    var event = await newClient.child("Users/${currentUser!.uid}/Phone Number/").once();
+    var event = await newClient.child("Users/${FirebaseAuth.instance.currentUser!.uid}/Phone Number/").once();
     var info = event.snapshot.value.toString();
 
       return info;

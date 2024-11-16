@@ -1,4 +1,5 @@
 import 'package:data_table_2/data_table_2.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
@@ -201,11 +202,11 @@ class _ScorePageState extends State<ScorePage> {
           padding: const EdgeInsets.all(13),
           child: Table(
             columnWidths: const {
-              0: FlexColumnWidth(4),
-              1: FlexColumnWidth(1),
-              2: FlexColumnWidth(3),
-              3: FlexColumnWidth(1),
-              4: FlexColumnWidth(4),
+              0: FlexColumnWidth(0.3),
+              1: FlexColumnWidth(0.1),
+              2: FlexColumnWidth(0.2),
+              3: FlexColumnWidth(0.1),
+              4: FlexColumnWidth(0.3),
             },
             defaultVerticalAlignment: TableCellVerticalAlignment.middle,
             children: [
@@ -261,32 +262,27 @@ class _ScorePageState extends State<ScorePage> {
     });
   }
 
-  List<Widget> buildActivityList() {
-    List<Widget> rows = List.empty(growable: true);
+  List<TableRow> buildActivityList() {
+    List<TableRow> rows = List.empty(growable: true);
     activities.sort((a, b) {
       return compareValues(int.parse(a.time.substring(0, a.time.length-1)), int.parse(b.time.substring(0, b.time.length-1)), false);
     },);
     for (var activity in activities) {
-      rows.add(Container(
-        color: activity.color,
-        child: Row(
+      rows.add(
+        TableRow(
+          decoration: BoxDecoration(color: activity.color),
           children: [
-            Text(activity.time, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white)), 
-            Image.network(activity.teamImagePath, errorBuilder: (context, error, stackTrace) {
+            Padding(padding: EdgeInsets.fromLTRB(13, 0, 0, 0), child: Center(child: Text(activity.time, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white)),),),
+            Padding(padding: EdgeInsets.fromLTRB(5, 0, 0, 0), child: Image.network(activity.teamImagePath, errorBuilder: (context, error, stackTrace) {
                           return const Text("");
-                        }, width: windowsDefaultIconSize.toDouble()/1.5 , fit: BoxFit.scaleDown, alignment: FractionalOffset.centerLeft),
-            Text(activity.name, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white)),
-            const Spacer(),
-            Row(
-              children: [
-                Text(stringToGameText[activity.action]!, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white)),
-                stringToGameAction[activity.action]!
-              ],
-            )
+                        }, width: windowsDefaultIconSize.toDouble()/2 , fit: BoxFit.scaleDown, alignment: FractionalOffset.centerLeft),),
+            Padding(padding: EdgeInsets.fromLTRB(5, 0, 5, 0), child: Text(activity.name, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white)),),
+            Text(stringToGameText[activity.action]!, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white), textAlign: TextAlign.end,),
+            Padding(padding: EdgeInsets.fromLTRB(0, 0, 8, 0), child: stringToGameAction[activity.action]!,)
           ]
         )
-      ));
-      rows.add(Divider(height: 1, thickness: 1, color: Theme.of(context).dividerColor,));
+      );
+      //rows.add(Divider(height: 1, thickness: 1, color: Theme.of(context).dividerColor,));
     }
     return rows;
   }
@@ -370,7 +366,7 @@ class _ScorePageState extends State<ScorePage> {
         ], 
         rows: (teamPlayers as List).map((key) {
           return DataRow(cells: [
-            DataCell(Text(key.number)),
+            DataCell(Center(child: Text(key.number),)),
             DataCell(Text(key.name), onTap: () {
               Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
                   initialEntries: [OverlayEntry(
@@ -409,7 +405,7 @@ class _ScorePageState extends State<ScorePage> {
           DataColumn2(fixedWidth: 35.0, label: Text("PF", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
         ], 
         rows: (teamPlayers as List).map((key) => DataRow(cells: [
-            DataCell(Text(key.number)),
+            DataCell(Center(child: Text(key.number),)),
             DataCell(Text(key.name), onTap: () {
               Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
                   initialEntries: [OverlayEntry(
@@ -443,21 +439,21 @@ class _ScorePageState extends State<ScorePage> {
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
         centerTitle: true,
-        title: RichText(
+        title: Flexible(child: RichText(
           textAlign: TextAlign.center,
           text: TextSpan(
               text: widget.sport,
-              style: TextStyle(fontSize: 20, color: Colors.white),
+              style: TextStyle(fontSize: Theme.of(context).textTheme.headlineSmall!.fontSize),
               children: <TextSpan>[
                 TextSpan(
                   text: '\n${widget.season}',
-                  style: const TextStyle(
-                    fontSize: 16,
+                  style: TextStyle(
+                    fontSize: Theme.of(context).textTheme.bodySmall!.fontSize,
                   ),
                 ),
               ]
           ),
-        ), 
+        ),), 
         actions: [
           IconButton(
             onPressed: () {
@@ -615,31 +611,41 @@ class _ScorePageState extends State<ScorePage> {
       ),
       Row(
         children: <Widget>[
-          Column(
-            children: <Widget>[
-              Image.network(width: 70, game!.team1SourcePath, errorBuilder: (context, error, stackTrace) {
-                return const Text("");
-              },),
-              SizedBox(width: 100, child: Text(game!.team1, textAlign: TextAlign.center,),),
-            ],
+          SizedBox(
+            width: 70,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Image.network(width: 70, game!.team1SourcePath, errorBuilder: (context, error, stackTrace) {
+                  return const Text("");
+                },),
+                Center(child: Text(game!.team1, textAlign: TextAlign.center,),),
+              ],
+            ),
           ),
           Expanded(
-            child:
-              Text(
-                '${game!.team1score}-${game!.team2score}',
+            child: Center(
+              child: Text(
+                '${game!.team1score} - ${game!.team2score}',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 35,
                   fontWeight: FontWeight.bold,
-                ))),
-          Column(
-            children: <Widget>[
-              Image.network(width: 70, game!.team2SourcePath, errorBuilder: (context, error, stackTrace) {
-                return const Text("");
-              },),
-              SizedBox(width: 100, child: Text(game!.team2, textAlign: TextAlign.center,),),
-            ],
+                )),
+            ),
           ),
+          SizedBox(
+            width: 70,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Image.network(width: 70, game!.team2SourcePath, errorBuilder: (context, error, stackTrace) {
+                  return const Text("");
+                },),
+                Center(child: Text(game!.team2, textAlign: TextAlign.center),),
+              ],
+            ),
+          )
         ],
       ),
     ];
@@ -690,13 +696,13 @@ class _ScorePageState extends State<ScorePage> {
                                 children: <Widget>[
                                   TextButton(onPressed: () async {
                                     DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${game!.UrlPath}/${game!.GameNum}/team1vote/");
-                                    await newClient.child(currentUser!.uid).set(1);
+                                    await newClient.child(FirebaseAuth.instance.currentUser!.uid).set(1);
                                     Navigator.pop(context);
                                     await _refreshData(setState);
                                   }, child: Text(game!.team1),),
                                   TextButton(onPressed: () async {
                                     DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${game!.UrlPath}/${game!.GameNum}/team2vote/");
-                                    await newClient.child(currentUser!.uid).set(1);
+                                    await newClient.child(FirebaseAuth.instance.currentUser!.uid).set(1);
                                     Navigator.pop(context);
                                     await _refreshData(setState);
                                   }, child: Text(game!.team2),),
@@ -737,7 +743,26 @@ class _ScorePageState extends State<ScorePage> {
     if (game!.status != 0 && team1Players.isNotEmpty && team2Players.isNotEmpty) {
       items.add(buildTeamLeaders());
     }
-    items.add(Padding(padding: const EdgeInsets.all(5), child: Column(children: buildActivityList()),));   
+    items.add(
+      Card(
+        elevation: 2,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12.0),
+          child:  Table(
+            border: TableBorder(horizontalInside: BorderSide(color: Colors.grey)),
+            defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+            columnWidths: {
+              0: IntrinsicColumnWidth(),
+              1: IntrinsicColumnWidth(),
+              2: FractionColumnWidth(0.55),
+              3: IntrinsicColumnWidth(),
+              4: IntrinsicColumnWidth(),
+            },
+            children: buildActivityList()
+          ),
+        )
+      )
+    );   
     return items;
   }
 
@@ -745,7 +770,7 @@ class _ScorePageState extends State<ScorePage> {
     return Card(
       elevation: 2,
       child: SizedBox(
-        width: 300,
+        width: MediaQuery.sizeOf(context).width - 38,
         height: 240,
         child: Container(
           padding: const EdgeInsets.all(13),

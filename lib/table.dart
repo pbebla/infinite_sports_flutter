@@ -299,21 +299,21 @@ class _TablePageState extends State<TablePage> {
     return Scaffold(
         appBar: AppBar(
           centerTitle: true,
-          title: RichText(
-                textAlign: TextAlign.center,
-                text: TextSpan(
-                    text: widget.sport,
-                    style: TextStyle(fontSize: 20, color: Colors.white),
-                    children: <TextSpan>[
-                      TextSpan(
-                        text: '\n${widget.season} Table',
-                        style: const TextStyle(
-                          fontSize: 16,
-                        ),
-                      ),
-                    ]
-                ),
-              ),
+          title: Flexible(child: RichText(
+            textAlign: TextAlign.center,
+            text: TextSpan(
+                text: widget.sport,
+                style: TextStyle(fontSize: Theme.of(context).textTheme.headlineSmall!.fontSize),
+                children: <TextSpan>[
+                  TextSpan(
+                    text: '\n${widget.season} Table',
+                    style: TextStyle(
+                      fontSize: Theme.of(context).textTheme.bodySmall!.fontSize,
+                    ),
+                  ),
+                ]
+            ),
+          ),),
           backgroundColor: Theme.of(context).colorScheme.primary,
           foregroundColor: Colors.white,
         ),

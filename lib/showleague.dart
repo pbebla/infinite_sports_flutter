@@ -73,23 +73,23 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
           length: dateList.length,
           child: Scaffold(
             appBar: GlobalAppBar(
-              title: RichText(
+              title: Flexible(child: RichText(
                 textAlign: TextAlign.center,
                 text: TextSpan(
                     text: widget.sport,
-                    style: TextStyle(fontSize: 20),
+                    style: TextStyle(fontSize: Theme.of(context).textTheme.headlineSmall!.fontSize),
                     children: <TextSpan>[
                       TextSpan(
                         text: '\n${widget.season}',
-                        style: const TextStyle(
-                          fontSize: 16,
+                        style: TextStyle(
+                          fontSize: Theme.of(context).textTheme.bodySmall!.fontSize,
                         ),
                       ),
                     ]
                 ),
-              ), 
+              ),),
               height: AppBar().preferredSize.height, 
-              showTables: true
+              showTables: true,
             ),
             body: CustomScrollView(
               controller: ScrollController(),

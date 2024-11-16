@@ -65,16 +65,81 @@ class _NavBarState extends State<NavBar> {
 
   @override
   Widget build(BuildContext context) {
-    return Drawer(
-      backgroundColor: Theme.of(context).brightness == Brightness.light ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.surface,
-      child: ListView(
-        children: [
-          Visibility(
+    return NavigationDrawer(
+      backgroundColor: Theme.of(context).brightness == Brightness.light ? Theme.of(context).colorScheme.primary : Theme.of(context).navigationDrawerTheme.backgroundColor,
+      children: [
+        Visibility(
             visible: signedIn,
             child: Column(
               children: [
                 GestureDetector(
                   onTap: () {
+                    var actions = <CupertinoActionSheetAction>[
+                      CupertinoActionSheetAction(
+                        isDefaultAction: true,
+                        onPressed: () async {
+                          final ImagePicker picker = ImagePicker();
+                          final XFile? file = await picker.pickImage(source: ImageSource.gallery);
+                          if (file != null) {
+                            await setImage(FirebaseAuth.instance.currentUser!, FileImage(File(file.path)));
+                          }
+                          Navigator.pop(context);
+                          setState(() {
+                          });
+                        },
+                        child: const Text('Photos'),
+                      ),
+                      CupertinoActionSheetAction(
+                        onPressed: () async {
+                          final ImagePicker picker = ImagePicker();
+                          final XFile? file = await picker.pickImage(source: ImageSource.camera);
+                          if (file != null) {
+                            await setImage(FirebaseAuth.instance.currentUser!, FileImage(File(file.path)));
+                          }
+                          Navigator.pop(context);
+                          setState(() {
+                          });
+                        },
+                        child: const Text('Camera'),
+                      ),
+                    ];
+                    if (FirebaseAuth.instance.currentUser?.photoURL?.isNotEmpty ?? false) {
+                      actions.add(
+                        CupertinoActionSheetAction(
+                          isDestructiveAction: true,
+                          onPressed: () async {
+                            showAdaptiveDialog(
+                              context: context,
+                              builder: (context) {
+                                return AlertDialog.adaptive(
+                                  title: Text("Are you sure you want to remove your current profile picture?"),
+                                  actions: [
+                                    TextButton(
+                                      child: const Text("Yes"),
+                                      onPressed: () async {
+                                        await removeImage(FirebaseAuth.instance.currentUser!);
+                                        Navigator.pop(context);
+                                        Navigator.pop(context);
+                                        setState(() {});
+                                      },
+                                    ),
+                                    TextButton(
+                                      child: const Text("No"),
+                                      onPressed: () {
+                                        Navigator.pop(context);
+                                        Navigator.pop(context);
+                                        setState(() {});
+                                      },
+                                    )
+                                  ],
+                                );
+                              }
+                            );
+                          },
+                          child: const Text('Remove'),
+                        ),
+                      );
+                    }
                     showCupertinoModalPopup(
                       context: context, 
                       builder: (context) => CupertinoActionSheet(
@@ -85,36 +150,11 @@ class _NavBarState extends State<NavBar> {
                             },
                             child: const Text('Cancel'),
                           ),
-                        actions: <CupertinoActionSheetAction>[
-                          CupertinoActionSheetAction(
-                            onPressed: () async {
-                              final ImagePicker picker = ImagePicker();
-                              final XFile? file = await picker.pickImage(source: ImageSource.gallery);
-                              if (file != null) {
-                                await setImage(FirebaseAuth.instance.currentUser!, FileImage(File(file.path)));
-                              }
-                              setState(() {
-                              });
-                            },
-                            child: const Text('Photos'),
-                          ),
-                          CupertinoActionSheetAction(
-                            onPressed: () async {
-                              final ImagePicker picker = ImagePicker();
-                              final XFile? file = await picker.pickImage(source: ImageSource.camera);
-                              if (file != null) {
-                                await setImage(FirebaseAuth.instance.currentUser!, FileImage(File(file.path)));
-                              }
-                              setState(() {
-                              });
-                            },
-                            child: const Text('Camera'),
-                          ),
-                        ],
+                        actions: actions
                       ));
                   },
-                  child: signedIn && (currentUser?.photoURL?.isNotEmpty ?? false) ? 
-                  CircleAvatar(backgroundImage: NetworkImage(currentUser!.photoURL!), radius: 50) : 
+                  child: signedIn && (FirebaseAuth.instance.currentUser?.photoURL?.isNotEmpty ?? false) ? 
+                  CircleAvatar(backgroundImage: NetworkImage(FirebaseAuth.instance.currentUser!.photoURL!), radius: 50) : 
                   const CircleAvatar(backgroundImage: AssetImage("assets/portraitplaceholder.png"), radius: 50),
                 ),
                 Text(FirebaseAuth.instance.currentUser?.displayName ?? "", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineMedium!.fontSize)),
@@ -139,7 +179,7 @@ class _NavBarState extends State<NavBar> {
             textColor: Colors.white,
             onTap: () {
               Navigator.push(context, MaterialPageRoute(builder:(context) {
-                return PlayerPage(uid: currentUser!.uid,);
+                return PlayerPage(uid: FirebaseAuth.instance.currentUser!.uid,);
               },));
             },
           ),),
@@ -228,8 +268,7 @@ class _NavBarState extends State<NavBar> {
                 );
               }
           ),),
-        ],
-      ),
+      ]
     );
   }
 }

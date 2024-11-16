@@ -182,7 +182,6 @@ class _LoginDemoState extends State<LoginPage> {
 
     if (user != null) {
       signedIn = true;
-      currentUser = user;
       String? token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
         await uploadToken(user, token);

@@ -1,6 +1,7 @@
 
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
@@ -65,31 +66,41 @@ class _LiveScorePageState extends State<LiveScorePage> {
         ),
         Row(
           children: <Widget>[
-            Column(
-              children: <Widget>[
-                Image.network(width: 70, game.team1SourcePath, errorBuilder: (context, error, stackTrace) {
-                  return const Text("");
-                },),
-                SizedBox(width: 100, child: Text(game.team1, textAlign: TextAlign.center,),),
-              ],
+            SizedBox(
+              width: 70,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  Image.network(width: 70, game.team1SourcePath, errorBuilder: (context, error, stackTrace) {
+                    return const Text("");
+                  },),
+                  Center(child: Text(game.team1, textAlign: TextAlign.center,),),
+                ],
+              ),
             ),
-            Expanded(
-              child:
-                Text(
-                  '${game.team1score}-${game.team2score}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 35,
-                    fontWeight: FontWeight.bold,
-                  ))),
-            Column(
-              children: <Widget>[
-                Image.network(width: 70, game.team2SourcePath, errorBuilder: (context, error, stackTrace) {
-                  return const Text("");
-                },),
-                SizedBox(width: 100, child: Text(game.team2, textAlign: TextAlign.center,),),
-              ],
+           Expanded(
+            child: Center(
+              child: Text(
+                '${game.team1score} - ${game.team2score}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 35,
+                  fontWeight: FontWeight.bold,
+                )),
             ),
+           ),
+            SizedBox(
+              width: 70,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  Image.network(width: 70, game.team2SourcePath, errorBuilder: (context, error, stackTrace) {
+                    return const Text("");
+                  },),
+                  Center(child: Text(game.team2, textAlign: TextAlign.center),),
+                ],
+              ),
+            )
           ],
         ),
       ];
@@ -140,13 +151,13 @@ class _LiveScorePageState extends State<LiveScorePage> {
                                   children: <Widget>[
                                     TextButton(onPressed: () async {
                                       DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${game.UrlPath}/${game.GameNum}/team1vote/");
-                                      await newClient.child(currentUser!.uid).set(1);
+                                      await newClient.child(FirebaseAuth.instance.currentUser!.uid).set(1);
                                       Navigator.pop(context);
                                       await _refreshData(setState);
                                     }, child: Text(game.team1),),
                                     TextButton(onPressed: () async {
                                       DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${game.UrlPath}/${game.GameNum}/team2vote/");
-                                      await newClient.child(currentUser!.uid).set(1);
+                                      await newClient.child(FirebaseAuth.instance.currentUser!.uid).set(1);
                                       Navigator.pop(context);
                                       await _refreshData(setState);
                                     }, child: Text(game.team2),),
@@ -187,7 +198,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
       Card card = Card(
         elevation: 2,
         child: SizedBox(
-          width: 300,
+          width: MediaQuery.sizeOf(context).width - 38,
           height: 240,
           child: Container(
             padding: const EdgeInsets.all(13),

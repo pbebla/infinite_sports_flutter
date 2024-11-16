@@ -7,7 +7,8 @@ class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
   final Widget title;
   final double height;
   final bool showTables;
-  const GlobalAppBar({super.key, required this.title, required this.height, required this.showTables});
+  final PreferredSizeWidget? bottom;
+  const GlobalAppBar({super.key, required this.title, required this.height, required this.showTables, this.bottom});
   
   @override
   Widget build(BuildContext context) {
@@ -70,6 +71,7 @@ class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
       title: title,
       centerTitle: true,
       foregroundColor: Colors.white,
+      bottom: bottom
     );
   }
   

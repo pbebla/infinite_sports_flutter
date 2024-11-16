@@ -19,13 +19,13 @@ ThemeData lightMode = ThemeData(
   // This works for code too, not just values: Most code changes can be
   // tested with just a hot reload.
   brightness: Brightness.light,
-  colorScheme: ColorScheme.fromSeed(brightness: Brightness.light, seedColor: infiniteSportsPrimaryColor, primary: infiniteSportsPrimaryColor, dynamicSchemeVariant: DynamicSchemeVariant.fidelity,),
+  colorScheme: ColorScheme.fromSeed(brightness: Brightness.light, seedColor: Colors.white, primary: infiniteSportsPrimaryColor, dynamicSchemeVariant: DynamicSchemeVariant.fidelity,),
   useMaterial3: true,
 );
 
 ThemeData darkMode = ThemeData(
   brightness: Brightness.dark,
-  colorScheme: ColorScheme.fromSeed(brightness: Brightness.dark, seedColor: infiniteSportsPrimaryColor, primary: infiniteSportsPrimaryColor, dynamicSchemeVariant: DynamicSchemeVariant.fidelity,),
+  colorScheme: ColorScheme.fromSeed(brightness: Brightness.dark, seedColor: Colors.black, primary: infiniteSportsPrimaryColor, dynamicSchemeVariant: DynamicSchemeVariant.fidelity,),
   useMaterial3: true,
 );
 

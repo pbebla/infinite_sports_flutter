@@ -100,7 +100,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
   DataTable2 buildLeaderboard(setState) {
     if (widget.sport == "Futsal") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
-        DataCell(Text(key.number)),
+        DataCell(Center(child: Text(key.number),)),
         DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, fit: BoxFit.scaleDown, alignment: FractionalOffset.center),)),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
@@ -135,7 +135,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       );
     } else if (widget.sport == "Basketball") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
-        DataCell(Text(key.number)),
+        DataCell(Center(child: Text(key.number),)),
         DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/1.75, fit: BoxFit.scaleDown, alignment: FractionalOffset.center),)),
         //DataCell(Row(children: [Text(key.number), Spacer(), ])),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
@@ -172,7 +172,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     } else if (widget.sport == "AFC San Jose") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Text(key.position)),
-        DataCell(Text(key.number)),
+        DataCell(Center(child: Text(key.number),)),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
                   initialEntries: [OverlayEntry(
@@ -213,21 +213,21 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
-        title: RichText(
+        title: Flexible(child: RichText(
           textAlign: TextAlign.center,
           text: TextSpan(
               text: widget.sport,
-              style: TextStyle(fontSize: 20, color: Colors.white),
+              style: TextStyle(fontSize: Theme.of(context).textTheme.headlineSmall!.fontSize),
               children: <TextSpan>[
                 TextSpan(
                   text: '\n${widget.season} Leaderboard',
-                  style: const TextStyle(
-                    fontSize: 16,
+                  style: TextStyle(
+                    fontSize: Theme.of(context).textTheme.bodySmall!.fontSize,
                   ),
                 ),
               ]
           ),
-        ),
+        ),),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),

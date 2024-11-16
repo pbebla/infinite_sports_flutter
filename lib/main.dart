@@ -40,7 +40,7 @@ Future<void> main() async {
   }
   FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
     if (signedIn) {
-      await uploadToken(currentUser!, newToken);
+      await uploadToken(FirebaseAuth.instance.currentUser!, newToken);
     }
   });
   SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -118,10 +118,9 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<int> setCurrentValues() async {
     if (FirebaseAuth.instance.currentUser != null && autoSignIn) {
       signedIn = true;
-      currentUser = FirebaseAuth.instance.currentUser;
       String? token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
-        await uploadToken(currentUser!, token);
+        await uploadToken(FirebaseAuth.instance.currentUser!, token);
       }
     } else {
       FirebaseAuth.instance.signOut();
@@ -171,23 +170,22 @@ class _MyHomePageState extends State<MyHomePage> {
           );
         }
       ),
-      bottomNavigationBar: BottomNavigationBar(
-      type: BottomNavigationBarType.fixed,
-      items: const [
-        BottomNavigationBarItem(
-          icon: ImageIcon(AssetImage('assets/scores.png')),
-          label: 'Live Scores'),
-        BottomNavigationBarItem(
-          icon: ImageIcon(AssetImage('assets/leagues.png')),
-          label: 'Leagues'),
-        BottomNavigationBarItem(
-          icon: ImageIcon(AssetImage('assets/aroundyou.png')),
-          label: 'Around You'),
-      ],
-      selectedItemColor: Theme.of(context).colorScheme.primary,
-      currentIndex: _selectedIndex,
-      onTap: _onItemTapped,
-      ) // This trailing comma makes auto-formatting nicer for build methods.
+      bottomNavigationBar: NavigationBar(
+        destinations: const [
+          NavigationDestination(
+            icon: ImageIcon(AssetImage('assets/scores.png')),
+            label: 'Live Scores'),
+          NavigationDestination(
+            icon: ImageIcon(AssetImage('assets/leagues.png')),
+            label: 'Leagues'),
+          NavigationDestination(
+            icon: ImageIcon(AssetImage('assets/aroundyou.png')),
+            label: 'Around You'),
+        ],
+        indicatorColor: Theme.of(context).colorScheme.primary,
+        selectedIndex: _selectedIndex,
+        onDestinationSelected: _onItemTapped,
+        ) // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 

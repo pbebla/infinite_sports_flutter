@@ -1,5 +1,6 @@
 
 import 'dart:ui';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
@@ -102,7 +103,7 @@ class BasketballGame implements Game
     @override
   void setUpVote()
   {
-      signedIn = currentUser != null;
+      signedIn = FirebaseAuth.instance.currentUser != null;
 
       if (team1vote.isNotEmpty)
       {
@@ -123,15 +124,15 @@ class BasketballGame implements Game
 
       if (team1vote.isNotEmpty  && team2vote.isNotEmpty  && signedIn)
       {
-          voted = team1vote.containsKey(currentUser!.uid) || team2vote.containsKey(currentUser!.uid);
+          voted = team1vote.containsKey(FirebaseAuth.instance.currentUser!.uid) || team2vote.containsKey(FirebaseAuth.instance.currentUser!.uid);
       }
       else if (team1vote.isNotEmpty && signedIn)
       {
-          voted = team1vote.containsKey(currentUser!.uid);
+          voted = team1vote.containsKey(FirebaseAuth.instance.currentUser!.uid);
       }
       else if (team2vote.isNotEmpty && signedIn)
       {
-          voted = team2vote.containsKey(currentUser!.uid);
+          voted = team2vote.containsKey(FirebaseAuth.instance.currentUser!.uid);
       }
       else
       {

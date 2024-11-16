@@ -92,7 +92,12 @@ class _LeaguesPageState extends State<LeaguesPage> {
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
     return Scaffold(
-      appBar: GlobalAppBar(title: Text("Leagues"), height: AppBar().preferredSize.height, showTables: false),
+      appBar: AppBar(
+        centerTitle: true,
+        foregroundColor: Colors.white,
+        title: Text("Leagues"),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+      ),
       body: FutureBuilder(
         future: populateMenus(), 
         builder: (context, snapshot) {
