@@ -174,12 +174,15 @@ class _MyHomePageState extends State<MyHomePage> {
         destinations: const [
           NavigationDestination(
             icon: ImageIcon(AssetImage('assets/scores.png')),
+            selectedIcon: ImageIcon(AssetImage('assets/scores.png'), color: Colors.white,),
             label: 'Live Scores'),
           NavigationDestination(
             icon: ImageIcon(AssetImage('assets/leagues.png')),
+            selectedIcon: ImageIcon(AssetImage('assets/leagues.png'), color: Colors.white,),
             label: 'Leagues'),
           NavigationDestination(
             icon: ImageIcon(AssetImage('assets/aroundyou.png')),
+            selectedIcon: ImageIcon(AssetImage('assets/aroundyou.png'), color: Colors.white,),
             label: 'Around You'),
         ],
         indicatorColor: Theme.of(context).colorScheme.primary,

@@ -11,7 +11,6 @@ class PushNotifications {
     await _firebaseMessaging.requestPermission(
       provisional: true
     );
-    final apns = await _firebaseMessaging.getAPNSToken();
     final token = await _firebaseMessaging.getToken();
     print("device token: $token");
   }

@@ -67,7 +67,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
         Row(
           children: <Widget>[
             SizedBox(
-              width: 70,
+              width: 80,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
@@ -90,7 +90,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
             ),
            ),
             SizedBox(
-              width: 70,
+              width: 80,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[

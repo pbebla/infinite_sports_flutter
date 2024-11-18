@@ -612,7 +612,7 @@ class _ScorePageState extends State<ScorePage> {
       Row(
         children: <Widget>[
           SizedBox(
-            width: 70,
+            width: 80,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
@@ -635,7 +635,7 @@ class _ScorePageState extends State<ScorePage> {
             ),
           ),
           SizedBox(
-            width: 70,
+            width: 80,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
