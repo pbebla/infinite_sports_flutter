@@ -78,17 +78,14 @@ class _LiveScorePageState extends State<LiveScorePage> {
                 ],
               ),
             ),
-           Expanded(
-            child: Center(
-              child: Text(
-                '${game.team1score} - ${game.team2score}',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 35,
-                  fontWeight: FontWeight.bold,
-                )),
-            ),
+            Expanded(child: Text(game.team1score, textAlign: TextAlign.right, style: TextStyle(fontSize: 35, fontWeight: FontWeight.bold))),
+            
+           SizedBox(
+            width: 25,
+            child: Center(child: Text("-", style: TextStyle(fontSize: 35, fontWeight: FontWeight.bold))),
            ),
+           Expanded(child: Text(game.team2score, textAlign: TextAlign.left, style: TextStyle(fontSize: 35, fontWeight: FontWeight.bold))),
+            
             SizedBox(
               width: 80,
               child: Column(

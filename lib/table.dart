@@ -299,7 +299,7 @@ class _TablePageState extends State<TablePage> {
     return Scaffold(
         appBar: AppBar(
           centerTitle: true,
-          title: Flexible(child: RichText(
+          title: RichText(
             textAlign: TextAlign.center,
             text: TextSpan(
                 text: widget.sport,
@@ -313,7 +313,7 @@ class _TablePageState extends State<TablePage> {
                   ),
                 ]
             ),
-          ),),
+          ),
           backgroundColor: Theme.of(context).colorScheme.primary,
           foregroundColor: Colors.white,
         ),
