@@ -71,27 +71,27 @@ class _LiveScorePageState extends State<LiveScorePage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
-                  Image.network(width: 70, game.team1SourcePath, errorBuilder: (context, error, stackTrace) {
+                  Image.network(width: 70, height: 70, game.team1SourcePath, errorBuilder: (context, error, stackTrace) {
                     return const Text("");
                   },),
                   Center(child: Text(game.team1, textAlign: TextAlign.center,),),
                 ],
               ),
             ),
-            Expanded(child: Text(game.team1score, textAlign: TextAlign.right, style: TextStyle(fontSize: 35, fontWeight: FontWeight.bold))),
+            Expanded(child: Text(game.team1score, textAlign: TextAlign.center, style: TextStyle(fontSize: 35, fontWeight: FontWeight.bold))),
             
            SizedBox(
             width: 25,
             child: Center(child: Text("-", style: TextStyle(fontSize: 35, fontWeight: FontWeight.bold))),
            ),
-           Expanded(child: Text(game.team2score, textAlign: TextAlign.left, style: TextStyle(fontSize: 35, fontWeight: FontWeight.bold))),
+           Expanded(child: Text(game.team2score, textAlign: TextAlign.center, style: TextStyle(fontSize: 35, fontWeight: FontWeight.bold))),
             
             SizedBox(
               width: 80,
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
-                  Image.network(width: 70, game.team2SourcePath, errorBuilder: (context, error, stackTrace) {
+                  Image.network(width: 70, height: 70, game.team2SourcePath, errorBuilder: (context, error, stackTrace) {
                     return const Text("");
                   },),
                   Center(child: Text(game.team2, textAlign: TextAlign.center),),
@@ -201,8 +201,9 @@ class _LiveScorePageState extends State<LiveScorePage> {
             padding: const EdgeInsets.all(13),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: informationRows
-            )
+            ),
           ), //Padding
         ), //SizedBox
       );

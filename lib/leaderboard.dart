@@ -101,7 +101,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     if (widget.sport == "Futsal") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Center(child: Text(key.number),)),
-        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, fit: BoxFit.scaleDown, alignment: FractionalOffset.center),)),
+        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center),)),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
                   initialEntries: [OverlayEntry(
@@ -136,7 +136,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     } else if (widget.sport == "Basketball") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Center(child: Text(key.number),)),
-        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/1.75, fit: BoxFit.scaleDown, alignment: FractionalOffset.center),)),
+        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center),)),
         //DataCell(Row(children: [Text(key.number), Spacer(), ])),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(

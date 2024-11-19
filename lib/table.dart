@@ -108,8 +108,8 @@ class _TablePageState extends State<TablePage> {
       List<DataRow> teamsList = teams.entries
           .map((key) => DataRow(cells: [
                 DataCell(Image.network(key.value.imagePath,
-                    width: windowsDefaultIconSize.toDouble(),
-                    fit: BoxFit.scaleDown,
+                    width: windowsDefaultIconSize.toDouble()/1.25,
+                    height: windowsDefaultIconSize.toDouble()/1.25,
                     alignment: FractionalOffset.center,
                     errorBuilder: (context, error, stackTrace) {
                       return const Text("");
@@ -119,10 +119,12 @@ class _TablePageState extends State<TablePage> {
                 DataCell(Text(key.value.wins.toString())),
                 DataCell(Text((key.value as FutsalTeamInfo).draws.toString())),
                 DataCell(Text(key.value.losses.toString())),
+                DataCell(Text((key.value as FutsalTeamInfo).gs.toString())),
+                DataCell(Text((key.value as FutsalTeamInfo).gc.toString())), 
+                DataCell(Text((key.value as FutsalTeamInfo).gd.toString())),
                 DataCell(Text.rich(TextSpan(
                     text: key.value.points.toString(),
                     style: const TextStyle(fontWeight: FontWeight.bold)))),
-                DataCell(Text((key.value as FutsalTeamInfo).gd.toString())),
               ]))
           .toList();
       return DataTable(
@@ -141,8 +143,10 @@ class _TablePageState extends State<TablePage> {
           DataColumn(label: Text("W"), numeric: true),
           DataColumn(label: Text("D"), numeric: true),
           DataColumn(label: Text("L"), numeric: true),
-          DataColumn(label: Text("P"), numeric: true),
+          DataColumn(label: Text("GF"), numeric: true),
+          DataColumn(label: Text("GA"), numeric: true),
           DataColumn(label: Text("GD"), numeric: true),
+          DataColumn(label: Text("P"), numeric: true),
         ],
         rows: teamsList,
       );
@@ -154,10 +158,12 @@ class _TablePageState extends State<TablePage> {
                 DataCell(Text(key.value.wins.toString())),
                 DataCell(Text((key.value as SoccerTeamInfo).draws.toString())),
                 DataCell(Text(key.value.losses.toString())),
+                DataCell(Text((key.value as SoccerTeamInfo).gs.toString())),
+                DataCell(Text((key.value as SoccerTeamInfo).gc.toString())), 
+                DataCell(Text((key.value as SoccerTeamInfo).gd.toString())),
                 DataCell(Text.rich(TextSpan(
                     text: key.value.points.toString(),
-                    style: const TextStyle(fontWeight: FontWeight.bold)))),
-                DataCell(Text((key.value as SoccerTeamInfo).gd.toString())),
+                    style: const TextStyle(fontWeight: FontWeight.bold)))),  
               ]))
           .toList();
       return DataTable(
@@ -175,8 +181,10 @@ class _TablePageState extends State<TablePage> {
           DataColumn(label: Text("W"), numeric: true),
           DataColumn(label: Text("D"), numeric: true),
           DataColumn(label: Text("L"), numeric: true),
-          DataColumn(label: Text("P"), numeric: true),
+          DataColumn(label: Text("GF"), numeric: true),
+          DataColumn(label: Text("GA"), numeric: true),
           DataColumn(label: Text("GD"), numeric: true),
+          DataColumn(label: Text("P"), numeric: true),
         ],
         rows: teamsList,
       );
@@ -184,18 +192,20 @@ class _TablePageState extends State<TablePage> {
       List<DataRow> teamsList = teams.entries
           .map((key) => DataRow(cells: [
                 DataCell(Image.network(key.value.imagePath,
-                    width: windowsDefaultIconSize.toDouble(),
-                    fit: BoxFit.scaleDown,
+                    width: windowsDefaultIconSize.toDouble()/1.25,
+                    height: windowsDefaultIconSize.toDouble()/1.25,
                     alignment: FractionalOffset.center)),
                 DataCell(Text(key.key.toString())),
                 DataCell(Text((key.value as BasketballTeamInfo).gp.toString())),
                 DataCell(Text(key.value.wins.toString())),
                 DataCell(Text(key.value.losses.toString())),
+                DataCell(Text(key.value.ppg.toString())),
+                DataCell(Text(key.value.pcpg.toString())),
+                DataCell(Text(
+                    (key.value as BasketballTeamInfo).pd.toStringAsFixed(1))),
                 DataCell(Text.rich(TextSpan(
                     text: key.value.pct,
                     style: const TextStyle(fontWeight: FontWeight.bold)))),
-                DataCell(Text(
-                    (key.value as BasketballTeamInfo).pd.toStringAsFixed(1))),
               ]))
           .toList();
       return DataTable(
@@ -213,8 +223,10 @@ class _TablePageState extends State<TablePage> {
           DataColumn(label: Text("GP"), numeric: true),
           DataColumn(label: Text("W"), numeric: true),
           DataColumn(label: Text("L"), numeric: true),
-          DataColumn(label: Text("Pct"), numeric: true),
+          DataColumn(label: Text("PPG"), numeric: true),
+          DataColumn(label: Text("OPPG"), numeric: true),
           DataColumn(label: Text("APD"), numeric: true),
+          DataColumn(label: Text("Pct"), numeric: true),
         ],
         rows: teamsList,
       );

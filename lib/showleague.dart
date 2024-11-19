@@ -37,8 +37,8 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
 
   @override
   void initState() {
-    _league = buildLeague();
     super.initState();
+    _league = buildLeague();
   }
   
   Future<int> buildLeague() async {
@@ -58,7 +58,6 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
   
   @override
   Widget build(BuildContext context) {
-    executeAfterBuild();
     return FutureBuilder(
       future: _league, 
       builder:(context, snapshot) {
@@ -71,57 +70,76 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
         }
         return DefaultTabController(
           length: dateList.length,
-          child: Scaffold(
-            appBar: GlobalAppBar(
-              title: RichText(
-                textAlign: TextAlign.center,
-                text: TextSpan(
-                    text: widget.sport,
-                    style: TextStyle(fontSize: Theme.of(context).textTheme.headlineSmall!.fontSize),
-                    children: <TextSpan>[
-                      TextSpan(
-                        text: '\n${widget.season}',
-                        style: TextStyle(
-                          fontSize: Theme.of(context).textTheme.bodySmall!.fontSize,
-                        ),
+          child: Builder(
+            builder: (context) {
+              return Scaffold(
+                appBar: GlobalAppBar(
+                  title: RichText(
+                    textAlign: TextAlign.center,
+                    text: TextSpan(
+                        text: widget.sport,
+                        style: TextStyle(fontSize: Theme.of(context).textTheme.headlineSmall!.fontSize),
+                        children: <TextSpan>[
+                          TextSpan(
+                            text: '\n${widget.season}',
+                            style: TextStyle(
+                              fontSize: Theme.of(context).textTheme.bodySmall!.fontSize,
+                            ),
+                          ),
+                        ]
+                    ),
+                  ),
+                  height: AppBar().preferredSize.height, 
+                  tableWidget: IconButton(
+                    onPressed: () {
+                      Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
+                        initialEntries: [OverlayEntry(
+                          builder: (context) {
+                            return TablePage(sport: widget.sport, season: widget.season);
+                          })],
+                      )));
+                    },
+                    icon: const ImageIcon(AssetImage('assets/table.png')),
+                  ),
+                  leaderboardWidget: IconButton(
+                    onPressed: () {
+                      Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
+                        initialEntries: [OverlayEntry(
+                          builder: (context) {
+                            return LeaderboardPage(sport: widget.sport, season: widget.season);
+                          })],
+                      )));
+                    },
+                    icon: const ImageIcon(AssetImage('assets/leader.png')),
+                  ),
+                ),
+                body: CustomScrollView(
+                  controller: ScrollController(),
+                  slivers: [
+                    SliverAppBar(
+                      leading: IconButton(
+                        onPressed: () => Navigator.pop(context), 
+                        icon: Icon(Icons.arrow_back)
                       ),
-                    ]
-                ),
-              ),
-              height: AppBar().preferredSize.height, 
-              showTables: true,
-            ),
-            body: CustomScrollView(
-              controller: ScrollController(),
-              slivers: [
-                SliverAppBar(
-                  leading: IconButton(
-                    onPressed: () => Navigator.pop(context), 
-                    icon: Icon(Icons.arrow_back)
-                  ),
-                  title: TabBar(
-                    tabAlignment: TabAlignment.start,
-                    isScrollable: true,
-                    tabs: dateList
-                  ),
-                ),
-                SliverFillRemaining(
-                  child: TabBarView(
-                    children: scoresList,
-                  ),
+                      title: TabBar(
+                        tabAlignment: TabAlignment.start,
+                        isScrollable: true,
+                        tabs: dateList
+                      ),
+                    ),
+                    SliverFillRemaining(
+                      child: TabBarView(
+                        children: scoresList,
+                      ),
+                    )
+                  ],
                 )
-              ],
-            )
+              );
+            }
           )
         );
       },
     );
   }
 
-  Future<void> executeAfterBuild() async {
-    await Future.delayed(Duration.zero);
-    headerNotifier.value = [widget.sport, widget.season];
-    // this code will get executed after the build method
-    // because of the way async functions are scheduled
-  }
 }

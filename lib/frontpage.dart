@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
+import 'package:infinite_sports_flutter/leaderboard.dart';
 import 'package:infinite_sports_flutter/livescore.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
+import 'package:infinite_sports_flutter/table.dart';
 
 class FrontPage extends StatefulWidget {
   const FrontPage({super.key, required this.onTitleSelect});
@@ -39,8 +41,8 @@ class _FrontPageState extends State<FrontPage> {
 
   @override
   void initState() {
-    _loadingPage = getFrontPageValues();
     super.initState();
+    _loadingPage = getFrontPageValues();
   }
 
   Future<int> getFrontPageValues() async {
@@ -64,7 +66,42 @@ class _FrontPageState extends State<FrontPage> {
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
     return Scaffold(
-      appBar: GlobalAppBar(title: Text("Live Scores"), height: AppBar().preferredSize.height, showTables: true),
+      appBar: GlobalAppBar(
+        title: Text("Live Scores"), 
+        height: AppBar().preferredSize.height,
+        tableWidget: ValueListenableBuilder(
+          valueListenable: headerNotifier, 
+          builder:(context, value, child) {
+            return IconButton(
+              onPressed: () {
+                Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
+                  initialEntries: [OverlayEntry(
+                    builder: (context) {
+                      return TablePage(sport: value[0], season: value[1]);
+                    })],
+                )));
+              },
+              icon: const ImageIcon(AssetImage('assets/table.png')),
+            );
+          },
+        ),
+        leaderboardWidget:         ValueListenableBuilder(
+          valueListenable: headerNotifier, 
+          builder: (context, value, child) {
+            return IconButton(
+              onPressed: () {
+                Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
+                  initialEntries: [OverlayEntry(
+                    builder: (context) {
+                      return LeaderboardPage(sport: value[0], season: value[1]);
+                    })],
+                )));
+              },
+              icon: const ImageIcon(AssetImage('assets/leader.png')),
+            );
+          }
+        ),
+      ),
       body: FutureBuilder(
         future: _loadingPage, 
         builder: (context, snapshot) {

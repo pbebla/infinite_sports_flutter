@@ -6,9 +6,10 @@ import 'package:infinite_sports_flutter/table.dart';
 class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
   final Widget title;
   final double height;
-  final bool showTables;
   final PreferredSizeWidget? bottom;
-  const GlobalAppBar({super.key, required this.title, required this.height, required this.showTables, this.bottom});
+  final Widget tableWidget;
+  final Widget leaderboardWidget;
+  const GlobalAppBar({super.key, required this.title, required this.height, this.bottom, required this.tableWidget, required this.leaderboardWidget});
   
   @override
   Widget build(BuildContext context) {
@@ -26,44 +27,8 @@ class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
         },
       ),
       actions: [
-        Visibility(
-          visible: showTables,
-          child: ValueListenableBuilder(
-            valueListenable: headerNotifier, 
-            builder:(context, value, child) {
-              return IconButton(
-                onPressed: () {
-                  Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
-                    initialEntries: [OverlayEntry(
-                      builder: (context) {
-                        return TablePage(sport: value[0], season: value[1]);
-                      })],
-                  )));
-                },
-                icon: const ImageIcon(AssetImage('assets/table.png')),
-              );
-            },
-          ),
-        ),
-        Visibility(
-          visible: showTables,
-          child: ValueListenableBuilder(
-            valueListenable: headerNotifier, 
-            builder: (context, value, child) {
-              return IconButton(
-                onPressed: () {
-                  Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
-                    initialEntries: [OverlayEntry(
-                      builder: (context) {
-                        return LeaderboardPage(sport: value[0], season: value[1]);
-                      })],
-                  )));
-                },
-                icon: const ImageIcon(AssetImage('assets/leader.png')),
-              );
-            }
-          )
-        )
+        tableWidget,
+        leaderboardWidget
       ],
       backgroundColor: Theme.of(context).colorScheme.primary,
       // Here we take the value from the MyHomePage object that was created by

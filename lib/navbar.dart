@@ -2,6 +2,7 @@
 import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -36,6 +37,25 @@ class _NavBarState extends State<NavBar> {
   bool signUpsOpen = false;
   bool signUpEnabled = false;
   String signUpDetail = "";
+  String? profileImagePath;
+  Future<void>? _loadProfilePic;
+  Future<void>? _getSignUpStatus;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfilePic = retrieveProfilePic();
+    _getSignUpStatus = setUp();
+  }
+
+  Future<void> retrieveProfilePic() async {
+    DatabaseReference newClient = FirebaseDatabase.instance.ref();
+    if (signedIn) {
+      var event = await newClient.child("Users/${FirebaseAuth.instance.currentUser?.uid}").get();
+      var player = event.value as Map;
+      profileImagePath = player["ProfileUrl"] ?? "";
+    }
+  }
 
   Future<void> setUp() async {
     var status  = await getSignUpStatus();
@@ -153,9 +173,26 @@ class _NavBarState extends State<NavBar> {
                         actions: actions
                       ));
                   },
-                  child: signedIn && (FirebaseAuth.instance.currentUser?.photoURL?.isNotEmpty ?? false) ? 
-                  CircleAvatar(backgroundImage: NetworkImage(FirebaseAuth.instance.currentUser!.photoURL!), radius: 50) : 
-                  const CircleAvatar(backgroundImage: AssetImage("assets/portraitplaceholder.png"), radius: 50),
+                  child: FutureBuilder(
+                    future: _loadProfilePic, 
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return Center(
+                            child: CircularProgressIndicator(
+                              color: Theme.of(context).colorScheme.primary,
+                            )
+                          );
+                      }
+                      if (signedIn) {
+                        if (FirebaseAuth.instance.currentUser?.photoURL?.isNotEmpty ?? false) {
+                          return CircleAvatar(backgroundImage: NetworkImage(FirebaseAuth.instance.currentUser!.photoURL!), radius: 50);
+                        } else if (profileImagePath?.isNotEmpty ?? false) {
+                          return CircleAvatar(backgroundImage: NetworkImage(profileImagePath!), radius: 50);
+                        }
+                      }
+                      return const CircleAvatar(backgroundImage: AssetImage("assets/portraitplaceholder.png"), radius: 50);
+                    }
+                  )
                 ),
                 Text(FirebaseAuth.instance.currentUser?.displayName ?? "", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineMedium!.fontSize)),
               ],)),
@@ -184,7 +221,7 @@ class _NavBarState extends State<NavBar> {
             },
           ),),
           FutureBuilder(
-            future: setUp(), 
+            future: _getSignUpStatus, 
             builder: (context, snapshot) {
               if(snapshot.connectionState == ConnectionState.waiting) {
                 return Center(

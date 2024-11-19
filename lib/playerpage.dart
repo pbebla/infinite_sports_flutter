@@ -229,7 +229,7 @@ class _PlayerPageState extends State<PlayerPage> {
                               }),
                               cells: [
                                 DataCell(Center(child: Text(season, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white)))),
-                                DataCell(Image.network((info.$3 as BasketballPlayer).teamPath, width: windowsDefaultIconSize.toDouble()/1.5, errorBuilder:(context, error, stackTrace) => const Text("")),),
+                                DataCell(Image.network((info.$3 as BasketballPlayer).teamPath, width: windowsDefaultIconSize.toDouble()/1.5, height: windowsDefaultIconSize.toDouble()/1.5, errorBuilder:(context, error, stackTrace) => const Text("")),),
                                 DataCell(Text(info.$1, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
                                 //DataCell(Text(info.$1, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
                                 DataCell(Text((info.$3 as BasketballPlayer).total.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
@@ -293,7 +293,7 @@ class _PlayerPageState extends State<PlayerPage> {
                                 }),
                                 cells: [
                                   DataCell(Center(child: Text(season, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white)))),
-                                  DataCell(Image.network((info.$3 as FutsalPlayer).teamPath, width: windowsDefaultIconSize.toDouble()/1.5, errorBuilder:(context, error, stackTrace) => const Text(""),)),
+                                  DataCell(Image.network((info.$3 as FutsalPlayer).teamPath, width: windowsDefaultIconSize.toDouble()/1.5, height: windowsDefaultIconSize.toDouble()/1.5, errorBuilder:(context, error, stackTrace) => const Text(""),)),
                                   DataCell(Text(info.$1, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
                                   //DataCell(Text(info.$3.number)),
                                   DataCell(Text((info.$3 as FutsalPlayer).goals.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
