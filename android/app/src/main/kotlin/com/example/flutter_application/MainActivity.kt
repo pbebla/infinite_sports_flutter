@@ -1,4 +1,4 @@
-package com.example.infinite_sports_flutter
+package com.infinitesports.Infinite_Sports_App
 
 import io.flutter.embedding.android.FlutterActivity
 
