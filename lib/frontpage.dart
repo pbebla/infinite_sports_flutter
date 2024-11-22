@@ -53,7 +53,6 @@ class _FrontPageState extends State<FrontPage> {
     currentAFCDate = await getCurrentDate("AFC San Jose", currentAFCSeason);
     isCurrentFinished = await isSeasonFinished(currentSport, currentSeason);
     isCurrentAFCFinished = await isAFCSeasonFinished(currentAFCSeason);
-    headerNotifier.value = [currentSport, currentSeason];
     return 1;
   }
 
@@ -85,7 +84,7 @@ class _FrontPageState extends State<FrontPage> {
             );
           },
         ),
-        leaderboardWidget:         ValueListenableBuilder(
+        leaderboardWidget: ValueListenableBuilder(
           valueListenable: headerNotifier, 
           builder: (context, value, child) {
             return IconButton(
@@ -181,6 +180,8 @@ class _FrontPageState extends State<FrontPage> {
             ]
             ));
           }
+          WidgetsBinding.instance
+            .addPostFrameCallback((_) => executeAfterBuild());
           return DefaultTabController(
             length: tabs.length, 
             child: Scaffold(
@@ -233,5 +234,16 @@ class _FrontPageState extends State<FrontPage> {
     setState(() {
       
     });
+  }
+
+  void executeAfterBuild() {
+    if (tabNames.isEmpty) {
+      return;
+    }
+    if (tabNames[0].text == "Infinite Sports") {
+      headerNotifier.value = [currentSport, currentSeason];
+    } else if (tabNames[0].text == "AFC San Jose") {
+      headerNotifier.value = ["AFC San Jose", currentAFCSeason];
+    }
   }
 }
