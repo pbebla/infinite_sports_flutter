@@ -779,8 +779,9 @@ Future<void> setImage(User user, FileImage fileImage) async
     var storageUser = storage.child("Users").child(user.uid).child("profileimage.jpg");
     await storageUser.putFile(fileImage.file);
     var url = await storageUser.getDownloadURL();
-
     await user.updatePhotoURL(url);
+    var imageCLient = newClient.child("Users/" + user.uid + "/ProfileUrl");
+    await imageCLient.set(url);
 
   }
   catch (e)

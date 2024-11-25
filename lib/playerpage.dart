@@ -192,7 +192,6 @@ class _PlayerPageState extends State<PlayerPage> {
                           Center(child: CircleAvatar(backgroundImage: NetworkImage(profileImagePath), radius: 50),) :
                           Center(child: CircleAvatar(backgroundImage: AssetImage("assets/portraitplaceholder.png"), radius: 50),),
                       ),
-                      //Expanded(child: profileImagePath != "" ? Image.network(profileImagePath, ) : Image.asset("assets/portraitplaceholder.png")),
                       Expanded(
                         child: Padding(
                           padding: EdgeInsets.fromLTRB(13, 0, 0, 0),
@@ -231,13 +230,12 @@ class _PlayerPageState extends State<PlayerPage> {
                                 DataCell(Center(child: Text(season, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white)))),
                                 DataCell(Image.network((info.$3 as BasketballPlayer).teamPath, width: windowsDefaultIconSize.toDouble()/1.5, height: windowsDefaultIconSize.toDouble()/1.5, errorBuilder:(context, error, stackTrace) => const Text("")),),
                                 DataCell(Text(info.$1, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
-                                //DataCell(Text(info.$1, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
-                                DataCell(Text((info.$3 as BasketballPlayer).total.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
-                                DataCell(Text((info.$3 as BasketballPlayer).rebounds.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
-                                DataCell(Text((info.$3 as BasketballPlayer).twoPoints.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
-                                DataCell(Text((info.$3 as BasketballPlayer).threePoints.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
-                                DataCell(Text((info.$3 as BasketballPlayer).onePoint.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
-                                DataCell(Text((info.$3 as BasketballPlayer).shotPercentage, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
+                                DataCell(Center(child: Text((info.$3 as BasketballPlayer).total.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white)))),
+                                DataCell(Center(child: Text((info.$3 as BasketballPlayer).rebounds.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white)))),
+                                DataCell(Center(child: Text((info.$3 as BasketballPlayer).twoPoints.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white)))),
+                                DataCell(Center(child: Text((info.$3 as BasketballPlayer).threePoints.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white)))),
+                                DataCell(Center(child: Text((info.$3 as BasketballPlayer).onePoint.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white)))),
+                                DataCell(Center(child: Text((info.$3 as BasketballPlayer).shotPercentage, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white)))),
                             ]));
                             career.onePoint += (info.$3 as BasketballPlayer).onePoint;
                             career.twoPoints += (info.$3 as BasketballPlayer).twoPoints;
@@ -252,22 +250,21 @@ class _PlayerPageState extends State<PlayerPage> {
                             const DataCell(Text("")),
                             const DataCell(Text("")),
                             const DataCell(Text("Career", style: TextStyle(fontWeight: FontWeight.bold),)),
-                            DataCell(Text(career.total.toString())),
-                            DataCell(Text(career.rebounds.toString())),
-                            DataCell(Text(career.twoPoints.toString())),
-                            DataCell(Text(career.threePoints.toString())),
-                            DataCell(Text(career.onePoint.toString())),
-                            DataCell(Text(career.shotPercentage)),
+                            DataCell(Center(child: Text(career.total.toString()))),
+                            DataCell(Center(child: Text(career.rebounds.toString()))),
+                            DataCell(Center(child: Text(career.twoPoints.toString()))),
+                            DataCell(Center(child: Text(career.threePoints.toString()))),
+                            DataCell(Center(child: Text(career.onePoint.toString()))),
+                            DataCell(Center(child: Text(career.shotPercentage))),
                           ]));
                           return Column(children: [
                               Text(sports[index], style: TextStyle(fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineLarge!.fontSize), ),
                               Text(sportPositions[sports[index]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
                               DataTable(
-                                horizontalMargin: 13,
                                 columnSpacing: 5,
                                 columns: const [
-                                  DataColumn(label: Text("Season"), numeric: false),
-                                  DataColumn(label: Text("")),
+                                  DataColumn(label: Text("Season"), numeric: true),
+                                  DataColumn(label: Text(""), numeric: true),
                                   DataColumn(label: Text("Team")),
                                   DataColumn(label: Text("PTS"), numeric: true),
                                   DataColumn(label: Text("REB"), numeric: true),
@@ -295,10 +292,9 @@ class _PlayerPageState extends State<PlayerPage> {
                                   DataCell(Center(child: Text(season, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white)))),
                                   DataCell(Image.network((info.$3 as FutsalPlayer).teamPath, width: windowsDefaultIconSize.toDouble()/1.5, height: windowsDefaultIconSize.toDouble()/1.5, errorBuilder:(context, error, stackTrace) => const Text(""),)),
                                   DataCell(Text(info.$1, style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
-                                  //DataCell(Text(info.$3.number)),
-                                  DataCell(Text((info.$3 as FutsalPlayer).goals.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
-                                  DataCell(Text((info.$3 as FutsalPlayer).assists.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
-                                  DataCell(Text((info.$3 as FutsalPlayer).saves.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white))),
+                                  DataCell(Center(child: Text((info.$3 as FutsalPlayer).goals.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white)))),
+                                  DataCell(Center(child: Text((info.$3 as FutsalPlayer).assists.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white)))),
+                                  DataCell(Center(child: Text((info.$3 as FutsalPlayer).saves.toString(), style: TextStyle(color: info.$2.computeLuminance() > 0.5 ? Colors.black : Colors.white)))),
                                 ]));
                               career.goals += (info.$3 as FutsalPlayer).goals;
                               career.assists += (info.$3 as FutsalPlayer).assists;
@@ -309,21 +305,19 @@ class _PlayerPageState extends State<PlayerPage> {
                               const DataCell(Text("")),
                               const DataCell(Text("")),
                               const DataCell(Text("Career", style: TextStyle(fontWeight: FontWeight.bold),)),
-                              DataCell(Text(career.goals.toString())),
-                              DataCell(Text(career.assists.toString())),
-                              DataCell(Text(career.saves.toString())),
+                              DataCell(Center(child: Text(career.goals.toString()),)),
+                              DataCell(Center(child: Text(career.assists.toString()),)),
+                              DataCell(Center(child: Text(career.saves.toString()),)),
                             ]));
                           return Column(children: [
                               Text(sports[index], style: TextStyle(fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineLarge!.fontSize), ),
                               Text(sportPositions[sports[index]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
                               DataTable(
-                                horizontalMargin: 13,
                                 columnSpacing: 16,
                                 columns: const [
-                                  DataColumn(label: Text("Season")),
-                                  DataColumn(label: Text("")),
+                                  DataColumn(label: Text("Season"), numeric: true),
+                                  DataColumn(label: Text(""), numeric: true),
                                   DataColumn(label: Text("Team")),
-                                  //DataColumn(label: Text("#"), numeric: true),
                                   DataColumn(label: Text("Goals"), numeric: true),
                                   DataColumn(label: Text("Assists"), numeric: true),
                                   DataColumn(label: Text("Saves"), numeric: true),
@@ -341,9 +335,9 @@ class _PlayerPageState extends State<PlayerPage> {
                           tableEntries[sports[index]]!.forEach((season, info) {
                               rows.add(DataRow(cells: [
                                 DataCell(Text(info.$1, softWrap: true,)),
-                                DataCell(Text((info.$3 as SoccerPlayer).goals.toString())),
-                                DataCell(Text((info.$3 as SoccerPlayer).assists.toString())),
-                                DataCell(Text((info.$3 as SoccerPlayer).saves.toString())),
+                                DataCell(Center(child: Text((info.$3 as SoccerPlayer).goals.toString()))),
+                                DataCell(Center(child: Text((info.$3 as SoccerPlayer).assists.toString()))),
+                                DataCell(Center(child: Text((info.$3 as SoccerPlayer).saves.toString()))),
                               ]));
                               career.goals += (info.$3 as SoccerPlayer).goals;
                               career.assists += (info.$3 as SoccerPlayer).assists;
@@ -351,16 +345,15 @@ class _PlayerPageState extends State<PlayerPage> {
                           });
                           rows.add(DataRow(cells: [
                               const DataCell(Text("Career", style: TextStyle(fontWeight: FontWeight.bold),)),
-                              DataCell(Text(career.goals.toString())),
-                              DataCell(Text(career.assists.toString())),
-                              DataCell(Text(career.saves.toString())),
+                              DataCell(Center(child: Text(career.goals.toString()))),
+                              DataCell(Center(child: Text(career.assists.toString()))),
+                              DataCell(Center(child: Text(career.saves.toString()))),
                             ]));
                           return Column(
                             children: [
                               Text(sports[index], style: TextStyle(fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineLarge!.fontSize), ),
                               Text(sportPositions[sports[index]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
                               DataTable(
-                                horizontalMargin: 13,
                                 columnSpacing: 10,
                                 columns: const [
                                   DataColumn(label: Text("Season")),
