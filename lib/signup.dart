@@ -33,15 +33,17 @@ class _SignupState extends State<Signup> {
     String? phoneNumber = await getPhone();
     bool isSignedUpForNextSeason = await isSignedUp(FirebaseAuth.instance.currentUser!, widget.nextleague, widget.season);
     List<ListTile> list = List<ListTile>.empty(growable: true);
-    ListTile nextSeasonTile = ListTile(
-      enabled: !isSignedUpForNextSeason,
-      title: Text("${widget.nextleague} Season ${widget.season}"), 
-      onTap: () {
-      Navigator.push(context, MaterialPageRoute(builder:(context) {
-        return LeagueForm(sport: widget.nextleague, season: widget.season, oldInfo: oldInfo ?? UserInformation(), phoneNumber: phoneNumber ?? "",);
-      },));
-    },);
-    list.add(nextSeasonTile);
+    if (widget.nextleague.isNotEmpty && widget.season.isNotEmpty) {
+      ListTile nextSeasonTile = ListTile(
+        enabled: !isSignedUpForNextSeason,
+        title: Text("${widget.nextleague} Season ${widget.season}"), 
+        onTap: () {
+        Navigator.push(context, MaterialPageRoute(builder:(context) {
+          return LeagueForm(sport: widget.nextleague, season: widget.season, oldInfo: oldInfo ?? UserInformation(), phoneNumber: phoneNumber ?? "",);
+        },));
+      },);
+      list.add(nextSeasonTile);
+    }
 
     var signups = await getOtherSignups();
     signups.forEach((k, v) {

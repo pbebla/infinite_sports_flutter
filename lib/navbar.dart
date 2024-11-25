@@ -76,6 +76,10 @@ class _NavBarState extends State<NavBar> {
         signUpDetail = "Sign Up for Basketball Season $season";
         signUpsOpen = true;
         break;
+      case 3:
+        signUpDetail = "Sign Ups Open";
+        signUpsOpen = true;
+        break;
       default:
         signUpDetail = "Sign Ups Closed";
         signUpsOpen = false;
