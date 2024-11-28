@@ -1,0 +1,1 @@
+-keep class com.infinitesports.Infinite_Sports_App.BuildConfig { *; }
