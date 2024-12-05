@@ -84,7 +84,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       if (widget.sport == "Futsal" || widget.sport == "AFC San Jose") {
         players.sort((a, b) => a.saves == b.saves ? compareValues(a.assists, b.assists, isAscending) : compareValues(a.saves, b.saves, isAscending));
       } else if (widget.sport == "Basketball") {
-        players.sort((a, b) => int.parse(((a as BasketballPlayer).shotPercentage).replaceFirst('%', '')) == int.parse(((b as BasketballPlayer).shotPercentage).replaceFirst('%', '')) ? compareValues(a.total, b.total, isAscending) : compareValues(int.parse(((a as BasketballPlayer).shotPercentage).replaceFirst('%', '')), int.parse(((b as BasketballPlayer).shotPercentage).replaceFirst('%', '')), isAscending));
+        players.sort((a, b) => int.parse(((a as BasketballPlayer).shotPercentage).replaceFirst('%', '')) == int.parse(((b as BasketballPlayer).shotPercentage).replaceFirst('%', '')) ? compareValues(a.total, b.total, isAscending) : compareValues(int.parse(((a).shotPercentage).replaceFirst('%', '')), int.parse(((b).shotPercentage).replaceFirst('%', '')), isAscending));
       }
     }
   }

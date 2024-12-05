@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/leaderboard.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
-import 'package:infinite_sports_flutter/table.dart';
 
 class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
   final Widget title;

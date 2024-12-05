@@ -5,7 +5,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:infinite_sports_flutter/businesspage.dart';
 import 'package:infinite_sports_flutter/eventpage.dart';
-import 'package:infinite_sports_flutter/globalappbar.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/business.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
@@ -30,7 +29,7 @@ class AroundYou extends StatefulWidget {
 
 class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMixin {
   GoogleMapController? mapController;
-  LatLng? _center = null;
+  LatLng? _center;
   Position? _currentPosition;
   final DraggableScrollableController sheetController = DraggableScrollableController();
   bool isSheetExpanded = true;

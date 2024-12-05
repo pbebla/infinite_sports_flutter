@@ -1,6 +1,5 @@
 import 'package:infinite_sports_flutter/globalappbar.dart';
 import 'package:infinite_sports_flutter/leaderboard.dart';
-import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/table.dart';
 import 'package:intl/intl.dart';
 

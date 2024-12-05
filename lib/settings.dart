@@ -181,7 +181,7 @@ class _SettingsState extends State<Settings> {
                     return Scaffold(
                       appBar: AppBar(
                         centerTitle: true,
-                        title: const Text("About Infinite Sports Association", style: const TextStyle(fontSize: 16),),
+                        title: const Text("About Infinite Sports Association", style: TextStyle(fontSize: 16),),
                         backgroundColor: Theme.of(context).colorScheme.primary,
                         foregroundColor: Colors.white,
                       ),

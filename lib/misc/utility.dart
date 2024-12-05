@@ -780,7 +780,7 @@ Future<void> setImage(User user, FileImage fileImage) async
     await storageUser.putFile(fileImage.file);
     var url = await storageUser.getDownloadURL();
     await user.updatePhotoURL(url);
-    var imageCLient = newClient.child("Users/" + user.uid + "/ProfileUrl");
+    var imageCLient = newClient.child("Users/${user.uid}/ProfileUrl");
     await imageCLient.set(url);
 
   }
@@ -798,7 +798,7 @@ Future<void> removeImage(User user) async
   {
     var storageUser = storage.child("Users").child(user.uid).child("profileimage.jpg");
     await storageUser.delete();
-    var imageCLient = newClient.child("Users/" + user.uid + "/ProfileUrl");
+    var imageCLient = newClient.child("Users/${user.uid}/ProfileUrl");
     await imageCLient.remove();
     await user.updatePhotoURL(null);
 

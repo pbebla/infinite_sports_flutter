@@ -4,7 +4,6 @@ import 'package:infinite_sports_flutter/globalappbar.dart';
 import 'package:infinite_sports_flutter/leaderboard.dart';
 import 'package:infinite_sports_flutter/livescore.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
-import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 import 'package:infinite_sports_flutter/table.dart';
 
@@ -134,7 +133,7 @@ class _FrontPageState extends State<FrontPage> {
                           padding: const EdgeInsets.all(13),
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [Text("Assyrian ${currentSport} League Season ${currentSeason}", style: const TextStyle(fontWeight: FontWeight.bold),), const Spacer(), ImageIcon(AssetImage(currentSport == "Futsal" ? 'assets/FutsalLeague.png' : 'assets/BasketLeague.png'), size: windowsDefaultIconSize.toDouble(),)],),),
+                            children: [Text("Assyrian $currentSport League Season $currentSeason", style: const TextStyle(fontWeight: FontWeight.bold),), const Spacer(), ImageIcon(AssetImage(currentSport == "Futsal" ? 'assets/FutsalLeague.png' : 'assets/BasketLeague.png'), size: windowsDefaultIconSize.toDouble(),)],),),
                       )
                     ),
                   );
