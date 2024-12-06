@@ -112,7 +112,7 @@ class _TablePageState extends State<TablePage> {
                     height: windowsDefaultIconSize.toDouble()/1.25,
                     alignment: FractionalOffset.center,
                     errorBuilder: (context, error, stackTrace) {
-                      return const Text("");
+                      return SizedBox(width: 0, height: 0);
                     })),
                 DataCell(Text(key.key.toString())),
                 DataCell(Text((key.value as FutsalTeamInfo).gp.toString())),
@@ -194,7 +194,7 @@ class _TablePageState extends State<TablePage> {
                 DataCell(Image.network(key.value.imagePath,
                     width: windowsDefaultIconSize.toDouble()/1.25,
                     height: windowsDefaultIconSize.toDouble()/1.25,
-                    alignment: FractionalOffset.center)),
+                    alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => const Text(""))),
                 DataCell(Text(key.key.toString())),
                 DataCell(Text((key.value as BasketballTeamInfo).gp.toString())),
                 DataCell(Text(key.value.wins.toString())),

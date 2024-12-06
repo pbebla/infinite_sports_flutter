@@ -69,7 +69,7 @@ class _PlayerPageState extends State<PlayerPage> {
             firstName = info.name.split(' ')[0];
             lastName = info.name.split(' ')[1];
           }
-          data = (team, color.dominantColor?.color ?? const Color.fromARGB(255, 124, 124, 124), info);
+          data = (team, color.dominantColor?.color ?? Color.fromARGB(255, 124, 124, 124), info);
         }
       });
     }

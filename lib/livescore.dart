@@ -71,9 +71,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
-                  Image.network(width: 70, height: 70, game.team1SourcePath, errorBuilder: (context, error, stackTrace) {
-                    return const Text("");
-                  },),
+                  game.team1SourcePath.isNotEmpty ? Image.network(width: 70, height: 70, game.team1SourcePath) : SizedBox(width: 0, height: 0),
                   Center(child: Text(game.team1, textAlign: TextAlign.center,),),
                 ],
               ),
@@ -91,9 +89,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
-                  Image.network(width: 70, height: 70, game.team2SourcePath, errorBuilder: (context, error, stackTrace) {
-                    return const Text("");
-                  },),
+                  game.team2SourcePath.isNotEmpty ? Image.network(width: 70, height: 70, game.team2SourcePath) : SizedBox(width: 0, height: 0),
                   Center(child: Text(game.team2, textAlign: TextAlign.center),),
                 ],
               ),

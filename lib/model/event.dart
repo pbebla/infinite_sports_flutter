@@ -19,7 +19,7 @@ class Event {
     eventDate = convertDatabaseDateToFormatDate(eventDate!);
     date = convertDatabaseDateToFormatDate(date!);
     if (imageUrl != null) {
-      imageSrc = Image.network(imageUrl!);
+      imageSrc = Image.network(imageUrl!, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0));
     }
   }
 

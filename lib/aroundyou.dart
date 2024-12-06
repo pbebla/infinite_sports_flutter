@@ -255,10 +255,10 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                   physics: const ClampingScrollPhysics(),
                                   padding: EdgeInsets.zero,
                                   itemBuilder: (context, index) => ListTile(
-                                    leading: businesses![index].logo ?? const Text(""),
+                                    leading: businesses![index].logo ?? SizedBox(width: 0, height: 0),
                                     title: Text('${businesses![index].name}'),
                                     subtitle: Text('${businesses![index].description}', overflow: TextOverflow.ellipsis,),
-                                    trailing: (!businesses![index].lat.isNaN) ? Text('${businesses![index].getMiles(_currentPosition!).toString().substring(0,4)} mi' ) : const Text(""),
+                                    trailing: (!businesses![index].lat.isNaN) ? Text('${businesses![index].getMiles(_currentPosition!).toString().substring(0,4)} mi' ) : SizedBox(width: 0, height: 0),
                                     onTap: () async {
                                       var address = "";
                                       if (!businesses![index].lat.isNaN) {
@@ -280,7 +280,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                   physics: const ClampingScrollPhysics(),
                                   padding: EdgeInsets.zero,
                                   itemBuilder: (context, index) => ListTile(
-                                    leading: events![index].imageSrc ?? const Text(""),
+                                    leading: events![index].imageSrc ?? SizedBox(width: 0, height: 0),
                                     title: Text('${events![index].title}'),
                                     subtitle: Text('on ${events![index].eventDate}\nat ${events![index].location}\n${events![index].startTime} - ${events![index].endTime}'),
                                     onTap: () async {

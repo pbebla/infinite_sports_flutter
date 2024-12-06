@@ -101,7 +101,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     if (widget.sport == "Futsal") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Center(child: Text(key.number),)),
-        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center),)),
+        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0),),)),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
                   initialEntries: [OverlayEntry(
@@ -124,8 +124,8 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           return Theme.of(context).colorScheme.surfaceContainerHighest; // Use the default value.
         }),
         columns: [
-          const DataColumn2(fixedWidth: 30.0, label: Text(""), numeric: true),
-          DataColumn2(fixedWidth: windowsDefaultIconSize.toDouble()/1.5, label: Text("")),
+          const DataColumn2(fixedWidth: 30.0, label: SizedBox(width: 0, height: 0), numeric: true),
+          DataColumn2(fixedWidth: windowsDefaultIconSize.toDouble()/1.5, label: SizedBox(width: 0, height: 0),),
           DataColumn2(label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 50.0, label: const Text("G"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 50.0, label: const Text("A"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
@@ -136,7 +136,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     } else if (widget.sport == "Basketball") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Center(child: Text(key.number),)),
-        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center),)),
+        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0),),)),
         //DataCell(Row(children: [Text(key.number), Spacer(), ])),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
@@ -160,8 +160,8 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           return Theme.of(context).colorScheme.surfaceContainerHighest; // Use the default value.
         }),
         columns: [
-          const DataColumn2(fixedWidth: 30.0, label: Text(""), numeric: true),
-          DataColumn2(fixedWidth: windowsDefaultIconSize.toDouble()/1.5, label: Text("")),
+          const DataColumn2(fixedWidth: 30.0, label: SizedBox(width: 0, height: 0), numeric: true),
+          DataColumn2(fixedWidth: windowsDefaultIconSize.toDouble()/1.5, label: SizedBox(width: 0, height: 0),),
           DataColumn2(label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 50.0, label: const Text("PTS"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 50.0, label: const Text("REB"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),

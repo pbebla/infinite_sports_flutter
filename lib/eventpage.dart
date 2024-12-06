@@ -79,7 +79,7 @@ class _EventPageState extends State<EventPage> {
         List<Attendee> attendees = List.empty(growable: true);
         event.attendees?.forEach((uid, val) {
           String name = '${users[uid]?.firstName ?? ""} ${users[uid]?.lastName ?? ""}';
-          attendees.add(Attendee(name, (users[uid]!.profileURL != null) ? Image.network(users[uid]!.profileURL!) : Image.asset("assets/portraitplaceholder.png")));
+          attendees.add(Attendee(name, Image.network(users[uid]!.profileURL!, errorBuilder:(context, error, stackTrace) => Image.asset("assets/portraitplaceholder.png"))));
           if (signedIn && uid == FirebaseAuth.instance.currentUser!.uid) {
             attending = true;
           }
@@ -96,7 +96,7 @@ class _EventPageState extends State<EventPage> {
             body: SingleChildScrollView(
               child: Column(
                 children: [
-                  event.imageSrc ?? const Text(""),
+                  event.imageSrc ?? SizedBox(width: 0, height: 0),
                   Visibility(
                     visible: event.address?.isNotEmpty ?? false,
                     child: ElevatedButton(

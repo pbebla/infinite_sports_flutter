@@ -211,11 +211,11 @@ class _ScorePageState extends State<ScorePage> {
             children: [
               const TableRow(
                 children: [
-                  Text(""),
-                  Text(""),
+                  SizedBox(width: 0, height: 0),
+                  SizedBox(width: 0, height: 0),
                   TableCell(verticalAlignment: TableCellVerticalAlignment.top, child: Text("Leaders", textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold),)),
-                  Text(""),
-                  Text("")
+                  SizedBox(width: 0, height: 0),
+                  SizedBox(width: 0, height: 0),
                 ]
               ),
               TableRow(
@@ -229,10 +229,10 @@ class _ScorePageState extends State<ScorePage> {
               ),
               const TableRow(
                 children: [
-                  Text(""),
-                  Text(""),
-                  Text(""),
-                  Text(""),
+                  SizedBox(width: 0, height: 0),
+                  SizedBox(width: 0, height: 0),
+                  SizedBox(width: 0, height: 0),
+                  SizedBox(width: 0, height: 0),
                   Text("")
                 ]
               ),
@@ -272,9 +272,7 @@ class _ScorePageState extends State<ScorePage> {
           decoration: BoxDecoration(color: activity.color),
           children: [
             Padding(padding: EdgeInsets.fromLTRB(13, 0, 0, 0), child: Center(child: Text(activity.time, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white)),),),
-            Padding(padding: EdgeInsets.fromLTRB(5, 0, 0, 0), child: Image.network(activity.teamImagePath, errorBuilder: (context, error, stackTrace) {
-                          return const Text("");
-                        }, width: windowsDefaultIconSize.toDouble()/2 , height: windowsDefaultIconSize.toDouble()/2, fit: BoxFit.scaleDown, alignment: FractionalOffset.center),),
+            Padding(padding: EdgeInsets.fromLTRB(5, 0, 0, 0), child: Image.network(activity.teamImagePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0), width: windowsDefaultIconSize.toDouble()/2 , height: windowsDefaultIconSize.toDouble()/2, fit: BoxFit.scaleDown, alignment: FractionalOffset.center),),
             Padding(padding: EdgeInsets.fromLTRB(5, 0, 5, 0), child: Text(activity.name, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white)),),
             Text(stringToGameText[activity.action]!, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white), textAlign: TextAlign.end,),
             Padding(padding: EdgeInsets.fromLTRB(0, 0, 8, 0), child: stringToGameAction[activity.action]!,)
@@ -356,9 +354,7 @@ class _ScorePageState extends State<ScorePage> {
           return teamColor; // Use the default value.
         }),
         columns: [
-          DataColumn2(size: ColumnSize.S, label: Image.network(teamSourcePath, errorBuilder: (context, error, stackTrace) {
-                          return const Text("");
-                        }, width: windowsDefaultIconSize.toDouble(), height: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center,)),
+          DataColumn2(size: ColumnSize.S, label: Image.network(teamSourcePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0), width: windowsDefaultIconSize.toDouble(), height: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center,)),
           DataColumn2(size: ColumnSize.L, label: Text(teamName), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(size: ColumnSize.S, label: const Text("Goals"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(size: ColumnSize.S, label: const Text("Assists"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
@@ -392,10 +388,8 @@ class _ScorePageState extends State<ScorePage> {
           return teamColor; // Use the default value.
         }),
         columns: [
-          DataColumn2(fixedWidth: 20.0, size: ColumnSize.S, label: Text("")),
-          DataColumn2(label: Image.network(teamSourcePath, errorBuilder: (context, error, stackTrace) {
-                          return const Text("");
-                        }, width: windowsDefaultIconSize.toDouble(), height: windowsDefaultIconSize.toDouble(), alignment: FractionalOffset.center), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(fixedWidth: 20.0, size: ColumnSize.S, label: SizedBox(width: 0, height: 0)),
+          DataColumn2(label: Image.network(teamSourcePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0), width: windowsDefaultIconSize.toDouble(), height: windowsDefaultIconSize.toDouble(), alignment: FractionalOffset.center), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 40.0, label: Text("PTS", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 40.0, label: Text("REB", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 45.0, label: Text("2PM", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
@@ -513,7 +507,7 @@ class _ScorePageState extends State<ScorePage> {
                   onRefresh: () async {
                     return _refreshData(setState);
                   },
-                  child: table1 ?? const Text("")
+                  child: table1 ?? SizedBox(width: 0, height: 0)
                   );
               }
               )
@@ -528,7 +522,7 @@ class _ScorePageState extends State<ScorePage> {
                   onRefresh: () async {
                     return _refreshData(setState);
                   },
-                  child: table2 ?? const Text("")
+                  child: table2 ?? SizedBox(width: 0, height: 0)
                   );
               }
               )
@@ -615,9 +609,7 @@ class _ScorePageState extends State<ScorePage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                Image.network(width: 70, height: 70, game!.team1SourcePath, errorBuilder: (context, error, stackTrace) {
-                  return const Text("");
-                },),
+                Image.network(width: 70, height: 70, game!.team1SourcePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0)),
                 Center(child: Text(game!.team1, textAlign: TextAlign.center,),),
               ],
             ),
@@ -633,9 +625,7 @@ class _ScorePageState extends State<ScorePage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                Image.network(width: 70, height: 70, game!.team2SourcePath, errorBuilder: (context, error, stackTrace) {
-                  return const Text("");
-                },),
+                Image.network(width: 70, height: 70, game!.team2SourcePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0)),
                 Center(child: Text(game!.team2, textAlign: TextAlign.center),),
               ],
             ),

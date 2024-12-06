@@ -972,7 +972,7 @@ Future<List<Business>> getBusinesses() async {
       business.lat = value["Lat"] ?? double.nan;
       business.long = value["Long"] ?? double.nan;
       if (business.logoUrl != null) {
-        business.logo = Image.network(business.logoUrl!);
+        business.logo = Image.network(business.logoUrl!, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0));
       }
       businesses.add(business);
     }
