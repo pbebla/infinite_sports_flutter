@@ -24,6 +24,16 @@ Future<void> main() async {
   );
   await PushNotifications.init();
   await PushNotifications.initLocalNotifications();
+  FirebaseMessaging.instance.getToken().then( (token) {
+    assert(token != null);
+    print("device token: $token");
+  }
+  );
+  FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
+    if (signedIn) {
+      await uploadToken(FirebaseAuth.instance.currentUser!, newToken);
+    }
+  });
   FirebaseMessaging.onMessage.listen((message) {
     String payloadData = jsonEncode(message.data);
     print("Received notification in foreground");
@@ -36,11 +46,6 @@ Future<void> main() async {
   if (message != null) {
     print("Launched from terminated state");
   }
-  FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
-    if (signedIn) {
-      await uploadToken(FirebaseAuth.instance.currentUser!, newToken);
-    }
-  });
   SharedPreferences prefs = await SharedPreferences.getInstance();
   darkModeEnabled = prefs.getBool('darkMode') ?? false;
   autoSignIn = prefs.getBool('autoSignIn') ?? false;
