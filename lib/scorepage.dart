@@ -202,9 +202,9 @@ class _ScorePageState extends State<ScorePage> {
           child: Table(
             columnWidths: const {
               0: FlexColumnWidth(0.3),
-              1: FlexColumnWidth(0.1),
-              2: FlexColumnWidth(0.2),
-              3: FlexColumnWidth(0.1),
+              1: FlexColumnWidth(0.05),
+              2: FlexColumnWidth(0.3),
+              3: FlexColumnWidth(0.05),
               4: FlexColumnWidth(0.3),
             },
             defaultVerticalAlignment: TableCellVerticalAlignment.middle,
