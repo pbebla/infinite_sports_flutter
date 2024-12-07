@@ -211,11 +211,11 @@ class _ScorePageState extends State<ScorePage> {
             children: [
               const TableRow(
                 children: [
-                  SizedBox(width: 0, height: 0),
-                  SizedBox(width: 0, height: 0),
+                  Text(""),
+                  Text(""),
                   TableCell(verticalAlignment: TableCellVerticalAlignment.top, child: Text("Leaders", textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold),)),
-                  SizedBox(width: 0, height: 0),
-                  SizedBox(width: 0, height: 0),
+                  Text(""),
+                  Text(""),
                 ]
               ),
               TableRow(
@@ -229,10 +229,10 @@ class _ScorePageState extends State<ScorePage> {
               ),
               const TableRow(
                 children: [
-                  SizedBox(width: 0, height: 0),
-                  SizedBox(width: 0, height: 0),
-                  SizedBox(width: 0, height: 0),
-                  SizedBox(width: 0, height: 0),
+                  Text(""),
+                  Text(""),
+                  Text(""),
+                  Text(""),
                   Text("")
                 ]
               ),
