@@ -28,6 +28,22 @@ class Settings extends StatefulWidget {
 }
 
 class _SettingsState extends State<Settings> {
+  TextEditingController? _emailController;
+  String? _emailErrorText;
+  
+  @override
+  void initState() {
+    super.initState();
+    _emailController = TextEditingController();
+    _emailErrorText = "";
+  }
+
+  @override
+  void dispose() {
+    _emailController!.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     // This method is rerun every time setState is called, for instance as done
@@ -36,6 +52,7 @@ class _SettingsState extends State<Settings> {
     // The Flutter framework has been optimized to make rerunning build methods
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
+
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
@@ -276,6 +293,76 @@ class _SettingsState extends State<Settings> {
               const ListTile(title: Text("Infinite Sports App\nRewritten by Pauldin Bebla"),)
             ]
           )
+        ),
+        SliverVisibility(
+          visible: signedIn,
+          sliver: SliverList(
+          delegate: SliverChildListDelegate(
+            [
+              const Divider(color: Colors.grey),
+              ListTile(title: Text("Delete Account", style: TextStyle(color: Theme.of(context).colorScheme.error,)), minTileHeight: 40, onTap: () async {
+                showDialog(
+                  context: context, 
+                  builder: (context) {
+                    return StatefulBuilder(
+                      builder: (context, localSetState) {
+                        return AlertDialog(
+                          title: Text("ALERT!"),
+                          content: Container(
+                            height: 150,
+                            child: Column(
+                            children: [
+                              Text("Are you sure you want to delete your account? Type your email below before confirming."),
+                              Padding(
+                                padding: EdgeInsets.fromLTRB(0, 10, 0, 0),
+                                child: TextField(
+                                  controller: _emailController,
+                                  decoration: InputDecoration(
+                                    border: const OutlineInputBorder(),
+                                    errorText: (_emailErrorText),
+                                    labelText: 'Email',
+                                    hintText: 'Enter your email'),
+                                ),
+                              )
+                            ],
+                          ),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () {
+                                Navigator.pop(context);
+                              }, 
+                              child: const Text("No, Go Back"),
+                            ),
+                            FilledButton(
+                              onPressed: () async {
+                                if (_emailController!.text != FirebaseAuth.instance.currentUser!.email) {
+                                  _emailErrorText = "Email does not match.";
+                                  localSetState(() {});
+                                } else {
+                                  var user = FirebaseAuth.instance.currentUser!;
+                                  await removeImage(user);
+                                  await user.delete();
+                                  signedIn = false;
+                                  Navigator.pop(context);
+                                  Navigator.pop(context);
+                                  Navigator.pop(context);
+                                  setState(() {},);
+                                }
+                              }, 
+                              child: const Text("Yes, Delete", style: TextStyle(color: Colors.white),),
+                            )
+                          ],
+                        );
+                      }
+                    );
+                  }
+                );
+              },),
+              const Divider(color: Colors.grey),
+            ]   
+          ),
+        )
         )
     ],),)
     );

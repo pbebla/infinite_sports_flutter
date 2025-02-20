@@ -341,6 +341,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
       if (token != null) {
         await uploadToken(user, token);
       }
+      await user.sendEmailVerification();
       return true;
     }
     return false;

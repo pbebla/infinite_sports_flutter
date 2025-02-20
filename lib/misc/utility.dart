@@ -188,25 +188,22 @@ Future<List<String>> getDates(String sport, String season) async {
 }
 
 Future<String> getCurrentDate(String sport, String season) async {
-  var Sunday = DateTime.now();
-
-  while (Sunday.weekday != DateTime.sunday)
-  {
-    Sunday = Sunday.add(const Duration(days: 1));
-  }
+  var now = DateTime.now();
 
   List<String> dates = await getDates(sport, season);
-
-  var latestDate = dates.reduce((current, next) => current.compareTo(next)>0 ? current : next);
-  if (convertDateToDatabase(Sunday).compareTo(latestDate) > 0) {
-    return latestDate;
+  dates.sort((a, b) => DateTime.parse(a.substring(4)+a.substring(0,2)+a.substring(2,4)).compareTo(DateTime.parse(b.substring(4)+b.substring(0,2)+b.substring(2,4))));
+  int i = 0;
+  while (i < dates.length) {
+    var converted = DateTime.parse(dates[i].substring(4)+dates[i].substring(0,2)+dates[i].substring(2,4));
+    if (DateUtils.isSameDay(now, converted)) {
+      return dates[i];
+    } else if (now.compareTo(converted) == 1){
+      i+=1;
+    } else {
+      return dates[i];
+    }
   }
-
-  while (!dates.contains(convertDateToDatabase(Sunday)))
-  {
-    Sunday = Sunday.add(const Duration(days: 7));
-  }
-  return convertDateToDatabase(Sunday);
+  return dates[dates.length-1];
 }
 
 Future<String> getMinSeason(sport) async {
