@@ -329,14 +329,16 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     if (_firstNameErrorText != null || _lastNameErrorText != null || _emailErrorText != null || _passwordErrorText != null || _verifyPasswordErrorText != null) {
       return false;
     }
-    String email = _emailController.text;
-    String password = _passwordController.text;
+    String firstName = _firstNameController.value.text.trim();
+    String lastName = _lastNameController.value.text.trim();
+    String email = _emailController.text.trim();
+    String password = _passwordController.text.trim();
     User? user = await auth.signUpWithEmailAndPassword(email, password);
 
     if (user != null) {
       signedIn = true;
-      await FirebaseAuth.instance.currentUser!.updateDisplayName('${_firstNameController.value.text} ${_lastNameController.value.text}');
-      await createDatabaseLocation(FirebaseAuth.instance.currentUser!, profileImage, _phoneController.value.text);
+      await FirebaseAuth.instance.currentUser!.updateDisplayName('$firstName $lastName');
+      await createDatabaseLocation(FirebaseAuth.instance.currentUser!, profileImage, _phoneController.value.text, firstName, lastName);
       String? token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
         await uploadToken(user, token);

@@ -55,12 +55,15 @@ dependencies:
   shared_preferences: ^2.3.2
   google_maps_flutter: ^2.9.0
   geolocator: ^13.0.1
-  flutter_config: ^2.0.2
   url_launcher: ^6.3.0
   geocoding: ^3.0.0
   share_plus: ^10.0.0
   flutter_native_splash: ^2.4.1
   data_table_2: ^2.5.15
+  flutter_config:
+    git:
+      url: git://github.com/dev-mahmoud-elshenawy/flutter_config-flutter3.29.0-fix.git
+      ref: master
 
 dev_dependencies:
   flutter_test:

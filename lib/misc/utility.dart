@@ -743,7 +743,13 @@ Future<void> addUpdateInfo(UserInformation information, String phone) async
   try
   {
     var client = newClient.child("/Information/");
-    await client.set(information);
+    Map<String, dynamic> infoList = {
+      "Age" : information.age,
+      "Height": information.height,
+      "FutsalPosition" : information.futsalPosition,
+      "BasketballPosition": information.basketballPosition
+    };
+    await client.set(infoList);
     var phoneClient = newClient.child("/Phone Number/");
     await phoneClient.set(phone);
   }
@@ -806,7 +812,7 @@ Future<void> removeImage(User user) async
   }
 }
 
-Future<void> createDatabaseLocation(User user, FileImage? fileImage, String phoneNumber) async
+Future<void> createDatabaseLocation(User user, FileImage? fileImage, String phoneNumber, String firstName, String lastName) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   if (fileImage != null) {
@@ -815,11 +821,11 @@ Future<void> createDatabaseLocation(User user, FileImage? fileImage, String phon
 
   var firstClient = newClient.child("Users/${user.uid}/First Name");
 
-  await firstClient.set(user.displayName!.split(' ')[0]);
+  await firstClient.set(firstName);
 
   var lastClient = newClient.child("Users/${user.uid}/Last Name");
 
-  await lastClient.set(user.displayName!.split(' ')[1]);
+  await lastClient.set(lastName);
 
   var numberClient = newClient.child("Users/${user.uid}/Phone Number");
 

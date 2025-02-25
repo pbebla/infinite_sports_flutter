@@ -26,9 +26,10 @@ class _LeagueFormState extends State<LeagueForm> {
   late TextEditingController _commentController;
   bool seasonRulesRead = false;
   bool waiverRead = false;
-  String? _selectedPosition;
   List<String> basketballPositions = ["Point Guard", "Shooting Guard", "Small Forward", "Power Forward", "Center"];
   List<String> futsalPositions = ["Goal Keeper", "Defender", "Midfielder", "Striker"];
+  List<bool> isSelected = List.empty(growable: true);
+  List<String> positions = List.empty();
 
   @override
   void initState() {
@@ -47,6 +48,21 @@ class _LeagueFormState extends State<LeagueForm> {
     }
     _phoneController = TextEditingController(text: widget.phoneNumber);
     _commentController = TextEditingController();
+    late List<String> oldPositions;
+    if (widget.sport == "Futsal") {
+      positions = futsalPositions;
+      oldPositions = widget.oldInfo.futsalPosition.split(';');
+    } else {
+      positions = basketballPositions;
+      oldPositions = widget.oldInfo.basketballPosition.split(';');
+    }
+    for (var position in positions) {
+      if (oldPositions.contains(position)) {
+        isSelected.add(true);
+      } else {
+        isSelected.add(false);
+      }
+    }
   }
 
   @override
@@ -61,14 +77,6 @@ class _LeagueFormState extends State<LeagueForm> {
 
   @override
   Widget build(BuildContext context) {
-    late List<String> positions;
-
-    if (widget.sport == "Futsal") {
-      positions = futsalPositions;
-    } else {
-      positions = basketballPositions;
-    }
-
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
@@ -123,11 +131,15 @@ class _LeagueFormState extends State<LeagueForm> {
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: positions.length,
                 itemBuilder: (context, i) {
-                  return RadioListTile(title: Text(positions[i]), value: positions[i], groupValue: _selectedPosition, onChanged: (value) {
-                    setState(() {
-                      _selectedPosition = value;
-                    });
-                  },);
+                  return CheckboxListTile(
+                    title: Text(positions[i]),
+                    value: isSelected[i], 
+                    onChanged: (newValue) {
+                      isSelected[i] = newValue!;
+                      setState(() {
+                      });
+                    }
+                  );
                 }
             ),
             ),
@@ -239,7 +251,7 @@ class _LeagueFormState extends State<LeagueForm> {
               child: ElevatedButton(
                 onPressed: 
                 (!seasonRulesRead || !waiverRead || _heightFeetController.value.text.isEmpty || 
-                _heightInchesController.value.text.isEmpty || _selectedPosition == null || _ageController.value.text.isEmpty
+                _heightInchesController.value.text.isEmpty || !isSelected.contains(true) || _ageController.value.text.isEmpty
                  || _phoneController.value.text.isEmpty) ? null : () async => await _register(),
                 style: ButtonStyle(
                     backgroundColor: WidgetStateProperty.resolveWith(
@@ -342,15 +354,34 @@ class _LeagueFormState extends State<LeagueForm> {
     try {
       var userInformation = UserInformation();
       userInformation.age = int.parse(_ageController.value.text);
-      if (basketballPositions.contains(_selectedPosition)) {
-        userInformation.basketballPosition = _selectedPosition!;
+      String _selectedPositions = "";
+      if (widget.sport == "Basketball") {
+        for (var i = 0; i < basketballPositions.length ; i++) {
+          if (isSelected[i]) {
+            if (_selectedPositions.isEmpty) {
+              _selectedPositions+=basketballPositions[i];
+            } else {
+              _selectedPositions+=';${basketballPositions[i]}';
+            }
+          }
+        }
+        userInformation.basketballPosition = _selectedPositions;
         userInformation.futsalPosition = widget.oldInfo.futsalPosition;
       } else {
-        userInformation.futsalPosition = _selectedPosition!;
+        for (var i = 0; i < futsalPositions.length ; i++) {
+          if (isSelected[i]) {
+            if (_selectedPositions.isEmpty) {
+              _selectedPositions+=futsalPositions[i];
+            } else {
+              _selectedPositions+=';${futsalPositions[i]}';
+            }
+          }
+        }
+        userInformation.futsalPosition = _selectedPositions;
         userInformation.basketballPosition = widget.oldInfo.basketballPosition;
       }
-      userInformation.height = "${_heightFeetController.value.text}'${_heightInchesController.value.text}";
-      await addUpdateInfo(userInformation, _phoneController.value.text);
+      userInformation.height = "${_heightFeetController.value.text.trim()}'${_heightInchesController.value.text.trim()}";
+      await addUpdateInfo(userInformation, _phoneController.value.text.trim());
       await signUpToPlay(widget.sport, widget.season);
       if (_commentController.value.text.isNotEmpty) {
         await addComment(widget.sport, widget.season, _commentController.value.text);
