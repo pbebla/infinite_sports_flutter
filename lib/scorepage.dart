@@ -19,7 +19,6 @@ import 'package:infinite_sports_flutter/table.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'package:palette_generator/palette_generator.dart';
 
 Map<String, String> stringToGameText = {
   "OnePointer": "FT",
@@ -99,12 +98,12 @@ class _ScorePageState extends State<ScorePage> {
 
   Future<int> getGameData() async {
     if (game!.team1SourcePath != "") {
-      var palette = await PaletteGenerator.fromImageProvider(NetworkImage(game!.team1SourcePath));
-      team1color = palette.dominantColor?.color ?? const Color.fromARGB(255, 124, 124, 124);
+      var palette = await ColorScheme.fromImageProvider(provider: NetworkImage(game!.team1SourcePath));
+      team1color = palette.primary;
     }
     if (game!.team2SourcePath != "") {
-      var palette = await PaletteGenerator.fromImageProvider(NetworkImage(game!.team2SourcePath));
-      team2color = palette.dominantColor?.color ?? const Color.fromARGB(255, 124, 124, 124);
+      var palette = await ColorScheme.fromImageProvider(provider: NetworkImage(game!.team2SourcePath));
+      team2color = palette.primary;
     }
     if (widget.sport == "Futsal") {
       buildTeamPlayers(team1Players, (game as FutsalGame).team1lineup, game!.team1activity, team1color, game!.team1SourcePath);

@@ -8,7 +8,6 @@ import 'package:infinite_sports_flutter/model/flagfootballplayer.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/player.dart';
 import 'package:infinite_sports_flutter/model/soccerplayer.dart';
-import 'package:palette_generator/palette_generator.dart';
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key, required this.uid});
@@ -40,13 +39,13 @@ class _PlayerPageState extends State<PlayerPage> {
         var name = entry.key;
         var info = entry.value;
         if (info.uid == widget.uid) {
-          var color = await PaletteGenerator.fromImageProvider(NetworkImage(teamLogos[sport][season][team]));
+          var color = await ColorScheme.fromImageProvider(provider: NetworkImage(teamLogos[sport][season][team]));
           info.teamPath = teamLogos[sport][season][team];
           if (firstName.isEmpty) {
             firstName = info.name.split(' ')[0];
             lastName = info.name.split(' ')[1];
           }
-          data = (team, color.dominantColor?.color ?? const Color.fromARGB(255, 124, 124, 124), info);
+          data = (team, color.primary, info);
           
         }
       });
@@ -56,13 +55,13 @@ class _PlayerPageState extends State<PlayerPage> {
         var name = entry.key;
         var info = entry.value;
         if (info.uid == widget.uid) {
-          var color = await PaletteGenerator.fromImageProvider(NetworkImage(teamLogos[sport][season][team]));
+          var color = await ColorScheme.fromImageProvider(provider: NetworkImage(teamLogos[sport][season][team]));
           info.teamPath = teamLogos[sport][season][team];
           if (firstName.isEmpty) {
             firstName = info.name.split(' ')[0];
             lastName = info.name.split(' ')[1];
           }
-          data = (team, color.dominantColor?.color ?? Color.fromARGB(255, 124, 124, 124), info);
+          data = (team, color.primary, info);
         }
       });
     } else {
@@ -71,13 +70,13 @@ class _PlayerPageState extends State<PlayerPage> {
         var name = entry.key;
         var info = entry.value;
         if (info.uid == widget.uid) {
-          var color = await PaletteGenerator.fromImageProvider(NetworkImage(teamLogos[sport][season][team]));
+          var color = await ColorScheme.fromImageProvider(provider: NetworkImage(teamLogos[sport][season][team]));
           info.teamPath = teamLogos[sport][season][team];
           if (firstName.isEmpty) {
             firstName = info.name.split(' ')[0];
             lastName = info.name.split(' ')[1];
           }
-          data = (team, color.dominantColor?.color ?? Color.fromARGB(255, 124, 124, 124), info);
+          data = (team, color.primary, info);
         }
       });
     }
