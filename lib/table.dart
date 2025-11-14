@@ -80,9 +80,8 @@ class _TablePageState extends State<TablePage> {
         temp.name = key;
         temp.wins = value["Wins"];
         temp.losses = value["Losses"];
-        temp.ties = value["Ties"];
-        temp.pointsFor = value["Points For"];
-        temp.pointsAgainst = value["Points Against"];
+        temp.pointsFor = value["PF"];
+        temp.pointsAgainst = value["PA"];
         temp.imagePath = logos![key]!;
         gottenLineUp[key] = temp;
       });
@@ -210,10 +209,9 @@ class _TablePageState extends State<TablePage> {
         DataCell(Text(key.key.toString())),
         DataCell(Text(key.value.wins.toString())),
         DataCell(Text(key.value.losses.toString())),
-        DataCell(Text((key.value as FlagFootballTeamInfo).ties.toString())),
-        DataCell(Text((key.value as FlagFootballTeamInfo).pointDifferential.toString())),
         DataCell(Text((key.value as FlagFootballTeamInfo).pointsFor.toString())),
         DataCell(Text((key.value as FlagFootballTeamInfo).pointsAgainst.toString())),
+        DataCell(Text((key.value as FlagFootballTeamInfo).pointDifferential.toString())),
       ]))
           .toList();
       return DataTable(
@@ -230,10 +228,9 @@ class _TablePageState extends State<TablePage> {
           DataColumn(label: Text("Team")),
           DataColumn(label: Text("W"), numeric: true),
           DataColumn(label: Text("L"), numeric: true),
-          DataColumn(label: Text("T"), numeric: true),
-          DataColumn(label: Text("PD"), numeric: true),
           DataColumn(label: Text("PF"), numeric: true),
           DataColumn(label: Text("PA"), numeric: true),
+          DataColumn(label: Text("PD"), numeric: true)
         ],
         rows: teamsList,
       );

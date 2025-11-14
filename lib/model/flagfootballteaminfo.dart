@@ -8,7 +8,6 @@ class FlagFootballTeamInfo extends TeamInfo {
   @override
   int losses = 0;
 
-  int ties = 0;
   int pointsFor = 0;
   int pointsAgainst = 0;
 
