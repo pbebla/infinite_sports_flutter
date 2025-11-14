@@ -8,6 +8,8 @@ import 'package:infinite_sports_flutter/model/basketballgame.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/business.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
+import 'package:infinite_sports_flutter/model/flagfootballgame.dart';
+import 'package:infinite_sports_flutter/model/flagfootballplayer.dart';
 import 'package:infinite_sports_flutter/model/futsalgame.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
@@ -21,6 +23,7 @@ var infiniteSportsPrimaryColor = const Color.fromARGB(255, 208, 0, 0);
 
 Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
 Map<String, Map<String, Map<String, BasketballPlayer>>> basketballLineups = {};
+Map<String, Map<String, Map<String, FlagFootballPlayer>>> flagFootballLineups = {};
 Map teamLogos = {};
 FirebaseAuthService auth = FirebaseAuthService();
 bool signedIn = false;
@@ -32,18 +35,18 @@ BuildContext? mainScaffoldContext;
 ValueNotifier headerNotifier = ValueNotifier(["", ""]);
 
 final List<String> months = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December"
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December"
 ];
 
 String convertDatabaseDateToFormatDate(String databaseDate) {
@@ -55,26 +58,26 @@ String convertDatabaseDateToFormatDate(String databaseDate) {
 
 String convertStringDateToDatabase(String date)
 {
-    var firstSplit = date.split(",".toString());
-    var secondSplit = firstSplit[0].split(" ".toString());
+  var firstSplit = date.split(",".toString());
+  var secondSplit = firstSplit[0].split(" ".toString());
 
-    var year = firstSplit[1].replaceAll(" ", "");
-    var month = secondSplit[0];
-    var day = secondSplit[1];
+  var year = firstSplit[1].replaceAll(" ", "");
+  var month = secondSplit[0];
+  var day = secondSplit[1];
 
-    if (int.parse(day) < 10)
-    {
-        day = "0$day";
-    }
+  if (int.parse(day) < 10)
+  {
+    day = "0$day";
+  }
 
-    var numMonth = "${months.indexOf(month)+1}";
+  var numMonth = "${months.indexOf(month)+1}";
 
-    if (int.parse(numMonth) < 10)
-    {
-        numMonth = "0$numMonth";
-    }
+  if (int.parse(numMonth) < 10)
+  {
+    numMonth = "0$numMonth";
+  }
 
-    return numMonth + day + year;
+  return numMonth + day + year;
 }
 
 String convertDateToDatabase(DateTime date) {
@@ -82,20 +85,20 @@ String convertDateToDatabase(DateTime date) {
 
   if (date.month < 10)
   {
-      formattedDate = "0${date.month.toString()}";
+    formattedDate = "0${date.month.toString()}";
   }
   else
   {
-      formattedDate = date.month.toString();
+    formattedDate = date.month.toString();
   }
 
   if (date.day < 10)
   {
-      formattedDate = "${formattedDate}0${date.day.toString()}";
+    formattedDate = "${formattedDate}0${date.day.toString()}";
   }
   else
   {
-      formattedDate = formattedDate + (date.day.toString());
+    formattedDate = formattedDate + (date.day.toString());
   }
 
   return formattedDate + (date.year.toString());
@@ -110,7 +113,7 @@ Future<String> getCurrentSport() async {
   }
   catch (e)
   {
-      return e.toString();
+    return e.toString();
   }
 }
 
@@ -123,20 +126,20 @@ Future<String> getCurrentSeason(currentSport) async {
   }
   catch (e)
   {
-      return e.toString();
+    return e.toString();
   }
 }
 
 Future<bool> isSeasonFinished(sport, season) async {
   try
   {
-      DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-      var seasonFinished = await newClient.child("Finished").get();
-      return seasonFinished.value as bool;
+    DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
+    var seasonFinished = await newClient.child("Finished").get();
+    return seasonFinished.value as bool;
   }
   catch (e)
   {
-      return true;
+    return true;
   }
 }
 
@@ -149,7 +152,7 @@ Future<String> getAFCCurrentSeason() async {
   }
   catch (e)
   {
-      return e.toString();
+    return e.toString();
   }
 }
 
@@ -276,6 +279,37 @@ Future<void> getAllFutsalLineUps(String season) async
   futsalLineups[season] = result;
 }
 
+Future<void> getAllFlagFootballLineUps(String season) async
+{
+  DatabaseReference newClient = FirebaseDatabase.instance.ref("/Flag Football/$season");
+  var event = await newClient.child("Line Ups").once();
+  var lineups = event.snapshot.value as Map;
+  Map<String, Map<String, FlagFootballPlayer>> result = {};
+  lineups.forEach((team, lineup) {
+    Map<String, FlagFootballPlayer> temp = {};
+    (lineup as Map).forEach((name, info) {
+      FlagFootballPlayer temp2 = FlagFootballPlayer();
+      temp2.name = name;
+      temp2.number = info["number"] ?? '0';
+      temp2.uid = info["UID"] ?? '0';
+      temp2.receptions = info["Receptions"] ?? 0;
+      temp2.receivingTouchdowns = info["Receiving Touchdowns"] ?? 0;
+      temp2.receiverMiss = info["Receiver Miss"] ?? 0;
+      temp2.passingTouchdowns = info["Passing Touchdowns"] ?? 0;
+      temp2.qbCompletions = info["QB Completions"] ?? 0;
+      temp2.qbIncomplete = info["QB Incomplete"] ?? 0;
+      temp2.interceptions = info["Interceptions"] ?? 0;
+      temp2.flagPulls = info["Flag Pulls"] ?? 0;
+      temp2.passBreakups = info["Pass Breakups"] ?? 0;
+      temp2.sacks = info["Sacks"] ?? 0;
+      temp[name] = temp2;
+    });
+    result[team] = temp;
+  },);
+
+  flagFootballLineups[season] = result;
+}
+
 Future<void> getAllBasketballLineUps(String season) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref("/Basketball/$season");
@@ -305,7 +339,7 @@ Future<void> getAllBasketballLineUps(String season) async
 }
 
 int compareValues(dynamic value1, dynamic value2, bool ascending) =>
-  ascending ? value1.compareTo(value2) : value2.compareTo(value1);
+    ascending ? value1.compareTo(value2) : value2.compareTo(value1);
 
 Future<List<Game>> getGames(sport, season, date, times) async {
   List<Game> allGames = <Game>[];
@@ -324,6 +358,11 @@ Future<List<Game>> getGames(sport, season, date, times) async {
     var all = await getAllSoccerGames(sport, season);
     games = List<Game>.from(all[date] as List<Game>);
   }
+  else if (sport == "Flag Football")
+  {
+    var all = await getAllFlagFootballGames(sport, season);
+    games = List<Game>.from(all[date] as List<Game>);
+  }
   else
   {
     var all = await getAllBasketballGames(sport, season);
@@ -333,34 +372,34 @@ Future<List<Game>> getGames(sport, season, date, times) async {
   int i = 0;
   for (var game in games)
   {
-      await fillInNull(game, sport, season);
-      if (sport != "AFC San Jose") {
-        game.Time = (await getSeasonStartTime(times, sport, season)) + i;
-      }
-      
-      switch (game.status)
-      {
-          case 0:
-              game.stringStatus = "Upcoming";
-              game.statusColor = Colors.grey;
-              break;
-          case 1:
-              game.stringStatus = "Live";
-              game.statusColor = Colors.red;
-              break;
-          case 2:
-              game.stringStatus = "Final";
-              game.statusColor = Colors.green;
-              break;
-      }
+    await fillInNull(game, sport, season);
+    if (sport != "AFC San Jose") {
+      game.Time = (await getSeasonStartTime(times, sport, season)) + i;
+    }
 
-      game.UrlPath = "https://infinite-sports-app.firebaseio.com/$sport/$season/Date/$date";
-      game.GameNum = i;
+    switch (game.status)
+    {
+      case 0:
+        game.stringStatus = "Upcoming";
+        game.statusColor = Colors.grey;
+        break;
+      case 1:
+        game.stringStatus = "Live";
+        game.statusColor = Colors.red;
+        break;
+      case 2:
+        game.stringStatus = "Final";
+        game.statusColor = Colors.green;
+        break;
+    }
 
-      game.setUpVote();
-      //game.getLineUpImages();
-      allGames.add(game);
-      i++;
+    game.UrlPath = "https://infinite-sports-app.firebaseio.com/$sport/$season/Date/$date";
+    game.GameNum = i;
+
+    game.setUpVote();
+    //game.getLineUpImages();
+    allGames.add(game);
+    i++;
   }
   return allGames;
 }
@@ -413,7 +452,7 @@ Future<Map<String, List<SoccerGame>>> getAllSoccerGames(sport, season) async {
   }
   catch (e)
   {
-      return {};
+    return {};
   }
 }
 
@@ -457,7 +496,7 @@ Future<Map<String, List<FutsalGame>>> getAllFutsalGames(sport, season) async {
   }
   catch (e)
   {
-      return {};
+    return {};
   }
 }
 
@@ -501,25 +540,69 @@ Future<Map<String, List<BasketballGame>>> getAllBasketballGames(sport, season) a
   }
   catch (e)
   {
-      return {};
+    return {};
+  }
+}
+
+Future<Map<String, List<FlagFootballGame>>> getAllFlagFootballGames(sport, season) async {
+  try
+  {
+    DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
+    var games = await newClient.child("Date").get();
+    dynamic data = games.value;
+    var result = <String, List<FlagFootballGame>>{};
+    data.forEach((key, value) {
+      var list = <FlagFootballGame>[];
+      for (var val in value) {
+        var game = FlagFootballGame();
+        if (val.containsKey("team1vote")) {
+          game.team1vote = val["team1vote"] as Map<dynamic, dynamic>;
+        }
+        if (val.containsKey("team2vote")) {
+          game.team2vote = val["team2vote"] as Map<dynamic, dynamic>;
+        }
+        if (val.containsKey("team1activity")) {
+          game.team1activity = val["team1activity"] as Map<dynamic, dynamic>;
+        }
+        if (val.containsKey("team2activity")) {
+          game.team2activity = val["team2activity"] as Map<dynamic, dynamic>;
+        }
+        game.team1 = val["team1"];
+        game.team2 = val["team2"];
+        game.team1score = val["team1score"].toString();
+        game.team2score = val["team2score"].toString();
+        game.date = val["Date"];
+        game.status = val["status"] ?? 0;
+        if(val.containsKey("link")) {
+          game.link = val["link"];
+        }
+        list.add(game);
+      }
+      result[key] = list;
+    });
+    return result;
+  }
+  catch (e)
+  {
+    return {};
   }
 }
 
 Future<void> fillInNull(game, sport, season) async {
   if (game is SoccerGame) {
     if (game.team1SourcePath == "")
-      {
-          await getAllTeamLogo();
+    {
+      await getAllTeamLogo();
 
-          if (game.team1 == "AFC San Jose") {
-            game.team1lineup = await getSoccerRoster(sport, season);
-            game.team1SourcePath = teamLogos[game.team1];
-          }
-          if (game.team2 == "AFC San Jose") {
-            game.team2lineup = await getSoccerRoster(sport, season);
-            game.team2SourcePath = teamLogos[game.team2];
-          }
+      if (game.team1 == "AFC San Jose") {
+        game.team1lineup = await getSoccerRoster(sport, season);
+        game.team1SourcePath = teamLogos[game.team1];
       }
+      if (game.team2 == "AFC San Jose") {
+        game.team2lineup = await getSoccerRoster(sport, season);
+        game.team2SourcePath = teamLogos[game.team2];
+      }
+    }
 
   }
   if (game is FutsalGame) {
@@ -530,43 +613,64 @@ Future<void> fillInNull(game, sport, season) async {
 
       if (game.team1SourcePath == "")
       {
-          await getAllTeamLogo();
-          var futsal = teamLogos["Futsal"];
-          var logos = futsal[season];
+        await getAllTeamLogo();
+        var futsal = teamLogos["Futsal"];
+        var logos = futsal[season];
 
-          if (logos.containsKey(game.team1)) {
-            game.team1SourcePath = logos[game.team1];
-          }
-          if (logos.containsKey(game.team2)) {
-            game.team2SourcePath = logos[game.team2];
-          }
+        if (logos.containsKey(game.team1)) {
+          game.team1SourcePath = logos[game.team1];
+        }
+        if (logos.containsKey(game.team2)) {
+          game.team2SourcePath = logos[game.team2];
+        }
       }
 
     }
     catch (e)
     {
-        var message = e.toString();
+      var message = e.toString();
     }
   }
   if (game is BasketballGame) {
     try
     {
-        game.team1lineup = await getBasketballLineUp(season, game.team1);
-        game.team2lineup = await getBasketballLineUp(season, game.team2);
+      game.team1lineup = await getBasketballLineUp(season, game.team1);
+      game.team2lineup = await getBasketballLineUp(season, game.team2);
 
-        if (game.team1SourcePath == "")
-        {
-            await getAllTeamLogo();
-            var basketball = teamLogos["Basketball"];
-            var logos = basketball[season];
+      if (game.team1SourcePath == "")
+      {
+        await getAllTeamLogo();
+        var basketball = teamLogos["Basketball"];
+        var logos = basketball[season];
 
-            game.team1SourcePath = logos[game.team1] ?? "";
-            game.team2SourcePath = logos[game.team2] ?? "";
-        }
+        game.team1SourcePath = logos[game.team1] ?? "";
+        game.team2SourcePath = logos[game.team2] ?? "";
+      }
     }
     catch (e)
     {
-        var message = e.toString();
+      var message = e.toString();
+    }
+  }
+  if (game is FlagFootballGame) {
+    try
+    {
+      game.team1lineup = await getFlagFootballLineUp(season, game.team1);
+      game.team2lineup = await getFlagFootballLineUp(season, game.team2);
+
+      if (game.team1SourcePath == "")
+      {
+        await getAllTeamLogo();
+        var flagFootball = teamLogos["Flag Football"];
+        var logos = flagFootball[season];
+
+        game.team1SourcePath = logos[game.team1] ?? "";
+        game.team2SourcePath = logos[game.team2] ?? "";
+      }
+    }
+    catch (e)
+    {
+      var message = e.toString();
     }
   }
 }
@@ -574,45 +678,51 @@ Future<void> fillInNull(game, sport, season) async {
 Future<int> getSeasonStartTime(times, sport, season) async {
   if (times.containsKey(sport))
   {
-      if (times[sport]!.containsKey(season))
-      {
-          return times[sport]![season]!;
-      }
+    if (times[sport]!.containsKey(season))
+    {
+      return times[sport]![season]!;
+    }
   }
 
   try
   {
-      DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-      var event = await newClient.child("Start Time").once();
-      late int seasonStart;
-      if (event.snapshot.value != null) {
-        seasonStart = event.snapshot.value as int;
-      } else {
-        seasonStart = 0;
-      }
+    DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
+    var event = await newClient.child("Start Time").once();
+    late int seasonStart;
+    if (event.snapshot.value != null) {
+      seasonStart = event.snapshot.value as int;
+    } else {
+      seasonStart = 0;
+    }
 
-      if (!times.containsKey(sport))
-      {
-          var dictionary = <String, int>{};
-          dictionary[season] = seasonStart;
-          times[sport] = dictionary;
-      }
-      else
-      {
-          times[sport]![season] = seasonStart;
-      }
+    if (!times.containsKey(sport))
+    {
+      var dictionary = <String, int>{};
+      dictionary[season] = seasonStart;
+      times[sport] = dictionary;
+    }
+    else
+    {
+      times[sport]![season] = seasonStart;
+    }
 
-      return seasonStart;
+    return seasonStart;
   }
   catch (e)
   {
-      return 5;
+    return 5;
   }
 }
 
 Future<Map<String, FutsalPlayer>> getFutsalLineUp(season, team) async {
   await getAllFutsalLineUps(season);
   Map<String, FutsalPlayer> lineup = futsalLineups[season]?[team] ?? {};
+  return lineup;
+}
+
+Future<Map<String, FlagFootballPlayer>> getFlagFootballLineUp(season, team) async {
+  await getAllFlagFootballLineUps(season);
+  Map<String, FlagFootballPlayer> lineup = flagFootballLineups[season]?[team] ?? {};
   return lineup;
 }
 
@@ -653,14 +763,14 @@ String? convertUrlToId(String url, {bool trimWhitespaces = true}) {
 
   for (var exp in [
     RegExp(
-        r"^https:\/\/(?:www\.|m\.)?youtube\.com\/watch\?v=([_\-a-zA-Z0-9]{11}).*$"),
+        r"^https?:\/\/(?:www\.|m\.)?youtube\.com\/watch\?v=([_\-a-zA-Z0-9]{11}).*$"),
     RegExp(
-        r"^https:\/\/(?:music\.)?youtube\.com\/watch\?v=([_\-a-zA-Z0-9]{11}).*$"),
+        r"^https?:\/\/(?:music\.)?youtube\.com\/watch\?v=([_\-a-zA-Z0-9]{11}).*$"),
     RegExp(
-        r"^https:\/\/(?:www\.|m\.)?youtube\.com\/shorts\/([_\-a-zA-Z0-9]{11}).*$"),
+        r"^https?:\/\/(?:www\.|m\.)?youtube\.com\/shorts\/([_\-a-zA-Z0-9]{11}).*$"),
     RegExp(
-        r"^https:\/\/(?:www\.|m\.)?youtube(?:-nocookie)?\.com\/embed\/([_\-a-zA-Z0-9]{11}).*$"),
-    RegExp(r"^https:\/\/youtu\.be\/([_\-a-zA-Z0-9]{11}).*$")
+        r"^https?:\/\/(?:www\.|m\.)?youtube(?:-nocookie)?\.com\/embed\/([_\-a-zA-Z0-9]{11}).*$"),
+    RegExp(r"^https?:\/\/youtu\.be\/([_\-a-zA-Z0-9]{11}).*$")
   ]) {
     Match? match = exp.firstMatch(url);
     if (match != null && match.groupCount >= 1) return match.group(1);
@@ -733,7 +843,7 @@ Future<UserInformation?> getInformation() async
   }
   catch (e)
   {
-      return null;
+    return null;
   }
 }
 
@@ -841,9 +951,9 @@ Future<void> uploadToken(User user, String token) async
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   try
   {
-      var dateClient = newClient.child("Users/${user.uid}/Token");
+    var dateClient = newClient.child("Users/${user.uid}/Token");
 
-      await dateClient.set(token);
+    await dateClient.set(token);
   }
   catch (e) {
 
@@ -857,7 +967,7 @@ Future<void> addComment(String league, String season, String comment) async
 
   try
   {
-      await client.set("${FirebaseAuth.instance.currentUser!.uid}:$comment");
+    await client.set("${FirebaseAuth.instance.currentUser!.uid}:$comment");
   }
   catch (e)
   {
@@ -880,7 +990,7 @@ Future<bool> isSignedUp(User user, String league, String season) async
 
     return ((listP as Map).containsKey(user.uid) || listNP.containsKey(user.uid));
   }
-  catch (e) 
+  catch (e)
   {
     return false;
   }
@@ -894,11 +1004,11 @@ Future<String?> getPhone() async
     var event = await newClient.child("Users/${FirebaseAuth.instance.currentUser!.uid}/Phone Number/").once();
     var info = event.snapshot.value.toString();
 
-      return info;
+    return info;
   }
   catch (e)
   {
-      return null;
+    return null;
   }
 }
 
@@ -938,9 +1048,9 @@ Future<String> getSeason(league) async {
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   try
   {
-      var event = await newClient.child(league + " Season").once();
-      var seasonNum = event.snapshot.value.toString();
-      return seasonNum;
+    var event = await newClient.child(league + " Season").once();
+    var seasonNum = event.snapshot.value.toString();
+    return seasonNum;
   }
   catch (e)
   {
@@ -953,7 +1063,7 @@ Future<Map<dynamic, dynamic>> getOtherSignups() async {
     DatabaseReference newClient = FirebaseDatabase.instance.ref();
     var event = await newClient.child("Sign Ups").once();
     var status = event.snapshot.value as Map<dynamic, dynamic>;
-  return status;
+    return status;
   } catch (e) {
     return {};
   }
