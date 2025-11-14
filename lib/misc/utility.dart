@@ -294,10 +294,10 @@ Future<void> getAllFlagFootballLineUps(String season) async
       temp2.uid = info["UID"] ?? '0';
       temp2.receptions = info["Receptions"] ?? 0;
       temp2.receivingTouchdowns = info["Receiving Touchdowns"] ?? 0;
-      temp2.receiverMiss = info["Receiver Miss"] ?? 0;
+      temp2.receptionMisses = info["Receiver Miss"] ?? 0;
       temp2.passingTouchdowns = info["Passing Touchdowns"] ?? 0;
       temp2.qbCompletions = info["QB Completions"] ?? 0;
-      temp2.qbIncomplete = info["QB Incomplete"] ?? 0;
+      temp2.qbIncompletions = info["QB Incomplete"] ?? 0;
       temp2.interceptions = info["Interceptions"] ?? 0;
       temp2.flagPulls = info["Flag Pulls"] ?? 0;
       temp2.passBreakups = info["Pass Breakups"] ?? 0;

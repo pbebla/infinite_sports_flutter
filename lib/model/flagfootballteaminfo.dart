@@ -1,8 +1,6 @@
 import 'package:infinite_sports_flutter/model/teaminfo.dart';
 
-class FlagFootballTeamInfo extends TeamInfo {
-  @override
-  String name = "";
+class FlagFootballTeamInfo implements TeamInfo {
   @override
   int wins = 0;
   @override
@@ -13,5 +11,7 @@ class FlagFootballTeamInfo extends TeamInfo {
 
   int get pointDifferential => pointsFor - pointsAgainst;
 
-  FlagFootballTeamInfo();
+  @override
+  String imagePath = "";
+
 }

@@ -77,7 +77,6 @@ class _TablePageState extends State<TablePage> {
       Map eventData = event.value as Map;
       eventData.forEach((key, value) {
         var temp = FlagFootballTeamInfo();
-        temp.name = key;
         temp.wins = value["Wins"];
         temp.losses = value["Losses"];
         temp.pointsFor = value["PF"];

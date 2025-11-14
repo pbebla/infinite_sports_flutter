@@ -14,17 +14,23 @@ class FlagFootballPlayer implements Player {
   String number = "";
 
   int receptions = 0;
+  int receptionMisses = 0;
   int receivingTouchdowns = 0;
-  int receiverMiss = 0;
-  int passingTouchdowns = 0;
+  int rushingTouchdowns = 0;
   int qbCompletions = 0;
-  int qbIncomplete = 0;
+  int qbIncompletions = 0;
+  int passingTouchdowns = 0;
+  int passingInterceptions = 0;
   int interceptions = 0;
+  int interceptionTouchdowns = 0;
   int flagPulls = 0;
   int passBreakups = 0;
   int sacks = 0;
+  int pointAfterTouchdownMakes = 0;
+  int pointAfterTouchdownMisses = 0;
+  int twoPointConversions = 0;
   String teamPath = "";
 
-  double get catchRate => receptions + receiverMiss == 0 ? 0.0 : (receptions / (receptions + receiverMiss)) * 100;
-  double get qbCompletionRate => qbCompletions + qbIncomplete == 0 ? 0.0 : (qbCompletions / (qbCompletions + qbIncomplete)) * 100;
+  double get catchRate => receptions + receptionMisses == 0 ? 0.0 : (receptions / (receptions + receptionMisses)) * 100;
+  double get qbCompletionRate => qbCompletions + qbIncompletions == 0 ? 0.0 : (qbCompletions / (qbCompletions + qbIncompletions)) * 100;
 }
