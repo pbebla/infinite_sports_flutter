@@ -266,7 +266,7 @@ class _NavBarState extends State<NavBar> {
                 textColor: Colors.white,
                 trailing: Switch(
                   value: darkModeEnabled, 
-                  activeColor: Theme.of(context).colorScheme.primary,
+                  activeThumbColor: Theme.of(context).colorScheme.primary,
                   onChanged: (value) {
                   Provider.of<ThemeProvider>(context, listen: false).toggleTheme();
                   setState(() {

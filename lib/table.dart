@@ -245,6 +245,11 @@ class _TablePageState extends State<TablePage> {
               value = (b.value as FutsalTeamInfo)
                   .gd
                   .compareTo((a.value as FutsalTeamInfo).gd);
+              if (value == 0) {
+                value = (b.value as FutsalTeamInfo)
+                    .gs
+                    .compareTo((a.value as FutsalTeamInfo).gs);
+              }
             }
             return value;
           },
@@ -261,6 +266,11 @@ class _TablePageState extends State<TablePage> {
               value = (b.value as SoccerTeamInfo)
                   .gd
                   .compareTo((a.value as SoccerTeamInfo).gd);
+              if (value == 0) {
+                value = (b.value as SoccerTeamInfo)
+                    .gs
+                    .compareTo((a.value as SoccerTeamInfo).gs);
+              }
             }
             return value;
           },
@@ -276,6 +286,11 @@ class _TablePageState extends State<TablePage> {
               value = (b.value as BasketballTeamInfo)
                   .pd
                   .compareTo((a.value as BasketballTeamInfo).pd);
+              if (value == 0) {
+                value = (b.value as BasketballTeamInfo)
+                  .ppg
+                  .compareTo((a.value as BasketballTeamInfo).ppg);
+              }
             }
             return value;
           },
