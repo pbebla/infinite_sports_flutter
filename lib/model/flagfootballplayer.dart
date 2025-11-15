@@ -31,6 +31,27 @@ class FlagFootballPlayer implements Player {
   int twoPointConversions = 0;
   String teamPath = "";
 
-  double get catchRate => receptions + receptionMisses == 0 ? 0.0 : (receptions / (receptions + receptionMisses)) * 100;
-  double get qbCompletionRate => qbCompletions + qbIncompletions == 0 ? 0.0 : (qbCompletions / (qbCompletions + qbIncompletions)) * 100;
+  String catchRate = "";
+  String qbCompletionRate = "";
+  void getCompletionPercentage() {
+    var percentageCheck = ((qbCompletions + 0.0) / (qbCompletions + qbIncompletions));
+
+    if (percentageCheck.isNaN) {
+      qbCompletionRate = "0%";
+    } else {
+      var percentage = (percentageCheck * 100.0).round();
+      qbCompletionRate = "$percentage%";
+    }
+  }
+
+  void getCatchRate() {
+    var percentageCheck = ((receptions + 0.0) / (receptions + receptionMisses));
+
+    if (percentageCheck.isNaN) {
+      catchRate = "0%";
+    } else {
+      var percentage = (percentageCheck * 100.0).round();
+      catchRate = "$percentage%";
+    }
+  }
 }

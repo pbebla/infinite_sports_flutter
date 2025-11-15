@@ -302,6 +302,8 @@ Future<void> getAllFlagFootballLineUps(String season) async
       temp2.flagPulls = info["Flag Pulls"] ?? 0;
       temp2.passBreakups = info["Pass Breakups"] ?? 0;
       temp2.sacks = info["Sacks"] ?? 0;
+      temp2.getCompletionPercentage();
+      temp2.getCatchRate();
       temp[name] = temp2;
     });
     result[team] = temp;
@@ -393,7 +395,12 @@ Future<List<Game>> getGames(sport, season, date, times) async {
         break;
     }
 
-    game.UrlPath = "https://infinite-sports-app.firebaseio.com/$sport/$season/Date/$date";
+    game.databaseReference = FirebaseDatabase.instance
+      .ref(sport)
+      .child(season)
+      .child("Date")
+      .child(date);
+
     game.GameNum = i;
 
     game.setUpVote();

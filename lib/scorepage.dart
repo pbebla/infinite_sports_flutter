@@ -678,13 +678,13 @@ class _ScorePageState extends State<ScorePage> {
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: <Widget>[
                                   TextButton(onPressed: () async {
-                                    DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${game!.UrlPath}/${game!.GameNum}/team1vote/");
+                                    DatabaseReference newClient = game!.databaseReference.child(game!.GameNum.toString()).child("team1vote");
                                     await newClient.child(FirebaseAuth.instance.currentUser!.uid).set(1);
                                     Navigator.pop(context);
                                     await _refreshData(setState);
                                   }, child: Text(game!.team1),),
                                   TextButton(onPressed: () async {
-                                    DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${game!.UrlPath}/${game!.GameNum}/team2vote/");
+                                    DatabaseReference newClient = game!.databaseReference.child(game!.GameNum.toString()).child("team2vote");
                                     await newClient.child(FirebaseAuth.instance.currentUser!.uid).set(1);
                                     Navigator.pop(context);
                                     await _refreshData(setState);

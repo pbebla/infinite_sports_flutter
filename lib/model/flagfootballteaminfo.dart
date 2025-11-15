@@ -10,6 +10,7 @@ class FlagFootballTeamInfo implements TeamInfo {
   int pointsAgainst = 0;
 
   int get pointDifferential => pointsFor - pointsAgainst;
+  String get pct => (wins / (wins + losses)).toStringAsFixed(3);
 
   @override
   String imagePath = "";

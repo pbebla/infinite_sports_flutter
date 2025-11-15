@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
 
@@ -158,6 +159,9 @@ class FutsalGame implements Game {
       ProgressColor1 = const Color(0xFFD80000);
       ProgressColor2 = const Color(0xFFD80000);
   }
+
+  @override
+  late DatabaseReference databaseReference;
 }
   
 

@@ -19,9 +19,6 @@ class FlagFootballPlayerStats extends PlayerStats {
   int pointAfterTouchdownMisses;
   int twoPointConversions;
 
-  double get catchRate => receptions + receptionMisses == 0 ? 0.0 : (receptions / (receptions + receptionMisses)) * 100;
-  double get qbCompletionRate => qbCompletions + qbIncompletions == 0 ? 0.0 : (qbCompletions / (qbCompletions + qbIncompletions)) * 100;
-
   FlagFootballPlayerStats(
       String name,
       String number,

@@ -211,10 +211,13 @@ class _TablePageState extends State<TablePage> {
         DataCell(Text((key.value as FlagFootballTeamInfo).pointsFor.toString())),
         DataCell(Text((key.value as FlagFootballTeamInfo).pointsAgainst.toString())),
         DataCell(Text((key.value as FlagFootballTeamInfo).pointDifferential.toString())),
+        DataCell(Text.rich(TextSpan(
+            text: key.value.pct,
+            style: const TextStyle(fontWeight: FontWeight.bold)))),
       ]))
           .toList();
       return DataTable(
-        sortColumnIndex: 2,
+        sortColumnIndex: 5,
         sortAscending: false,
         columnSpacing: 0,
         headingRowColor: WidgetStateProperty.resolveWith<Color?>(
@@ -229,7 +232,8 @@ class _TablePageState extends State<TablePage> {
           DataColumn(label: Text("L"), numeric: true),
           DataColumn(label: Text("PF"), numeric: true),
           DataColumn(label: Text("PA"), numeric: true),
-          DataColumn(label: Text("PD"), numeric: true)
+          DataColumn(label: Text("PD"), numeric: true),
+          DataColumn(label: Text("Pct"), numeric: true),
         ],
         rows: teamsList,
       );
@@ -291,6 +295,11 @@ class _TablePageState extends State<TablePage> {
                   .gd
                   .compareTo((a.value as FutsalTeamInfo).gd);
             }
+            if (value == 0) {
+              value = (b.value as FutsalTeamInfo)
+                  .gs
+                  .compareTo((a.value as FutsalTeamInfo).gs);
+            }
             return value;
           },
         ));
@@ -306,6 +315,11 @@ class _TablePageState extends State<TablePage> {
               value = (b.value as SoccerTeamInfo)
                   .gd
                   .compareTo((a.value as SoccerTeamInfo).gd);
+            }
+            if (value == 0) {
+              value = (b.value as SoccerTeamInfo)
+                  .gs
+                  .compareTo((a.value as SoccerTeamInfo).gs);
             }
             return value;
           },
