@@ -47,13 +47,13 @@ class _PlayerPageState extends State<PlayerPage> {
         var name = entry.key;
         var info = entry.value;
         if (info.uid == widget.uid) {
-          var color = await ColorScheme.fromImageProvider(provider: NetworkImage(teamLogos[sport][season][team]));
+          var palette = await getColorsFromImage(NetworkImage(teamLogos[sport][season][team]));
           info.teamPath = teamLogos[sport][season][team];
           if (firstName.isEmpty) {
             firstName = info.name.split(' ')[0];
             lastName = info.name.split(' ')[1];
           }
-          data = (team, color.primary, info);
+          data = (team, palette[0], info);
           
         }
       });
@@ -62,13 +62,13 @@ class _PlayerPageState extends State<PlayerPage> {
         var name = entry.key;
         var info = entry.value;
         if (info.uid == widget.uid) {
-          var color = await ColorScheme.fromImageProvider(provider: NetworkImage(teamLogos[sport][season][team]));
+          var palette = await getColorsFromImage(NetworkImage(teamLogos[sport][season][team]));
           info.teamPath = teamLogos[sport][season][team];
           if (firstName.isEmpty) {
             firstName = info.name.split(' ')[0];
             lastName = info.name.split(' ')[1];
           }
-          data = (team, color.primary, info);
+          data = (team, palette[0], info);
         }
       });
     }
