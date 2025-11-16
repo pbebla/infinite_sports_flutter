@@ -290,7 +290,7 @@ Future<void> getAllFlagFootballLineUps(String season) async
     (lineup as Map).forEach((name, info) {
       FlagFootballPlayer temp2 = FlagFootballPlayer();
       temp2.name = name;
-      temp2.number = info["number"] ?? '0';
+      temp2.number = info["number"].toString() ?? '0';
       temp2.uid = info["UID"] ?? '0';
       temp2.receptions = info["Receptions"] ?? 0;
       temp2.receivingTouchdowns = info["Receiving Touchdowns"] ?? 0;

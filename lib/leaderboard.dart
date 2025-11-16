@@ -225,7 +225,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       );
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Center(child: Text(key.number),)),
-        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0),),)),
+        DataCell(Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0),)),
         DataCell(Container(decoration: verticalDividerRight, alignment: Alignment.centerLeft, child: Padding(padding: EdgeInsets.fromLTRB(0.0, 0, 0.0, 0), child: Text(key.name.toString(), softWrap: true,)),), onTap: () {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
             initialEntries: [OverlayEntry(
@@ -240,14 +240,14 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         DataCell(Container(decoration: verticalDividerLeft, alignment: Alignment.centerRight, child: Text(key.catchRate.toString()),)),
         DataCell(Text(key.receivingTouchdowns.toString())),
         DataCell(Container(decoration: verticalDividerLeft, alignment: Alignment.centerRight, child: Text(key.rushingTouchdowns.toString()),)),
-        DataCell(Container(decoration: verticalDividerLeft, alignment: Alignment.centerRight, child: Text(key.flagPulls.toString()),)),
-        DataCell(Text(key.sacks.toString())),
+        DataCell(Container(decoration: verticalDividerLeft, alignment: Alignment.centerRight, child: Text(key.sacks.toString()))),
+        DataCell(Text(key.flagPulls.toString())),
         DataCell(Text(key.passBreakups.toString())),
         DataCell(Text(key.interceptions.toString())),
       ])).toList();
       return DataTable2(
         fixedLeftColumns: 3,
-        minWidth: 950,
+        minWidth: 850,
         sortColumnIndex: sortColumnIndex,
         sortAscending: isAscending,
         columnSpacing: 10,
@@ -260,14 +260,14 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           const DataColumn2(fixedWidth: 25, label: SizedBox(width: 0, height: 0), numeric: true),
           DataColumn2(fixedWidth: 35, label: SizedBox(width: 0, height: 0),),
           DataColumn2(size: ColumnSize.L, label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn2(size: ColumnSize.L, label: const Text("QB COMP%"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: const Text("Cmp%"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(size: ColumnSize.S, label: const Text("TD"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(size: ColumnSize.S, label: const Text("INT"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn2(size: ColumnSize.L, label: const Text("WR REC%"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: const Text("Rec%"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(size: ColumnSize.S, label: const Text("TD"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn2(size: ColumnSize.L, label: const Text("RUSH TD"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn2(size: ColumnSize.M, label: const Text("DEF FP"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-          DataColumn2(size: ColumnSize.M, label: const Text("SACK"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: const Text("Rush TD"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.S, label: const Text("Sck"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.S, label: const Text("FP"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(size: ColumnSize.S, label: const Text("PBU"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(size: ColumnSize.S, label: const Text("INT"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
         ],
