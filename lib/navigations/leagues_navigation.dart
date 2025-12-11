@@ -74,6 +74,33 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                       )
                     );
                   },);
+              } else if (settings.name == '/flagFootballLeagues') {
+                return FutureBuilder(
+                  future: getSeasonTiles("Flag Football", context), 
+                  builder:(context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return Center(
+                        child: CircularProgressIndicator(
+                          color: Theme.of(context).colorScheme.primary,
+                        )
+                      );
+                    }
+                    return Scaffold(
+                      appBar: AppBar(
+                        foregroundColor: Colors.white,
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        centerTitle: true,
+                        title: Text("Flag Football")
+                      ),
+                      body: ListView.separated(
+                        separatorBuilder: (context, index) => Divider(
+                              color: Theme.of(context).dividerColor,
+                            ),
+                        itemCount: snapshot.data!.length,
+                        itemBuilder: (context, index) => snapshot.data![index]
+                      )
+                    );
+                  },);
               } else if (settings.name == '/currentLeague') {
                 return ShowLeaguePage(sport: (settings.arguments as List<String>)[0], season: (settings.arguments as List<String>)[1]);
               } else if (settings.name == '/afcsanjose') {

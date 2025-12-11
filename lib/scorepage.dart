@@ -8,6 +8,8 @@ import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
 import 'package:infinite_sports_flutter/model/basketballplayerstats.dart';
+import 'package:infinite_sports_flutter/model/flagfootballgame.dart';
+import 'package:infinite_sports_flutter/model/flagfootballplayerstats.dart';
 import 'package:infinite_sports_flutter/model/futsalgame.dart';
 import 'package:infinite_sports_flutter/model/futsalplayerstats.dart';
 import 'package:infinite_sports_flutter/model/gameactivity.dart';
@@ -31,7 +33,16 @@ Map<String, String> stringToGameText = {
   "Assist": "Assist",
   "Yellow": "Yellow",
   "Blue": "Blue",
-  "Red": "Red"
+  "Red": "Red",
+  "RecTD": "REC TD",
+  "RushTD": "RUSH TD",
+  "QBTD": "PASS TD",
+  "IntTD": "INT TD",
+  "QBInt": "PASS INT",
+  "DefInt": "DEF INT",
+  "PAT": "PAT",
+  "TwoPoint": "2PT",
+  "Safety": "Safety"
 };
 
 Map<String,Widget> stringToGameAction = {
@@ -99,12 +110,12 @@ class _ScorePageState extends State<ScorePage> {
 
   Future<int> getGameData() async {
     if (game!.team1SourcePath != "") {
-      var palette = await getColorsFromImage(NetworkImage(game!.team1SourcePath));
-      team1color = palette[0];
+      var palette = await ColorScheme.fromImageProvider(provider: NetworkImage(game!.team1SourcePath));
+      team1color = palette.primary;
     }
     if (game!.team2SourcePath != "") {
-      var palette = await getColorsFromImage(NetworkImage(game!.team2SourcePath));
-      team2color = palette[0];
+      var palette = await ColorScheme.fromImageProvider(provider: NetworkImage(game!.team2SourcePath));
+      team2color = palette.primary;
     }
     if (widget.sport == "Futsal") {
       buildTeamPlayers(team1Players, (game as FutsalGame).team1lineup, game!.team1activity, team1color, game!.team1SourcePath);
@@ -115,7 +126,10 @@ class _ScorePageState extends State<ScorePage> {
     } else if (widget.sport == "Basketball") {
       buildTeamPlayers(team1Players, (game as BasketballGame).team1lineup, game!.team1activity, team1color, game!.team1SourcePath);
       buildTeamPlayers(team2Players, (game as BasketballGame).team2lineup, game!.team2activity, team2color, game!.team2SourcePath);
-    }
+    } else if (widget.sport == "Flag Football") {
+      buildTeamPlayers(team1Players, (game as FlagFootballGame).team1lineup, game!.team1activity, team1color, game!.team1SourcePath);
+      buildTeamPlayers(team2Players, (game as FlagFootballGame).team2lineup, game!.team2activity, team2color, game!.team2SourcePath);
+    } 
     populateActivities(game!.team1activity, team1Players, activities, team1color, widget.game.team1SourcePath);
     populateActivities(game!.team2activity, team2Players, activities, team2color, widget.game.team2SourcePath);
     if (widget.sport == "AFC San Jose") {
@@ -267,18 +281,20 @@ class _ScorePageState extends State<ScorePage> {
       return compareValues(int.parse(a.time.substring(0, a.time.length-1)), int.parse(b.time.substring(0, b.time.length-1)), false);
     },);
     for (var activity in activities) {
-      rows.add(
-        TableRow(
-          decoration: BoxDecoration(color: activity.color),
-          children: [
-            Padding(padding: EdgeInsets.fromLTRB(13, 0, 0, 0), child: Center(child: Text(activity.time, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white)),),),
-            Padding(padding: EdgeInsets.fromLTRB(5, 0, 0, 0), child: Image.network(activity.teamImagePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0), width: windowsDefaultIconSize.toDouble()/2 , height: windowsDefaultIconSize.toDouble()/2, fit: BoxFit.scaleDown, alignment: FractionalOffset.center),),
-            Padding(padding: EdgeInsets.fromLTRB(5, 0, 5, 0), child: Text(activity.name, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white)),),
-            Text(stringToGameText[activity.action]!, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white), textAlign: TextAlign.end,),
-            Padding(padding: EdgeInsets.fromLTRB(0, 0, 8, 0), child: stringToGameAction[activity.action]!,)
-          ]
-        )
-      );
+      if (stringToGameText.containsKey(activity.action)) {
+        rows.add(
+          TableRow(
+            decoration: BoxDecoration(color: activity.color),
+            children: [
+              Padding(padding: EdgeInsets.fromLTRB(13, 0, 0, 0), child: Center(child: Text(activity.time, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white)),),),
+              Padding(padding: EdgeInsets.fromLTRB(5, 0, 0, 0), child: Image.network(activity.teamImagePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0), width: windowsDefaultIconSize.toDouble()/2 , height: windowsDefaultIconSize.toDouble()/2, fit: BoxFit.scaleDown, alignment: FractionalOffset.center),),
+              Padding(padding: EdgeInsets.fromLTRB(5, 0, 5, 0), child: Text(activity.name, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white)),),
+              Text(stringToGameText[activity.action]!, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white), textAlign: TextAlign.end,),
+              Padding(padding: EdgeInsets.fromLTRB(0, 0, 8, 0), child: stringToGameAction[activity.action],)
+            ]
+          )
+        );
+      }
       //rows.add(Divider(height: 1, thickness: 1, color: Theme.of(context).dividerColor,));
     }
     return rows;
@@ -332,6 +348,87 @@ class _ScorePageState extends State<ScorePage> {
             }
           });
           teamPlayers.add(BasketballPlayerStats(name.toString(), profile.number, profile.uid, ones, twos, threes, fouls, rebounds));
+        });
+      } else if (widget.sport == "Flag Football") {
+        teamLineup.forEach((name, profile) {
+          int receptions = 0;
+          int receptionMisses = 0;
+          int receivingTouchdowns = 0;
+          int rushingTouchdowns = 0;
+          int qbCompletions = 0;
+          int qbIncompletions = 0;
+          int passingTouchdowns = 0;
+          int passingInterceptions = 0;
+          int interceptions = 0;
+          int interceptionTouchdowns = 0;
+          int flagPulls = 0;
+          int passBreakups = 0;
+          int sacks = 0;
+          int pointAfterTouchdownMakes = 0;
+          int pointAfterTouchdownMisses = 0;
+          int twoPointConversions = 0;
+          teamActivity.forEach((k, v) {
+            for(var history in v) {
+              for(var action in history.keys) {
+                if (history[action] == name) {
+                  if (action == "QBComp") {
+                    qbCompletions+=1;
+                  } else if (action == "QBInc") {
+                    qbIncompletions+=1;
+                  } else if (action == "QBTD") {
+                    passingTouchdowns+=1;
+                  } else if (action == "QBInt") {
+                    passingInterceptions+=1;
+                  } else if (action == "Rec") {
+                    receptions+=1;
+                  } else if (action == "RecMiss") {
+                    receptionMisses+=1;
+                  } else if (action == "RecTD") {
+                    receivingTouchdowns+=1;
+                  } else if (action == "RushTD") {
+                    rushingTouchdowns+=1;
+                  } else if (action == "DefInt") {
+                    interceptions+=1;
+                  } else if (action == "IntTD") {
+                    interceptionTouchdowns+=1;
+                  } else if (action == "FlagPull") {
+                    flagPulls+=1;
+                  } else if (action == "Sack") {
+                    sacks+=1;
+                  } else if (action == "PassBreakUp") {
+                    passBreakups+=1;
+                  } else if (action == "PAT") {
+                    pointAfterTouchdownMakes+=1;
+                  } else if (action == "PATMiss") {
+                    pointAfterTouchdownMisses+=1;
+                  } else if (action == "TwoPoint") {
+                    twoPointConversions+=1;
+                  }
+                }
+              }
+            }
+          });
+          teamPlayers.add(FlagFootballPlayerStats(
+            name.toString(),
+            profile.number,
+            profile.uid,
+            receptions,
+            receptionMisses,
+            receivingTouchdowns,
+            rushingTouchdowns,
+            qbCompletions,
+            qbIncompletions,
+            passingTouchdowns,
+            passingInterceptions,
+            interceptions,
+            interceptionTouchdowns,
+            flagPulls,
+            passBreakups,
+            sacks,
+            pointAfterTouchdownMakes,
+            pointAfterTouchdownMisses,
+            twoPointConversions
+          ));
         });
       }
     }
@@ -413,6 +510,68 @@ class _ScorePageState extends State<ScorePage> {
             DataCell(Text(key.threes.toString())),
             DataCell(Text(key.ones.toString())),
             DataCell(Text(key.fouls.toString())),
+          ])).toList(),
+      );
+    } else if (widget.sport == "Flag Football") {
+      return DataTable2(
+        horizontalMargin: 19,
+        bottomMargin: 10,
+        minWidth: 1000,
+        sortColumnIndex: tableSortColumnIndex,
+        sortAscending: tableIsAscending,
+        columnSpacing: 0,
+        headingTextStyle: TextStyle(color: teamColor.computeLuminance() > 0.5 ? Colors.black : Colors.white),
+        fixedTopRows: 1,
+        fixedLeftColumns: 2,
+        headingRowColor: WidgetStateProperty.resolveWith<Color?>((Set<WidgetState> states) {
+          return teamColor; // Use the default value.
+        }),
+        columns: [
+          DataColumn2(fixedWidth: 20.0, size: ColumnSize.S, label: SizedBox(width: 0, height: 0)),
+          DataColumn2(size: ColumnSize.L, label: Image.network(teamSourcePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0), width: windowsDefaultIconSize.toDouble(), height: windowsDefaultIconSize.toDouble(), alignment: FractionalOffset.center), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: Text("CMP", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.S, label: Text("ATT", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: Text("P-TD", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: Text("P-INT", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.S, label: Text("REC", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.S, label: Text("TAR", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: Text("RC-TD", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: Text("RU-TD", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: Text("SACK", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.S, label: Text("FP", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.S, label: Text("PBU", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: Text("D-INT", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: Text("INT-TD", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: Text("XPM", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: Text("XPA", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: Text("2PT", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+        ], 
+        rows: (teamPlayers as List).map((key) => DataRow(cells: [
+            DataCell(Center(child: Text(key.number),)),
+            DataCell(Text(key.name), onTap: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
+                  initialEntries: [OverlayEntry(
+                    builder: (context) {
+                      return PlayerPage(uid: key.uid);
+                    })],
+                )));
+            },),
+            DataCell(Text(key.qbCompletions.toString())),
+            DataCell(Text((key.qbCompletions+key.qbIncompletions).toString())),
+            DataCell(Text(key.passingTouchdowns.toString())),
+            DataCell(Text(key.passingInterceptions.toString())),
+            DataCell(Text(key.receptions.toString())),
+            DataCell(Text((key.receptions + key.receptionMisses).toString())),
+            DataCell(Text(key.receivingTouchdowns.toString())),
+            DataCell(Text(key.rushingTouchdowns.toString())),
+            DataCell(Text(key.sacks.toString())),
+            DataCell(Text(key.flagPulls.toString())),
+            DataCell(Text(key.passBreakups.toString())),
+            DataCell(Text(key.interceptions.toString())),
+            DataCell(Text(key.interceptionTouchdowns.toString())),
+            DataCell(Text(key.pointAfterTouchdownMakes.toString())),
+            DataCell(Text((key.pointAfterTouchdownMakes + key.pointAfterTouchdownMisses).toString())),
+            DataCell(Text(key.twoPointConversions.toString())),
           ])).toList(),
       );
     }
@@ -499,7 +658,7 @@ class _ScorePageState extends State<ScorePage> {
           )
           );
           tabNames.add(Tab(text: game!.date));
-          if (game is FutsalGame || game is BasketballGame || (game is SoccerGame && widget.game.team1 == "AFC San Jose")) {
+          if (game is FutsalGame || game is BasketballGame || game is FlagFootballGame || (game is SoccerGame && widget.game.team1 == "AFC San Jose")) {
             tabs.add(StatefulBuilder(
               builder: (context, setState) {
                 buildTeamTables(setState);
@@ -514,7 +673,7 @@ class _ScorePageState extends State<ScorePage> {
             );
             tabNames.add(Tab(text: game!.team1));
           }
-          if (game is FutsalGame || game is BasketballGame || (game is SoccerGame && widget.game.team2 == "AFC San Jose")) {
+          if (game is FutsalGame || game is BasketballGame || game is FlagFootballGame || (game is SoccerGame && widget.game.team2 == "AFC San Jose")) {
             tabs.add(StatefulBuilder(
               builder: (context, setState) {
                 buildTeamTables(setState);
@@ -586,6 +745,9 @@ class _ScorePageState extends State<ScorePage> {
     } else if (widget.sport == "Basketball") {
       table1 = buildStatsTable(game!.team1, game!.team1SourcePath, (game! as BasketballGame).team1lineup, team1color, game!.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1, setState);
       table2 = buildStatsTable(game!.team2, game!.team2SourcePath, (game! as BasketballGame).team2lineup, team2color, game!.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2, setState);
+    } else if (widget.sport == "Flag Football") {
+      table1 = buildStatsTable(game!.team1, game!.team1SourcePath, (game! as FlagFootballGame).team1lineup, team1color, game!.team1activity, team1Players, table1SortColumnIndex, table1isAscending, onSort1, setState);
+      table2 = buildStatsTable(game!.team2, game!.team2SourcePath, (game! as FlagFootballGame).team2lineup, team2color, game!.team2activity, team2Players, table2SortColumnIndex, table2isAscending, onSort2, setState);
     } 
     return 1;
   }
@@ -679,13 +841,13 @@ class _ScorePageState extends State<ScorePage> {
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: <Widget>[
                                   TextButton(onPressed: () async {
-                                    DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${game!.UrlPath}/${game!.GameNum}/team1vote/");
+                                    DatabaseReference newClient = game!.databaseReference.child(game!.GameNum.toString()).child("team1vote");
                                     await newClient.child(FirebaseAuth.instance.currentUser!.uid).set(1);
                                     Navigator.pop(context);
                                     await _refreshData(setState);
                                   }, child: Text(game!.team1),),
                                   TextButton(onPressed: () async {
-                                    DatabaseReference newClient = FirebaseDatabase.instance.refFromURL("${game!.UrlPath}/${game!.GameNum}/team2vote/");
+                                    DatabaseReference newClient = game!.databaseReference.child(game!.GameNum.toString()).child("team2vote");
                                     await newClient.child(FirebaseAuth.instance.currentUser!.uid).set(1);
                                     Navigator.pop(context);
                                     await _refreshData(setState);
@@ -785,34 +947,94 @@ class _ScorePageState extends State<ScorePage> {
   void sortTable(int columnIndex, bool ascending, players) {
     if (columnIndex == 1) {
       players.sort((a, b) => 
-        compareValues(a.name, b.name, ascending));
-    } else if (columnIndex == 2) {
-      if (widget.sport == "Futsal" || widget.sport == "AFC San Jose") {
-        players.sort((a, b) => a.goals == b.goals ? compareValues(a.assists, b.assists, ascending) : compareValues(a.goals, b.goals, ascending));
-      } else if (widget.sport == "Basketball") {
-        players.sort((a, b) => a.total == b.total ? compareValues(a.rebounds, b.rebounds, ascending) : compareValues((a as BasketballPlayerStats).total, (b as BasketballPlayerStats).total, ascending));
-      } 
-    } else if (columnIndex == 3) {
-      if (widget.sport == "Futsal" || widget.sport == "AFC San Jose") {
-        players.sort((a, b) => a.assists == b.assists ? compareValues(a.goals, b.goals, ascending) : compareValues(a.assists, b.assists, ascending));
-      } else if (widget.sport == "Basketball") {
-        players.sort((a, b) => a.rebounds == b.rebounds ? compareValues(a.total, b.total, ascending) : compareValues((a as BasketballPlayerStats).rebounds, (b as BasketballPlayerStats).rebounds, ascending));
-      }
-    } else if (columnIndex == 4) {
-      if (widget.sport == "Basketball") {
-        players.sort((a, b) => compareValues((a as BasketballPlayerStats).twos, (b as BasketballPlayerStats).twos, ascending));
-      }
-    } else if (columnIndex == 5) {
-      if (widget.sport == "Basketball") {
-        players.sort((a, b) => compareValues((a as BasketballPlayerStats).threes, (b as BasketballPlayerStats).threes, ascending));
-      }
-    } else if (columnIndex == 6) {
-      if (widget.sport == "Basketball") {
-        players.sort((a, b) => compareValues((a as BasketballPlayerStats).ones, (b as BasketballPlayerStats).ones, ascending));
-      }
-    } else if (columnIndex == 7) {
-      if (widget.sport == "Basketball") {
-        players.sort((a, b) => compareValues((a as BasketballPlayerStats).fouls, (b as BasketballPlayerStats).fouls, ascending));
+              compareValues(a.name, b.name, ascending));
+    } else {
+      switch (widget.sport) {
+        case "AFC San Jose":
+        case "Futsal":
+          switch (columnIndex) {
+            case 2:
+              players.sort((a, b) => a.goals == b.goals ? compareValues(a.assists, b.assists, ascending) : compareValues(a.goals, b.goals, ascending));
+              break;
+            case 3:
+              players.sort((a, b) => a.assists == b.assists ? compareValues(a.goals, b.goals, ascending) : compareValues(a.assists, b.assists, ascending));
+              break;
+          }
+          break;
+        case "Basketball":
+          switch (columnIndex) {
+            case 2:
+              players.sort((a, b) => a.total == b.total ? compareValues(a.rebounds, b.rebounds, ascending) : compareValues((a as BasketballPlayerStats).total, (b as BasketballPlayerStats).total, ascending));
+              break;
+            case 3:
+              players.sort((a, b) => a.rebounds == b.rebounds ? compareValues(a.total, b.total, ascending) : compareValues((a as BasketballPlayerStats).rebounds, (b as BasketballPlayerStats).rebounds, ascending));
+              break;
+            case 4:
+              players.sort((a, b) => compareValues((a as BasketballPlayerStats).twos, (b as BasketballPlayerStats).twos, ascending));
+              break;
+            case 5:
+              players.sort((a, b) => compareValues((a as BasketballPlayerStats).threes, (b as BasketballPlayerStats).threes, ascending));
+              break;
+            case 6:
+              players.sort((a, b) => compareValues((a as BasketballPlayerStats).ones, (b as BasketballPlayerStats).ones, ascending));
+              break;
+            case 7:
+              players.sort((a, b) => compareValues((a as BasketballPlayerStats).fouls, (b as BasketballPlayerStats).fouls, ascending));
+              break;
+          }
+          break;
+        case "Flag Football":
+          switch (columnIndex) {
+            case 2:
+              players.sort((a, b) => compareValues(a.qbCompletions, b.qbCompletions, ascending));
+              break;
+            case 3:
+              players.sort((a, b) => compareValues((a.qbCompletions + a.qbIncompletions), (b.qbCompletions + b.qbIncompletions), ascending));
+              break;
+            case 4:
+              players.sort((a, b) => compareValues(a.passingTouchdowns, b.passingTouchdowns, ascending));
+              break;
+            case 5:
+              players.sort((a, b) => compareValues(a.passingInterceptions, b.passingInterceptions, ascending));
+              break;
+            case 6:
+              players.sort((a, b) => compareValues(a.receptions, b.receptions, ascending));
+              break;
+            case 7:
+              players.sort((a, b) => compareValues((a.receptions + a.receptionMisses), (b.receptions + b.receptionMisses), ascending));
+              break;
+            case 8:
+              players.sort((a, b) => compareValues(a.receivingTouchdowns, b.receivingTouchdowns, ascending));
+              break;
+            case 9:
+              players.sort((a, b) => compareValues(a.rushingTouchdowns, b.rushingTouchdowns, ascending));
+              break;
+            case 10:
+              players.sort((a, b) => compareValues(a.sacks, b.sacks, ascending));
+              break;
+            case 11:
+              players.sort((a, b) => compareValues(a.flagPulls, b.flagPulls, ascending));
+              break;
+            case 12:
+              players.sort((a, b) => compareValues(a.passBreakups, b.passBreakups, ascending));
+              break;
+            case 13:
+              players.sort((a, b) => compareValues(a.interceptions, b.interceptions, ascending));
+              break;
+            case 14:
+              players.sort((a, b) => compareValues(a.interceptionTouchdowns, b.interceptionTouchdowns, ascending));
+              break;
+            case 15:
+              players.sort((a, b) => compareValues(a.pointAfterTouchdownMakes, b.interceptionTouchdowns, ascending));
+              break;
+            case 16:
+              players.sort((a, b) => compareValues((a.pointAfterTouchdownMakes + a.pointAfterTouchdownMisses), (b.pointAfterTouchdownMakes + b.pointAfterTouchdownMisses), ascending));
+              break;
+            case 17:
+              players.sort((a, b) => compareValues(a.twoPointConversions, b.twoPointConversions, ascending));
+              break;
+          }
+          break;
       }
     }
   }

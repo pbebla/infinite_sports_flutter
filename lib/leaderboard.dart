@@ -1,7 +1,9 @@
+
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
+import 'package:infinite_sports_flutter/model/flagfootballplayer.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/player.dart';
 import 'package:infinite_sports_flutter/playerpage.dart';
@@ -49,6 +51,18 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       var roster = await getSoccerRoster(widget.sport, widget.season);
       var players = roster.values.toList();
       return players;
+    } else if (widget.sport == "Flag Football") {
+      await getAllFlagFootballLineUps(widget.season);
+      var players = <FlagFootballPlayer>[];
+      var lineups = flagFootballLineups[widget.season];
+      for (String team in lineups!.keys) {
+        for (String player in lineups[team]!.keys) {
+          lineups[team]![player]!.name = player;
+          lineups[team]![player]!.teamPath = teamLogos["Flag Football"][widget.season][team];
+          players.add(lineups[team]![player]!);
+        }
+      }
+      return players;
     } else {
       await getAllBasketballLineUps(widget.season);
       var players = <BasketballPlayer>[];
@@ -66,8 +80,41 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
 
   void sortTable(int columnIndex, bool ascending) {
     if (columnIndex == 2) {
-      players.sort((a, b) => 
-        compareValues(a.name, b.name, isAscending));
+      players.sort((a, b) =>
+          compareValues(a.name, b.name, isAscending));
+    } else if (widget.sport == "Flag Football") {
+      switch (columnIndex) {
+        case 3:
+          players.sort((a, b) => compareValues(a.qbCompletionRate, b.qbCompletionRate, ascending));
+          break;
+        case 4:
+          players.sort((a, b) => compareValues(a.passingTouchdowns, b.passingTouchdowns, ascending));
+          break;
+        case 5:
+          players.sort((a, b) => compareValues(a.passingInterceptions, b.passingInterceptions, ascending));
+          break;
+        case 6:
+          players.sort((a, b) => compareValues(a.catchRate, b.catchRate, ascending));
+          break;
+        case 7:
+          players.sort((a, b) => compareValues(a.receivingTouchdowns, b.receivingTouchdowns, ascending));
+          break;
+        case 8:
+          players.sort((a, b) => compareValues(a.rushingTouchdowns, b.rushingTouchdowns, ascending));
+          break;
+        case 9:
+          players.sort((a, b) => compareValues(a.flagPulls, b.flagPulls, ascending));
+          break;
+        case 10:
+          players.sort((a, b) => compareValues(a.sacks, b.sacks, ascending));
+          break;
+        case 11:
+          players.sort((a, b) => compareValues(a.passBreakups, b.passBreakups, ascending));
+          break;
+        case 12:
+          players.sort((a, b) => compareValues(a.interceptions, b.interceptions, ascending));
+          break;
+      }
     } else if (columnIndex == 3) {
       if (widget.sport == "Futsal" || widget.sport == "AFC San Jose") {
         players.sort((a, b) => a.goals == b.goals ? compareValues(a.assists, b.assists, isAscending) : compareValues(a.goals, b.goals, isAscending));
@@ -104,11 +151,11 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0),),)),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-                  initialEntries: [OverlayEntry(
-                    builder: (context) {
-                      return PlayerPage(uid: key.uid);
-                    })],
-                )));
+            initialEntries: [OverlayEntry(
+                builder: (context) {
+                  return PlayerPage(uid: key.uid);
+                })],
+          )));
         },),
         DataCell(Text(key.goals.toString())),
         DataCell(Text(key.assists.toString())),
@@ -130,7 +177,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           DataColumn2(fixedWidth: 50.0, label: const Text("G"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 50.0, label: const Text("A"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 50.0, label: const Text("S"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-        ], 
+        ],
         rows: teamsList,
       );
     } else if (widget.sport == "Basketball") {
@@ -140,11 +187,11 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         //DataCell(Row(children: [Text(key.number), Spacer(), ])),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-                  initialEntries: [OverlayEntry(
-                    builder: (context) {
-                      return PlayerPage(uid: key.uid);
-                    })],
-                )));
+            initialEntries: [OverlayEntry(
+                builder: (context) {
+                  return PlayerPage(uid: key.uid);
+                })],
+          )));
         },),
         DataCell(Text(key.total.toString())),
         DataCell(Text(key.rebounds.toString())),
@@ -166,20 +213,80 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           DataColumn2(fixedWidth: 50.0, label: const Text("PTS"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 50.0, label: const Text("REB"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 50.0, label: const Text("FG%"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-        ], 
+        ],
         rows: teamsList,
       );
-    } else if (widget.sport == "AFC San Jose") {
+    } else if (widget.sport == "Flag Football") {
+      final verticalDividerRight = BoxDecoration(
+          border: Border(right: BorderSide(color: Colors.grey.shade300, width: 1))
+      );
+      final verticalDividerLeft = BoxDecoration(
+          border: Border(left: BorderSide(color: Colors.grey.shade300, width: 1))
+      );
+      List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
+        DataCell(Center(child: Text(key.number),)),
+        DataCell(Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0),)),
+        DataCell(Container(decoration: verticalDividerRight, alignment: Alignment.centerLeft, child: Padding(padding: EdgeInsets.fromLTRB(0.0, 0, 0.0, 0), child: Text(key.name.toString(), softWrap: true,)),), onTap: () {
+          Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
+            initialEntries: [OverlayEntry(
+                builder: (context) {
+                  return PlayerPage(uid: key.uid);
+                })],
+          )));
+        },),
+        DataCell(Text(key.qbCompletionRate)),
+        DataCell(Text(key.passingTouchdowns.toString())),
+        DataCell(Text(key.passingInterceptions.toString())),
+        DataCell(Container(decoration: verticalDividerLeft, alignment: Alignment.centerRight, child: Text(key.catchRate.toString()),)),
+        DataCell(Text(key.receivingTouchdowns.toString())),
+        DataCell(Container(decoration: verticalDividerLeft, alignment: Alignment.centerRight, child: Text(key.rushingTouchdowns.toString()),)),
+        DataCell(Container(decoration: verticalDividerLeft, alignment: Alignment.centerRight, child: Text(key.sacks.toString()))),
+        DataCell(Text(key.flagPulls.toString())),
+        DataCell(Text(key.passBreakups.toString())),
+        DataCell(Text(key.interceptions.toString())),
+        DataCell(Text(key.interceptionTouchdowns.toString())),
+      ])).toList();
+      return DataTable2(
+        fixedLeftColumns: 3,
+        minWidth: 1000,
+        sortColumnIndex: sortColumnIndex,
+        sortAscending: isAscending,
+        columnSpacing: 10,
+        fixedTopRows: 1,
+        bottomMargin: 10,
+        headingRowColor: WidgetStateProperty.resolveWith<Color?>((Set<WidgetState> states) {
+          return Theme.of(context).colorScheme.surfaceContainerHighest; // Use the default value.
+        }),
+        columns: [
+          const DataColumn2(fixedWidth: 25, label: SizedBox(width: 0, height: 0), numeric: true),
+          DataColumn2(fixedWidth: 35, label: SizedBox(width: 0, height: 0),),
+          DataColumn2(size: ColumnSize.L, label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: const Text("CMP%"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: const Text("P-TD"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: const Text("P-INT"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: const Text("REC%"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: const Text("RC-TD"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: const Text("RU-TD"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: const Text("SACK"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.S, label: const Text("FP"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: const Text("PBU"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: const Text("D-INT"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.M, label: const Text("INT-TD"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+        ],
+        rows: teamsList,
+      );
+    }
+    else if (widget.sport == "AFC San Jose") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Text(key.position)),
         DataCell(Center(child: Text(key.number),)),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-                  initialEntries: [OverlayEntry(
-                    builder: (context) {
-                      return PlayerPage(uid: key.uid);
-                    })],
-                )));
+            initialEntries: [OverlayEntry(
+                builder: (context) {
+                  return PlayerPage(uid: key.uid);
+                })],
+          )));
         },),
         DataCell(Text(key.goals.toString())),
         DataCell(Text(key.assists.toString())),
@@ -201,7 +308,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           DataColumn2(fixedWidth: 50.0, label: const Text("G"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 50.0, label: const Text("A"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 50.0, label: const Text("S"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
-        ], 
+        ],
         rows: teamsList,
       );
     }
@@ -211,50 +318,50 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        centerTitle: true,
-        title: RichText(
-          textAlign: TextAlign.center,
-          text: TextSpan(
-              text: widget.sport,
-              style: TextStyle(fontSize: Theme.of(context).textTheme.headlineSmall!.fontSize),
-              children: <TextSpan>[
-                TextSpan(
-                  text: '\n${widget.season} Leaderboard',
-                  style: TextStyle(
-                    fontSize: Theme.of(context).textTheme.bodySmall!.fontSize,
+        appBar: AppBar(
+          centerTitle: true,
+          title: RichText(
+            textAlign: TextAlign.center,
+            text: TextSpan(
+                text: widget.sport,
+                style: TextStyle(fontSize: Theme.of(context).textTheme.headlineSmall!.fontSize),
+                children: <TextSpan>[
+                  TextSpan(
+                    text: '\n${widget.season} Leaderboard',
+                    style: TextStyle(
+                      fontSize: Theme.of(context).textTheme.bodySmall!.fontSize,
+                    ),
                   ),
-                ),
-              ]
+                ]
+            ),
           ),
+          backgroundColor: Theme.of(context).colorScheme.primary,
+          foregroundColor: Colors.white,
         ),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
-      ),
-      body: FutureBuilder(
-        future: getPlayersList(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(
-              child: CircularProgressIndicator(
-                color: Theme.of(context).colorScheme.primary,
-              )
-            );
-          }
-          if (players.isEmpty) {
-            players = snapshot.data!;
-            sortTable(3, isAscending);
-          }
-          return StatefulBuilder(
-            builder: (context, setState) {
-              return SizedBox(
-                width: MediaQuery.sizeOf(context).width,
-                child: buildLeaderboard(setState),
+        body: FutureBuilder(
+            future: getPlayersList(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return Center(
+                    child: CircularProgressIndicator(
+                      color: Theme.of(context).colorScheme.primary,
+                    )
+                );
+              }
+              if (players.isEmpty) {
+                players = snapshot.data!;
+                sortTable(3, isAscending);
+              }
+              return StatefulBuilder(
+                  builder: (context, setState) {
+                    return SizedBox(
+                      width: MediaQuery.sizeOf(context).width,
+                      child: buildLeaderboard(setState),
+                    );
+                  }
               );
             }
-          );
-        }
-      )
+        )
     );
   }
 }
