@@ -1,5 +1,6 @@
 // ignore_for_file: non_constant_identifier_names
 
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 
 abstract class Game
@@ -29,7 +30,7 @@ abstract class Game
   String percvote2 = "";
   late Color ProgressColor1;
   late Color ProgressColor2;
-  String UrlPath = "";
+  late DatabaseReference databaseReference;
   late int GameNum;
   late int Time;
   void setUpVote();

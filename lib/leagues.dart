@@ -74,6 +74,10 @@ class _LeaguesPageState extends State<LeaguesPage> {
       onTap:() {
         Navigator.pushNamed(context, "/basketballLeagues");
       },),
+      ListTile(leading: const ImageIcon(AssetImage('assets/FlagFootballLeague.png')), title: const Text("Assyrian Flag Football League"),
+      onTap:() {
+        Navigator.pushNamed(context, "/flagFootballLeagues");
+      },),
       ListTile(leading: const ImageIcon(AssetImage('assets/FutsalLeague.png')), title: const Text("AFC San Jose"),
       onTap:() {
         Navigator.pushNamed(context, "/afcsanjose");

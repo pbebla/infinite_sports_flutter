@@ -308,7 +308,7 @@ class _SettingsState extends State<Settings> {
                       builder: (context, localSetState) {
                         return AlertDialog(
                           title: Text("ALERT!"),
-                          content: Container(
+                          content: SizedBox(
                             height: 150,
                             child: Column(
                             children: [

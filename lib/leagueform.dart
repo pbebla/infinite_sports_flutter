@@ -354,30 +354,30 @@ class _LeagueFormState extends State<LeagueForm> {
     try {
       var userInformation = UserInformation();
       userInformation.age = int.parse(_ageController.value.text);
-      String _selectedPositions = "";
+      String selectedPositions = "";
       if (widget.sport == "Basketball") {
         for (var i = 0; i < basketballPositions.length ; i++) {
           if (isSelected[i]) {
-            if (_selectedPositions.isEmpty) {
-              _selectedPositions+=basketballPositions[i];
+            if (selectedPositions.isEmpty) {
+              selectedPositions+=basketballPositions[i];
             } else {
-              _selectedPositions+=';${basketballPositions[i]}';
+              selectedPositions+=';${basketballPositions[i]}';
             }
           }
         }
-        userInformation.basketballPosition = _selectedPositions;
+        userInformation.basketballPosition = selectedPositions;
         userInformation.futsalPosition = widget.oldInfo.futsalPosition;
       } else {
         for (var i = 0; i < futsalPositions.length ; i++) {
           if (isSelected[i]) {
-            if (_selectedPositions.isEmpty) {
-              _selectedPositions+=futsalPositions[i];
+            if (selectedPositions.isEmpty) {
+              selectedPositions+=futsalPositions[i];
             } else {
-              _selectedPositions+=';${futsalPositions[i]}';
+              selectedPositions+=';${futsalPositions[i]}';
             }
           }
         }
-        userInformation.futsalPosition = _selectedPositions;
+        userInformation.futsalPosition = selectedPositions;
         userInformation.basketballPosition = widget.oldInfo.basketballPosition;
       }
       userInformation.height = "${_heightFeetController.value.text.trim()}'${_heightInchesController.value.text.trim()}";

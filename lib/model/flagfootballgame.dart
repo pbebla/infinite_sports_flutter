@@ -1,14 +1,12 @@
-
 import 'dart:ui';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/model/basketballplayer.dart';
+import 'package:infinite_sports_flutter/model/flagfootballplayer.dart';
 import 'dart:core';
 import 'package:infinite_sports_flutter/model/game.dart';
 
-class BasketballGame implements Game
-{
+class FlagFootballGame implements Game {
   @override
   late int GameNum;
 
@@ -93,14 +91,15 @@ class BasketballGame implements Game
   @override
   late bool voted;
 
-  Map<String, BasketballPlayer> team1lineup = {};
-  Map<String, BasketballPlayer> team2lineup = {};
+  Map<String, FlagFootballPlayer> team1lineup = {};
+
+  Map<String, FlagFootballPlayer> team2lineup = {};
 
   @override
   void getLineUpImages() async {
   }
 
-    @override
+  @override
   void setUpVote()
   {
       signedIn = FirebaseAuth.instance.currentUser != null;
@@ -164,65 +163,4 @@ class BasketballGame implements Game
 
   @override
   late DatabaseReference databaseReference;
-  
 }
-/*
-public async void GetLineUpImages()
-{
-    if(team1lineup == null || team2lineup == null)
-    {
-        return;
-    }
-
-    foreach (var player in team1lineup)
-    {
-        player.Value.GetPercentage();
-
-        if (player.Value.UID != null)
-        {
-            try
-            {
-                if (player.Value.ProfileImage == null)
-                {
-                    player.Value.ProfileImage = ImageSource.FromUri(new Uri(await ProfileHelper.GetProfileURL(player.Value.UID)));
-                }
-            }
-            catch
-            {
-                player.Value.ProfileImage = "PortraitPlaceholder.png";
-            }
-        }
-        else
-        {
-            player.Value.ProfileImage = "PortraitPlaceholder.png";
-        }
-
-    }
-
-    foreach (var player in team2lineup)
-    {
-        player.Value.GetPercentage();
-
-        if (player.Value.UID != null)
-        {
-            try
-            {
-                if (player.Value.ProfileImage == null)
-                {
-                    player.Value.ProfileImage = ImageSource.FromUri(new Uri(await ProfileHelper.GetProfileURL(player.Value.UID)));
-                }
-            }
-            catch
-            {
-                player.Value.ProfileImage = "PortraitPlaceholder.png";
-            }
-        }
-        else
-        {
-            player.Value.ProfileImage = "PortraitPlaceholder.png";
-        }
-
-    }
-}
-*/
-
