@@ -79,6 +79,7 @@ class _TablePageState extends State<TablePage> {
         var temp = FlagFootballTeamInfo();
         temp.wins = value["Wins"];
         temp.losses = value["Losses"];
+        temp.ties = value["Ties"] ?? 0;
         temp.pointsFor = value["PF"];
         temp.pointsAgainst = value["PA"];
         temp.imagePath = logos![key]!;
@@ -208,6 +209,7 @@ class _TablePageState extends State<TablePage> {
         DataCell(Text(key.key.toString())),
         DataCell(Text(key.value.wins.toString())),
         DataCell(Text(key.value.losses.toString())),
+        DataCell(Text(key.value.ties.toString())),
         DataCell(Text((key.value as FlagFootballTeamInfo).pointsFor.toString())),
         DataCell(Text((key.value as FlagFootballTeamInfo).pointsAgainst.toString())),
         DataCell(Text((key.value as FlagFootballTeamInfo).pointDifferential.toString())),
@@ -230,6 +232,7 @@ class _TablePageState extends State<TablePage> {
           DataColumn(label: Text("Team")),
           DataColumn(label: Text("W"), numeric: true),
           DataColumn(label: Text("L"), numeric: true),
+          DataColumn(label: Text("T"), numeric: true),
           DataColumn(label: Text("PF"), numeric: true),
           DataColumn(label: Text("PA"), numeric: true),
           DataColumn(label: Text("PD"), numeric: true),
@@ -358,7 +361,8 @@ class _TablePageState extends State<TablePage> {
       teams = Map.fromEntries(teams.entries.toList()
         ..sort(
               (a, b) {
-            int value = b.value.wins.compareTo(a.value.wins);
+            int value = double.parse((b.value as FlagFootballTeamInfo).pct)
+                .compareTo(double.parse((a.value as FlagFootballTeamInfo).pct));
             if (value == 0) {
               value = (b.value as FlagFootballTeamInfo).pointDifferential.compareTo((a.value as FlagFootballTeamInfo).pointDifferential);
             }
