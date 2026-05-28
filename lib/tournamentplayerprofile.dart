@@ -1,5 +1,5 @@
-﻿import 'package:firebase_database/firebase_database.dart';
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
@@ -30,31 +30,8 @@ class _TournamentPlayerProfilePageState
     }
   }
 
-  Future<List<Map<String, String>>> _loadHistory(String uid) async {
-    try {
-      DatabaseReference ref =
-          FirebaseDatabase.instance.ref('/Users/$uid/Played');
-      var snap = await ref.get();
-      if (snap.value == null) return [];
-      // Guard against malformed data (e.g. a list or scalar at this path)
-      if (snap.value is! Map) return [];
-      final data = snap.value as Map;
-      final List<Map<String, String>> history = [];
-      data.forEach((k, v) {
-        if (v is Map) {
-          history.add({
-            'season': k.toString(),
-            'sport': v['Sport']?.toString() ?? v['sport']?.toString() ?? '',
-            'team': v['Team']?.toString() ?? v['team']?.toString() ?? '',
-          });
-        }
-      });
-      return history;
-    } catch (e, st) {
-      debugPrint('tournamentplayerprofile._loadHistory error: $e\n$st');
-      return [];
-    }
-  }
+  Future<List<Map<String, String>>> _loadHistory(String uid) =>
+      getUserPlayedHistory(uid);
 
   @override
   Widget build(BuildContext context) {

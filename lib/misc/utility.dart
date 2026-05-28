@@ -55,6 +55,34 @@ final List<String> months = [
   "December"
 ];
 
+/// Fetches the list of seasons / tournaments a user has played in.
+/// Reads from /Users/{uid}/Played. Returns an empty list on error or
+/// malformed data. Each entry is {'season': String, 'sport': String,
+/// 'team': String}.
+Future<List<Map<String, String>>> getUserPlayedHistory(String uid) async {
+  try {
+    final ref = FirebaseDatabase.instance.ref('/Users/$uid/Played');
+    final snap = await ref.get();
+    if (snap.value == null) return [];
+    if (snap.value is! Map) return [];
+    final data = snap.value as Map;
+    final result = <Map<String, String>>[];
+    data.forEach((k, v) {
+      if (v is Map) {
+        result.add({
+          'season': k.toString(),
+          'sport': v['Sport']?.toString() ?? v['sport']?.toString() ?? '',
+          'team': v['Team']?.toString() ?? v['team']?.toString() ?? '',
+        });
+      }
+    });
+    return result;
+  } catch (e) {
+    debugPrint('getUserPlayedHistory error: $e');
+    return [];
+  }
+}
+
 /// Parses a Firebase MMDDYYYY string into a DateTime. Returns null
 /// when the input is not 8 digits or any segment is non-numeric.
 DateTime? parseDatabaseDate(String databaseDate) {
