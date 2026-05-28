@@ -176,6 +176,8 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
                               builder: (_) => TournamentTeamDetailPage(
                                 teamId: player.teamId,
                                 tournamentId: widget.tournamentId!,
+                                preloadedTeams: widget.teams,
+                                preloadedRosters: widget.rosters,
                               ),
                             ),
                           );

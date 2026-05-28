@@ -87,6 +87,10 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   int _selectedIndex = 0;
+  // Track whether the Tournaments tab has ever been opened. Until it has,
+  // we keep TournamentsNavigation un-instantiated so getAllTournaments()
+  // doesn't fire at app launch for users who never visit Tournaments.
+  bool _tournamentsTabBuilt = false;
   String _title = "";
   String _liveScoresTitle = "Live Scores";
   String currentSport = "";
@@ -154,7 +158,12 @@ class _MyHomePageState extends State<MyHomePage> {
         return CurrentLivescoreNavigation(onTitleSelect: setLiveScoreTitle);
       },),
       const LeaguesNavigation(),
-      const TournamentsNavigation(),
+      // Lazy: don't instantiate TournamentsNavigation (which would trigger
+      // getAllTournaments at app launch) until the user actually taps the
+      // Tournaments tab.
+      _tournamentsTabBuilt
+          ? const TournamentsNavigation()
+          : const SizedBox.shrink(),
       const AroundYou(),
     ];
     // This method is rerun every time setState is called, for instance as done
@@ -204,6 +213,9 @@ class _MyHomePageState extends State<MyHomePage> {
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
+      if (index == 2 && !_tournamentsTabBuilt) {
+        _tournamentsTabBuilt = true;
+      }
       switch(index) { 
         case 0: { 
           _title = _liveScoresTitle; 

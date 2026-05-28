@@ -66,6 +66,8 @@ class TeamsTab extends StatelessWidget {
                   builder: (_) => TournamentTeamDetailPage(
                     teamId: team.id,
                     tournamentId: tournamentId,
+                    preloadedTeams: teams,
+                    preloadedRosters: rosters,
                   ),
                 ),
               );

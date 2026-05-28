@@ -10,10 +10,17 @@ class TournamentTeamDetailPage extends StatefulWidget {
   final String teamId;
   final String tournamentId;
 
+  /// Optional — if the parent already loaded teams + rosters for this
+  /// tournament, pass them through so we don't re-fetch them.
+  final Map<String, TournamentTeam>? preloadedTeams;
+  final Map<String, List<TournamentPlayer>>? preloadedRosters;
+
   const TournamentTeamDetailPage({
     super.key,
     required this.teamId,
     required this.tournamentId,
+    this.preloadedTeams,
+    this.preloadedRosters,
   });
 
   @override
@@ -48,8 +55,10 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
 
   Future<void> _loadData() async {
     try {
-      final teams = await TournamentService.getTeams(widget.tournamentId);
-      final rosters =
+      // Reuse parent-loaded data when available.
+      final teams = widget.preloadedTeams ??
+          await TournamentService.getTeams(widget.tournamentId);
+      final rosters = widget.preloadedRosters ??
           await TournamentService.getRosters(widget.tournamentId, teams);
       final players = rosters[widget.teamId] ?? [];
 

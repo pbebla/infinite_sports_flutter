@@ -314,6 +314,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
                           builder: (_) => TournamentTeamDetailPage(
                             teamId: team.id,
                             tournamentId: widget.tournamentId!,
+                            preloadedTeams: widget.teams,
                           ),
                         ),
                       );
