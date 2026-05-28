@@ -1,3 +1,5 @@
+import 'package:infinite_sports_flutter/misc/parse_helpers.dart';
+
 class Tournament {
   final String id;
   final String name;
@@ -38,21 +40,21 @@ class Tournament {
   factory Tournament.fromFirebase(String id, Map<dynamic, dynamic> data) {
     return Tournament(
       id: id,
-      name: data['Name']?.toString() ?? data['name']?.toString() ?? id,
-      sport: data['Sport']?.toString() ?? data['sport']?.toString() ?? 'Soccer',
-      edition: data['Edition']?.toString() ?? data['edition']?.toString() ?? '',
-      logoUrl: data['LogoUrl']?.toString() ?? data['logoUrl']?.toString(),
-      hostCity: data['HostCity']?.toString() ?? data['hostCity']?.toString(),
-      location: data['Location']?.toString() ?? data['location']?.toString(),
-      startDate: data['StartDate']?.toString() ?? data['startDate']?.toString(),
-      endDate: data['EndDate']?.toString() ?? data['endDate']?.toString(),
-      status: data['Status']?.toString() ?? data['status']?.toString() ?? 'TBD',
-      finished: data['Finished'] as bool? ?? data['finished'] as bool? ?? false,
-      champion: data['Champion']?.toString() ?? data['champion']?.toString(),
-      runnerUp: data['RunnerUp']?.toString() ?? data['runnerUp']?.toString(),
-      goldenBoot: data['GoldenBoot']?.toString() ?? data['goldenBoot']?.toString(),
-      bestKeeper: data['BestKeeper']?.toString() ?? data['bestKeeper']?.toString(),
-      dplLeader: data['DplLeader']?.toString() ?? data['dplLeader']?.toString(),
+      name: firstNonNull(data, ['Name', 'name'])?.toString() ?? id,
+      sport: firstNonNull(data, ['Sport', 'sport'])?.toString() ?? 'Soccer',
+      edition: firstNonNull(data, ['Edition', 'edition'])?.toString() ?? '',
+      logoUrl: firstNonNull(data, ['LogoUrl', 'logoUrl'])?.toString(),
+      hostCity: firstNonNull(data, ['HostCity', 'hostCity'])?.toString(),
+      location: firstNonNull(data, ['Location', 'location'])?.toString(),
+      startDate: firstNonNull(data, ['StartDate', 'startDate'])?.toString(),
+      endDate: firstNonNull(data, ['EndDate', 'endDate'])?.toString(),
+      status: firstNonNull(data, ['Status', 'status'])?.toString() ?? 'TBD',
+      finished: parseBool(firstNonNull(data, ['Finished', 'finished'])),
+      champion: firstNonNull(data, ['Champion', 'champion'])?.toString(),
+      runnerUp: firstNonNull(data, ['RunnerUp', 'runnerUp'])?.toString(),
+      goldenBoot: firstNonNull(data, ['GoldenBoot', 'goldenBoot'])?.toString(),
+      bestKeeper: firstNonNull(data, ['BestKeeper', 'bestKeeper'])?.toString(),
+      dplLeader: firstNonNull(data, ['DplLeader', 'dplLeader'])?.toString(),
     );
   }
 }
