@@ -181,19 +181,37 @@ class _MatchH2HTabState extends State<MatchH2HTab> {
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         onTap: () async {
+          if (widget.onMatchTap == null) return;
           if (!context.mounted) return;
-          if (widget.onMatchTap != null) {
-            // Show loading
-            showDialog(
-              context: context,
-              barrierDismissible: false,
-              builder: (_) => const Center(child: CircularProgressIndicator()),
-            );
-            final pastTeams = await TournamentService.getTeamsForTournament(tournamentId);
-            if (!context.mounted) return;
-            Navigator.of(context).pop(); // Close loading dialog
-            widget.onMatchTap!(m, pastTeams, tournamentId);
+
+          // Capture the navigator BEFORE the await so we can pop the
+          // loading dialog even if the InkWell context becomes unmounted
+          // during the fetch (long-standing bug — previously the dialog
+          // would orphan and the user would see endless spinner).
+          final navigator = Navigator.of(context);
+
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => const Center(child: CircularProgressIndicator()),
+          );
+
+          Map<String, TournamentTeam> pastTeams = {};
+          try {
+            pastTeams =
+                await TournamentService.getTeamsForTournament(tournamentId);
+          } catch (e, st) {
+            debugPrint('MatchH2HTab tap getTeams error: $e\n$st');
+          } finally {
+            // Always close the loading dialog, even if fetch threw or
+            // context became unmounted.
+            if (navigator.canPop()) {
+              navigator.pop();
+            }
           }
+
+          if (!context.mounted) return;
+          widget.onMatchTap!(m, pastTeams, tournamentId);
         },
         child: Padding(
           padding: const EdgeInsets.all(10),
