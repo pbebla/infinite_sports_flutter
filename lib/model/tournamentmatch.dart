@@ -1,4 +1,5 @@
 import 'package:infinite_sports_flutter/misc/parse_helpers.dart';
+import 'package:infinite_sports_flutter/model/match_status.dart';
 
 class TournamentMatch {
   final String id;
@@ -72,6 +73,9 @@ class TournamentMatch {
           : null,
     );
   }
+
+  /// Typed view of the raw [status] int.
+  MatchStatus get matchStatus => MatchStatus.fromInt(status);
 
   String get winnerTeamId {
     if (status != 2) return '';
