@@ -633,6 +633,14 @@ None at time of writing. All design decisions resolved during brainstorming.
 - Refund flow
 
 ### Phase 2 (Sept–Dec 2026, parallel with Phase 1.5)
+- **Unified "Matches" tab** — rename the bottom-nav "Live Scores" tab to "Matches".
+  Show ALL upcoming/live matches across every active sport:
+    - Current week's league fixtures (futsal, basketball, flag football, AFC soccer)
+    - Live and upcoming tournament matches (e.g., "this Saturday's tournament games")
+  Filter to only the closest/currently-relevant matches (this week / next match for each league),
+  never overwhelming the user with all future weeks. Each match card jumps directly to its
+  league or tournament detail. Extend the existing "shortcut to current league" button to also
+  jump to active tournaments. This becomes the most-used screen in the app.
 - Photo & video gallery per match
 - MVP / Goal-of-the-Tournament voting
 - Player check-in / attendance
