@@ -1,0 +1,242 @@
+﻿import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/tournament_service.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/tournament.dart';
+import 'package:infinite_sports_flutter/tournamentdetail.dart';
+
+class TournamentsPage extends StatefulWidget {
+  const TournamentsPage({super.key});
+
+  @override
+  State<TournamentsPage> createState() => _TournamentsPageState();
+}
+
+class _TournamentsPageState extends State<TournamentsPage> {
+  late Future<List<Tournament>> _tournamentsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _tournamentsFuture = TournamentService.getAllTournaments();
+  }
+
+  Color _sportColor(String sport) {
+    switch (sport.toLowerCase()) {
+      case 'soccer':
+        return Colors.blue;
+      case 'basketball':
+        return Colors.orange;
+      case 'flag football':
+        return Colors.green;
+      case 'volleyball':
+        return Colors.purple;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  Color _statusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'registration open':
+        return Colors.teal;
+      case 'group stage':
+        return Colors.blue;
+      case 'quarterfinals':
+        return Colors.indigo;
+      case 'semifinals':
+        return Colors.deepPurple;
+      case 'final':
+        return Colors.red;
+      case 'completed':
+        return Colors.grey;
+      default:
+        return Colors.blueGrey;
+    }
+  }
+
+  Widget _buildTournamentCard(BuildContext context, Tournament t) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => TournamentDetailPage(
+                tournamentId: t.id,
+                tournamentName: t.name,
+              ),
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              // Logo
+              CircleAvatar(
+                radius: 26,
+                backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                child: t.logoUrl != null && t.logoUrl!.isNotEmpty
+                    ? ClipOval(
+                        child: Image.network(
+                          t.logoUrl!,
+                          width: 52,
+                          height: 52,
+                          fit: BoxFit.cover,
+                          errorBuilder: (c, e, s) => Icon(
+                            Icons.emoji_events,
+                            size: 30,
+                            color: infiniteSportsPrimaryColor,
+                          ),
+                        ),
+                      )
+                    : Icon(
+                        Icons.emoji_events,
+                        size: 30,
+                        color: infiniteSportsPrimaryColor,
+                      ),
+              ),
+              const SizedBox(width: 12),
+              // Info
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      t.name,
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        _chip(t.sport, _sportColor(t.sport)),
+                        const SizedBox(width: 6),
+                        if (t.edition.isNotEmpty)
+                          Text(
+                            t.edition,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    _chip(t.status, _statusColor(t.status)),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right,
+                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _chip(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          color: color,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        centerTitle: true,
+        foregroundColor: Colors.white,
+        title: const Text('Tournaments'),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+      ),
+      body: FutureBuilder<List<Tournament>>(
+        future: _tournamentsFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(
+              child: CircularProgressIndicator(
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            );
+          }
+          if (snapshot.hasError || snapshot.data == null || snapshot.data!.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.emoji_events_outlined,
+                      size: 64, color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3)),
+                  const SizedBox(height: 16),
+                  Text(
+                    'No tournaments available',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                        ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          final all = snapshot.data!;
+          final current = all.where((t) => !t.finished).toList();
+          final past = all.where((t) => t.finished).toList();
+
+          return ListView(
+            padding: const EdgeInsets.only(top: 8, bottom: 16),
+            children: [
+              if (current.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Text(
+                    'Current',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: infiniteSportsPrimaryColor,
+                          letterSpacing: 1.2,
+                        ),
+                  ),
+                ),
+                ...current.map((t) => _buildTournamentCard(context, t)),
+              ],
+              if (past.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Text(
+                    'Past Tournaments',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                        ),
+                  ),
+                ),
+                ...past.map((t) => _buildTournamentCard(context, t)),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+

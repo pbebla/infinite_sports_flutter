@@ -11,6 +11,7 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/navigations/current_livescore_navigation.dart';
 import 'package:infinite_sports_flutter/navigations/leagues_navigation.dart';
+import 'package:infinite_sports_flutter/navigations/tournaments_navigation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -153,6 +154,7 @@ class _MyHomePageState extends State<MyHomePage> {
         return CurrentLivescoreNavigation(onTitleSelect: setLiveScoreTitle);
       },),
       const LeaguesNavigation(),
+      const TournamentsNavigation(),
       const AroundYou(),
     ];
     // This method is rerun every time setState is called, for instance as done
@@ -184,6 +186,10 @@ class _MyHomePageState extends State<MyHomePage> {
             selectedIcon: ImageIcon(AssetImage('assets/leagues.png'), color: Colors.white,),
             label: 'Leagues'),
           NavigationDestination(
+            icon: Icon(Icons.emoji_events_outlined),
+            selectedIcon: Icon(Icons.emoji_events, color: Colors.white),
+            label: 'Tournaments'),
+          NavigationDestination(
             icon: ImageIcon(AssetImage('assets/aroundyou.png')),
             selectedIcon: ImageIcon(AssetImage('assets/aroundyou.png'), color: Colors.white,),
             label: 'Around You'),
@@ -203,9 +209,11 @@ class _MyHomePageState extends State<MyHomePage> {
           _title = _liveScoresTitle; 
         } 
         break; 
-        case 1: { _title = 'Leagues'; } 
+        case 1: { _title = 'Leagues'; }
         break;
-        case 2: { _title = 'Around You'; } 
+        case 2: { _title = 'Tournaments'; }
+        break;
+        case 3: { _title = 'Around You'; }
         break;
       } 
     });
