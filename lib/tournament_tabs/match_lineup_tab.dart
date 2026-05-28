@@ -94,6 +94,7 @@ class MatchLineupTab extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
       child: Row(
         children: [
+          // Jersey number badge
           Container(
             width: 24,
             height: 24,
@@ -107,6 +108,13 @@ class MatchLineupTab extends StatelessWidget {
                 style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
               ),
             ),
+          ),
+          const SizedBox(width: 6),
+          // Player photo (falls back to person icon if no photoUrl)
+          TeamLogo(
+            url: p.photoUrl,
+            size: 24,
+            fallbackIcon: Icons.person,
           ),
           const SizedBox(width: 8),
           Expanded(
