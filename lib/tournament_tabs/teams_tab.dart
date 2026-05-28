@@ -3,6 +3,7 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 class TeamsTab extends StatelessWidget {
   final Map<String, TournamentTeam> teams;
@@ -74,25 +75,7 @@ class TeamsTab extends StatelessWidget {
               child: Row(
                 children: [
                   // Team logo
-                  CircleAvatar(
-                    radius: 24,
-                    backgroundColor:
-                        Theme.of(context).colorScheme.surfaceContainerHighest,
-                    child: team.logoUrl != null && team.logoUrl!.isNotEmpty
-                        ? ClipOval(
-                            child: Image.network(
-                              team.logoUrl!,
-                              width: 48,
-                              height: 48,
-                              fit: BoxFit.cover,
-                              errorBuilder: (c, e, s) => const Icon(
-                                  Icons.shield,
-                                  size: 28,
-                                  color: Colors.grey),
-                            ),
-                          )
-                        : const Icon(Icons.shield, size: 28, color: Colors.grey),
-                  ),
+                  TeamLogo(url: team.logoUrl, size: 48),
                   const SizedBox(width: 12),
                   // Info
                   Expanded(

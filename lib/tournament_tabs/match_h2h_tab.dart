@@ -3,6 +3,7 @@ import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:intl/intl.dart';
 
 class MatchH2HTab extends StatefulWidget {
@@ -45,27 +46,11 @@ class _MatchH2HTabState extends State<MatchH2HTab> {
     return DateFormat('MMM d, yyyy').format(dt);
   }
 
-  Widget _smallLogo(String? url) {
-    if (url != null && url.isNotEmpty) {
-      return ClipOval(
-        child: Image.network(
-          url,
-          width: 16,
-          height: 16,
-          fit: BoxFit.cover,
-          errorBuilder: (c, e, s) =>
-              const Icon(Icons.shield, size: 16, color: Colors.grey),
-        ),
-      );
-    }
-    return const Icon(Icons.shield, size: 16, color: Colors.grey);
-  }
-
   Widget _buildSummaryBar(BuildContext context, List<Map<String, dynamic>> entries) {
     int team1Wins = 0, draws = 0, team2Wins = 0;
     for (final entry in entries) {
       final m = entry['match'] as TournamentMatch;
-      if (m.status != 2) continue;
+      if (!m.matchStatus.isFinished) continue;
       // Determine if team1 (as passed to this widget) won or lost
       final myTeamIsTeam1InMatch = m.team1Id == widget.team1Id;
       final myScore = myTeamIsTeam1InMatch ? m.team1Score : m.team2Score;
@@ -240,9 +225,12 @@ class _MatchH2HTabState extends State<MatchH2HTab> {
                   Expanded(
                     child: Row(
                       children: [
-                        _smallLogo(myTeamIsTeam1InMatch
-                            ? widget.team1?.logoUrl
-                            : widget.team2?.logoUrl),
+                        TeamLogo(
+                          url: myTeamIsTeam1InMatch
+                              ? widget.team1?.logoUrl
+                              : widget.team2?.logoUrl,
+                          size: 16,
+                        ),
                         const SizedBox(width: 4),
                         Expanded(
                           child: Text(
@@ -293,9 +281,12 @@ class _MatchH2HTabState extends State<MatchH2HTab> {
                           ),
                         ),
                         const SizedBox(width: 4),
-                        _smallLogo(myTeamIsTeam1InMatch
-                            ? widget.team2?.logoUrl
-                            : widget.team1?.logoUrl),
+                        TeamLogo(
+                          url: myTeamIsTeam1InMatch
+                              ? widget.team2?.logoUrl
+                              : widget.team1?.logoUrl,
+                          size: 16,
+                        ),
                       ],
                     ),
                   ),

@@ -3,6 +3,7 @@ import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/tournamentdetail.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 class TournamentsPage extends StatefulWidget {
   const TournamentsPage({super.key});
@@ -77,28 +78,10 @@ class _TournamentsPageState extends State<TournamentsPage> {
           child: Row(
             children: [
               // Logo
-              CircleAvatar(
-                radius: 26,
-                backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: t.logoUrl != null && t.logoUrl!.isNotEmpty
-                    ? ClipOval(
-                        child: Image.network(
-                          t.logoUrl!,
-                          width: 52,
-                          height: 52,
-                          fit: BoxFit.cover,
-                          errorBuilder: (c, e, s) => Icon(
-                            Icons.emoji_events,
-                            size: 30,
-                            color: infiniteSportsPrimaryColor,
-                          ),
-                        ),
-                      )
-                    : Icon(
-                        Icons.emoji_events,
-                        size: 30,
-                        color: infiniteSportsPrimaryColor,
-                      ),
+              TeamLogo(
+                url: t.logoUrl,
+                size: 52,
+                fallbackIcon: Icons.emoji_events,
               ),
               const SizedBox(width: 12),
               // Info

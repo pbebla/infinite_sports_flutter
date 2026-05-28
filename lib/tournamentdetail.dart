@@ -11,6 +11,7 @@ import 'package:infinite_sports_flutter/tournament_tabs/playerstats_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/table_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/teamstats_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/teams_tab.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 class TournamentDetailPage extends StatefulWidget {
   final String tournamentId;
@@ -219,33 +220,11 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               // Tournament logo
-              Container(
-                width: 54,
-                height: 54,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: ClipOval(
-                  child: tournament?.logoUrl != null &&
-                          tournament!.logoUrl!.isNotEmpty
-                      ? Image.network(
-                          tournament.logoUrl!,
-                          width: 54,
-                          height: 54,
-                          fit: BoxFit.cover,
-                          errorBuilder: (c, e, s) => const Icon(
-                            Icons.emoji_events,
-                            size: 30,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(
-                          Icons.emoji_events,
-                          size: 30,
-                          color: Colors.white,
-                        ),
-                ),
+              TeamLogo(
+                url: tournament?.logoUrl,
+                size: 54,
+                fallbackIcon: Icons.emoji_events,
+                fallbackBackground: Colors.white.withValues(alpha: 0.15),
               ),
               const SizedBox(width: 14),
               // Info

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 class TableTab extends StatelessWidget {
   final Map<String, TournamentTeam> teams;
@@ -26,22 +27,6 @@ class TableTab extends StatelessWidget {
       default:
         return Colors.grey;
     }
-  }
-
-  Widget _teamLogo(String? url) {
-    if (url != null && url.isNotEmpty) {
-      return ClipOval(
-        child: Image.network(
-          url,
-          width: 24,
-          height: 24,
-          fit: BoxFit.cover,
-          errorBuilder: (c, e, s) =>
-              const Icon(Icons.shield, size: 24, color: Colors.grey),
-        ),
-      );
-    }
-    return const Icon(Icons.shield, size: 24, color: Colors.grey);
   }
 
   List<TournamentTeam> _sortGroup(List<TournamentTeam> group) {
@@ -227,7 +212,7 @@ class TableTab extends StatelessWidget {
           ),
           const SizedBox(width: 4),
           // Team logo
-          _teamLogo(team.logoUrl),
+          TeamLogo(url: team.logoUrl, size: 24),
           const SizedBox(width: 6),
           Expanded(
             flex: 5,

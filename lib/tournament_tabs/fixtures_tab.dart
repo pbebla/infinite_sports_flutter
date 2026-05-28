@@ -7,6 +7,7 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_match_detail.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -64,25 +65,9 @@ class FixturesTab extends StatelessWidget {
     }
   }
 
-  Widget _teamLogo(String? url, {double size = 28}) {
-    if (url != null && url.isNotEmpty) {
-      return ClipOval(
-        child: Image.network(
-          url,
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-          errorBuilder: (c, e, s) =>
-              Icon(Icons.shield, size: size, color: Colors.grey),
-        ),
-      );
-    }
-    return Icon(Icons.shield, size: size, color: Colors.grey);
-  }
-
   // Build a compact leaders strip for completed matches
   Widget _buildLeadersStrip(BuildContext context, TournamentMatch match) {
-    if (match.status != 2) return const SizedBox.shrink();
+    if (!match.matchStatus.isFinished) return const SizedBox.shrink();
     final team1Players = match.team1Id != null ? (rosters[match.team1Id] ?? []) : <TournamentPlayer>[];
     final team2Players = match.team2Id != null ? (rosters[match.team2Id] ?? []) : <TournamentPlayer>[];
     final allPlayers = [...team1Players, ...team2Players];
@@ -234,14 +219,14 @@ class FixturesTab extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 6),
-        _teamLogo(team1?.logoUrl),
+        TeamLogo(url: team1?.logoUrl, size: 28),
       ],
     );
 
     Widget team2Widget = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _teamLogo(team2?.logoUrl),
+        TeamLogo(url: team2?.logoUrl, size: 28),
         const SizedBox(width: 6),
         Flexible(
           child: Text(

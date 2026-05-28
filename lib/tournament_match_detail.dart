@@ -6,6 +6,7 @@ import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_facts_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_h2h_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_lineup_tab.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -116,19 +117,7 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
     }
 
     Widget teamLogo(TournamentTeam? team, {double size = 40}) {
-      if (team?.logoUrl != null && team!.logoUrl!.isNotEmpty) {
-        return ClipOval(
-          child: Image.network(
-            team.logoUrl!,
-            width: size,
-            height: size,
-            fit: BoxFit.cover,
-            errorBuilder: (c, e, s) =>
-                Icon(Icons.shield, size: size, color: Colors.white60),
-          ),
-        );
-      }
-      return Icon(Icons.shield, size: size, color: Colors.white60);
+      return TeamLogo(url: team?.logoUrl, size: size);
     }
 
     return Container(

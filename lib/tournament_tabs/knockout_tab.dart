@@ -3,6 +3,7 @@ import 'package:infinite_sports_flutter/model/tournament_stage.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 class KnockoutTab extends StatefulWidget {
   final List<TournamentMatch> matches;
@@ -292,22 +293,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
       displayName = 'TBD';
     }
 
-    Widget logoWidget;
-    if (team?.logoUrl != null && team!.logoUrl!.isNotEmpty) {
-      logoWidget = ClipOval(
-        child: Image.network(
-          team.logoUrl!,
-          width: 24,
-          height: 24,
-          fit: BoxFit.cover,
-          errorBuilder: (c, e, s) =>
-              const Icon(Icons.shield, size: 24, color: Colors.grey),
-        ),
-      );
-    } else {
-      logoWidget = const Icon(Icons.shield, size: 24, color: Colors.grey);
-    }
-
+    Widget logoWidget = TeamLogo(url: team?.logoUrl, size: 24);
     if (isEliminated) {
       logoWidget = Opacity(opacity: 0.5, child: logoWidget);
     }

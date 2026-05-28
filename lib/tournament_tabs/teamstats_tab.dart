@@ -1,6 +1,7 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 class TeamStatsTab extends StatefulWidget {
   final Map<String, TournamentTeam> teams;
@@ -183,21 +184,7 @@ class _TeamStatsTabState extends State<TeamStatsTab> {
             flex: 5,
             child: Row(
               children: [
-                if (team.logoUrl != null && team.logoUrl!.isNotEmpty)
-                  ClipOval(
-                    child: Image.network(
-                      team.logoUrl!,
-                      width: 22,
-                      height: 22,
-                      fit: BoxFit.cover,
-                      errorBuilder: (c, e, s) => const Icon(
-                          Icons.shield,
-                          size: 22,
-                          color: Colors.grey),
-                    ),
-                  )
-                else
-                  const Icon(Icons.shield, size: 22, color: Colors.grey),
+                TeamLogo(url: team.logoUrl, size: 22),
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(

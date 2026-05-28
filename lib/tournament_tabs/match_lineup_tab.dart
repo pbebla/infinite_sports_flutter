@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 class MatchLineupTab extends StatelessWidget {
   final TournamentMatch match;
@@ -136,19 +137,7 @@ class MatchLineupTab extends StatelessWidget {
             padding: const EdgeInsets.all(8),
             child: Row(
               children: [
-                if (team?.logoUrl != null && team!.logoUrl!.isNotEmpty)
-                  ClipOval(
-                    child: Image.network(
-                      team.logoUrl!,
-                      width: 24,
-                      height: 24,
-                      fit: BoxFit.cover,
-                      errorBuilder: (c, e, s) =>
-                          const Icon(Icons.shield, size: 20, color: Colors.grey),
-                    ),
-                  )
-                else
-                  const Icon(Icons.shield, size: 20, color: Colors.grey),
+                TeamLogo(url: team?.logoUrl, size: 24),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(

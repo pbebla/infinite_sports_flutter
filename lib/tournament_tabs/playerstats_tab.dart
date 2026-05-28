@@ -4,6 +4,7 @@ import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 class PlayerStatsTab extends StatefulWidget {
   final Map<String, List<TournamentPlayer>> rosters;
@@ -139,39 +140,17 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
             child: Stack(
               children: [
                 // Player photo
-                CircleAvatar(
-                  radius: 18,
-                  backgroundColor:
-                      Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: player.photoUrl != null && player.photoUrl!.isNotEmpty
-                      ? ClipOval(
-                          child: Image.network(
-                            player.photoUrl!,
-                            width: 36,
-                            height: 36,
-                            fit: BoxFit.cover,
-                            errorBuilder: (c, e, s) => const Icon(
-                                Icons.person,
-                                size: 22,
-                                color: Colors.grey),
-                          ),
-                        )
-                      : const Icon(Icons.person, size: 22, color: Colors.grey),
+                TeamLogo(
+                  url: player.photoUrl,
+                  size: 36,
+                  fallbackIcon: Icons.person,
                 ),
                 // Team logo overlay
                 if (team?.logoUrl != null && team!.logoUrl!.isNotEmpty)
                   Positioned(
                     bottom: 0,
                     right: 0,
-                    child: ClipOval(
-                      child: Image.network(
-                        team.logoUrl!,
-                        width: 14,
-                        height: 14,
-                        fit: BoxFit.cover,
-                        errorBuilder: (c, e, s) => const SizedBox.shrink(),
-                      ),
-                    ),
+                    child: TeamLogo(url: team.logoUrl, size: 14),
                   ),
               ],
             ),

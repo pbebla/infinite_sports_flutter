@@ -1,6 +1,7 @@
 ﻿import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 class TournamentPlayerProfilePage extends StatefulWidget {
   final TournamentPlayer player;
@@ -99,23 +100,11 @@ class _TournamentPlayerProfilePageState
           padding: const EdgeInsets.fromLTRB(56, 12, 16, 16),
           child: Row(
             children: [
-              CircleAvatar(
-                radius: 28,
-                backgroundColor: Colors.white.withValues(alpha: 0.2),
-                child: player.photoUrl != null && player.photoUrl!.isNotEmpty
-                    ? ClipOval(
-                        child: Image.network(
-                          player.photoUrl!,
-                          width: 56,
-                          height: 56,
-                          fit: BoxFit.cover,
-                          errorBuilder: (c, e, s) => const Icon(
-                              Icons.person,
-                              size: 32,
-                              color: Colors.white),
-                        ),
-                      )
-                    : const Icon(Icons.person, size: 32, color: Colors.white),
+              TeamLogo(
+                url: player.photoUrl,
+                size: 56,
+                fallbackIcon: Icons.person,
+                fallbackBackground: Colors.white.withValues(alpha: 0.2),
               ),
               const SizedBox(width: 16),
               Expanded(

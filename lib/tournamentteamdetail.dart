@@ -4,6 +4,7 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournamentplayerprofile.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 class TournamentTeamDetailPage extends StatefulWidget {
   final String teamId;
@@ -147,23 +148,10 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
             children: [
               Row(
                 children: [
-                  CircleAvatar(
-                    radius: 30,
-                    backgroundColor: Colors.white.withValues(alpha: 0.2),
-                    child: (team?.logoUrl != null && team!.logoUrl!.isNotEmpty)
-                        ? ClipOval(
-                            child: Image.network(
-                              team.logoUrl!,
-                              width: 60,
-                              height: 60,
-                              fit: BoxFit.cover,
-                              errorBuilder: (c, e, s) => const Icon(
-                                  Icons.shield,
-                                  size: 34,
-                                  color: Colors.white),
-                            ),
-                          )
-                        : const Icon(Icons.shield, size: 34, color: Colors.white),
+                  TeamLogo(
+                    url: team?.logoUrl,
+                    size: 60,
+                    fallbackBackground: Colors.white.withValues(alpha: 0.2),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -346,27 +334,10 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                   const SizedBox(height: 10),
                   Row(
                     children: [
-                      CircleAvatar(
-                        radius: 22,
-                        backgroundColor: Theme.of(context)
-                            .colorScheme
-                            .surfaceContainerHighest,
-                        child: (team.coachPhotoUrl != null &&
-                                team.coachPhotoUrl!.isNotEmpty)
-                            ? ClipOval(
-                                child: Image.network(
-                                  team.coachPhotoUrl!,
-                                  width: 44,
-                                  height: 44,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (c, e, s) => const Icon(
-                                      Icons.person,
-                                      size: 24,
-                                      color: Colors.grey),
-                                ),
-                              )
-                            : const Icon(Icons.person,
-                                size: 24, color: Colors.grey),
+                      TeamLogo(
+                        url: team.coachPhotoUrl,
+                        size: 44,
+                        fallbackIcon: Icons.person,
                       ),
                       const SizedBox(width: 10),
                       Column(
@@ -515,22 +486,10 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: Row(
               children: [
-                CircleAvatar(
-                  radius: 22,
-                  backgroundColor:
-                      Theme.of(context).colorScheme.surfaceContainerHighest,
-                  child: (team.coachPhotoUrl != null && team.coachPhotoUrl!.isNotEmpty)
-                      ? ClipOval(
-                          child: Image.network(
-                            team.coachPhotoUrl!,
-                            width: 44,
-                            height: 44,
-                            fit: BoxFit.cover,
-                            errorBuilder: (c, e, s) =>
-                                const Icon(Icons.person, size: 24, color: Colors.grey),
-                          ),
-                        )
-                      : const Icon(Icons.person, size: 24, color: Colors.grey),
+                TeamLogo(
+                  url: team.coachPhotoUrl,
+                  size: 44,
+                  fallbackIcon: Icons.person,
                 ),
                 const SizedBox(width: 10),
                 Column(
@@ -631,21 +590,10 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
             ),
             const SizedBox(width: 10),
             // Photo
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-              child: (p.photoUrl != null && p.photoUrl!.isNotEmpty)
-                  ? ClipOval(
-                      child: Image.network(
-                        p.photoUrl!,
-                        width: 36,
-                        height: 36,
-                        fit: BoxFit.cover,
-                        errorBuilder: (c, e, s) =>
-                            const Icon(Icons.person, size: 20, color: Colors.grey),
-                      ),
-                    )
-                  : const Icon(Icons.person, size: 20, color: Colors.grey),
+            TeamLogo(
+              url: p.photoUrl,
+              size: 36,
+              fallbackIcon: Icons.person,
             ),
             const SizedBox(width: 10),
             // Name + position
@@ -773,27 +721,10 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                       padding: const EdgeInsets.symmetric(vertical: 5),
                       child: Row(
                         children: [
-                          CircleAvatar(
-                            radius: 18,
-                            backgroundColor: Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest,
-                            child: (player.photoUrl != null &&
-                                    player.photoUrl!.isNotEmpty)
-                                ? ClipOval(
-                                    child: Image.network(
-                                      player.photoUrl!,
-                                      width: 36,
-                                      height: 36,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (c, e, s) => const Icon(
-                                          Icons.person,
-                                          size: 22,
-                                          color: Colors.grey),
-                                    ),
-                                  )
-                                : const Icon(Icons.person,
-                                    size: 22, color: Colors.grey),
+                          TeamLogo(
+                            url: player.photoUrl,
+                            size: 36,
+                            fallbackIcon: Icons.person,
                           ),
                           const SizedBox(width: 10),
                           Expanded(

@@ -766,8 +766,7 @@ enum TournamentStage {
     }
     if (normalized == 'ro16' ||
         normalized == 'r16' ||
-        normalized.contains('roundof16') ||
-        normalized.contains('roundof8') && false) {
+        normalized.contains('roundof16')) {
       return TournamentStage.roundOf16;
     }
     if (normalized == 'qf' ||
