@@ -64,16 +64,6 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
 
   // ---- Helpers ----
 
-  Color _parseHex(String? hex) {
-    if (hex == null || hex.isEmpty) return Colors.grey;
-    try {
-      final clean = hex.replaceAll('#', '');
-      return Color(int.parse('FF$clean', radix: 16));
-    } catch (_) {
-      return Colors.grey;
-    }
-  }
-
   // Position ordering
   List<String> _positionOrder() {
     return ['GK', 'GOALKEEPER', 'DEF', 'DEFENDER', 'MID', 'MIDFIELDER', 'FWD', 'FORWARD',
@@ -124,10 +114,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
   Widget _buildHeader(BuildContext context) {
     final team = _team;
     // Determine header color
-    Color headerColor = const Color(0xFF1A237E);
-    if (team?.overrideColor != null && team!.overrideColor!.isNotEmpty) {
-      headerColor = _parseHex(team.overrideColor);
-    }
+    Color headerColor = team?.overrideColor ?? const Color(0xFF1A237E);
 
     final darkened = Color.fromARGB(
       255,
@@ -307,7 +294,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                             CustomPaint(
                               size: const Size(40, 44),
                               painter: _JerseyPainter(
-                                  color: _parseHex(team.homeColor)),
+                                  color: team.homeColor!),
                             ),
                             const SizedBox(height: 4),
                             const Text('Home',
@@ -322,7 +309,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                             CustomPaint(
                               size: const Size(40, 44),
                               painter: _JerseyPainter(
-                                  color: _parseHex(team.awayColor)),
+                                  color: team.awayColor!),
                             ),
                             const SizedBox(height: 4),
                             const Text('Away',
