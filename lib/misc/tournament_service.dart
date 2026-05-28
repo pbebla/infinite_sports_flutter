@@ -1,4 +1,5 @@
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/model/tournament_stage.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
@@ -6,6 +7,14 @@ import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 
 class TournamentService {
+  /// Session-scoped cache of /Users/{uid}/ProfileUrl values.
+  /// Keyed by uid. Cleared by [clearProfileUrlCache] if needed.
+  static final Map<String, String> _profileUrlCache = {};
+
+  /// Clears the in-memory ProfileUrl cache. Call after a sign-out or when
+  /// you need fresh user photos (rare).
+  static void clearProfileUrlCache() => _profileUrlCache.clear();
+
   /// Returns list of all tournaments sorted: active first, then historical newest-first.
   static Future<List<Tournament>> getAllTournaments() async {
     try {
@@ -62,17 +71,21 @@ class TournamentService {
   }
 
   /// Returns map of teams keyed by team id, merged with table data.
+  /// Teams and Table queries run in parallel via Future.wait.
   static Future<Map<String, TournamentTeam>> getTeams(String tournamentId) async {
     try {
-      DatabaseReference ref =
-          FirebaseDatabase.instance.ref('/Tournaments/$tournamentId');
-      final teamsSnap = await ref.child('Teams').get();
-      final tableSnap = await ref.child('Table').get();
+      final ref = FirebaseDatabase.instance.ref('/Tournaments/$tournamentId');
+      final snaps = await Future.wait([
+        ref.child('Teams').get(),
+        ref.child('Table').get(),
+      ]);
+      final teamsSnap = snaps[0];
+      final tableSnap = snaps[1];
 
       if (teamsSnap.value == null) return {};
 
       final teamsData = teamsSnap.value as Map;
-      final tableData = tableSnap.value != null
+      final tableData = tableSnap.value is Map
           ? tableSnap.value as Map
           : <dynamic, dynamic>{};
 
@@ -90,7 +103,8 @@ class TournamentService {
         }
       });
       return result;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('TournamentService.getTeams error: $e');
       return {};
     }
   }
@@ -123,54 +137,84 @@ class TournamentService {
   }
 
   /// Returns map of teamId -> list of TournamentPlayer.
-  /// Also tries to load profileUrl from Users/{uid}/ProfileUrl if uid exists.
+  /// Also tries to load profileUrl from /Users/{uid}/ProfileUrl if uid exists
+  /// and the player record doesn't already have a photoUrl.
+  ///
+  /// Profile-photo URLs are fetched in PARALLEL via Future.wait and cached
+  /// in a session-scoped Map keyed by uid, so subsequent renders are instant.
+  /// Previously this was N+1 sequential per-player reads — ~120 round trips
+  /// for a 12-team x 10-player tournament before this page could render.
   static Future<Map<String, List<TournamentPlayer>>> getRosters(
     String tournamentId,
     Map<String, TournamentTeam> teams,
   ) async {
     try {
-      DatabaseReference ref =
+      final ref =
           FirebaseDatabase.instance.ref('/Tournaments/$tournamentId/Rosters');
-      var snap = await ref.get();
+      final snap = await ref.get();
       if (snap.value == null) return {};
       final data = snap.value as Map;
 
+      // First pass: build all TournamentPlayer instances and collect the
+      // set of uids whose ProfileUrl we still need to fetch.
       final Map<String, List<TournamentPlayer>> result = {};
+      final Set<String> uidsToFetch = {};
 
-      for (final teamEntry in data.entries) {
-        final teamId = teamEntry.key.toString();
+      data.forEach((teamKey, teamValue) {
+        if (teamValue is! Map) return;
+        final teamId = teamKey.toString();
         final teamName = teams[teamId]?.name ?? teamId;
-        if (teamEntry.value is! Map) continue;
-        final playersData = teamEntry.value as Map;
         final List<TournamentPlayer> players = [];
 
-        for (final playerEntry in playersData.entries) {
-          if (playerEntry.value is! Map) continue;
-          final playerName = playerEntry.key.toString();
-          var player = TournamentPlayer.fromFirebase(
-            playerName,
+        teamValue.forEach((playerKey, playerValue) {
+          if (playerValue is! Map) return;
+          final player = TournamentPlayer.fromFirebase(
+            playerKey.toString(),
             teamId,
             teamName,
-            playerEntry.value as Map,
+            playerValue,
           );
-
-          // Try to load profile photo from Users/{uid}/ProfileUrl
-          if (player.uid != null && player.uid!.isNotEmpty && player.photoUrl == null) {
-            try {
-              DatabaseReference userRef =
-                  FirebaseDatabase.instance.ref('/Users/${player.uid}/ProfileUrl');
-              var urlSnap = await userRef.get();
-              if (urlSnap.value != null) {
-                player = player.copyWith(photoUrl: urlSnap.value.toString());
-              }
-            } catch (_) {}
-          }
-
           players.add(player);
-        }
+
+          final uid = player.uid;
+          if (uid != null &&
+              uid.isNotEmpty &&
+              (player.photoUrl == null || player.photoUrl!.isEmpty) &&
+              !_profileUrlCache.containsKey(uid)) {
+            uidsToFetch.add(uid);
+          }
+        });
 
         result[teamId] = players;
+      });
+
+      // Second pass: fetch all missing ProfileUrls in parallel.
+      if (uidsToFetch.isNotEmpty) {
+        await Future.wait(uidsToFetch.map((uid) async {
+          try {
+            final urlSnap = await FirebaseDatabase.instance
+                .ref('/Users/$uid/ProfileUrl')
+                .get();
+            _profileUrlCache[uid] =
+                urlSnap.value?.toString() ?? '';
+          } catch (_) {
+            _profileUrlCache[uid] = '';
+          }
+        }));
       }
+
+      // Third pass: substitute cached photoUrls into players where needed.
+      result.forEach((teamId, players) {
+        for (var i = 0; i < players.length; i++) {
+          final p = players[i];
+          if (p.uid == null || p.uid!.isEmpty) continue;
+          if (p.photoUrl != null && p.photoUrl!.isNotEmpty) continue;
+          final cached = _profileUrlCache[p.uid!];
+          if (cached != null && cached.isNotEmpty) {
+            players[i] = p.copyWith(photoUrl: cached);
+          }
+        }
+      });
 
       return result;
     } catch (_) {
