@@ -29,6 +29,7 @@ class TournamentDetailPage extends StatefulWidget {
 class _TournamentDetailPageState extends State<TournamentDetailPage>
     with SingleTickerProviderStateMixin {
   bool _isLoading = true;
+  String? _loadError;
   Tournament? _tournament;
   Map<String, TournamentTeam> _teams = {};
   List<TournamentMatch> _matches = [];
@@ -58,31 +59,79 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
   }
 
   Future<void> _loadData() async {
-    final results = await Future.wait([
-      TournamentService.getTournamentHeader(widget.tournamentId),
-      TournamentService.getTeams(widget.tournamentId),
-      TournamentService.getMatches(widget.tournamentId),
-    ]);
+    try {
+      final results = await Future.wait([
+        TournamentService.getTournamentHeader(widget.tournamentId),
+        TournamentService.getTeams(widget.tournamentId),
+        TournamentService.getMatches(widget.tournamentId),
+      ]);
 
-    final tournament = results[0] as Tournament?;
-    final teams = results[1] as Map<String, TournamentTeam>;
-    final matches = results[2] as List<TournamentMatch>;
+      final tournament = results[0] as Tournament?;
+      final teams = results[1] as Map<String, TournamentTeam>;
+      final matches = results[2] as List<TournamentMatch>;
 
-    final rosters = await TournamentService.getRosters(widget.tournamentId, teams);
+      final rosters =
+          await TournamentService.getRosters(widget.tournamentId, teams);
 
-    if (mounted) {
+      if (!mounted) return;
       setState(() {
         _tournament = tournament;
         _teams = teams;
         _matches = matches;
         _rosters = rosters;
         _isLoading = false;
+        _loadError = null;
+      });
+    } catch (e, st) {
+      debugPrint('TournamentDetailPage._loadData error: $e\n$st');
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _loadError = 'Could not load tournament. Tap retry.';
       });
     }
   }
 
+  Widget _buildErrorView(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.tournamentName)),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, size: 64, color: Colors.redAccent),
+              const SizedBox(height: 16),
+              Text(
+                _loadError ?? 'Something went wrong.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 16),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
+                onPressed: () {
+                  setState(() {
+                    _isLoading = true;
+                    _loadError = null;
+                  });
+                  _loadData();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_loadError != null) {
+      return _buildErrorView(context);
+    }
     return Scaffold(
       body: _isLoading
           ? Center(

@@ -23,6 +23,7 @@ class TournamentTeamDetailPage extends StatefulWidget {
 class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
     with SingleTickerProviderStateMixin {
   bool _isLoading = true;
+  String? _loadError;
   TournamentTeam? _team;
   List<TournamentPlayer> _players = [];
   late TabController _tabController;
@@ -47,18 +48,24 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
   Future<void> _loadData() async {
     try {
       final teams = await TournamentService.getTeams(widget.tournamentId);
-      final rosters = await TournamentService.getRosters(widget.tournamentId, teams);
+      final rosters =
+          await TournamentService.getRosters(widget.tournamentId, teams);
       final players = rosters[widget.teamId] ?? [];
 
-      if (mounted) {
-        setState(() {
-          _team = teams[widget.teamId];
-          _players = players;
-          _isLoading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
+      if (!mounted) return;
+      setState(() {
+        _team = teams[widget.teamId];
+        _players = players;
+        _isLoading = false;
+        _loadError = null;
+      });
+    } catch (e, st) {
+      debugPrint('TournamentTeamDetailPage._loadData error: $e\n$st');
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _loadError = 'Could not load team. Tap retry.';
+      });
     }
   }
 
@@ -911,6 +918,43 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
 
   @override
   Widget build(BuildContext context) {
+    if (_loadError != null) {
+      return Scaffold(
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF1A237E),
+          foregroundColor: Colors.white,
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.error_outline, size: 64, color: Colors.redAccent),
+                const SizedBox(height: 16),
+                Text(
+                  _loadError ?? 'Something went wrong.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 16),
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry'),
+                  onPressed: () {
+                    setState(() {
+                      _isLoading = true;
+                      _loadError = null;
+                    });
+                    _loadData();
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     if (_isLoading) {
       return Scaffold(
         appBar: AppBar(

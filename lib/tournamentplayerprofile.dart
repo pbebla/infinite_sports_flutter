@@ -35,6 +35,8 @@ class _TournamentPlayerProfilePageState
           FirebaseDatabase.instance.ref('/Users/$uid/Played');
       var snap = await ref.get();
       if (snap.value == null) return [];
+      // Guard against malformed data (e.g. a list or scalar at this path)
+      if (snap.value is! Map) return [];
       final data = snap.value as Map;
       final List<Map<String, String>> history = [];
       data.forEach((k, v) {
@@ -47,7 +49,8 @@ class _TournamentPlayerProfilePageState
         }
       });
       return history;
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('tournamentplayerprofile._loadHistory error: $e\n$st');
       return [];
     }
   }
