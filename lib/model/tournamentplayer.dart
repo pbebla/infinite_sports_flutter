@@ -1,3 +1,5 @@
+import 'package:infinite_sports_flutter/misc/parse_helpers.dart';
+
 class TournamentPlayer {
   final String name;
   final String teamId;
@@ -33,6 +35,33 @@ class TournamentPlayer {
 
   int get goalsAndAssists => goals + assists;
 
+  /// Returns the integer stat value for a given stat name.
+  /// Recognized names: 'goals', 'assists', 'saves', 'dpl',
+  /// 'cleanSheets', 'yellowCards', 'redCards', 'goalsAndAssists'.
+  /// Returns 0 for unrecognized names.
+  int statByName(String stat) {
+    switch (stat) {
+      case 'goals':
+        return goals;
+      case 'assists':
+        return assists;
+      case 'saves':
+        return saves;
+      case 'dpl':
+        return dpl;
+      case 'cleanSheets':
+        return cleanSheets;
+      case 'yellowCards':
+        return yellowCards;
+      case 'redCards':
+        return redCards;
+      case 'goalsAndAssists':
+        return goalsAndAssists;
+      default:
+        return 0;
+    }
+  }
+
   factory TournamentPlayer.fromFirebase(
     String name,
     String teamId,
@@ -43,23 +72,17 @@ class TournamentPlayer {
       name: name,
       teamId: teamId,
       teamName: teamName,
-      uid: data['UID']?.toString() ?? data['uid']?.toString(),
-      number: data['Number']?.toString() ?? data['number']?.toString(),
-      position: data['Position']?.toString() ?? data['position']?.toString(),
-      photoUrl: data['PhotoUrl']?.toString() ?? data['photoUrl']?.toString(),
-      goals: (data['Goals'] as num?)?.toInt() ?? (data['goals'] as num?)?.toInt() ?? 0,
-      assists: (data['Assists'] as num?)?.toInt() ?? (data['assists'] as num?)?.toInt() ?? 0,
-      saves: (data['Saves'] as num?)?.toInt() ?? (data['saves'] as num?)?.toInt() ?? 0,
-      dpl: (data['DPL'] as num?)?.toInt() ?? (data['dpl'] as num?)?.toInt() ?? 0,
-      cleanSheets: (data['CleanSheets'] as num?)?.toInt() ??
-          (data['cleanSheets'] as num?)?.toInt() ??
-          0,
-      yellowCards: (data['YellowCards'] as num?)?.toInt() ??
-          (data['yellowCards'] as num?)?.toInt() ??
-          0,
-      redCards: (data['RedCards'] as num?)?.toInt() ??
-          (data['redCards'] as num?)?.toInt() ??
-          0,
+      uid: firstNonNull(data, ['UID', 'uid'])?.toString(),
+      number: firstNonNull(data, ['Number', 'number'])?.toString(),
+      position: firstNonNull(data, ['Position', 'position'])?.toString(),
+      photoUrl: firstNonNull(data, ['PhotoUrl', 'photoUrl'])?.toString(),
+      goals: parseInt(firstNonNull(data, ['Goals', 'goals'])),
+      assists: parseInt(firstNonNull(data, ['Assists', 'assists'])),
+      saves: parseInt(firstNonNull(data, ['Saves', 'saves'])),
+      dpl: parseInt(firstNonNull(data, ['DPL', 'dpl'])),
+      cleanSheets: parseInt(firstNonNull(data, ['CleanSheets', 'cleanSheets'])),
+      yellowCards: parseInt(firstNonNull(data, ['YellowCards', 'yellowCards'])),
+      redCards: parseInt(firstNonNull(data, ['RedCards', 'redCards'])),
     );
   }
 
