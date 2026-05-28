@@ -699,18 +699,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       {'label': 'Red Cards', 'stat': 'redCards'},
     ];
 
-    int getValue(TournamentPlayer p, String stat) {
-      switch (stat) {
-        case 'goals': return p.goals;
-        case 'assists': return p.assists;
-        case 'saves': return p.saves;
-        case 'dpl': return p.dpl;
-        case 'cleanSheets': return p.cleanSheets;
-        case 'yellowCards': return p.yellowCards;
-        case 'redCards': return p.redCards;
-        default: return 0;
-      }
-    }
+    int getValue(TournamentPlayer p, String stat) => p.statByName(stat);
 
     List<TournamentPlayer> getAllSorted(String stat) {
       final filtered = players.where((p) => getValue(p, stat) > 0).toList()

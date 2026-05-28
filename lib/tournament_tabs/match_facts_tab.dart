@@ -245,22 +245,7 @@ class MatchFactsTab extends StatelessWidget {
       {'label': 'Yellow Cards', 'stat': 'yellowCards'},
     ];
 
-    int getValue(TournamentPlayer p, String stat) {
-      switch (stat) {
-        case 'goals':
-          return p.goals;
-        case 'assists':
-          return p.assists;
-        case 'saves':
-          return p.saves;
-        case 'dpl':
-          return p.dpl;
-        case 'yellowCards':
-          return p.yellowCards;
-        default:
-          return 0;
-      }
-    }
+    int getValue(TournamentPlayer p, String stat) => p.statByName(stat);
 
     final List<Widget> rows = [];
     for (final cat in categories) {

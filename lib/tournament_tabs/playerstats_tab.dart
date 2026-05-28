@@ -26,61 +26,10 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
 
   List<TournamentPlayer> _getSortedByAll(String stat) {
     final allPlayers = TournamentService.getAllPlayers(widget.rosters);
-    int Function(TournamentPlayer) getValue;
-    switch (stat) {
-      case 'goals':
-        getValue = (p) => p.goals;
-        break;
-      case 'assists':
-        getValue = (p) => p.assists;
-        break;
-      case 'goalsAndAssists':
-        getValue = (p) => p.goalsAndAssists;
-        break;
-      case 'saves':
-        getValue = (p) => p.saves;
-        break;
-      case 'dpl':
-        getValue = (p) => p.dpl;
-        break;
-      case 'cleanSheets':
-        getValue = (p) => p.cleanSheets;
-        break;
-      case 'yellowCards':
-        getValue = (p) => p.yellowCards;
-        break;
-      case 'redCards':
-        getValue = (p) => p.redCards;
-        break;
-      default:
-        getValue = (p) => 0;
-    }
-    final filtered = allPlayers.where((p) => getValue(p) > 0).toList();
-    filtered.sort((a, b) => getValue(b).compareTo(getValue(a)));
+    final filtered =
+        allPlayers.where((p) => p.statByName(stat) > 0).toList();
+    filtered.sort((a, b) => b.statByName(stat).compareTo(a.statByName(stat)));
     return filtered;
-  }
-
-  int _statValue(TournamentPlayer p, String stat) {
-    switch (stat) {
-      case 'goals':
-        return p.goals;
-      case 'assists':
-        return p.assists;
-      case 'goalsAndAssists':
-        return p.goalsAndAssists;
-      case 'saves':
-        return p.saves;
-      case 'dpl':
-        return p.dpl;
-      case 'cleanSheets':
-        return p.cleanSheets;
-      case 'yellowCards':
-        return p.yellowCards;
-      case 'redCards':
-        return p.redCards;
-      default:
-        return 0;
-    }
   }
 
   @override
@@ -158,7 +107,7 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
                   ...displayed.asMap().entries.map((entry) {
                     final rank = entry.key;
                     final player = entry.value;
-                    final value = _statValue(player, stat);
+                    final value = player.statByName(stat);
                     final team = widget.teams[player.teamId];
                     return _buildPlayerRow(
                         context, player, team, value, rank);

@@ -95,26 +95,16 @@ class FixturesTab extends StatelessWidget {
       {'label': 'DPL', 'icon': Icons.sports_kabaddi, 'faIcon': null, 'emoji': null, 'color': Colors.teal, 'stat': 'dpl'},
     ];
 
-    int getValue(TournamentPlayer p, String stat) {
-      switch (stat) {
-        case 'goals': return p.goals;
-        case 'assists': return p.assists;
-        case 'saves': return p.saves;
-        case 'dpl': return p.dpl;
-        default: return 0;
-      }
-    }
-
     final chips = <Widget>[];
     for (final def in statDefs) {
       final stat = def['stat'] as String;
       final sorted = allPlayers
-          .where((p) => getValue(p, stat) > 0)
+          .where((p) => p.statByName(stat) > 0)
           .toList()
-        ..sort((a, b) => getValue(b, stat).compareTo(getValue(a, stat)));
+        ..sort((a, b) => b.statByName(stat).compareTo(a.statByName(stat)));
       if (sorted.isEmpty) continue;
       final top = sorted.first;
-      final value = getValue(top, stat);
+      final value = top.statByName(stat);
       chips.add(
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
