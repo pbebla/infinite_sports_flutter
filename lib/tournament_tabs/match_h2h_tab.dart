@@ -182,32 +182,38 @@ class _MatchH2HTabState extends State<MatchH2HTab> {
         borderRadius: BorderRadius.circular(8),
         onTap: () async {
           if (widget.onMatchTap == null) return;
-          if (!context.mounted) return;
 
-          // Capture the navigator BEFORE the await so we can pop the
-          // loading dialog even if the InkWell context becomes unmounted
-          // during the fetch (long-standing bug — previously the dialog
-          // would orphan and the user would see endless spinner).
-          final navigator = Navigator.of(context);
+          // Past match is in the SAME tournament we're currently viewing?
+          // Just use the current page's teams — no fetch needed, no modal
+          // dialog to orphan. This is the common case for "tap the same
+          // match in H2H" (since past meetings of the same two teams in
+          // the current tournament show up here).
+          if (tournamentId == widget.currentTournamentId) {
+            final currentTeams = <String, TournamentTeam>{
+              if (widget.team1 != null) widget.team1Id: widget.team1!,
+              if (widget.team2 != null) widget.team2Id: widget.team2!,
+            };
+            widget.onMatchTap!(m, currentTeams, tournamentId);
+            return;
+          }
 
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (_) => const Center(child: CircularProgressIndicator()),
-          );
-
+          // Past match is from a DIFFERENT tournament — fetch its teams.
+          // No modal dialog (the previous showDialog pattern would orphan
+          // the spinner if the await hung). Cap the fetch with a timeout
+          // so we never wait more than 8 seconds.
           Map<String, TournamentTeam> pastTeams = {};
           try {
-            pastTeams =
-                await TournamentService.getTeamsForTournament(tournamentId);
+            pastTeams = await TournamentService
+                .getTeamsForTournament(tournamentId)
+                .timeout(
+              const Duration(seconds: 8),
+              onTimeout: () {
+                debugPrint('MatchH2HTab tap getTeams timeout');
+                return <String, TournamentTeam>{};
+              },
+            );
           } catch (e, st) {
             debugPrint('MatchH2HTab tap getTeams error: $e\n$st');
-          } finally {
-            // Always close the loading dialog, even if fetch threw or
-            // context became unmounted.
-            if (navigator.canPop()) {
-              navigator.pop();
-            }
           }
 
           if (!context.mounted) return;
@@ -328,7 +334,7 @@ class _MatchH2HTabState extends State<MatchH2HTab> {
 
         final entries = snapshot.data ?? [];
         final finished = entries
-            .where((e) => (e['match'] as TournamentMatch).status == 2)
+            .where((e) => (e['match'] as TournamentMatch).matchStatus.isFinished)
             .toList();
 
         if (finished.isEmpty) {
