@@ -6,6 +6,7 @@ import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_facts_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_h2h_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_lineup_tab.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -45,16 +46,9 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
   }
 
   String _formatDate(String mmddyyyy) {
-    if (mmddyyyy.length != 8) return mmddyyyy;
-    try {
-      final m = mmddyyyy.substring(0, 2);
-      final d = mmddyyyy.substring(2, 4);
-      final y = mmddyyyy.substring(4, 8);
-      final dt = DateTime(int.parse(y), int.parse(m), int.parse(d));
-      return DateFormat('EEEE, MMMM d, yyyy').format(dt);
-    } catch (_) {
-      return mmddyyyy;
-    }
+    final dt = parseDatabaseDate(mmddyyyy);
+    if (dt == null) return mmddyyyy;
+    return DateFormat('EEEE, MMMM d, yyyy').format(dt);
   }
 
   Widget _buildScoreboardHeader(BuildContext context) {

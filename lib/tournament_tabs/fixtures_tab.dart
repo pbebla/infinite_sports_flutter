@@ -27,16 +27,9 @@ class FixturesTab extends StatelessWidget {
   });
 
   String _formatDate(String mmddyyyy) {
-    if (mmddyyyy.length != 8) return mmddyyyy;
-    try {
-      final m = mmddyyyy.substring(0, 2);
-      final d = mmddyyyy.substring(2, 4);
-      final y = mmddyyyy.substring(4, 8);
-      final dt = DateTime(int.parse(y), int.parse(m), int.parse(d));
-      return DateFormat('EEEE, MMMM d').format(dt);
-    } catch (_) {
-      return mmddyyyy;
-    }
+    final dt = parseDatabaseDate(mmddyyyy);
+    if (dt == null) return mmddyyyy;
+    return DateFormat('EEEE, MMMM d').format(dt);
   }
 
   Set<String> _getEliminatedTeams() {

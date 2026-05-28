@@ -55,11 +55,21 @@ final List<String> months = [
   "December"
 ];
 
+/// Parses a Firebase MMDDYYYY string into a DateTime. Returns null
+/// when the input is not 8 digits or any segment is non-numeric.
+DateTime? parseDatabaseDate(String databaseDate) {
+  if (databaseDate.length != 8) return null;
+  final m = int.tryParse(databaseDate.substring(0, 2));
+  final d = int.tryParse(databaseDate.substring(2, 4));
+  final y = int.tryParse(databaseDate.substring(4, 8));
+  if (m == null || d == null || y == null) return null;
+  return DateTime.utc(y, m, d);
+}
+
 String convertDatabaseDateToFormatDate(String databaseDate) {
-  int year = int.parse(databaseDate.substring(4));
-  int day = int.parse(databaseDate.substring(2,4));
-  int month = int.parse(databaseDate.substring(0,2));
-  return DateFormat.yMMMMd('en_US').format(DateTime.utc(year, month=month, day=day));
+  final dt = parseDatabaseDate(databaseDate);
+  if (dt == null) return databaseDate;
+  return DateFormat.yMMMMd('en_US').format(dt);
 }
 
 String convertStringDateToDatabase(String date)

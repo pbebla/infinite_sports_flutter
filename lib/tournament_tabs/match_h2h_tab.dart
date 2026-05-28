@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:intl/intl.dart';
@@ -39,16 +40,9 @@ class _MatchH2HTabState extends State<MatchH2HTab> {
   }
 
   String _formatDate(String mmddyyyy) {
-    if (mmddyyyy.length != 8) return mmddyyyy;
-    try {
-      final m = mmddyyyy.substring(0, 2);
-      final d = mmddyyyy.substring(2, 4);
-      final y = mmddyyyy.substring(4, 8);
-      final dt = DateTime(int.parse(y), int.parse(m), int.parse(d));
-      return DateFormat('MMM d, yyyy').format(dt);
-    } catch (_) {
-      return mmddyyyy;
-    }
+    final dt = parseDatabaseDate(mmddyyyy);
+    if (dt == null) return mmddyyyy;
+    return DateFormat('MMM d, yyyy').format(dt);
   }
 
   Widget _smallLogo(String? url) {
