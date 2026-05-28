@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/model/tournament_stage.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
@@ -27,15 +28,15 @@ class _KnockoutTabState extends State<KnockoutTab> {
   void initState() {
     super.initState();
     // Pre-select the first knockout round
-    final knockoutMatches =
-        widget.matches.where((m) => _isKnockout(m.stage)).toList();
+    final knockoutMatches = widget.matches
+        .where((m) => TournamentStage.fromString(m.stage).isKnockout)
+        .toList();
     if (knockoutMatches.isNotEmpty) {
       final roundsSet = <String>{};
       for (final m in knockoutMatches) {
-        roundsSet.add(_normaliseRound(m.stage));
+        roundsSet.add(TournamentStage.fromString(m.stage).label);
       }
-      final rounds =
-          _roundOrder.where((r) => roundsSet.contains(r)).toList();
+      final rounds = _roundOrder.where((r) => roundsSet.contains(r)).toList();
       if (rounds.isNotEmpty) _selectedRound = rounds.first;
     }
   }
@@ -57,46 +58,19 @@ class _KnockoutTabState extends State<KnockoutTab> {
     );
   }
 
-  static const List<String> _roundOrder = [
-    'Quarterfinal',
-    'Quarterfinals',
-    'Semifinal',
-    'Semifinals',
-    'Final',
-    'Championship',
-  ];
-
-  // Normalise stage name for display and ordering
-  String _normaliseRound(String stage) {
-    switch (stage.toLowerCase()) {
-      case 'quarterfinal':
-      case 'quarterfinals':
-        return 'Quarterfinal';
-      case 'semifinal':
-      case 'semifinals':
-        return 'Semifinal';
-      case 'final':
-      case 'championship':
-        return 'Final';
-      default:
-        return stage;
-    }
-  }
-
-  bool _isKnockout(String stage) {
-    final s = stage.toLowerCase();
-    return s == 'quarterfinal' ||
-        s == 'quarterfinals' ||
-        s == 'semifinal' ||
-        s == 'semifinals' ||
-        s == 'final' ||
-        s == 'championship';
-  }
+  /// Ordered list of knockout-round display labels, sorted by stage progression.
+  static final List<String> _roundOrder = (TournamentStage.values
+          .where((s) => s.isKnockout)
+          .toList()
+        ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder)))
+      .map((s) => s.label)
+      .toList();
 
   @override
   Widget build(BuildContext context) {
-    final knockoutMatches =
-        widget.matches.where((m) => _isKnockout(m.stage)).toList();
+    final knockoutMatches = widget.matches
+        .where((m) => TournamentStage.fromString(m.stage).isKnockout)
+        .toList();
 
     if (knockoutMatches.isEmpty) {
       return const Center(child: Text('Knockout stage not yet available'));
@@ -105,7 +79,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
     // Build ordered unique rounds
     final roundsSet = <String>{};
     for (final m in knockoutMatches) {
-      roundsSet.add(_normaliseRound(m.stage));
+      roundsSet.add(TournamentStage.fromString(m.stage).label);
     }
     final rounds = _roundOrder
         .where((r) => roundsSet.contains(r))
@@ -114,7 +88,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
     // Group by normalised round
     final Map<String, List<TournamentMatch>> byRound = {};
     for (final m in knockoutMatches) {
-      final nr = _normaliseRound(m.stage);
+      final nr = TournamentStage.fromString(m.stage).label;
       byRound.putIfAbsent(nr, () => []).add(m);
     }
     for (final r in byRound.keys) {
@@ -124,7 +98,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
     // Eliminated teams across all knockout matches
     final eliminated = <String>{};
     for (final m in knockoutMatches) {
-      if (m.status == 2) {
+      if (m.matchStatus.isFinished) {
         final loser = m.loserTeamId;
         if (loser.isNotEmpty) eliminated.add(loser);
       }
@@ -169,7 +143,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: rounds.map((round) {
                 final roundMatches = byRound[round] ?? [];
-                final isFinal = round == 'Final';
+                final isFinal = round == TournamentStage.finalStage.label;
                 return Container(
                   width: isFinal ? 200 : 180,
                   margin: const EdgeInsets.only(right: 24),
@@ -215,8 +189,8 @@ class _KnockoutTabState extends State<KnockoutTab> {
     final team2 = match.team2Id != null ? widget.teams[match.team2Id] : null;
 
     final isFinalMatch = isFinal;
-    final isLive = match.status == 1;
-    final isComplete = match.status == 2;
+    final isLive = match.matchStatus.isLive;
+    final isComplete = match.matchStatus.isFinished;
     final winner = isComplete ? match.winnerTeamId : '';
 
     return Container(

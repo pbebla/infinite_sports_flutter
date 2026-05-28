@@ -1,5 +1,6 @@
 import 'package:firebase_database/firebase_database.dart';
 import 'package:infinite_sports_flutter/model/tournament.dart';
+import 'package:infinite_sports_flutter/model/tournament_stage.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
@@ -268,15 +269,6 @@ class TournamentService {
         bool isRunnerUp = false;
 
         if (matchesNode is Map) {
-          const stageOrder = {
-            'group stage': 0,
-            'quarterfinal': 1,
-            'quarterfinals': 1,
-            'semifinal': 2,
-            'semifinals': 2,
-            'final': 3,
-            'championship': 3,
-          };
           int maxOrder = 0;
 
           matchesNode.forEach((mKey, mValue) {
@@ -284,16 +276,15 @@ class TournamentService {
             final t1 = mValue['Team1Id']?.toString();
             final t2 = mValue['Team2Id']?.toString();
             if (t1 != teamId && t2 != teamId) return;
-            final stage =
-                (mValue['Stage']?.toString() ?? '').toLowerCase();
-            final order = stageOrder[stage] ?? 0;
-            if (order > maxOrder) {
+            final rawStage = mValue['Stage']?.toString() ?? '';
+            final stage = TournamentStage.fromString(rawStage);
+            final order = stage.sortOrder;
+            if (order > maxOrder && order != TournamentStage.unknown.sortOrder) {
               maxOrder = order;
-              furthestStage =
-                  mValue['Stage']?.toString() ?? 'Group Stage';
+              furthestStage = rawStage.isNotEmpty ? rawStage : 'Group Stage';
             }
-            // Check if champion or runner-up
-            if ((stage == 'final' || stage == 'championship') &&
+            // Check if champion or runner-up (only if the match was the final and finished)
+            if (stage == TournamentStage.finalStage &&
                 (mValue['Status'] as num?)?.toInt() == 2) {
               final score1 =
                   (mValue['Team1Score'] as num?)?.toInt() ?? 0;

@@ -60,8 +60,8 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
   Widget _buildScoreboardHeader(BuildContext context) {
     final team1 = widget.match.team1Id != null ? widget.teams[widget.match.team1Id] : null;
     final team2 = widget.match.team2Id != null ? widget.teams[widget.match.team2Id] : null;
-    final isLive = widget.match.status == 1;
-    final isFinished = widget.match.status == 2;
+    final isLive = widget.match.matchStatus.isLive;
+    final isFinished = widget.match.matchStatus.isFinished;
 
     Widget scoreWidget;
     if (isLive) {

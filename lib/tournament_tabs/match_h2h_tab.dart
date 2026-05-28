@@ -189,7 +189,7 @@ class _MatchH2HTabState extends State<MatchH2HTab> {
     final tournamentName = entry['tournamentName'] as String;
     final tournamentId = entry['tournamentId'] as String;
 
-    if (m.status == 0) return const SizedBox.shrink();
+    if (m.matchStatus.isPending) return const SizedBox.shrink();
 
     final myTeamIsTeam1InMatch = m.team1Id == widget.team1Id;
     final myScore = myTeamIsTeam1InMatch ? m.team1Score : m.team2Score;
@@ -254,7 +254,7 @@ class _MatchH2HTabState extends State<MatchH2HTab> {
                           child: Text(
                             widget.team1?.name ?? m.team1Id ?? 'Team 1',
                             style: TextStyle(
-                              fontWeight: (m.status == 2 && !isDraw && myTeamIsTeam1InMatch && myTeamWon)
+                              fontWeight: (m.matchStatus.isFinished && !isDraw && myTeamIsTeam1InMatch && myTeamWon)
                                   ? FontWeight.bold
                                   : FontWeight.normal,
                               fontSize: 13,
@@ -272,7 +272,7 @@ class _MatchH2HTabState extends State<MatchH2HTab> {
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      m.status == 2
+                      m.matchStatus.isFinished
                           ? '${m.team1Score} - ${m.team2Score}'
                           : 'vs',
                       style: const TextStyle(
@@ -289,7 +289,7 @@ class _MatchH2HTabState extends State<MatchH2HTab> {
                           child: Text(
                             widget.team2?.name ?? m.team2Id ?? 'Team 2',
                             style: TextStyle(
-                              fontWeight: (m.status == 2 && !isDraw && !myTeamIsTeam1InMatch && myTeamWon)
+                              fontWeight: (m.matchStatus.isFinished && !isDraw && !myTeamIsTeam1InMatch && myTeamWon)
                                   ? FontWeight.bold
                                   : FontWeight.normal,
                               fontSize: 13,

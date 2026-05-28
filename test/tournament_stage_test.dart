@@ -29,6 +29,7 @@ void main() {
     test('fromString recognizes final', () {
       expect(TournamentStage.fromString('Final'), TournamentStage.finalStage);
       expect(TournamentStage.fromString('F'), TournamentStage.finalStage);
+      expect(TournamentStage.fromString('Championship'), TournamentStage.finalStage);
     });
 
     test('fromString recognizes third place', () {

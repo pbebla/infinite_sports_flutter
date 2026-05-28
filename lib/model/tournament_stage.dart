@@ -43,7 +43,8 @@ enum TournamentStage {
     }
     if (normalized == 'f' ||
         normalized == 'final' ||
-        normalized == 'finals') {
+        normalized == 'finals' ||
+        normalized == 'championship') {
       return TournamentStage.finalStage;
     }
     return TournamentStage.unknown;

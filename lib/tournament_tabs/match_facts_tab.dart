@@ -358,7 +358,7 @@ class MatchFactsTab extends StatelessWidget {
     if (allEvents.isEmpty && team1Players.isEmpty && team2Players.isEmpty) {
       return Center(
         child: Text(
-          match.status == 0 ? 'Match not started yet' : 'No activity recorded',
+          match.matchStatus.isPending ? 'Match not started yet' : 'No activity recorded',
           style: TextStyle(
             color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
           ),

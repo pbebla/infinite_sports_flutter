@@ -2,6 +2,7 @@ import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/tournament_stage.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
@@ -25,16 +26,6 @@ class FixturesTab extends StatelessWidget {
     required this.sport,
   });
 
-  int _stageOrder(String stage) {
-    switch (stage.toLowerCase()) {
-      case 'group stage': return 0;
-      case 'quarterfinal': case 'quarterfinals': return 1;
-      case 'semifinal': case 'semifinals': return 2;
-      case 'final': case 'championship': return 3;
-      default: return 4;
-    }
-  }
-
   String _formatDate(String mmddyyyy) {
     if (mmddyyyy.length != 8) return mmddyyyy;
     try {
@@ -51,7 +42,8 @@ class FixturesTab extends StatelessWidget {
   Set<String> _getEliminatedTeams() {
     final eliminated = <String>{};
     for (final match in matches) {
-      if (match.stage != 'Group Stage' && match.status == 2) {
+      final stage = TournamentStage.fromString(match.stage);
+      if (stage != TournamentStage.group && match.matchStatus.isFinished) {
         final loser = match.loserTeamId;
         if (loser.isNotEmpty) eliminated.add(loser);
       }
@@ -60,19 +52,21 @@ class FixturesTab extends StatelessWidget {
   }
 
   String _stageLabelShort(String stage) {
-    switch (stage.toLowerCase()) {
-      case 'quarterfinal':
-      case 'quarterfinals':
-        return 'QF';
-      case 'semifinal':
-      case 'semifinals':
-        return 'SF';
-      case 'final':
-      case 'championship':
-        return 'Final';
-      case 'group stage':
+    final ts = TournamentStage.fromString(stage);
+    switch (ts) {
+      case TournamentStage.group:
         return 'Group';
-      default:
+      case TournamentStage.roundOf16:
+        return 'R16';
+      case TournamentStage.quarterFinal:
+        return 'QF';
+      case TournamentStage.semiFinal:
+        return 'SF';
+      case TournamentStage.thirdPlace:
+        return '3rd';
+      case TournamentStage.finalStage:
+        return 'Final';
+      case TournamentStage.unknown:
         return stage;
     }
   }
@@ -180,8 +174,8 @@ class FixturesTab extends StatelessWidget {
     final team2Eliminated =
         match.team2Id != null && eliminatedTeams.contains(match.team2Id);
 
-    final isLive = match.status == 1;
-    final isFinal = match.status == 2;
+    final isLive = match.matchStatus.isLive;
+    final isFinal = match.matchStatus.isFinished;
 
     final team1IsWinner = isFinal && match.winnerTeamId == match.team1Id;
     final team2IsWinner = isFinal && match.winnerTeamId == match.team2Id;
@@ -399,16 +393,16 @@ class FixturesTab extends StatelessWidget {
 
     final eliminated = _getEliminatedTeams();
 
-    // Sort matches by: stageOrder * 100000000 + dateInt + bracketPosition
+    // Sort matches by stage progression, then by date, then by bracket position
     final sortedMatches = [...matches];
     sortedMatches.sort((a, b) {
-      final aOrder = _stageOrder(a.stage) * 100000000 +
-          (int.tryParse(a.date) ?? 0) +
-          a.bracketPosition;
-      final bOrder = _stageOrder(b.stage) * 100000000 +
-          (int.tryParse(b.date) ?? 0) +
-          b.bracketPosition;
-      return aOrder.compareTo(bOrder);
+      final aStage = TournamentStage.fromString(a.stage).sortOrder;
+      final bStage = TournamentStage.fromString(b.stage).sortOrder;
+      if (aStage != bStage) return aStage.compareTo(bStage);
+      final aDate = int.tryParse(a.date) ?? 0;
+      final bDate = int.tryParse(b.date) ?? 0;
+      if (aDate != bDate) return aDate.compareTo(bDate);
+      return a.bracketPosition.compareTo(b.bracketPosition);
     });
 
     // Build date groups in stage-based order using LinkedHashMap to preserve insertion order
