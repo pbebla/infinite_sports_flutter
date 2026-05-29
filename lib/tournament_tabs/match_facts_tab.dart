@@ -73,6 +73,14 @@ class MatchFactsTab extends StatelessWidget {
         return Icons.sports_soccer;
       case 'own goal':
         return Icons.sports_soccer;
+      case 'penalty goal':
+        return Icons.sports_soccer;
+      case 'penalty saved':
+        return Icons.back_hand;
+      case 'penalty missed':
+        return Icons.block;
+      case 'substitution':
+        return Icons.swap_horiz;
       case 'assist':
         return Icons.directions_run;
       case 'yellow card':
@@ -98,6 +106,14 @@ class MatchFactsTab extends StatelessWidget {
         return Colors.green;
       case 'own goal':
         return Colors.red;
+      case 'penalty goal':
+        return Colors.green;
+      case 'penalty saved':
+        return Colors.purple;
+      case 'penalty missed':
+        return Colors.grey;
+      case 'substitution':
+        return Colors.teal;
       case 'assist':
         return Colors.lightGreen;
       case 'yellow card':
@@ -160,6 +176,21 @@ class MatchFactsTab extends StatelessWidget {
               ),
             ),
           ),
+        ],
+      );
+    }
+    // Penalty events: base icon with a small "(P)" tag.
+    if (lower == 'penalty goal' ||
+        lower == 'penalty saved' ||
+        lower == 'penalty missed') {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(_iconForEvent(eventType),
+              color: _colorForEvent(eventType), size: 16),
+          const SizedBox(width: 1),
+          const Text('(P)',
+              style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
         ],
       );
     }
