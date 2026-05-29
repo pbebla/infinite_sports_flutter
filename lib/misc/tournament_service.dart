@@ -56,6 +56,13 @@ class TournamentService {
     }
   }
 
+  /// Returns headers for all tournaments whose Finished flag is false.
+  /// Order follows getAllTournaments (active-first, newest edition first).
+  static Future<List<Tournament>> getActiveTournaments() async {
+    final all = await getAllTournaments();
+    return all.where((t) => !t.finished).toList();
+  }
+
   /// Returns the Tournament header object (top-level fields only).
   static Future<Tournament?> getTournamentHeader(String tournamentId) async {
     try {
