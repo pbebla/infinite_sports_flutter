@@ -3,9 +3,16 @@ import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
 import 'package:infinite_sports_flutter/leaderboard.dart';
 import 'package:infinite_sports_flutter/livescore.dart';
+import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/tournament.dart';
+import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
+import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
+import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 import 'package:infinite_sports_flutter/table.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/fixtures_tab.dart';
+import 'package:infinite_sports_flutter/tournamentdetail.dart';
 
 class FrontPage extends StatefulWidget {
   const FrontPage({super.key, required this.onTitleSelect});
@@ -27,6 +34,14 @@ class _FrontPageState extends State<FrontPage> {
   List<Widget> tabs = List.empty(growable: true);
   List<Tab> tabNames = List.empty(growable: true);
 
+  // Current active tournament shown as its own tab on the home screen.
+  bool hasActiveTournament = false;
+  String? currentTournamentId;
+  Tournament? currentTournament;
+  Map<String, TournamentTeam> tournamentTeams = {};
+  List<TournamentMatch> tournamentMatches = [];
+  Map<String, List<TournamentPlayer>> tournamentRosters = {};
+
   @override
   void initState() {
     super.initState();
@@ -41,7 +56,37 @@ class _FrontPageState extends State<FrontPage> {
     currentAFCDate = await getCurrentDate("AFC San Jose", currentAFCSeason);
     isCurrentFinished = await isSeasonFinished(currentSport, currentSeason);
     isCurrentAFCFinished = await isAFCSeasonFinished(currentAFCSeason);
+    await _loadCurrentTournament();
     return 1;
+  }
+
+  /// Loads the current active tournament (if any) so its live and scheduled
+  /// games can be shown as a dedicated tab on the home screen. A finished
+  /// tournament is treated as "no active tournament" so it drops off the home
+  /// screen the same way a finished league season does.
+  Future<void> _loadCurrentTournament() async {
+    hasActiveTournament = false;
+    currentTournament = null;
+    tournamentTeams = {};
+    tournamentMatches = [];
+    tournamentRosters = {};
+
+    final id = await TournamentService.getCurrentTournamentId();
+    if (id == null || id.isEmpty) return;
+    currentTournamentId = id;
+
+    final header = await TournamentService.getTournamentHeader(id);
+    if (header == null || header.finished) return;
+    currentTournament = header;
+
+    final teams = await TournamentService.getTeams(id);
+    final matches = await TournamentService.getMatches(id);
+    final rosters = await TournamentService.getRosters(id, teams);
+
+    tournamentTeams = teams;
+    tournamentMatches = matches;
+    tournamentRosters = rosters;
+    hasActiveTournament = true;
   }
 
   Widget getSportIcon(String sport) {
@@ -108,7 +153,7 @@ class _FrontPageState extends State<FrontPage> {
               }
               tabs.clear();
               tabNames.clear();
-              if (!isCurrentFinished || !isCurrentAFCFinished) {
+              if (!isCurrentFinished || !isCurrentAFCFinished || hasActiveTournament) {
                 if (!isCurrentFinished) {
                   tabNames.add(Tab(text: "Infinite Sports"));
                   tabs.add(Column(children: [
@@ -185,6 +230,10 @@ class _FrontPageState extends State<FrontPage> {
                     )
                   ]));
                 }
+                if (hasActiveTournament) {
+                  tabNames.add(const Tab(text: "Tournament"));
+                  tabs.add(_buildTournamentTab(context));
+                }
                 WidgetsBinding.instance.addPostFrameCallback((_) => executeAfterBuild());
                 return DefaultTabController(
                     length: tabs.length,
@@ -231,6 +280,66 @@ class _FrontPageState extends State<FrontPage> {
             }
         )
     );
+  }
+
+  /// Builds the home-screen "Tournament" tab: a tappable header card that
+  /// opens the full tournament page, followed by the live + scheduled +
+  /// completed games (reusing the same fixtures list as the tournament page).
+  Widget _buildTournamentTab(BuildContext context) {
+    final name = currentTournament?.name ?? "Tournament";
+    final sport = currentTournament?.sport ?? 'Soccer';
+    return Column(children: [
+      LayoutBuilder(
+        builder: (context, constraints) {
+          return GestureDetector(
+            onTap: () {
+              if (currentTournamentId == null) return;
+              Navigator.push(context, MaterialPageRoute(builder: (context) {
+                return TournamentDetailPage(
+                  tournamentId: currentTournamentId!,
+                  tournamentName: name,
+                );
+              }));
+            },
+            child: Card(
+              elevation: 2,
+              child: SizedBox(
+                width: constraints.maxWidth - 38,
+                height: 70,
+                child: Container(
+                  padding: const EdgeInsets.all(13),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          name,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 2,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Icon(Icons.emoji_events),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+      Divider(color: Theme.of(context).dividerColor),
+      Expanded(
+        child: FixturesTab(
+          matches: tournamentMatches,
+          teams: tournamentTeams,
+          rosters: tournamentRosters,
+          tournamentId: currentTournamentId ?? '',
+          sport: sport,
+        ),
+      ),
+    ]);
   }
 
   Future<void> _refreshData() async {
