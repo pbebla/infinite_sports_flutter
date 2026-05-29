@@ -386,6 +386,7 @@ class _FrontPageState extends State<FrontPage> {
   Future<void> _refreshData() async {
     _loadingPage = getFrontPageValues();
     await _loadingPage;
+    if (!mounted) return;
     setState(() {});
   }
 
@@ -399,5 +400,8 @@ class _FrontPageState extends State<FrontPage> {
     } else if (tabNames[0].text == "AFC San Jose") {
       headerNotifier.value = ["AFC San Jose", currentAFCSeason];
     }
+    // If the first tab is a tournament, headerNotifier is intentionally left
+    // unchanged: the table/leaderboard buttons it feeds are hidden on
+    // tournament tabs (via _onTournamentTab), so its value is never read there.
   }
 }
