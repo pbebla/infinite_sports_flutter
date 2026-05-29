@@ -12,21 +12,24 @@ import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 import 'package:infinite_sports_flutter/table.dart';
-import 'package:infinite_sports_flutter/tournament_tabs/fixtures_tab.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/tournament_day_view.dart';
 import 'package:infinite_sports_flutter/tournamentdetail.dart';
 
-/// One active tournament's data for the home screen, with [matches] already
-/// filtered down to the tournament's current game day.
+/// One active tournament's data for the home screen. [matches] holds ALL of the
+/// tournament's matches (the day strip filters per selected day); [initialDay]
+/// is the day to open on — the current game day computed at load time.
 class _ActiveTournamentTab {
   final Tournament tournament;
   final Map<String, TournamentTeam> teams;
   final List<TournamentMatch> matches;
   final Map<String, List<TournamentPlayer>> rosters;
+  final String initialDay;
   const _ActiveTournamentTab({
     required this.tournament,
     required this.teams,
     required this.matches,
     required this.rosters,
+    required this.initialDay,
   });
 }
 
@@ -85,9 +88,10 @@ class _FrontPageState extends State<FrontPage> {
   }
 
   /// Loads every active (not-finished) tournament that has a current game day,
-  /// keeping only that day's matches. Tournaments whose games are all in the
-  /// past (or that have none) are skipped, so finished games fall off the home
-  /// screen the same way a finished league season does.
+  /// keeping ALL of its matches so the home-tab day strip can switch between
+  /// days. Tournaments whose games are all in the past (or that have none) are
+  /// skipped, so finished games fall off the home screen the same way a
+  /// finished league season does.
   Future<void> _loadActiveTournaments() async {
     final tournaments = await TournamentService.getActiveTournaments();
     final bundles = await Future.wait(tournaments.map((t) async {
@@ -95,13 +99,13 @@ class _FrontPageState extends State<FrontPage> {
       final matches = await TournamentService.getMatches(t.id);
       final day = currentGameDay(matches.map((m) => m.date));
       if (day == null) return null;
-      final dayMatches = matches.where((m) => m.date == day).toList();
       final rosters = await TournamentService.getRosters(t.id, teams);
       return _ActiveTournamentTab(
         tournament: t,
         teams: teams,
-        matches: dayMatches,
+        matches: matches,
         rosters: rosters,
+        initialDay: day,
       );
     }));
     activeTournaments = [
@@ -372,12 +376,13 @@ class _FrontPageState extends State<FrontPage> {
       ),
       Divider(color: Theme.of(context).dividerColor),
       Expanded(
-        child: FixturesTab(
+        child: TournamentDayView(
           matches: data.matches,
           teams: data.teams,
           rosters: data.rosters,
           tournamentId: data.tournament.id,
           sport: sport,
+          initialDay: data.initialDay,
         ),
       ),
     ]);
