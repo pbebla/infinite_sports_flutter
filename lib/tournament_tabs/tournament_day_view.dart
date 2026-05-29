@@ -51,8 +51,9 @@ class _TournamentDayViewState extends State<TournamentDayView> {
     _selectedDay = _days.contains(widget.initialDay)
         ? widget.initialDay
         : (_days.isNotEmpty ? _days.first : widget.initialDay);
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => _scrollSelectedIntoView());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scrollSelectedIntoView();
+    });
   }
 
   @override
@@ -125,7 +126,7 @@ class _TournamentDayViewState extends State<TournamentDayView> {
         decoration: BoxDecoration(
           color: selected
               ? infiniteSportsPrimaryColor
-              : Colors.grey.withValues(alpha: 0.15),
+              : onSurface.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
