@@ -46,6 +46,18 @@ class TournamentMatch {
       if (raw is Map) {
         return raw.map((k, v) => MapEntry(k.toString(), v));
       }
+      // Firebase Realtime Database returns a node as a List (not a Map) when
+      // its keys are small, near-contiguous integers — which is what the
+      // minute-keyed activity map becomes (e.g. minutes 1, 2, 3 come back as
+      // [null, ..., ..., ...]). Recover the minute->events mapping by using
+      // the array index as the minute key and skipping null holes.
+      if (raw is List) {
+        final out = <String, dynamic>{};
+        for (var i = 0; i < raw.length; i++) {
+          if (raw[i] != null) out['$i'] = raw[i];
+        }
+        return out.isEmpty ? null : out;
+      }
       return null;
     }
 
