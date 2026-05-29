@@ -326,8 +326,9 @@ class _FrontPageState extends State<FrontPage> {
   }
 
   /// Builds a home-screen tournament tab: a centered, tappable header card that
-  /// opens the full tournament page, followed by that tournament's current
-  /// game-day matches (reusing the shared FixturesTab).
+  /// opens the full tournament page, followed by a [TournamentDayView] — a
+  /// swipeable day strip over that tournament's matches, opening on the current
+  /// game day.
   Widget _buildTournamentTab(BuildContext context, _ActiveTournamentTab data) {
     final name = data.tournament.name;
     final sport = data.tournament.sport;
