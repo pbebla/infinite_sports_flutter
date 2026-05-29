@@ -390,6 +390,7 @@ class _FrontPageState extends State<FrontPage> {
   }
 
   void executeAfterBuild() {
+    if (!mounted) return;
     if (tabNames.isEmpty) return;
     _onTournamentTab.value =
         tabIsTournament.isNotEmpty ? tabIsTournament[0] : false;
