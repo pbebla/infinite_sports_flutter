@@ -92,7 +92,7 @@ class _MyHomePageState extends State<MyHomePage> {
   // doesn't fire at app launch for users who never visit Tournaments.
   bool _tournamentsTabBuilt = false;
   String _title = "";
-  String _liveScoresTitle = "Live Scores";
+  String _liveScoresTitle = "Matches";
   String currentSport = "";
   String currentSeason = "";
   String currentAFCSeason = "";
@@ -189,7 +189,7 @@ class _MyHomePageState extends State<MyHomePage> {
           NavigationDestination(
             icon: ImageIcon(AssetImage('assets/scores.png')),
             selectedIcon: ImageIcon(AssetImage('assets/scores.png'), color: Colors.white,),
-            label: 'Live Scores'),
+            label: 'Matches'),
           NavigationDestination(
             icon: ImageIcon(AssetImage('assets/leagues.png')),
             selectedIcon: ImageIcon(AssetImage('assets/leagues.png'), color: Colors.white,),
