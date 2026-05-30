@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -67,139 +67,8 @@ class MatchFactsTab extends StatelessWidget {
     return events;
   }
 
-  IconData _iconForEvent(String eventType) {
-    switch (eventType.toLowerCase()) {
-      case 'goal':
-        return Icons.sports_soccer;
-      case 'own goal':
-        return Icons.sports_soccer;
-      case 'penalty goal':
-        return Icons.sports_soccer;
-      case 'penalty saved':
-        return Icons.back_hand;
-      case 'penalty missed':
-        return Icons.block;
-      case 'substitution':
-        return Icons.swap_horiz;
-      case 'assist':
-        return Icons.directions_run;
-      case 'yellow card':
-        return Icons.square;
-      case 'red card':
-        return Icons.square;
-      case 'second yellow':
-        return Icons.square;
-      case 'dpl':
-        return Icons.sports_kabaddi;
-      case 'save':
-        return Icons.back_hand;
-      case 'foul':
-        return Icons.warning_amber;
-      default:
-        return Icons.sports;
-    }
-  }
-
-  Color _colorForEvent(String eventType) {
-    switch (eventType.toLowerCase()) {
-      case 'goal':
-        return Colors.green;
-      case 'own goal':
-        return Colors.red;
-      case 'penalty goal':
-        return Colors.green;
-      case 'penalty saved':
-        return Colors.purple;
-      case 'penalty missed':
-        return Colors.grey;
-      case 'substitution':
-        return Colors.teal;
-      case 'assist':
-        return Colors.lightGreen;
-      case 'yellow card':
-        return Colors.amber;
-      case 'red card':
-        return Colors.red;
-      case 'second yellow':
-        return Colors.orange;
-      case 'dpl':
-        return Colors.deepOrange;
-      case 'save':
-        return Colors.purple;
-      case 'foul':
-        return Colors.orange;
-      default:
-        return Colors.grey;
-    }
-  }
-
   Widget _eventIcon(String eventType) {
-    final lower = eventType.toLowerCase();
-    // Goal: emoji soccer ball
-    if (lower == 'goal') {
-      return const Text('⚽', style: TextStyle(fontSize: 16));
-    }
-    // Own goal: red soccer icon
-    if (lower == 'own goal') {
-      return const Icon(Icons.sports_soccer, color: Colors.red, size: 18);
-    }
-    // Assist: soccer boot icon
-    if (lower == 'assist') {
-      return const FaIcon(FontAwesomeIcons.shoePrints, size: 15, color: Colors.black87);
-    }
-    // Second yellow: stacked yellow + red card widget
-    if (lower == 'second yellow') {
-      return Stack(
-        children: [
-          Transform.rotate(
-            angle: -0.15,
-            child: Container(
-              width: 11,
-              height: 15,
-              decoration: BoxDecoration(
-                color: Colors.amber,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ),
-          Positioned(
-            left: 5,
-            child: Transform.rotate(
-              angle: 0.15,
-              child: Container(
-                width: 11,
-                height: 15,
-                decoration: BoxDecoration(
-                  color: Colors.red,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-    // Penalty events: base icon with a small "(P)" tag.
-    if (lower == 'penalty goal' ||
-        lower == 'penalty saved' ||
-        lower == 'penalty missed') {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(_iconForEvent(eventType),
-              color: _colorForEvent(eventType), size: 16),
-          const SizedBox(width: 1),
-          const Text('(P)',
-              style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
-        ],
-      );
-    }
-    final icon = _iconForEvent(eventType);
-    final color = _colorForEvent(eventType);
-    if (lower == 'yellow card' || lower == 'red card') {
-      return Icon(icon, color: color, size: 16);
-    }
-    return Icon(icon, color: color, size: 18);
+    return StatIcon(asset: statIconAsset(eventType), size: 24);
   }
 
   Widget _buildEventRow(BuildContext context, Map<String, dynamic> event) {
