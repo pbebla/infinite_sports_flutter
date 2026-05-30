@@ -1,12 +1,12 @@
 import 'dart:collection';
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournament_stage.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_match_detail.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -73,16 +73,10 @@ class FixturesTab extends StatelessWidget {
     final allPlayers = [...team1Players, ...team2Players];
     if (allPlayers.isEmpty) return const SizedBox.shrink();
 
-    final statDefs = [
-      {'label': 'G', 'icon': null, 'faIcon': null, 'emoji': '⚽', 'color': Colors.green, 'stat': 'goals'},
-      {'label': 'A', 'icon': null, 'faIcon': FontAwesomeIcons.shoePrints, 'emoji': null, 'color': Colors.black87, 'stat': 'assists'},
-      {'label': 'S', 'icon': Icons.back_hand, 'faIcon': null, 'emoji': null, 'color': Colors.purple, 'stat': 'saves'},
-      {'label': 'DPL', 'icon': Icons.sports_kabaddi, 'faIcon': null, 'emoji': null, 'color': Colors.teal, 'stat': 'dpl'},
-    ];
+    const stats = ['goals', 'assists', 'saves', 'dpl'];
 
     final chips = <Widget>[];
-    for (final def in statDefs) {
-      final stat = def['stat'] as String;
+    for (final stat in stats) {
       final sorted = allPlayers
           .where((p) => p.statByName(stat) > 0)
           .toList()
@@ -100,13 +94,8 @@ class FixturesTab extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (def['emoji'] != null)
-                Text(def['emoji'] as String, style: const TextStyle(fontSize: 12))
-              else if (def['faIcon'] != null)
-                FaIcon(def['faIcon'] as FaIconData, size: 12, color: def['color'] as Color)
-              else
-                Icon(def['icon'] as IconData, size: 12, color: def['color'] as Color),
-              const SizedBox(width: 3),
+              StatIcon(asset: statIconAssetForStat(stat), size: 18),
+              const SizedBox(width: 4),
               Text(
                 '${top.name} $value',
                 style: const TextStyle(fontSize: 11),
