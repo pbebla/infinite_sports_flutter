@@ -38,6 +38,11 @@ void main() {
       expect(statIconAssetForStat('dpl'), 'assets/stat_icons/dpl.png');
     });
 
+    test('is case-insensitive and trims surrounding whitespace', () {
+      expect(statIconAssetForStat('GOALS'), 'assets/stat_icons/goal.png');
+      expect(statIconAssetForStat('  Saves  '), 'assets/stat_icons/save.png');
+    });
+
     test('returns null for unknown stat keys', () {
       expect(statIconAssetForStat('rebounds'), isNull);
     });

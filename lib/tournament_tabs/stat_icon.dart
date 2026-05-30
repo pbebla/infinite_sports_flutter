@@ -80,7 +80,8 @@ class StatIcon extends StatelessWidget {
         ],
       ),
       child: asset == null
-          ? Icon(Icons.sports, size: size * 0.62, color: Colors.grey)
+          // grey.shade700 keeps the fallback readable against the white chip.
+          ? Icon(Icons.sports, size: size * 0.62, color: Colors.grey.shade700)
           : Image.asset(asset!, fit: BoxFit.contain),
     );
   }
