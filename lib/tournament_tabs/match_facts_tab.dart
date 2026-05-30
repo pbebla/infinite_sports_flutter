@@ -226,6 +226,82 @@ class MatchFactsTab extends StatelessWidget {
     );
   }
 
+  Widget _buildIconLegend(BuildContext context) {
+    // [eventType, label] for all 13 icons, in approved order.
+    const items = <List<String>>[
+      ['goal', 'Goal'],
+      ['own goal', 'Own goal'],
+      ['penalty goal', 'Goal by penalty'],
+      ['penalty missed', 'Missed penalty'],
+      ['penalty saved', 'Saved penalty'],
+      ['save', 'Save (goalkeeper)'],
+      ['assist', 'Assist'],
+      ['substitution', 'Substitution'],
+      ['yellow card', 'Yellow card'],
+      ['red card', 'Red card'],
+      ['second yellow', 'Second yellow (= red)'],
+      ['foul', 'Foul'],
+      ['dpl', 'DPL — Defensive Play (Tackle, Steal, Block)'],
+    ];
+
+    Widget cell(List<String> item, {required bool rightColumn}) {
+      return Padding(
+        // Right column is nudged toward the middle, away from the left line.
+        padding: EdgeInsets.only(left: rightColumn ? 14 : 0, bottom: 11),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            StatIcon(asset: statIconAsset(item[0]), size: 30),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                item[1],
+                style: const TextStyle(fontSize: 12, height: 1.25),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Two columns running downward: pair items (left, right). A trailing odd
+    // item occupies the left column only.
+    final List<Widget> rows = [];
+    for (int i = 0; i < items.length; i += 2) {
+      rows.add(Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: cell(items[i], rightColumn: false)),
+          Expanded(
+            child: (i + 1 < items.length)
+                ? cell(items[i + 1], rightColumn: true)
+                : const SizedBox.shrink(),
+          ),
+        ],
+      ));
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          child: Text(
+            'What the icons mean',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+          child: Column(children: rows),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Parse and merge all events
@@ -241,12 +317,23 @@ class MatchFactsTab extends StatelessWidget {
     });
 
     if (allEvents.isEmpty && team1Players.isEmpty && team2Players.isEmpty) {
-      return Center(
-        child: Text(
-          match.matchStatus.isPending ? 'Match not started yet' : 'No activity recorded',
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
-          ),
+      return SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Center(
+                child: Text(
+                  match.matchStatus.isPending ? 'Match not started yet' : 'No activity recorded',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                  ),
+                ),
+              ),
+            ),
+            _buildIconLegend(context),
+          ],
         ),
       );
     }
@@ -295,6 +382,7 @@ class MatchFactsTab extends StatelessWidget {
           else
             ...allEvents.map((e) => _buildEventRow(context, e)),
           _buildMatchLeaders(context),
+          _buildIconLegend(context),
         ],
       ),
     );
