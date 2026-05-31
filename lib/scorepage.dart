@@ -21,7 +21,6 @@ import 'package:infinite_sports_flutter/table.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'package:material_color_utilities/material_color_utilities.dart';
 
 Map<String, String> stringToGameText = {
   "OnePointer": "FT",
@@ -214,12 +213,13 @@ class _ScorePageState extends State<ScorePage> {
       child: Container(
           padding: const EdgeInsets.all(13),
           child: Table(
+            border: TableBorder.all(),
             columnWidths: const {
-              0: FlexColumnWidth(0.3),
-              1: FlexColumnWidth(0.05),
-              2: FlexColumnWidth(0.3),
-              3: FlexColumnWidth(0.05),
-              4: FlexColumnWidth(0.3),
+              0: FlexColumnWidth(),
+              1: FixedColumnWidth(25),
+              2: FixedColumnWidth(70),
+              3: FixedColumnWidth(25),
+              4: FlexColumnWidth(),
             },
             defaultVerticalAlignment: TableCellVerticalAlignment.middle,
             children: [

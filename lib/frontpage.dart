@@ -308,8 +308,6 @@ class _FrontPageState extends State<FrontPage> {
               return Center(
                 child: Card(
                   elevation: 2,
-                  shadowColor: Colors.black,
-                  color: Colors.white,
                   child: SizedBox(
                     width: 350,
                     height: 70,

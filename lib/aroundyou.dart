@@ -51,7 +51,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
     mapController = controller;
   }
 
-  _getUserLocation() async {
+  Future<void> _getUserLocation() async {
     bool serviceEnabled;
     LocationPermission permission;
     // Check if location services are enabled

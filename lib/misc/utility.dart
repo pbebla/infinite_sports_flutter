@@ -19,11 +19,7 @@ import 'package:infinite_sports_flutter/model/soccerplayer.dart';
 import 'package:infinite_sports_flutter/model/userinformation.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
-import 'dart:typed_data';
-import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
-import 'package:material_color_utilities/material_color_utilities.dart';
 
 var infiniteSportsPrimaryColor = const Color.fromARGB(255, 208, 0, 0);
 
