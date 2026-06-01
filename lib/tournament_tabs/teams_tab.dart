@@ -23,8 +23,6 @@ class TeamsTab extends StatelessWidget {
     switch (qualification.toLowerCase()) {
       case 'qualified':
         return Colors.green;
-      case 'can qualify':
-        return Colors.amber;
       case 'eliminated':
         return Colors.red;
       default:

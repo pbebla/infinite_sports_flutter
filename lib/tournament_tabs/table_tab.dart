@@ -20,8 +20,6 @@ class TableTab extends StatelessWidget {
     switch (qualification.toLowerCase()) {
       case 'qualified':
         return Colors.green;
-      case 'can qualify':
-        return Colors.amber;
       case 'eliminated':
         return Colors.red;
       default:
@@ -99,6 +97,7 @@ class TableTab extends StatelessWidget {
           _tableHeader(context),
           Expanded(
             child: ListView.builder(
+              padding: EdgeInsetsGeometry.all(0),
               itemCount: sorted.length,
               itemBuilder: (context, index) => _teamRow(context, sorted[index]),
             ),
@@ -135,22 +134,45 @@ class TableTab extends StatelessWidget {
           .colorScheme
           .surfaceContainerHighest
           .withValues(alpha: 0.5),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          const SizedBox(width: 4 + 18 + 4 + 24 + 6), // qual bar + seed + logo
           Expanded(
-            flex: 5,
-            child: Text('Team', style: headerStyle),
+            flex: 7,
+            child: Center(child: Text('Team', style: headerStyle)),
           ),
-          SizedBox(width: 30, child: Center(child: Text('GP', style: headerStyle))),
-          SizedBox(width: 30, child: Center(child: Text('W', style: headerStyle))),
-          SizedBox(width: 30, child: Center(child: Text('D', style: headerStyle))),
-          SizedBox(width: 30, child: Center(child: Text('L', style: headerStyle))),
-          SizedBox(width: 30, child: Center(child: Text('GS', style: headerStyle))),
-          SizedBox(width: 30, child: Center(child: Text('GC', style: headerStyle))),
-          SizedBox(width: 36, child: Center(child: Text('GD', style: headerStyle))),
-          SizedBox(width: 36, child: Center(child: Text('Pts', style: headerStyle))),
+          Expanded(
+            flex: 1,
+            child: Center(child: Text('GP', style: headerStyle)),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(child: Text('W', style: headerStyle)),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(child: Text('D', style: headerStyle)),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(child: Text('L', style: headerStyle)),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(child: Text('GS', style: headerStyle)),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(child: Text('GC', style: headerStyle)),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(child: Text('GD', style: headerStyle)),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(child: Text('Pts', style: headerStyle)),
+          ),
         ],
       ),
     );
@@ -187,50 +209,72 @@ class TableTab extends StatelessWidget {
         child: Row(
         children: [
           // Qualification color bar
-          Container(
-            width: 4,
-            height: 44,
-            color: qualColor,
-          ),
-          const SizedBox(width: 6),
-          // Seed badge
-          SizedBox(
-            width: 18,
-            child: team.seed != null
-                ? Center(
-                    child: Text(
-                      '${team.seed}',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withValues(alpha: 0.5),
-                      ),
-                    ),
-                  )
-                : null,
-          ),
-          const SizedBox(width: 4),
-          // Team logo
-          TeamLogo(url: team.logoUrl, size: 24),
-          const SizedBox(width: 6),
           Expanded(
-            flex: 5,
-            child: Text(
-              team.name,
-              style: const TextStyle(fontSize: 13),
-              overflow: TextOverflow.ellipsis,
-            ),
+            flex: 7,
+            child: Row(
+              children: [
+                Container(
+                  width: 4,
+                  height: 44,
+                  color: qualColor,
+                ),
+                SizedBox(
+                  width: 18,
+                  child: team.seed != null
+                      ? Center(
+                          child: Text(
+                            '${team.seed}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface
+                                  .withValues(alpha: 0.5),
+                            ),
+                          ),
+                        )
+                      : null,
+                ),
+                // Team logo
+                TeamLogo(url: team.logoUrl, size: 24),
+                const SizedBox(width: 6),
+                Expanded(
+                  flex: 5,
+                  child: Text(
+                    team.name,
+                    style: const TextStyle(fontSize: 13),
+                    softWrap: true,
+                  ),
+                ),
+                    ]
+                  ),
           ),
-          SizedBox(width: 30, child: Center(child: Text('${team.gp}', style: cellStyle))),
-          SizedBox(width: 30, child: Center(child: Text('${team.wins}', style: cellStyle))),
-          SizedBox(width: 30, child: Center(child: Text('${team.draws}', style: cellStyle))),
-          SizedBox(width: 30, child: Center(child: Text('${team.losses}', style: cellStyle))),
-          SizedBox(width: 30, child: Center(child: Text('${team.gs}', style: cellStyle))),
-          SizedBox(width: 30, child: Center(child: Text('${team.gc}', style: cellStyle))),
-          SizedBox(
-            width: 36,
+          Expanded(
+            flex: 1,
+            child: Center(child: Text('${team.gp}', style: cellStyle)),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(child: Text('${team.wins}', style: cellStyle)),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(child: Text('${team.draws}', style: cellStyle)),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(child: Text('${team.losses}', style: cellStyle)),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(child: Text('${team.gs}', style: cellStyle)),
+          ),
+          Expanded(
+            flex: 1,
+            child: Center(child: Text('${team.gc}', style: cellStyle)),
+          ),
+          Expanded(
+            flex: 1,
             child: Center(
               child: Text(
                 team.gd >= 0 ? '+${team.gd}' : '${team.gd}',
@@ -244,8 +288,8 @@ class TableTab extends StatelessWidget {
               ),
             ),
           ),
-          SizedBox(
-            width: 36,
+          Expanded(
+            flex: 1,
             child: Center(
               child: Text(
                 '${team.points}',
@@ -267,7 +311,6 @@ class TableTab extends StatelessWidget {
         runSpacing: 4,
         children: [
           _legendItem(Colors.green, 'Qualified'),
-          _legendItem(Colors.amber, 'Can Qualify'),
           _legendItem(Colors.red, 'Eliminated'),
         ],
       ),

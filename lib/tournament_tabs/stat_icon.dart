@@ -5,31 +5,31 @@ import 'package:flutter/material.dart';
 String? statIconAsset(String eventType) {
   switch (eventType.toLowerCase().trim()) {
     case 'goal':
-      return 'assets/stat_icons/goal.png';
+      return 'assets/goal.png';
     case 'own goal':
-      return 'assets/stat_icons/own_goal.png';
+      return 'assets/own_goal.png';
     case 'penalty goal':
-      return 'assets/stat_icons/goal_penalty.png';
+      return 'assets/goal_penalty.png';
     case 'penalty missed':
-      return 'assets/stat_icons/penalty_missed.png';
+      return 'assets/penalty_missed.png';
     case 'penalty saved':
-      return 'assets/stat_icons/penalty_saved.png';
+      return 'assets/penalty_saved.png';
     case 'save':
-      return 'assets/stat_icons/save.png';
+      return 'assets/save.png';
     case 'assist':
-      return 'assets/stat_icons/assist.png';
+      return 'assets/assist.png';
     case 'substitution':
-      return 'assets/stat_icons/substitution.png';
+      return 'assets/substitution.png';
     case 'yellow card':
-      return 'assets/stat_icons/yellow_card.png';
+      return 'assets/yellow.png';
     case 'red card':
-      return 'assets/stat_icons/red_card.png';
+      return 'assets/red.png';
     case 'second yellow':
-      return 'assets/stat_icons/second_yellow.png';
+      return 'assets/second_yellow.png';
     case 'foul':
-      return 'assets/stat_icons/foul.png';
+      return 'assets/foul.png';
     case 'dpl':
-      return 'assets/stat_icons/dpl.png';
+      return 'assets/dpl.png';
     default:
       return null;
   }

@@ -65,59 +65,6 @@ class FixturesTab extends StatelessWidget {
     }
   }
 
-  // Build a compact leaders strip for completed matches
-  Widget _buildLeadersStrip(BuildContext context, TournamentMatch match) {
-    if (!match.matchStatus.isFinished) return const SizedBox.shrink();
-    final team1Players = match.team1Id != null ? (rosters[match.team1Id] ?? []) : <TournamentPlayer>[];
-    final team2Players = match.team2Id != null ? (rosters[match.team2Id] ?? []) : <TournamentPlayer>[];
-    final allPlayers = [...team1Players, ...team2Players];
-    if (allPlayers.isEmpty) return const SizedBox.shrink();
-
-    const stats = ['goals', 'assists', 'saves', 'dpl'];
-
-    final chips = <Widget>[];
-    for (final stat in stats) {
-      final sorted = allPlayers
-          .where((p) => p.statByName(stat) > 0)
-          .toList()
-        ..sort((a, b) => b.statByName(stat).compareTo(a.statByName(stat)));
-      if (sorted.isEmpty) continue;
-      final top = sorted.first;
-      final value = top.statByName(stat);
-      chips.add(
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-          decoration: BoxDecoration(
-            color: Colors.grey.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              StatIcon(asset: statIconAssetForStat(stat), size: 18),
-              const SizedBox(width: 4),
-              Text(
-                '${top.name} $value',
-                style: const TextStyle(fontSize: 11),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    if (chips.isEmpty) return const SizedBox.shrink();
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 6),
-      child: Wrap(
-        spacing: 6,
-        runSpacing: 4,
-        children: chips,
-      ),
-    );
-  }
-
   Widget _buildMatchCard(
     BuildContext context,
     TournamentMatch match,
@@ -198,8 +145,6 @@ class FixturesTab extends StatelessWidget {
             name1,
             style: TextStyle(
               fontWeight: team1IsWinner ? FontWeight.bold : FontWeight.normal,
-              decoration:
-                  team1Eliminated ? TextDecoration.lineThrough : null,
               fontSize: 13,
             ),
             textAlign: TextAlign.right,
@@ -222,8 +167,6 @@ class FixturesTab extends StatelessWidget {
             name2,
             style: TextStyle(
               fontWeight: team2IsWinner ? FontWeight.bold : FontWeight.normal,
-              decoration:
-                  team2Eliminated ? TextDecoration.lineThrough : null,
               fontSize: 13,
             ),
             textAlign: TextAlign.left,
@@ -309,8 +252,6 @@ class FixturesTab extends StatelessWidget {
                   ),
                 ],
               ),
-              // Leaders strip for completed matches
-              _buildLeadersStrip(context, match),
               // Stream link
               if (match.link != null && match.link!.isNotEmpty) ...[
                 const SizedBox(height: 8),
@@ -383,13 +324,7 @@ class FixturesTab extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
               child: Text(
                 _formatDate(date),
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onSurface
-                          .withValues(alpha: 0.7),
-                    ),
+                style: TextStyle(fontWeight: FontWeight.bold),
               ),
             ),
             ...dateMatches.map(

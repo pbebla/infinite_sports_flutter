@@ -97,7 +97,7 @@ class _TournamentDayViewState extends State<TournamentDayView> {
     // Nothing to switch between when there is a single day.
     if (_days.length <= 1) return const SizedBox.shrink();
     return SizedBox(
-      height: 66,
+      height: 70,
       child: ListView.builder(
         controller: _stripController,
         scrollDirection: Axis.horizontal,
@@ -112,6 +112,7 @@ class _TournamentDayViewState extends State<TournamentDayView> {
     final selected = day == _selectedDay;
     final dt = parseDatabaseDate(day);
     final dow = dt != null ? DateFormat('EEE').format(dt).toUpperCase() : '';
+    final month = dt != null ? DateFormat.MMM().format(dt).toUpperCase() : '';
     final dayNumber = dt != null ? DateFormat('d').format(dt) : day;
     final onSurface = Theme.of(context).colorScheme.onSurface;
 
@@ -141,6 +142,15 @@ class _TournamentDayViewState extends State<TournamentDayView> {
               ),
             ),
             const SizedBox(height: 2),
+            Text(
+              month,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color:
+                    selected ? Colors.white : onSurface.withValues(alpha: 0.7),
+              ),
+            ),
             Text(
               dayNumber,
               style: TextStyle(

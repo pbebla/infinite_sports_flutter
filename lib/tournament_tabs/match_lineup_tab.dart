@@ -110,20 +110,13 @@ class MatchLineupTab extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 6),
-          // Player photo (falls back to person icon if no photoUrl)
-          TeamLogo(
-            url: p.photoUrl,
-            size: 24,
-            fallbackIcon: Icons.person,
-          ),
-          const SizedBox(width: 8),
           Expanded(
             child: Text(
               p.name,
-              style: const TextStyle(fontSize: 12),
-              overflow: TextOverflow.ellipsis,
+              softWrap: true,
+              overflow: TextOverflow.fade,
             ),
-          ),
+          )
         ],
       ),
     );
@@ -140,30 +133,12 @@ class MatchLineupTab extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Team header
-          Padding(
-            padding: const EdgeInsets.all(8),
-            child: Row(
-              children: [
-                TeamLogo(url: team?.logoUrl, size: 24),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    team?.name ?? 'TBD',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
           // Coach row if available
           if (team?.coachName != null && team!.coachName!.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
               child: Row(
                 children: [
-                  const Icon(Icons.person_pin, size: 16, color: Colors.grey),
                   const SizedBox(width: 4),
                   Text(
                     'Coach',

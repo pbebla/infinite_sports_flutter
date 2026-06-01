@@ -9,7 +9,6 @@ import 'package:infinite_sports_flutter/tournament_tabs/fixtures_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/knockout_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/playerstats_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/table_tab.dart';
-import 'package:infinite_sports_flutter/tournament_tabs/teamstats_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/teams_tab.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
@@ -42,7 +41,6 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
     Tab(text: 'Table'),
     Tab(text: 'Knockout'),
     Tab(text: 'Player Stats'),
-    Tab(text: 'Team Stats'),
     Tab(text: 'Teams'),
   ];
 
@@ -189,7 +187,6 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                     teams: _teams,
                     tournamentId: widget.tournamentId,
                   ),
-                  TeamStatsTab(teams: _teams, rosters: _rosters),
                   TeamsTab(
                     teams: _teams,
                     matches: _matches,

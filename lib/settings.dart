@@ -4,6 +4,7 @@ import 'package:flutter_launcher_icons/constants.dart';
 import 'package:flutter_sticky_header/flutter_sticky_header.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -183,6 +184,19 @@ class _SettingsState extends State<Settings> {
                   },)); 
                 },),
                 const Divider(color: Colors.grey),
+                ListTile(title: const Text("Tournaments"), minTileHeight: 40, onTap: () {
+                  Navigator.push(context, MaterialPageRoute(builder:(context) {
+                    return Scaffold(
+                      appBar: AppBar(
+                        centerTitle: true,
+                        title: const Text("Tournaments"),
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                      body: _buildIconLegend(context)
+                    );
+                  },)); 
+                },),
               ]
             ),
           ), 
@@ -365,6 +379,81 @@ class _SettingsState extends State<Settings> {
         )
         )
     ],),)
+    );
+  }
+
+    Widget _buildIconLegend(BuildContext context) {
+    // [eventType, label] for all 13 icons, in approved order.
+    const items = <List<String>>[
+      ['goal', 'Goal'],
+      ['own goal', 'Own goal'],
+      ['penalty goal', 'Goal by penalty'],
+      ['penalty missed', 'Missed penalty'],
+      ['penalty saved', 'Saved penalty'],
+      ['save', 'Save (goalkeeper)'],
+      ['assist', 'Assist'],
+      ['substitution', 'Substitution'],
+      ['yellow card', 'Yellow card'],
+      ['red card', 'Red card'],
+      ['second yellow', 'Second yellow (= red)'],
+      ['foul', 'Foul'],
+      ['dpl', 'DPL — Defensive Play (Tackle, Steal, Block)'],
+    ];
+
+    Widget cell(List<String> item, {required bool rightColumn}) {
+      return Padding(
+        // Right column is nudged toward the middle, away from the left line.
+        padding: EdgeInsets.only(left: rightColumn ? 14 : 0, bottom: 11),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            StatIcon(asset: statIconAsset(item[0]), size: 30),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                item[1],
+                style: const TextStyle(fontSize: 12, height: 1.25),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Two columns running downward: pair items (left, right). A trailing odd
+    // item occupies the left column only.
+    final List<Widget> rows = [];
+    for (int i = 0; i < items.length; i += 2) {
+      rows.add(Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: cell(items[i], rightColumn: false)),
+          Expanded(
+            child: (i + 1 < items.length)
+                ? cell(items[i + 1], rightColumn: true)
+                : const SizedBox.shrink(),
+          ),
+        ],
+      ));
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          child: Text(
+            'What the icons mean',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+          child: Column(children: rows),
+        ),
+      ],
     );
   }
   

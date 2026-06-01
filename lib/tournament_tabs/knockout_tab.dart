@@ -121,6 +121,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
               return ChoiceChip(
                 label: Text(round),
                 selected: selected,
+                showCheckmark: false,
                 onSelected: (_) {
                   setState(() => _selectedRound = round);
                   _scrollToRound(rounds, index);

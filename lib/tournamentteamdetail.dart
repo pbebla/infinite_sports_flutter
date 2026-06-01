@@ -647,7 +647,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
     }
 
     final categories = [
-      {'label': 'Top Scorer', 'stat': 'goals'},
+      {'label': 'Goals', 'stat': 'goals'},
       {'label': 'Assists', 'stat': 'assists'},
       {'label': 'Saves', 'stat': 'saves'},
       {'label': 'Defensive Plays (DPL)', 'stat': 'dpl'},

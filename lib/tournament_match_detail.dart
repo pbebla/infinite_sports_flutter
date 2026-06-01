@@ -4,7 +4,6 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_facts_tab.dart';
-import 'package:infinite_sports_flutter/tournament_tabs/match_h2h_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_lineup_tab.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -33,18 +32,6 @@ class TournamentMatchDetailPage extends StatefulWidget {
 }
 
 class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
-  late Future<List<Map<String, dynamic>>> _h2hFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.match.team1Id != null && widget.match.team2Id != null) {
-      _h2hFuture = TournamentService.getH2HMatches(
-          widget.match.team1Id!, widget.match.team2Id!);
-    } else {
-      _h2hFuture = Future.value([]);
-    }
-  }
 
   String _formatDate(String mmddyyyy) {
     final dt = parseDatabaseDate(mmddyyyy);
@@ -236,7 +223,7 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
     final team2Players = widget.match.team2Id != null ? (widget.rosters[widget.match.team2Id] ?? []) : <TournamentPlayer>[];
 
     return DefaultTabController(
-      length: 3,
+      length: 2,
       child: Scaffold(
         body: NestedScrollView(
           headerSliverBuilder: (context, innerBoxIsScrolled) {
@@ -265,8 +252,7 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                 bottom: const TabBar(
                   tabs: [
                     Tab(text: 'Facts'),
-                    Tab(text: 'Lineup'),
-                    Tab(text: 'H2H'),
+                    Tab(text: 'Lineup')
                   ],
                   labelColor: Colors.white,
                   unselectedLabelColor: Colors.white70,
@@ -292,29 +278,7 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                 team1Players: team1Players,
                 team2Players: team2Players,
                 sport: widget.sport,
-              ),
-              MatchH2HTab(
-                team1Id: widget.match.team1Id ?? '',
-                team2Id: widget.match.team2Id ?? '',
-                team1: team1,
-                team2: team2,
-                currentTournamentId: widget.tournamentId,
-                preloadedFuture: _h2hFuture,
-                onMatchTap: (pastMatch, pastTeams, pastTournamentId) {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => TournamentMatchDetailPage(
-                        match: pastMatch,
-                        teams: pastTeams,
-                        rosters: const {},
-                        tournamentId: pastTournamentId,
-                        sport: widget.sport,
-                      ),
-                    ),
-                  );
-                },
-              ),
+              )
             ],
           ),
         ),
