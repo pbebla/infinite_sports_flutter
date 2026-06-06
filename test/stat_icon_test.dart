@@ -12,8 +12,8 @@ void main() {
       expect(statIconAsset('save'), 'assets/save.png');
       expect(statIconAsset('assist'), 'assets/assist.png');
       expect(statIconAsset('substitution'), 'assets/substitution.png');
-      expect(statIconAsset('yellow card'), 'assets/yellow_card.png');
-      expect(statIconAsset('red card'), 'assets/red_card.png');
+      expect(statIconAsset('yellow card'), 'assets/yellow.png');
+      expect(statIconAsset('red card'), 'assets/red.png');
       expect(statIconAsset('second yellow'), 'assets/second_yellow.png');
       expect(statIconAsset('foul'), 'assets/foul.png');
       expect(statIconAsset('dpl'), 'assets/dpl.png');
@@ -21,7 +21,7 @@ void main() {
 
     test('is case-insensitive and trims surrounding whitespace', () {
       expect(statIconAsset('GOAL'), 'assets/goal.png');
-      expect(statIconAsset('  Yellow Card  '), 'assets/yellow_card.png');
+      expect(statIconAsset('  Yellow Card  '), 'assets/yellow.png');
     });
 
     test('returns null for unknown or empty event types', () {
