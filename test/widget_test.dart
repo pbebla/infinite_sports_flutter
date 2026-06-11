@@ -1,30 +1,73 @@
-// This is a basic Flutter widget test.
+// Widget smoke tests for the app's Firebase-free presentational widgets.
 //
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+// Note: the app root `MyApp` cannot be smoke-tested in a plain `flutter test`
+// run. Its build reads `Provider.of<ThemeProvider>` (so it needs that ancestor)
+// and `MyHomePage.initState` immediately calls into Firebase
+// (FirebaseAuth.instance.currentUser, Realtime Database queries) which isn't
+// initialized in unit tests. Instead we smoke-test the presentational widgets
+// that make up the Tournaments UI, which build without any backend.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:infinite_sports_flutter/main.dart';
+import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/fixtures_tab.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/tournament_day_view.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('FixturesTab shows an empty state when there are no matches',
+      (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: FixturesTab(
+            matches: [],
+            teams: {},
+            rosters: {},
+            tournamentId: 't1',
+            sport: 'Soccer',
+          ),
+        ),
+      ),
+    );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(find.text('No fixtures available'), findsOneWidget);
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
+  testWidgets('TournamentDayView renders one day pill per distinct match day',
+      (tester) async {
+    final matches = [
+      TournamentMatch.fromFirebase('m1', {
+        'Date': '05292026',
+        'Stage': 'Group Stage',
+        'Label': 'Group Stage',
+      }),
+      TournamentMatch.fromFirebase('m2', {
+        'Date': '06012026',
+        'Stage': 'Group Stage',
+        'Label': 'Group Stage',
+      }),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TournamentDayView(
+            matches: matches,
+            teams: const {},
+            rosters: const {},
+            tournamentId: 't1',
+            sport: 'Soccer',
+            initialDay: '05292026',
+          ),
+        ),
+      ),
+    );
+    // Let the post-frame scroll-into-view callback run.
     await tester.pump();
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Two distinct days -> the strip shows both day-of-month numbers.
+    expect(find.text('29'), findsOneWidget); // May 29
+    expect(find.text('1'), findsOneWidget); // June 1
   });
 }
