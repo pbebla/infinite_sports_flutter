@@ -107,6 +107,23 @@ export const onMatchStatus = onValueWritten(
     if (before === after) return;
     const root = dbRoot(event);
 
+    // Corrections re-arm the one-shot alerts, mirroring the goal re-arm on
+    // score undo: reopening a finished match (2 -> 1) re-arms full time, and
+    // resetting to pending (-> 0) re-arms both, so the eventual real kickoff
+    // and full time still alert. The correction itself stays silent.
+    const meta = root.child(`NotificationsMeta/${tid}/${mid}`);
+    if (before === 2 && after === 1) {
+      await meta.child('fulltime').remove();
+      return;
+    }
+    if (after === 0) {
+      await Promise.all([
+        meta.child('kickoff').remove(),
+        meta.child('fulltime').remove(),
+      ]);
+      return;
+    }
+
     const kind = before === 0 && after === 1 ? 'kickoff' : after === 2 ? 'fulltime' : null;
     if (!kind) return;
     if (!(await claimKey(root, tid, mid, kind))) return;

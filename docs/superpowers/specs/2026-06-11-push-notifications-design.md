@@ -96,7 +96,10 @@ Topic names use only `[a-zA-Z0-9_-]`; ids are sanitized (percent-style escape of
 2. `onValueWritten('/Tournaments/{tid}/Matches/{mid}/Status')`:
    - `0 → 1` → kickoff alert (include `MatchLocation` when present).
    - `anything → 2` → full-time alert with final score.
-   - Any other transition (e.g. reopened match `2 → 1`) → silence.
+   - Any other transition (e.g. reopened match `2 → 1`) → silence — but corrections
+     **re-arm** the one-shot dedupe keys, mirroring the goal re-arm on undo: a reopen
+     (`2 → 1`) clears the `fulltime` key and a reset to pending (`→ 0`) clears both,
+     so the eventual real kickoff/full time still alerts (added after owner field test).
 
 ### Idempotency / double-fire guard
 
