@@ -63,9 +63,9 @@ class PushNotifications {
     required String body,
     required String payload,
   }) async {
-    // Brand-red tint for the small stencil icon; full-color logo on a solid
-    // square (Robinhood-style) as the large icon — white square in light
-    // mode, black square in dark mode, matching the phone's theme.
+    // Black disc for the small stencil icon (owner choice); full-color logo
+    // on a solid square (Robinhood-style) as the large icon — white square in
+    // light mode, black square in dark mode, matching the phone's theme.
     final isDark =
         PlatformDispatcher.instance.platformBrightness == Brightness.dark;
     final androidNotificationDetails =
@@ -73,7 +73,7 @@ class PushNotifications {
         channelDescription: 'Incoming Infinite Sports notifications',
         importance: Importance.max,
         priority: Priority.high,
-        color: const Color(0xFFD00000),
+        color: const Color(0xFF000000),
         largeIcon: DrawableResourceAndroidBitmap(
             isDark ? 'ic_notification_large_dark' : 'ic_notification_large_light'),
         ticker: 'ticker');

@@ -76,7 +76,7 @@ describe('decideGoal', () => {
     expect(d!.title).toBe('⚽ GOAL! Eagles 2 – 1 Lions');
     expect(d!.body).toBe("Sam Smith (Eagles) 12' · Assist: Skylar Jackson");
     expect(d!.dedupeKey).toBe('goal_t1_2');
-    expect(d!.color).toBe('#D00000');
+    expect(d!.color).toBe('#000000');
     expect(d!.condition).toBe(
       "'tournament_T1' in topics || 'tournament_T1_team_eaglesId' in topics || 'tournament_T1_team_lionsId' in topics");
     expect(d!.data).toEqual({ type: 'goal', tournamentId: 'T1', matchId: 'M1' });
@@ -154,7 +154,7 @@ describe('decideStatus', () => {
     expect(d!.title).toBe('🟢 Kickoff: Eagles vs Lions');
     expect(d!.body).toBe('Now playing — Field A');
     expect(d!.dedupeKey).toBe('kickoff');
-    expect(d!.color).toBe('#D00000');
+    expect(d!.color).toBe('#000000');
     expect(d!.data.type).toBe('kickoff');
   });
 
@@ -170,7 +170,7 @@ describe('decideStatus', () => {
     expect(d!.title).toBe('🏁 Full time: Eagles 3 – 1 Lions');
     expect(d!.body).toBe('');
     expect(d!.dedupeKey).toBe('fulltime');
-    expect(d!.color).toBe('#D00000');
+    expect(d!.color).toBe('#000000');
   });
 
   test('silence on no-change, reopen (2 -> 1), and reset (1 -> 0)', () => {

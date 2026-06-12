@@ -25,12 +25,12 @@ export interface AlertDecision {
   data: { type: string; tournamentId: string; matchId: string };
 }
 
-/** One consistent brand tint for the small-icon logo on every alert —
+/** One consistent black disc for the small-icon logo on every alert —
  *  the title emoji (🟢/⚽/🏁) carries the alert type instead (owner choice). */
 export const ALERT_COLORS = {
-  goal: '#D00000',
-  kickoff: '#D00000',
-  fulltime: '#D00000',
+  goal: '#000000',
+  kickoff: '#000000',
+  fulltime: '#000000',
 } as const;
 
 // ---- topics (MUST stay in parity with lib/misc/notification_topics.dart) ----
