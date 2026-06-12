@@ -28,15 +28,19 @@ void main() {
     ..writeAsBytesSync(img.encodePng(resized));
   stdout.writeln('wrote ${out.path}');
 
-  // Large icon: the full-color logo on a black square (Robinhood-style),
-  // shown as the big image on the right side of notifications.
+  // Large icons: the full-color logo on a solid square (Robinhood-style),
+  // shown as the big image on the right side of notifications. Two variants —
+  // white square for light mode, black square for dark mode; the app picks
+  // one at display time from the phone's theme.
   const largeSide = 256;
-  final large = img.Image(width: largeSide, height: largeSide, numChannels: 4);
-  img.fill(large, color: img.ColorRgba8(0, 0, 0, 255));
   final glyph = img.copyResize(trimmed, width: (largeSide * 0.78).round());
-  img.compositeImage(large, glyph,
-      dstX: (largeSide - glyph.width) ~/ 2, dstY: (largeSide - glyph.height) ~/ 2);
-  final largeOut = File('android/app/src/main/res/drawable/ic_notification_large.png')
-    ..writeAsBytesSync(img.encodePng(large));
-  stdout.writeln('wrote ${largeOut.path}');
+  for (final (suffix, r, g, b) in [('light', 255, 255, 255), ('dark', 0, 0, 0)]) {
+    final large = img.Image(width: largeSide, height: largeSide, numChannels: 4);
+    img.fill(large, color: img.ColorRgba8(r, g, b, 255));
+    img.compositeImage(large, glyph,
+        dstX: (largeSide - glyph.width) ~/ 2, dstY: (largeSide - glyph.height) ~/ 2);
+    final out = File('android/app/src/main/res/drawable/ic_notification_large_$suffix.png')
+      ..writeAsBytesSync(img.encodePng(large));
+    stdout.writeln('wrote ${out.path}');
+  }
 }
