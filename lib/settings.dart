@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:flutter_sticky_header/flutter_sticky_header.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
+import 'package:infinite_sports_flutter/misc/follow_store.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -31,12 +32,26 @@ class Settings extends StatefulWidget {
 class _SettingsState extends State<Settings> {
   TextEditingController? _emailController;
   String? _emailErrorText;
-  
+  final FollowStore _followStore = FollowStore();
+  List<FollowedChannel> _follows = [];
+  bool _masterEnabled = true;
+
   @override
   void initState() {
     super.initState();
     _emailController = TextEditingController();
     _emailErrorText = "";
+    _loadNotificationSettings();
+  }
+
+  Future<void> _loadNotificationSettings() async {
+    final follows = await _followStore.follows();
+    final master = await _followStore.masterEnabled();
+    if (!mounted) return;
+    setState(() {
+      _follows = follows;
+      _masterEnabled = master;
+    });
   }
 
   @override
@@ -108,6 +123,54 @@ class _SettingsState extends State<Settings> {
                 ]
               ),
             ), 
+          ),
+        ),
+        SliverStickyHeader(
+          header: const Text("Notifications"),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate(
+              [
+                const Divider(color: Colors.grey),
+                ListTile(
+                  title: const Text("All notifications"),
+                  minTileHeight: 40,
+                  trailing: Switch(
+                    value: _masterEnabled,
+                    onChanged: (value) async {
+                      await _followStore.setMasterEnabled(value);
+                      setState(() => _masterEnabled = value);
+                    },
+                  ),
+                ),
+                if (_follows.isEmpty)
+                  const ListTile(
+                    minTileHeight: 40,
+                    title: Text(
+                      "Turn on the bell on any tournament or team page to follow it here.",
+                      style: TextStyle(fontSize: 13, color: Colors.grey),
+                    ),
+                  )
+                else
+                  for (final channel in _follows)
+                    ListTile(
+                      minTileHeight: 40,
+                      title: Text(channel.label),
+                      subtitle: Text(
+                        channel.kind == 'tournament' ? 'All matches' : 'Team',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      trailing: IconButton(
+                        tooltip: 'Stop alerts',
+                        icon: const Icon(Icons.notifications_active),
+                        onPressed: () async {
+                          await _followStore.unfollow(channel.topic);
+                          await _loadNotificationSettings();
+                        },
+                      ),
+                    ),
+                const Divider(color: Colors.grey),
+              ],
+            ),
           ),
         ),
         SliverStickyHeader(
