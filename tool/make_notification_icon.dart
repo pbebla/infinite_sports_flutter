@@ -14,8 +14,15 @@ void main() {
     stderr.writeln('ERROR: background is not transparent — need a transparent logo.');
     exit(1);
   }
+  // Trim the transparent margins so the glyph fills the icon box — the raw
+  // logo has large built-in padding that made the status-bar icon look tiny.
+  final trimmed = img.trim(src, mode: img.TrimMode.transparent);
+  final side = trimmed.width > trimmed.height ? trimmed.width : trimmed.height;
+  final square = img.Image(width: side, height: side, numChannels: 4);
+  img.compositeImage(square, trimmed,
+      dstX: (side - trimmed.width) ~/ 2, dstY: (side - trimmed.height) ~/ 2);
   // 96x96 = 24dp small icon at xxhdpi; Android scales for other densities.
-  final resized = img.copyResize(src, width: 96, height: 96, interpolation: img.Interpolation.cubic);
+  final resized = img.copyResize(square, width: 96, height: 96, interpolation: img.Interpolation.cubic);
   final out = File('android/app/src/main/res/drawable/ic_notification.png')
     ..createSync(recursive: true)
     ..writeAsBytesSync(img.encodePng(resized));

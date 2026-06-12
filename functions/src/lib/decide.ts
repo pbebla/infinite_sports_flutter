@@ -20,8 +20,18 @@ export interface AlertDecision {
   title: string;
   body: string;
   condition: string;
+  /** Android accent color so each alert type is recognizable at a glance. */
+  color: string;
   data: { type: string; tournamentId: string; matchId: string };
 }
+
+/** Per-type accent colors: goal = brand red, kickoff = green,
+ *  full time = the app's tournament-header navy. */
+export const ALERT_COLORS = {
+  goal: '#D00000',
+  kickoff: '#0A7D2C',
+  fulltime: '#1A237E',
+} as const;
 
 // ---- topics (MUST stay in parity with lib/misc/notification_topics.dart) ----
 
@@ -157,9 +167,10 @@ export function decideGoal(args: {
   return {
     kind: 'goal',
     dedupeKey: `goal_t${teamTag}_${after}`,
-    title: `GOAL! ${names.team1} ${match.team1Score} – ${match.team2Score} ${names.team2}`,
+    title: `⚽ GOAL! ${names.team1} ${match.team1Score} – ${match.team2Score} ${names.team2}`,
     body,
     condition: buildCondition(tid, match.team1Id, match.team2Id),
+    color: ALERT_COLORS.goal,
     data: { type: 'goal', tournamentId: tid, matchId: mid },
   };
 }
@@ -176,11 +187,12 @@ export function decideStatus(args: {
     return {
       kind: 'kickoff',
       dedupeKey: 'kickoff',
-      title: `Kickoff: ${names.team1} vs ${names.team2}`,
+      title: `🟢 Kickoff: ${names.team1} vs ${names.team2}`,
       body: match.matchLocation
         ? `Now playing — ${match.matchLocation}`
         : 'Now playing — follow it live!',
       condition,
+      color: ALERT_COLORS.kickoff,
       data: { type: 'kickoff', tournamentId: tid, matchId: mid },
     };
   }
@@ -189,9 +201,10 @@ export function decideStatus(args: {
     return {
       kind: 'fulltime',
       dedupeKey: 'fulltime',
-      title: `Full time: ${names.team1} ${match.team1Score} – ${match.team2Score} ${names.team2}`,
+      title: `🏁 Full time: ${names.team1} ${match.team1Score} – ${match.team2Score} ${names.team2}`,
       body: '',
       condition,
+      color: ALERT_COLORS.fulltime,
       data: { type: 'fulltime', tournamentId: tid, matchId: mid },
     };
   }

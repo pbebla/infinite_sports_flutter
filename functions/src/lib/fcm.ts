@@ -22,6 +22,7 @@ export async function sendAlert(d: AlertDecision): Promise<void> {
         notification: {
           channelId: 'infinite_sports_notifications',
           sound: 'default',
+          color: d.color,
         },
       },
       apns: { payload: { aps: { sound: 'default' } } },

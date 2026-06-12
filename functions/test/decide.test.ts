@@ -73,9 +73,10 @@ describe('decideGoal', () => {
     const d = decideGoal({ ...base, match: liveMatch() });
     expect(d).not.toBeNull();
     expect(d!.kind).toBe('goal');
-    expect(d!.title).toBe('GOAL! Eagles 2 – 1 Lions');
+    expect(d!.title).toBe('⚽ GOAL! Eagles 2 – 1 Lions');
     expect(d!.body).toBe("Sam Smith (Eagles) 12' · Assist: Skylar Jackson");
     expect(d!.dedupeKey).toBe('goal_t1_2');
+    expect(d!.color).toBe('#D00000');
     expect(d!.condition).toBe(
       "'tournament_T1' in topics || 'tournament_T1_team_eaglesId' in topics || 'tournament_T1_team_lionsId' in topics");
     expect(d!.data).toEqual({ type: 'goal', tournamentId: 'T1', matchId: 'M1' });
@@ -139,7 +140,7 @@ describe('decideGoal', () => {
   test('team 2 goal title uses snapshot scores', () => {
     const m = liveMatch({ Team2Score: 2, Team2Activity: { '30': [{ Goal: 'Leo' }] } });
     const d = decideGoal({ ...base, teamTag: 2, match: m });
-    expect(d!.title).toBe('GOAL! Eagles 2 – 2 Lions');
+    expect(d!.title).toBe('⚽ GOAL! Eagles 2 – 2 Lions');
   });
 });
 
@@ -150,9 +151,10 @@ describe('decideStatus', () => {
     const d = decideStatus({ ...base, before: 0, after: 1,
       match: liveMatch({ MatchLocation: 'Field A' }) });
     expect(d!.kind).toBe('kickoff');
-    expect(d!.title).toBe('Kickoff: Eagles vs Lions');
+    expect(d!.title).toBe('🟢 Kickoff: Eagles vs Lions');
     expect(d!.body).toBe('Now playing — Field A');
     expect(d!.dedupeKey).toBe('kickoff');
+    expect(d!.color).toBe('#0A7D2C');
     expect(d!.data.type).toBe('kickoff');
   });
 
@@ -165,9 +167,10 @@ describe('decideStatus', () => {
     const d = decideStatus({ ...base, before: 1, after: 2,
       match: liveMatch({ Status: 2, Team1Score: 3 }) });
     expect(d!.kind).toBe('fulltime');
-    expect(d!.title).toBe('Full time: Eagles 3 – 1 Lions');
+    expect(d!.title).toBe('🏁 Full time: Eagles 3 – 1 Lions');
     expect(d!.body).toBe('');
     expect(d!.dedupeKey).toBe('fulltime');
+    expect(d!.color).toBe('#1A237E');
   });
 
   test('silence on no-change, reopen (2 -> 1), and reset (1 -> 0)', () => {
