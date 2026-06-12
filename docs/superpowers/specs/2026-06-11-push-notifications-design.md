@@ -21,7 +21,7 @@ Delivery is FCM **topic**-based: device-level, no account required.
 
 | Moment | Trigger (DB write by Manager app) | Notification |
 |---|---|---|
-| ⚽ Goal | `Team1Score` or `Team2Score` **increases** while `Status == 1` | "GOAL! Eagles 2–1 Lions" + scorer line when available |
+| ⚽ Goal | `Team1Score` or `Team2Score` **increases** while `Status == 1` | Title "GOAL! Eagles 2–1 Lions"; body "Sam Smith (Eagles) 12' · Assist: Skylar Jackson" — scorer and assist best-effort, assist line only when one exists (body renders smaller than title on lock screens) |
 | 🟢 Kickoff | `Status` transitions `0 → 1` | "Kickoff: Eagles vs Lions" + field/location when set |
 | 🏁 Full time | `Status` transitions `→ 2` | "Full time: Eagles 3–1 Lions" |
 
@@ -85,7 +85,14 @@ Topic names use only `[a-zA-Z0-9_-]`; ids are sanitized (percent-style escape of
 1. `onValueWritten('/Tournaments/{tid}/Matches/{mid}/Team1Score')` and `.../Team2Score` → shared handler:
    - Ignore unless new > old (score **decrease or unchanged = silence**; covers undo-stat removals).
    - Ignore unless match `Status == 1` (post-final corrections = silence).
-   - Body: `"{Team1} {s1} – {s2} {Team2}"`. Scorer line is **best-effort**: read the match's newest goal-type activity event; omit the line if not yet written (activity and score are separate writes and may race).
+   - **Grace window:** claim the dedupe key immediately (so re-fires still skip), then wait ~10 s before
+     reading activity and sending — gives the scorekeeper time to enter the assist after the goal.
+   - Title: `"GOAL! {Team1} {s1} – {s2} {Team2}"`. Body (best-effort, omit parts not found):
+     scorer = newest goal-type event in the scoring team's activity; assist = an assist event in the
+     **same minute bucket** as that goal **or the next minute** (clock may tick between taps). Tap order
+     is irrelevant — both events land in minute buckets, so goal-then-assist and assist-then-goal pair
+     identically; the Manager app needs no entry-order rule and no changes.
+   - Assist entered after the window: the alert already went out goal-only; no follow-up push.
 2. `onValueWritten('/Tournaments/{tid}/Matches/{mid}/Status')`:
    - `0 → 1` → kickoff alert (include `MatchLocation` when present).
    - `anything → 2` → full-time alert with final score.
@@ -149,7 +156,7 @@ First bell tap calls the existing permission request; if the OS reports denied, 
    - `functions/test/decide.test.ts` — every §4 rule: increase/decrease/no-change, status transitions incl. reopen, dedupe keys, exact alert wording, sanitizer.
    - Fan app: `test/notification_topics_test.dart` (topic names/sanitizer parity cases), `test/follow_store_test.dart` (list CRUD + master-switch semantics with mocked messaging+prefs).
 2. **Emulator dress rehearsal:** Firebase Local Emulator Suite (database + functions). Scripted match simulation (pending → live → goals up/down → finished) asserts exactly which sends would fire, before any deploy.
-3. **Live sign-off:** deploy; owner follows *Test Tournament 2026* on a real phone; goals recorded from the Manager app must buzz the phone in 1–3 s. Safe in production: zero fans are subscribed to any topic until they tap a bell, and bells ship in this same release.
+3. **Live sign-off:** deploy; owner follows *Test Tournament 2026* on a real phone; kickoff/full-time buzz in 1–3 s, goals in ~10–15 s (grace window) with scorer + assist shown. Safe in production: zero fans are subscribed to any topic until they tap a bell, and bells ship in this same release.
 
 ---
 
