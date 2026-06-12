@@ -5,6 +5,8 @@ import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournamentplayerprofile.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
+import 'package:infinite_sports_flutter/misc/notification_topics.dart';
+import 'package:infinite_sports_flutter/widgets/follow_bell.dart';
 
 class TournamentTeamDetailPage extends StatefulWidget {
   final String teamId;
@@ -903,6 +905,13 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
               pinned: true,
               backgroundColor: const Color(0xFF1A237E),
               foregroundColor: Colors.white,
+              actions: [
+                FollowBell(
+                  topic: teamTopic(widget.tournamentId, widget.teamId),
+                  label: _team?.name ?? 'this team',
+                  kind: 'team',
+                ),
+              ],
               flexibleSpace: FlexibleSpaceBar(
                 background: _buildHeader(context),
               ),
