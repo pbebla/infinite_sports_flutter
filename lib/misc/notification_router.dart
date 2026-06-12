@@ -4,9 +4,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
-import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
-import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_match_detail.dart';
 
 /// Message that launched the app from a terminated state; routed by
@@ -15,20 +13,44 @@ RemoteMessage? pendingLaunchMessage;
 
 /// Opens the match page for a Watcher notification payload
 /// `{type, tournamentId, matchId}`. Silently no-ops on bad payloads —
-/// a tap must never crash the app.
+/// a tap must never crash the app. Shows an immediate loading overlay so the
+/// tap always gives instant feedback while the match data downloads.
 Future<void> openMatchFromNotification(Map<String, dynamic> data) async {
   final tid = data['tournamentId']?.toString() ?? '';
   final mid = data['matchId']?.toString() ?? '';
   if (tid.isEmpty || mid.isEmpty) return;
+  final ctx = mainContext;
+  if (ctx == null) return;
+  final navigator = Navigator.of(ctx, rootNavigator: true);
+  var loadingShown = true;
+  showDialog(
+    context: ctx,
+    barrierDismissible: false,
+    useRootNavigator: true,
+    builder: (_) => const PopScope(
+      canPop: false,
+      child: Center(child: CircularProgressIndicator(color: Colors.white)),
+    ),
+  );
+  void dismissLoading() {
+    if (loadingShown) {
+      loadingShown = false;
+      navigator.pop();
+    }
+  }
+
   try {
-    final results = await Future.wait([
-      TournamentService.getTournamentHeader(tid),
-      TournamentService.getTeams(tid),
-      TournamentService.getMatches(tid),
-    ]);
-    final tournament = results[0] as Tournament?;
-    final teams = results[1] as Map<String, TournamentTeam>;
-    final matches = results[2] as List<TournamentMatch>;
+    // Rosters depend on teams, so chain them off the teams future instead of
+    // waiting for everything else first — all four loads overlap.
+    final headerFuture = TournamentService.getTournamentHeader(tid);
+    final teamsFuture = TournamentService.getTeams(tid);
+    final matchesFuture = TournamentService.getMatches(tid);
+    final rostersFuture =
+        teamsFuture.then((teams) => TournamentService.getRosters(tid, teams));
+    final tournament = await headerFuture;
+    final teams = await teamsFuture;
+    final matches = await matchesFuture;
+    final rosters = await rostersFuture;
     TournamentMatch? match;
     for (final m in matches) {
       if (m.id == mid) {
@@ -36,11 +58,12 @@ Future<void> openMatchFromNotification(Map<String, dynamic> data) async {
         break;
       }
     }
-    if (match == null) return;
-    final rosters = await TournamentService.getRosters(tid, teams);
-    final ctx = mainContext;
-    if (ctx == null) return;
-    Navigator.of(ctx, rootNavigator: true).push(MaterialPageRoute(
+    if (match == null) {
+      dismissLoading();
+      return;
+    }
+    dismissLoading();
+    navigator.push(MaterialPageRoute(
       builder: (_) => TournamentMatchDetailPage(
         match: match!,
         teams: teams,
@@ -50,6 +73,7 @@ Future<void> openMatchFromNotification(Map<String, dynamic> data) async {
       ),
     ));
   } catch (e) {
+    dismissLoading();
     debugPrint('openMatchFromNotification failed: $e');
   }
 }
