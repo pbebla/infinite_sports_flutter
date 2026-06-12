@@ -9,6 +9,17 @@
         android:icon="@mipmap/launcher_icon">
         <meta-data android:name="com.google.android.geo.API_KEY"
                android:value="@string/GOOGLE_MAPS_API_KEY"/>
+        <!-- Push notifications: white-silhouette small icon + brand accent,
+             and a high-importance channel so alerts banner-pop. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notification" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification_accent" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="infinite_sports_notifications" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

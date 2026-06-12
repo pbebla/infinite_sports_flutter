@@ -12,8 +12,18 @@ class PushNotifications {
     );
   }
 
+  /// Channel id shared with the Watcher's FCM sends (functions/src/lib/fcm.ts)
+  /// and the manifest's default_notification_channel_id. Max importance makes
+  /// alerts banner-pop instead of arriving silently in the tray.
+  static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
+    'infinite_sports_notifications',
+    'Infinite Sports App Notifications',
+    description: 'Incoming Infinite Sports notifications',
+    importance: Importance.max,
+  );
+
   static Future initLocalNotifications() async {
-    const AndroidInitializationSettings androidInitializationSettings = AndroidInitializationSettings('@mipmap/launcher_icon');
+    const AndroidInitializationSettings androidInitializationSettings = AndroidInitializationSettings('@drawable/ic_notification');
     final DarwinInitializationSettings iOSinitializationSettings = DarwinInitializationSettings();
     final InitializationSettings initializationSettings = InitializationSettings(
       android: androidInitializationSettings,
@@ -21,9 +31,10 @@ class PushNotifications {
     );
 
     if (Platform.isAndroid) {
-      await _flutterLocalNotificationsPlugin
-          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()!
-          .requestNotificationsPermission();
+      final androidPlugin = _flutterLocalNotificationsPlugin
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()!;
+      await androidPlugin.requestNotificationsPermission();
+      await androidPlugin.createNotificationChannel(_channel);
     }
 
     if (Platform.isIOS) {
@@ -63,7 +74,9 @@ class PushNotifications {
         android: androidNotificationDetails,
         iOS: iosNotificationDetails
       );
+    // Unique id per alert so a goal doesn't overwrite the kickoff in the tray.
+    final id = DateTime.now().millisecondsSinceEpoch & 0x7FFFFFFF;
     await _flutterLocalNotificationsPlugin
-      .show(0, title, body, notificationDetails, payload: payload);
+      .show(id, title, body, notificationDetails, payload: payload);
   }
 }
