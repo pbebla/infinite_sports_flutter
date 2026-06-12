@@ -1,0 +1,11 @@
+/// FCM topic naming for follow bells.
+/// MUST stay in parity with functions/src/lib/decide.ts (sanitizeId,
+/// tournamentTopic, teamTopic) — the Watcher addresses these exact topics.
+String sanitizeTopicId(String id) =>
+    id.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+
+String tournamentTopic(String tournamentId) =>
+    'tournament_${sanitizeTopicId(tournamentId)}';
+
+String teamTopic(String tournamentId, String teamId) =>
+    'tournament_${sanitizeTopicId(tournamentId)}_team_${sanitizeTopicId(teamId)}';
