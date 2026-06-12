@@ -106,6 +106,8 @@ function bucketEvents(bucket: unknown, minute: number): MinuteEvent[] {
     if (!ev || typeof ev !== 'object') continue;
     const entries = Object.entries(ev as Record<string, unknown>);
     if (!entries.length) continue;
+    // The Manager app writes each activity event as a single-entry {EventType: PlayerName}
+    // map, so only the first entry is meaningful.
     const [type, player] = entries[0];
     out.push({ minute, eventType: type.toLowerCase().trim(), player: String(player) });
   }
@@ -126,7 +128,7 @@ function findScorerAndAssist(activity: Record<string, unknown> | null):
   const events = allEvents(activity);
   const scorer = [...events].reverse().find((e) => SCORER_EVENTS.has(e.eventType)) ?? null;
   if (!scorer) return { scorer: null, assist: null };
-  const assist = events.find((e) =>
+  const assist = [...events].reverse().find((e) =>
     e.eventType === 'assist' &&
     (e.minute === scorer.minute || e.minute === scorer.minute + 1)) ?? null;
   return { scorer, assist };
@@ -197,7 +199,9 @@ export function decideStatus(args: {
   return null; // reopen (2->1), reset (1->0), or anything else: silence
 }
 
-/** Keys to delete when a score DECREASES, so a re-recorded goal alerts again. */
+/** Keys to delete when a score DECREASES, so a re-recorded goal alerts again.
+ *  (teamTag: which team's counter, oldScore: score before the undo,
+ *  newScore: score after the undo.) Returns keys for newScore+1..oldScore. */
 export function goalKeysToClear(
   teamTag: 1 | 2, oldScore: number, newScore: number,
 ): string[] {

@@ -57,6 +57,13 @@ describe('parseMatch', () => {
       names: NAMES, tid: 'T1', mid: 'M1' });
     expect(d?.body).toBe("Ana (Eagles) 1'");
   });
+
+  test('parseMatch tolerates null and empty-array activity', () => {
+    const m = parseMatch(null);
+    expect(m.team1Score).toBe(0);
+    expect(m.team1Activity).toBeNull();
+    expect(parseMatch({ Team1Activity: [] }).team1Activity).toBeNull();
+  });
 });
 
 describe('decideGoal', () => {
@@ -120,6 +127,19 @@ describe('decideGoal', () => {
   test('silence when match is not live', () => {
     expect(decideGoal({ ...base, match: liveMatch({ Status: 2 }) })).toBeNull();
     expect(decideGoal({ ...base, match: liveMatch({ Status: 0 }) })).toBeNull();
+  });
+
+  test('two goals in one minute pair the newest assist with the newest goal', () => {
+    const m = liveMatch({ Team1Activity: {
+      '12': [{ Goal: 'Ana' }, { Assist: 'Old Helper' }, { Goal: 'Sam Smith' }, { Assist: 'Skylar Jackson' }] } });
+    expect(decideGoal({ ...base, match: m })!.body)
+      .toBe("Sam Smith (Eagles) 12' · Assist: Skylar Jackson");
+  });
+
+  test('team 2 goal title uses snapshot scores', () => {
+    const m = liveMatch({ Team2Score: 2, Team2Activity: { '30': [{ Goal: 'Leo' }] } });
+    const d = decideGoal({ ...base, teamTag: 2, match: m });
+    expect(d!.title).toBe('GOAL! Eagles 2 – 2 Lions');
   });
 });
 
