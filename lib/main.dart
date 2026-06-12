@@ -5,6 +5,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_config/flutter_config.dart';
 import 'package:infinite_sports_flutter/aroundyou.dart';
+import 'package:infinite_sports_flutter/misc/notification_router.dart';
 import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -42,11 +43,10 @@ Future<void> main() async {
       PushNotifications.showSimpleNotification(title: message.notification!.title!, body: message.notification!.body!, payload: payloadData);
     }
   },);
-  final RemoteMessage? message = 
-    await FirebaseMessaging.instance.getInitialMessage();
-  if (message != null) {
-    print("Launched from terminated state");
-  }
+  FirebaseMessaging.onMessageOpenedApp.listen((message) {
+    openMatchFromNotification(message.data);
+  });
+  pendingLaunchMessage = await FirebaseMessaging.instance.getInitialMessage();
   SharedPreferences prefs = await SharedPreferences.getInstance();
   darkModeEnabled = prefs.getBool('darkMode') ?? false;
   autoSignIn = prefs.getBool('autoSignIn') ?? false;
@@ -107,6 +107,13 @@ class _MyHomePageState extends State<MyHomePage> {
     // TODO: implement initState
     setTitle(_liveScoresTitle);
     _fetchCurrentValues = setCurrentValues();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final message = pendingLaunchMessage;
+      if (message != null) {
+        pendingLaunchMessage = null;
+        openMatchFromNotification(message.data);
+      }
+    });
     super.initState();
   }
 

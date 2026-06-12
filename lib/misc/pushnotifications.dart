@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:infinite_sports_flutter/misc/notification_router.dart';
 
 class PushNotifications {
   static final FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
@@ -40,7 +41,8 @@ class PushNotifications {
       onDidReceiveBackgroundNotificationResponse: onNotificationTap);
   }
 
-  static void onNotificationTap(notificationresponse) {
+  static void onNotificationTap(NotificationResponse notificationResponse) {
+    openMatchFromPayloadString(notificationResponse.payload);
   }
 
   //local notifications
