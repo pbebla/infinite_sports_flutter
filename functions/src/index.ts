@@ -4,19 +4,14 @@ import { onValueWritten } from 'firebase-functions/v2/database';
 import type { DatabaseEvent, DataSnapshot } from 'firebase-functions/v2/database';
 import type { Change } from 'firebase-functions/v2';
 import {
-  decideGoal, decideStatus, goalKeysToClear, parseMatch,
+  decideGoal, decideStatus, goalKeysToClear, parseMatch, toInt,
 } from './lib/decide';
 import { loadNames } from './lib/names';
 import { sendAlert } from './lib/fcm';
 
 admin.initializeApp();
 
-const GOAL_GRACE_MS = 10_000; // wait for the assist to be entered
-
-function toInt(v: unknown): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.trunc(n) : 0;
-}
+const GOAL_GRACE_MS = 10_000; // Scorekeepers typically enter the assist within ~10s of the goal; the alert waits so it can include the assist credit.
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -54,19 +49,27 @@ async function handleScore(
   const preMatch = parseMatch((await matchRef.get()).val());
   if (preMatch.status !== 1) return;
 
-  if (!(await claimKey(tid, mid, `goal_t${teamTag}_${after}`))) return;
+  const dedupeKey = `goal_t${teamTag}_${after}`;
+  if (!(await claimKey(tid, mid, dedupeKey))) return;
 
-  await sleep(GOAL_GRACE_MS); // let the scorekeeper enter the assist
+  try {
+    await sleep(GOAL_GRACE_MS); // let the scorekeeper enter the assist
 
-  // Re-read for fresh activity (scorer + assist), keep pre-grace live status.
-  const match = parseMatch((await matchRef.get()).val());
-  match.status = 1;
-  const names = await loadNames(tid, match);
-  const decision = decideGoal({ teamTag, before, after, match, names, tid, mid });
-  if (decision) {
-    await sendAlert(decision);
-  } else {
-    logger.info('goal decision was null after grace window', { tid, mid, teamTag, after });
+    // Re-read for fresh activity (scorer + assist), keep pre-grace live status.
+    const match = parseMatch((await matchRef.get()).val());
+    match.status = 1;
+    const names = await loadNames(tid, match);
+    const decision = decideGoal({ teamTag, before, after, match, names, tid, mid });
+    if (decision) {
+      await sendAlert(decision);
+    } else {
+      logger.info('goal decision was null after grace window', { tid, mid, teamTag, after });
+    }
+  } catch (err) {
+    // Release the claim so a retry can deliver the lost alert.
+    await admin.database().ref(`NotificationsMeta/${tid}/${mid}/${dedupeKey}`)
+      .remove().catch(() => undefined);
+    throw err;
   }
 }
 
@@ -93,10 +96,17 @@ export const onMatchStatus = onValueWritten(
     if (!kind) return;
     if (!(await claimKey(tid, mid, kind))) return;
 
-    const matchRef = admin.database().ref(`Tournaments/${tid}/Matches/${mid}`);
-    const match = parseMatch((await matchRef.get()).val());
-    const names = await loadNames(tid, match);
-    const decision = decideStatus({ before, after, match, names, tid, mid });
-    if (decision) await sendAlert(decision);
+    try {
+      const matchRef = admin.database().ref(`Tournaments/${tid}/Matches/${mid}`);
+      const match = parseMatch((await matchRef.get()).val());
+      const names = await loadNames(tid, match);
+      const decision = decideStatus({ before, after, match, names, tid, mid });
+      if (decision) await sendAlert(decision);
+    } catch (err) {
+      // Release the claim so a retry can deliver the lost alert.
+      await admin.database().ref(`NotificationsMeta/${tid}/${mid}/${kind}`)
+        .remove().catch(() => undefined);
+      throw err;
+    }
   },
 );

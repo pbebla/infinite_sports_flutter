@@ -10,10 +10,15 @@ export async function sendAlert(d: AlertDecision): Promise<void> {
     });
     return;
   }
-  await admin.messaging().send({
-    condition: d.condition,
-    notification: { title: d.title, ...(d.body ? { body: d.body } : {}) },
-    data: d.data,
-  });
-  logger.info('sent', { kind: d.kind, title: d.title });
+  try {
+    await admin.messaging().send({
+      condition: d.condition,
+      notification: { title: d.title, ...(d.body ? { body: d.body } : {}) },
+      data: d.data,
+    });
+    logger.info('sent', { kind: d.kind, title: d.title });
+  } catch (err) {
+    logger.error('sendAlert failed', { kind: d.kind, error: String(err) });
+    throw err;
+  }
 }

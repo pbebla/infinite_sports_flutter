@@ -1,16 +1,17 @@
 import * as admin from 'firebase-admin';
 import type { MatchContext, Names } from './decide';
 
-const cache = new Map<string, string>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // names may be corrected mid-tournament
+const cache = new Map<string, { value: string; expiresAt: number }>();
 
 async function readName(path: string, fallback: string): Promise<string> {
   const hit = cache.get(path);
-  if (hit !== undefined) return hit;
+  if (hit && hit.expiresAt > Date.now()) return hit.value;
   try {
     const snap = await admin.database().ref(path).get();
     const v = snap.val();
     const name = typeof v === 'string' && v.trim() ? v : fallback;
-    cache.set(path, name);
+    cache.set(path, { value: name, expiresAt: Date.now() + CACHE_TTL_MS });
     return name;
   } catch {
     return fallback;

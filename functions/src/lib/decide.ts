@@ -55,7 +55,7 @@ function firstNonNull(data: Record<string, unknown>, keys: string[]): unknown {
   return null;
 }
 
-function toInt(v: unknown): number {
+export function toInt(v: unknown): number {
   const n = Number(v);
   return Number.isFinite(n) ? Math.trunc(n) : 0;
 }
