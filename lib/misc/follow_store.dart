@@ -71,6 +71,17 @@ class FollowStore {
     return prefs.getBool(_masterKey) ?? true;
   }
 
+  /// FCM topic calls are best-effort: the persisted list is the source of
+  /// truth, and subscriptions are re-applied via the master switch or on the
+  /// next follow, so a flaky network must never surface as a UI error.
+  Future<void> _tryMessaging(Future<void> Function() call) async {
+    try {
+      await call();
+    } catch (_) {
+      // Swallow: intent is persisted; FCM will catch up on a later call.
+    }
+  }
+
   Future<void> follow(FollowedChannel channel) async {
     final current = await follows();
     if (!current.any((c) => c.topic == channel.topic)) {
@@ -81,7 +92,7 @@ class FollowStore {
       // A fresh follow means the fan wants alerts again.
       await setMasterEnabled(true);
     } else {
-      await _messaging.subscribeToTopic(channel.topic);
+      await _tryMessaging(() => _messaging.subscribeToTopic(channel.topic));
     }
   }
 
@@ -89,7 +100,7 @@ class FollowStore {
     final current = await follows();
     current.removeWhere((c) => c.topic == topic);
     await _save(current);
-    await _messaging.unsubscribeFromTopic(topic);
+    await _tryMessaging(() => _messaging.unsubscribeFromTopic(topic));
   }
 
   Future<void> setMasterEnabled(bool enabled) async {
@@ -98,9 +109,9 @@ class FollowStore {
     final current = await follows();
     for (final c in current) {
       if (enabled) {
-        await _messaging.subscribeToTopic(c.topic);
+        await _tryMessaging(() => _messaging.subscribeToTopic(c.topic));
       } else {
-        await _messaging.unsubscribeFromTopic(c.topic);
+        await _tryMessaging(() => _messaging.unsubscribeFromTopic(c.topic));
       }
     }
   }
