@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' show Color;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:infinite_sports_flutter/misc/notification_router.dart';
@@ -62,11 +63,15 @@ class PushNotifications {
     required String body,
     required String payload,
   }) async {
-    const AndroidNotificationDetails androidNotificationDetails = 
+    const AndroidNotificationDetails androidNotificationDetails =
       AndroidNotificationDetails('infinite_sports_notifications', 'Infinite Sports App Notifications',
         channelDescription: 'Incoming Infinite Sports notifications',
         importance: Importance.max,
         priority: Priority.high,
+        // Brand-red tint for the small stencil icon; full-color logo on a
+        // black square (Robinhood-style) as the large icon.
+        color: Color(0xFFD00000),
+        largeIcon: DrawableResourceAndroidBitmap('ic_notification_large'),
         ticker: 'ticker');
     const iosNotificationDetails = DarwinNotificationDetails();
     const NotificationDetails notificationDetails =

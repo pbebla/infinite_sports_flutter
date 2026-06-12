@@ -27,4 +27,16 @@ void main() {
     ..createSync(recursive: true)
     ..writeAsBytesSync(img.encodePng(resized));
   stdout.writeln('wrote ${out.path}');
+
+  // Large icon: the full-color logo on a black square (Robinhood-style),
+  // shown as the big image on the right side of notifications.
+  const largeSide = 256;
+  final large = img.Image(width: largeSide, height: largeSide, numChannels: 4);
+  img.fill(large, color: img.ColorRgba8(0, 0, 0, 255));
+  final glyph = img.copyResize(trimmed, width: (largeSide * 0.78).round());
+  img.compositeImage(large, glyph,
+      dstX: (largeSide - glyph.width) ~/ 2, dstY: (largeSide - glyph.height) ~/ 2);
+  final largeOut = File('android/app/src/main/res/drawable/ic_notification_large.png')
+    ..writeAsBytesSync(img.encodePng(large));
+  stdout.writeln('wrote ${largeOut.path}');
 }

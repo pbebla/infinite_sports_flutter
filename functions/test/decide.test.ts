@@ -154,7 +154,7 @@ describe('decideStatus', () => {
     expect(d!.title).toBe('🟢 Kickoff: Eagles vs Lions');
     expect(d!.body).toBe('Now playing — Field A');
     expect(d!.dedupeKey).toBe('kickoff');
-    expect(d!.color).toBe('#0A7D2C');
+    expect(d!.color).toBe('#D00000');
     expect(d!.data.type).toBe('kickoff');
   });
 
@@ -170,7 +170,7 @@ describe('decideStatus', () => {
     expect(d!.title).toBe('🏁 Full time: Eagles 3 – 1 Lions');
     expect(d!.body).toBe('');
     expect(d!.dedupeKey).toBe('fulltime');
-    expect(d!.color).toBe('#1A237E');
+    expect(d!.color).toBe('#D00000');
   });
 
   test('silence on no-change, reopen (2 -> 1), and reset (1 -> 0)', () => {

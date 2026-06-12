@@ -25,12 +25,12 @@ export interface AlertDecision {
   data: { type: string; tournamentId: string; matchId: string };
 }
 
-/** Per-type accent colors: goal = brand red, kickoff = green,
- *  full time = the app's tournament-header navy. */
+/** One consistent brand tint for the small-icon logo on every alert —
+ *  the title emoji (🟢/⚽/🏁) carries the alert type instead (owner choice). */
 export const ALERT_COLORS = {
   goal: '#D00000',
-  kickoff: '#0A7D2C',
-  fulltime: '#1A237E',
+  kickoff: '#D00000',
+  fulltime: '#D00000',
 } as const;
 
 // ---- topics (MUST stay in parity with lib/misc/notification_topics.dart) ----
