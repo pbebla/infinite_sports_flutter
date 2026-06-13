@@ -143,6 +143,63 @@ class TournamentService {
     }
   }
 
+  /// Live stream of all matches in a tournament. Emits immediately from
+  /// RTDB's local cache (if any) then on every change.
+  /// Matches are sorted by date then bracketPosition, mirroring [getMatches].
+  static Stream<List<TournamentMatch>> watchMatches(String tournamentId) {
+    final ref = FirebaseDatabase.instance
+        .ref('/Tournaments/$tournamentId/Matches');
+    return ref.onValue.map((event) {
+      final value = event.snapshot.value;
+      if (value is! Map) return <TournamentMatch>[];
+      final out = <TournamentMatch>[];
+      value.forEach((key, v) {
+        if (v is Map) {
+          try {
+            out.add(TournamentMatch.fromFirebase(key.toString(), v));
+          } catch (_) {}
+        }
+      });
+      out.sort((a, b) {
+        final dateCompare = a.date.compareTo(b.date);
+        if (dateCompare != 0) return dateCompare;
+        return a.bracketPosition.compareTo(b.bracketPosition);
+      });
+      return out;
+    });
+  }
+
+  /// Live stream of one match.
+  static Stream<TournamentMatch?> watchMatch(
+      String tournamentId, String matchId) {
+    final ref = FirebaseDatabase.instance
+        .ref('/Tournaments/$tournamentId/Matches/$matchId');
+    return ref.onValue.map((event) {
+      final value = event.snapshot.value;
+      if (value is! Map) return null;
+      try {
+        return TournamentMatch.fromFirebase(matchId, value);
+      } catch (_) {
+        return null;
+      }
+    });
+  }
+
+  /// Live stream of the tournament header (status/champion/etc.).
+  static Stream<Tournament?> watchTournament(String tournamentId) {
+    final ref =
+        FirebaseDatabase.instance.ref('/Tournaments/$tournamentId');
+    return ref.onValue.map((event) {
+      final value = event.snapshot.value;
+      if (value is! Map) return null;
+      try {
+        return Tournament.fromFirebase(tournamentId, value);
+      } catch (_) {
+        return null;
+      }
+    });
+  }
+
   /// Returns map of teamId -> list of TournamentPlayer.
   /// Also tries to load profileUrl from /Users/{uid}/ProfileUrl if uid exists
   /// and the player record doesn't already have a photoUrl.
