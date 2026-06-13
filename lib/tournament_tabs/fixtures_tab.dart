@@ -97,6 +97,23 @@ class FixturesTab extends StatelessWidget {
     final name1 = teamName(team1, match.team1Id, match.team1Seed);
     final name2 = teamName(team2, match.team2Id, match.team2Seed);
 
+    // Leading live indicator (MinuteBall) – shown only for live matches, placed
+    // at the far-left edge of the match row (FotMob style). Non-live rows get
+    // a SizedBox of matching width so team columns stay aligned.
+    const double minuteBallWidth = 28; // approximate rendered width of MinuteBall
+    Widget leadingWidget;
+    if (isLive && match.clock != null) {
+      leadingWidget = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          MinuteBall(clock: match.clock),
+          const SizedBox(width: 10),
+        ],
+      );
+    } else {
+      leadingWidget = const SizedBox(width: minuteBallWidth + 10);
+    }
+
     // Score / time widget in center
     Widget centerWidget;
     if (isLive) {
@@ -131,10 +148,6 @@ class FixturesTab extends StatelessWidget {
                   value: match.team2Score, fontSize: 18, baseColor: scoreColor),
             ],
           ),
-          if (match.clock != null) ...[
-            const SizedBox(height: 4),
-            MinuteBall(clock: match.clock),
-          ],
         ],
       );
     } else if (isFinal) {
@@ -248,9 +261,10 @@ class FixturesTab extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-              // FotMob-style: Team1 [right-aligned] | Score | Team2 [left-aligned]
+              // FotMob-style: [MinuteBall] Team1 [right-aligned] | Score | Team2 [left-aligned]
               Row(
                 children: [
+                  leadingWidget,
                   Expanded(
                     child: Align(
                       alignment: Alignment.centerRight,

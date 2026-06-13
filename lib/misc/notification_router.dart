@@ -6,6 +6,7 @@ import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/tournament_match_detail.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 /// Message that launched the app from a terminated state; routed by
 /// MyHomePage once the first frame (and mainContext) exists.
@@ -27,9 +28,20 @@ Future<void> openMatchFromNotification(Map<String, dynamic> data) async {
     context: ctx,
     barrierDismissible: false,
     useRootNavigator: true,
-    builder: (_) => const PopScope(
+    builder: (dialogCtx) => PopScope(
       canPop: false,
-      child: Center(child: CircularProgressIndicator(color: Colors.white)),
+      child: Material(
+        color: Theme.of(dialogCtx).colorScheme.surface,
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.max,
+            children: const [
+              SizedBox(height: 16),
+              SkeletonMatchList(count: 3),
+            ],
+          ),
+        ),
+      ),
     ),
   );
   void dismissLoading() {
