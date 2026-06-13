@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
@@ -5,6 +7,8 @@ import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_facts_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_lineup_tab.dart';
+import 'package:infinite_sports_flutter/widgets/live_clock.dart';
+import 'package:infinite_sports_flutter/widgets/score_text.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:intl/intl.dart';
@@ -32,6 +36,24 @@ class TournamentMatchDetailPage extends StatefulWidget {
 }
 
 class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
+  late TournamentMatch _match = widget.match;
+  StreamSubscription<TournamentMatch?>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = TournamentService
+        .watchMatch(widget.tournamentId, widget.match.id)
+        .listen((m) {
+      if (mounted && m != null) setState(() => _match = m);
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
 
   String _formatDate(String mmddyyyy) {
     final dt = parseDatabaseDate(mmddyyyy);
@@ -40,23 +62,35 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
   }
 
   Widget _buildScoreboardHeader(BuildContext context) {
-    final team1 = widget.match.team1Id != null ? widget.teams[widget.match.team1Id] : null;
-    final team2 = widget.match.team2Id != null ? widget.teams[widget.match.team2Id] : null;
-    final isLive = widget.match.matchStatus.isLive;
-    final isFinished = widget.match.matchStatus.isFinished;
+    final team1 = _match.team1Id != null ? widget.teams[_match.team1Id] : null;
+    final team2 = _match.team2Id != null ? widget.teams[_match.team2Id] : null;
+    final isLive = _match.matchStatus.isLive;
+    final isFinished = _match.matchStatus.isFinished;
 
     Widget scoreWidget;
     if (isLive) {
       scoreWidget = Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            '${widget.match.team1Score} - ${widget.match.team2Score}',
-            style: const TextStyle(
-              color: Colors.red,
-              fontWeight: FontWeight.bold,
-              fontSize: 28,
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ScoreText(
+                  value: _match.team1Score,
+                  fontSize: 28,
+                  baseColor: Colors.white),
+              const Text(' - ',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 28)),
+              ScoreText(
+                  value: _match.team2Score,
+                  fontSize: 28,
+                  baseColor: Colors.white),
+            ],
           ),
+          const SizedBox(height: 4),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
             decoration: BoxDecoration(
@@ -72,11 +106,13 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
               ),
             ),
           ),
+          const SizedBox(height: 4),
+          MatchClockText(clock: _match.clock),
         ],
       );
     } else if (isFinished) {
       scoreWidget = Text(
-        '${widget.match.team1Score} - ${widget.match.team2Score}',
+        '${_match.team1Score} - ${_match.team2Score}',
         style: const TextStyle(
           color: Colors.white,
           fontWeight: FontWeight.bold,
@@ -94,9 +130,9 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
               fontSize: 22,
             ),
           ),
-          if (widget.match.time != null)
+          if (_match.time != null)
             Text(
-              widget.match.time!,
+              _match.time!,
               style: const TextStyle(color: Colors.white70, fontSize: 13),
             ),
         ],
@@ -130,7 +166,7 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    widget.match.label,
+                    _match.label,
                     style: const TextStyle(
                       color: Colors.white70,
                       fontSize: 12,
@@ -149,7 +185,7 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                         teamLogo(team1),
                         const SizedBox(height: 6),
                         Text(
-                          team1?.name ?? widget.match.team1Id ?? 'TBD',
+                          team1?.name ?? _match.team1Id ?? 'TBD',
                           style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
@@ -174,7 +210,7 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                         teamLogo(team2),
                         const SizedBox(height: 6),
                         Text(
-                          team2?.name ?? widget.match.team2Id ?? 'TBD',
+                          team2?.name ?? _match.team2Id ?? 'TBD',
                           style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
@@ -191,10 +227,10 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
               ),
               const SizedBox(height: 10),
               Text(
-                _formatDate(widget.match.date),
+                _formatDate(_match.date),
                 style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
-              if (widget.match.matchLocation != null && widget.match.matchLocation!.isNotEmpty) ...[
+              if (_match.matchLocation != null && _match.matchLocation!.isNotEmpty) ...[
                 const SizedBox(height: 2),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -202,7 +238,7 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                     const Icon(Icons.location_on, size: 12, color: Colors.white54),
                     const SizedBox(width: 3),
                     Text(
-                      widget.match.matchLocation!,
+                      _match.matchLocation!,
                       style: const TextStyle(color: Colors.white54, fontSize: 12),
                     ),
                   ],
@@ -217,10 +253,10 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    final team1 = widget.match.team1Id != null ? widget.teams[widget.match.team1Id] : null;
-    final team2 = widget.match.team2Id != null ? widget.teams[widget.match.team2Id] : null;
-    final team1Players = widget.match.team1Id != null ? (widget.rosters[widget.match.team1Id] ?? []) : <TournamentPlayer>[];
-    final team2Players = widget.match.team2Id != null ? (widget.rosters[widget.match.team2Id] ?? []) : <TournamentPlayer>[];
+    final team1 = _match.team1Id != null ? widget.teams[_match.team1Id] : null;
+    final team2 = _match.team2Id != null ? widget.teams[_match.team2Id] : null;
+    final team1Players = _match.team1Id != null ? (widget.rosters[_match.team1Id] ?? []) : <TournamentPlayer>[];
+    final team2Players = _match.team2Id != null ? (widget.rosters[_match.team2Id] ?? []) : <TournamentPlayer>[];
 
     return DefaultTabController(
       length: 2,
@@ -233,12 +269,12 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                 backgroundColor: const Color(0xFF1A237E),
                 foregroundColor: Colors.white,
                 actions: [
-                  if (widget.match.link != null && widget.match.link!.isNotEmpty)
+                  if (_match.link != null && _match.link!.isNotEmpty)
                     IconButton(
                       icon: const Icon(Icons.live_tv, color: Colors.red),
                       tooltip: 'Watch Stream',
                       onPressed: () async {
-                        final uri = Uri.tryParse(widget.match.link!);
+                        final uri = Uri.tryParse(_match.link!);
                         if (uri != null) {
                           await launchUrl(uri, mode: LaunchMode.externalApplication);
                         }
@@ -265,14 +301,14 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
           body: TabBarView(
             children: [
               MatchFactsTab(
-                match: widget.match,
+                match: _match,
                 team1: team1,
                 team2: team2,
                 team1Players: team1Players,
                 team2Players: team2Players,
               ),
               MatchLineupTab(
-                match: widget.match,
+                match: _match,
                 team1: team1,
                 team2: team2,
                 team1Players: team1Players,

@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_config/flutter_config.dart';
 import 'package:infinite_sports_flutter/aroundyou.dart';
+import 'package:infinite_sports_flutter/misc/goal_toast.dart';
 import 'package:infinite_sports_flutter/misc/notification_router.dart';
 import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
@@ -42,11 +43,26 @@ Future<void> main() async {
   });
   FirebaseMessaging.onMessage.listen((message) {
     String payloadData = jsonEncode(message.data);
-    print("Received notification in foreground");
-    if (message.notification != null) {
-      PushNotifications.showSimpleNotification(title: message.notification!.title!, body: message.notification!.body!, payload: payloadData);
+    final ctx = mainContext;
+    // Foreground goal in a followed match → slim in-app toast instead of a
+    // heads-up notification; tap opens the match.
+    if (message.data['type'] == 'goal' && ctx != null) {
+      GoalToast.show(
+        context: ctx,
+        title: message.notification?.title ?? 'GOAL!',
+        body: message.notification?.body ?? '',
+        onTap: () =>
+            openMatchFromNotification(Map<String, dynamic>.from(message.data)),
+      );
+      return;
     }
-  },);
+    if (message.notification != null) {
+      PushNotifications.showSimpleNotification(
+          title: message.notification!.title!,
+          body: message.notification!.body!,
+          payload: payloadData);
+    }
+  });
   FirebaseMessaging.onMessageOpenedApp.listen((message) {
     openMatchFromNotification(message.data);
   });
