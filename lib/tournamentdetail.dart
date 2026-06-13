@@ -1,4 +1,6 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:async';
+
+import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournament.dart';
@@ -35,6 +37,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
   Tournament? _tournament;
   Map<String, TournamentTeam> _teams = {};
   List<TournamentMatch> _matches = [];
+  StreamSubscription<List<TournamentMatch>>? _matchesSub;
   Map<String, List<TournamentPlayer>> _rosters = {};
   late TabController _tabController;
 
@@ -55,6 +58,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
 
   @override
   void dispose() {
+    _matchesSub?.cancel();
     _tabController.dispose();
     super.dispose();
   }
@@ -82,6 +86,15 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
         _rosters = rosters;
         _isLoading = false;
         _loadError = null;
+      });
+
+      // Keep matches live after the initial paint: scores, clock, standings and
+      // the bracket all update in place without a manual refresh.
+      _matchesSub?.cancel();
+      _matchesSub =
+          TournamentService.watchMatches(widget.tournamentId).listen((live) {
+        if (!mounted || live.isEmpty) return;
+        setState(() => _matches = live);
       });
     } catch (e, st) {
       debugPrint('TournamentDetailPage._loadData error: $e\n$st');
