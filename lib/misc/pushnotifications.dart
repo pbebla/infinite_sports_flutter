@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'dart:ui' show Brightness, Color, PlatformDispatcher;
+import 'dart:ui' show Color;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:infinite_sports_flutter/misc/notification_router.dart';
@@ -63,19 +63,15 @@ class PushNotifications {
     required String body,
     required String payload,
   }) async {
-    // Black disc for the small stencil icon (owner choice); full-color logo
-    // on a solid square (Robinhood-style) as the large icon — white square in
-    // light mode, black square in dark mode, matching the phone's theme.
-    final isDark =
-        PlatformDispatcher.instance.platformBrightness == Brightness.dark;
-    final androidNotificationDetails =
+    // Black disc holding the white logo stencil as the small icon (owner
+    // choice). No large icon — the owner found the big square logo too
+    // prominent on the right of the notification.
+    const androidNotificationDetails =
       AndroidNotificationDetails('infinite_sports_notifications', 'Infinite Sports App Notifications',
         channelDescription: 'Incoming Infinite Sports notifications',
         importance: Importance.max,
         priority: Priority.high,
-        color: const Color(0xFF000000),
-        largeIcon: DrawableResourceAndroidBitmap(
-            isDark ? 'ic_notification_large_dark' : 'ic_notification_large_light'),
+        color: Color(0xFF000000),
         ticker: 'ticker');
     const iosNotificationDetails = DarwinNotificationDetails();
     final NotificationDetails notificationDetails =
