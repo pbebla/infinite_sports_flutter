@@ -305,7 +305,10 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                       },
                     ),
                 ],
-                expandedHeight: 220,
+                // 240 (not 220) leaves headroom so the live header — score,
+                // LIVE badge, clock, date AND location — never clips on
+                // devices with a tall status bar.
+                expandedHeight: 240,
                 flexibleSpace: FlexibleSpaceBar(
                   background: _buildScoreboardHeader(context),
                 ),
