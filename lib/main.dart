@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_config/flutter_config.dart';
@@ -24,6 +25,9 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  // Cache RTDB on disk so tournament pages render instantly from the last
+  // known data, then stream fresh updates. Must run before any DB access.
+  FirebaseDatabase.instance.setPersistenceEnabled(true);
   await PushNotifications.init();
   await PushNotifications.initLocalNotifications();
   FirebaseMessaging.instance.getToken().then( (token) {
