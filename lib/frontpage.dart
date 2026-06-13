@@ -12,8 +12,11 @@ import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 import 'package:infinite_sports_flutter/table.dart';
+import 'package:infinite_sports_flutter/tournament_match_detail.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/fixtures_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/tournament_day_view.dart';
 import 'package:infinite_sports_flutter/tournamentdetail.dart';
+import 'package:infinite_sports_flutter/widgets/live_filter_bar.dart';
 
 /// One active tournament's data for the home screen. [matches] holds ALL of the
 /// tournament's matches (the day strip filters per selected day); [initialDay]
@@ -329,7 +332,6 @@ class _FrontPageState extends State<FrontPage> {
   /// game day.
   Widget _buildTournamentTab(BuildContext context, _ActiveTournamentTab data) {
     final name = data.tournament.name;
-    final sport = data.tournament.sport;
     return Column(children: [
       LayoutBuilder(
         builder: (context, constraints) {
@@ -374,16 +376,7 @@ class _FrontPageState extends State<FrontPage> {
         },
       ),
       Divider(color: Theme.of(context).dividerColor),
-      Expanded(
-        child: TournamentDayView(
-          matches: data.matches,
-          teams: data.teams,
-          rosters: data.rosters,
-          tournamentId: data.tournament.id,
-          sport: sport,
-          initialDay: data.initialDay,
-        ),
-      ),
+      Expanded(child: _HomeTournamentBody(data: data)),
     ]);
   }
 
@@ -407,5 +400,91 @@ class _FrontPageState extends State<FrontPage> {
     // If the first tab is a tournament, headerNotifier is intentionally left
     // unchanged: the table/leaderboard buttons it feeds are hidden on
     // tournament tabs (via _onTournamentTab), so its value is never read there.
+  }
+}
+
+/// Live body of a home-screen tournament tab: streams the tournament's matches
+/// so scores/clock update without a refresh, pins live matches in a Happening
+/// Now rail, and offers a Live pill that filters to live matches only.
+class _HomeTournamentBody extends StatefulWidget {
+  final _ActiveTournamentTab data;
+  const _HomeTournamentBody({required this.data});
+
+  @override
+  State<_HomeTournamentBody> createState() => _HomeTournamentBodyState();
+}
+
+class _HomeTournamentBodyState extends State<_HomeTournamentBody> {
+  bool _liveOnly = false;
+
+  String _abbr(String teamId) {
+    final name = (widget.data.teams[teamId]?.name ?? teamId).trim();
+    if (name.length <= 3) return name.toUpperCase();
+    return name.substring(0, 3).toUpperCase();
+  }
+
+  void _openMatch(TournamentMatch m) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TournamentMatchDetailPage(
+          match: m,
+          teams: widget.data.teams,
+          rosters: widget.data.rosters,
+          tournamentId: widget.data.tournament.id,
+          sport: widget.data.tournament.sport,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final data = widget.data;
+    return StreamBuilder<List<TournamentMatch>>(
+      stream: TournamentService.watchMatches(data.tournament.id),
+      initialData: data.matches,
+      builder: (context, snap) {
+        final matches = snap.data ?? data.matches;
+        final live = liveMatches(matches);
+        return Column(
+          children: [
+            HappeningNowRail(live: live, abbr: _abbr, onTapMatch: _openMatch),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+              child: Row(
+                children: [
+                  const Spacer(),
+                  LivePill(
+                    on: _liveOnly,
+                    onChanged: (v) => setState(() => _liveOnly = v),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: _liveOnly
+                  ? (live.isEmpty
+                      ? const Center(child: Text('No live matches right now'))
+                      : FixturesTab(
+                          matches: live,
+                          teams: data.teams,
+                          rosters: data.rosters,
+                          tournamentId: data.tournament.id,
+                          sport: data.tournament.sport,
+                        ))
+                  : TournamentDayView(
+                      matches: matches,
+                      teams: data.teams,
+                      rosters: data.rosters,
+                      tournamentId: data.tournament.id,
+                      sport: data.tournament.sport,
+                      initialDay: data.initialDay,
+                    ),
+            ),
+          ],
+        );
+      },
+    );
   }
 }
