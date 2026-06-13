@@ -7,6 +7,8 @@ import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_match_detail.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
+import 'package:infinite_sports_flutter/widgets/live_clock.dart';
+import 'package:infinite_sports_flutter/widgets/score_text.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -98,6 +100,7 @@ class FixturesTab extends StatelessWidget {
     // Score / time widget in center
     Widget centerWidget;
     if (isLive) {
+      final scoreColor = Theme.of(context).colorScheme.onSurface;
       centerWidget = Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -114,10 +117,24 @@ class FixturesTab extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          Text(
-            '${match.team1Score} - ${match.team2Score}',
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ScoreText(
+                  value: match.team1Score, fontSize: 18, baseColor: scoreColor),
+              Text(' - ',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                      color: scoreColor)),
+              ScoreText(
+                  value: match.team2Score, fontSize: 18, baseColor: scoreColor),
+            ],
           ),
+          if (match.clock != null) ...[
+            const SizedBox(height: 4),
+            MinuteBall(clock: match.clock),
+          ],
         ],
       );
     } else if (isFinal) {
