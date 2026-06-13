@@ -15,6 +15,7 @@ import 'package:infinite_sports_flutter/tournament_tabs/teams_tab.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:infinite_sports_flutter/misc/notification_topics.dart';
 import 'package:infinite_sports_flutter/widgets/follow_bell.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 class TournamentDetailPage extends StatefulWidget {
   final String tournamentId;
@@ -148,10 +149,20 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
     }
     return Scaffold(
       body: _isLoading
-          ? Center(
-              child: CircularProgressIndicator(
-                color: Theme.of(context).colorScheme.primary,
-              ),
+          ? Column(
+              children: [
+                // Placeholder for the navy scoreboard/header area.
+                Container(height: 150, color: const Color(0xFF1A237E)),
+                const Expanded(
+                  child: SingleChildScrollView(
+                    physics: NeverScrollableScrollPhysics(),
+                    child: Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: SkeletonMatchList(count: 8),
+                    ),
+                  ),
+                ),
+              ],
             )
           : NestedScrollView(
               headerSliverBuilder: (context, innerBoxIsScrolled) {

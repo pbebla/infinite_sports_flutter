@@ -17,6 +17,7 @@ import 'package:infinite_sports_flutter/tournament_tabs/fixtures_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/tournament_day_view.dart';
 import 'package:infinite_sports_flutter/tournamentdetail.dart';
 import 'package:infinite_sports_flutter/widgets/live_filter_bar.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 /// One active tournament's data for the home screen. [matches] holds ALL of the
 /// tournament's matches (the day strip filters per selected day); [initialDay]
@@ -185,10 +186,12 @@ class _FrontPageState extends State<FrontPage> {
             future: _loadingPage,
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return Center(
-                    child: CircularProgressIndicator(
-                      color: Theme.of(context).colorScheme.primary,
-                    )
+                return const SingleChildScrollView(
+                  physics: NeverScrollableScrollPhysics(),
+                  child: Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: SkeletonMatchList(count: 8),
+                  ),
                 );
               }
               tabs.clear();
