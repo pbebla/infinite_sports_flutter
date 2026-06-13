@@ -1,3 +1,4 @@
+import 'package:infinite_sports_flutter/misc/match_clock.dart';
 import 'package:infinite_sports_flutter/misc/parse_helpers.dart';
 import 'package:infinite_sports_flutter/model/match_status.dart';
 
@@ -12,6 +13,7 @@ class TournamentMatch {
   final int team1Score;
   final int team2Score;
   final int status;
+  final MatchClock? clock;
   final Map<String, dynamic>? team1Activity;
   final Map<String, dynamic>? team2Activity;
   final String? link;
@@ -31,6 +33,7 @@ class TournamentMatch {
     required this.team1Score,
     required this.team2Score,
     required this.status,
+    this.clock,
     this.team1Activity,
     this.team2Activity,
     this.link,
@@ -61,6 +64,8 @@ class TournamentMatch {
       return null;
     }
 
+    final clock = MatchClock.fromMap(firstNonNull(data, ['Clock', 'clock']));
+
     return TournamentMatch(
       id: id,
       stage: firstNonNull(data, ['Stage', 'stage'])?.toString() ?? 'Group Stage',
@@ -72,6 +77,7 @@ class TournamentMatch {
       team1Score: parseInt(firstNonNull(data, ['Team1Score', 'team1Score'])),
       team2Score: parseInt(firstNonNull(data, ['Team2Score', 'team2Score'])),
       status: parseInt(firstNonNull(data, ['Status', 'status'])),
+      clock: clock,
       team1Activity: parseActivity(firstNonNull(data, ['Team1Activity', 'team1Activity'])),
       team2Activity: parseActivity(firstNonNull(data, ['Team2Activity', 'team2Activity'])),
       link: firstNonNull(data, ['Link', 'link'])?.toString(),
