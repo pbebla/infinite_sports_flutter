@@ -416,6 +416,13 @@ class _HomeTournamentBody extends StatefulWidget {
 
 class _HomeTournamentBodyState extends State<_HomeTournamentBody> {
   bool _liveOnly = false;
+  late final Stream<List<TournamentMatch>> _matchesStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _matchesStream = TournamentService.watchMatches(widget.data.tournament.id);
+  }
 
   String _abbr(String teamId) {
     final name = (widget.data.teams[teamId]?.name ?? teamId).trim();
@@ -442,7 +449,7 @@ class _HomeTournamentBodyState extends State<_HomeTournamentBody> {
   Widget build(BuildContext context) {
     final data = widget.data;
     return StreamBuilder<List<TournamentMatch>>(
-      stream: TournamentService.watchMatches(data.tournament.id),
+      stream: _matchesStream,
       initialData: data.matches,
       builder: (context, snap) {
         final matches = snap.data ?? data.matches;
