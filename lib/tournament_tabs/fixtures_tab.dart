@@ -13,6 +13,18 @@ import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+/// Display priority: live first, then upcoming, then finished.
+int _statusRank(int status) {
+  switch (status) {
+    case 1: // live
+      return 0;
+    case 0: // upcoming
+      return 1;
+    default: // finished (2) and anything else
+      return 2;
+  }
+}
+
 class FixturesTab extends StatelessWidget {
   final List<TournamentMatch> matches;
   final Map<String, TournamentTeam> teams;
@@ -322,15 +334,22 @@ class FixturesTab extends StatelessWidget {
 
     final eliminated = _getEliminatedTeams();
 
-    // Sort matches by stage progression, then by date, then by bracket position
+    // Sort matches: live first, then upcoming, then finished.
+    // Within each status group: date, then time, then stage progression, then bracket position.
     final sortedMatches = [...matches];
     sortedMatches.sort((a, b) {
-      final aStage = TournamentStage.fromString(a.stage).sortOrder;
-      final bStage = TournamentStage.fromString(b.stage).sortOrder;
-      if (aStage != bStage) return aStage.compareTo(bStage);
+      final ra = _statusRank(a.status);
+      final rb = _statusRank(b.status);
+      if (ra != rb) return ra.compareTo(rb);
       final aDate = int.tryParse(a.date) ?? 0;
       final bDate = int.tryParse(b.date) ?? 0;
       if (aDate != bDate) return aDate.compareTo(bDate);
+      final at = a.time ?? '';
+      final bt = b.time ?? '';
+      if (at != bt) return at.compareTo(bt);
+      final stageCmp = TournamentStage.fromString(a.stage).sortOrder
+          .compareTo(TournamentStage.fromString(b.stage).sortOrder);
+      if (stageCmp != 0) return stageCmp;
       return a.bracketPosition.compareTo(b.bracketPosition);
     });
 
