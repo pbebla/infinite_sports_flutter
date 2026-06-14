@@ -233,6 +233,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                     matches: _matches,
                     rosters: _rosters,
                     tournamentId: widget.tournamentId,
+                    stats: stats,
                   ),
                 ],
               );

@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
@@ -10,6 +11,7 @@ class TeamsTab extends StatelessWidget {
   final List<TournamentMatch> matches;
   final Map<String, List<TournamentPlayer>> rosters;
   final String tournamentId;
+  final ComputedTournamentStats stats;
 
   const TeamsTab({
     super.key,
@@ -17,6 +19,7 @@ class TeamsTab extends StatelessWidget {
     required this.matches,
     required this.rosters,
     required this.tournamentId,
+    required this.stats,
   });
 
   Color _qualificationColor(String qualification) {
@@ -50,6 +53,7 @@ class TeamsTab extends StatelessWidget {
       itemCount: teamList.length,
       itemBuilder: (context, index) {
         final team = teamList[index];
+        final s = stats.standingFor(team.id);
         return Card(
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
           elevation: 1,
@@ -117,7 +121,7 @@ class TeamsTab extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'W${team.wins} D${team.draws} L${team.losses}',
+                          'W${s.w} D${s.d} L${s.l}',
                           style: TextStyle(
                             fontSize: 12,
                             color: Theme.of(context)
