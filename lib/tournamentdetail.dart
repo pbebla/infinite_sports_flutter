@@ -226,6 +226,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                     rosters: _rosters,
                     teams: _teams,
                     tournamentId: widget.tournamentId,
+                    stats: stats,
                   ),
                   TeamsTab(
                     teams: _teams,

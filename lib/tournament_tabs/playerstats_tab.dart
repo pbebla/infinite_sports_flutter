@@ -1,6 +1,7 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
+import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
@@ -10,11 +11,13 @@ class PlayerStatsTab extends StatefulWidget {
   final Map<String, List<TournamentPlayer>> rosters;
   final Map<String, TournamentTeam> teams;
   final String? tournamentId;
+  final ComputedTournamentStats stats;
 
   const PlayerStatsTab({
     super.key,
     required this.rosters,
     required this.teams,
+    required this.stats,
     this.tournamentId,
   });
 
@@ -27,9 +30,10 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
 
   List<TournamentPlayer> _getSortedByAll(String stat) {
     final allPlayers = TournamentService.getAllPlayers(widget.rosters);
-    final filtered =
-        allPlayers.where((p) => p.statByName(stat) > 0).toList();
-    filtered.sort((a, b) => b.statByName(stat).compareTo(a.statByName(stat)));
+    int valueOf(TournamentPlayer p) =>
+        widget.stats.statByName(p.teamId, p.name, stat);
+    final filtered = allPlayers.where((p) => valueOf(p) > 0).toList();
+    filtered.sort((a, b) => valueOf(b).compareTo(valueOf(a)));
     return filtered;
   }
 
@@ -108,7 +112,7 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
                   ...displayed.asMap().entries.map((entry) {
                     final rank = entry.key;
                     final player = entry.value;
-                    final value = player.statByName(stat);
+                    final value = widget.stats.statByName(player.teamId, player.name, stat);
                     final team = widget.teams[player.teamId];
                     return _buildPlayerRow(
                         context, player, team, value, rank);
