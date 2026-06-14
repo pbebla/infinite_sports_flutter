@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
+import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
@@ -195,7 +196,12 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                   ),
                 ];
               },
-              body: TabBarView(
+              body: Builder(builder: (context) {
+                final stats = computeTournamentStats(
+                  matches: _matches,
+                  rosters: _rosters,
+                );
+                return TabBarView(
                 controller: _tabController,
                 children: [
                   FixturesTab(
@@ -209,6 +215,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                     teams: _teams,
                     matches: _matches,
                     tournamentId: widget.tournamentId,
+                    stats: stats,
                   ),
                   KnockoutTab(
                     matches: _matches,
@@ -227,7 +234,8 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                     tournamentId: widget.tournamentId,
                   ),
                 ],
-              ),
+              );
+              }),
             ),
     );
   }

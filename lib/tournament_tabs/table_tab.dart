@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
@@ -8,11 +9,13 @@ class TableTab extends StatelessWidget {
   final Map<String, TournamentTeam> teams;
   final List<TournamentMatch> matches;
   final String? tournamentId;
+  final ComputedTournamentStats stats;
 
   const TableTab({
     super.key,
     required this.teams,
     required this.matches,
+    required this.stats,
     this.tournamentId,
   });
 
@@ -30,11 +33,19 @@ class TableTab extends StatelessWidget {
   List<TournamentTeam> _sortGroup(List<TournamentTeam> group) {
     return group
       ..sort((a, b) {
-        if (b.points != a.points) return b.points.compareTo(a.points);
-        if (b.gd != a.gd) return b.gd.compareTo(a.gd);
-        return b.gs.compareTo(a.gs);
+        final sa = stats.standingFor(a.id);
+        final sb = stats.standingFor(b.id);
+        if (sb.pts != sa.pts) return sb.pts.compareTo(sa.pts);
+        if (sb.gd != sa.gd) return sb.gd.compareTo(sa.gd);
+        return sb.gs.compareTo(sa.gs);
       });
   }
+
+  Set<String> get _liveTeamIds => matches
+      .where((m) => m.status == 1)
+      .expand((m) => [m.team1Id, m.team2Id])
+      .whereType<String>()
+      .toSet();
 
   @override
   Widget build(BuildContext context) {
@@ -181,6 +192,8 @@ class TableTab extends StatelessWidget {
   Widget _teamRow(BuildContext context, TournamentTeam team) {
     const cellStyle = TextStyle(fontSize: 12);
     final qualColor = _qualificationColor(team.qualification);
+    final s = stats.standingFor(team.id);
+    final isLive = _liveTeamIds.contains(team.id);
 
     return InkWell(
       onTap: tournamentId != null
@@ -199,6 +212,7 @@ class TableTab extends StatelessWidget {
           : null,
       child: Container(
         decoration: BoxDecoration(
+          color: isLive ? const Color(0x1A0A7D2C) : null,
           border: Border(
             bottom: BorderSide(
               color: Theme.of(context).dividerColor,
@@ -240,10 +254,20 @@ class TableTab extends StatelessWidget {
                 const SizedBox(width: 6),
                 Expanded(
                   flex: 5,
-                  child: Text(
-                    team.name,
-                    style: const TextStyle(fontSize: 13),
-                    softWrap: true,
+                  child: Row(
+                    children: [
+                      if (isLive) ...[
+                        const _LiveDot(),
+                        const SizedBox(width: 5),
+                      ],
+                      Expanded(
+                        child: Text(
+                          team.name,
+                          style: const TextStyle(fontSize: 13),
+                          softWrap: true,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                     ]
@@ -251,37 +275,37 @@ class TableTab extends StatelessWidget {
           ),
           Expanded(
             flex: 1,
-            child: Center(child: Text('${team.gp}', style: cellStyle)),
+            child: Center(child: Text('${s.gp}', style: cellStyle)),
           ),
           Expanded(
             flex: 1,
-            child: Center(child: Text('${team.wins}', style: cellStyle)),
+            child: Center(child: Text('${s.w}', style: cellStyle)),
           ),
           Expanded(
             flex: 1,
-            child: Center(child: Text('${team.draws}', style: cellStyle)),
+            child: Center(child: Text('${s.d}', style: cellStyle)),
           ),
           Expanded(
             flex: 1,
-            child: Center(child: Text('${team.losses}', style: cellStyle)),
+            child: Center(child: Text('${s.l}', style: cellStyle)),
           ),
           Expanded(
             flex: 1,
-            child: Center(child: Text('${team.gs}', style: cellStyle)),
+            child: Center(child: Text('${s.gs}', style: cellStyle)),
           ),
           Expanded(
             flex: 1,
-            child: Center(child: Text('${team.gc}', style: cellStyle)),
+            child: Center(child: Text('${s.gc}', style: cellStyle)),
           ),
           Expanded(
             flex: 1,
             child: Center(
               child: Text(
-                team.gd >= 0 ? '+${team.gd}' : '${team.gd}',
+                s.gd >= 0 ? '+${s.gd}' : '${s.gd}',
                 style: cellStyle.copyWith(
-                  color: team.gd > 0
+                  color: s.gd > 0
                       ? Colors.green
-                      : team.gd < 0
+                      : s.gd < 0
                           ? Colors.red
                           : null,
                 ),
@@ -292,7 +316,7 @@ class TableTab extends StatelessWidget {
             flex: 1,
             child: Center(
               child: Text(
-                '${team.points}',
+                '${s.pts}',
                 style: cellStyle.copyWith(fontWeight: FontWeight.bold),
               ),
             ),
@@ -332,6 +356,37 @@ class TableTab extends StatelessWidget {
         const SizedBox(width: 4),
         Text(label, style: const TextStyle(fontSize: 12)),
       ],
+    );
+  }
+}
+
+class _LiveDot extends StatefulWidget {
+  const _LiveDot();
+  @override
+  State<_LiveDot> createState() => _LiveDotState();
+}
+
+class _LiveDotState extends State<_LiveDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))
+        ..repeat(reverse: true);
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween(begin: 1.0, end: 0.35).animate(_c),
+      child: Container(
+        width: 8,
+        height: 8,
+        decoration: const BoxDecoration(
+            color: Color(0xFF0A7D2C), shape: BoxShape.circle),
+      ),
     );
   }
 }
