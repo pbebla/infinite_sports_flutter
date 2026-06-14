@@ -18,6 +18,8 @@ class TournamentMatch {
   final Map<String, dynamic>? team2Activity;
   final String? link;
   final String? matchLocation;
+  final String? team1Keeper;
+  final String? team2Keeper;
   final int bracketPosition;
   final int? team1Seed;
   final int? team2Seed;
@@ -38,6 +40,8 @@ class TournamentMatch {
     this.team2Activity,
     this.link,
     this.matchLocation,
+    this.team1Keeper,
+    this.team2Keeper,
     required this.bracketPosition,
     this.team1Seed,
     this.team2Seed,
@@ -82,6 +86,8 @@ class TournamentMatch {
       team2Activity: parseActivity(firstNonNull(data, ['Team2Activity', 'team2Activity'])),
       link: firstNonNull(data, ['Link', 'link'])?.toString(),
       matchLocation: firstNonNull(data, ['MatchLocation', 'matchLocation'])?.toString(),
+      team1Keeper: firstNonNull(data, ['Team1Keeper', 'team1Keeper'])?.toString(),
+      team2Keeper: firstNonNull(data, ['Team2Keeper', 'team2Keeper'])?.toString(),
       bracketPosition: parseInt(firstNonNull(data, ['BracketPosition', 'bracketPosition'])),
       team1Seed: firstNonNull(data, ['Team1Seed', 'team1Seed']) != null
           ? parseInt(firstNonNull(data, ['Team1Seed', 'team1Seed']))
