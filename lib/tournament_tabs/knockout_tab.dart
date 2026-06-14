@@ -231,6 +231,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
                 !(winner == match.team1Id),
             isWinner: winner == match.team1Id,
             isFinal: isComplete,
+            isLive: isLive,
           ),
           Divider(height: 1, color: Theme.of(context).dividerColor),
           _teamRow(
@@ -245,6 +246,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
                 !(winner == match.team2Id),
             isWinner: winner == match.team2Id,
             isFinal: isComplete,
+            isLive: isLive,
           ),
           if (isLive)
             Container(
@@ -282,6 +284,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
     required bool isEliminated,
     required bool isWinner,
     required bool isFinal,
+    required bool isLive,
   }) {
     String displayName;
     if (team != null) {
@@ -343,15 +346,17 @@ class _KnockoutTabState extends State<KnockoutTab> {
               ),
             ),
           ),
-          if (isFinal)
+          if (isFinal || isLive)
             Text(
               '$score',
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: isWinner ? FontWeight.bold : FontWeight.normal,
-                color: isEliminated
-                    ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4)
-                    : null,
+                color: isLive && !isFinal
+                    ? const Color(0xFFD00000)
+                    : isEliminated
+                        ? Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4)
+                        : null,
               ),
             ),
         ],
