@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
+import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournamentplayerprofile.dart';
@@ -36,6 +40,9 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
   String? _loadError;
   TournamentTeam? _team;
   List<TournamentPlayer> _players = [];
+  Map<String, List<TournamentPlayer>> _rosters = {};
+  List<TournamentMatch> _matches = [];
+  StreamSubscription<List<TournamentMatch>>? _matchesSub;
   late TabController _tabController;
   late Future<List<Map<String, dynamic>>> _historyFuture;
   final Set<String> _expandedStats = {};
@@ -47,10 +54,15 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
     _historyFuture =
         TournamentService.getTeamTournamentHistory(widget.teamId);
     _loadData();
+    _matchesSub = TournamentService.watchMatches(widget.tournamentId).listen((live) {
+      if (!mounted) return;
+      setState(() => _matches = live);
+    });
   }
 
   @override
   void dispose() {
+    _matchesSub?.cancel();
     _tabController.dispose();
     super.dispose();
   }
@@ -68,6 +80,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       setState(() {
         _team = teams[widget.teamId];
         _players = players;
+        _rosters = rosters;
         _isLoading = false;
         _loadError = null;
       });
@@ -658,7 +671,9 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       {'label': 'Red Cards', 'stat': 'redCards'},
     ];
 
-    int getValue(TournamentPlayer p, String stat) => p.statByName(stat);
+    final stats = computeTournamentStats(matches: _matches, rosters: _rosters);
+    int getValue(TournamentPlayer p, String stat) =>
+        stats.statByName(p.teamId, p.name, stat);
 
     List<TournamentPlayer> getAllSorted(String stat) {
       final filtered = players.where((p) => getValue(p, stat) > 0).toList()
@@ -794,17 +809,19 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
   }
 
   Widget _buildSeasonRecord(BuildContext context) {
-    final team = _team;
-    if (team == null) return const SizedBox.shrink();
+    if (_team == null) return const SizedBox.shrink();
+
+    final computed = computeTournamentStats(matches: _matches, rosters: _rosters);
+    final s = computed.standingFor(widget.teamId);
 
     final stats = [
-      {'label': 'W', 'value': '${team.wins}'},
-      {'label': 'D', 'value': '${team.draws}'},
-      {'label': 'L', 'value': '${team.losses}'},
-      {'label': 'GF', 'value': '${team.gs}'},
-      {'label': 'GA', 'value': '${team.gc}'},
-      {'label': 'GD', 'value': team.gd >= 0 ? '+${team.gd}' : '${team.gd}'},
-      {'label': 'Pts', 'value': '${team.points}'},
+      {'label': 'W', 'value': '${s.w}'},
+      {'label': 'D', 'value': '${s.d}'},
+      {'label': 'L', 'value': '${s.l}'},
+      {'label': 'GF', 'value': '${s.gs}'},
+      {'label': 'GA', 'value': '${s.gc}'},
+      {'label': 'GD', 'value': s.gd >= 0 ? '+${s.gd}' : '${s.gd}'},
+      {'label': 'Pts', 'value': '${s.pts}'},
     ];
 
     return Card(
