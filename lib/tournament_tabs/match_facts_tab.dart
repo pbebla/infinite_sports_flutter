@@ -4,6 +4,7 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class MatchFactsTab extends StatelessWidget {
   final TournamentMatch match;
@@ -130,6 +131,97 @@ class MatchFactsTab extends StatelessWidget {
                 : const SizedBox.shrink(),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildLocationCard(BuildContext context) {
+    final info = match.locationInfo;
+    if (info == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: Material(
+        color: Theme.of(context).colorScheme.surface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          side: BorderSide(color: Theme.of(context).dividerColor),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () async {
+            final messenger = ScaffoldMessenger.of(context);
+            try {
+              final ok = await launchUrl(Uri.parse(info.mapsUrl()),
+                  mode: LaunchMode.externalApplication);
+              if (!ok) {
+                messenger.showSnackBar(
+                    const SnackBar(content: Text("Couldn't open maps.")));
+              }
+            } catch (_) {
+              messenger.showSnackBar(
+                  const SnackBar(content: Text("Couldn't open maps.")));
+            }
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1A237E),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.location_on, color: Colors.white, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(info.venue,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 15)),
+                      if (info.field != null) ...[
+                        const SizedBox(height: 2),
+                        Text(info.field!,
+                            style: const TextStyle(
+                                color: Color(0xFF1A237E), fontSize: 13)),
+                      ],
+                      if (info.address != null) ...[
+                        const SizedBox(height: 3),
+                        Text(info.address!,
+                            style: TextStyle(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurface
+                                    .withValues(alpha: 0.6),
+                                fontSize: 12)),
+                      ],
+                      const SizedBox(height: 8),
+                      const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.directions, size: 14, color: Color(0xFF1A237E)),
+                          SizedBox(width: 4),
+                          Text('Get directions',
+                              style: TextStyle(
+                                  color: Color(0xFF1A237E),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right,
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3)),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -280,6 +372,7 @@ class MatchFactsTab extends StatelessWidget {
             )
           else
             ...allEvents.map((e) => _buildEventRow(context, e)),
+          _buildLocationCard(context),
           _buildMatchLeaders(context)
         ],
       ),
