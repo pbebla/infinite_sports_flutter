@@ -130,37 +130,47 @@ class FixturesTab extends StatelessWidget {
     Widget centerWidget;
     if (isLive) {
       final scoreColor = Theme.of(context).colorScheme.onSurface;
-      centerWidget = Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: Colors.red,
-              borderRadius: BorderRadius.circular(3),
+      centerWidget = SizedBox(
+        height: 44,
+        child: Stack(
+          alignment: Alignment.center,
+          clipBehavior: Clip.none,
+          children: [
+            // Score is vertically centered so it lines up with the team names.
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ScoreText(
+                    value: match.team1Score, fontSize: 18, baseColor: scoreColor),
+                Text(' - ',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        color: scoreColor)),
+                ScoreText(
+                    value: match.team2Score, fontSize: 18, baseColor: scoreColor),
+              ],
             ),
-            child: const Text(
-              'LIVE',
-              style: TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ScoreText(
-                  value: match.team1Score, fontSize: 18, baseColor: scoreColor),
-              Text(' - ',
+            // LIVE badge floats just above the score.
+            Positioned(
+              top: 0,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.red,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: const Text(
+                  'LIVE',
                   style: TextStyle(
+                      color: Colors.white,
                       fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                      color: scoreColor)),
-              ScoreText(
-                  value: match.team2Score, fontSize: 18, baseColor: scoreColor),
-            ],
-          ),
-        ],
+                      fontSize: 10),
+                ),
+              ),
+            ),
+          ],
+        ),
       );
     } else if (isFinal) {
       centerWidget = Text(
@@ -260,7 +270,7 @@ class FixturesTab extends StatelessWidget {
                     ),
                   ),
                   const Spacer(),
-                  if (!isLive && match.matchLocation != null)
+                  if (match.matchLocation != null)
                     Text(
                       match.matchLocation!,
                       style: TextStyle(
