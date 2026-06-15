@@ -5,6 +5,7 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:infinite_sports_flutter/misc/single_match_tallies.dart';
 
 class MatchFactsTab extends StatelessWidget {
   final TournamentMatch match;
@@ -228,16 +229,17 @@ class MatchFactsTab extends StatelessWidget {
 
   Widget _buildMatchLeaders(BuildContext context) {
     final allPlayers = [...team1Players, ...team2Players];
+    final tallies = singleMatchPlayerTallies(match);
 
     final categories = [
       {'label': 'Goals', 'stat': 'goals'},
       {'label': 'Assists', 'stat': 'assists'},
       {'label': 'Saves', 'stat': 'saves'},
       {'label': 'DPL', 'stat': 'dpl'},
-      {'label': 'Yellow Cards', 'stat': 'yellowCards'},
     ];
 
-    int getValue(TournamentPlayer p, String stat) => p.statByName(stat);
+    int getValue(TournamentPlayer p, String stat) =>
+        tallies[p.name]?.byStat(stat) ?? 0;
 
     final List<Widget> rows = [];
     for (final cat in categories) {
