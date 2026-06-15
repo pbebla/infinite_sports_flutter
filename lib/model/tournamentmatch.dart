@@ -1,4 +1,5 @@
 import 'package:infinite_sports_flutter/misc/match_clock.dart';
+import 'package:infinite_sports_flutter/misc/match_location.dart';
 import 'package:infinite_sports_flutter/misc/parse_helpers.dart';
 import 'package:infinite_sports_flutter/model/match_status.dart';
 
@@ -18,6 +19,7 @@ class TournamentMatch {
   final Map<String, dynamic>? team2Activity;
   final String? link;
   final String? matchLocation;
+  final MatchLocationInfo? locationInfo;
   final String? team1Keeper;
   final String? team2Keeper;
   final int bracketPosition;
@@ -40,6 +42,7 @@ class TournamentMatch {
     this.team2Activity,
     this.link,
     this.matchLocation,
+    this.locationInfo,
     this.team1Keeper,
     this.team2Keeper,
     required this.bracketPosition,
@@ -70,6 +73,11 @@ class TournamentMatch {
 
     final clock = MatchClock.fromMap(firstNonNull(data, ['Clock', 'clock']));
 
+    final locationInfo = MatchLocationInfo.fromMatch(
+      location: firstNonNull(data, ['Location', 'location']),
+      legacyString: firstNonNull(data, ['MatchLocation', 'matchLocation'])?.toString(),
+    );
+
     return TournamentMatch(
       id: id,
       stage: firstNonNull(data, ['Stage', 'stage'])?.toString() ?? 'Group Stage',
@@ -86,6 +94,7 @@ class TournamentMatch {
       team2Activity: parseActivity(firstNonNull(data, ['Team2Activity', 'team2Activity'])),
       link: firstNonNull(data, ['Link', 'link'])?.toString(),
       matchLocation: firstNonNull(data, ['MatchLocation', 'matchLocation'])?.toString(),
+      locationInfo: locationInfo,
       team1Keeper: firstNonNull(data, ['Team1Keeper', 'team1Keeper'])?.toString(),
       team2Keeper: firstNonNull(data, ['Team2Keeper', 'team2Keeper'])?.toString(),
       bracketPosition: parseInt(firstNonNull(data, ['BracketPosition', 'bracketPosition'])),
