@@ -52,6 +52,10 @@ class MatchFactsTab extends StatelessWidget {
                 subOn = (playerName['On'] ?? playerName['on'])?.toString();
                 subOff = (playerName['Off'] ?? playerName['off'])?.toString();
                 displayName = subOff;
+              } else if (isSub) {
+                // Legacy scalar substitution: treat the name as the OUT player.
+                subOff = playerName?.toString();
+                displayName = subOff ?? '';
               } else {
                 displayName = playerName?.toString() ?? '';
               }
@@ -74,6 +78,10 @@ class MatchFactsTab extends StatelessWidget {
             subOn = (playerName['On'] ?? playerName['on'])?.toString();
             subOff = (playerName['Off'] ?? playerName['off'])?.toString();
             displayName = subOff;
+          } else if (isSub) {
+            // Legacy scalar substitution: treat the name as the OUT player.
+            subOff = playerName?.toString();
+            displayName = subOff ?? '';
           } else {
             displayName = playerName?.toString() ?? '';
           }
