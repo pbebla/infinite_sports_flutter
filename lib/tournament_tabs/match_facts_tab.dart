@@ -337,6 +337,7 @@ class MatchFactsTab extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _buildLocationCard(context),
             Padding(
               padding: const EdgeInsets.all(24),
               child: Center(
