@@ -36,7 +36,7 @@ class MatchFactsTab extends StatelessWidget {
   }
 
   /// Flattens an activity map into a list of events.
-  /// Each entry: {minute, eventType, playerName, isTeam1}
+  /// Each entry: {minute, eventType, playerName, subOn, subOff, isTeam1}
   List<Map<String, dynamic>> _parseActivity(
       Map<String, dynamic>? activity, bool isTeam1) {
     if (activity == null) return [];
@@ -46,10 +46,21 @@ class MatchFactsTab extends StatelessWidget {
         for (final item in value) {
           if (item is Map) {
             item.forEach((eventType, playerName) {
+              final isSub = eventType.toString() == 'substitution';
+              String? subOn, subOff, displayName;
+              if (isSub && playerName is Map) {
+                subOn = (playerName['On'] ?? playerName['on'])?.toString();
+                subOff = (playerName['Off'] ?? playerName['off'])?.toString();
+                displayName = subOff;
+              } else {
+                displayName = playerName?.toString() ?? '';
+              }
               events.add({
                 'minute': minute.toString(),
                 'eventType': eventType.toString(),
-                'playerName': playerName?.toString() ?? '',
+                'playerName': displayName ?? '',
+                'subOn': subOn,
+                'subOff': subOff,
                 'isTeam1': isTeam1,
               });
             });
@@ -57,10 +68,21 @@ class MatchFactsTab extends StatelessWidget {
         }
       } else if (value is Map) {
         value.forEach((eventType, playerName) {
+          final isSub = eventType.toString() == 'substitution';
+          String? subOn, subOff, displayName;
+          if (isSub && playerName is Map) {
+            subOn = (playerName['On'] ?? playerName['on'])?.toString();
+            subOff = (playerName['Off'] ?? playerName['off'])?.toString();
+            displayName = subOff;
+          } else {
+            displayName = playerName?.toString() ?? '';
+          }
           events.add({
             'minute': minute.toString(),
             'eventType': eventType.toString(),
-            'playerName': playerName?.toString() ?? '',
+            'playerName': displayName ?? '',
+            'subOn': subOn,
+            'subOff': subOff,
             'isTeam1': isTeam1,
           });
         });
@@ -78,6 +100,40 @@ class MatchFactsTab extends StatelessWidget {
     final minute = event['minute'] as String;
     final eventType = event['eventType'] as String;
     final playerName = event['playerName'] as String;
+    final subOn = event['subOn'] as String?;
+    final subOff = event['subOff'] as String?;
+
+    Widget nameWidget;
+    if (eventType == 'substitution' && (subOn != null || subOff != null)) {
+      nameWidget = Column(
+        crossAxisAlignment:
+            isTeam1 ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (subOn != null)
+            Text('↗ $subOn',
+                style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF0A7D2C),
+                    fontWeight: FontWeight.w600),
+                overflow: TextOverflow.ellipsis),
+          if (subOff != null)
+            Text('↘ $subOff',
+                style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFFC62828),
+                    fontWeight: FontWeight.w600),
+                overflow: TextOverflow.ellipsis),
+        ],
+      );
+    } else {
+      nameWidget = Text(
+        playerName,
+        style: const TextStyle(fontSize: 12),
+        overflow: TextOverflow.ellipsis,
+        textAlign: isTeam1 ? TextAlign.left : TextAlign.right,
+      );
+    }
 
     Widget eventContent = Row(
       mainAxisSize: MainAxisSize.min,
@@ -85,22 +141,9 @@ class MatchFactsTab extends StatelessWidget {
         if (isTeam1) ...[
           _eventIcon(eventType),
           const SizedBox(width: 4),
-          Flexible(
-            child: Text(
-              playerName,
-              style: const TextStyle(fontSize: 12),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
+          Flexible(child: nameWidget),
         ] else ...[
-          Flexible(
-            child: Text(
-              playerName,
-              style: const TextStyle(fontSize: 12),
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.right,
-            ),
-          ),
+          Flexible(child: nameWidget),
           const SizedBox(width: 4),
           _eventIcon(eventType),
         ],
