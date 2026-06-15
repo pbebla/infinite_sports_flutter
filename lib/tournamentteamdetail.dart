@@ -424,9 +424,17 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                       final stage =
                           entry['furthestStage'] as String? ??
                               'Group Stage';
-                      final w = entry['wins'] as int? ?? 0;
-                      final d = entry['draws'] as int? ?? 0;
-                      final l = entry['losses'] as int? ?? 0;
+                      final isCurrent =
+                          entry['tournamentId']?.toString() ==
+                              widget.tournamentId;
+                      final live = isCurrent
+                          ? computeTournamentStats(
+                                  matches: _matches, rosters: _rosters)
+                              .standingFor(widget.teamId)
+                          : null;
+                      final w = live?.w ?? (entry['wins'] as int? ?? 0);
+                      final d = live?.d ?? (entry['draws'] as int? ?? 0);
+                      final l = live?.l ?? (entry['losses'] as int? ?? 0);
                       String resultText;
                       String resultEmoji;
                       if (isChamp) {
