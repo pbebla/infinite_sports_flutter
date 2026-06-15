@@ -108,25 +108,6 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
           ),
           const SizedBox(height: 4),
           MatchClockText(clock: _match.clock),
-          const SizedBox(height: 10),
-          Text(
-            _formatDate(_match.date),
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
-          ),
-          if (_match.matchLocation != null && _match.matchLocation!.isNotEmpty) ...[
-            const SizedBox(height: 2),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.location_on, size: 12, color: Colors.white54),
-                const SizedBox(width: 3),
-                Text(
-                  _match.matchLocation!,
-                  style: const TextStyle(color: Colors.white54, fontSize: 12),
-                ),
-              ],
-            ),
-          ],
         ],
       );
     } else if (isFinished) {
