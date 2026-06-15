@@ -119,14 +119,14 @@ class MatchFactsTab extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (subOn != null)
-            Text('↗ $subOn',
+            Text(subOn,
                 style: const TextStyle(
                     fontSize: 12,
                     color: Color(0xFF0A7D2C),
                     fontWeight: FontWeight.w600),
                 overflow: TextOverflow.ellipsis),
           if (subOff != null)
-            Text('↘ $subOff',
+            Text(subOff,
                 style: const TextStyle(
                     fontSize: 12,
                     color: Color(0xFFC62828),
