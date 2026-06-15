@@ -16,12 +16,14 @@ Make the match detail page polished and sensible: a clean, aligned header; date 
 1. **Header alignment** — score, red `LIVE` badge, and running clock share one centered baseline aligned with the team crests/names (no too-high/low).
 2. **Date logic** — show date (+ time) at the top of the header ONLY when the match hasn't started; once `status==1` (live), remove the date from the header. Finished matches keep the date + show `FT`.
 3. **Location card** — under the "Match Leaders" section in the Facts tab: venue name (bold), field (e.g. "Field 1 · Turf", blue), full address (grey), and a "Get directions" affordance; tapping anywhere on the card opens the map-app chooser via `url_launcher`.
+5. **Match Leaders = THIS match (owner-confirmed option A)** — the "Match Leaders" box in `match_facts_tab.dart` currently shows each player's whole-tournament stored totals (`p.statByName`). Change it to show leaders **for this match only** — categories **Goals, Assists, Saves, DPL** — derived from THIS match's `team1Activity`/`team2Activity` timeline (reuse the Spec-1 engine's event-counting, scoped to one match via a small `singleMatchPlayerTallies(match)` pure helper). Updates live as events are recorded. The location card (item 3) sits directly above this section.
+6. **Team-detail Tournament History — current tournament row live** — on `tournamentteamdetail.dart`, the "Tournament History" card reads each tournament's STORED `Table` node once (correct for finished tournaments, stale for the live one). Make the row whose tournament == `widget.tournamentId` use the **live-derived standing** (the `ComputedTournamentStats` already computed on that page in Spec 1) so it matches the live "Tournament Record" card. Past tournaments keep their archived stored values.
 
 **Manager app:**
 4. **Location Library + structured capture** — in the match editor, choose a saved venue from a dropdown (which auto-fills address + field options) or "Add new venue"; pick/enter a field. Saved venues persist per tournament for reuse. The match stores a **structured location** (venue + address + field) plus a human string for back-compat.
 
 ### Out of scope
-- Live stats (Spec 1), substitutions (Spec 3).
+- Live stats engine itself (Spec 1, done), substitutions (Spec 3).
 
 ---
 
