@@ -277,6 +277,9 @@ class FixturesTab extends StatelessWidget {
                       child: team2Widget,
                     ),
                   ),
+                  // Trailing spacer mirrors the leading MinuteBall slot so the
+                  // score/time sits in the true horizontal center of the row.
+                  const SizedBox(width: minuteBallWidth + 10),
                 ],
               ),
               // Stream link
