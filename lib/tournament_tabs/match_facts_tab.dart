@@ -339,7 +339,6 @@ class MatchFactsTab extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildLocationCard(context),
             Padding(
               padding: const EdgeInsets.all(24),
               child: Center(
@@ -351,6 +350,7 @@ class MatchFactsTab extends StatelessWidget {
                 ),
               ),
             ),
+            _buildLocationCard(context),
           ],
         ),
       );
@@ -375,8 +375,8 @@ class MatchFactsTab extends StatelessWidget {
             )
           else
             ...allEvents.map((e) => _buildEventRow(context, e)),
-          _buildLocationCard(context),
-          _buildMatchLeaders(context)
+          _buildMatchLeaders(context),
+          _buildLocationCard(context)
         ],
       ),
     );

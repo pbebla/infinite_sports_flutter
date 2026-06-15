@@ -156,6 +156,8 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
           child: Column(
+            mainAxisSize: MainAxisSize.max,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               // Stage label chip centered above teams
               Center(
@@ -175,8 +177,9 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 14),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   // Team 1
                   Expanded(
@@ -274,7 +277,7 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                 // 240 (not 220) leaves headroom so the live header — score,
                 // LIVE badge, clock, date AND location — never clips on
                 // devices with a tall status bar.
-                expandedHeight: 240,
+                expandedHeight: 196,
                 flexibleSpace: FlexibleSpaceBar(
                   background: _buildScoreboardHeader(context),
                 ),
