@@ -1,5 +1,8 @@
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:infinite_sports_flutter/model/leaderboard_entry.dart';
+import 'package:infinite_sports_flutter/model/prediction.dart';
+import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/model/tournament_stage.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
@@ -340,6 +343,77 @@ class TournamentService {
   /// Returns teams for any tournament (alias for getTeams, used by H2H navigation).
   static Future<Map<String, TournamentTeam>> getTeamsForTournament(String tournamentId) async {
     return getTeams(tournamentId);
+  }
+
+  /// Reads PredictionConfig once (defaults applied when absent).
+  static Future<PredictionConfig> getPredictionConfig(String tournamentId) async {
+    try {
+      final snap = await FirebaseDatabase.instance
+          .ref('/Tournaments/$tournamentId/PredictionConfig')
+          .get();
+      return PredictionConfig.fromFirebase(snap.value);
+    } catch (_) {
+      return PredictionConfig.fromFirebase(const {});
+    }
+  }
+
+  static Stream<PredictionConfig> watchPredictionConfig(String tournamentId) {
+    return FirebaseDatabase.instance
+        .ref('/Tournaments/$tournamentId/PredictionConfig')
+        .onValue
+        .map((e) => PredictionConfig.fromFirebase(e.snapshot.value));
+  }
+
+  /// Writes the signed-in user's prediction for one match.
+  static Future<void> submitPrediction(
+    String tournamentId,
+    String matchId,
+    String uid,
+    int team1,
+    int team2,
+    int nowMs,
+  ) async {
+    final pred = MatchPrediction(team1: team1, team2: team2, updatedAt: nowMs);
+    await FirebaseDatabase.instance
+        .ref('/Tournaments/$tournamentId/Predictions/$matchId/$uid')
+        .set(pred.toFirebase());
+  }
+
+  /// Streams the signed-in user's predictions across the tournament, keyed by matchId.
+  static Stream<Map<String, MatchPrediction>> watchMyPredictions(
+      String tournamentId, String uid) {
+    final ref =
+        FirebaseDatabase.instance.ref('/Tournaments/$tournamentId/Predictions');
+    return ref.onValue.map((event) {
+      final value = event.snapshot.value;
+      final out = <String, MatchPrediction>{};
+      if (value is Map) {
+        value.forEach((matchId, byUser) {
+          if (byUser is Map && byUser[uid] is Map) {
+            final p = MatchPrediction.fromFirebase(byUser[uid]);
+            if (p != null) out[matchId.toString()] = p;
+          }
+        });
+      }
+      return out;
+    });
+  }
+
+  /// Streams the tournament leaderboard, already sorted.
+  static Stream<List<LeaderboardEntry>> watchLeaderboard(String tournamentId) {
+    final ref =
+        FirebaseDatabase.instance.ref('/Tournaments/$tournamentId/Leaderboard');
+    return ref.onValue.map((event) {
+      final value = event.snapshot.value;
+      final out = <LeaderboardEntry>[];
+      if (value is Map) {
+        value.forEach((uid, v) {
+          out.add(LeaderboardEntry.fromFirebase(uid.toString(), v));
+        });
+      }
+      out.sort(compareLeaderboard);
+      return out;
+    });
   }
 
   /// Returns participation history for a team across all tournaments.
