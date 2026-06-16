@@ -73,6 +73,11 @@ QuestionScore questionPoints({
     case QuestionType.custom:
       correct = customResult != null && answer == customResult;
       break;
+    case QuestionType.playerAward:
+      // Resolved externally via matchStatLeaders; customResult carries the
+      // winning player name when set by the resolution trigger.
+      correct = customResult != null && answer == customResult;
+      break;
   }
   return QuestionScore(
       correct: correct, points: correct ? question.points : 0, isExactScore: exact);

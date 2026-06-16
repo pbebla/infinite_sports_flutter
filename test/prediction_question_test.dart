@@ -30,6 +30,41 @@ void main() {
       final q = PredictionQuestion.fromFirebase('q_x', {'Type': 'weird', 'Points': 1});
       expect(q.type, QuestionType.custom);
     });
+    test('playerAward parses Stat field and round-trips toFirebase', () {
+      final q = PredictionQuestion.fromFirebase('q_pa', {
+        'Text': 'Top scorer?',
+        'Type': 'playerAward',
+        'Stat': 'goals',
+        'Points': 2,
+        'Order': 5,
+      });
+      expect(q.type, QuestionType.playerAward);
+      expect(q.stat, 'goals');
+      expect(q.points, 2);
+      expect(q.order, 5);
+      final fb = q.toFirebase();
+      expect(fb['Type'], 'playerAward');
+      expect(fb['Stat'], 'goals');
+    });
+    test('playerAward lowercase stat key also parsed', () {
+      final q = PredictionQuestion.fromFirebase('q_pa2', {
+        'Type': 'playerAward',
+        'stat': 'assists',
+        'Points': 1,
+        'Order': 1,
+      });
+      expect(q.type, QuestionType.playerAward);
+      expect(q.stat, 'assists');
+    });
+    test('non-playerAward question has null stat', () {
+      final q = PredictionQuestion.fromFirebase('q_w', {
+        'Type': 'matchWinner',
+        'Points': 1,
+        'Order': 0,
+      });
+      expect(q.stat, isNull);
+      expect(q.toFirebase().containsKey('Stat'), isFalse);
+    });
   });
 
   group('questionPoints', () {

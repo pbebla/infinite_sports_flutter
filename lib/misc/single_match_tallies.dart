@@ -70,3 +70,19 @@ Map<String, MatchPlayerTally> singleMatchPlayerTallies(TournamentMatch match) {
   scan(match.team2Activity);
   return out;
 }
+
+/// Player name(s) leading [stat] ('goals'|'assists'|'saves'|'dpl') in this match.
+/// Returns the set of names sharing the max (ties included). Empty if nobody has any.
+Set<String> matchStatLeaders(TournamentMatch match, String stat) {
+  final tallies = singleMatchPlayerTallies(match);
+  int max = 0;
+  for (final t in tallies.values) {
+    final v = t.byStat(stat);
+    if (v > max) max = v;
+  }
+  if (max == 0) return <String>{};
+  return {
+    for (final e in tallies.entries)
+      if (e.value.byStat(stat) == max) e.key
+  };
+}

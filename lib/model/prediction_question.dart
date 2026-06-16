@@ -1,6 +1,6 @@
 import 'package:infinite_sports_flutter/misc/parse_helpers.dart';
 
-enum QuestionType { matchWinner, correctScore, totalGoals, custom }
+enum QuestionType { matchWinner, correctScore, totalGoals, custom, playerAward }
 
 QuestionType questionTypeFromString(String? s) {
   switch ((s ?? '').toString()) {
@@ -10,6 +10,8 @@ QuestionType questionTypeFromString(String? s) {
       return QuestionType.correctScore;
     case 'totalGoals':
       return QuestionType.totalGoals;
+    case 'playerAward':
+      return QuestionType.playerAward;
     default:
       return QuestionType.custom;
   }
@@ -31,6 +33,7 @@ class PredictionQuestion {
   final int order;
   final List<QuestionOption> options; // custom only
   final double? line; // totalGoals only
+  final String? stat; // playerAward only ('goals'|'assists'|'saves'|'dpl')
 
   const PredictionQuestion({
     required this.id,
@@ -40,6 +43,7 @@ class PredictionQuestion {
     required this.order,
     required this.options,
     required this.line,
+    this.stat,
   });
 
   factory PredictionQuestion.fromFirebase(String id, dynamic raw) {
@@ -63,6 +67,7 @@ class PredictionQuestion {
       order: parseInt(firstNonNull(data, ['Order', 'order'])),
       options: options,
       line: lineRaw == null ? null : double.tryParse(lineRaw.toString()),
+      stat: firstNonNull(data, ['Stat', 'stat'])?.toString(),
     );
   }
 
@@ -72,6 +77,7 @@ class PredictionQuestion {
         'Points': points,
         'Order': order,
         if (line != null) 'Line': line,
+        if (stat != null) 'Stat': stat,
         if (options.isNotEmpty)
           'Options': {for (final o in options) o.id: {'Label': o.label}},
       };

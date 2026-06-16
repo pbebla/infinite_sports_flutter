@@ -132,6 +132,8 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
         return _buildTotalGoals();
       case QuestionType.custom:
         return _buildCustom();
+      case QuestionType.playerAward:
+        return _buildCustom();
     }
   }
 
