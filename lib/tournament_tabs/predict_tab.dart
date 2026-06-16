@@ -104,7 +104,12 @@ class _PredictTabState extends State<PredictTab> {
           : TournamentService.watchMyPredictions(widget.tournamentId, uid),
       builder: (context, snap) {
         final mine = snap.data ?? const <String, MatchPrediction>{};
+        // Predict-tab order: still-predictable (scheduled) first, then live, then
+        // finished — so fans land on games they can still predict.
+        int predictRank(int status) => status == 0 ? 0 : (status == 1 ? 1 : 2);
         final sorted = [...widget.matches]..sort((a, b) {
+            final r = predictRank(a.status).compareTo(predictRank(b.status));
+            if (r != 0) return r;
             final d = (int.tryParse(a.date) ?? 0)
                 .compareTo(int.tryParse(b.date) ?? 0);
             if (d != 0) return d;
