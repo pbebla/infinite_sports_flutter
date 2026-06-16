@@ -9,6 +9,8 @@ import {
 } from './lib/decide';
 import { loadNames } from './lib/names';
 import { sendAlert } from './lib/fcm';
+import { computeLeaderboard, FinalMatch, UserPrediction, PredScoring }
+  from './lib/predict';
 
 admin.initializeApp();
 
@@ -23,6 +25,70 @@ function sleep(ms: number): Promise<void> {
  *  and namespace, which matters in the emulator (demo project + custom ns). */
 function dbRoot(event: DatabaseEvent<Change<DataSnapshot>>): Reference {
   return event.data.before.ref.root as Reference;
+}
+
+async function readUserName(root: Reference, uid: string): Promise<string> {
+  try {
+    const [f, l] = await Promise.all([
+      root.child(`Users/${uid}/First Name`).get(),
+      root.child(`Users/${uid}/Last Name`).get(),
+    ]);
+    const name = `${f.val() ?? ''} ${l.val() ?? ''}`.trim();
+    return name.length > 0 ? name : 'Player';
+  } catch {
+    return 'Player';
+  }
+}
+
+async function recomputeLeaderboard(root: Reference, tid: string): Promise<void> {
+  const cfgSnap = await root.child(`Tournaments/${tid}/PredictionConfig`).get();
+  const cfg = (cfgSnap.val() ?? {}) as Record<string, unknown>;
+  if (cfg['Open'] === false) {
+    await root.child(`Tournaments/${tid}/Leaderboard`).remove();
+    return;
+  }
+  const scoringRaw = (cfg['Scoring'] ?? {}) as Record<string, unknown>;
+  const scoring: PredScoring = {
+    matchWinner: Number(scoringRaw['MatchWinner'] ?? 1),
+    exactScore: Number(scoringRaw['ExactScoreBonus'] ?? 3),
+  };
+
+  const matchesSnap = await root.child(`Tournaments/${tid}/Matches`).get();
+  const matches = (matchesSnap.val() ?? {}) as Record<string, any>;
+  const finals: FinalMatch[] = [];
+  for (const [mid, m] of Object.entries(matches)) {
+    const status = Number(m?.Status ?? m?.status ?? 0);
+    const startedAtMs = Number(m?.Clock?.StartedAt ?? m?.clock?.startedAt ?? 0);
+    if (status === 2 && startedAtMs > 0) {
+      finals.push({
+        id: mid,
+        team1Score: Number(m?.Team1Score ?? m?.team1Score ?? 0),
+        team2Score: Number(m?.Team2Score ?? m?.team2Score ?? 0),
+        startedAtMs,
+      });
+    }
+  }
+
+  const predsByMatch: Record<string, UserPrediction[]> = {};
+  const predsSnap = await root.child(`Tournaments/${tid}/Predictions`).get();
+  const preds = (predsSnap.val() ?? {}) as Record<string, any>;
+  for (const f of finals) {
+    const byUser = (preds[f.id] ?? {}) as Record<string, any>;
+    predsByMatch[f.id] = Object.entries(byUser).map(([uid, p]) => ({
+      uid,
+      team1: Number(p?.Team1 ?? p?.team1 ?? 0),
+      team2: Number(p?.Team2 ?? p?.team2 ?? 0),
+      updatedAt: Number(p?.UpdatedAt ?? p?.updatedAt ?? 0),
+    }));
+  }
+
+  const totals = computeLeaderboard(finals, predsByMatch, scoring);
+
+  const board: Record<string, { Name: string; Points: number; Exact: number }> = {};
+  await Promise.all(Object.entries(totals).map(async ([uid, t]) => {
+    board[uid] = { Name: await readUserName(root, uid), Points: t.points, Exact: t.exact };
+  }));
+  await root.child(`Tournaments/${tid}/Leaderboard`).set(board);
 }
 
 /** Atomically claim a dedupe key. Returns false if someone already claimed it. */
@@ -140,5 +206,26 @@ export const onMatchStatus = onValueWritten(
         .remove().catch(() => undefined);
       throw err;
     }
+  },
+);
+
+export const onPredictMatchStatus = onValueWritten(
+  '/Tournaments/{tid}/Matches/{mid}/Status',
+  async (event) => {
+    await recomputeLeaderboard(dbRoot(event), event.params['tid'] as string);
+  },
+);
+
+export const onPredictTeam1Score = onValueWritten(
+  '/Tournaments/{tid}/Matches/{mid}/Team1Score',
+  async (event) => {
+    await recomputeLeaderboard(dbRoot(event), event.params['tid'] as string);
+  },
+);
+
+export const onPredictTeam2Score = onValueWritten(
+  '/Tournaments/{tid}/Matches/{mid}/Team2Score',
+  async (event) => {
+    await recomputeLeaderboard(dbRoot(event), event.params['tid'] as string);
   },
 );
