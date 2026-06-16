@@ -133,12 +133,14 @@ class PredictionRoomPage extends StatelessWidget {
     List<PredictionQuestion> tournament,
     List<PredictionQuestion> matchLevel,
   ) {
-    final seen = <String>{};
-    final merged = <PredictionQuestion>[];
-    for (final q in [...tournament, ...matchLevel]) {
-      if (seen.add(q.id)) merged.add(q);
-    }
-    merged.sort((a, b) => a.order.compareTo(b.order));
+    // Per-match questions override tournament-wide ones on an id clash — must
+    // match the scoring function's merge direction (per-match wins).
+    final byId = <String, PredictionQuestion>{
+      for (final q in tournament) q.id: q,
+      for (final q in matchLevel) q.id: q,
+    };
+    final merged = byId.values.toList()
+      ..sort((a, b) => a.order.compareTo(b.order));
     return merged;
   }
 
