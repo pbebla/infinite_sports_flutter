@@ -1,14 +1,12 @@
 import 'dart:collection';
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/leaderboard_entry.dart';
-import 'package:infinite_sports_flutter/model/prediction.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
-import 'package:infinite_sports_flutter/tournament_tabs/predict_card.dart';
+import 'package:infinite_sports_flutter/prediction_room_page.dart';
 
 class PredictTab extends StatefulWidget {
   final List<TournamentMatch> matches;
@@ -34,7 +32,6 @@ class _PredictTabState extends State<PredictTab> {
   bool _showLeaderboard = false;
 
   String? get _uid => widget.currentUid;
-  bool get _signedIn => _uid != null;
 
   @override
   Widget build(BuildContext context) {
@@ -97,84 +94,71 @@ class _PredictTabState extends State<PredictTab> {
   }
 
   Widget _matchesView() {
-    final uid = _uid;
-    return StreamBuilder<Map<String, MatchPrediction>>(
-      stream: uid == null
-          ? const Stream.empty()
-          : TournamentService.watchMyPredictions(widget.tournamentId, uid),
-      builder: (context, snap) {
-        final mine = snap.data ?? const <String, MatchPrediction>{};
-        // Predict-tab order: still-predictable (scheduled) first, then live, then
-        // finished — so fans land on games they can still predict.
-        int predictRank(int status) => status == 0 ? 0 : (status == 1 ? 1 : 2);
-        final sorted = [...widget.matches]..sort((a, b) {
-            final r = predictRank(a.status).compareTo(predictRank(b.status));
-            if (r != 0) return r;
-            final d = (int.tryParse(a.date) ?? 0)
-                .compareTo(int.tryParse(b.date) ?? 0);
-            if (d != 0) return d;
-            return a.bracketPosition.compareTo(b.bracketPosition);
-          });
-        final LinkedHashMap<String, List<TournamentMatch>> byDate =
-            LinkedHashMap();
-        for (final m in sorted) {
-          byDate.putIfAbsent(m.date, () => []).add(m);
-        }
-        if (byDate.isEmpty) {
-          return const Center(child: Text('No matches to predict yet'));
-        }
-        final dates = byDate.keys.toList();
-        return ListView.builder(
-          padding: const EdgeInsets.only(bottom: 16),
-          itemCount: dates.length,
-          itemBuilder: (context, i) {
-            final date = dates[i];
-            final dayMatches = byDate[date]!;
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                  child: Text(formatDayHeading(date),
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
-                ),
-                ...dayMatches.map((m) => PredictCard(
-                      match: m,
-                      team1: m.team1Id != null ? widget.teams[m.team1Id] : null,
-                      team2: m.team2Id != null ? widget.teams[m.team2Id] : null,
-                      config: widget.config,
-                      myPrediction: mine[m.id],
-                      isSignedIn: _signedIn,
-                      onSignIn: _goSignIn,
-                      onSubmit: (t1, t2) => _submit(m.id, t1, t2),
-                    )),
-              ],
-            );
-          },
+    // Predict-tab order: still-predictable (scheduled) first, then live, then
+    // finished — so fans land on games they can still predict.
+    int predictRank(int status) => status == 0 ? 0 : (status == 1 ? 1 : 2);
+    final sorted = [...widget.matches]..sort((a, b) {
+        final r = predictRank(a.status).compareTo(predictRank(b.status));
+        if (r != 0) return r;
+        final d = (int.tryParse(a.date) ?? 0)
+            .compareTo(int.tryParse(b.date) ?? 0);
+        if (d != 0) return d;
+        return a.bracketPosition.compareTo(b.bracketPosition);
+      });
+    final LinkedHashMap<String, List<TournamentMatch>> byDate =
+        LinkedHashMap();
+    for (final m in sorted) {
+      byDate.putIfAbsent(m.date, () => []).add(m);
+    }
+    if (byDate.isEmpty) {
+      return const Center(child: Text('No matches to predict yet'));
+    }
+    final dates = byDate.keys.toList();
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 16),
+      itemCount: dates.length,
+      itemBuilder: (context, i) {
+        final date = dates[i];
+        final dayMatches = byDate[date]!;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Text(formatDayHeading(date),
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            ...dayMatches.map((m) => _matchIndexRow(context, m)),
+          ],
         );
       },
     );
   }
 
-  Future<void> _submit(String matchId, int t1, int t2) async {
-    final uid = _uid;
-    if (uid == null) return;
-    await TournamentService.submitPrediction(
-      widget.tournamentId, matchId, uid, t1, t2,
-      DateTime.now().millisecondsSinceEpoch,
+  Widget _matchIndexRow(BuildContext context, TournamentMatch m) {
+    final n1 = m.team1Id != null ? (widget.teams[m.team1Id]?.name ?? m.team1Id!) : 'TBD';
+    final n2 = m.team2Id != null ? (widget.teams[m.team2Id]?.name ?? m.team2Id!) : 'TBD';
+    final locked = m.status != 0;
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: ListTile(
+        title: Text('$n1  vs  $n2', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        subtitle: Text(locked
+            ? (m.status == 2 ? 'Final · predictions closed' : 'Live · predictions closed')
+            : '${m.time ?? ''} · tap to predict'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.push(context, MaterialPageRoute(
+          builder: (_) => PredictionRoomPage(
+            tournamentId: widget.tournamentId,
+            match: m,
+            team1: m.team1Id != null ? widget.teams[m.team1Id] : null,
+            team2: m.team2Id != null ? widget.teams[m.team2Id] : null,
+            config: widget.config,
+            currentUid: widget.currentUid,
+          ),
+        )),
+      ),
     );
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Prediction saved')));
-    }
-  }
-
-  void _goSignIn() {
-    Navigator.push(context,
-            MaterialPageRoute(builder: (context) => const LoginPage()))
-        .then((_) {
-      if (mounted) setState(() {});
-    });
   }
 
   Widget _leaderboardView() {
