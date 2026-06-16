@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
+import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
@@ -38,6 +40,7 @@ class TournamentMatchDetailPage extends StatefulWidget {
 class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
   late TournamentMatch _match = widget.match;
   StreamSubscription<TournamentMatch?>? _sub;
+  PredictionConfig? _predictionConfig;
 
   @override
   void initState() {
@@ -46,6 +49,9 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
         .watchMatch(widget.tournamentId, widget.match.id)
         .listen((m) {
       if (mounted && m != null) setState(() => _match = m);
+    });
+    TournamentService.getPredictionConfig(widget.tournamentId).then((cfg) {
+      if (mounted) setState(() => _predictionConfig = cfg);
     });
   }
 
@@ -302,6 +308,9 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                 team2: team2,
                 team1Players: team1Players,
                 team2Players: team2Players,
+                tournamentId: widget.tournamentId,
+                predictionConfig: _predictionConfig,
+                currentUid: FirebaseAuth.instance.currentUser?.uid,
               ),
               MatchLineupTab(
                 match: _match,
