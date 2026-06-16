@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:infinite_sports_flutter/model/leaderboard_entry.dart';
 import 'package:infinite_sports_flutter/model/prediction.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
+import 'package:infinite_sports_flutter/model/prediction_question.dart';
 import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/model/tournament_stage.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
@@ -415,6 +416,75 @@ class TournamentService {
       return out;
     });
   }
+
+  /// Tournament-wide default questions.
+  static Stream<List<PredictionQuestion>> watchTournamentQuestions(String tid) {
+    return FirebaseDatabase.instance
+        .ref('/Tournaments/$tid/PredictionQuestions')
+        .onValue
+        .map((e) => _parseQuestions(e.snapshot.value));
+  }
+
+  /// Per-match extra questions.
+  static Stream<List<PredictionQuestion>> watchMatchQuestions(String tid, String mid) {
+    return FirebaseDatabase.instance
+        .ref('/Tournaments/$tid/Matches/$mid/PredictionQuestions')
+        .onValue
+        .map((e) => _parseQuestions(e.snapshot.value));
+  }
+
+  static List<PredictionQuestion> _parseQuestions(dynamic value) {
+    final out = <PredictionQuestion>[];
+    if (value is Map) {
+      value.forEach((qid, q) =>
+          out.add(PredictionQuestion.fromFirebase(qid.toString(), q)));
+    }
+    out.sort((a, b) => a.order.compareTo(b.order));
+    return out;
+  }
+
+  /// The signed-in user's answers for one match, keyed by questionId.
+  static Stream<Map<String, QuestionAnswer>> watchMyMatchAnswers(
+      String tid, String mid, String uid) {
+    return FirebaseDatabase.instance
+        .ref('/Tournaments/$tid/Predictions/$mid/$uid')
+        .onValue
+        .map((e) {
+      final out = <String, QuestionAnswer>{};
+      final v = e.snapshot.value;
+      if (v is Map) {
+        v.forEach((qid, raw) {
+          final a = QuestionAnswer.fromFirebase(raw);
+          if (a != null) out[qid.toString()] = a;
+        });
+      }
+      return out;
+    });
+  }
+
+  static Future<void> submitAnswer(
+      String tid, String mid, String uid, String qid, String value, int nowMs) {
+    return FirebaseDatabase.instance
+        .ref('/Tournaments/$tid/Predictions/$mid/$uid/$qid')
+        .set({'Answer': value, 'UpdatedAt': nowMs});
+  }
+
+  /// Owner-set correct option for custom questions (read by the room to show results).
+  static Stream<Map<String, String>> watchMatchResults(String tid, String mid) {
+    return FirebaseDatabase.instance
+        .ref('/Tournaments/$tid/Matches/$mid/PredictionResults')
+        .onValue
+        .map((e) {
+      final out = <String, String>{};
+      final v = e.snapshot.value;
+      if (v is Map) v.forEach((qid, opt) => out[qid.toString()] = opt.toString());
+      return out;
+    });
+  }
+
+  /// Count of a user's answered questions for a match (for the hub progress chip).
+  static Stream<int> watchMyAnswerCount(String tid, String mid, String uid) =>
+      watchMyMatchAnswers(tid, mid, uid).map((m) => m.length);
 
   /// Returns participation history for a team across all tournaments.
   /// Returns list of {tournamentName, tournamentId, furthestStage, isChampion, isRunnerUp, wins, draws, losses, points}

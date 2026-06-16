@@ -27,3 +27,21 @@ class MatchPrediction {
         'UpdatedAt': updatedAt,
       };
 }
+
+class QuestionAnswer {
+  final String value; // see questionPoints encodings
+  final int updatedAt;
+  const QuestionAnswer({required this.value, required this.updatedAt});
+
+  static QuestionAnswer? fromFirebase(dynamic raw) {
+    if (raw is! Map) return null;
+    final v = (raw['Answer'] ?? raw['answer']);
+    if (v == null) return null;
+    return QuestionAnswer(
+      value: v.toString(),
+      updatedAt: parseInt(raw['UpdatedAt'] ?? raw['updatedAt']),
+    );
+  }
+
+  Map<String, dynamic> toFirebase() => {'Answer': value, 'UpdatedAt': updatedAt};
+}
