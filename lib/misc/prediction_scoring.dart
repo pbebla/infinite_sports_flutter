@@ -1,3 +1,5 @@
+import 'package:infinite_sports_flutter/model/prediction_question.dart';
+
 /// Pure scoring rule for a single match prediction.
 /// Mirrors functions/src/lib/predict.ts predictionPoints — keep both in sync.
 class PredictionResult {
@@ -29,4 +31,49 @@ PredictionResult predictionPoints({
     exactCorrect: exactCorrect,
     points: points,
   );
+}
+
+class QuestionScore {
+  final bool correct;
+  final int points;
+  final bool isExactScore;
+  const QuestionScore(
+      {required this.correct, required this.points, required this.isExactScore});
+}
+
+/// Pure scoring for ONE answer to ONE question. Mirrors functions/src/lib/predict.ts.
+/// `answer` encodings: matchWinner -> 'team1'|'draw'|'team2'; totalGoals -> 'over'|'under';
+/// correctScore -> 'T1-T2' (e.g. '2-1'); custom -> the chosen option id.
+/// `customResult` is the owner-set winning option id for custom questions (null = unresolved).
+QuestionScore questionPoints({
+  required PredictionQuestion question,
+  required String answer,
+  required int finalTeam1,
+  required int finalTeam2,
+  required String? customResult,
+}) {
+  bool correct = false;
+  bool exact = false;
+  switch (question.type) {
+    case QuestionType.matchWinner:
+      final res = finalTeam1 > finalTeam2
+          ? 'team1'
+          : (finalTeam1 < finalTeam2 ? 'team2' : 'draw');
+      correct = answer == res;
+      break;
+    case QuestionType.correctScore:
+      correct = answer == '$finalTeam1-$finalTeam2';
+      exact = correct;
+      break;
+    case QuestionType.totalGoals:
+      final line = question.line ?? 2.5;
+      final over = (finalTeam1 + finalTeam2) > line;
+      correct = answer == (over ? 'over' : 'under');
+      break;
+    case QuestionType.custom:
+      correct = customResult != null && answer == customResult;
+      break;
+  }
+  return QuestionScore(
+      correct: correct, points: correct ? question.points : 0, isExactScore: exact);
 }
