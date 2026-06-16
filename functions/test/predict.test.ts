@@ -47,4 +47,13 @@ describe('computeLeaderboard', () => {
     const b = computeLeaderboard(finals, preds, SCORING);
     expect(a).toEqual(b);
   });
+
+  test('drops qualifying users who scored zero (leaderboard = scorers only)', () => {
+    const lb = computeLeaderboard(
+      [{ id: 'm1', team1Score: 2, team2Score: 1, startedAtMs: 1000 }],
+      { m1: [{ uid: 'z1', team1: 0, team2: 3, updatedAt: 900 }] }, // wrong winner -> 0 pts
+      SCORING,
+    );
+    expect(lb['z1']).toBeUndefined();
+  });
 });

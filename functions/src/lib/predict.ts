@@ -43,5 +43,10 @@ export function computeLeaderboard(
       out[p.uid] = cur;
     }
   }
+  // Leaderboard shows scorers only: drop users who qualified but earned nothing
+  // (also clears users whose total dropped to 0 after a score correction/reopen).
+  for (const uid of Object.keys(out)) {
+    if (out[uid].points === 0) delete out[uid];
+  }
   return out;
 }
