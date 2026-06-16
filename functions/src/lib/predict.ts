@@ -1,8 +1,9 @@
 export interface PredQuestion {
   id: string;
-  type: 'matchWinner' | 'correctScore' | 'totalGoals' | 'custom';
+  type: 'matchWinner' | 'correctScore' | 'totalGoals' | 'custom' | 'playerAward';
   points: number;
   line: number | null;
+  stat?: 'goals' | 'assists' | 'saves' | 'dpl' | string;
 }
 export interface QAnswer { value: string; updatedAt: number }
 export interface QScore { correct: boolean; points: number; isExactScore: boolean }
@@ -28,6 +29,37 @@ export function questionPoints(
   return { correct, points: correct ? q.points : 0, isExactScore: exact };
 }
 
+export function matchStatLeaders(team1Activity: unknown, team2Activity: unknown, stat: string): string[] {
+  const tally: Record<string, number> = {};
+  const bump = (type: string, player: string) => {
+    const t = type.toLowerCase().trim();
+    let key: string | null = null;
+    if (t === 'goal' || t === 'penalty goal') key = 'goals';
+    else if (t === 'assist') key = 'assists';
+    else if (t === 'save' || t === 'penalty saved') key = 'saves';
+    else if (t === 'dpl') key = 'dpl';
+    if (key !== stat) return;
+    tally[player] = (tally[player] ?? 0) + 1;
+  };
+  const addEntry = (entry: unknown) => {
+    if (entry && typeof entry === 'object') {
+      for (const [k, v] of Object.entries(entry as Record<string, unknown>)) bump(k, String(v));
+    }
+  };
+  const scan = (activity: unknown) => {
+    if (!activity || typeof activity !== 'object') return;
+    for (const bucket of Object.values(activity as Record<string, unknown>)) {
+      if (Array.isArray(bucket)) bucket.forEach(addEntry);
+      else if (bucket && typeof bucket === 'object') Object.values(bucket as Record<string, unknown>).forEach(addEntry);
+    }
+  };
+  scan(team1Activity); scan(team2Activity);
+  let max = 0;
+  for (const v of Object.values(tally)) if (v > max) max = v;
+  if (max === 0) return [];
+  return Object.entries(tally).filter(([, v]) => v === max).map(([name]) => name);
+}
+
 export function computeLeaderboardV2(
   finals: FinalMatch[],
   questionsByMatch: Record<string, PredQuestion[]>,
@@ -43,6 +75,15 @@ export function computeLeaderboardV2(
       for (const q of qs) {
         const ans = byQ[q.id];
         if (!ans || !(ans.updatedAt < m.startedAtMs)) continue;
+        if (q.type === 'playerAward') {
+          const leaders = matchStatLeaders(m.team1Activity, m.team2Activity, q.stat ?? 'goals');
+          if (leaders.includes(ans.value)) {
+            const cur = out[uid] ?? { points: 0, exact: 0 };
+            cur.points += q.points;
+            out[uid] = cur;
+          }
+          continue;
+        }
         const r = questionPoints(q, ans.value, m.team1Score, m.team2Score, results[q.id] ?? null);
         if (r.points === 0 && !r.correct) continue;
         const cur = out[uid] ?? { points: 0, exact: 0 };
@@ -63,6 +104,8 @@ export interface FinalMatch {
   team1Score: number;
   team2Score: number;
   startedAtMs: number; // kickoff; predictions must predate this to count
+  team1Activity?: unknown;
+  team2Activity?: unknown;
 }
 
 export interface UserPrediction {

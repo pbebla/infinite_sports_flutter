@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { predictionPoints, computeLeaderboard, questionPoints, computeLeaderboardV2 } from '../src/lib/predict';
+import { predictionPoints, computeLeaderboard, questionPoints, computeLeaderboardV2, matchStatLeaders } from '../src/lib/predict';
 
 const SCORING = { matchWinner: 1, exactScore: 3 };
 
@@ -97,5 +97,36 @@ describe('computeLeaderboardV2', () => {
     expect(lb['u1']).toEqual({ points: 4, exact: 1 });
     expect(lb['u2']).toEqual({ points: 1, exact: 0 });
     expect(lb['u3']).toBeUndefined();
+  });
+
+  test('playerAward: awards fans who picked the match leader', () => {
+    const finals = [{ id: 'm1', team1Score: 0, team2Score: 0, startedAtMs: 1000,
+      team1Activity: { '5': [{ Goal: 'Alex' }, { Goal: 'Alex' }] }, team2Activity: { '7': [{ Goal: 'Bea' }] } }];
+    const qs = { m1: [{ id: 'pg', type: 'playerAward' as const, points: 2, line: null, stat: 'goals' }] };
+    const answers = { m1: {
+      u1: { pg: { value: 'Alex', updatedAt: 900 } }, // correct (Alex 2 > Bea 1)
+      u2: { pg: { value: 'Bea', updatedAt: 900 } },  // wrong
+    }};
+    const lb = computeLeaderboardV2(finals, qs, answers, {});
+    expect(lb['u1']).toEqual({ points: 2, exact: 0 });
+    expect(lb['u2']).toBeUndefined();
+  });
+});
+
+describe('matchStatLeaders', () => {
+  const t1 = { '10': [{ Goal: 'Alex' }], '20': [{ Goal: 'Alex' }, { Assist: 'Sam' }] };
+  const t2 = { '30': [{ Goal: 'Bea' }] };
+  test('single leader', () => {
+    expect(matchStatLeaders(t1, t2, 'goals').sort()).toEqual(['Alex']);
+  });
+  test('tie', () => {
+    expect(matchStatLeaders({ '1': [{ Goal: 'Alex' }] }, { '2': [{ Goal: 'Bea' }] }, 'goals').sort())
+      .toEqual(['Alex', 'Bea']);
+  });
+  test('penalty goal counts as goal; map-bucket shape', () => {
+    expect(matchStatLeaders({ '1': { '0': { 'penalty goal': 'Cy' } } }, null, 'goals')).toEqual(['Cy']);
+  });
+  test('nobody', () => {
+    expect(matchStatLeaders(null, null, 'saves')).toEqual([]);
   });
 });

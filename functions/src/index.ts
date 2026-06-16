@@ -61,6 +61,8 @@ async function recomputeLeaderboard(root: Reference, tid: string): Promise<void>
         team1Score: Number(m?.Team1Score ?? m?.team1Score ?? 0),
         team2Score: Number(m?.Team2Score ?? m?.team2Score ?? 0),
         startedAtMs,
+        team1Activity: m?.Team1Activity ?? m?.team1Activity ?? null,
+        team2Activity: m?.Team2Activity ?? m?.team2Activity ?? null,
       });
     }
   }
@@ -73,6 +75,7 @@ async function recomputeLeaderboard(root: Reference, tid: string): Promise<void>
     type: (q?.Type ?? q?.type ?? 'custom') as PredQuestion['type'],
     points: Number(q?.Points ?? q?.points ?? 0),
     line: (q?.Line ?? q?.line) != null ? Number(q?.Line ?? q?.line) : null,
+    stat: q?.Stat ?? q?.stat ?? null,
   }));
 
   // Build per-match question lists, results, and answers
@@ -89,6 +92,7 @@ async function recomputeLeaderboard(root: Reference, tid: string): Promise<void>
       type: (q?.Type ?? q?.type ?? 'custom') as PredQuestion['type'],
       points: Number(q?.Points ?? q?.points ?? 0),
       line: (q?.Line ?? q?.line) != null ? Number(q?.Line ?? q?.line) : null,
+      stat: q?.Stat ?? q?.stat ?? null,
     }));
     // Merge: tournament defaults first, then per-match extras (per-match overrides by id)
     const merged = new Map<string, PredQuestion>();
