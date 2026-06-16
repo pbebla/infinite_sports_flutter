@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/login.dart';
+import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/prediction.dart';
+import 'package:infinite_sports_flutter/model/prediction_config.dart';
+import 'package:infinite_sports_flutter/model/prediction_question.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
+import 'package:infinite_sports_flutter/prediction_room_page.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:infinite_sports_flutter/misc/single_match_tallies.dart';
 
@@ -14,6 +20,12 @@ class MatchFactsTab extends StatelessWidget {
   final List<TournamentPlayer> team1Players;
   final List<TournamentPlayer> team2Players;
 
+  // Optional prediction context — Task A6 will pass these from the match-detail
+  // page. Defaults to null so all existing call sites keep compiling unchanged.
+  final String? tournamentId;
+  final PredictionConfig? predictionConfig;
+  final String? currentUid;
+
   const MatchFactsTab({
     super.key,
     required this.match,
@@ -21,6 +33,9 @@ class MatchFactsTab extends StatelessWidget {
     required this.team2,
     required this.team1Players,
     required this.team2Players,
+    this.tournamentId,
+    this.predictionConfig,
+    this.currentUid,
   });
 
   // Parse minute string to sortable double: "90+3'" -> 90.3, "45'" -> 45.0
@@ -385,11 +400,30 @@ class MatchFactsTab extends StatelessWidget {
           .compareTo(_parseMinute(b['minute'] as String));
     });
 
+    // Teaser visibility: only when prediction context is fully provided and both
+    // teams are confirmed — rendered at the very top of either code path.
+    final showTeaser = tournamentId != null &&
+        predictionConfig?.open == true &&
+        match.team1Id != null &&
+        match.team2Id != null;
+
+    final teaser = showTeaser
+        ? _WhoWillWinTeaser(
+            tournamentId: tournamentId!,
+            match: match,
+            team1: team1,
+            team2: team2,
+            predictionConfig: predictionConfig!,
+            currentUid: currentUid,
+          )
+        : const SizedBox.shrink();
+
     if (allEvents.isEmpty && team1Players.isEmpty && team2Players.isEmpty) {
       return SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            teaser,
             Padding(
               padding: const EdgeInsets.all(24),
               child: Center(
@@ -411,6 +445,7 @@ class MatchFactsTab extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          teaser,
           const Divider(height: 1),
           if (allEvents.isEmpty)
             Padding(
@@ -429,6 +464,286 @@ class MatchFactsTab extends StatelessWidget {
           _buildMatchLeaders(context),
           _buildLocationCard(context)
         ],
+      ),
+    );
+  }
+}
+
+// ── Who Will Win Teaser ───────────────────────────────────────────────────────
+
+const _greenWin = Color(0xFF0A7D2C);
+
+class _WhoWillWinTeaser extends StatefulWidget {
+  final String tournamentId;
+  final TournamentMatch match;
+  final TournamentTeam? team1;
+  final TournamentTeam? team2;
+  final PredictionConfig predictionConfig;
+  final String? currentUid;
+
+  const _WhoWillWinTeaser({
+    required this.tournamentId,
+    required this.match,
+    required this.team1,
+    required this.team2,
+    required this.predictionConfig,
+    required this.currentUid,
+  });
+
+  @override
+  State<_WhoWillWinTeaser> createState() => _WhoWillWinTeaserState();
+}
+
+class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
+  // Whether we are in the middle of submitting (prevents double-taps).
+  bool _submitting = false;
+
+  String get _team1Name => widget.team1?.name ?? widget.match.team1Id ?? 'Team 1';
+  String get _team2Name => widget.team2?.name ?? widget.match.team2Id ?? 'Team 2';
+
+  Future<void> _submit(String value, String qid) async {
+    final uid = widget.currentUid;
+    if (uid == null || _submitting) return;
+    setState(() => _submitting = true);
+    try {
+      await TournamentService.submitAnswer(
+        widget.tournamentId,
+        widget.match.id,
+        uid,
+        qid,
+        value,
+        DateTime.now().millisecondsSinceEpoch,
+      );
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  void _pushRoom(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PredictionRoomPage(
+          tournamentId: widget.tournamentId,
+          match: widget.match,
+          team1: widget.team1,
+          team2: widget.team2,
+          config: widget.predictionConfig,
+          currentUid: widget.currentUid,
+        ),
+      ),
+    );
+  }
+
+  void _pushLogin(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Stream the tournament-wide questions and pick the first matchWinner.
+    return StreamBuilder<List<PredictionQuestion>>(
+      stream: TournamentService.watchTournamentQuestions(widget.tournamentId),
+      builder: (context, qSnap) {
+        final questions = qSnap.data ?? const [];
+        final PredictionQuestion? winnerQ = questions
+            .where((q) => q.type == QuestionType.matchWinner)
+            .cast<PredictionQuestion?>()
+            .firstOrNull;
+
+        if (winnerQ == null) return const SizedBox.shrink();
+
+        final uid = widget.currentUid;
+        final isPending = widget.match.matchStatus.isPending;
+
+        // When signed in, also stream the user's current answers for this match.
+        if (uid != null) {
+          return StreamBuilder<Map<String, QuestionAnswer>>(
+            stream: TournamentService.watchMyMatchAnswers(
+                widget.tournamentId, widget.match.id, uid),
+            builder: (context, ansSnap) {
+              final answers = ansSnap.data ?? const {};
+              final currentAnswer = answers[winnerQ.id]?.value;
+              return _buildCard(
+                  context, winnerQ, isPending, currentAnswer, hasAnswer: currentAnswer != null);
+            },
+          );
+        }
+
+        return _buildCard(context, winnerQ, isPending, null, hasAnswer: false);
+      },
+    );
+  }
+
+  Widget _buildCard(
+    BuildContext context,
+    PredictionQuestion q,
+    bool isPending,
+    String? currentAnswer, {
+    required bool hasAnswer,
+  }) {
+    final uid = widget.currentUid;
+    final signedIn = uid != null;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      child: Card(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header row: title + points badge
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Who will win?',
+                      style: TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: _greenWin.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '+${q.points} pt',
+                      style: const TextStyle(
+                          fontSize: 11,
+                          color: _greenWin,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // The three option buttons (team1 / Draw / team2)
+              _buildOptions(context, q, isPending, currentAnswer, signedIn),
+
+              const SizedBox(height: 10),
+
+              // Signed-out CTA
+              if (!signedIn) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => _pushLogin(context),
+                    child: const Text('Sign in to predict'),
+                  ),
+                ),
+              ]
+              // Signed in + has an answer → show "Enter prediction room →"
+              else if (hasAnswer) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.tonal(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _greenWin.withValues(alpha: 0.12),
+                      foregroundColor: _greenWin,
+                    ),
+                    onPressed: () => _pushRoom(context),
+                    child: const Text('Enter prediction room  →'),
+                  ),
+                ),
+              ]
+              // Locked (live / finished) without having answered → room link still available
+              else if (!isPending) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => _pushRoom(context),
+                    child: const Text('Enter prediction room  →'),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOptions(
+    BuildContext context,
+    PredictionQuestion q,
+    bool isPending,
+    String? currentAnswer,
+    bool signedIn,
+  ) {
+    final canTap = signedIn && isPending && !_submitting;
+
+    return Row(
+      children: [
+        Expanded(
+          child: _optionButton(
+            label: _team1Name,
+            value: 'team1',
+            isSelected: currentAnswer == 'team1',
+            onTap: canTap ? () => _submit('team1', q.id) : null,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: _optionButton(
+            label: 'Draw',
+            value: 'draw',
+            isSelected: currentAnswer == 'draw',
+            onTap: canTap ? () => _submit('draw', q.id) : null,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: _optionButton(
+            label: _team2Name,
+            value: 'team2',
+            isSelected: currentAnswer == 'team2',
+            onTap: canTap ? () => _submit('team2', q.id) : null,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _optionButton({
+    required String label,
+    required String value,
+    required bool isSelected,
+    required VoidCallback? onTap,
+  }) {
+    final selected = isSelected;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+        decoration: BoxDecoration(
+          color: selected ? _greenWin : Colors.transparent,
+          border: Border.all(
+            color: selected ? _greenWin : Colors.grey.shade400,
+            width: selected ? 2 : 1,
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            color: selected ? Colors.white : null,
+          ),
+        ),
       ),
     );
   }
