@@ -9,7 +9,7 @@ import {
 } from './lib/decide';
 import { loadNames } from './lib/names';
 import { sendAlert } from './lib/fcm';
-import { computeLeaderboard, FinalMatch, UserPrediction, PredScoring }
+import { computeLeaderboardV2, FinalMatch, PredQuestion, QAnswer }
   from './lib/predict';
 
 admin.initializeApp();
@@ -47,12 +47,8 @@ async function recomputeLeaderboard(root: Reference, tid: string): Promise<void>
     await root.child(`Tournaments/${tid}/Leaderboard`).remove();
     return;
   }
-  const scoringRaw = (cfg['Scoring'] ?? {}) as Record<string, unknown>;
-  const scoring: PredScoring = {
-    matchWinner: Number(scoringRaw['MatchWinner'] ?? 1),
-    exactScore: Number(scoringRaw['ExactScoreBonus'] ?? 3),
-  };
 
+  // Build the list of final matches (Status==2 with a known kick-off time)
   const matchesSnap = await root.child(`Tournaments/${tid}/Matches`).get();
   const matches = (matchesSnap.val() ?? {}) as Record<string, any>;
   const finals: FinalMatch[] = [];
@@ -69,20 +65,64 @@ async function recomputeLeaderboard(root: Reference, tid: string): Promise<void>
     }
   }
 
-  const predsByMatch: Record<string, UserPrediction[]> = {};
-  const predsSnap = await root.child(`Tournaments/${tid}/Predictions`).get();
-  const preds = (predsSnap.val() ?? {}) as Record<string, any>;
-  for (const f of finals) {
-    const byUser = (preds[f.id] ?? {}) as Record<string, any>;
-    predsByMatch[f.id] = Object.entries(byUser).map(([uid, p]) => ({
-      uid,
-      team1: Number(p?.Team1 ?? p?.team1 ?? 0),
-      team2: Number(p?.Team2 ?? p?.team2 ?? 0),
-      updatedAt: Number(p?.UpdatedAt ?? p?.updatedAt ?? 0),
-    }));
-  }
+  // Read tournament-wide default questions once
+  const tQSnap = await root.child(`Tournaments/${tid}/PredictionQuestions`).get();
+  const tQRaw = (tQSnap.val() ?? {}) as Record<string, any>;
+  const tournamentQuestions: PredQuestion[] = Object.entries(tQRaw).map(([qid, q]) => ({
+    id: qid,
+    type: (q?.Type ?? q?.type ?? 'custom') as PredQuestion['type'],
+    points: Number(q?.Points ?? q?.points ?? 0),
+    line: (q?.Line ?? q?.line) != null ? Number(q?.Line ?? q?.line) : null,
+  }));
 
-  const totals = computeLeaderboard(finals, predsByMatch, scoring);
+  // Build per-match question lists, results, and answers
+  const questionsByMatch: Record<string, PredQuestion[]> = {};
+  const resultsByMatch: Record<string, Record<string, string>> = {};
+  const answersByMatch: Record<string, Record<string, Record<string, QAnswer>>> = {};
+
+  await Promise.all(finals.map(async (f) => {
+    // Per-match extra questions (merged with tournament defaults)
+    const mQSnap = await root.child(`Tournaments/${tid}/Matches/${f.id}/PredictionQuestions`).get();
+    const mQRaw = (mQSnap.val() ?? {}) as Record<string, any>;
+    const matchQs: PredQuestion[] = Object.entries(mQRaw).map(([qid, q]) => ({
+      id: qid,
+      type: (q?.Type ?? q?.type ?? 'custom') as PredQuestion['type'],
+      points: Number(q?.Points ?? q?.points ?? 0),
+      line: (q?.Line ?? q?.line) != null ? Number(q?.Line ?? q?.line) : null,
+    }));
+    // Merge: tournament defaults first, then per-match extras (per-match overrides by id)
+    const merged = new Map<string, PredQuestion>();
+    for (const q of [...tournamentQuestions, ...matchQs]) merged.set(q.id, q);
+    questionsByMatch[f.id] = Array.from(merged.values());
+
+    // Owner-set results for custom questions: {qid: optionId}
+    const resSnap = await root.child(`Tournaments/${tid}/Matches/${f.id}/PredictionResults`).get();
+    const resRaw = (resSnap.val() ?? {}) as Record<string, any>;
+    resultsByMatch[f.id] = Object.fromEntries(
+      Object.entries(resRaw).map(([qid, opt]) => [qid, String(opt)]),
+    );
+
+    // Per-question answers: Predictions/{mid}/{uid}/{qid} = {Answer, UpdatedAt}
+    const predSnap = await root.child(`Tournaments/${tid}/Predictions/${f.id}`).get();
+    const predRaw = (predSnap.val() ?? {}) as Record<string, any>;
+    const byUser: Record<string, Record<string, QAnswer>> = {};
+    for (const [uid, byQ] of Object.entries(predRaw)) {
+      if (!byQ || typeof byQ !== 'object') continue;
+      byUser[uid] = {};
+      for (const [qid, ans] of Object.entries(byQ as Record<string, any>)) {
+        if (!ans || typeof ans !== 'object') continue;
+        const val = ans?.Answer ?? ans?.answer;
+        if (val == null) continue;
+        byUser[uid][qid] = {
+          value: String(val),
+          updatedAt: Number(ans?.UpdatedAt ?? ans?.updatedAt ?? 0),
+        };
+      }
+    }
+    answersByMatch[f.id] = byUser;
+  }));
+
+  const totals = computeLeaderboardV2(finals, questionsByMatch, answersByMatch, resultsByMatch);
 
   const board: Record<string, { Name: string; Points: number; Exact: number }> = {};
   await Promise.all(Object.entries(totals).map(async ([uid, t]) => {
@@ -228,4 +268,14 @@ export const onPredictTeam2Score = onValueWritten(
   async (event) => {
     await recomputeLeaderboard(dbRoot(event), event.params['tid'] as string);
   },
+);
+
+export const onPredictResult = onValueWritten(
+  '/Tournaments/{tid}/Matches/{mid}/PredictionResults/{qid}',
+  async (event) => { await recomputeLeaderboard(dbRoot(event), event.params['tid'] as string); },
+);
+
+export const onPredictQuestion = onValueWritten(
+  '/Tournaments/{tid}/PredictionQuestions/{qid}',
+  async (event) => { await recomputeLeaderboard(dbRoot(event), event.params['tid'] as string); },
 );
