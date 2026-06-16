@@ -90,6 +90,13 @@ DateTime? parseDatabaseDate(String databaseDate) {
   return DateTime.utc(y, m, d);
 }
 
+/// "08272026" -> "Thursday, August 27". Falls back to the raw string.
+String formatDayHeading(String mmddyyyy) {
+  final dt = parseDatabaseDate(mmddyyyy);
+  if (dt == null) return mmddyyyy;
+  return DateFormat('EEEE, MMMM d').format(dt);
+}
+
 String convertDatabaseDateToFormatDate(String databaseDate) {
   final dt = parseDatabaseDate(databaseDate);
   if (dt == null) return databaseDate;
