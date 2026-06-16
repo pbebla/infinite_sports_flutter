@@ -31,6 +31,8 @@ class FixturesTab extends StatelessWidget {
   final Map<String, List<TournamentPlayer>> rosters;
   final String tournamentId;
   final String sport;
+  final bool predictionsOpen;
+  final VoidCallback? onOpenPredict;
 
   const FixturesTab({
     super.key,
@@ -39,6 +41,8 @@ class FixturesTab extends StatelessWidget {
     required this.rosters,
     required this.tournamentId,
     required this.sport,
+    this.predictionsOpen = false,
+    this.onOpenPredict,
   });
 
   String _formatDate(String mmddyyyy) {
@@ -348,10 +352,14 @@ class FixturesTab extends StatelessWidget {
 
     final sortedDates = byDate.keys.toList(); // already in stage order
 
+    final showBanner = predictionsOpen && onOpenPredict != null;
+
     return ListView.builder(
       padding: const EdgeInsets.only(top: 8, bottom: 16),
-      itemCount: sortedDates.length,
-      itemBuilder: (context, dateIdx) {
+      itemCount: sortedDates.length + (showBanner ? 1 : 0),
+      itemBuilder: (context, index) {
+        if (showBanner && index == 0) return _predictBanner(context);
+        final dateIdx = showBanner ? index - 1 : index;
         final date = sortedDates[dateIdx];
         final dateMatches = byDate[date]!;
         return Column(
@@ -371,4 +379,39 @@ class FixturesTab extends StatelessWidget {
       },
     );
   }
+
+  Widget _predictBanner(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 2),
+        child: InkWell(
+          onTap: onOpenPredict,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                  colors: [Color(0xFF0A7D2C), Color(0xFF0C9636)]),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(children: const [
+              Text('🔮', style: TextStyle(fontSize: 20)),
+              SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Predictions',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14)),
+                      Text('Predict every match · climb the leaderboard',
+                          style: TextStyle(
+                              color: Colors.white70, fontSize: 11)),
+                    ]),
+              ),
+              Icon(Icons.chevron_right, color: Colors.white),
+            ]),
+          ),
+        ),
+      );
 }

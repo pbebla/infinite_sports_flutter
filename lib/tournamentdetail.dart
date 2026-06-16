@@ -1,9 +1,11 @@
 ﻿import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -11,6 +13,7 @@ import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/fixtures_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/knockout_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/playerstats_tab.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/predict_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/table_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/teams_tab.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
@@ -41,9 +44,8 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
   List<TournamentMatch> _matches = [];
   StreamSubscription<List<TournamentMatch>>? _matchesSub;
   Map<String, List<TournamentPlayer>> _rosters = {};
-  late TabController _tabController;
 
-  static const List<Tab> _tabs = [
+  static const List<Tab> _baseTabs = [
     Tab(text: 'Fixtures'),
     Tab(text: 'Table'),
     Tab(text: 'Knockout'),
@@ -51,17 +53,21 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
     Tab(text: 'Teams'),
   ];
 
+  PredictionConfig? _predictionConfig;
+  List<Tab> _tabs = const [];
+  TabController? _tabController;
+  int _predictIndex = -1;
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: _tabs.length, vsync: this);
     _loadData();
   }
 
   @override
   void dispose() {
     _matchesSub?.cancel();
-    _tabController.dispose();
+    _tabController?.dispose();
     super.dispose();
   }
 
@@ -80,6 +86,11 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
       final rosters =
           await TournamentService.getRosters(widget.tournamentId, teams);
 
+      final config =
+          await TournamentService.getPredictionConfig(widget.tournamentId);
+      final tabs = <Tab>[..._baseTabs];
+      if (config.open) tabs.add(const Tab(text: 'Predict'));
+
       if (!mounted) return;
       setState(() {
         _tournament = tournament;
@@ -88,6 +99,10 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
         _rosters = rosters;
         _isLoading = false;
         _loadError = null;
+        _predictionConfig = config;
+        _tabs = tabs;
+        _predictIndex = config.open ? tabs.length - 1 : -1;
+        _tabController = TabController(length: tabs.length, vsync: this);
       });
 
       // Keep matches live after the initial paint: scores, clock, standings and
@@ -149,7 +164,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
       return _buildErrorView(context);
     }
     return Scaffold(
-      body: _isLoading
+      body: (_isLoading || _tabController == null)
           ? Column(
               children: [
                 // Placeholder for the navy scoreboard/header area.
@@ -184,7 +199,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                       background: _buildHeader(context),
                     ),
                     bottom: TabBar(
-                      controller: _tabController,
+                      controller: _tabController!,
                       tabs: _tabs,
                       isScrollable: true,
                       labelColor: Colors.white,
@@ -202,7 +217,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                   rosters: _rosters,
                 );
                 return TabBarView(
-                controller: _tabController,
+                controller: _tabController!,
                 children: [
                   FixturesTab(
                     matches: _matches,
@@ -210,6 +225,10 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                     rosters: _rosters,
                     tournamentId: widget.tournamentId,
                     sport: _tournament?.sport ?? 'Soccer',
+                    predictionsOpen: _predictionConfig?.open ?? false,
+                    onOpenPredict: (_predictIndex >= 0)
+                        ? () => _tabController?.animateTo(_predictIndex)
+                        : null,
                   ),
                   TableTab(
                     teams: _teams,
@@ -235,6 +254,14 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                     tournamentId: widget.tournamentId,
                     stats: stats,
                   ),
+                  if (_predictionConfig?.open ?? false)
+                    PredictTab(
+                      matches: _matches,
+                      teams: _teams,
+                      tournamentId: widget.tournamentId,
+                      config: _predictionConfig!,
+                      currentUid: FirebaseAuth.instance.currentUser?.uid,
+                    ),
                 ],
               );
               }),
