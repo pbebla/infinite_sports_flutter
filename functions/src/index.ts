@@ -283,3 +283,8 @@ export const onPredictQuestion = onValueWritten(
   '/Tournaments/{tid}/PredictionQuestions/{qid}',
   async (event) => { await recomputeLeaderboard(dbRoot(event), event.params['tid'] as string); },
 );
+
+export const onPredictMatchQuestion = onValueWritten(
+  '/Tournaments/{tid}/Matches/{mid}/PredictionQuestions/{qid}',
+  async (event) => { await recomputeLeaderboard(dbRoot(event), event.params['tid'] as string); },
+);
