@@ -415,6 +415,8 @@ class MatchFactsTab extends StatelessWidget {
             team2: team2,
             predictionConfig: predictionConfig!,
             currentUid: currentUid,
+            team1Players: team1Players,
+            team2Players: team2Players,
           )
         : const SizedBox.shrink();
 
@@ -480,6 +482,8 @@ class _WhoWillWinTeaser extends StatefulWidget {
   final TournamentTeam? team2;
   final PredictionConfig predictionConfig;
   final String? currentUid;
+  final List<TournamentPlayer> team1Players;
+  final List<TournamentPlayer> team2Players;
 
   const _WhoWillWinTeaser({
     required this.tournamentId,
@@ -488,6 +492,8 @@ class _WhoWillWinTeaser extends StatefulWidget {
     required this.team2,
     required this.predictionConfig,
     required this.currentUid,
+    this.team1Players = const [],
+    this.team2Players = const [],
   });
 
   @override
@@ -530,6 +536,8 @@ class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
           team2: widget.team2,
           config: widget.predictionConfig,
           currentUid: widget.currentUid,
+          team1Players: widget.team1Players,
+          team2Players: widget.team2Players,
         ),
       ),
     );

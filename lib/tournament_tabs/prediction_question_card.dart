@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scoring.dart';
 import 'package:infinite_sports_flutter/model/prediction_question.dart';
+import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 
 const _greenWin = Color(0xFF0A7D2C);
 
@@ -18,6 +19,9 @@ class PredictionQuestionCard extends StatefulWidget {
   final int finalTeam2;
   final String team1Name;
   final String team2Name;
+  final List<TournamentPlayer> team1Players;
+  final List<TournamentPlayer> team2Players;
+  final Set<String> playerLeaders; // actual stat leaders; empty until finished
   final void Function(String value) onAnswer;
 
   const PredictionQuestionCard({
@@ -32,6 +36,9 @@ class PredictionQuestionCard extends StatefulWidget {
     required this.finalTeam2,
     required this.team1Name,
     required this.team2Name,
+    this.team1Players = const [],
+    this.team2Players = const [],
+    this.playerLeaders = const {},
     required this.onAnswer,
   });
 
@@ -133,7 +140,7 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
       case QuestionType.custom:
         return _buildCustom();
       case QuestionType.playerAward:
-        return _buildCustom();
+        return _buildPlayerAward();
     }
   }
 
@@ -212,6 +219,69 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
         const SizedBox(width: 8),
         _optionBtn('Under $lineStr', 'under'),
       ].map((w) => Expanded(child: w)).toList(),
+    );
+  }
+
+  // ── playerAward ──────────────────────────────────────────────────────────────
+
+  Widget _buildPlayerAward() {
+    final t1 = widget.team1Players;
+    final t2 = widget.team2Players;
+    if (t1.isEmpty && t2.isEmpty) {
+      return const Text('No roster available.',
+          style: TextStyle(fontSize: 12, color: Colors.grey));
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (t1.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(widget.team1Name,
+                style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.grey)),
+          ),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: t1.map((p) => _playerChip(p)).toList(),
+          ),
+          const SizedBox(height: 8),
+        ],
+        if (t2.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(widget.team2Name,
+                style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.grey)),
+          ),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: t2.map((p) => _playerChip(p)).toList(),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _playerChip(TournamentPlayer player) {
+    final selected = widget.answer == player.name;
+    final canTap = _interactive;
+    final label = player.number != null ? '#${player.number} ${player.name}' : player.name;
+    return ChoiceChip(
+      label: Text(label,
+          style: TextStyle(
+              fontSize: 12,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: selected ? Colors.white : null)),
+      selected: selected,
+      selectedColor: _greenWin,
+      onSelected: canTap ? (_) => widget.onAnswer(player.name) : null,
     );
   }
 
@@ -298,6 +368,11 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
     final q = widget.question;
     final answer = widget.answer;
 
+    // playerAward outcome uses leader membership, not the generic scoring fn.
+    if (q.type == QuestionType.playerAward) {
+      return _buildPlayerAwardOutcome(context, answer);
+    }
+
     String label;
     Color color;
 
@@ -339,6 +414,63 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
                 fontWeight: FontWeight.w700,
                 color: color)),
       ),
+    );
+  }
+
+  Widget _buildPlayerAwardOutcome(BuildContext context, String? answer) {
+    final leaders = widget.playerLeaders;
+    final q = widget.question;
+
+    String label;
+    Color color;
+
+    if (answer == null) {
+      label = 'No answer';
+      color = Colors.grey;
+    } else if (leaders.isEmpty) {
+      label = 'No result';
+      color = Colors.orange.shade700;
+    } else if (leaders.contains(answer)) {
+      label = '✓ +${q.points}';
+      color = _greenWin;
+    } else {
+      label = '✗';
+      color = Colors.grey;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Align(
+          alignment: Alignment.centerRight,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: color.withValues(alpha: 0.4)),
+            ),
+            child: Text(label,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: color)),
+          ),
+        ),
+        if (leaders.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            'Led by: ${leaders.join(', ')}',
+            style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withValues(alpha: 0.55)),
+            textAlign: TextAlign.right,
+          ),
+        ],
+      ],
     );
   }
 }

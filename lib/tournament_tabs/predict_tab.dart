@@ -5,6 +5,7 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/leaderboard_entry.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
+import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/prediction_room_page.dart';
 
@@ -14,6 +15,7 @@ class PredictTab extends StatefulWidget {
   final String tournamentId;
   final PredictionConfig config;
   final String? currentUid; // null = signed out
+  final Map<String, List<TournamentPlayer>> rosters;
 
   const PredictTab({
     super.key,
@@ -22,6 +24,7 @@ class PredictTab extends StatefulWidget {
     required this.tournamentId,
     required this.config,
     required this.currentUid,
+    this.rosters = const {},
   });
 
   @override
@@ -155,6 +158,8 @@ class _PredictTabState extends State<PredictTab> {
             team2: m.team2Id != null ? widget.teams[m.team2Id] : null,
             config: widget.config,
             currentUid: widget.currentUid,
+            team1Players: m.team1Id != null ? (widget.rosters[m.team1Id] ?? const []) : const [],
+            team2Players: m.team2Id != null ? (widget.rosters[m.team2Id] ?? const []) : const [],
           ),
         )),
       ),

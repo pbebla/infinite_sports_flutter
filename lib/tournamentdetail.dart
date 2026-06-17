@@ -261,6 +261,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                       tournamentId: widget.tournamentId,
                       config: _predictionConfig!,
                       currentUid: FirebaseAuth.instance.currentUser?.uid,
+                      rosters: _rosters,
                     ),
                 ],
               );

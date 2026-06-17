@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/login.dart';
+import 'package:infinite_sports_flutter/misc/single_match_tallies.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/model/prediction.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/prediction_question.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
+import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/prediction_question_card.dart';
 
@@ -18,6 +20,8 @@ class PredictionRoomPage extends StatelessWidget {
   final TournamentTeam? team2;
   final PredictionConfig config;
   final String? currentUid;
+  final List<TournamentPlayer> team1Players;
+  final List<TournamentPlayer> team2Players;
 
   const PredictionRoomPage({
     super.key,
@@ -27,6 +31,8 @@ class PredictionRoomPage extends StatelessWidget {
     required this.team2,
     required this.config,
     required this.currentUid,
+    this.team1Players = const [],
+    this.team2Players = const [],
   });
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -191,6 +197,12 @@ class PredictionRoomPage extends StatelessWidget {
                       finalTeam2: match.team2Score,
                       team1Name: _team1Name,
                       team2Name: _team2Name,
+                      team1Players: team1Players,
+                      team2Players: team2Players,
+                      playerLeaders: (q.type == QuestionType.playerAward &&
+                              match.matchStatus.isFinished)
+                          ? matchStatLeaders(match, q.stat ?? 'goals')
+                          : const <String>{},
                       onAnswer: (v) => _submit(context, q.id, v),
                     );
                   },
