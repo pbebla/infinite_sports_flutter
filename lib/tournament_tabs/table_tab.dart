@@ -127,7 +127,7 @@ class TableTab extends StatelessWidget {
         style: Theme.of(context).textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.bold,
               letterSpacing: 0.8,
-              color: Theme.of(context).colorScheme.primary,
+              color: Theme.of(context).colorScheme.onSurface,
             ),
       ),
     );

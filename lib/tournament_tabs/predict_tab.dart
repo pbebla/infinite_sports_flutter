@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/leaderboard_entry.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/prediction_question_card.dart'
+    show predictionAccent;
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -81,16 +83,20 @@ class _PredictTabState extends State<PredictTab> {
         for (final e in (snap.data ?? const <LeaderboardEntry>[])) {
           if (e.uid == uid) pts = e.points;
         }
+        final displayPts = pts ?? 0;
+        final label = pts == null
+            ? '— pts'
+            : '$displayPts ${displayPts == 1 ? 'pt' : 'pts'}';
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
           decoration: BoxDecoration(
-            color: infiniteSportsPrimaryColor.withValues(alpha: 0.12),
+            color: predictionAccent.withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(20),
           ),
-          child: Text('${pts ?? '—'} pts',
-              style: TextStyle(
+          child: Text(label,
+              style: const TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: infiniteSportsPrimaryColor)),
+                  color: predictionAccent)),
         );
       },
     );

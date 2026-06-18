@@ -205,6 +205,9 @@ class MatchFactsTab extends StatelessWidget {
   Widget _buildLocationCard(BuildContext context) {
     final info = match.locationInfo;
     if (info == null) return const SizedBox.shrink();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final locationBlue =
+        isDark ? const Color(0xFF5B9BFF) : const Color(0xFF1A237E);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
       child: Material(
@@ -238,7 +241,7 @@ class MatchFactsTab extends StatelessWidget {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1A237E),
+                    color: locationBlue,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Icon(Icons.location_on, color: Colors.white, size: 22),
@@ -249,13 +252,15 @@ class MatchFactsTab extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(info.venue,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 15)),
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: Theme.of(context).colorScheme.onSurface)),
                       if (info.field != null) ...[
                         const SizedBox(height: 2),
                         Text(info.field!,
-                            style: const TextStyle(
-                                color: Color(0xFF1A237E), fontSize: 13)),
+                            style: TextStyle(
+                                color: locationBlue, fontSize: 13)),
                       ],
                       if (info.address != null) ...[
                         const SizedBox(height: 3),
@@ -268,14 +273,14 @@ class MatchFactsTab extends StatelessWidget {
                                 fontSize: 12)),
                       ],
                       const SizedBox(height: 8),
-                      const Row(
+                      Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.directions, size: 14, color: Color(0xFF1A237E)),
-                          SizedBox(width: 4),
+                          Icon(Icons.directions, size: 14, color: locationBlue),
+                          const SizedBox(width: 4),
                           Text('Get directions',
                               style: TextStyle(
-                                  color: Color(0xFF1A237E),
+                                  color: locationBlue,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600)),
                         ],
