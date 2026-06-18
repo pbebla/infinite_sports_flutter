@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/misc/single_match_tallies.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/prediction.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/prediction_question.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
-import 'package:infinite_sports_flutter/tournament_tabs/prediction_question_card.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/prediction_question_card.dart'
+    show predictionAccent, PredictionQuestionCard;
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 /// Full-page view for answering all prediction questions for one match.
@@ -219,44 +219,56 @@ class PredictionRoomPage extends StatelessWidget {
     );
   }
 
+  // Change 6: centered "vs" with balanced sides; Change 1: blue tint; Change 5: size 30
   Widget _buildTeamHeader(BuildContext context) {
-    final brandColor = infiniteSportsPrimaryColor;
     return Container(
-      color: brandColor.withValues(alpha: 0.06),
+      color: predictionAccent.withValues(alpha: 0.06),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          TeamLogo(url: team1?.logoUrl, size: 22),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              _team1Name,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              overflow: TextOverflow.ellipsis,
+          // Left side: name right-aligned + logo
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Flexible(
+                  child: Text(
+                    _team1Name,
+                    textAlign: TextAlign.right,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TeamLogo(url: team1?.logoUrl, size: 30),
+              ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Text(
-              'vs',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(context)
-                      .colorScheme
-                      .onSurface
-                      .withValues(alpha: 0.5)),
+          // Dead-center "vs"
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 12),
+            child: Text('vs',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+          // Right side: logo + name left-aligned
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: [
+                TeamLogo(url: team2?.logoUrl, size: 30),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    _team2Name,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
             ),
           ),
-          Flexible(
-            child: Text(
-              _team2Name,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(width: 8),
-          TeamLogo(url: team2?.logoUrl, size: 22),
         ],
       ),
     );

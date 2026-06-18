@@ -82,3 +82,32 @@ class PredictionQuestion {
           'Options': {for (final o in options) o.id: {'Label': o.label}},
       };
 }
+
+/// Display text for a question — nice, consistent wording for the auto types;
+/// the stored text for custom (owner-authored) questions.
+String questionDisplayText(PredictionQuestion q) {
+  switch (q.type) {
+    case QuestionType.matchWinner:
+      return 'Who will win?';
+    case QuestionType.correctScore:
+      return 'What will the final score be?';
+    case QuestionType.totalGoals:
+      final l = q.line ?? 2.5;
+      final ls = l == l.roundToDouble() ? l.toStringAsFixed(0) : l.toString();
+      return 'Over or under $ls goals?';
+    case QuestionType.playerAward:
+      switch (q.stat) {
+        case 'assists':
+          return 'Who will provide the most assists?';
+        case 'saves':
+          return 'Who will make the most saves?';
+        case 'dpl':
+          return 'Who will be the best defender?';
+        case 'goals':
+        default:
+          return 'Who will score the most goals?';
+      }
+    case QuestionType.custom:
+      return q.text;
+  }
+}

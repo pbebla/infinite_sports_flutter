@@ -1,11 +1,14 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scoring.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/prediction_question.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
+// Change 1: calm blue accent, replaces brand red inside the prediction room/card
+const Color predictionAccent = Color(0xFF2D6CDF);
+
+// Correct answer green — ONLY used when finished + correct (Change 2)
 const _greenWin = Color(0xFF0A7D2C);
 
 /// A Firebase-free, testable card for a single prediction question.
@@ -137,7 +140,9 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
   @override
   Widget build(BuildContext context) {
     final q = widget.question;
-    final brandColor = infiniteSportsPrimaryColor;
+    // Change 7: pluralize points
+    final pts = q.points;
+    final ptsLabel = '$pts ${pts == 1 ? 'pt' : 'pts'}';
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -145,27 +150,28 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Branded header strip
+          // Change 1: blue-tinted header strip; Change 3: derived question text
           Container(
-            color: brandColor.withValues(alpha: 0.06),
+            color: predictionAccent.withValues(alpha: 0.06),
             padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: Text(q.text,
+                  child: Text(questionDisplayText(q),
                       style: const TextStyle(
                           fontSize: 14, fontWeight: FontWeight.w600)),
                 ),
                 const SizedBox(width: 8),
+                // Change 1: blue points pill; Change 7: pluralized
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: brandColor,
+                    color: predictionAccent,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Text('${q.points} pts',
+                  child: Text(ptsLabel,
                       style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
@@ -210,16 +216,17 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
   }
 
   // ── matchWinner ─────────────────────────────────────────────────────────────
+  // Change 4: 3 Expanded buttons of equal width, radius ~8, no pill rounding
 
   Widget _buildMatchWinner() {
     return Row(
       children: [
-        _optionBtnWithLogo(widget.team1Name, 'team1', widget.team1LogoUrl),
+        Expanded(child: _optionBtnWithLogo(widget.team1Name, 'team1', widget.team1LogoUrl)),
         const SizedBox(width: 6),
-        _optionBtn('Draw', 'draw'),
+        Expanded(child: _optionBtn('Draw', 'draw')),
         const SizedBox(width: 6),
-        _optionBtnWithLogo(widget.team2Name, 'team2', widget.team2LogoUrl),
-      ].map((w) => Expanded(child: w)).toList(),
+        Expanded(child: _optionBtnWithLogo(widget.team2Name, 'team2', widget.team2LogoUrl)),
+      ],
     );
   }
 
@@ -316,7 +323,7 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Team toggle
+        // Team toggle — Change 1: blue accent; Change 5: size 24 logos
         Row(
           children: [
             Expanded(child: _teamToggleBtn(0, widget.team1Name, widget.team1LogoUrl)),
@@ -357,9 +364,9 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
     );
   }
 
+  // Change 1: use predictionAccent; Change 5: size 24 logos
   Widget _teamToggleBtn(int teamIdx, String name, String? logoUrl) {
     final selected = _awardTeam == teamIdx;
-    final brandColor = infiniteSportsPrimaryColor;
     return GestureDetector(
       onTap: () {
         if (_awardTeam == teamIdx) return;
@@ -384,10 +391,10 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
         decoration: BoxDecoration(
           color: selected
-              ? brandColor.withValues(alpha: 0.1)
+              ? predictionAccent.withValues(alpha: 0.1)
               : Colors.transparent,
           border: Border.all(
-            color: selected ? brandColor : Colors.grey.shade300,
+            color: selected ? predictionAccent : Colors.grey.shade300,
             width: selected ? 1.5 : 1,
           ),
           borderRadius: BorderRadius.circular(8),
@@ -396,7 +403,8 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            TeamLogo(url: logoUrl, size: 18),
+            // Change 5: size 24
+            TeamLogo(url: logoUrl, size: 24),
             const SizedBox(width: 6),
             Flexible(
               child: Text(
@@ -407,7 +415,8 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
                   fontSize: 12,
                   fontWeight:
                       selected ? FontWeight.w700 : FontWeight.w500,
-                  color: selected ? brandColor : null,
+                  // Change 1: blue accent for selected text
+                  color: selected ? predictionAccent : null,
                 ),
               ),
             ),
@@ -434,24 +443,38 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
 
   // ── shared helpers ────────────────────────────────────────────────────────
 
-  /// A toggle-style button; highlighted in green when selected.
+  /// A toggle-style button.
+  /// Change 2: selected PRE-finish = blue (predictionAccent); finished+correct = green (handled by outcome chip).
+  /// Change 4 (matchWinner): radius 8 applied at call site via OutlinedButton shape override.
   Widget _optionBtn(String label, String value) {
     final selected = widget.answer == value;
     final canTap = _interactive;
+    // Change 2: blue for selected-before-finish; no special coloring post-finish
+    // (outcome chip shows green/grey; option boxes stay neutral when finished)
+    final Color borderColor =
+        selected ? predictionAccent : Colors.grey.shade400;
+    final Color? bgColor =
+        selected ? predictionAccent.withValues(alpha: 0.1) : null;
+    final Color? fgColor = selected ? predictionAccent : null;
+
     return OutlinedButton(
       onPressed: canTap ? () => widget.onAnswer(value) : null,
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        side: BorderSide(
-            color: selected ? _greenWin : Colors.grey.shade400, width: 1.5),
-        backgroundColor: selected ? _greenWin.withValues(alpha: 0.1) : null,
-        foregroundColor: selected ? _greenWin : null,
+        // Change 4: smaller corner radius for matchWinner-style buttons
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        side: BorderSide(color: borderColor, width: 1.5),
+        backgroundColor: bgColor,
+        foregroundColor: fgColor,
         disabledBackgroundColor:
-            selected ? _greenWin.withValues(alpha: 0.08) : null,
-        disabledForegroundColor: selected ? _greenWin : Colors.grey,
+            selected ? predictionAccent.withValues(alpha: 0.08) : null,
+        disabledForegroundColor:
+            selected ? predictionAccent : Colors.grey,
       ),
       child: Text(label,
           textAlign: TextAlign.center,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
               fontSize: 12.5,
               fontWeight:
@@ -460,26 +483,37 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
   }
 
   /// Like [_optionBtn] but with a small team logo leading the label.
+  /// Change 2: selected = blue (predictionAccent) not green.
+  /// Change 4: radius 8, 2-line text.
+  /// Change 5: size 24 logos.
   Widget _optionBtnWithLogo(String label, String value, String? logoUrl) {
     final selected = widget.answer == value;
     final canTap = _interactive;
+    final Color borderColor =
+        selected ? predictionAccent : Colors.grey.shade400;
+    final Color? bgColor =
+        selected ? predictionAccent.withValues(alpha: 0.1) : null;
+    final Color? fgColor = selected ? predictionAccent : null;
+
     return OutlinedButton(
       onPressed: canTap ? () => widget.onAnswer(value) : null,
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-        side: BorderSide(
-            color: selected ? _greenWin : Colors.grey.shade400, width: 1.5),
-        backgroundColor: selected ? _greenWin.withValues(alpha: 0.1) : null,
-        foregroundColor: selected ? _greenWin : null,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        side: BorderSide(color: borderColor, width: 1.5),
+        backgroundColor: bgColor,
+        foregroundColor: fgColor,
         disabledBackgroundColor:
-            selected ? _greenWin.withValues(alpha: 0.08) : null,
-        disabledForegroundColor: selected ? _greenWin : Colors.grey,
+            selected ? predictionAccent.withValues(alpha: 0.08) : null,
+        disabledForegroundColor:
+            selected ? predictionAccent : Colors.grey,
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         mainAxisSize: MainAxisSize.min,
         children: [
-          TeamLogo(url: logoUrl, size: 16),
+          // Change 5: size 24
+          TeamLogo(url: logoUrl, size: 24),
           const SizedBox(width: 4),
           Flexible(
             child: Text(label,
@@ -532,6 +566,8 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
       );
 
   // ── outcome chip ─────────────────────────────────────────────────────────
+  // Change 2: green ONLY shown here (finished+correct). Option boxes use blue
+  // when selected pre-finish; no special color when just disabled post-finish.
 
   Widget _buildOutcome(BuildContext context) {
     final q = widget.question;
@@ -561,7 +597,7 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
       );
       if (score.correct) {
         label = '✓ +${score.points}';
-        color = _greenWin;
+        color = _greenWin; // green ONLY here (correct after finish)
       } else {
         label = '✗';
         color = Colors.grey;
@@ -601,7 +637,7 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
       color = Colors.orange.shade700;
     } else if (leaders.contains(answer)) {
       label = '✓ +${q.points}';
-      color = _greenWin;
+      color = _greenWin; // green ONLY here (correct after finish)
     } else {
       label = '✗';
       color = Colors.grey;
