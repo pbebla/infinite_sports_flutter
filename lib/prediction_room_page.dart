@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/misc/single_match_tallies.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/prediction.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/prediction_question.dart';
@@ -9,6 +10,7 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/prediction_question_card.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 /// Full-page view for answering all prediction questions for one match.
 ///
@@ -175,6 +177,9 @@ class PredictionRoomPage extends StatelessWidget {
         // Sign-in banner for guests
         if (!signedIn) _buildSignInBanner(context),
 
+        // Compact team header row
+        _buildTeamHeader(context),
+
         Expanded(
           child: visibleQuestions.isEmpty
               ? _buildEmpty(context, questions.isEmpty)
@@ -197,6 +202,8 @@ class PredictionRoomPage extends StatelessWidget {
                       finalTeam2: match.team2Score,
                       team1Name: _team1Name,
                       team2Name: _team2Name,
+                      team1LogoUrl: team1?.logoUrl,
+                      team2LogoUrl: team2?.logoUrl,
                       team1Players: team1Players,
                       team2Players: team2Players,
                       playerLeaders: (q.type == QuestionType.playerAward &&
@@ -209,6 +216,49 @@ class PredictionRoomPage extends StatelessWidget {
                 ),
         ),
       ],
+    );
+  }
+
+  Widget _buildTeamHeader(BuildContext context) {
+    final brandColor = infiniteSportsPrimaryColor;
+    return Container(
+      color: brandColor.withValues(alpha: 0.06),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          TeamLogo(url: team1?.logoUrl, size: 22),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              _team1Name,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text(
+              'vs',
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withValues(alpha: 0.5)),
+            ),
+          ),
+          Flexible(
+            child: Text(
+              _team2Name,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
+          TeamLogo(url: team2?.logoUrl, size: 22),
+        ],
+      ),
     );
   }
 

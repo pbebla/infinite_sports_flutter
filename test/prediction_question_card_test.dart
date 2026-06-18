@@ -16,10 +16,11 @@ PredictionQuestion _q(QuestionType t,
         line: line,
         stat: stat);
 
-TournamentPlayer _player(String name) => TournamentPlayer(
+TournamentPlayer _player(String name, {String teamId = 'team1', String teamName = 'Eagles'}) =>
+    TournamentPlayer(
       name: name,
-      teamId: 'team1',
-      teamName: 'Eagles',
+      teamId: teamId,
+      teamName: teamName,
       goals: 0,
       assists: 0,
       saves: 0,
@@ -45,9 +46,9 @@ void main() {
         team1Name: 'Eagles',
         team2Name: 'Lions',
         onAnswer: (_) {})));
-    expect(find.text('Eagles'), findsOneWidget);
+    expect(find.text('Eagles'), findsWidgets);
     expect(find.text('Draw'), findsOneWidget);
-    expect(find.text('Lions'), findsOneWidget);
+    expect(find.text('Lions'), findsWidgets);
   });
 
   testWidgets('custom shows its options', (tester) async {
@@ -87,7 +88,7 @@ void main() {
     expect(find.textContaining('+3'), findsOneWidget);
   });
 
-  testWidgets('playerAward shows roster players to pick', (tester) async {
+  testWidgets('playerAward shows team toggle with both team names', (tester) async {
     await tester.pumpWidget(_host(PredictionQuestionCard(
         question: _q(QuestionType.playerAward, stat: 'goals'),
         answer: null,
@@ -100,10 +101,15 @@ void main() {
         team1Name: 'Eagles',
         team2Name: 'Lions',
         team1Players: [_player('Alex')],
-        team2Players: [_player('Bea')],
+        team2Players: [_player('Bea', teamId: 'team2', teamName: 'Lions')],
         playerLeaders: const {},
         onAnswer: (_) {})));
-    expect(find.text('Alex'), findsOneWidget);
-    expect(find.text('Bea'), findsOneWidget);
+    // Team toggle buttons are visible for both teams
+    expect(find.text('Eagles'), findsWidgets);
+    expect(find.text('Lions'), findsWidgets);
+    // The card builds and renders without error
+    expect(find.byType(PredictionQuestionCard), findsOneWidget);
+    // Team 1 (Eagles) is selected by default — Alex should appear in the wheel
+    expect(find.textContaining('Alex'), findsWidgets);
   });
 }

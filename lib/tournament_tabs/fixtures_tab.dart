@@ -393,7 +393,11 @@ class FixturesTab extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(children: const [
-              Text('🔮', style: TextStyle(fontSize: 20)),
+              Image(
+                image: AssetImage('assets/predict_symbolic_256.png'),
+                width: 22,
+                height: 22,
+              ),
               SizedBox(width: 10),
               Expanded(
                 child: Column(

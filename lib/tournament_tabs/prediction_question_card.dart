@@ -1,7 +1,10 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scoring.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/prediction_question.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 const _greenWin = Color(0xFF0A7D2C);
 
@@ -19,6 +22,8 @@ class PredictionQuestionCard extends StatefulWidget {
   final int finalTeam2;
   final String team1Name;
   final String team2Name;
+  final String? team1LogoUrl;
+  final String? team2LogoUrl;
   final List<TournamentPlayer> team1Players;
   final List<TournamentPlayer> team2Players;
   final Set<String> playerLeaders; // actual stat leaders; empty until finished
@@ -36,6 +41,8 @@ class PredictionQuestionCard extends StatefulWidget {
     required this.finalTeam2,
     required this.team1Name,
     required this.team2Name,
+    this.team1LogoUrl,
+    this.team2LogoUrl,
     this.team1Players = const [],
     this.team2Players = const [],
     this.playerLeaders = const {},
@@ -51,10 +58,15 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
   late int _t1;
   late int _t2;
 
+  // Player-award wheel state
+  int _awardTeam = 0; // 0 = team1, 1 = team2
+  late FixedExtentScrollController _awardController;
+
   @override
   void initState() {
     super.initState();
     _initScoreFromAnswer(widget.answer);
+    _initAwardFromAnswer(widget.answer);
   }
 
   @override
@@ -62,7 +74,16 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
     super.didUpdateWidget(old);
     if (widget.answer != old.answer) {
       _initScoreFromAnswer(widget.answer);
+      // Only re-sync wheel if the answer changed externally (not from user
+      // interaction in this widget — avoid jumpy re-init mid-scroll).
+      _syncAwardFromAnswer(widget.answer);
     }
+  }
+
+  @override
+  void dispose() {
+    _awardController.dispose();
+    super.dispose();
   }
 
   void _initScoreFromAnswer(String? answer) {
@@ -76,22 +97,59 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
     }
   }
 
+  void _initAwardFromAnswer(String? answer) {
+    int team = 0;
+    int idx = 0;
+    if (answer != null) {
+      final t2idx = widget.team2Players.indexWhere((p) => p.name == answer);
+      if (t2idx >= 0) {
+        team = 1;
+        idx = t2idx;
+      } else {
+        final t1idx = widget.team1Players.indexWhere((p) => p.name == answer);
+        if (t1idx >= 0) idx = t1idx;
+      }
+    }
+    _awardTeam = team;
+    _awardController = FixedExtentScrollController(initialItem: idx);
+  }
+
+  /// Sync wheel position when answer changes externally (no setState needed for
+  /// controller — jumpToItem handles it).
+  void _syncAwardFromAnswer(String? answer) {
+    if (answer == null) return;
+    final t2idx = widget.team2Players.indexWhere((p) => p.name == answer);
+    if (t2idx >= 0) {
+      if (_awardTeam != 1) setState(() => _awardTeam = 1);
+      _awardController.jumpToItem(t2idx);
+    } else {
+      final t1idx = widget.team1Players.indexWhere((p) => p.name == answer);
+      if (t1idx >= 0) {
+        if (_awardTeam != 0) setState(() => _awardTeam = 0);
+        _awardController.jumpToItem(t1idx);
+      }
+    }
+  }
+
   bool get _interactive =>
       widget.isSignedIn && !widget.locked && !widget.finished;
 
   @override
   Widget build(BuildContext context) {
     final q = widget.question;
+    final brandColor = infiniteSportsPrimaryColor;
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header: question text + points pill
-            Row(
+      clipBehavior: Clip.hardEdge,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Branded header strip
+          Container(
+            color: brandColor.withValues(alpha: 0.06),
+            padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
@@ -104,27 +162,34 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: _greenWin.withValues(alpha: 0.12),
+                    color: brandColor,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text('${q.points} pts',
                       style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          color: _greenWin)),
+                          color: Colors.white)),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            // Input area
-            _buildInput(context),
-            // Outcome chip (finished state)
-            if (widget.finished) ...[
-              const SizedBox(height: 10),
-              _buildOutcome(context),
-            ],
-          ],
-        ),
+          ),
+          // Input area
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildInput(context),
+                // Outcome chip (finished state)
+                if (widget.finished) ...[
+                  const SizedBox(height: 10),
+                  _buildOutcome(context),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -140,7 +205,7 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
       case QuestionType.custom:
         return _buildCustom();
       case QuestionType.playerAward:
-        return _buildPlayerAward();
+        return _buildPlayerAward(context);
     }
   }
 
@@ -149,11 +214,11 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
   Widget _buildMatchWinner() {
     return Row(
       children: [
-        _optionBtn(widget.team1Name, 'team1'),
+        _optionBtnWithLogo(widget.team1Name, 'team1', widget.team1LogoUrl),
         const SizedBox(width: 6),
         _optionBtn('Draw', 'draw'),
         const SizedBox(width: 6),
-        _optionBtn(widget.team2Name, 'team2'),
+        _optionBtnWithLogo(widget.team2Name, 'team2', widget.team2LogoUrl),
       ].map((w) => Expanded(child: w)).toList(),
     );
   }
@@ -224,64 +289,131 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
 
   // ── playerAward ──────────────────────────────────────────────────────────────
 
-  Widget _buildPlayerAward() {
+  Widget _buildPlayerAward(BuildContext context) {
     final t1 = widget.team1Players;
     final t2 = widget.team2Players;
+
     if (t1.isEmpty && t2.isEmpty) {
       return const Text('No roster available.',
           style: TextStyle(fontSize: 12, color: Colors.grey));
     }
+
+    // Read-only when locked/finished
+    if (!_interactive) {
+      final answer = widget.answer;
+      return Text(
+        answer != null && answer.isNotEmpty ? 'Your pick: $answer' : 'No pick',
+        style: TextStyle(
+            fontSize: 13,
+            color: answer != null && answer.isNotEmpty
+                ? null
+                : Colors.grey),
+      );
+    }
+
+    final activePlayers = _awardTeam == 0 ? t1 : t2;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (t1.isNotEmpty) ...[
+        // Team toggle
+        Row(
+          children: [
+            Expanded(child: _teamToggleBtn(0, widget.team1Name, widget.team1LogoUrl)),
+            const SizedBox(width: 8),
+            Expanded(child: _teamToggleBtn(1, widget.team2Name, widget.team2LogoUrl)),
+          ],
+        ),
+        const SizedBox(height: 10),
+        // Scroll wheel
+        if (activePlayers.isEmpty)
           Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text(widget.team1Name,
-                style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.grey)),
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text('No roster for this team.',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+          )
+        else
+          SizedBox(
+            height: 140,
+            child: CupertinoPicker(
+              scrollController: _awardController,
+              itemExtent: 36,
+              onSelectedItemChanged: (index) {
+                if (index < activePlayers.length) {
+                  widget.onAnswer(activePlayers[index].name);
+                }
+              },
+              children: activePlayers.map((p) {
+                final label =
+                    '#${p.number ?? '-'}  ${p.name}';
+                return Center(
+                  child: Text(label,
+                      style: const TextStyle(fontSize: 14)),
+                );
+              }).toList(),
+            ),
           ),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: t1.map((p) => _playerChip(p)).toList(),
-          ),
-          const SizedBox(height: 8),
-        ],
-        if (t2.isNotEmpty) ...[
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text(widget.team2Name,
-                style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.grey)),
-          ),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: t2.map((p) => _playerChip(p)).toList(),
-          ),
-        ],
       ],
     );
   }
 
-  Widget _playerChip(TournamentPlayer player) {
-    final selected = widget.answer == player.name;
-    final canTap = _interactive;
-    final label = player.number != null ? '#${player.number} ${player.name}' : player.name;
-    return ChoiceChip(
-      label: Text(label,
-          style: TextStyle(
-              fontSize: 12,
-              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-              color: selected ? Colors.white : null)),
-      selected: selected,
-      selectedColor: _greenWin,
-      onSelected: canTap ? (_) => widget.onAnswer(player.name) : null,
+  Widget _teamToggleBtn(int teamIdx, String name, String? logoUrl) {
+    final selected = _awardTeam == teamIdx;
+    final brandColor = infiniteSportsPrimaryColor;
+    return GestureDetector(
+      onTap: () {
+        if (_awardTeam == teamIdx) return;
+        setState(() {
+          _awardTeam = teamIdx;
+        });
+        // Jump to item 0 on the new controller (rebuild creates same controller)
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _awardController.hasClients) {
+            _awardController.jumpToItem(0);
+            // Submit the first player of the newly selected team
+            final players =
+                teamIdx == 0 ? widget.team1Players : widget.team2Players;
+            if (players.isNotEmpty) {
+              widget.onAnswer(players[0].name);
+            }
+          }
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? brandColor.withValues(alpha: 0.1)
+              : Colors.transparent,
+          border: Border.all(
+            color: selected ? brandColor : Colors.grey.shade300,
+            width: selected ? 1.5 : 1,
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TeamLogo(url: logoUrl, size: 18),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight:
+                      selected ? FontWeight.w700 : FontWeight.w500,
+                  color: selected ? brandColor : null,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -324,6 +456,43 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
               fontSize: 12.5,
               fontWeight:
                   selected ? FontWeight.w700 : FontWeight.w500)),
+    );
+  }
+
+  /// Like [_optionBtn] but with a small team logo leading the label.
+  Widget _optionBtnWithLogo(String label, String value, String? logoUrl) {
+    final selected = widget.answer == value;
+    final canTap = _interactive;
+    return OutlinedButton(
+      onPressed: canTap ? () => widget.onAnswer(value) : null,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+        side: BorderSide(
+            color: selected ? _greenWin : Colors.grey.shade400, width: 1.5),
+        backgroundColor: selected ? _greenWin.withValues(alpha: 0.1) : null,
+        foregroundColor: selected ? _greenWin : null,
+        disabledBackgroundColor:
+            selected ? _greenWin.withValues(alpha: 0.08) : null,
+        disabledForegroundColor: selected ? _greenWin : Colors.grey,
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TeamLogo(url: logoUrl, size: 16),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(label,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight:
+                        selected ? FontWeight.w700 : FontWeight.w500)),
+          ),
+        ],
+      ),
     );
   }
 

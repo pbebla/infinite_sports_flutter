@@ -659,7 +659,18 @@ class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
                       foregroundColor: _greenWin,
                     ),
                     onPressed: () => _pushRoom(context),
-                    child: const Text('Enter prediction room  →'),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Image(
+                          image: AssetImage('assets/predict_symbolic_256.png'),
+                          width: 20,
+                          height: 20,
+                        ),
+                        SizedBox(width: 8),
+                        Text('Enter prediction room  →'),
+                      ],
+                    ),
                   ),
                 ),
               ]
@@ -669,7 +680,18 @@ class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
                   width: double.infinity,
                   child: OutlinedButton(
                     onPressed: () => _pushRoom(context),
-                    child: const Text('Enter prediction room  →'),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Image(
+                          image: AssetImage('assets/predict_symbolic_256.png'),
+                          width: 20,
+                          height: 20,
+                        ),
+                        SizedBox(width: 8),
+                        Text('Enter prediction room  →'),
+                      ],
+                    ),
                   ),
                 ),
               ],
