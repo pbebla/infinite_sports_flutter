@@ -5,6 +5,7 @@ import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 class PlayerStatsTab extends StatefulWidget {
@@ -27,6 +28,27 @@ class PlayerStatsTab extends StatefulWidget {
 
 class _PlayerStatsTabState extends State<PlayerStatsTab> {
   final Set<String> _expanded = {};
+
+  /// Maps a stat key from [categories] to the event-type string that
+  /// [statIconAsset] understands. Returns null when there is no suitable icon.
+  String? _eventTypeForStat(String stat) {
+    switch (stat) {
+      case 'goals':
+        return 'goal';
+      case 'assists':
+        return 'assist';
+      case 'saves':
+        return 'save';
+      case 'dpl':
+        return 'dpl';
+      case 'yellowCards':
+        return 'yellow card';
+      case 'redCards':
+        return 'red card';
+      default:
+        return null;
+    }
+  }
 
   List<TournamentPlayer> _getSortedByAll(String stat) {
     final allPlayers = TournamentService.getAllPlayers(widget.rosters);
@@ -87,6 +109,17 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
                 children: [
                   Row(
                     children: [
+                      Builder(builder: (context) {
+                        final eventType = _eventTypeForStat(stat);
+                        if (eventType == null) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: StatIcon(
+                            asset: statIconAsset(eventType),
+                            size: 18,
+                          ),
+                        );
+                      }),
                       Text(
                         label,
                         style:

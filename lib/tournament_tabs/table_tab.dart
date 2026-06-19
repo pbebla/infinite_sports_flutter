@@ -88,8 +88,8 @@ class TableTab extends StatelessWidget {
                 for (final gName in groupNames) ...[
                   _groupHeader(context, gName),
                   _tableHeader(context),
-                  ...(_sortGroup(grouped[gName]!)).map(
-                    (team) => _teamRow(context, team),
+                  ...(_sortGroup(grouped[gName]!)).asMap().entries.map(
+                    (e) => _teamRow(context, e.value, rank: e.key),
                   ),
                   const SizedBox(height: 12),
                 ],
@@ -110,7 +110,7 @@ class TableTab extends StatelessWidget {
             child: ListView.builder(
               padding: EdgeInsetsGeometry.all(0),
               itemCount: sorted.length,
-              itemBuilder: (context, index) => _teamRow(context, sorted[index]),
+              itemBuilder: (context, index) => _teamRow(context, sorted[index], rank: index),
             ),
           ),
           _legend(context),
@@ -189,7 +189,7 @@ class TableTab extends StatelessWidget {
     );
   }
 
-  Widget _teamRow(BuildContext context, TournamentTeam team) {
+  Widget _teamRow(BuildContext context, TournamentTeam team, {int rank = 0}) {
     const cellStyle = TextStyle(fontSize: 12);
     final qualColor = _qualificationColor(team.qualification);
     final s = stats.standingFor(team.id);
@@ -234,20 +234,18 @@ class TableTab extends StatelessWidget {
                 ),
                 SizedBox(
                   width: 18,
-                  child: team.seed != null
-                      ? Center(
-                          child: Text(
-                            '${team.seed}',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurface
-                                  .withValues(alpha: 0.5),
-                            ),
-                          ),
-                        )
-                      : null,
+                  child: Center(
+                    child: Text(
+                      '${rank + 1}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withValues(alpha: 0.5),
+                      ),
+                    ),
+                  ),
                 ),
                 // Team logo
                 TeamLogo(url: team.logoUrl, size: 24),

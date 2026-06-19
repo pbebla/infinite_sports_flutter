@@ -196,13 +196,27 @@ class _PredictTabState extends State<PredictTab> {
             }
             final e = rows[i - 1];
             final mine = e.uid == _uid;
+            final onSurface = Theme.of(context).colorScheme.onSurface;
+            // Zebra striping: odd data rows (i is 1-based) get a subtle tint;
+            // even rows are transparent. The signed-in user row is bold only —
+            // no colour highlight.
+            final zebraColor = (i % 2 == 1)
+                ? onSurface.withValues(alpha: 0.04)
+                : Colors.transparent;
             return Container(
-              color: mine
-                  ? infiniteSportsPrimaryColor.withValues(alpha: 0.06)
-                  : null,
+              color: zebraColor,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
               child: Row(children: [
                 SizedBox(width: 28, child: Text('$i', style: const TextStyle(fontWeight: FontWeight.bold))),
+                // Thin "|" divider between rank and player name (FotMob style)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Container(
+                    width: 1,
+                    height: 16,
+                    color: onSurface.withValues(alpha: 0.2),
+                  ),
+                ),
                 Expanded(child: Text(mine ? '${e.name} (you)' : e.name,
                     style: TextStyle(fontWeight: mine ? FontWeight.bold : FontWeight.normal))),
                 SizedBox(width: 44, child: Text('${e.points}', textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.w800))),
