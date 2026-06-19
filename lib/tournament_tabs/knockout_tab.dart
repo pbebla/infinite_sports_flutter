@@ -168,12 +168,22 @@ class _KnockoutTabState extends State<KnockoutTab> {
                 (selIdx >= 0 && selIdx + 1 < rounds.length)
                     ? rounds[selIdx + 1]
                     : null;
+            // When the next round IS the Final, append the championship hero to
+            // the right of this bracket so fans can finger-scroll to it (not
+            // only via the Final chip).
+            TournamentMatch? trailingFinal;
+            if (nextRound == TournamentStage.finalStage.label) {
+              final finals = byRound[TournamentStage.finalStage.label] ?? [];
+              if (finals.isNotEmpty) trailingFinal = finals.first;
+            }
             return _buildBracketView(
               context,
               selectedRound,
-              nextRound,
+              // Hide the faded mini next-round column when the full hero shows.
+              trailingFinal != null ? null : nextRound,
               byRound,
               eliminated,
+              trailingFinal: trailingFinal,
             );
           }),
         ),
@@ -199,8 +209,9 @@ class _KnockoutTabState extends State<KnockoutTab> {
     String selectedRound,
     String? nextRound,
     Map<String, List<TournamentMatch>> byRound,
-    Set<String> eliminated,
-  ) {
+    Set<String> eliminated, {
+    TournamentMatch? trailingFinal,
+  }) {
     final leftMatches = List<TournamentMatch>.from(byRound[selectedRound] ?? [])
       ..sort((a, b) => a.bracketPosition.compareTo(b.bracketPosition));
 
@@ -221,7 +232,10 @@ class _KnockoutTabState extends State<KnockoutTab> {
       padding: const EdgeInsets.all(16),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: SizedBox(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
           width: totalW,
           height: totalH,
           child: Stack(
@@ -269,6 +283,17 @@ class _KnockoutTabState extends State<KnockoutTab> {
               ),
             ],
           ),
+            ),
+            // Finger-scroll target: the Final hero sits to the right of the
+            // last pre-final round so fans can swipe straight to it.
+            if (trailingFinal != null) ...[
+              const SizedBox(width: 16),
+              SizedBox(
+                width: 320,
+                child: _buildFinalHero(context, trailingFinal),
+              ),
+            ],
+          ],
         ),
       ),
     );
@@ -750,59 +775,59 @@ class _KnockoutMatchCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Header row: optional label / venue + time/date
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPadHeader),
-              child: Row(
-                children: [
-                  if (headerLabel != null) ...[
-                    Text(
-                      headerLabel!,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withValues(alpha: 0.6),
-                      ),
-                    ),
-                  ] else if (match.locationInfo?.venue != null)
-                    Expanded(
-                      child: Text(
-                        match.locationInfo!.venue,
+            // Header row (venue + time) — hidden once the match is finished;
+            // fans tap into the match for those details afterward.
+            if (!isFinished)
+              Padding(
+                padding: EdgeInsets.symmetric(
+                    horizontal: hPad, vertical: vPadHeader),
+                child: Row(
+                  children: [
+                    if (headerLabel != null) ...[
+                      Text(
+                        headerLabel!,
                         style: TextStyle(
                           fontSize: 11,
+                          fontWeight: FontWeight.w600,
                           color: Theme.of(context)
                               .colorScheme
                               .onSurface
-                              .withValues(alpha: 0.5),
+                              .withValues(alpha: 0.6),
                         ),
-                        overflow: TextOverflow.ellipsis,
                       ),
-                    )
-                  else
-                    const Spacer(),
-                  if (headerLabel != null) const Spacer(),
-                  Text(
-                    _timeLabel(),
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Theme.of(context)
-                          .colorScheme
-                          .onSurface
-                          .withValues(alpha: 0.5),
+                    ] else if (match.locationInfo?.venue != null)
+                      Expanded(
+                        child: Text(
+                          match.locationInfo!.venue,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withValues(alpha: 0.5),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      )
+                    else
+                      const Spacer(),
+                    if (headerLabel != null) const Spacer(),
+                    Text(
+                      _timeLabel(),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withValues(alpha: 0.5),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            Divider(
-                height: 1,
-                thickness: 0.5,
-                color: Theme.of(context).dividerColor),
-            // Team 1 row
+            // Team 1 row (no internal divider lines — FotMob style)
             _teamRow(
               context: context,
               team: team1,
@@ -814,10 +839,6 @@ class _KnockoutMatchCard extends StatelessWidget {
               showScore: isFinished || isLive,
               compact: compact,
             ),
-            Divider(
-                height: 1,
-                thickness: 0.5,
-                color: Theme.of(context).dividerColor),
             // Team 2 row
             _teamRow(
               context: context,
