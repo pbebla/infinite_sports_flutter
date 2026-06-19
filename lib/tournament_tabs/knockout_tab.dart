@@ -732,12 +732,12 @@ class _KnockoutMatchCard extends StatelessWidget {
 
     Widget card = Container(
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
+        // Solid filled box that pops on the black app background (FotMob style);
+        // distinct dark grey in dark mode, light card in light mode. No border line.
+        color: Theme.of(context).brightness == Brightness.dark
+            ? const Color(0xFF24262B)
+            : Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Theme.of(context).dividerColor,
-          width: 0.8,
-        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.06),

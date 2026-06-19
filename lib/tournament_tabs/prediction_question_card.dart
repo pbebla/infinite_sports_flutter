@@ -391,11 +391,13 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
         decoration: BoxDecoration(
           color: selected
-              ? predictionAccent.withValues(alpha: 0.1)
+              ? _greenWin.withValues(alpha: 0.1)
               : Colors.transparent,
           border: Border.all(
-            color: selected ? predictionAccent : Colors.grey.shade300,
-            width: selected ? 1.5 : 1,
+            color: selected
+                ? _greenWin
+                : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.25),
+            width: selected ? 2 : 1,
           ),
           borderRadius: BorderRadius.circular(8),
         ),
@@ -415,8 +417,7 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
                   fontSize: 12,
                   fontWeight:
                       selected ? FontWeight.w700 : FontWeight.w500,
-                  // Change 1: blue accent for selected text
-                  color: selected ? predictionAccent : null,
+                  color: selected ? _greenWin : null,
                 ),
               ),
             ),
@@ -444,32 +445,49 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
   // ── shared helpers ────────────────────────────────────────────────────────
 
   /// A toggle-style button.
-  /// Change 2: selected PRE-finish = blue (predictionAccent); finished+correct = green (handled by outcome chip).
-  /// Change 4 (matchWinner): radius 8 applied at call site via OutlinedButton shape override.
+  /// Unselected: onSurface text, subtle grey border, transparent bg.
+  /// Selected + not finished: green border + text + faint green bg.
+  /// Selected + finished: neutral grey border (outcome chip conveys right/wrong).
   Widget _optionBtn(String label, String value) {
     final selected = widget.answer == value;
     final canTap = _interactive;
-    // Change 2: blue for selected-before-finish; no special coloring post-finish
-    // (outcome chip shows green/grey; option boxes stay neutral when finished)
-    final Color borderColor =
-        selected ? predictionAccent : Colors.grey.shade400;
-    final Color? bgColor =
-        selected ? predictionAccent.withValues(alpha: 0.1) : null;
-    final Color? fgColor = selected ? predictionAccent : null;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    final Color borderColor;
+    final Color? bgColor;
+    final Color fgColor;
+    final double borderWidth;
+
+    if (selected && !widget.finished) {
+      // Active selection: green
+      borderColor = _greenWin;
+      bgColor = _greenWin.withValues(alpha: 0.08);
+      fgColor = _greenWin;
+      borderWidth = 2.0;
+    } else if (selected && widget.finished) {
+      // Finished: neutral grey border, let outcome chip show result
+      borderColor = onSurface.withValues(alpha: 0.25);
+      bgColor = null;
+      fgColor = onSurface;
+      borderWidth = 1.0;
+    } else {
+      // Unselected
+      borderColor = onSurface.withValues(alpha: 0.25);
+      bgColor = null;
+      fgColor = onSurface;
+      borderWidth = 1.0;
+    }
 
     return OutlinedButton(
       onPressed: canTap ? () => widget.onAnswer(value) : null,
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        // Change 4: smaller corner radius for matchWinner-style buttons
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        side: BorderSide(color: borderColor, width: 1.5),
+        side: BorderSide(color: borderColor, width: borderWidth),
         backgroundColor: bgColor,
         foregroundColor: fgColor,
-        disabledBackgroundColor:
-            selected ? predictionAccent.withValues(alpha: 0.08) : null,
-        disabledForegroundColor:
-            selected ? predictionAccent : Colors.grey,
+        disabledBackgroundColor: bgColor,
+        disabledForegroundColor: fgColor,
       ),
       child: Text(label,
           textAlign: TextAlign.center,
@@ -483,36 +501,49 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
   }
 
   /// Like [_optionBtn] but with a small team logo leading the label.
-  /// Change 2: selected = blue (predictionAccent) not green.
-  /// Change 4: radius 8, 2-line text.
-  /// Change 5: size 24 logos.
+  /// Applies the same green-selected / white-unselected scheme as [_optionBtn].
   Widget _optionBtnWithLogo(String label, String value, String? logoUrl) {
     final selected = widget.answer == value;
     final canTap = _interactive;
-    final Color borderColor =
-        selected ? predictionAccent : Colors.grey.shade400;
-    final Color? bgColor =
-        selected ? predictionAccent.withValues(alpha: 0.1) : null;
-    final Color? fgColor = selected ? predictionAccent : null;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    final Color borderColor;
+    final Color? bgColor;
+    final Color fgColor;
+    final double borderWidth;
+
+    if (selected && !widget.finished) {
+      borderColor = _greenWin;
+      bgColor = _greenWin.withValues(alpha: 0.08);
+      fgColor = _greenWin;
+      borderWidth = 2.0;
+    } else if (selected && widget.finished) {
+      borderColor = onSurface.withValues(alpha: 0.25);
+      bgColor = null;
+      fgColor = onSurface;
+      borderWidth = 1.0;
+    } else {
+      borderColor = onSurface.withValues(alpha: 0.25);
+      bgColor = null;
+      fgColor = onSurface;
+      borderWidth = 1.0;
+    }
 
     return OutlinedButton(
       onPressed: canTap ? () => widget.onAnswer(value) : null,
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        side: BorderSide(color: borderColor, width: 1.5),
+        side: BorderSide(color: borderColor, width: borderWidth),
         backgroundColor: bgColor,
         foregroundColor: fgColor,
-        disabledBackgroundColor:
-            selected ? predictionAccent.withValues(alpha: 0.08) : null,
-        disabledForegroundColor:
-            selected ? predictionAccent : Colors.grey,
+        disabledBackgroundColor: bgColor,
+        disabledForegroundColor: fgColor,
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Change 5: size 24
           TeamLogo(url: logoUrl, size: 24),
           const SizedBox(width: 4),
           Flexible(

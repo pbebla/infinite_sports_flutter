@@ -144,7 +144,7 @@ class MatchFactsTab extends StatelessWidget {
             Text(subOff,
                 style: const TextStyle(
                     fontSize: 12,
-                    color: Color(0xFFC62828),
+                    color: Color(0xFFE57373),
                     fontWeight: FontWeight.w600),
                 overflow: TextOverflow.ellipsis),
         ],
@@ -345,17 +345,20 @@ class MatchFactsTab extends StatelessWidget {
               ),
             ),
             Container(
-              width: 28,
-              height: 28,
+              width: 26,
+              height: 26,
               decoration: BoxDecoration(
-                color: infiniteSportsPrimaryColor,
                 shape: BoxShape.circle,
+                border: Border.all(
+                  color: const Color(0xFFD00000),
+                  width: 2,
+                ),
               ),
               child: Center(
                 child: Text(
                   '$value',
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: Color(0xFFD00000),
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
                   ),
@@ -661,7 +664,7 @@ class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
                   child: FilledButton.tonal(
                     style: FilledButton.styleFrom(
                       backgroundColor: _greenWin.withValues(alpha: 0.12),
-                      foregroundColor: _greenWin,
+                      foregroundColor: Theme.of(context).colorScheme.onSurface,
                     ),
                     onPressed: () => _pushRoom(context),
                     child: Row(
