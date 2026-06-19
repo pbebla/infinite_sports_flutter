@@ -29,37 +29,113 @@ class KnockoutTab extends StatefulWidget {
 }
 
 class _KnockoutTabState extends State<KnockoutTab> {
-  String? _selectedRound;
-  @override
-  void initState() {
-    super.initState();
-    // Pre-select the first knockout round
-    final knockoutMatches = widget.matches
-        .where((m) => TournamentStage.fromString(m.stage).isKnockout)
-        .toList();
-    if (knockoutMatches.isNotEmpty) {
-      final roundsSet = <String>{};
-      for (final m in knockoutMatches) {
-        roundsSet.add(TournamentStage.fromString(m.stage).label);
-      }
-      final rounds = _roundOrder.where((r) => roundsSet.contains(r)).toList();
-      if (rounds.isNotEmpty) _selectedRound = rounds.first;
-    }
-  }
+  late ScrollController _hCtrl;
 
-  /// Ordered list of knockout-round display labels, sorted by stage progression.
+  /// Ordered knockout-round labels sorted by stage progression (no Third Place
+  /// in the main bracket columns).
   static final List<String> _roundOrder = (TournamentStage.values
-          .where((s) => s.isKnockout)
+          .where((s) => s.isKnockout && s != TournamentStage.thirdPlace)
           .toList()
         ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder)))
       .map((s) => s.label)
       .toList();
+
+  // Layout constants
+  static const double _slotH = 96.0;
+  static const double _slotGap = 18.0;
+  static const double _colW = 210.0;
+  static const double _finalColW = 300.0;
+  static const double _colGapX = 44.0;
+  static const double _outerPad = 16.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _hCtrl = ScrollController();
+  }
+
+  @override
+  void dispose() {
+    _hCtrl.dispose();
+    super.dispose();
+  }
 
   String _formatMatchDate(String mmddyyyy) {
     final dt = parseDatabaseDate(mmddyyyy);
     if (dt == null) return mmddyyyy;
     return DateFormat('MMM d').format(dt);
   }
+
+  // ---------------------------------------------------------------------------
+  // Pre-compute x-offsets per round (index into bracketRounds list)
+  // ---------------------------------------------------------------------------
+
+  double _xOf(int roundIdx, List<String> bracketRounds) {
+    double x = _outerPad;
+    for (int r = 0; r < roundIdx; r++) {
+      final isFinal = bracketRounds[r] == TournamentStage.finalStage.label;
+      x += (isFinal ? _finalColW : _colW) + _colGapX;
+    }
+    return x;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pre-compute center Y positions per round (carries forward from round 0)
+  // ---------------------------------------------------------------------------
+
+  /// Returns a list of center-Y lists: centersPerRound[r][k] = center Y of
+  /// card k in round r, relative to the top of the bracket content.
+  List<List<double>> _computeCenters(
+      List<String> bracketRounds, Map<String, List<TournamentMatch>> byRound) {
+    final result = <List<double>>[];
+    for (int r = 0; r < bracketRounds.length; r++) {
+      final matches = byRound[bracketRounds[r]] ?? [];
+      final count = matches.length;
+      if (r == 0) {
+        // First round: evenly spaced
+        final centers = List.generate(
+            count, (i) => i * (_slotH + _slotGap) + _slotH / 2);
+        result.add(centers);
+      } else {
+        final prevCenters = result[r - 1];
+        final centers = <double>[];
+        for (int k = 0; k < count; k++) {
+          final feederA = 2 * k;
+          final feederB = 2 * k + 1;
+          final double cA = feederA < prevCenters.length
+              ? prevCenters[feederA]
+              : (prevCenters.isNotEmpty
+                  ? prevCenters.last
+                  : k * (_slotH + _slotGap) + _slotH / 2);
+          final double cB = feederB < prevCenters.length
+              ? prevCenters[feederB]
+              : cA;
+          centers.add((cA + cB) / 2);
+        }
+        result.add(centers);
+      }
+    }
+    return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Scroll to a round's x-offset
+  // ---------------------------------------------------------------------------
+
+  void _scrollToRound(int roundIdx, List<String> bracketRounds) {
+    final target = _xOf(roundIdx, bracketRounds);
+    if (_hCtrl.hasClients) {
+      _hCtrl.animateTo(
+        target.clamp(0.0, _hCtrl.position.maxScrollExtent),
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -71,14 +147,18 @@ class _KnockoutTabState extends State<KnockoutTab> {
       return const Center(child: Text('Knockout stage not yet available'));
     }
 
-    // Build ordered unique rounds
+    // Build ordered unique bracket rounds (no Third Place)
     final roundsSet = <String>{};
     for (final m in knockoutMatches) {
-      roundsSet.add(TournamentStage.fromString(m.stage).label);
+      final stage = TournamentStage.fromString(m.stage);
+      if (stage != TournamentStage.thirdPlace) {
+        roundsSet.add(stage.label);
+      }
     }
-    final rounds = _roundOrder.where((r) => roundsSet.contains(r)).toList();
+    final bracketRounds =
+        _roundOrder.where((r) => roundsSet.contains(r)).toList();
 
-    // Group by normalised round
+    // Group by normalised round label (all knockout including third place)
     final Map<String, List<TournamentMatch>> byRound = {};
     for (final m in knockoutMatches) {
       final nr = TournamentStage.fromString(m.stage).label;
@@ -89,7 +169,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
           .sort((a, b) => a.bracketPosition.compareTo(b.bracketPosition));
     }
 
-    // Eliminated teams across all knockout matches
+    // Eliminated teams
     final eliminated = <String>{};
     for (final m in knockoutMatches) {
       if (m.matchStatus.isFinished) {
@@ -98,7 +178,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
       }
     }
 
-    // Find third-place match
+    // Third place match
     final thirdPlaceMatches = knockoutMatches
         .where((m) =>
             TournamentStage.fromString(m.stage) == TournamentStage.thirdPlace)
@@ -106,239 +186,186 @@ class _KnockoutTabState extends State<KnockoutTab> {
     final thirdPlaceMatch =
         thirdPlaceMatches.isNotEmpty ? thirdPlaceMatches.first : null;
 
+    if (bracketRounds.isEmpty) {
+      return const Center(child: Text('Knockout stage not yet available'));
+    }
+
+    // Pre-compute centers
+    final centersPerRound = _computeCenters(bracketRounds, byRound);
+
+    // Total height = height of the first (tallest) round column
+    final firstCount = (byRound[bracketRounds.first] ?? []).length;
+    final totalH = firstCount * (_slotH + _slotGap);
+
+    // Total width — last column uses finalColW only if it's actually the Final stage
+    final lastRoundIdx = bracketRounds.length - 1;
+    final lastColW = bracketRounds[lastRoundIdx] == TournamentStage.finalStage.label
+        ? _finalColW
+        : _colW;
+    final totalW = _xOf(lastRoundIdx, bracketRounds) + lastColW + _outerPad;
+
+    // Chip labels — all including Third Place if present
+    final allRoundChipLabels = <String>[
+      ...bracketRounds,
+      if (thirdPlaceMatch != null) TournamentStage.thirdPlace.label,
+    ];
+
+    final dividerColor = Theme.of(context).dividerColor;
+
     return Column(
       children: [
-        // Round selector chips
+        // ── Round chips (quick-jumps) ──────────────────────────────────────
         Container(
           height: 48,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            itemCount: rounds.length,
+            itemCount: allRoundChipLabels.length,
             separatorBuilder: (_, __) => const SizedBox(width: 8),
             itemBuilder: (context, index) {
-              final round = rounds[index];
-              final selected = round == _selectedRound;
+              final label = allRoundChipLabels[index];
+              // Third Place chip scrolls to end; bracket rounds scroll to their x
+              final isThirdPlace = label == TournamentStage.thirdPlace.label;
               return ChoiceChip(
-                label: Text(round),
-                selected: selected,
+                label: Text(label),
+                selected: false,
                 showCheckmark: false,
-                onSelected: (_) => setState(() => _selectedRound = round),
-                selectedColor: Theme.of(context).colorScheme.primary,
-                labelStyle: TextStyle(
-                  color: selected ? Colors.white : null,
-                  fontWeight:
-                      selected ? FontWeight.bold : FontWeight.normal,
-                ),
+                onSelected: (_) {
+                  if (isThirdPlace) {
+                    // Scroll to far right so the 3rd-place card is visible
+                    // (it's below the bracket, reached via vertical scroll)
+                    // Just scroll horizontal to end for now
+                    if (_hCtrl.hasClients) {
+                      _hCtrl.animateTo(
+                        _hCtrl.position.maxScrollExtent,
+                        duration: const Duration(milliseconds: 350),
+                        curve: Curves.easeInOut,
+                      );
+                    }
+                  } else {
+                    final roundIdx = bracketRounds.indexOf(label);
+                    if (roundIdx >= 0) _scrollToRound(roundIdx, bracketRounds);
+                  }
+                },
               );
             },
           ),
         ),
-        // Content area — Final round gets hero layout, others get card columns
+
+        // ── Continuous bracket ─────────────────────────────────────────────
         Expanded(
-          child: Builder(builder: (context) {
-            final selectedRound = _selectedRound;
-            if (selectedRound == null) return const SizedBox.shrink();
-
-            final isFinalSelected =
-                selectedRound == TournamentStage.finalStage.label;
-
-            if (isFinalSelected) {
-              // Find the final match (bracketPosition 0 or first)
-              final finalMatches = byRound[selectedRound] ?? [];
-              final finalMatch =
-                  finalMatches.isNotEmpty ? finalMatches.first : null;
-              return SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (finalMatch != null)
-                      _buildFinalHero(context, finalMatch),
-                    _buildBronzeCard(context, thirdPlaceMatch),
-                  ],
+          child: SingleChildScrollView(
+            // Outer vertical scroll
+            padding: EdgeInsets.zero,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Horizontal bracket
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  controller: _hCtrl,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 16, bottom: 8),
+                    child: SizedBox(
+                      width: totalW,
+                      height: totalH,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          // ── Connectors (behind cards) ──────────────────
+                          Positioned.fill(
+                            child: CustomPaint(
+                              painter: _MultiBracketConnectorPainter(
+                                bracketRounds: bracketRounds,
+                                centersPerRound: centersPerRound,
+                                byRound: byRound,
+                                slotH: _slotH,
+                                colW: _colW,
+                                finalColW: _finalColW,
+                                colGapX: _colGapX,
+                                outerPad: _outerPad,
+                                dividerColor: dividerColor,
+                              ),
+                            ),
+                          ),
+                          // ── Cards per round ────────────────────────────
+                          for (int r = 0; r < bracketRounds.length; r++) ...[
+                            ..._buildRoundCards(
+                              context: context,
+                              roundIdx: r,
+                              bracketRounds: bracketRounds,
+                              byRound: byRound,
+                              centersPerRound: centersPerRound,
+                              eliminated: eliminated,
+                              allMatches: knockoutMatches,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-              );
-            }
-
-            // Non-final rounds: FotMob-style bracket view with connector lines
-            // Find the next round after the selected one.
-            final selIdx = rounds.indexOf(selectedRound);
-            final nextRound =
-                (selIdx >= 0 && selIdx + 1 < rounds.length)
-                    ? rounds[selIdx + 1]
-                    : null;
-            // When the next round IS the Final, append the championship hero to
-            // the right of this bracket so fans can finger-scroll to it (not
-            // only via the Final chip).
-            TournamentMatch? trailingFinal;
-            if (nextRound == TournamentStage.finalStage.label) {
-              final finals = byRound[TournamentStage.finalStage.label] ?? [];
-              if (finals.isNotEmpty) trailingFinal = finals.first;
-            }
-            return _buildBracketView(
-              context,
-              selectedRound,
-              // Hide the faded mini next-round column when the full hero shows.
-              trailingFinal != null ? null : nextRound,
-              byRound,
-              eliminated,
-              trailingFinal: trailingFinal,
-            );
-          }),
+                // ── 3rd place below bracket ────────────────────────────────
+                if (thirdPlaceMatch != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 8),
+                    child: _buildBronzeCard(context, thirdPlaceMatch),
+                  ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
         ),
       ],
     );
   }
 
   // ---------------------------------------------------------------------------
-  // Bracket view — selected round (left column) + next round faded (right)
-  // with FotMob-style "]" connector lines between feeders and successor cards.
+  // Build all positioned cards for one round
   // ---------------------------------------------------------------------------
 
-  /// Fixed-slot constants.  slotH must be consistent with _KnockoutMatchCard's
-  /// compact height; gap is the vertical whitespace between slots.
-  static const double _slotH = 96.0;
-  static const double _slotGap = 18.0;
-  static const double _leftColW = 230.0;
-  static const double _rightColW = 200.0;
-  static const double _colGapX = 44.0;
-
-  Widget _buildBracketView(
-    BuildContext context,
-    String selectedRound,
-    String? nextRound,
-    Map<String, List<TournamentMatch>> byRound,
-    Set<String> eliminated, {
-    TournamentMatch? trailingFinal,
-  }) {
-    final leftMatches = List<TournamentMatch>.from(byRound[selectedRound] ?? [])
-      ..sort((a, b) => a.bracketPosition.compareTo(b.bracketPosition));
-
-    final rightMatches = nextRound != null
-        ? (List<TournamentMatch>.from(byRound[nextRound] ?? [])
-          ..sort((a, b) => a.bracketPosition.compareTo(b.bracketPosition)))
-        : <TournamentMatch>[];
-
-    final leftCount = leftMatches.length;
-    final totalH = leftCount * (_slotH + _slotGap);
-    final totalW = _leftColW +
-        (rightMatches.isNotEmpty ? _colGapX + _rightColW : 0.0) +
-        16.0; // right padding
-
-    final dividerColor = Theme.of(context).dividerColor;
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-          width: totalW,
-          height: totalH,
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              // ── Connector lines (behind the cards) ────────────────────────
-              if (rightMatches.isNotEmpty)
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: _BracketConnectorPainter(
-                      leftCount: leftCount,
-                      rightCount: rightMatches.length,
-                      slotH: _slotH,
-                      slotGap: _slotGap,
-                      leftColW: _leftColW,
-                      colGapX: _colGapX,
-                      dividerColor: dividerColor,
-                    ),
-                  ),
-                ),
-              // ── Left column cards ──────────────────────────────────────────
-              for (int i = 0; i < leftCount; i++)
-                Positioned(
-                  top: i * (_slotH + _slotGap),
-                  left: 0,
-                  width: _leftColW,
-                  height: _slotH,
-                  child: _KnockoutMatchCard(
-                    match: leftMatches[i],
-                    teams: widget.teams,
-                    eliminated: eliminated,
-                    tournamentId: widget.tournamentId,
-                    rosters: widget.rosters,
-                    sport: widget.sport,
-                    formatDate: _formatMatchDate,
-                    compact: true,
-                  ),
-                ),
-              // ── Right column cards (faded, next round) ─────────────────────
-              ..._buildRightCards(
-                context: context,
-                rightMatches: rightMatches,
-                leftCount: leftCount,
-                eliminated: eliminated,
-              ),
-            ],
-          ),
-            ),
-            // Finger-scroll target: the Final hero sits to the right of the
-            // last pre-final round so fans can swipe straight to it.
-            if (trailingFinal != null) ...[
-              const SizedBox(width: 16),
-              SizedBox(
-                width: 320,
-                child: _buildFinalHero(context, trailingFinal),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Builds the right-column (next-round, faded) Positioned widgets for the
-  /// bracket Stack.  Extracted so we can compute each card's top Y with normal
-  /// Dart control flow rather than a list-spread IIFE.
-  List<Widget> _buildRightCards({
+  List<Widget> _buildRoundCards({
     required BuildContext context,
-    required List<TournamentMatch> rightMatches,
-    required int leftCount,
+    required int roundIdx,
+    required List<String> bracketRounds,
+    required Map<String, List<TournamentMatch>> byRound,
+    required List<List<double>> centersPerRound,
     required Set<String> eliminated,
+    required List<TournamentMatch> allMatches,
   }) {
+    final roundLabel = bracketRounds[roundIdx];
+    final matches = byRound[roundLabel] ?? [];
+    // Only use the hero layout for the actual "Final" stage, not just any last round.
+    final isFinalRound = roundLabel == TournamentStage.finalStage.label;
+    final colW = isFinalRound ? _finalColW : _colW;
+    final leftX = _xOf(roundIdx, bracketRounds);
+    final centers = centersPerRound[roundIdx];
+
     final result = <Widget>[];
-    for (int k = 0; k < rightMatches.length; k++) {
-      final feederA = 2 * k;
-      final feederB = 2 * k + 1;
+    for (int k = 0; k < matches.length; k++) {
+      final m = matches[k];
+      final centerY = k < centers.length
+          ? centers[k]
+          : k * (_slotH + _slotGap) + _slotH / 2;
+      final topY = centerY - _slotH / 2;
 
-      final double? centerA = feederA < leftCount
-          ? feederA * (_slotH + _slotGap) + _slotH / 2
-          : null;
-      final double? centerB = feederB < leftCount
-          ? feederB * (_slotH + _slotGap) + _slotH / 2
-          : null;
-
-      final double rightTopY;
-      if (centerA != null && centerB != null) {
-        rightTopY = (centerA + centerB) / 2 - _slotH / 2;
-      } else if (centerA != null) {
-        rightTopY = centerA - _slotH / 2;
+      if (isFinalRound) {
+        // Final: render the hero, vertically centered between its SF feeders
+        result.add(Positioned(
+          top: topY,
+          left: leftX,
+          width: colW,
+          child: _buildFinalHero(context, m),
+        ));
       } else {
-        // No feeder cards visible — fall back to natural k-th slot position.
-        rightTopY = k * (_slotH + _slotGap);
-      }
-
-      result.add(Positioned(
-        top: rightTopY,
-        left: _leftColW + _colGapX,
-        width: _rightColW,
-        height: _slotH,
-        child: Opacity(
-          opacity: 0.55,
+        result.add(Positioned(
+          top: topY,
+          left: leftX,
+          width: colW,
+          height: _slotH,
           child: _KnockoutMatchCard(
-            match: rightMatches[k],
+            match: m,
             teams: widget.teams,
             eliminated: eliminated,
             tournamentId: widget.tournamentId,
@@ -346,12 +373,17 @@ class _KnockoutTabState extends State<KnockoutTab> {
             sport: widget.sport,
             formatDate: _formatMatchDate,
             compact: true,
+            allMatches: allMatches,
           ),
-        ),
-      ));
+        ));
+      }
     }
     return result;
   }
+
+  // ---------------------------------------------------------------------------
+  // Final hero
+  // ---------------------------------------------------------------------------
 
   Widget _buildFinalHero(BuildContext context, TournamentMatch match) {
     final team1 =
@@ -363,7 +395,6 @@ class _KnockoutTabState extends State<KnockoutTab> {
     final winnerId = isFinished ? match.winnerTeamId : '';
     final winnerTeam = winnerId.isNotEmpty ? widget.teams[winnerId] : null;
 
-    // Champion tint gradient
     List<Color> gradientColors;
     if (isFinished) {
       final homeColor = winnerTeam?.homeColor;
@@ -373,11 +404,9 @@ class _KnockoutTabState extends State<KnockoutTab> {
           Color.lerp(homeColor, Colors.black, 0.35)!,
         ];
       } else {
-        // Fallback gold
         gradientColors = const [Color(0xFFFFB300), Color(0xFFE65100)];
       }
     } else {
-      // Default blue
       gradientColors = const [Color(0xFF5B9BFF), Color(0xFF2D5BA8)];
     }
 
@@ -401,11 +430,9 @@ class _KnockoutTabState extends State<KnockoutTab> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Teams row
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Team 1
               Expanded(
                 child: Column(
                   children: [
@@ -432,12 +459,10 @@ class _KnockoutTabState extends State<KnockoutTab> {
                   ],
                 ),
               ),
-              // Score + Trophy
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Column(
                   children: [
-                    // Trophy
                     Image.asset(
                       'assets/trophy.png',
                       height: 44,
@@ -517,7 +542,6 @@ class _KnockoutTabState extends State<KnockoutTab> {
                   ],
                 ),
               ),
-              // Team 2
               Expanded(
                 child: Column(
                   children: [
@@ -546,8 +570,9 @@ class _KnockoutTabState extends State<KnockoutTab> {
               ),
             ],
           ),
-          // Venue + date
-          if (match.locationInfo?.venue != null || match.date.isNotEmpty) ...[
+          if (!isFinished &&
+              (match.locationInfo?.venue != null ||
+                  match.date.isNotEmpty)) ...[
             const SizedBox(height: 12),
             Text(
               [
@@ -592,6 +617,10 @@ class _KnockoutTabState extends State<KnockoutTab> {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Bronze card
+  // ---------------------------------------------------------------------------
+
   Widget _buildBronzeCard(
       BuildContext context, TournamentMatch? thirdPlaceMatch) {
     if (thirdPlaceMatch == null) return const SizedBox.shrink();
@@ -605,35 +634,49 @@ class _KnockoutTabState extends State<KnockoutTab> {
       sport: widget.sport,
       formatDate: _formatMatchDate,
       headerLabel: '🥉 Third place',
+      allMatches: widget.matches,
     );
   }
-
 }
 
 // ---------------------------------------------------------------------------
-// Bracket connector painter — draws FotMob "]" lines between left and right
+// Multi-round bracket connector painter
+// Draws "]" connectors for every adjacent round pair r → r+1.
 // ---------------------------------------------------------------------------
 
-class _BracketConnectorPainter extends CustomPainter {
-  final int leftCount;
-  final int rightCount;
+class _MultiBracketConnectorPainter extends CustomPainter {
+  final List<String> bracketRounds;
+  final List<List<double>> centersPerRound;
+  final Map<String, List<TournamentMatch>> byRound;
   final double slotH;
-  final double slotGap;
-  final double leftColW;
+  final double colW;
+  final double finalColW;
   final double colGapX;
+  final double outerPad;
   final Color dividerColor;
 
-  const _BracketConnectorPainter({
-    required this.leftCount,
-    required this.rightCount,
+  const _MultiBracketConnectorPainter({
+    required this.bracketRounds,
+    required this.centersPerRound,
+    required this.byRound,
     required this.slotH,
-    required this.slotGap,
-    required this.leftColW,
+    required this.colW,
+    required this.finalColW,
     required this.colGapX,
+    required this.outerPad,
     required this.dividerColor,
   });
 
-  double _leftCenterY(int i) => i * (slotH + slotGap) + slotH / 2;
+  double _xOf(int roundIdx) {
+    double x = outerPad;
+    for (int r = 0; r < roundIdx; r++) {
+      // Use the wider final column only for the actual Final stage, not just the last position.
+      final isFinalStage =
+          bracketRounds[r] == TournamentStage.finalStage.label;
+      x += (isFinalStage ? finalColW : colW) + colGapX;
+    }
+    return x;
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -642,58 +685,57 @@ class _BracketConnectorPainter extends CustomPainter {
       ..strokeWidth = 1.5
       ..style = PaintingStyle.stroke;
 
-    final midX = leftColW + colGapX / 2;
-    final rightEdgeX = leftColW + colGapX;
+    for (int r = 0; r < bracketRounds.length - 1; r++) {
+      final leftCenters = centersPerRound[r];
+      final rightCenters = centersPerRound[r + 1];
+      final rightCount = rightCenters.length;
 
-    for (int k = 0; k < rightCount; k++) {
-      final feederA = 2 * k;
-      final feederB = 2 * k + 1;
+      final leftColActualW = bracketRounds[r] == TournamentStage.finalStage.label
+          ? finalColW
+          : colW;
+      final leftRightEdgeX = _xOf(r) + leftColActualW; // right edge of left col
+      final rightLeftEdgeX = _xOf(r + 1);               // left edge of right col
+      final midX = (leftRightEdgeX + rightLeftEdgeX) / 2;
 
-      // We need at least one feeder to draw anything meaningful.
-      if (feederA >= leftCount) continue;
+      for (int k = 0; k < rightCount; k++) {
+        final feederA = 2 * k;
+        final feederB = 2 * k + 1;
 
-      final centerA = _leftCenterY(feederA);
-      final double centerB =
-          feederB < leftCount ? _leftCenterY(feederB) : centerA;
+        if (feederA >= leftCenters.length) continue;
 
-      final rightCenterY = (centerA + centerB) / 2;
+        final centerA = leftCenters[feederA];
+        final double centerB = feederB < leftCenters.length
+            ? leftCenters[feederB]
+            : centerA;
+        final rightCenterY = rightCenters[k];
 
-      final path = Path();
-
-      if (feederB < leftCount) {
-        // Both feeders exist — draw the classic "]" bracket:
-        //  · horizontal stub from right edge of feeder A card → midX
-        //  · horizontal stub from right edge of feeder B card → midX
-        //  · vertical bar along midX connecting A and B
-        //  · horizontal line from midX → right edge, at right card center Y
-        path
-          ..moveTo(leftColW, centerA)
-          ..lineTo(midX, centerA)
-          ..moveTo(leftColW, centerB)
-          ..lineTo(midX, centerB)
-          ..moveTo(midX, centerA)
-          ..lineTo(midX, centerB)
-          ..moveTo(midX, rightCenterY)
-          ..lineTo(rightEdgeX, rightCenterY);
-      } else {
-        // Only one feeder — simple horizontal stub
-        path
-          ..moveTo(leftColW, centerA)
-          ..lineTo(rightEdgeX, centerA);
+        final path = Path();
+        if (feederB < leftCenters.length) {
+          // Classic "]" bracket
+          path
+            ..moveTo(leftRightEdgeX, centerA)
+            ..lineTo(midX, centerA)
+            ..moveTo(leftRightEdgeX, centerB)
+            ..lineTo(midX, centerB)
+            ..moveTo(midX, centerA)
+            ..lineTo(midX, centerB)
+            ..moveTo(midX, rightCenterY)
+            ..lineTo(rightLeftEdgeX, rightCenterY);
+        } else {
+          // Single feeder — straight horizontal stub
+          path
+            ..moveTo(leftRightEdgeX, centerA)
+            ..lineTo(rightLeftEdgeX, centerA);
+        }
+        canvas.drawPath(path, paint);
       }
-
-      canvas.drawPath(path, paint);
     }
   }
 
   @override
-  bool shouldRepaint(_BracketConnectorPainter old) =>
-      old.leftCount != leftCount ||
-      old.rightCount != rightCount ||
-      old.slotH != slotH ||
-      old.slotGap != slotGap ||
-      old.leftColW != leftColW ||
-      old.colGapX != colGapX ||
+  bool shouldRepaint(_MultiBracketConnectorPainter old) =>
+      old.bracketRounds != bracketRounds ||
+      old.centersPerRound != centersPerRound ||
       old.dividerColor != dividerColor;
 }
 
@@ -710,6 +752,8 @@ class _KnockoutMatchCard extends StatelessWidget {
   final String sport;
   final String Function(String) formatDate;
   final String? headerLabel;
+  final List<TournamentMatch> allMatches;
+
   /// When true, uses compact paddings so the card fits within the fixed bracket
   /// slot height (~96 px) without overflow.
   final bool compact;
@@ -722,6 +766,7 @@ class _KnockoutMatchCard extends StatelessWidget {
     required this.rosters,
     required this.sport,
     required this.formatDate,
+    required this.allMatches,
     this.headerLabel,
     this.compact = false,
   });
@@ -751,14 +796,11 @@ class _KnockoutMatchCard extends StatelessWidget {
         match.team2Id!.isNotEmpty &&
         tournamentId != null;
 
-    // Compact mode uses tighter padding to fit within the 96-px bracket slot.
     final hPad = compact ? 8.0 : 10.0;
     final vPadHeader = compact ? 4.0 : 6.0;
 
     Widget card = Container(
       decoration: BoxDecoration(
-        // Solid filled box that pops on the black app background (FotMob style);
-        // distinct dark grey in dark mode, light card in light mode. No border line.
         color: Theme.of(context).brightness == Brightness.dark
             ? const Color(0xFF24262B)
             : Theme.of(context).cardColor,
@@ -777,8 +819,7 @@ class _KnockoutMatchCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Header row (venue + time) — hidden once the match is finished;
-            // fans tap into the match for those details afterward.
+            // Header row — hidden once the match is finished
             if (!isFinished)
               Padding(
                 padding: EdgeInsets.symmetric(
@@ -827,12 +868,13 @@ class _KnockoutMatchCard extends StatelessWidget {
                   ],
                 ),
               ),
-            // Team 1 row (no internal divider lines — FotMob style)
+            // Team 1 row (no internal divider — FotMob style)
             _teamRow(
               context: context,
               team: team1,
               teamId: match.team1Id,
               seed: match.team1Seed,
+              source: match.team1Source,
               score: match.team1Score,
               isEliminated: team1Eliminated,
               isWinner: team1IsWinner,
@@ -845,6 +887,7 @@ class _KnockoutMatchCard extends StatelessWidget {
               team: team2,
               teamId: match.team2Id,
               seed: match.team2Seed,
+              source: match.team2Source,
               score: match.team2Score,
               isEliminated: team2Eliminated,
               isWinner: team2IsWinner,
@@ -892,8 +935,6 @@ class _KnockoutMatchCard extends StatelessWidget {
       );
     }
 
-    // In compact/bracket mode the card is already positioned by the Stack;
-    // no outer bottom padding is needed (it would cause overflow).
     if (compact) return card;
 
     return Padding(
@@ -914,19 +955,26 @@ class _KnockoutMatchCard extends StatelessWidget {
     required TournamentTeam? team,
     required String? teamId,
     required int? seed,
+    required String? source,
     required int score,
     required bool isEliminated,
     required bool isWinner,
     required bool showScore,
     bool compact = false,
   }) {
+    // Determine display name and whether this is a placeholder slot
     String displayName;
+    bool isPlaceholder = false;
     if (team != null) {
       displayName = team.name;
     } else if (seed != null) {
       displayName = 'Seed #$seed';
     } else if (teamId != null && teamId.isNotEmpty) {
       displayName = teamId;
+    } else if (source != null && source.isNotEmpty) {
+      // Show feeder placeholder
+      displayName = formatFeederSource(source, allMatches);
+      isPlaceholder = true;
     } else {
       displayName = 'TBD';
     }
@@ -937,7 +985,17 @@ class _KnockoutMatchCard extends StatelessWidget {
     final fontSize = compact ? 12.0 : 13.0;
     final scoreFontSize = compact ? 13.0 : 15.0;
 
-    Widget logoWidget = TeamLogo(url: team?.logoUrl, size: logoSize);
+    // Logo or placeholder shield icon
+    Widget logoWidget;
+    if (isPlaceholder) {
+      logoWidget = Icon(
+        Icons.shield_outlined,
+        size: logoSize,
+        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.35),
+      );
+    } else {
+      logoWidget = TeamLogo(url: team?.logoUrl, size: logoSize);
+    }
     if (isEliminated) {
       logoWidget = Opacity(opacity: 0.5, child: logoWidget);
     }
@@ -955,7 +1013,7 @@ class _KnockoutMatchCard extends StatelessWidget {
                 fontSize: fontSize,
                 fontWeight:
                     isWinner ? FontWeight.bold : FontWeight.normal,
-                fontStyle: (team == null && seed != null)
+                fontStyle: isPlaceholder || (team == null && seed != null)
                     ? FontStyle.italic
                     : FontStyle.normal,
                 color: isEliminated
@@ -963,12 +1021,17 @@ class _KnockoutMatchCard extends StatelessWidget {
                         .colorScheme
                         .onSurface
                         .withValues(alpha: 0.4)
-                    : team == null
+                    : (team == null && !isPlaceholder)
                         ? Theme.of(context)
                             .colorScheme
                             .onSurface
                             .withValues(alpha: 0.5)
-                        : null,
+                        : isPlaceholder
+                            ? Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withValues(alpha: 0.55)
+                            : null,
                 decoration: isEliminated
                     ? TextDecoration.lineThrough
                     : null,
