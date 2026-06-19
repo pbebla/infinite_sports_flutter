@@ -240,6 +240,8 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                     matches: _matches,
                     teams: _teams,
                     tournamentId: widget.tournamentId,
+                    rosters: _rosters,
+                    sport: _tournament?.sport ?? 'Soccer',
                   ),
                   PlayerStatsTab(
                     rosters: _rosters,
