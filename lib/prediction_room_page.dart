@@ -180,6 +180,9 @@ class PredictionRoomPage extends StatelessWidget {
         // Compact team header row
         _buildTeamHeader(context),
 
+        // Predictions lock once the match starts/finishes
+        if (locked) _buildClosedBanner(context, finished),
+
         Expanded(
           child: visibleQuestions.isEmpty
               ? _buildEmpty(context, questions.isEmpty)
@@ -216,6 +219,33 @@ class PredictionRoomPage extends StatelessWidget {
                 ),
         ),
       ],
+    );
+  }
+
+  /// Shown once the match starts/finishes — predictions can no longer be edited.
+  Widget _buildClosedBanner(BuildContext context, bool finished) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: onSurface.withValues(alpha: 0.06),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.lock_outline,
+              size: 15, color: onSurface.withValues(alpha: 0.6)),
+          const SizedBox(width: 6),
+          Text(
+            finished
+                ? 'Predictions closed — match finished'
+                : 'Predictions closed — match has started',
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: onSurface.withValues(alpha: 0.7)),
+          ),
+        ],
+      ),
     );
   }
 

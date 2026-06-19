@@ -143,7 +143,7 @@ class MatchFactsTab extends StatelessWidget {
             Text(subOff,
                 style: const TextStyle(
                     fontSize: 12,
-                    color: Color(0xFFE57373),
+                    color: Color(0xFFEF5350),
                     fontWeight: FontWeight.w600),
                 overflow: TextOverflow.ellipsis),
         ],
@@ -343,25 +343,12 @@ class MatchFactsTab extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            Container(
-              width: 26,
-              height: 26,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: const Color(0xFFD00000),
-                  width: 2,
-                ),
-              ),
-              child: Center(
-                child: Text(
-                  '$value',
-                  style: const TextStyle(
-                    color: Color(0xFFD00000),
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+            Text(
+              '$value',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
               ),
             ),
           ],
@@ -656,8 +643,9 @@ class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
                   ),
                 ),
               ]
-              // Signed in + has an answer → show "Enter prediction room →"
-              else if (hasAnswer) ...[
+              // Signed in + has an answer OR the match is locked (live/finished):
+              // show the SAME green "Enter prediction room →" button in all states.
+              else if (hasAnswer || !isPending) ...[
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.tonal(
@@ -665,27 +653,6 @@ class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
                       backgroundColor: _greenWin.withValues(alpha: 0.12),
                       foregroundColor: Theme.of(context).colorScheme.onSurface,
                     ),
-                    onPressed: () => _pushRoom(context),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Image(
-                          image: AssetImage('assets/predict_symbolic_256.png'),
-                          width: 20,
-                          height: 20,
-                        ),
-                        SizedBox(width: 8),
-                        Text('Enter prediction room  →'),
-                      ],
-                    ),
-                  ),
-                ),
-              ]
-              // Locked (live / finished) without having answered → room link still available
-              else if (!isPending) ...[
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton(
                     onPressed: () => _pushRoom(context),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
