@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/prediction.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/prediction_question.dart';
