@@ -1,11 +1,21 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/match_clock.dart';
+import 'package:infinite_sports_flutter/misc/server_time.dart';
 
 mixin _Ticking<T extends StatefulWidget> on State<T> {
   Timer? _timer;
+  bool _ticking = false;
+
+  /// (Re)start or stop the 1-second ticker.
+  /// Guards against redundant cancel+restart when a parent rebuilds faster
+  /// than once per second — only acts when the desired state actually changes
+  /// or when the timer is unexpectedly absent.
   void startTicking(bool active) {
+    if (active == _ticking && (_timer != null) == active) return;
     _timer?.cancel();
+    _timer = null;
+    _ticking = active;
     if (active) {
       _timer = Timer.periodic(const Duration(seconds: 1), (_) {
         if (mounted) setState(() {});
@@ -50,7 +60,7 @@ class _MinuteBallState extends State<MinuteBall> with _Ticking {
     final clock = widget.clock;
     final label = clock == null
         ? 'LIVE'
-        : minuteLabel(clock.elapsedAt(DateTime.now().millisecondsSinceEpoch));
+        : minuteLabel(clock.elapsedAt(serverNowMs()));
     return Container(
       width: 30,
       height: 30,
@@ -98,7 +108,7 @@ class _MatchClockTextState extends State<MatchClockText> with _Ticking {
     final clock = widget.clock;
     if (clock == null) return const SizedBox.shrink();
     final label =
-        clockLabel(clock.elapsedAt(DateTime.now().millisecondsSinceEpoch));
+        clockLabel(clock.elapsedAt(serverNowMs()));
     return Text(
       label,
       style: const TextStyle(

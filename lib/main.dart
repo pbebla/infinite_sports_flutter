@@ -9,6 +9,7 @@ import 'package:infinite_sports_flutter/aroundyou.dart';
 import 'package:infinite_sports_flutter/misc/goal_toast.dart';
 import 'package:infinite_sports_flutter/misc/notification_router.dart';
 import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
+import 'package:infinite_sports_flutter/misc/server_time.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
@@ -26,6 +27,9 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  // Start listening to Firebase server-time offset so live match clocks
+  // stay accurate even when the device clock differs from server time.
+  initServerTimeOffset();
   // Cache RTDB on disk so tournament pages render instantly from the last
   // known data, then stream fresh updates. Must run before any DB access.
   FirebaseDatabase.instance.setPersistenceEnabled(true);
