@@ -158,7 +158,7 @@ class MatchLineupTab extends StatelessWidget {
                 ],
               ),
             ),
-          const Divider(height: 1),
+          const Divider(height: 1, thickness: 1),
           if (sorted.isEmpty)
             Padding(
               padding: const EdgeInsets.all(12),

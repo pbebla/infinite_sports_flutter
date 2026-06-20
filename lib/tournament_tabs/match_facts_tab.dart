@@ -371,7 +371,7 @@ class MatchFactsTab extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Divider(),
+        const Divider(thickness: 1),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
           child: Text(
@@ -474,7 +474,7 @@ class MatchFactsTab extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           teaser,
-          const Divider(height: 1),
+          const Divider(height: 1, thickness: 1),
           if (allEvents.isEmpty)
             Padding(
               padding: const EdgeInsets.all(24),

@@ -154,8 +154,7 @@ class FixturesTab extends StatelessWidget {
         match.time ?? 'TBD',
         style: TextStyle(
           fontSize: 13,
-          color:
-              Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
       );
     }
@@ -168,8 +167,9 @@ class FixturesTab extends StatelessWidget {
           child: Text(
             name1,
             style: TextStyle(
-              fontWeight: team1IsWinner ? FontWeight.bold : FontWeight.normal,
+              fontWeight: team1IsWinner ? FontWeight.bold : FontWeight.w600,
               fontSize: 13,
+              color: Theme.of(context).colorScheme.onSurface,
             ),
             textAlign: TextAlign.right,
             overflow: TextOverflow.ellipsis,
@@ -190,8 +190,9 @@ class FixturesTab extends StatelessWidget {
           child: Text(
             name2,
             style: TextStyle(
-              fontWeight: team2IsWinner ? FontWeight.bold : FontWeight.normal,
+              fontWeight: team2IsWinner ? FontWeight.bold : FontWeight.w600,
               fontSize: 13,
+              color: Theme.of(context).colorScheme.onSurface,
             ),
             textAlign: TextAlign.left,
             overflow: TextOverflow.ellipsis,
@@ -238,7 +239,10 @@ class FixturesTab extends StatelessWidget {
                     ),
                     child: Text(
                       _stageLabelShort(match.label),
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                   const Spacer(),

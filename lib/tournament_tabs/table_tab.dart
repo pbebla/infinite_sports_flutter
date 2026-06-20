@@ -216,7 +216,7 @@ class TableTab extends StatelessWidget {
           border: Border(
             bottom: BorderSide(
               color: Theme.of(context).dividerColor,
-              width: 0.5,
+              width: 1,
             ),
           ),
         ),
@@ -261,7 +261,11 @@ class TableTab extends StatelessWidget {
                       Expanded(
                         child: Text(
                           team.name,
-                          style: const TextStyle(fontSize: 13),
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
                           softWrap: true,
                         ),
                       ),
@@ -315,7 +319,10 @@ class TableTab extends StatelessWidget {
             child: Center(
               child: Text(
                 '${s.pts}',
-                style: cellStyle.copyWith(fontWeight: FontWeight.bold),
+                style: cellStyle.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
               ),
             ),
           ),

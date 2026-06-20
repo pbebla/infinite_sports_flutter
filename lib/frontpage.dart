@@ -230,7 +230,7 @@ class _FrontPageState extends State<FrontPage> {
                       );
                     },
                   ),
-                  Divider(color: Theme.of(context).dividerColor),
+                  Divider(color: Theme.of(context).dividerColor, thickness: 1),
                   Center(child: Text(convertDatabaseDateToFormatDate(currentDate), style: const TextStyle(fontWeight: FontWeight.bold))),
                   Expanded(
                       child: LiveScorePage(sport: currentSport, season: currentSeason, date: currentDate, onTitleSelect: (String value) { widget.onTitleSelect(value); })
@@ -268,7 +268,7 @@ class _FrontPageState extends State<FrontPage> {
                         );
                       }
                   ),
-                  Divider(color: Theme.of(context).dividerColor),
+                  Divider(color: Theme.of(context).dividerColor, thickness: 1),
                   Text(convertDatabaseDateToFormatDate(currentAFCDate), style: const TextStyle(fontWeight: FontWeight.bold)),
                   Expanded(
                       child: LiveScorePage(sport: "AFC San Jose", season: currentAFCSeason, date: currentAFCDate, onTitleSelect: (String value) {widget.onTitleSelect(value);})
@@ -378,7 +378,7 @@ class _FrontPageState extends State<FrontPage> {
           );
         },
       ),
-      Divider(color: Theme.of(context).dividerColor),
+      Divider(color: Theme.of(context).dividerColor, thickness: 1),
       Expanded(child: _HomeTournamentBody(data: data)),
     ]);
   }
