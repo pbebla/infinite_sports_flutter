@@ -59,7 +59,12 @@ class MatchFactsTab extends StatelessWidget {
       if (value is List) {
         for (final item in value) {
           if (item is Map) {
+            // Extract _t once per event map — it is a top-level metadata key,
+            // not an eventType, so we skip it in the forEach below.
+            final tStamp =
+                (item['_t'] is int) ? item['_t'] as int : null;
             item.forEach((eventType, playerName) {
+              if (eventType.toString() == '_t') return; // skip metadata key
               final isSub = eventType.toString() == 'substitution';
               String? subOn, subOff, displayName;
               if (isSub && playerName is Map) {
@@ -80,12 +85,16 @@ class MatchFactsTab extends StatelessWidget {
                 'subOn': subOn,
                 'subOff': subOff,
                 'isTeam1': isTeam1,
+                '_t': tStamp,
               });
             });
           }
         }
       } else if (value is Map) {
+        final tStamp =
+            (value['_t'] is int) ? value['_t'] as int : null;
         value.forEach((eventType, playerName) {
+          if (eventType.toString() == '_t') return; // skip metadata key
           final isSub = eventType.toString() == 'substitution';
           String? subOn, subOff, displayName;
           if (isSub && playerName is Map) {
@@ -106,6 +115,7 @@ class MatchFactsTab extends StatelessWidget {
             'subOn': subOn,
             'subOff': subOff,
             'isTeam1': isTeam1,
+            '_t': tStamp,
           });
         });
       }
@@ -382,16 +392,38 @@ class MatchFactsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Parse and merge all events
-    final List<Map<String, dynamic>> allEvents = [
+    // Parse and merge all events, attaching a stable merge-index so the sort
+    // is fully deterministic even when _t is absent (pre-fix events).
+    final rawEvents = [
       ..._parseActivity(match.team1Activity, true),
       ..._parseActivity(match.team2Activity, false),
     ];
+    // Tag each event with its position in the concatenated list. This index
+    // is the tertiary tiebreaker — it preserves the pre-fix behavior (team1
+    // events before team2 events within the same minute) for old data that
+    // has no _t stamp.
+    final List<Map<String, dynamic>> allEvents = [
+      for (var i = 0; i < rawEvents.length; i++)
+        {...rawEvents[i], '_mergeIdx': i},
+    ];
 
-    // Sort by minute
+    // Sort: primary = minute asc; secondary = _t asc (when both present);
+    // tertiary = _mergeIdx asc (stable, preserves old ordering for legacy data).
     allEvents.sort((a, b) {
-      return _parseMinute(a['minute'] as String)
+      final minCmp = _parseMinute(a['minute'] as String)
           .compareTo(_parseMinute(b['minute'] as String));
+      if (minCmp != 0) return minCmp;
+
+      final aT = a['_t'] as int?;
+      final bT = b['_t'] as int?;
+      if (aT != null && bT != null) {
+        final tCmp = aT.compareTo(bT);
+        if (tCmp != 0) return tCmp;
+      }
+
+      // Tertiary: merge-index (guarantees stability; also handles legacy events
+      // without _t by preserving their original team1-before-team2 order).
+      return (a['_mergeIdx'] as int).compareTo(b['_mergeIdx'] as int);
     });
 
     // Teaser visibility: only when prediction context is fully provided and both
