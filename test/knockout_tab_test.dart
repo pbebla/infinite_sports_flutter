@@ -145,15 +145,23 @@ void main() {
     expect(find.byType(Image), findsWidgets);
   });
 
-  testWidgets('KnockoutTab renders bronze card below the bracket',
+  testWidgets(
+      'KnockoutTab renders bronze card beneath the Final hero (same column)',
       (tester) async {
     await tester.pumpWidget(buildTab([finishedFinal, thirdPlaceMatch]));
     await tester.pump();
 
-    // Third place teams should appear somewhere in the widget tree.
-    // Team Beta appears in both the Final hero and the bronze card.
+    // The bronze card now lives in a Column beneath the Final hero inside
+    // the horizontal Stack (not in a separate outer Column).
+    // Team Beta appears in both the Final hero and the bronze card;
+    // Team Delta appears only in the bronze card — confirming it renders.
     expect(find.text('Team Beta'), findsWidgets);
     expect(find.text('Team Delta'), findsWidgets);
+
+    // The "Third Place" chip should exist in the chip row, confirming the
+    // bronze path is wired up (header label in the card is hidden when
+    // the match is finished, so we check the chip row instead).
+    expect(find.text('Third Place'), findsWidgets);
   });
 
   testWidgets(

@@ -44,9 +44,17 @@ class _KnockoutTabState extends State<KnockoutTab> {
   static const double _slotH = 96.0;
   static const double _slotGap = 18.0;
   static const double _colW = 210.0;
-  static const double _finalColW = 300.0;
+  // Change 2: wider final column (300 → 360)
+  static const double _finalColW = 360.0;
   static const double _colGapX = 44.0;
   static const double _outerPad = 16.0;
+
+  // Fixed height for the final hero card
+  static const double _heroH = 150.0;
+  // Estimated bronze card height (two team rows + small header)
+  static const double _bronzeH = 90.0;
+  // Gap between hero and bronze
+  static const double _heroBronzeGap = 12.0;
 
   @override
   void initState() {
@@ -139,6 +147,12 @@ class _KnockoutTabState extends State<KnockoutTab> {
 
   @override
   Widget build(BuildContext context) {
+    // Change 3: faint grey backdrop in light mode
+    final isLight = Theme.of(context).brightness == Brightness.light;
+    final backdropColor = isLight
+        ? Theme.of(context).colorScheme.surfaceContainerLow
+        : Colors.transparent;
+
     final knockoutMatches = widget.matches
         .where((m) => TournamentStage.fromString(m.stage).isKnockout)
         .toList();
@@ -193,9 +207,26 @@ class _KnockoutTabState extends State<KnockoutTab> {
     // Pre-compute centers
     final centersPerRound = _computeCenters(bracketRounds, byRound);
 
-    // Total height = height of the first (tallest) round column
+    // Base height = height of the first (tallest) round column
     final firstCount = (byRound[bracketRounds.first] ?? []).length;
-    final totalH = firstCount * (_slotH + _slotGap);
+    final baseH = firstCount * (_slotH + _slotGap);
+
+    // Change 1: ensure the Stack is tall enough for the hero + bronze sitting
+    // below it in the Final column (both live inside the Stack now).
+    final finalRoundIdx = bracketRounds.length - 1;
+    final isFinalPresent =
+        bracketRounds[finalRoundIdx] == TournamentStage.finalStage.label;
+    double totalH = baseH;
+    if (isFinalPresent && centersPerRound[finalRoundIdx].isNotEmpty) {
+      final finalCenterY = centersPerRound[finalRoundIdx][0];
+      final heroTop = finalCenterY - _heroH / 2;
+      final bottomEdge = heroTop +
+          _heroH +
+          _heroBronzeGap +
+          (thirdPlaceMatch != null ? _bronzeH : 0) +
+          16; // bottom padding inside Stack
+      if (bottomEdge > totalH) totalH = bottomEdge;
+    }
 
     // Total width — last column uses finalColW only if it's actually the Final stage
     final lastRoundIdx = bracketRounds.length - 1;
@@ -212,112 +243,95 @@ class _KnockoutTabState extends State<KnockoutTab> {
 
     final dividerColor = Theme.of(context).dividerColor;
 
-    return Column(
-      children: [
-        // ── Round chips (quick-jumps) ──────────────────────────────────────
-        Container(
-          height: 48,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: allRoundChipLabels.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 8),
-            itemBuilder: (context, index) {
-              final label = allRoundChipLabels[index];
-              // Third Place chip scrolls to end; bracket rounds scroll to their x
-              final isThirdPlace = label == TournamentStage.thirdPlace.label;
-              return ChoiceChip(
-                label: Text(label),
-                selected: false,
-                showCheckmark: false,
-                onSelected: (_) {
-                  if (isThirdPlace) {
-                    // Scroll to far right so the 3rd-place card is visible
-                    // (it's below the bracket, reached via vertical scroll)
-                    // Just scroll horizontal to end for now
-                    if (_hCtrl.hasClients) {
-                      _hCtrl.animateTo(
-                        _hCtrl.position.maxScrollExtent,
-                        duration: const Duration(milliseconds: 350),
-                        curve: Curves.easeInOut,
-                      );
+    return Container(
+      color: backdropColor,
+      child: Column(
+        children: [
+          // ── Round chips (quick-jumps) ──────────────────────────────────────
+          Container(
+            height: 48,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: allRoundChipLabels.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final label = allRoundChipLabels[index];
+                // Change 1: Third Place chip now scrolls to the Final column
+                // (bronze lives beneath the hero at the Final x-offset)
+                final isThirdPlace = label == TournamentStage.thirdPlace.label;
+                return ChoiceChip(
+                  label: Text(label),
+                  selected: false,
+                  showCheckmark: false,
+                  onSelected: (_) {
+                    if (isThirdPlace) {
+                      // Scroll to the Final round x so hero + bronze are in view
+                      _scrollToRound(finalRoundIdx, bracketRounds);
+                    } else {
+                      final roundIdx = bracketRounds.indexOf(label);
+                      if (roundIdx >= 0) _scrollToRound(roundIdx, bracketRounds);
                     }
-                  } else {
-                    final roundIdx = bracketRounds.indexOf(label);
-                    if (roundIdx >= 0) _scrollToRound(roundIdx, bracketRounds);
-                  }
-                },
-              );
-            },
+                  },
+                );
+              },
+            ),
           ),
-        ),
 
-        // ── Continuous bracket ─────────────────────────────────────────────
-        Expanded(
-          child: SingleChildScrollView(
-            // Outer vertical scroll
-            padding: EdgeInsets.zero,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Horizontal bracket
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  controller: _hCtrl,
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 16, bottom: 8),
-                    child: SizedBox(
-                      width: totalW,
-                      height: totalH,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          // ── Connectors (behind cards) ──────────────────
-                          Positioned.fill(
-                            child: CustomPaint(
-                              painter: _MultiBracketConnectorPainter(
-                                bracketRounds: bracketRounds,
-                                centersPerRound: centersPerRound,
-                                byRound: byRound,
-                                slotH: _slotH,
-                                colW: _colW,
-                                finalColW: _finalColW,
-                                colGapX: _colGapX,
-                                outerPad: _outerPad,
-                                dividerColor: dividerColor,
-                              ),
+          // ── Continuous bracket ─────────────────────────────────────────────
+          Expanded(
+            child: SingleChildScrollView(
+              // Outer vertical scroll
+              padding: EdgeInsets.zero,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                controller: _hCtrl,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 16, bottom: 8),
+                  child: SizedBox(
+                    width: totalW,
+                    height: totalH,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        // ── Connectors (behind cards) ──────────────────
+                        Positioned.fill(
+                          child: CustomPaint(
+                            painter: _MultiBracketConnectorPainter(
+                              bracketRounds: bracketRounds,
+                              centersPerRound: centersPerRound,
+                              byRound: byRound,
+                              slotH: _slotH,
+                              colW: _colW,
+                              finalColW: _finalColW,
+                              colGapX: _colGapX,
+                              outerPad: _outerPad,
+                              dividerColor: dividerColor,
                             ),
                           ),
-                          // ── Cards per round ────────────────────────────
-                          for (int r = 0; r < bracketRounds.length; r++) ...[
-                            ..._buildRoundCards(
-                              context: context,
-                              roundIdx: r,
-                              bracketRounds: bracketRounds,
-                              byRound: byRound,
-                              centersPerRound: centersPerRound,
-                              eliminated: eliminated,
-                              allMatches: knockoutMatches,
-                            ),
-                          ],
+                        ),
+                        // ── Cards per round ────────────────────────────
+                        for (int r = 0; r < bracketRounds.length; r++) ...[
+                          ..._buildRoundCards(
+                            context: context,
+                            roundIdx: r,
+                            bracketRounds: bracketRounds,
+                            byRound: byRound,
+                            centersPerRound: centersPerRound,
+                            eliminated: eliminated,
+                            allMatches: knockoutMatches,
+                            thirdPlaceMatch: thirdPlaceMatch,
+                          ),
                         ],
-                      ),
+                      ],
                     ),
                   ),
                 ),
-                // ── 3rd place below bracket ────────────────────────────────
-                if (thirdPlaceMatch != null)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
-                    child: _buildBronzeCard(context, thirdPlaceMatch),
-                  ),
-                const SizedBox(height: 16),
-              ],
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -333,6 +347,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
     required List<List<double>> centersPerRound,
     required Set<String> eliminated,
     required List<TournamentMatch> allMatches,
+    TournamentMatch? thirdPlaceMatch,
   }) {
     final roundLabel = bracketRounds[roundIdx];
     final matches = byRound[roundLabel] ?? [];
@@ -348,17 +363,34 @@ class _KnockoutTabState extends State<KnockoutTab> {
       final centerY = k < centers.length
           ? centers[k]
           : k * (_slotH + _slotGap) + _slotH / 2;
-      final topY = centerY - _slotH / 2;
 
       if (isFinalRound) {
-        // Final: render the hero, vertically centered between its SF feeders
+        // Change 1: Final column = hero (fixed 150 h) + bronze beneath it,
+        // all in a single Positioned Column so bronze scrolls with the hero.
+        final heroTop = centerY - _heroH / 2;
         result.add(Positioned(
-          top: topY,
+          top: heroTop,
           left: leftX,
           width: colW,
-          child: _buildFinalHero(context, m),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // Hero at fixed height
+              SizedBox(
+                height: _heroH,
+                child: _buildFinalHero(context, m),
+              ),
+              // Bronze card beneath the hero (only when present)
+              if (thirdPlaceMatch != null) ...[
+                const SizedBox(height: _heroBronzeGap),
+                _buildBronzeCard(context, thirdPlaceMatch, colW),
+              ],
+            ],
+          ),
         ));
       } else {
+        final topY = centerY - _slotH / 2;
         result.add(Positioned(
           top: topY,
           left: leftX,
@@ -426,9 +458,10 @@ class _KnockoutTabState extends State<KnockoutTab> {
         ),
         borderRadius: BorderRadius.circular(16),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -436,15 +469,15 @@ class _KnockoutTabState extends State<KnockoutTab> {
               Expanded(
                 child: Column(
                   children: [
-                    TeamLogo(url: team1?.logoUrl, size: 40),
-                    const SizedBox(height: 6),
+                    TeamLogo(url: team1?.logoUrl, size: 36),
+                    const SizedBox(height: 5),
                     Text(
                       team1?.name ?? (match.team1Seed != null
                           ? 'Seed #${match.team1Seed}'
                           : 'TBD'),
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 12,
+                        fontSize: 11,
                         fontWeight: team1IsWinner
                             ? FontWeight.bold
                             : FontWeight.normal,
@@ -465,14 +498,14 @@ class _KnockoutTabState extends State<KnockoutTab> {
                   children: [
                     Image.asset(
                       'assets/trophy.png',
-                      height: 44,
+                      height: 36,
                       errorBuilder: (_, __, ___) => const Icon(
                         Icons.emoji_events,
-                        size: 44,
+                        size: 36,
                         color: Color(0xFFFFD700),
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     if (isFinished || isLive)
                       Row(
                         mainAxisSize: MainAxisSize.min,
@@ -483,19 +516,19 @@ class _KnockoutTabState extends State<KnockoutTab> {
                               color: team1IsWinner
                                   ? Colors.white
                                   : Colors.white70,
-                              fontSize: 26,
+                              fontSize: 24,
                               fontWeight: team1IsWinner
                                   ? FontWeight.bold
                                   : FontWeight.normal,
                             ),
                           ),
                           const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 6),
+                            padding: EdgeInsets.symmetric(horizontal: 5),
                             child: Text(
                               '–',
                               style: TextStyle(
                                 color: Colors.white70,
-                                fontSize: 22,
+                                fontSize: 20,
                               ),
                             ),
                           ),
@@ -505,7 +538,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
                               color: team2IsWinner
                                   ? Colors.white
                                   : Colors.white70,
-                              fontSize: 26,
+                              fontSize: 24,
                               fontWeight: team2IsWinner
                                   ? FontWeight.bold
                                   : FontWeight.normal,
@@ -518,7 +551,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
                         match.time ?? '–',
                         style: const TextStyle(
                           color: Colors.white70,
-                          fontSize: 14,
+                          fontSize: 13,
                         ),
                       ),
                     if (isLive)
@@ -545,15 +578,15 @@ class _KnockoutTabState extends State<KnockoutTab> {
               Expanded(
                 child: Column(
                   children: [
-                    TeamLogo(url: team2?.logoUrl, size: 40),
-                    const SizedBox(height: 6),
+                    TeamLogo(url: team2?.logoUrl, size: 36),
+                    const SizedBox(height: 5),
                     Text(
                       team2?.name ?? (match.team2Seed != null
                           ? 'Seed #${match.team2Seed}'
                           : 'TBD'),
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 12,
+                        fontSize: 11,
                         fontWeight: team2IsWinner
                             ? FontWeight.bold
                             : FontWeight.normal,
@@ -573,7 +606,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
           if (!isFinished &&
               (match.locationInfo?.venue != null ||
                   match.date.isNotEmpty)) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Text(
               [
                 if (match.locationInfo?.venue != null)
@@ -583,7 +616,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
               ].join(' · '),
               style: const TextStyle(
                 color: Colors.white70,
-                fontSize: 11,
+                fontSize: 10,
               ),
               textAlign: TextAlign.center,
             ),
@@ -611,30 +644,40 @@ class _KnockoutTabState extends State<KnockoutTab> {
       );
     }
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+    // Fill the fixed hero height
+    return SizedBox(
+      height: _heroH,
       child: hero,
     );
   }
 
   // ---------------------------------------------------------------------------
-  // Bronze card
+  // Bronze card — smaller, muted, sits beneath the Final hero
   // ---------------------------------------------------------------------------
 
   Widget _buildBronzeCard(
-      BuildContext context, TournamentMatch? thirdPlaceMatch) {
+      BuildContext context, TournamentMatch? thirdPlaceMatch, double parentWidth) {
     if (thirdPlaceMatch == null) return const SizedBox.shrink();
 
-    return _KnockoutMatchCard(
-      match: thirdPlaceMatch,
-      teams: widget.teams,
-      eliminated: const {},
-      tournamentId: widget.tournamentId,
-      rosters: widget.rosters,
-      sport: widget.sport,
-      formatDate: _formatMatchDate,
-      headerLabel: '🥉 Third place',
-      allMatches: widget.matches,
+    // Narrower than the hero and centered within the final column width
+    final bronzeWidth = parentWidth - 48;
+    return Center(
+      child: SizedBox(
+        width: bronzeWidth,
+        child: _KnockoutMatchCard(
+          match: thirdPlaceMatch,
+          teams: widget.teams,
+          eliminated: const {},
+          tournamentId: widget.tournamentId,
+          rosters: widget.rosters,
+          sport: widget.sport,
+          formatDate: _formatMatchDate,
+          headerLabel: '🥉 Third place',
+          allMatches: widget.matches,
+          compact: true,
+          isBronze: true,
+        ),
+      ),
     );
   }
 }
@@ -758,6 +801,9 @@ class _KnockoutMatchCard extends StatelessWidget {
   /// slot height (~96 px) without overflow.
   final bool compact;
 
+  /// When true, applies muted styling appropriate for the 3rd-place bronze card.
+  final bool isBronze;
+
   const _KnockoutMatchCard({
     required this.match,
     required this.teams,
@@ -769,10 +815,14 @@ class _KnockoutMatchCard extends StatelessWidget {
     required this.allMatches,
     this.headerLabel,
     this.compact = false,
+    this.isBronze = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isLight = Theme.of(context).brightness == Brightness.light;
+
     final team1 = match.team1Id != null ? teams[match.team1Id] : null;
     final team2 = match.team2Id != null ? teams[match.team2Id] : null;
     final isLive = match.matchStatus.isLive;
@@ -799,16 +849,28 @@ class _KnockoutMatchCard extends StatelessWidget {
     final hPad = compact ? 8.0 : 10.0;
     final vPadHeader = compact ? 4.0 : 6.0;
 
+    // Change 3: light-mode card background matches Teams tab (Card = surface/white)
+    // + faint border to stand off the grey backdrop. Dark mode unchanged.
+    final cardColor = isLight
+        ? cs.surface
+        : const Color(0xFF24262B);
+    final cardBorder = isLight
+        ? Border.all(color: cs.onSurface.withValues(alpha: 0.08))
+        : null;
+    // Bronze: slightly dimmer surface in light, same dark fill in dark
+    final effectiveCardColor = isBronze && isLight
+        ? cs.surfaceContainerHighest
+        : cardColor;
+
     Widget card = Container(
       decoration: BoxDecoration(
-        color: Theme.of(context).brightness == Brightness.dark
-            ? const Color(0xFF24262B)
-            : Theme.of(context).cardColor,
+        color: effectiveCardColor,
         borderRadius: BorderRadius.circular(12),
+        border: cardBorder,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 6,
+            color: Colors.black.withValues(alpha: isLight ? 0.05 : 0.06),
+            blurRadius: isLight ? 4 : 6,
             offset: const Offset(0, 2),
           ),
         ],
@@ -832,10 +894,8 @@ class _KnockoutMatchCard extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withValues(alpha: 0.6),
+                          // Change 4: secondary label is muted
+                          color: cs.onSurface.withValues(alpha: 0.55),
                         ),
                       ),
                     ] else if (match.locationInfo?.venue != null)
@@ -844,10 +904,8 @@ class _KnockoutMatchCard extends StatelessWidget {
                           match.locationInfo!.venue,
                           style: TextStyle(
                             fontSize: 11,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurface
-                                .withValues(alpha: 0.5),
+                            // Change 4: venue is secondary/muted
+                            color: cs.onSurface.withValues(alpha: 0.55),
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -859,10 +917,8 @@ class _KnockoutMatchCard extends StatelessWidget {
                       _timeLabel(),
                       style: TextStyle(
                         fontSize: 11,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withValues(alpha: 0.5),
+                        // Change 4: date/time is secondary/muted
+                        color: cs.onSurface.withValues(alpha: 0.55),
                       ),
                     ),
                   ],
@@ -962,6 +1018,8 @@ class _KnockoutMatchCard extends StatelessWidget {
     required bool showScore,
     bool compact = false,
   }) {
+    final cs = Theme.of(context).colorScheme;
+
     // Determine display name and whether this is a placeholder slot
     String displayName;
     bool isPlaceholder = false;
@@ -991,7 +1049,7 @@ class _KnockoutMatchCard extends StatelessWidget {
       logoWidget = Icon(
         Icons.shield_outlined,
         size: logoSize,
-        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.35),
+        color: cs.onSurface.withValues(alpha: 0.35),
       );
     } else {
       logoWidget = TeamLogo(url: team?.logoUrl, size: logoSize);
@@ -999,6 +1057,36 @@ class _KnockoutMatchCard extends StatelessWidget {
     if (isEliminated) {
       logoWidget = Opacity(opacity: 0.5, child: logoWidget);
     }
+
+    // Change 4: team name uses full-strength onSurface (w600) for real teams.
+    // Placeholder / TBD / eliminated retain muted treatment.
+    Color? nameColor;
+    if (isEliminated) {
+      nameColor = cs.onSurface.withValues(alpha: 0.4);
+    } else if (isPlaceholder) {
+      nameColor = cs.onSurface.withValues(alpha: 0.55);
+    } else if (team == null && seed == null) {
+      // Pure TBD
+      nameColor = cs.onSurface.withValues(alpha: 0.5);
+    }
+    // else null → inherits default (full onSurface)
+
+    FontWeight nameWeight;
+    if (isWinner) {
+      nameWeight = FontWeight.bold;
+    } else if (!isPlaceholder && team != null) {
+      // Real named team: w600 for contrast even when not winner
+      nameWeight = FontWeight.w600;
+    } else {
+      nameWeight = FontWeight.normal;
+    }
+
+    // Score text: full onSurface for active teams, muted for eliminated
+    Color? scoreColor;
+    if (isEliminated) {
+      scoreColor = cs.onSurface.withValues(alpha: 0.4);
+    }
+    // else null → full onSurface
 
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: rowHPad, vertical: rowVPad),
@@ -1011,27 +1099,11 @@ class _KnockoutMatchCard extends StatelessWidget {
               displayName,
               style: TextStyle(
                 fontSize: fontSize,
-                fontWeight:
-                    isWinner ? FontWeight.bold : FontWeight.normal,
+                fontWeight: nameWeight,
                 fontStyle: isPlaceholder || (team == null && seed != null)
                     ? FontStyle.italic
                     : FontStyle.normal,
-                color: isEliminated
-                    ? Theme.of(context)
-                        .colorScheme
-                        .onSurface
-                        .withValues(alpha: 0.4)
-                    : (team == null && !isPlaceholder)
-                        ? Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withValues(alpha: 0.5)
-                        : isPlaceholder
-                            ? Theme.of(context)
-                                .colorScheme
-                                .onSurface
-                                .withValues(alpha: 0.55)
-                            : null,
+                color: nameColor,
                 decoration: isEliminated
                     ? TextDecoration.lineThrough
                     : null,
@@ -1044,14 +1116,8 @@ class _KnockoutMatchCard extends StatelessWidget {
               '$score',
               style: TextStyle(
                 fontSize: scoreFontSize,
-                fontWeight:
-                    isWinner ? FontWeight.bold : FontWeight.normal,
-                color: isEliminated
-                    ? Theme.of(context)
-                        .colorScheme
-                        .onSurface
-                        .withValues(alpha: 0.4)
-                    : null,
+                fontWeight: isWinner ? FontWeight.bold : FontWeight.w600,
+                color: scoreColor,
               ),
             ),
         ],
