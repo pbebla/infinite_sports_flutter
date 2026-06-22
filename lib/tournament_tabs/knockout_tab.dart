@@ -881,8 +881,11 @@ class _KnockoutMatchCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Header row — hidden once the match is finished
-            if (!isFinished)
+            // Header row — only for upcoming matches. Live shows the LIVE
+            // strip + live score, finished shows the final score, so the
+            // kickoff date/time header is redundant (and would overflow the
+            // fixed bracket slot when stacked with the LIVE strip).
+            if (!isFinished && !isLive)
               Padding(
                 padding: EdgeInsets.symmetric(
                     horizontal: hPad, vertical: vPadHeader),
