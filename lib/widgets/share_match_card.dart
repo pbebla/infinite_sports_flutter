@@ -94,7 +94,9 @@ class ShareMatchCard extends StatelessWidget {
             ),
           ),
           Align(
-              alignment: const Alignment(0, -0.36),
+              alignment: showStats
+                  ? const Alignment(0, -0.04)
+                  : const Alignment(0, 0.22),
               child: _centerPill(finished, live)),
           Positioned(
             left: 0,
@@ -138,16 +140,22 @@ class ShareMatchCard extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: const TextStyle(
-            color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800));
+            color: Colors.white, fontSize: 14, fontWeight: FontWeight.w800));
 
-    // Upcoming: logo + name centered (no scores/leaders).
+    // Upcoming: logo + name sit slightly above center; the kickoff/location
+    // pill is positioned below them (in build), keeping top/bottom balanced.
     if (!showStats) {
       return Container(
         color: color,
         padding: const EdgeInsets.fromLTRB(10, 40, 10, 52),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [_logo(logoUrl), const SizedBox(height: 10), nameText],
+          children: [
+            const Spacer(flex: 3),
+            _logo(logoUrl),
+            const SizedBox(height: 10),
+            nameText,
+            const Spacer(flex: 5),
+          ],
         ),
       );
     }
@@ -166,7 +174,7 @@ class ShareMatchCard extends StatelessWidget {
           Text('$score',
               style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 44,
+                  fontSize: 40,
                   height: 1.1,
                   fontWeight: FontWeight.w800)),
           const Spacer(flex: 4),
