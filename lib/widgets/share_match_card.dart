@@ -38,7 +38,6 @@ class ShareMatchCard extends StatelessWidget {
     final finished = match.matchStatus.isFinished;
     final live = match.matchStatus.isLive;
     final showStats = finished || live;
-    final winnerId = match.winnerTeamId; // '' if draw or not finished
     final name1 = team1?.name ?? match.team1Id ?? 'TBD';
     final name2 = team2?.name ?? match.team2Id ?? 'TBD';
     final c1 = team1?.homeColor ?? _default1;
@@ -61,8 +60,6 @@ class ShareMatchCard extends StatelessWidget {
                   color: c1,
                   team1: true,
                   showStats: showStats,
-                  isWinner:
-                      winnerId.isNotEmpty && winnerId == (match.team1Id ?? '#'),
                   logoUrl: team1?.logoUrl,
                 ),
               ),
@@ -73,8 +70,6 @@ class ShareMatchCard extends StatelessWidget {
                   color: c2,
                   team1: false,
                   showStats: showStats,
-                  isWinner:
-                      winnerId.isNotEmpty && winnerId == (match.team2Id ?? '#'),
                   logoUrl: team2?.logoUrl,
                 ),
               ),
@@ -137,67 +132,62 @@ class ShareMatchCard extends StatelessWidget {
     required Color color,
     required bool team1,
     required bool showStats,
-    required bool isWinner,
     required String? logoUrl,
   }) {
+    final nameText = Text(name.toUpperCase(),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+            color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800));
+
+    // Upcoming: logo + name centered (no scores/leaders).
+    if (!showStats) {
+      return Container(
+        color: color,
+        padding: const EdgeInsets.fromLTRB(10, 40, 10, 52),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [_logo(logoUrl), const SizedBox(height: 10), nameText],
+        ),
+      );
+    }
+
+    // Live / finished: group brought down from the top, leaders pinned lower.
     return Container(
       color: color,
-      padding: const EdgeInsets.fromLTRB(10, 34, 10, 52),
+      padding: const EdgeInsets.fromLTRB(10, 40, 10, 52),
       child: Column(
-        mainAxisAlignment:
-            showStats ? MainAxisAlignment.start : MainAxisAlignment.center,
         children: [
+          const Spacer(flex: 3),
           _logo(logoUrl),
-          const SizedBox(height: 6),
-          Text(name.toUpperCase(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+          const SizedBox(height: 10),
+          nameText,
+          const SizedBox(height: 2),
+          Text('$score',
               style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 15,
+                  fontSize: 44,
+                  height: 1.1,
                   fontWeight: FontWeight.w800)),
-          if (showStats) ...[
-            Text('$score',
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 40,
-                    height: 1.1,
-                    fontWeight: FontWeight.w800)),
-            SizedBox(
-              height: 16,
-              child: isWinner
-                  ? Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 1),
-                      decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(7)),
-                      child: Text('👑 WINNERS',
-                          style: TextStyle(
-                              color: color,
-                              fontSize: 8,
-                              fontWeight: FontWeight.w800)))
-                  : null,
-            ),
-            const SizedBox(height: 8),
-            _statRow('goals', team1),
-            _statRow('assists', team1),
-            _statRow('dpl', team1),
-            _statRow('saves', team1),
-          ],
+          const Spacer(flex: 4),
+          _statRow('goals', team1),
+          _statRow('assists', team1),
+          _statRow('dpl', team1),
+          _statRow('saves', team1),
+          const Spacer(flex: 1),
         ],
       ),
     );
   }
 
   Widget _logo(String? url) {
-    const double size = 44;
+    const double size = 66;
     final shield = Container(
       width: size,
       height: size,
       decoration:
           const BoxDecoration(color: Colors.white24, shape: BoxShape.circle),
-      child: const Icon(Icons.shield_outlined, color: Colors.white, size: 26),
+      child: const Icon(Icons.shield_outlined, color: Colors.white, size: 40),
     );
     if (url == null || url.isEmpty) return shield;
     return ClipOval(
@@ -234,6 +224,18 @@ class ShareMatchCard extends StatelessWidget {
     );
   }
 
+  /// Short venue label: "Venue" or "Venue · Field"; null when unknown.
+  String? _locationLabel() {
+    final loc = match.locationInfo;
+    if (loc != null && loc.venue.trim().isNotEmpty) {
+      final f = loc.field;
+      return (f != null && f.trim().isNotEmpty) ? '${loc.venue} · $f' : loc.venue;
+    }
+    final ml = match.matchLocation;
+    if (ml != null && ml.trim().isNotEmpty) return ml;
+    return null;
+  }
+
   Widget _centerPill(bool finished, bool live) {
     String label;
     if (finished) {
@@ -242,21 +244,28 @@ class ShareMatchCard extends StatelessWidget {
       label = 'LIVE  ${match.team1Score}-${match.team2Score}';
     } else {
       final t = match.time;
-      label = t != null && t.isNotEmpty ? 'KICKOFF\n$t' : 'UPCOMING';
+      final loc = _locationLabel();
+      label = t != null && t.isNotEmpty ? 'KICKOFF · $t' : 'UPCOMING';
+      if (loc != null) label = '$label\n📍 $loc';
     }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
-          boxShadow: const [BoxShadow(blurRadius: 6, color: Colors.black38)]),
-      child: Text(label,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-              color: live ? _primary : const Color(0xFF111111),
-              fontSize: 9,
-              height: 1.3,
-              fontWeight: FontWeight.w800)),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 250),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: const [BoxShadow(blurRadius: 6, color: Colors.black38)]),
+        child: Text(label,
+            textAlign: TextAlign.center,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+                color: live ? _primary : const Color(0xFF111111),
+                fontSize: 9,
+                height: 1.35,
+                fontWeight: FontWeight.w800)),
+      ),
     );
   }
 }
