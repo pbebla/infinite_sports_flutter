@@ -104,22 +104,30 @@ class ShareMatchCard extends StatelessWidget {
             bottom: 0,
             child: Container(
               color: _footer,
-              padding: const EdgeInsets.symmetric(vertical: 11),
-              alignment: Alignment.center,
-              child: const Text.rich(
-                TextSpan(
-                  children: [
-                    TextSpan(text: '▶ Follow '),
-                    TextSpan(
-                        text: 'Infinite Sports',
-                        style: TextStyle(color: Color(0xFFFF5A5A))),
-                    TextSpan(text: ' for live scores'),
-                  ],
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800),
-                ),
+              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Image.asset('assets/infinitelarge_dark.png', height: 34),
+                  const SizedBox(width: 6),
+                  const Flexible(
+                    child: Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(text: 'Follow '),
+                          TextSpan(
+                              text: 'Infinite Sports',
+                              style: TextStyle(color: Color(0xFFFF5A5A))),
+                          TextSpan(text: ' for live scores'),
+                        ],
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
