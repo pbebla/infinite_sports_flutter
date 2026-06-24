@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/share_match_card_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
@@ -41,6 +42,7 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
   late TournamentMatch _match = widget.match;
   StreamSubscription<TournamentMatch?>? _sub;
   PredictionConfig? _predictionConfig;
+  String _tournamentName = '';
 
   @override
   void initState() {
@@ -52,6 +54,9 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
     });
     TournamentService.getPredictionConfig(widget.tournamentId).then((cfg) {
       if (mounted) setState(() => _predictionConfig = cfg);
+    });
+    TournamentService.getTournamentHeader(widget.tournamentId).then((t) {
+      if (mounted && t != null) setState(() => _tournamentName = t.name);
     });
   }
 
@@ -268,6 +273,17 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                 backgroundColor: const Color(0xFF1A237E),
                 foregroundColor: Colors.white,
                 actions: [
+                  IconButton(
+                    icon: const Icon(Icons.ios_share),
+                    tooltip: 'Share match',
+                    onPressed: () => shareMatchCard(
+                      context,
+                      match: _match,
+                      team1: team1,
+                      team2: team2,
+                      tournamentName: _tournamentName,
+                    ),
+                  ),
                   if (_match.link != null && _match.link!.isNotEmpty)
                     IconButton(
                       icon: const Icon(Icons.live_tv, color: Colors.red),
