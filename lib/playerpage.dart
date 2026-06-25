@@ -3,11 +3,13 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/award.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/flagfootballplayer.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/player.dart';
 import 'package:infinite_sports_flutter/model/soccerplayer.dart';
+import 'package:infinite_sports_flutter/widgets/trophy_cabinet.dart';
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key, required this.uid});
@@ -29,6 +31,7 @@ class _PlayerPageState extends State<PlayerPage> {
   String height = "";
   int age = 0;
   Map player = {};
+  List<Award> _awards = [];
 
   Future<(String, Color, Player)> extractPlayerStatsHelper(sport, season, team) async {
     await getAllTeamLogo();
@@ -176,6 +179,24 @@ class _PlayerPageState extends State<PlayerPage> {
       });
     });
     await extractAFCStats();
+
+    // Load awards from Users/{uid}/Awards
+    try {
+      final awardsSnap = await newClient.child("Users/${widget.uid}/Awards").get();
+      if (awardsSnap.value is Map) {
+        final rawMap = awardsSnap.value as Map;
+        _awards = rawMap.entries
+            .where((e) => e.value is Map)
+            .map((e) => Award.fromMap(
+                  e.key.toString(),
+                  Map<dynamic, dynamic>.from(e.value as Map),
+                ))
+            .toList();
+      }
+    } catch (_) {
+      _awards = [];
+    }
+
     return 1;
   }
 
@@ -237,13 +258,19 @@ class _PlayerPageState extends State<PlayerPage> {
               ),
               Expanded(
                 child: ListView.builder(
-                    itemCount: sports.length,
+                    itemCount: sports.length + 1,
                     itemBuilder: (context, index) {
-                      if (sports[index] == "Basketball") {
-                        if (tableEntries.containsKey(sports[index])) {
+                      // Index 0: Trophy Cabinet (headline, above all stat tables)
+                      if (index == 0) {
+                        return TrophyCabinet(awards: _awards);
+                      }
+                      // Remaining indices map to sports list (offset by 1)
+                      final sportIndex = index - 1;
+                      if (sports[sportIndex] == "Basketball") {
+                        if (tableEntries.containsKey(sports[sportIndex])) {
                           List<DataRow> rows = List.empty(growable: true);
                           BasketballPlayer career = BasketballPlayer();
-                          tableEntries[sports[index]]!.forEach((season, info) {
+                          tableEntries[sports[sportIndex]]!.forEach((season, info) {
                             rows.add(DataRow(
                               color: WidgetStateProperty.resolveWith((value) {
                                 return info.$2;
@@ -280,8 +307,8 @@ class _PlayerPageState extends State<PlayerPage> {
                             DataCell(Center(child: Text(career.shotPercentage))),
                           ]));
                           return Column(children: [
-                              Text(sports[index], style: TextStyle(fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineLarge!.fontSize), ),
-                              Text(sportPositions[sports[index]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
+                              Text(sports[sportIndex], style: TextStyle(fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineLarge!.fontSize), ),
+                              Text(sportPositions[sports[sportIndex]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
                               DataTable(
                                 columnSpacing: 5,
                                 columns: const [
@@ -301,11 +328,11 @@ class _PlayerPageState extends State<PlayerPage> {
                           );
                         }
                       }
-                      else if (sports[index] == "Futsal") {
-                        if (tableEntries.containsKey(sports[index])) {
+                      else if (sports[sportIndex] == "Futsal") {
+                        if (tableEntries.containsKey(sports[sportIndex])) {
                           List<DataRow> rows = List.empty(growable: true);
                           FutsalPlayer career = FutsalPlayer();
-                          tableEntries[sports[index]]!.forEach((season, info) {
+                          tableEntries[sports[sportIndex]]!.forEach((season, info) {
                               rows.add(DataRow(
                                 color: WidgetStateProperty.resolveWith((value) {
                                   return info.$2;
@@ -332,8 +359,8 @@ class _PlayerPageState extends State<PlayerPage> {
                               DataCell(Center(child: Text(career.saves.toString()),)),
                             ]));
                           return Column(children: [
-                              Text(sports[index], style: TextStyle(fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineLarge!.fontSize), ),
-                              Text(sportPositions[sports[index]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
+                              Text(sports[sportIndex], style: TextStyle(fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineLarge!.fontSize), ),
+                              Text(sportPositions[sports[sportIndex]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
                               DataTable(
                                 columnSpacing: 16,
                                 columns: const [
@@ -350,11 +377,11 @@ class _PlayerPageState extends State<PlayerPage> {
                           );
                         }
                       }
-                      else if (sports[index] == "Flag Football") {
-                        if (tableEntries.containsKey(sports[index])) {
+                      else if (sports[sportIndex] == "Flag Football") {
+                        if (tableEntries.containsKey(sports[sportIndex])) {
                           List<DataRow> rows = List.empty(growable: true);
                           FlagFootballPlayer career = FlagFootballPlayer();
-                          tableEntries[sports[index]]!.forEach((season, info) {
+                          tableEntries[sports[sportIndex]]!.forEach((season, info) {
                               rows.add(DataRow(
                                 color: WidgetStateProperty.resolveWith((value) {
                                   return info.$2;
@@ -393,8 +420,8 @@ class _PlayerPageState extends State<PlayerPage> {
                               DataCell(Center(child: Text(career.flagPulls.toString()),)),
                             ]));
                           return Column(children: [
-                              Text(sports[index], style: TextStyle(fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineLarge!.fontSize), ),
-                              Text(sportPositions[sports[index]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
+                              Text(sports[sportIndex], style: TextStyle(fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineLarge!.fontSize), ),
+                              Text(sportPositions[sports[sportIndex]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
                               DataTable(
                                 columnSpacing: 16,
                                 columns: const [
@@ -415,11 +442,11 @@ class _PlayerPageState extends State<PlayerPage> {
                           );
                         }
                       }
-                      else if (sports[index] == "AFC San Jose") {
-                        if (tableEntries.containsKey(sports[index])) {
+                      else if (sports[sportIndex] == "AFC San Jose") {
+                        if (tableEntries.containsKey(sports[sportIndex])) {
                           List<DataRow> rows = List.empty(growable: true);
                           SoccerPlayer career = SoccerPlayer();
-                          tableEntries[sports[index]]!.forEach((season, info) {
+                          tableEntries[sports[sportIndex]]!.forEach((season, info) {
                               rows.add(DataRow(cells: [
                                 DataCell(Text(info.$1, softWrap: true,)),
                                 DataCell(Center(child: Text((info.$3 as SoccerPlayer).goals.toString()))),
@@ -438,8 +465,8 @@ class _PlayerPageState extends State<PlayerPage> {
                             ]));
                           return Column(
                             children: [
-                              Text(sports[index], style: TextStyle(fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineLarge!.fontSize), ),
-                              Text(sportPositions[sports[index]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
+                              Text(sports[sportIndex], style: TextStyle(fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineLarge!.fontSize), ),
+                              Text(sportPositions[sports[sportIndex]] ?? "", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize), ),
                               DataTable(
                                 columnSpacing: 10,
                                 columns: const [
