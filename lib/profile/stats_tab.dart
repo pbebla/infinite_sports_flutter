@@ -8,13 +8,29 @@ class CompetitionStats {
   final String sport;    // e.g. "Futsal", "Basketball", "Flag Football"
   final String position; // raw position string (e.g. "GK", "Guard", "QB")
   final Map<String, num> stats; // statKey → value
+  /// Higher = newer. Used by ProfilePage to sort competitions latest-first.
+  final int sortKey;
 
   const CompetitionStats({
     required this.label,
     required this.sport,
     required this.position,
     required this.stats,
+    this.sortKey = 0,
   });
+}
+
+/// Returns the appropriate icon for a given sport string.
+IconData sportIcon(String sport) {
+  final s = sport.toLowerCase();
+  if (s.contains('basket')) return Icons.sports_basketball;
+  if (s.contains('flag') || s.contains('football')) return Icons.sports_football;
+  // Futsal, AFC San Jose, Soccer, or any tournament defaulting to soccer-style
+  if (s.contains('futsal') || s.contains('afc') || s.contains('soccer')) {
+    return Icons.sports_soccer;
+  }
+  // Tournaments / unknown
+  return Icons.emoji_events;
 }
 
 /// The "Stats" tab of the tabbed player profile.
@@ -77,11 +93,9 @@ class _StatsTabState extends State<StatsTab> {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
       children: [
-        // Competition selector
-        if (widget.competitions.length > 1) ...[
-          _competitionDropdown(context),
-          const SizedBox(height: 16),
-        ],
+        // Competition selector header
+        _competitionHeader(context, comp),
+        const SizedBox(height: 16),
         // Stats card
         Card(
           child: Padding(
@@ -115,27 +129,119 @@ class _StatsTabState extends State<StatsTab> {
     );
   }
 
-  Widget _competitionDropdown(BuildContext context) {
-    return DropdownButtonFormField<int>(
-      initialValue: _selectedIndex,
-      decoration: InputDecoration(
-        labelText: 'Competition',
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      ),
-      items: [
-        for (int i = 0; i < widget.competitions.length; i++)
-          DropdownMenuItem(
-            value: i,
-            child: Text(
-              widget.competitions[i].label,
-              overflow: TextOverflow.ellipsis,
+  /// Tappable header card that shows the selected competition and opens a
+  /// bottom-sheet picker when tapped.
+  Widget _competitionHeader(BuildContext context, CompetitionStats selected) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: () => _openCompetitionPicker(context),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border.all(color: colorScheme.outline.withValues(alpha: 0.4)),
+          borderRadius: BorderRadius.circular(12),
+          color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            Icon(
+              sportIcon(selected.sport),
+              size: 22,
+              color: colorScheme.primary,
             ),
-          ),
-      ],
-      onChanged: (v) {
-        if (v != null) setState(() => _selectedIndex = v);
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                selected.label,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Icon(
+              Icons.keyboard_arrow_down,
+              color: colorScheme.onSurface.withValues(alpha: 0.6),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openCompetitionPicker(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetCtx) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Drag handle
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Theme.of(sheetCtx)
+                      .colorScheme
+                      .onSurface
+                      .withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                'Select Competition',
+                style: Theme.of(sheetCtx).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+            ),
+            const Divider(height: 1),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: widget.competitions.length,
+                itemBuilder: (_, i) {
+                  final c = widget.competitions[i];
+                  final isSelected = i == _selectedIndex;
+                  return ListTile(
+                    leading: Icon(
+                      sportIcon(c.sport),
+                      color: isSelected
+                          ? Theme.of(sheetCtx).colorScheme.primary
+                          : null,
+                    ),
+                    title: Text(
+                      c.label,
+                      style: TextStyle(
+                        fontWeight: isSelected
+                            ? FontWeight.w700
+                            : FontWeight.normal,
+                        color: isSelected
+                            ? Theme.of(sheetCtx).colorScheme.primary
+                            : null,
+                      ),
+                    ),
+                    selected: isSelected,
+                    onTap: () {
+                      setState(() => _selectedIndex = i);
+                      Navigator.pop(sheetCtx);
+                    },
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        );
       },
     );
   }

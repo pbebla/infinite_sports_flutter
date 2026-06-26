@@ -903,49 +903,54 @@ class _ProfilePageState extends State<ProfilePage>
       }
     }
 
-    // ── 9. CompetitionStats ──────────────────────────────────────────────
+    // ── 9. CompetitionStats (per-season + per-tournament, latest first) ────
     final competitions = <CompetitionStats>[];
 
-    if (_tableEntries.containsKey('Futsal')) {
-      competitions.add(CompetitionStats(
-        label: 'Futsal (Career)',
-        sport: 'Futsal',
-        position: _sportPositions['Futsal'] ?? '',
-        stats: _futsalStatMap(_tableEntries['Futsal']!),
-      ));
+    // League seasons — one entry per season per sport.
+    for (final sportEntry in _tableEntries.entries) {
+      final sport = sportEntry.key;
+      final seasonMap = sportEntry.value;
+      final position = sport == 'AFC San Jose'
+          ? (_information['SoccerPosition'] ?? '').toString()
+          : (_sportPositions[sport] ?? '');
+
+      for (final seasonEntry in seasonMap.entries) {
+        final seasonNum = seasonEntry.key;
+        final player = seasonEntry.value.$3;
+        final sortKey = int.tryParse(seasonNum) ?? 0;
+
+        final String label;
+        if (sport == 'AFC San Jose') {
+          label = 'AFC San Jose · Season $seasonNum';
+        } else {
+          label = '$sport · Season $seasonNum';
+        }
+
+        competitions.add(CompetitionStats(
+          label: label,
+          sport: sport,
+          position: position,
+          stats: _buildStatMapForSingleEntry(sport, player),
+          sortKey: sortKey,
+        ));
+      }
     }
-    if (_tableEntries.containsKey('Basketball')) {
-      competitions.add(CompetitionStats(
-        label: 'Basketball (Career)',
-        sport: 'Basketball',
-        position: _sportPositions['Basketball'] ?? '',
-        stats: _basketballStatMap(_tableEntries['Basketball']!),
-      ));
-    }
-    if (_tableEntries.containsKey('Flag Football')) {
-      competitions.add(CompetitionStats(
-        label: 'Flag Football (Career)',
-        sport: 'Flag Football',
-        position: _sportPositions['Flag Football'] ?? '',
-        stats: _flagFootballStatMap(_tableEntries['Flag Football']!),
-      ));
-    }
-    if (_tableEntries.containsKey('AFC San Jose')) {
-      competitions.add(CompetitionStats(
-        label: 'AFC San Jose (Career)',
-        sport: 'AFC San Jose',
-        position: (_information['SoccerPosition'] ?? '').toString(),
-        stats: _soccerStatMap(_tableEntries['AFC San Jose']!),
-      ));
-    }
+
+    // Tournament appearances — one entry per appearance.
     for (final ta in _tournamentAppearancesCache) {
+      final sortKey =
+          int.tryParse(ta.edition.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0;
       competitions.add(CompetitionStats(
         label: ta.tournamentName,
         sport: ta.sport,
         position: ta.position,
         stats: _tournamentPlayerStatMap(ta.player),
+        sortKey: sortKey,
       ));
     }
+
+    // Sort latest first.
+    competitions.sort((a, b) => b.sortKey.compareTo(a.sortKey));
     _competitions = competitions;
 
     // ── 10. Current-season stats label + headline stats ───────────────────
