@@ -77,7 +77,7 @@ class _CareerRowTile extends StatelessWidget {
           const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       leading: TeamLogo(
         url: row.teamLogoUrl.isNotEmpty ? row.teamLogoUrl : null,
-        size: 40,
+        size: 36,
       ),
       title: Text(
         row.title,

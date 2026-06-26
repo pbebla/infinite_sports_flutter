@@ -14,6 +14,7 @@ import 'package:infinite_sports_flutter/profile/career_tab.dart';
 import 'package:infinite_sports_flutter/profile/profile_hero.dart';
 import 'package:infinite_sports_flutter/profile/profile_tab.dart';
 import 'package:infinite_sports_flutter/profile/stats_tab.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 // ─── Human-readable labels for stat keys (shared across ProfileTab + StatsTab) ─
 const Map<String, String> _statLabel = {
@@ -112,99 +113,68 @@ class _ProfilePageState extends State<ProfilePage>
   Future<(String, Color, Player)> _extractHelper(
       String sport, String season, String team) async {
     await getAllTeamLogo();
+    // Color extraction is deferred — we only decode the CURRENT stint's logo
+    // once, after _current is determined. Use a placeholder here so we don't
+    // download + decode every logo for every season.
+    const Color placeholder = Color(0xFFD00000);
     (String, Color, Player) data;
     if (sport == 'Basketball') {
-      data = ('', Colors.black, BasketballPlayer());
+      data = ('', placeholder, BasketballPlayer());
       final entries = basketballLineups[season]?[team]?.entries;
       if (entries != null) {
-        await Future.forEach(entries, (entry) async {
+        for (final entry in entries) {
           final info = entry.value;
           if (info.uid == widget.uid) {
-            // Safe logo extraction — skip ColorScheme.fromImageProvider when
-            // the URL is missing; fall back to infinite red.
             final logoUrl =
                 (teamLogos[sport]?[season]?[team])?.toString() ?? '';
-            Color primaryColor;
-            if (logoUrl.isEmpty) {
-              primaryColor = const Color(0xFFD00000);
-            } else {
-              try {
-                final cs = await ColorScheme.fromImageProvider(
-                    provider: NetworkImage(logoUrl));
-                primaryColor = cs.primary;
-              } catch (_) {
-                primaryColor = const Color(0xFFD00000);
-              }
-            }
             info.teamPath = logoUrl;
             if (_firstName.isEmpty && info.name.contains(' ')) {
               _firstName = info.name.split(' ')[0];
               _lastName = info.name.split(' ').sublist(1).join(' ');
             }
-            data = (team, primaryColor, info);
+            data = (team, placeholder, info);
+            break;
           }
-        });
+        }
       }
     } else if (sport == 'Futsal') {
-      data = ('', Colors.black, FutsalPlayer());
+      data = ('', placeholder, FutsalPlayer());
       final entries = futsalLineups[season]?[team]?.entries;
       if (entries != null) {
-        await Future.forEach(entries, (entry) async {
+        for (final entry in entries) {
           final info = entry.value;
           if (info.uid == widget.uid) {
             final logoUrl =
                 (teamLogos[sport]?[season]?[team])?.toString() ?? '';
-            Color primaryColor;
-            if (logoUrl.isEmpty) {
-              primaryColor = const Color(0xFFD00000);
-            } else {
-              try {
-                final cs = await ColorScheme.fromImageProvider(
-                    provider: NetworkImage(logoUrl));
-                primaryColor = cs.primary;
-              } catch (_) {
-                primaryColor = const Color(0xFFD00000);
-              }
-            }
             info.teamPath = logoUrl;
             if (_firstName.isEmpty && info.name.contains(' ')) {
               _firstName = info.name.split(' ')[0];
               _lastName = info.name.split(' ').sublist(1).join(' ');
             }
-            data = (team, primaryColor, info);
+            data = (team, placeholder, info);
+            break;
           }
-        });
+        }
       }
     } else {
       // Flag Football
-      data = ('', Colors.black, FlagFootballPlayer());
+      data = ('', placeholder, FlagFootballPlayer());
       final entries = flagFootballLineups[season]?[team]?.entries;
       if (entries != null) {
-        await Future.forEach(entries, (entry) async {
+        for (final entry in entries) {
           final info = entry.value;
           if (info.uid == widget.uid) {
             final logoUrl =
                 (teamLogos[sport]?[season]?[team])?.toString() ?? '';
-            Color primaryColor;
-            if (logoUrl.isEmpty) {
-              primaryColor = const Color(0xFFD00000);
-            } else {
-              try {
-                final cs = await ColorScheme.fromImageProvider(
-                    provider: NetworkImage(logoUrl));
-                primaryColor = cs.primary;
-              } catch (_) {
-                primaryColor = const Color(0xFFD00000);
-              }
-            }
             info.teamPath = logoUrl;
             if (_firstName.isEmpty && info.name.contains(' ')) {
               _firstName = info.name.split(' ')[0];
               _lastName = info.name.split(' ').sublist(1).join(' ');
             }
-            data = (team, primaryColor, info);
+            data = (team, placeholder, info);
+            break;
           }
-        });
+        }
       }
     }
     return data;
@@ -614,11 +584,7 @@ class _ProfilePageState extends State<ProfilePage>
         future: _loadOnce(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(
-              child: CircularProgressIndicator(
-                color: Theme.of(context).colorScheme.primary,
-              ),
-            );
+            return _ProfileSkeleton();
           }
 
           if (snapshot.hasError) {
@@ -814,8 +780,22 @@ class _ProfilePageState extends State<ProfilePage>
     // ── 6. Build stints ──────────────────────────────────────────────────
     final stints = <ParticipationStint>[];
 
+    // Memoize getCurrentSeason results — avoids one await per (sport × season).
+    final Map<String, String> cachedCurrentSeason = {};
+
     for (final sportEntry in _tableEntries.entries) {
       final sport = sportEntry.key;
+
+      // Fetch current season ONCE per sport.
+      if (!cachedCurrentSeason.containsKey(sport)) {
+        try {
+          cachedCurrentSeason[sport] = await getCurrentSeason(sport);
+        } catch (_) {
+          cachedCurrentSeason[sport] = '';
+        }
+      }
+      final currentSeasonForSport = cachedCurrentSeason[sport] ?? '';
+
       for (final seasonEntry in sportEntry.value.entries) {
         final seasonNum = seasonEntry.key;
         final info = seasonEntry.value;
@@ -823,15 +803,14 @@ class _ProfilePageState extends State<ProfilePage>
 
         final sortKey = int.tryParse(seasonNum) ?? 0;
         bool isActive = false;
-        try {
-          final currentSeason = await getCurrentSeason(
-              sport == 'AFC San Jose' ? 'AFC San Jose' : sport);
-          if (currentSeason == seasonNum) {
+        // Only run the finished-check for the one matching season, not all.
+        if (currentSeasonForSport == seasonNum) {
+          try {
             isActive = sport == 'AFC San Jose'
                 ? !(await isAFCSeasonFinished(seasonNum))
                 : !(await isSeasonFinished(sport, seasonNum));
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
 
         final position = _sportPositions[sport] ??
             (_information['${sport}Position'] ?? '').toString();
@@ -866,10 +845,32 @@ class _ProfilePageState extends State<ProfilePage>
     _current = currentParticipation(_stints);
 
     // ── 7. Team color ────────────────────────────────────────────────────
+    // Decode the logo image ONCE — only for the current stint.
+    // All _extractHelper calls above stored a placeholder color; we now
+    // replace it here with a single real ColorScheme decode.
     if (_current != null && !_current!.isTournament) {
       final entry = _tableEntries[_current!.sport]?[_current!.label];
       if (entry != null && entry.$1.isNotEmpty) {
-        _teamColor = entry.$2;
+        final logoUrl = entry.$3 is FutsalPlayer
+            ? (entry.$3 as FutsalPlayer).teamPath
+            : entry.$3 is BasketballPlayer
+                ? (entry.$3 as BasketballPlayer).teamPath
+                : entry.$3 is FlagFootballPlayer
+                    ? (entry.$3 as FlagFootballPlayer).teamPath
+                    : entry.$3 is SoccerPlayer
+                        ? (entry.$3 as SoccerPlayer).teamPath
+                        : '';
+        if (logoUrl.isNotEmpty) {
+          try {
+            final cs = await ColorScheme.fromImageProvider(
+                provider: NetworkImage(logoUrl));
+            _teamColor = cs.primary;
+          } catch (_) {
+            _teamColor = const Color(0xFFD00000);
+          }
+        } else {
+          _teamColor = const Color(0xFFD00000);
+        }
       }
     }
 
@@ -972,6 +973,51 @@ class _ProfilePageState extends State<ProfilePage>
     _careerRows = _buildCareerRows();
 
     return 1;
+  }
+}
+
+// ─── Skeleton placeholder shown while the profile loads ──────────────────────
+
+class _ProfileSkeleton extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // Hero block
+        Container(
+          width: double.infinity,
+          height: 180,
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              SkeletonBox(width: 64, height: 64, radius: 32),
+              SizedBox(height: 12),
+              SkeletonBox(width: 160, height: 18),
+              SizedBox(height: 8),
+              SkeletonBox(width: 100, height: 12),
+            ],
+          ),
+        ),
+        // Tab bar placeholder
+        const SizedBox(height: 48),
+        // Card blocks
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            children: const [
+              SkeletonBox(width: double.infinity, height: 80),
+              SizedBox(height: 12),
+              SkeletonBox(width: double.infinity, height: 80),
+              SizedBox(height: 12),
+              SkeletonBox(width: double.infinity, height: 80),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 }
 

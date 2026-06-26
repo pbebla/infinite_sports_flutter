@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/profile_stat_priority.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 
 /// Data class representing a single competition entry in the Stats tab.
 /// Define here so Task 6 (ProfilePage) imports from this file.
@@ -272,8 +273,45 @@ class _StatsTabState extends State<StatsTab> {
         .map((key) => _StatRow(
               label: _statLabels[key] ?? _humanize(key),
               value: _formatValue(comp.stats[key]!),
+              iconAsset: _statIconAssetForKey(key),
             ))
         .toList();
+  }
+
+  /// Maps a profile stat key to the matching StatIcon asset path.
+  /// Falls back to null (StatIcon will show its generic fallback).
+  static String? _statIconAssetForKey(String key) {
+    switch (key) {
+      case 'goals':
+      case 'cleanSheets':
+        return statIconAsset('goal');
+      case 'assists':
+        return statIconAsset('assist');
+      case 'saves':
+        return statIconAsset('save');
+      case 'dpl':
+        return statIconAsset('dpl');
+      case 'rebounds':
+        return 'assets/rebound.png';
+      case 'threePointers':
+        return 'assets/threepointer.png';
+      case 'twoPointers':
+        return 'assets/twopointer.png';
+      case 'freeThrows':
+        return 'assets/onepointer.png';
+      // No asset for these — fall back to generic Material icon via null
+      case 'points':
+      case 'passTouchdowns':
+      case 'receivingTouchdowns':
+      case 'receptions':
+      case 'interceptions':
+      case 'flagPulls':
+      case 'sacks':
+      case 'passBreakups':
+      case 'games':
+      default:
+        return null;
+    }
   }
 
   static String _formatValue(num v) {
@@ -293,8 +331,14 @@ class _StatsTabState extends State<StatsTab> {
 class _StatRow extends StatelessWidget {
   final String label;
   final String value;
+  /// Asset path for the stat icon. Null → generic bar_chart icon fallback.
+  final String? iconAsset;
 
-  const _StatRow({required this.label, required this.value});
+  const _StatRow({
+    required this.label,
+    required this.value,
+    this.iconAsset,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -303,6 +347,10 @@ class _StatRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
         children: [
+          // Stat icon
+          StatIcon(asset: iconAsset, size: 22),
+          const SizedBox(width: 10),
+          // Label
           Expanded(
             child: Text(
               label,
@@ -311,23 +359,7 @@ class _StatRow extends StatelessWidget {
                   ),
             ),
           ),
-          // Dotted spacer
-          Expanded(
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                '..............................',
-                maxLines: 1,
-                overflow: TextOverflow.clip,
-                style: TextStyle(
-                  color: onSurface.withValues(alpha: 0.15),
-                  fontSize: 10,
-                  letterSpacing: 2,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
+          // Value — right-aligned, no dotted spacer
           Text(
             value,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
