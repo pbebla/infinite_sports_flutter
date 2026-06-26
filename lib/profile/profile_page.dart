@@ -15,7 +15,7 @@ import 'package:infinite_sports_flutter/profile/profile_hero.dart';
 import 'package:infinite_sports_flutter/profile/profile_tab.dart';
 import 'package:infinite_sports_flutter/profile/stats_tab.dart';
 
-// ─── Human-readable labels for stat keys (shared across hero + StatsTab) ──────
+// ─── Human-readable labels for stat keys (shared across ProfileTab + StatsTab) ─
 const Map<String, String> _statLabel = {
   'games': 'Games',
   'goals': 'Goals',
@@ -92,7 +92,8 @@ class _ProfilePageState extends State<ProfilePage>
   ParticipationStint? _current;
   Color? _teamColor;
   List<({String label, String value})> _headlineStats = [];
-  bool _isKeeper = false;
+  String? _currentTeamNumber;
+  String? _currentStatsLabel;
 
   @override
   void initState() {
@@ -119,14 +120,28 @@ class _ProfilePageState extends State<ProfilePage>
         await Future.forEach(entries, (entry) async {
           final info = entry.value;
           if (info.uid == widget.uid) {
-            final color = await ColorScheme.fromImageProvider(
-                provider: NetworkImage(teamLogos[sport][season][team]));
-            info.teamPath = teamLogos[sport][season][team];
+            // Safe logo extraction — skip ColorScheme.fromImageProvider when
+            // the URL is missing; fall back to infinite red.
+            final logoUrl =
+                (teamLogos[sport]?[season]?[team])?.toString() ?? '';
+            Color primaryColor;
+            if (logoUrl.isEmpty) {
+              primaryColor = const Color(0xFFD00000);
+            } else {
+              try {
+                final cs = await ColorScheme.fromImageProvider(
+                    provider: NetworkImage(logoUrl));
+                primaryColor = cs.primary;
+              } catch (_) {
+                primaryColor = const Color(0xFFD00000);
+              }
+            }
+            info.teamPath = logoUrl;
             if (_firstName.isEmpty && info.name.contains(' ')) {
               _firstName = info.name.split(' ')[0];
               _lastName = info.name.split(' ').sublist(1).join(' ');
             }
-            data = (team, color.primary, info);
+            data = (team, primaryColor, info);
           }
         });
       }
@@ -137,14 +152,26 @@ class _ProfilePageState extends State<ProfilePage>
         await Future.forEach(entries, (entry) async {
           final info = entry.value;
           if (info.uid == widget.uid) {
-            final color = await ColorScheme.fromImageProvider(
-                provider: NetworkImage(teamLogos[sport][season][team]));
-            info.teamPath = teamLogos[sport][season][team];
+            final logoUrl =
+                (teamLogos[sport]?[season]?[team])?.toString() ?? '';
+            Color primaryColor;
+            if (logoUrl.isEmpty) {
+              primaryColor = const Color(0xFFD00000);
+            } else {
+              try {
+                final cs = await ColorScheme.fromImageProvider(
+                    provider: NetworkImage(logoUrl));
+                primaryColor = cs.primary;
+              } catch (_) {
+                primaryColor = const Color(0xFFD00000);
+              }
+            }
+            info.teamPath = logoUrl;
             if (_firstName.isEmpty && info.name.contains(' ')) {
               _firstName = info.name.split(' ')[0];
               _lastName = info.name.split(' ').sublist(1).join(' ');
             }
-            data = (team, color.primary, info);
+            data = (team, primaryColor, info);
           }
         });
       }
@@ -156,14 +183,26 @@ class _ProfilePageState extends State<ProfilePage>
         await Future.forEach(entries, (entry) async {
           final info = entry.value;
           if (info.uid == widget.uid) {
-            final color = await ColorScheme.fromImageProvider(
-                provider: NetworkImage(teamLogos[sport][season][team]));
-            info.teamPath = teamLogos[sport][season][team];
+            final logoUrl =
+                (teamLogos[sport]?[season]?[team])?.toString() ?? '';
+            Color primaryColor;
+            if (logoUrl.isEmpty) {
+              primaryColor = const Color(0xFFD00000);
+            } else {
+              try {
+                final cs = await ColorScheme.fromImageProvider(
+                    provider: NetworkImage(logoUrl));
+                primaryColor = cs.primary;
+              } catch (_) {
+                primaryColor = const Color(0xFFD00000);
+              }
+            }
+            info.teamPath = logoUrl;
             if (_firstName.isEmpty && info.name.contains(' ')) {
               _firstName = info.name.split(' ')[0];
               _lastName = info.name.split(' ').sublist(1).join(' ');
             }
-            data = (team, color.primary, info);
+            data = (team, primaryColor, info);
           }
         });
       }
@@ -344,7 +383,6 @@ class _ProfilePageState extends State<ProfilePage>
       return award.scopeType == 'tournament' &&
           award.scopeId == stint.scopeId;
     } else {
-      // League: sport key in scopeId OR sport match, plus season match
       final sportKey = stint.sport.replaceAll(' ', '').toLowerCase();
       final scopeMatch = award.scopeId.toLowerCase().contains(sportKey) ||
           award.sport.toLowerCase().contains(stint.sport.toLowerCase()) ||
@@ -360,7 +398,6 @@ class _ProfilePageState extends State<ProfilePage>
   String _teamLogoUrl(String sport, String season, String team) {
     try {
       if (sport == 'AFC San Jose') {
-        // AFC San Jose teamLogos value is a single String (the league logo)
         final afcVal = teamLogos['AFC San Jose'];
         if (afcVal is String) return afcVal;
         return '';
@@ -382,7 +419,6 @@ class _ProfilePageState extends State<ProfilePage>
     String position;
 
     if (_current!.isTournament) {
-      // Find the tournament appearance
       final ta = _findTournamentAppearance(_current!.scopeId);
       if (ta == null) return [];
       statMap = _tournamentPlayerStatMap(ta.player);
@@ -393,7 +429,13 @@ class _ProfilePageState extends State<ProfilePage>
       position = _current!.position;
       final seasons = _tableEntries[sport];
       if (seasons == null || seasons.isEmpty) return [];
-      statMap = _buildStatMapForSport(sport, seasons);
+      // Show only the current season stats, not career totals
+      final currentSeasonEntry = seasons[_current!.label];
+      if (currentSeasonEntry != null) {
+        statMap = _buildStatMapForSingleEntry(sport, currentSeasonEntry.$3);
+      } else {
+        statMap = _buildStatMapForSport(sport, seasons);
+      }
     }
 
     final group = positionGroup(sport, position);
@@ -416,6 +458,40 @@ class _ProfilePageState extends State<ProfilePage>
     }
 
     return result;
+  }
+
+  /// Build stat map from a single Player entry (for current season card).
+  Map<String, num> _buildStatMapForSingleEntry(String sport, Player player) {
+    switch (sport) {
+      case 'Futsal':
+        final p = player as FutsalPlayer;
+        return {'goals': p.goals, 'assists': p.assists, 'saves': p.saves};
+      case 'Basketball':
+        final p = player as BasketballPlayer;
+        return {
+          'points': p.total,
+          'rebounds': p.rebounds,
+          'threePointers': p.threePoints,
+          'twoPointers': p.twoPoints,
+          'freeThrows': p.onePoint,
+        };
+      case 'Flag Football':
+        final p = player as FlagFootballPlayer;
+        return {
+          'receptions': p.receptions,
+          'receivingTouchdowns': p.receivingTouchdowns,
+          'passTouchdowns': p.passingTouchdowns,
+          'interceptions': p.interceptions,
+          'flagPulls': p.flagPulls,
+          'sacks': p.sacks,
+          'passBreakups': p.passBreakups,
+        };
+      case 'AFC San Jose':
+        final p = player as SoccerPlayer;
+        return {'goals': p.goals, 'assists': p.assists, 'saves': p.saves};
+      default:
+        return {};
+    }
   }
 
   Map<String, num> _buildStatMapForSport(
@@ -449,7 +525,7 @@ class _ProfilePageState extends State<ProfilePage>
           title: '${stint.sport} · ${ta?.tournamentName ?? stint.label}',
           summary: _tournamentSummary(Map<String, num>.from(stats)),
           hasTrophy: hasTrophy,
-          onTap: null, // Task 8 wires navigation
+          onTap: null,
         ));
       } else {
         final sport = stint.sport;
@@ -491,8 +567,6 @@ class _ProfilePageState extends State<ProfilePage>
   }
 
   _TournamentAppearance? _findTournamentAppearance(String tournamentId) {
-    // We need to keep a reference to the tournament appearances list built
-    // during getProfileData. We store it as a field for this helper.
     return _tournamentAppearancesCache
         .where((ta) => ta.tournamentId == tournamentId)
         .firstOrNull;
@@ -514,15 +588,7 @@ class _ProfilePageState extends State<ProfilePage>
             ProfileHero(
               photoUrl: '',
               fullName: widget._limitedName,
-              current: null,
               teamColor: null,
-              headlineStats: const [
-                (label: '—', value: '—'),
-                (label: '—', value: '—'),
-                (label: '—', value: '—'),
-              ],
-              trophyCount: 0,
-              isKeeper: false,
             ),
             const Expanded(
               child: Center(
@@ -581,17 +647,7 @@ class _ProfilePageState extends State<ProfilePage>
               ProfileHero(
                 photoUrl: _profileUrl,
                 fullName: fullName,
-                current: _current,
                 teamColor: _teamColor,
-                headlineStats: _headlineStats.length >= 3
-                    ? _headlineStats.take(3).toList()
-                    : [
-                        ..._headlineStats,
-                        for (int i = _headlineStats.length; i < 3; i++)
-                          (label: '—', value: '—'),
-                      ],
-                trophyCount: _awards.length,
-                isKeeper: _isKeeper,
               ),
               // Tab bar
               TabBar(
@@ -610,6 +666,10 @@ class _ProfilePageState extends State<ProfilePage>
                     ProfileTab(
                       information: _information,
                       awards: _awards,
+                      current: _current,
+                      currentTeamNumber: _currentTeamNumber,
+                      currentStatsLabel: _currentStatsLabel,
+                      currentStats: _headlineStats,
                     ),
                     StatsTab(competitions: _competitions),
                     CareerTab(rows: _careerRows),
@@ -640,11 +700,7 @@ class _ProfilePageState extends State<ProfilePage>
   }
 
   Future<int> _doLoad() async {
-    // Rebuild the tournament appearances cache reference before loading.
     _tournamentAppearancesCache.clear();
-
-    // We need to store tournament appearances in the cache as we build them.
-    // Refactor getProfileData to populate the cache directly.
     return _getProfileDataWithCache();
   }
 
@@ -662,46 +718,50 @@ class _ProfilePageState extends State<ProfilePage>
         : {};
 
     // ── 2. Load league appearances ───────────────────────────────────────
-    if (rawUser['Played'] is Map) {
-      await Future.forEach(
-          (rawUser['Played'] as Map).entries, (entry) async {
-        final sport = entry.key.toString();
-        final seasons = entry.value;
-        if (seasons is! Map) return;
-        await Future.forEach(seasons.entries, (entry2) async {
-          final seasonRaw = entry2.key.toString();
-          final team = entry2.value.toString();
-          final parts = seasonRaw.split(' ');
-          final seasonNum = parts.last;
+    try {
+      if (rawUser['Played'] is Map) {
+        await Future.forEach(
+            (rawUser['Played'] as Map).entries, (entry) async {
+          final sport = entry.key.toString();
+          final seasons = entry.value;
+          if (seasons is! Map) return;
+          await Future.forEach(seasons.entries, (entry2) async {
+            final seasonRaw = entry2.key.toString();
+            final team = entry2.value.toString();
+            final parts = seasonRaw.split(' ');
+            final seasonNum = parts.last;
 
-          if (sport == 'Futsal') {
-            _sportPositions[sport] =
-                (_information['${sport}Position'] ?? '').toString();
-            await getAllFutsalLineUps(seasonNum);
-            _tableEntries['Futsal'] ??= {};
-            _tableEntries['Futsal']![seasonNum] =
-                await _extractPlayerStats(sport, seasonNum, team);
-          } else if (sport == 'Basketball') {
-            _sportPositions[sport] =
-                (_information['${sport}Position'] ?? '').toString();
-            await getAllBasketballLineUps(seasonNum);
-            _tableEntries['Basketball'] ??= {};
-            _tableEntries['Basketball']![seasonNum] =
-                await _extractPlayerStats(sport, seasonNum, team);
-          } else if (sport == 'Flag Football') {
-            _sportPositions[sport] =
-                (_information['${sport}Position'] ?? '').toString();
-            await getAllFlagFootballLineUps(seasonNum);
-            _tableEntries['Flag Football'] ??= {};
-            _tableEntries['Flag Football']![seasonNum] =
-                await _extractPlayerStats(sport, seasonNum, team);
-          }
+            if (sport == 'Futsal') {
+              _sportPositions[sport] =
+                  (_information['${sport}Position'] ?? '').toString();
+              await getAllFutsalLineUps(seasonNum);
+              _tableEntries['Futsal'] ??= {};
+              _tableEntries['Futsal']![seasonNum] =
+                  await _extractPlayerStats(sport, seasonNum, team);
+            } else if (sport == 'Basketball') {
+              _sportPositions[sport] =
+                  (_information['${sport}Position'] ?? '').toString();
+              await getAllBasketballLineUps(seasonNum);
+              _tableEntries['Basketball'] ??= {};
+              _tableEntries['Basketball']![seasonNum] =
+                  await _extractPlayerStats(sport, seasonNum, team);
+            } else if (sport == 'Flag Football') {
+              _sportPositions[sport] =
+                  (_information['${sport}Position'] ?? '').toString();
+              await getAllFlagFootballLineUps(seasonNum);
+              _tableEntries['Flag Football'] ??= {};
+              _tableEntries['Flag Football']![seasonNum] =
+                  await _extractPlayerStats(sport, seasonNum, team);
+            }
+          });
         });
-      });
-    }
+      }
+    } catch (_) {}
 
     // ── 3. AFC San Jose ──────────────────────────────────────────────────
-    await _extractAFCStats();
+    try {
+      await _extractAFCStats();
+    } catch (_) {}
 
     // ── 4. Awards ────────────────────────────────────────────────────────
     try {
@@ -724,7 +784,8 @@ class _ProfilePageState extends State<ProfilePage>
     // ── 5. Tournament appearances ────────────────────────────────────────
     try {
       final tournaments = await TournamentService.getAllTournaments();
-      await Future.forEach(tournaments, (tournament) async {
+      // Run all tournament lookups concurrently for speed.
+      await Future.wait(tournaments.map((tournament) async {
         try {
           final teams = await TournamentService.getTeams(tournament.id);
           final rosters =
@@ -741,6 +802,7 @@ class _ProfilePageState extends State<ProfilePage>
                   logoUrl: tournament.logoUrl ?? '',
                   teamName: player.teamName,
                   position: player.position ?? '',
+                  number: player.number ?? '',
                   player: player,
                 ));
                 break;
@@ -748,7 +810,7 @@ class _ProfilePageState extends State<ProfilePage>
             }
           }
         } catch (_) {}
-      });
+      }));
     } catch (_) {}
 
     // ── 6. Build stints ──────────────────────────────────────────────────
@@ -813,7 +875,35 @@ class _ProfilePageState extends State<ProfilePage>
       }
     }
 
-    // ── 8. CompetitionStats ──────────────────────────────────────────────
+    // ── 8. Jersey number for current team ────────────────────────────────
+    if (_current != null) {
+      if (_current!.isTournament) {
+        final ta = _findTournamentAppearance(_current!.scopeId);
+        if (ta != null && ta.number.isNotEmpty) {
+          _currentTeamNumber = ta.number;
+        }
+      } else {
+        // League players all have a `number` field on the Player model.
+        final entry =
+            _tableEntries[_current!.sport]?[_current!.label];
+        if (entry != null && entry.$1.isNotEmpty) {
+          final player = entry.$3;
+          // All league player models implement Player which has `number`.
+          if (player is FutsalPlayer && player.number.isNotEmpty) {
+            _currentTeamNumber = player.number;
+          } else if (player is BasketballPlayer && player.number.isNotEmpty) {
+            _currentTeamNumber = player.number;
+          } else if (player is FlagFootballPlayer &&
+              player.number.isNotEmpty) {
+            _currentTeamNumber = player.number;
+          } else if (player is SoccerPlayer && player.number.isNotEmpty) {
+            _currentTeamNumber = player.number;
+          }
+        }
+      }
+    }
+
+    // ── 9. CompetitionStats ──────────────────────────────────────────────
     final competitions = <CompetitionStats>[];
 
     if (_tableEntries.containsKey('Futsal')) {
@@ -858,16 +948,22 @@ class _ProfilePageState extends State<ProfilePage>
     }
     _competitions = competitions;
 
-    // ── 9. Hero headline stats ────────────────────────────────────────────
+    // ── 10. Current-season stats label + headline stats ───────────────────
+    if (_current != null) {
+      if (_current!.isTournament) {
+        final ta = _findTournamentAppearance(_current!.scopeId);
+        _currentStatsLabel = ta?.tournamentName ?? _current!.label;
+      } else {
+        final sport = _current!.sport;
+        final seasonNum = _current!.label;
+        if (sport == 'AFC San Jose') {
+          _currentStatsLabel = 'AFC San Jose Season $seasonNum';
+        } else {
+          _currentStatsLabel = '$sport League Season $seasonNum';
+        }
+      }
+    }
     _headlineStats = _buildHeadlineStats();
-
-    // ── 10. isKeeper ─────────────────────────────────────────────────────
-    final currentStatMap =
-        _competitions.isNotEmpty ? _competitions.first.stats : <String, num>{};
-    _isKeeper = detectKeeper(
-      Map<String, num>.from(currentStatMap),
-      _current?.position ?? '',
-    );
 
     // ── 11. CareerRows ───────────────────────────────────────────────────
     _careerRows = _buildCareerRows();
@@ -887,6 +983,7 @@ class _TournamentAppearance {
   final String logoUrl;
   final String teamName;
   final String position;
+  final String number;
   final TournamentPlayer player;
 
   _TournamentAppearance({
@@ -898,6 +995,7 @@ class _TournamentAppearance {
     required this.logoUrl,
     required this.teamName,
     required this.position,
+    required this.number,
     required this.player,
   });
 }
