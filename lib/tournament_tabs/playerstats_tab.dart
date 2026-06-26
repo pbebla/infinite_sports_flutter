@@ -4,6 +4,7 @@ import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
+import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
@@ -166,7 +167,9 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
     int value,
     int rank,
   ) {
-    return Padding(
+    return GestureDetector(
+      onTap: () => openPlayerProfileById(context, uid: player.uid, name: player.name),
+      child: Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
@@ -272,6 +275,7 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
                   ),
                 ),
         ],
+      ),
       ),
     );
   }

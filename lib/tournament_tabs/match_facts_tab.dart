@@ -9,6 +9,7 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/prediction_room_page.dart';
+import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:infinite_sports_flutter/misc/single_match_tallies.dart';
 
@@ -347,10 +348,13 @@ class MatchFactsTab extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: Text(
-                '${top.name} (${top.teamName})',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-                overflow: TextOverflow.ellipsis,
+              child: GestureDetector(
+                onTap: () => openPlayerProfileById(context, uid: top.uid, name: top.name),
+                child: Text(
+                  '${top.name} (${top.teamName})',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
             Text(
