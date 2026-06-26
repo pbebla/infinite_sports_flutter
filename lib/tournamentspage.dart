@@ -148,9 +148,7 @@ class _TournamentsPageState extends State<TournamentsPage> {
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
-        foregroundColor: Colors.white,
-        title: const Text('Tournaments'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
+        title: Image.asset('assets/infinitelarge_dark.png', height: 30),
       ),
       body: FutureBuilder<List<Tournament>>(
         future: _tournamentsFuture,

@@ -28,12 +28,10 @@ class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
         tableWidget,
         leaderboardWidget
       ],
-      backgroundColor: Theme.of(context).colorScheme.primary,
       // Here we take the value from the MyHomePage object that was created by
       // the App.build method, and use it to set our appbar title.
       title: title,
       centerTitle: true,
-      foregroundColor: Colors.white,
       bottom: bottom
     );
   }

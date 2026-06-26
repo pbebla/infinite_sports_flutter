@@ -96,9 +96,7 @@ class _LeaguesPageState extends State<LeaguesPage> {
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
-        foregroundColor: Colors.white,
-        title: Text("Leagues"),
-        backgroundColor: Theme.of(context).colorScheme.primary,
+        title: Image.asset('assets/infinitelarge_dark.png', height: 30),
       ),
       body: FutureBuilder(
         future: populateMenus(), 

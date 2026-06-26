@@ -687,8 +687,6 @@ class _ProfilePageState extends State<ProfilePage>
     return AppBar(
       centerTitle: true,
       title: const Text('Profile'),
-      backgroundColor: Theme.of(context).colorScheme.primary,
-      foregroundColor: Colors.white,
     );
   }
 

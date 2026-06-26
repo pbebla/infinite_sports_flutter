@@ -33,8 +33,6 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                     }
                     return Scaffold(
                       appBar: AppBar(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Theme.of(context).colorScheme.primary,
                         centerTitle: true,
                         title: Text("Futsal")
                       ),
@@ -60,8 +58,6 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                     }
                     return Scaffold(
                       appBar: AppBar(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Theme.of(context).colorScheme.primary,
                         centerTitle: true,
                         title: Text("Basketball")
                       ),
@@ -87,8 +83,6 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                     }
                     return Scaffold(
                       appBar: AppBar(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Theme.of(context).colorScheme.primary,
                         centerTitle: true,
                         title: Text("Flag Football")
                       ),
@@ -116,8 +110,6 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                     }
                     return Scaffold(
                       appBar: AppBar(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Theme.of(context).colorScheme.primary,
                         centerTitle: true,
                         title: Text("AFC San Jose")
                       ),
