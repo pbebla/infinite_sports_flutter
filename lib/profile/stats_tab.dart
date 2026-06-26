@@ -44,14 +44,37 @@ IconData sportIcon(String sport) {
 class StatsTab extends StatefulWidget {
   final List<CompetitionStats> competitions;
 
-  const StatsTab({super.key, required this.competitions});
+  /// Initial selection (default 0 = latest). The parent can seed this and will
+  /// receive change notifications via [onCompetitionChanged].
+  final int initialIndex;
+
+  /// Called whenever the user selects a different competition. The parent
+  /// (ProfilePage) uses this to know which competition is active when the
+  /// user presses the Share button on the Stats tab.
+  final ValueChanged<int>? onCompetitionChanged;
+
+  const StatsTab({
+    super.key,
+    required this.competitions,
+    this.initialIndex = 0,
+    this.onCompetitionChanged,
+  });
 
   @override
   State<StatsTab> createState() => _StatsTabState();
 }
 
 class _StatsTabState extends State<StatsTab> {
-  int _selectedIndex = 0;
+  late int _selectedIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedIndex = (widget.initialIndex >= 0 &&
+            widget.initialIndex < widget.competitions.length)
+        ? widget.initialIndex
+        : 0;
+  }
 
   // Human-readable labels for known stat keys.
   static const Map<String, String> _statLabels = {
@@ -234,6 +257,7 @@ class _StatsTabState extends State<StatsTab> {
                     selected: isSelected,
                     onTap: () {
                       setState(() => _selectedIndex = i);
+                      widget.onCompetitionChanged?.call(i);
                       Navigator.pop(sheetCtx);
                     },
                   );

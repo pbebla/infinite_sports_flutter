@@ -1,6 +1,7 @@
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/profile_stat_priority.dart';
+import 'package:infinite_sports_flutter/misc/share_profile_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/award.dart';
@@ -14,6 +15,7 @@ import 'package:infinite_sports_flutter/profile/career_tab.dart';
 import 'package:infinite_sports_flutter/profile/profile_hero.dart';
 import 'package:infinite_sports_flutter/profile/profile_tab.dart';
 import 'package:infinite_sports_flutter/profile/stats_tab.dart';
+import 'package:infinite_sports_flutter/widgets/share_profile_card.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 // ─── Human-readable labels for stat keys (shared across ProfileTab + StatsTab) ─
@@ -81,6 +83,11 @@ class _ProfilePageState extends State<ProfilePage>
   String _profileUrl = '';
   Map<dynamic, dynamic> _information = {};
   List<Award> _awards = [];
+
+  // ── Share state ──────────────────────────────────────────────────────────
+  /// Tracks which competition is currently selected in the Stats tab, so the
+  /// Share button on that tab knows which card to build.
+  int _selectedStatsIndex = 0;
 
   // sport → seasonNum → (teamName, teamColor, Player)
   final Map<String, Map<String, (String, Color, Player)>> _tableEntries = {};
@@ -639,7 +646,12 @@ class _ProfilePageState extends State<ProfilePage>
                       currentStatsLabel: _currentStatsLabel,
                       currentStats: _headlineStats,
                     ),
-                    StatsTab(competitions: _competitions),
+                    StatsTab(
+                      competitions: _competitions,
+                      initialIndex: _selectedStatsIndex,
+                      onCompetitionChanged: (i) =>
+                          setState(() => _selectedStatsIndex = i),
+                    ),
                     CareerTab(rows: _careerRows),
                   ],
                 ),
@@ -655,7 +667,117 @@ class _ProfilePageState extends State<ProfilePage>
     return AppBar(
       centerTitle: true,
       title: const Text('Profile'),
+      actions: widget._isLimited
+          ? null
+          : [
+              IconButton(
+                icon: const Icon(Icons.ios_share),
+                tooltip: 'Share',
+                onPressed: () => _onShareTap(context),
+              ),
+            ],
     );
+  }
+
+  /// Builds and shares the appropriate profile card for the active tab.
+  Future<void> _onShareTap(BuildContext context) async {
+    final fullName =
+        '$_firstName $_lastName'.trim().isNotEmpty
+            ? '$_firstName $_lastName'.trim()
+            : 'Player';
+
+    final tab = _tabController.index;
+
+    if (tab == 0) {
+      // ── Profile tab → Trophy Cabinet card ──────────────────────────────
+      final currentLabel = _current != null
+          ? '${_current!.team} · ${_current!.sport}'
+          : '';
+      final n = _awards.length;
+      await shareProfileCard(
+        context,
+        ShareProfileCabinetCard(
+          name: fullName,
+          photoUrl: _profileUrl,
+          currentLabel: currentLabel,
+          awards: _awards,
+        ),
+        shareText:
+            "$fullName's trophy cabinet — $n ${n == 1 ? 'trophy' : 'trophies'}"
+            ' on Infinite Sports',
+      );
+    } else if (tab == 1) {
+      // ── Stats tab → Stats card for currently selected competition ───────
+      if (_competitions.isEmpty) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(content: Text('No stats to share yet.')),
+        );
+        return;
+      }
+      final idx = _selectedStatsIndex.clamp(0, _competitions.length - 1);
+      final comp = _competitions[idx];
+
+      // Build ordered stat rows the same way StatsTab does.
+      final group = positionGroup(comp.sport, comp.position);
+      final priority = profileStatPriority(comp.sport, group);
+      final orderedKeys = <String>[
+        for (final k in priority)
+          if (comp.stats.containsKey(k)) k,
+        for (final k in comp.stats.keys)
+          if (!priority.contains(k)) k,
+      ];
+      final statRows = orderedKeys
+          .take(5)
+          .map((k) => (
+                label: _statLabel[k] ?? k,
+                value: comp.stats[k].toString(),
+              ))
+          .toList();
+
+      await shareProfileCard(
+        context,
+        ShareProfileStatsCard(
+          name: fullName,
+          photoUrl: _profileUrl,
+          competitionLabel: comp.label,
+          stats: statRows,
+        ),
+        shareText:
+            "$fullName · ${comp.label} — Infinite Sports",
+      );
+    } else {
+      // ── Career tab → Career card ─────────────────────────────────────────
+      // Compute career headline totals.
+      final distinctSports = <String>{
+        for (final c in _competitions) c.sport,
+      };
+      final sportsPlayed = distinctSports.length;
+
+      // Total goals across all league/tournament stats.
+      int totalGoals = 0;
+      for (final c in _competitions) {
+        totalGoals += (c.stats['goals'] ?? 0).toInt();
+      }
+
+      final trophies = _awards.length;
+
+      final headlineTotals = <({String label, String value})>[
+        (label: 'Sports Played', value: '$sportsPlayed'),
+        if (totalGoals > 0) (label: 'Goals', value: '$totalGoals'),
+        (label: 'Trophies', value: '$trophies'),
+        (label: 'Seasons', value: '${_competitions.length}'),
+      ];
+
+      await shareProfileCard(
+        context,
+        ShareProfileCareerCard(
+          name: fullName,
+          photoUrl: _profileUrl,
+          headlineTotals: headlineTotals,
+        ),
+        shareText: "$fullName's career on Infinite Sports",
+      );
+    }
   }
 
   // Ensure getProfileData runs only once even if FutureBuilder rebuilds.
