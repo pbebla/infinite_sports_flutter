@@ -502,8 +502,10 @@ class _ProfilePageState extends State<ProfilePage>
         final season = stint.label;
         final team = stint.team;
         final seasons = _tableEntries[sport];
-        final Map<String, num> stats = seasons != null
-            ? _buildStatMapForSport(sport, seasons)
+        // Per-season stats for THIS row (not the sport's career aggregate).
+        final seasonEntry = seasons?[season];
+        final Map<String, num> stats = seasonEntry != null
+            ? _buildStatMapForSingleEntry(sport, seasonEntry.$3)
             : {};
         final hasTrophy =
             _awards.any((a) => _awardMatchesStint(a, stint));
