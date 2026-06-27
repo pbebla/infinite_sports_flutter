@@ -252,15 +252,17 @@ class _MiniTrophy extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        CircleAvatar(
-          radius: 22,
-          backgroundColor: color,
-          child: Icon(
-            trophyIconData(award.icon),
-            color: Colors.white,
-            size: 20,
-          ),
-        ),
+        isAssetIcon(award.icon)
+            ? trophyIconWidget(award.icon, size: 44)
+            : CircleAvatar(
+                radius: 22,
+                backgroundColor: color,
+                child: Icon(
+                  trophyIconData(award.icon),
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
         const SizedBox(height: 4),
         SizedBox(
           width: 56,

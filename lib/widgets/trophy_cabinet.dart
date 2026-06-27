@@ -93,15 +93,17 @@ class _TrophyChip extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    CircleAvatar(
-                      radius: 28,
-                      backgroundColor: color,
-                      child: Icon(
-                        trophyIconData(award.icon),
-                        color: Colors.white,
-                        size: 28,
-                      ),
-                    ),
+                    isAssetIcon(award.icon)
+                        ? trophyIconWidget(award.icon, size: 56)
+                        : CircleAvatar(
+                            radius: 28,
+                            backgroundColor: color,
+                            child: Icon(
+                              trophyIconData(award.icon),
+                              color: Colors.white,
+                              size: 28,
+                            ),
+                          ),
                     const SizedBox(width: 16),
                     Expanded(
                       child: Text(
@@ -152,15 +154,17 @@ class _TrophyChip extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircleAvatar(
-              radius: 22,
-              backgroundColor: color,
-              child: Icon(
-                trophyIconData(award.icon),
-                color: Colors.white,
-                size: 20,
-              ),
-            ),
+            isAssetIcon(award.icon)
+                ? trophyIconWidget(award.icon, size: 44)
+                : CircleAvatar(
+                    radius: 22,
+                    backgroundColor: color,
+                    child: Icon(
+                      trophyIconData(award.icon),
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
             const SizedBox(height: 6),
             Text(
               award.name,
