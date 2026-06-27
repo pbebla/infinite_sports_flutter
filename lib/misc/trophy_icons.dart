@@ -29,6 +29,7 @@ const Map<String, String> kTrophyAssetIcons = {
   'fastest_goal':       'assets/trophies/fastest_goal.png',
   'mvp':                'assets/trophies/mvp.png',
   'team_of_tournament': 'assets/trophies/team_of_tournament.png',
+  'goal_net':           'assets/trophies/goal_net.png',
 };
 
 const List<String> kTrophyAssetIconKeys = [
@@ -42,6 +43,7 @@ const List<String> kTrophyAssetIconKeys = [
   'fastest_goal',
   'mvp',
   'team_of_tournament',
+  'goal_net',
 ];
 
 bool isAssetIcon(String key) => kTrophyAssetIcons.containsKey(key);
@@ -49,15 +51,22 @@ bool isAssetIcon(String key) => kTrophyAssetIcons.containsKey(key);
 // ─── Unified renderer ─────────────────────────────────────────────────────────
 
 /// Renders a trophy icon: PNG image tile for asset keys, Material icon for builtin keys.
+///
+/// Asset icons are placed inside a fixed square ([size]×[size]) with
+/// [BoxFit.contain] so the artwork is never cropped or stretched. The PNG
+/// files are transparent, so no background clipping is applied — the icon
+/// sits on whatever surface the parent provides, which keeps it correct in
+/// both light and dark mode.
 Widget trophyIconWidget(String key, {double size = 32, Color? color}) {
   if (isAssetIcon(key)) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(size * 0.18),
+    return SizedBox(
+      width: size,
+      height: size,
       child: Image.asset(
         kTrophyAssetIcons[key]!,
         width: size,
         height: size,
-        fit: BoxFit.cover,
+        fit: BoxFit.contain,
       ),
     );
   }
