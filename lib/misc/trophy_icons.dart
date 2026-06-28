@@ -33,6 +33,7 @@ const Map<String, String> kTrophyAssetIcons = {
   'champion':           'assets/trophies/champion.png',
   'runner_up':          'assets/trophies/runner_up.png',
   'clean_sheet':        'assets/trophies/clean_sheet.png',
+  'young_talent':       'assets/trophies/young_talent.png',
 };
 
 const List<String> kTrophyAssetIconKeys = [
@@ -50,6 +51,7 @@ const List<String> kTrophyAssetIconKeys = [
   'champion',
   'runner_up',
   'clean_sheet',
+  'young_talent',
 ];
 
 bool isAssetIcon(String key) => kTrophyAssetIcons.containsKey(key);
