@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/trophy_icons.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 /// Data class for a single row in the Career tab.
@@ -13,8 +14,10 @@ class CareerRow {
   /// Compact stat summary shown as a subtitle, e.g. "12G · 4A".
   final String summary;
 
-  /// When true, a 🏆 badge is shown on the trailing side.
-  final bool hasTrophy;
+  /// Trophies earned during this stint.
+  /// Each entry carries the trophy name and icon key (for [trophyIconWidget]).
+  /// Empty list → no trophy decoration is shown.
+  final List<({String name, String icon})> trophies;
 
   /// Optional tap callback. Null → row is not interactive.
   final VoidCallback? onTap;
@@ -23,16 +26,19 @@ class CareerRow {
     required this.teamLogoUrl,
     required this.title,
     required this.summary,
-    this.hasTrophy = false,
+    this.trophies = const [],
     this.onTap,
   });
+
+  /// Convenience getter — true when at least one trophy was earned.
+  bool get hasTrophy => trophies.isNotEmpty;
 }
 
 /// The "Career" tab of the tabbed player profile.
 ///
 /// Renders [rows] (pre-sorted newest-first by the caller via [careerHistory])
-/// as tappable list rows with a team logo, title, optional summary, and an
-/// optional trophy badge.
+/// as tappable list rows with a team logo, title, optional summary, and a
+/// compact row of trophy icons for every trophy earned that stint.
 ///
 /// Empty [rows] → "No history yet." message.
 class CareerTab extends StatelessWidget {
@@ -72,6 +78,40 @@ class _CareerRowTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
 
+    // Build subtitle: summary text + optional trophy row.
+    Widget? subtitleWidget;
+
+    if (row.summary.isNotEmpty || row.trophies.isNotEmpty) {
+      subtitleWidget = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (row.summary.isNotEmpty)
+            Text(
+              row.summary,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: onSurface.withValues(alpha: 0.6),
+                  ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          if (row.trophies.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 4,
+              runSpacing: 2,
+              children: row.trophies.map((t) {
+                return Tooltip(
+                  message: t.name,
+                  child: trophyIconWidget(t.icon, size: 18),
+                );
+              }).toList(),
+            ),
+          ],
+        ],
+      );
+    }
+
     final tile = ListTile(
       contentPadding:
           const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -87,28 +127,10 @@ class _CareerRowTile extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
-      subtitle: row.summary.isNotEmpty
-          ? Text(
-              row.summary,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: onSurface.withValues(alpha: 0.6),
-                  ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            )
-          : null,
-      trailing: row.hasTrophy
-          ? const Text(
-              '🏆',
-              style: TextStyle(fontSize: 20),
-            )
-          : null,
+      subtitle: subtitleWidget,
       onTap: row.onTap,
     );
 
-    // Wrap in InkWell only when there is an onTap, so the splash is scoped to
-    // the tile bounds. ListTile already does this internally when onTap != null,
-    // so we just return the tile directly.
     return tile;
   }
 }

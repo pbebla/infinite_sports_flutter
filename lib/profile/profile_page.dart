@@ -495,13 +495,15 @@ class _ProfilePageState extends State<ProfilePage>
       if (stint.isTournament) {
         final ta = _findTournamentAppearance(stint.scopeId);
         final stats = ta != null ? _tournamentPlayerStatMap(ta.player) : {};
-        final hasTrophy =
-            _awards.any((a) => _awardMatchesStint(a, stint));
+        final stintTrophies = _awards
+            .where((a) => _awardMatchesStint(a, stint))
+            .map((a) => (name: a.name, icon: a.icon))
+            .toList();
         rows.add(CareerRow(
           teamLogoUrl: ta?.logoUrl ?? '',
           title: '${stint.sport} · ${ta?.tournamentName ?? stint.label}',
           summary: _tournamentSummary(Map<String, num>.from(stats)),
-          hasTrophy: hasTrophy,
+          trophies: stintTrophies,
           onTap: null,
         ));
       } else {
@@ -514,8 +516,10 @@ class _ProfilePageState extends State<ProfilePage>
         final Map<String, num> stats = seasonEntry != null
             ? _buildStatMapForSingleEntry(sport, seasonEntry.$3)
             : {};
-        final hasTrophy =
-            _awards.any((a) => _awardMatchesStint(a, stint));
+        final stintTrophies = _awards
+            .where((a) => _awardMatchesStint(a, stint))
+            .map((a) => (name: a.name, icon: a.icon))
+            .toList();
         final logoUrl = _teamLogoUrl(sport, season, team);
 
         String summary;
@@ -536,7 +540,7 @@ class _ProfilePageState extends State<ProfilePage>
           teamLogoUrl: logoUrl,
           title: '$sport · Season $season',
           summary: summary,
-          hasTrophy: hasTrophy,
+          trophies: stintTrophies,
           onTap: null,
         ));
       }
