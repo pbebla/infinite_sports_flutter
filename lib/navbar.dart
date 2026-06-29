@@ -216,7 +216,7 @@ class _NavBarState extends State<NavBar> {
             visible: signedIn,
             child: ListTile(
             leading: const ImageIcon(AssetImage("assets/playerstats.png"), color: Colors.white,),
-            title: const Text("Stats", style: TextStyle(fontWeight: FontWeight.bold),),
+            title: const Text("Profile", style: TextStyle(fontWeight: FontWeight.bold),),
             textColor: Colors.white,
             onTap: () {
               Navigator.push(context, MaterialPageRoute(builder:(context) {

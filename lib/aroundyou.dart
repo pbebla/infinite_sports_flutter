@@ -151,10 +151,8 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                 },);
             },
           ),
-          backgroundColor: Theme.of(context).colorScheme.primary,
           centerTitle: true,
-          foregroundColor: Colors.white,
-          title: Text("Around You"),
+          title: Image.asset('assets/infinitelarge_dark.png', height: 30),
           actions: [
             IconButton(
               onPressed: () async {

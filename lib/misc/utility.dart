@@ -273,6 +273,7 @@ Future<List<String>> getSoccerSeasons(sport) async {
   if (sport == "AFC San Jose") {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/");
     var event = await newClient.child("Seasons").once();
+    if (event.snapshot.value == null) return [];
     var seasons = event.snapshot.value as Map<dynamic, dynamic>;
     return seasons.keys.toList().cast<String>();
   }
@@ -289,7 +290,7 @@ Future<Map<String, SoccerPlayer>> getSoccerRoster(sport, season) async {
       SoccerPlayer temp = SoccerPlayer();
       temp.assists = info["Assists"] ?? 0;
       temp.goals = info["Goals"] ?? 0;
-      temp.number = info["Number"].toString() ?? "";
+      temp.number = info["Number"]?.toString() ?? '';
       temp.saves = info["Saves"] ?? 0;
       temp.uid = info["UID"] ?? '0';
       temp.position = info["Position"] ?? "";
@@ -337,7 +338,7 @@ Future<void> getAllFlagFootballLineUps(String season) async
     (lineup as Map).forEach((name, info) {
       FlagFootballPlayer temp2 = FlagFootballPlayer();
       temp2.name = name;
-      temp2.number = info["number"].toString() ?? '0';
+      temp2.number = info["number"]?.toString() ?? '0';
       temp2.uid = info["UID"] ?? '0';
       temp2.receptions = info["Receptions"] ?? 0;
       temp2.receivingTouchdowns = info["Receiving Touchdowns"] ?? 0;
@@ -369,7 +370,7 @@ Future<void> getAllBasketballLineUps(String season) async
     Map<String, BasketballPlayer> temp = {};
     (lineup as Map).forEach((name, info) {
       BasketballPlayer temp2 = BasketballPlayer();
-      temp2.number = info["number"] ?? 0;
+      temp2.number = (info["number"] ?? '0').toString();
       temp2.uid = info["UID"] ?? '0';
       temp2.name = name;
       temp2.onePoint = info["OnePoint"] ?? 0;
@@ -788,13 +789,17 @@ Future<Map<String, BasketballPlayer>> getBasketballLineUp(season, team) async {
 
 Future<void> getAllTeamLogo() async
 {
+  if (teamLogos.isNotEmpty) return;
+
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   var event = await newClient.child("Logo Urls").once();
-  teamLogos = event.snapshot.value as Map;
+  final raw = event.snapshot.value;
+  if (raw is Map) teamLogos = raw;
 
   newClient = FirebaseDatabase.instance.ref("AFC San Jose");
-  event = await newClient.child("Logo URL").once();
-  teamLogos["AFC San Jose"] = event.snapshot.value as String;
+  var afcEvent = await newClient.child("Logo URL").once();
+  final afcLogo = afcEvent.snapshot.value;
+  if (afcLogo != null) teamLogos["AFC San Jose"] = afcLogo.toString();
 }
 
 Future<Game> getGame(widget, sport, season, date, times, num) async {

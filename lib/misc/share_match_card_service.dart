@@ -52,7 +52,7 @@ Future<void> shareMatchCard(
     }
     if (!context.mounted) return;
 
-    final bytes = await _capture(
+    final bytes = await captureCardToPng(
       context,
       ShareMatchCard(
         match: match,
@@ -83,7 +83,11 @@ Future<void> shareMatchCard(
   }
 }
 
-Future<Uint8List> _capture(BuildContext context, Widget card) async {
+/// Renders [card] offscreen via a transparent overlay and returns the PNG bytes.
+///
+/// Exported so that other share services (e.g. [shareProfileCard]) can reuse
+/// the same pipeline without duplicating the RepaintBoundary / Overlay logic.
+Future<Uint8List> captureCardToPng(BuildContext context, Widget card) async {
   final key = GlobalKey();
   final overlay = Overlay.of(context, rootOverlay: true);
   final entry = OverlayEntry(

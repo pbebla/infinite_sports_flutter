@@ -7,7 +7,7 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
-import 'package:infinite_sports_flutter/tournamentplayerprofile.dart';
+import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:infinite_sports_flutter/misc/notification_topics.dart';
 import 'package:infinite_sports_flutter/widgets/follow_bell.dart';
@@ -586,21 +586,8 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
   }
 
   Widget _buildPlayerRow(BuildContext context, TournamentPlayer p) {
-    final team = _team;
-    final tournamentName = team?.name ?? widget.tournamentId;
-
     return InkWell(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => TournamentPlayerProfilePage(
-              player: p,
-              tournamentName: tournamentName,
-            ),
-          ),
-        );
-      },
+      onTap: () => openPlayerProfileById(context, uid: p.uid, name: p.name),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         child: Row(

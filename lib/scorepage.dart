@@ -16,7 +16,7 @@ import 'package:infinite_sports_flutter/model/gameactivity.dart';
 import 'package:infinite_sports_flutter/model/playerstats.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
-import 'package:infinite_sports_flutter/playerpage.dart';
+import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:infinite_sports_flutter/table.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
@@ -460,12 +460,7 @@ class _ScorePageState extends State<ScorePage> {
           return DataRow(cells: [
             DataCell(Center(child: Text(key.number),)),
             DataCell(Text(key.name), onTap: () {
-              Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
-                  initialEntries: [OverlayEntry(
-                    builder: (mainContext) {
-                      return PlayerPage(uid: key.uid);
-                    })],
-                )));
+              openPlayerProfileById(context, uid: key.uid, name: key.name);
             },),
             DataCell(Text(key.goals.toString())),
             DataCell(Text(key.assists.toString())),
@@ -497,12 +492,7 @@ class _ScorePageState extends State<ScorePage> {
         rows: (teamPlayers as List).map((key) => DataRow(cells: [
             DataCell(Center(child: Text(key.number),)),
             DataCell(Text(key.name), onTap: () {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-                  initialEntries: [OverlayEntry(
-                    builder: (context) {
-                      return PlayerPage(uid: key.uid);
-                    })],
-                )));
+              openPlayerProfileById(context, uid: key.uid, name: key.name);
             },),
             DataCell(Text(key.total.toString())),
             DataCell(Text(key.rebounds.toString())),
@@ -549,12 +539,7 @@ class _ScorePageState extends State<ScorePage> {
         rows: (teamPlayers as List).map((key) => DataRow(cells: [
             DataCell(Center(child: Text(key.number),)),
             DataCell(Text(key.name), onTap: () {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-                  initialEntries: [OverlayEntry(
-                    builder: (context) {
-                      return PlayerPage(uid: key.uid);
-                    })],
-                )));
+              openPlayerProfileById(context, uid: key.uid, name: key.name);
             },),
             DataCell(Text(key.qbCompletions.toString())),
             DataCell(Text((key.qbCompletions+key.qbIncompletions).toString())),
