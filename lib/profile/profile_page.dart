@@ -365,7 +365,7 @@ class _ProfilePageState extends State<ProfilePage>
           award.sport.toLowerCase().contains(stint.sport.toLowerCase()) ||
           award.sport == stint.sport;
       final seasonMatch = award.season == stint.label ||
-          award.season.contains(stint.label);
+          award.season == 'Season ${stint.label}';
       return award.scopeType == 'league' && scopeMatch && seasonMatch;
     }
   }
@@ -799,8 +799,11 @@ class _ProfilePageState extends State<ProfilePage>
   Future<int> _getProfileDataWithCache() async {
     // ── 1. Load Users/{uid} ──────────────────────────────────────────────
     final ref = FirebaseDatabase.instance.ref();
-    final userSnap = await ref.child('Users/${widget.uid}').get();
-    final rawUser = userSnap.value as Map? ?? {};
+    Map rawUser = {};
+    try {
+      final userSnap = await ref.child('Users/${widget.uid}').get();
+      rawUser = userSnap.value as Map? ?? {};
+    } catch (_) {}
 
     _firstName = (rawUser['First Name'] ?? '').toString();
     _lastName = (rawUser['Last Name'] ?? '').toString();
@@ -917,7 +920,9 @@ class _ProfilePageState extends State<ProfilePage>
       // Fetch current season ONCE per sport.
       if (!cachedCurrentSeason.containsKey(sport)) {
         try {
-          cachedCurrentSeason[sport] = await getCurrentSeason(sport);
+          cachedCurrentSeason[sport] = sport == 'AFC San Jose'
+              ? await getAFCCurrentSeason()
+              : await getCurrentSeason(sport);
         } catch (_) {
           cachedCurrentSeason[sport] = '';
         }
@@ -941,7 +946,9 @@ class _ProfilePageState extends State<ProfilePage>
         }
 
         final position = _sportPositions[sport] ??
-            (_information['${sport}Position'] ?? '').toString();
+            (sport == 'AFC San Jose'
+                ? (_information['SoccerPosition'] ?? '').toString()
+                : (_information['${sport}Position'] ?? '').toString());
 
         stints.add(ParticipationStint(
           sport: sport,
