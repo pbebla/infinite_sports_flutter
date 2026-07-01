@@ -10,6 +10,9 @@ import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/playerpage.dart';
+import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
+import 'package:infinite_sports_flutter/registration/registration_models.dart';
+import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/settings.dart';
 import 'package:infinite_sports_flutter/signup.dart';
 import 'package:provider/provider.dart';
@@ -34,6 +37,7 @@ class NavBar extends StatefulWidget {
 class _NavBarState extends State<NavBar> {
   String nextleague = "";
   String season = "";
+  Map<String, RegistrationConfig> openRegistrations = {};
   bool signUpsOpen = false;
   bool signUpEnabled = false;
   String signUpDetail = "";
@@ -58,6 +62,16 @@ class _NavBarState extends State<NavBar> {
   }
 
   Future<void> setUp() async {
+    // New-style registrations (registration redesign L1a) win when any is
+    // open; the legacy Sign Up Status int stays as the fallback below.
+    openRegistrations = await RegistrationService.getOpenRegistrations();
+    if (openRegistrations.isNotEmpty) {
+      signUpDetail = openRegistrations.length == 1
+          ? "Sign Up for ${openRegistrations.values.first.label}"
+          : "Sign Ups Open";
+      signUpsOpen = true;
+      return;
+    }
     var status  = await getSignUpStatus();
     switch (status) {
       case 0:
@@ -243,6 +257,9 @@ class _NavBarState extends State<NavBar> {
                 textColor: Colors.white,
                 onTap: () {
                   Navigator.push(context, MaterialPageRoute(builder:(context) {
+                    if (openRegistrations.isNotEmpty) {
+                      return const RegistrationEntryPage();
+                    }
                     return Signup(nextleague: nextleague, season: season);
                   },));
                 },

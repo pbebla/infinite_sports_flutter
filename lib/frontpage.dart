@@ -6,6 +6,9 @@ import 'package:infinite_sports_flutter/livescore.dart';
 import 'package:infinite_sports_flutter/misc/game_day.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
+import 'package:infinite_sports_flutter/registration/registration_models.dart';
+import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -63,6 +66,9 @@ class _FrontPageState extends State<FrontPage> {
   // Active tournaments (not finished, each having a current game day).
   List<_ActiveTournamentTab> activeTournaments = [];
 
+  // Open new-style registrations (regId -> config) for the sign-up banner.
+  Map<String, RegistrationConfig> openRegistrations = {};
+
   // Drives whether the app-bar table/leaderboard shortcut buttons are hidden
   // (they are league-only and make no sense on a tournament tab).
   final ValueNotifier<bool> _onTournamentTab = ValueNotifier<bool>(false);
@@ -88,6 +94,7 @@ class _FrontPageState extends State<FrontPage> {
     isCurrentFinished = await isSeasonFinished(currentSport, currentSeason);
     isCurrentAFCFinished = await isAFCSeasonFinished(currentAFCSeason);
     await _loadActiveTournaments();
+    openRegistrations = await RegistrationService.getOpenRegistrations();
     return 1;
   }
 
@@ -129,6 +136,35 @@ class _FrontPageState extends State<FrontPage> {
       default:
         return Icon(Icons.sports);
     }
+  }
+
+  /// Banner card shown while any new-style registration is open; tapping it
+  /// opens the registration entry page.
+  Widget _registrationBanner(BuildContext context) {
+    final config = openRegistrations.values.first;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(19, 4, 19, 0),
+      child: Card(
+        color: Theme.of(context).colorScheme.primary,
+        child: ListTile(
+          leading: const Icon(Icons.how_to_reg, color: Colors.white),
+          title: Text(
+            openRegistrations.length == 1
+                ? 'Registration open: ${config.label}'
+                : 'Registrations are open',
+            style: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+          subtitle: const Text('Tap to sign up',
+              style: TextStyle(color: Colors.white70)),
+          onTap: () {
+            Navigator.push(context, MaterialPageRoute(builder: (_) {
+              return const RegistrationEntryPage();
+            }));
+          },
+        ),
+      ),
+    );
   }
 
   @override
@@ -201,6 +237,8 @@ class _FrontPageState extends State<FrontPage> {
                 tabNames.add(Tab(text: "Infinite Sports"));
                 tabIsTournament.add(false);
                 tabs.add(Column(children: [
+                  if (openRegistrations.isNotEmpty)
+                    _registrationBanner(context),
                   LayoutBuilder(
                     builder: (context, constraints) {
                       return GestureDetector(
@@ -311,19 +349,28 @@ class _FrontPageState extends State<FrontPage> {
                     )
                 );
               }
-              return Center(
-                child: Card(
-                  elevation: 2,
-                  child: SizedBox(
-                    width: 350,
-                    height: 70,
-                    child: Container(
-                      padding: const EdgeInsets.all(13),
-                      child: const Text("No Upcoming Games,\nStay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+              return Column(children: [
+                if (openRegistrations.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: _registrationBanner(context),
+                  ),
+                Expanded(
+                  child: Center(
+                    child: Card(
+                      elevation: 2,
+                      child: SizedBox(
+                        width: 350,
+                        height: 70,
+                        child: Container(
+                          padding: const EdgeInsets.all(13),
+                          child: const Text("No Upcoming Games,\nStay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              );
+              ]);
             }
         )
     );
