@@ -8,11 +8,8 @@ import 'package:url_launcher/url_launcher.dart';
 /// The Zelle account's registered number (shown + copyable).
 const String kZelleNumber = '408-693-9436';
 
-/// PLACEHOLDER — the OWNER must replace this with the exact recipient name
-/// Zelle displays for 408-693-9436 BEFORE this phase ships (spec section 5:
-/// "owner to supply name before L1a ships"). Everything else works without
-/// it; the payment screen just shows this literal text until then.
-const String kZelleDisplayName = 'OWNER-SET-ZELLE-RECIPIENT-NAME';
+/// The recipient name Zelle displays for 408-693-9436 (owner-confirmed).
+const String kZelleDisplayName = 'Zaya Shahbaz Arami';
 
 /// Venmo handle for the business profile.
 const String kVenmoHandle = 'infinite-sports';
