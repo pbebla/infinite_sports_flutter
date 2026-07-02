@@ -123,7 +123,10 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
                             MaterialPageRoute(
                                 builder: (_) => PaymentScreen(
                                     regId: widget.regId,
-                                    config: widget.config)),
+                                    config: widget.config,
+                                    amount: amountOwed(
+                                        config: widget.config,
+                                        submission: sub))),
                           ).then((_) => _refresh());
                         },
                         child: const Text('Complete payment',

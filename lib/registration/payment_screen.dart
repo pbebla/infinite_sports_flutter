@@ -21,6 +21,10 @@ class PaymentScreen extends StatelessWidget {
   final String regId;
   final RegistrationConfig config;
 
+  /// The dollar amount THIS registrant owes — captains owe config.teamFee,
+  /// individuals/joiners config.fee. Callers compute it with [amountOwed].
+  final num amount;
+
   /// True when reached straight from a fresh submission (the status page is
   /// not underneath us) — the exit button pushes the status page instead of
   /// popping.
@@ -30,6 +34,7 @@ class PaymentScreen extends StatelessWidget {
     super.key,
     required this.regId,
     required this.config,
+    required this.amount,
     this.fromSubmission = false,
   });
 
@@ -40,7 +45,7 @@ class PaymentScreen extends StatelessWidget {
     final name = FirebaseAuth.instance.currentUser?.displayName ?? '';
     final note = Uri.encodeComponent('$regId - $name');
     return Uri.parse(
-        'https://venmo.com/$kVenmoHandle?txn=pay&amount=${config.fee}&note=$note');
+        'https://venmo.com/$kVenmoHandle?txn=pay&amount=$amount&note=$note');
   }
 
   void _exit(BuildContext context) {
@@ -72,7 +77,7 @@ class PaymentScreen extends StatelessWidget {
             elevation: 2,
             child: ListTile(
               leading: const Icon(Icons.attach_money),
-              title: Text('\$${config.fee}',
+              title: Text('\$$amount',
                   style: Theme.of(context).textTheme.headlineSmall),
               subtitle: Text([
                 config.label,
