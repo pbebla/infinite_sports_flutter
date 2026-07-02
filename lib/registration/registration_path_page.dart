@@ -14,36 +14,10 @@ class RegistrationPathPage extends StatelessWidget {
       {super.key, required this.regId, required this.config});
 
   Future<void> _startCaptain(BuildContext context) async {
-    final controller = TextEditingController();
     final name = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Your team name'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-            labelText: 'Team name',
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () {
-              final cleaned = cleanTeamName(controller.text);
-              if (cleaned.isEmpty) return; // require a non-empty name
-              Navigator.pop(ctx, cleaned);
-            },
-            child: const Text('Continue'),
-          ),
-        ],
-      ),
+      builder: (_) => const _TeamNameDialog(),
     );
-    controller.dispose();
     if (name == null || name.isEmpty || !context.mounted) return;
     Navigator.push(context, MaterialPageRoute(builder: (_) {
       return RegistrationFormPage(
@@ -113,6 +87,55 @@ class RegistrationPathPage extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Owns its TextEditingController so it is disposed with the dialog subtree
+/// (disposing it right after showDialog resolves crashes the dialog's exit
+/// animation: '_dependents.isEmpty is not true'). Pops the cleaned name.
+class _TeamNameDialog extends StatefulWidget {
+  const _TeamNameDialog();
+
+  @override
+  State<_TeamNameDialog> createState() => _TeamNameDialogState();
+}
+
+class _TeamNameDialogState extends State<_TeamNameDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _continue() {
+    final cleaned = cleanTeamName(_controller.text);
+    if (cleaned.isEmpty) return; // require a non-empty name
+    Navigator.pop(context, cleaned);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Your team name'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        textCapitalization: TextCapitalization.words,
+        onSubmitted: (_) => _continue(),
+        decoration: const InputDecoration(
+          border: OutlineInputBorder(),
+          labelText: 'Team name',
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel')),
+        ElevatedButton(onPressed: _continue, child: const Text('Continue')),
+      ],
     );
   }
 }

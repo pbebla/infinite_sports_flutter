@@ -125,6 +125,20 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
         title: Text(widget.config.label),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
+        bottom: widget.path == 'individual'
+            ? null
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(26),
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    widget.path == 'captain'
+                        ? 'New team: ${widget.teamName}'
+                        : 'Joining ${widget.team?.name ?? 'team'}',
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                  ),
+                ),
+              ),
       ),
       body: FutureBuilder(
         future: _load,
