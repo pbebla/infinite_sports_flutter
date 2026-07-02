@@ -1,10 +1,12 @@
-// Pure registration-engine models + helpers (Leagues epic L1, phase L1a).
+// Pure registration-engine models + helpers (Leagues epic L1, phases L1a-L1b).
 //
 // NO Flutter/Firebase imports — unit-tested directly. This file is
 // intentionally DUPLICATED byte-for-byte in both repos (the apps share no
 // code; precedent: trophy/tournament models). Keep the copies identical:
 //   Manager: lib/models/registration_models.dart
 //   Fan:     lib/registration/registration_models.dart
+
+import 'dart:math';
 
 // ---------------------------------------------------------------------------
 // Question model
@@ -520,3 +522,199 @@ const List<RegQuestion> kDefaultRegQuestions = [
       label: 'Waiver Conditions',
       isRequired: true),
 ];
+
+// ---------------------------------------------------------------------------
+// Teams (Registrations/{regId}/Teams/{teamId}) — L1b
+// ---------------------------------------------------------------------------
+
+/// Valid RegTeam.status values.
+const List<String> kRegTeamStatuses = ['pending', 'approved', 'rejected'];
+
+class RegTeam {
+  final String id;
+  final String name;
+  final String captainUid;
+  final String status; // 'pending' | 'approved' | 'rejected'
+  final String joinCode; // '' until approved
+  final bool codeWaivesPayment; // joiners with this code skip payment
+  final int createdAt; // millisecondsSinceEpoch
+
+  const RegTeam({
+    required this.id,
+    required this.name,
+    required this.captainUid,
+    this.status = 'pending',
+    this.joinCode = '',
+    this.codeWaivesPayment = false,
+    this.createdAt = 0,
+  });
+
+  bool get isPending => status == 'pending';
+  bool get isApproved => status == 'approved';
+  bool get isRejected => status == 'rejected';
+
+  Map<String, dynamic> toFirebaseMap() => {
+        'Name': name,
+        'CaptainUid': captainUid,
+        'Status': status,
+        if (joinCode.isNotEmpty) 'JoinCode': joinCode,
+        'CodeWaivesPayment': codeWaivesPayment,
+        'CreatedAt': createdAt,
+      };
+
+  /// Defensive parse; returns null for malformed nodes.
+  static RegTeam? fromNode(String id, Object? raw) {
+    if (raw is! Map) return null;
+    final name = raw['Name']?.toString() ?? '';
+    if (id.isEmpty || name.isEmpty) return null;
+    final rawStatus = raw['Status']?.toString() ?? 'pending';
+    return RegTeam(
+      id: id,
+      name: name,
+      captainUid: raw['CaptainUid']?.toString() ?? '',
+      status: kRegTeamStatuses.contains(rawStatus) ? rawStatus : 'pending',
+      joinCode: raw['JoinCode']?.toString() ?? '',
+      codeWaivesPayment: raw['CodeWaivesPayment'] == true,
+      createdAt: int.tryParse(raw['CreatedAt']?.toString() ?? '') ?? 0,
+    );
+  }
+
+  RegTeam copyWith({
+    String? name,
+    String? captainUid,
+    String? status,
+    String? joinCode,
+    bool? codeWaivesPayment,
+    int? createdAt,
+  }) =>
+      RegTeam(
+        id: id,
+        name: name ?? this.name,
+        captainUid: captainUid ?? this.captainUid,
+        status: status ?? this.status,
+        joinCode: joinCode ?? this.joinCode,
+        codeWaivesPayment: codeWaivesPayment ?? this.codeWaivesPayment,
+        createdAt: createdAt ?? this.createdAt,
+      );
+}
+
+/// Parses a Registrations/{regId}/Teams node into {teamId: team}, skipping
+/// malformed entries. {} for null/junk.
+Map<String, RegTeam> regTeamsFromNode(Object? raw) {
+  final out = <String, RegTeam>{};
+  if (raw is Map) {
+    raw.forEach((id, value) {
+      final team = RegTeam.fromNode(id.toString(), value);
+      if (team != null) out[id.toString()] = team;
+    });
+  }
+  return out;
+}
+
+/// Team-name hygiene: trim/collapse whitespace + capitalize each word
+/// ("  the   boys " -> "The Boys"). Existing capitals are preserved
+/// ("LA galaxy" -> "LA Galaxy").
+String cleanTeamName(String input) =>
+    capitalizeWords(collapseTrailingSpaces(input));
+
+// ---------------------------------------------------------------------------
+// Join codes
+// ---------------------------------------------------------------------------
+
+/// Confusable-free code alphabet (no I/O/0/1) — the same one the tournament
+/// join-code dialog uses (Manager lib/ui/tournaments/manage_teams_page.dart).
+const String kJoinCodeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+/// The uppercased/trimmed form every code is stored and compared in.
+String normalizeJoinCode(String input) => input.trim().toUpperCase();
+
+/// A random [length]-char code. [random] is injected so tests can seed it;
+/// UI callers pass Random.secure().
+String generateJoinCode(Random random, {int length = 6}) => List.generate(
+        length, (_) => kJoinCodeAlphabet[random.nextInt(kJoinCodeAlphabet.length)])
+    .join();
+
+/// A random code not present in [taken] (compared normalized). Retries up to
+/// 100 times, then falls back to a longer code so the function stays total —
+/// collisions over the 32^6 space are practically impossible.
+String generateUniqueJoinCode(Random random, Set<String> taken,
+    {int length = 6}) {
+  final normalizedTaken = taken.map(normalizeJoinCode).toSet();
+  for (var i = 0; i < 100; i++) {
+    final code = generateJoinCode(random, length: length);
+    if (!normalizedTaken.contains(code)) return code;
+  }
+  return generateJoinCode(random, length: length + 2);
+}
+
+/// null when [code] is usable, else the problem to show. Mirrors the
+/// tournament dialog's 4-12 rule; [taken] holds every OTHER team's code in
+/// the same registration (any casing) for the per-registration uniqueness
+/// check.
+String? validateJoinCode(String code, {Set<String> taken = const {}}) {
+  final c = normalizeJoinCode(code);
+  if (c.length < 4 || c.length > 12) return 'Code must be 4-12 characters.';
+  if (!RegExp(r'^[A-Z0-9]+$').hasMatch(c)) return 'Letters and numbers only.';
+  if (taken.map(normalizeJoinCode).contains(c)) {
+    return 'That code is already used by another team.';
+  }
+  return null;
+}
+
+/// Outcome of matching an entered code against a registration's teams.
+/// status: 'ok' (approved team found — [team] set), 'notApproved' (the code
+/// belongs to a pending/rejected team — [team] set), 'notFound'.
+class JoinCodeMatch {
+  final String status;
+  final RegTeam? team;
+  const JoinCodeMatch(this.status, [this.team]);
+}
+
+/// Finds the team whose JoinCode matches [input] (compared normalized).
+/// An approved team always wins over a non-approved one with the same code.
+JoinCodeMatch matchJoinCode(Map<String, RegTeam> teams, String input) {
+  final code = normalizeJoinCode(input);
+  if (code.isEmpty) return const JoinCodeMatch('notFound');
+  RegTeam? nonApproved;
+  for (final team in teams.values) {
+    if (team.joinCode.isEmpty) continue;
+    if (normalizeJoinCode(team.joinCode) != code) continue;
+    if (team.isApproved) return JoinCodeMatch('ok', team);
+    nonApproved ??= team;
+  }
+  return nonApproved != null
+      ? JoinCodeMatch('notApproved', nonApproved)
+      : const JoinCodeMatch('notFound');
+}
+
+/// True when another team in [teams] (any status, any id but [teamId])
+/// carries [name] modulo case/outer whitespace — the approval dialog warns
+/// on duplicates (spec section 7).
+bool hasDuplicateTeamName(
+    Map<String, RegTeam> teams, String teamId, String name) {
+  final needle = name.trim().toLowerCase();
+  return teams.entries
+      .any((e) => e.key != teamId && e.value.name.trim().toLowerCase() == needle);
+}
+
+// ---------------------------------------------------------------------------
+// Amount owed
+// ---------------------------------------------------------------------------
+
+/// The dollar amount a submission owes right now — 0 whenever [paymentOwed]
+/// says nothing is owed. Captains owe [RegistrationConfig.teamFee]; everyone
+/// else owes [RegistrationConfig.fee]. The payment screen shows THIS number
+/// (a captain must never be shown the per-player fee).
+num amountOwed({
+  required RegistrationConfig config,
+  required RegSubmission submission,
+  bool codeWaivesPayment = false,
+}) {
+  if (!paymentOwed(
+      config: config,
+      submission: submission,
+      codeWaivesPayment: codeWaivesPayment)) {
+    return 0;
+  }
+  return submission.path == 'captain' ? config.teamFee : config.fee;
+}

@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 
@@ -460,6 +462,250 @@ void main() {
       expect(positionsFieldForSport('Basketball'), 'BasketballPosition');
       expect(positionsFieldForSport('Flag Football'), 'FlagFootballPosition');
       expect(positionsFieldForSport('Cricket'), '');
+    });
+  });
+
+  group('RegTeam', () {
+    test('round-trips through toFirebaseMap/fromNode', () {
+      const team = RegTeam(
+        id: 'team1',
+        name: 'Red Dragons',
+        captainUid: 'cap-uid',
+        status: 'approved',
+        joinCode: 'ABC234',
+        codeWaivesPayment: true,
+        createdAt: 1750000000000,
+      );
+      final parsed = RegTeam.fromNode('team1', team.toFirebaseMap());
+      expect(parsed, isNotNull);
+      expect(parsed!.id, 'team1');
+      expect(parsed.name, 'Red Dragons');
+      expect(parsed.captainUid, 'cap-uid');
+      expect(parsed.status, 'approved');
+      expect(parsed.isApproved, isTrue);
+      expect(parsed.joinCode, 'ABC234');
+      expect(parsed.codeWaivesPayment, isTrue);
+      expect(parsed.createdAt, 1750000000000);
+    });
+
+    test('defaults: new team is pending, no code, no waive', () {
+      const team = RegTeam(id: 't', name: 'X', captainUid: 'u');
+      expect(team.isPending, isTrue);
+      expect(team.isApproved, isFalse);
+      expect(team.isRejected, isFalse);
+      expect(team.joinCode, '');
+      expect(team.codeWaivesPayment, isFalse);
+      final map = team.toFirebaseMap();
+      expect(map.containsKey('JoinCode'), isFalse); // omitted while empty
+    });
+
+    test('fromNode rejects junk', () {
+      expect(RegTeam.fromNode('t', null), isNull);
+      expect(RegTeam.fromNode('t', 'garbage'), isNull);
+      expect(RegTeam.fromNode('t', {'CaptainUid': 'u'}), isNull); // no Name
+      expect(RegTeam.fromNode('', {'Name': 'X'}), isNull); // no id
+    });
+
+    test('fromNode defaults a bad status to pending', () {
+      final parsed =
+          RegTeam.fromNode('t', {'Name': 'X', 'Status': 'vaporized'});
+      expect(parsed!.status, 'pending');
+    });
+
+    test('copyWith overrides only the given fields', () {
+      const team = RegTeam(id: 't', name: 'X', captainUid: 'u');
+      final approved = team.copyWith(status: 'approved', joinCode: 'ZZZZ99');
+      expect(approved.id, 't');
+      expect(approved.name, 'X');
+      expect(approved.status, 'approved');
+      expect(approved.joinCode, 'ZZZZ99');
+      expect(approved.codeWaivesPayment, isFalse);
+    });
+  });
+
+  group('regTeamsFromNode', () {
+    test('parses a map of teams, skipping malformed entries', () {
+      final node = {
+        'a': {'Name': 'Team A', 'CaptainUid': 'u1'},
+        'bad': 'garbage',
+        'b': {'Name': 'Team B', 'CaptainUid': 'u2', 'Status': 'approved'},
+      };
+      final teams = regTeamsFromNode(node);
+      expect(teams.keys.toSet(), {'a', 'b'});
+      expect(teams['a']!.isPending, isTrue);
+      expect(teams['b']!.isApproved, isTrue);
+    });
+
+    test('null / junk gives an empty map', () {
+      expect(regTeamsFromNode(null), isEmpty);
+      expect(regTeamsFromNode('x'), isEmpty);
+      expect(regTeamsFromNode([1, 2]), isEmpty);
+    });
+  });
+
+  group('cleanTeamName', () {
+    test('collapses whitespace and capitalizes words', () {
+      expect(cleanTeamName('  the   boys '), 'The Boys');
+      expect(cleanTeamName('LA galaxy'), 'LA Galaxy'); // capitals preserved
+      expect(cleanTeamName('   '), '');
+    });
+  });
+
+  group('join codes', () {
+    test('alphabet is confusable-free', () {
+      expect(kJoinCodeAlphabet.contains('I'), isFalse);
+      expect(kJoinCodeAlphabet.contains('O'), isFalse);
+      expect(kJoinCodeAlphabet.contains('0'), isFalse);
+      expect(kJoinCodeAlphabet.contains('1'), isFalse);
+      expect(kJoinCodeAlphabet.length, 32);
+    });
+
+    test('generateJoinCode makes 6-char codes from the alphabet', () {
+      final rand = Random(42);
+      for (var i = 0; i < 100; i++) {
+        final code = generateJoinCode(rand);
+        expect(code.length, 6);
+        for (final ch in code.split('')) {
+          expect(kJoinCodeAlphabet.contains(ch), isTrue,
+              reason: '$ch not in alphabet');
+        }
+      }
+    });
+
+    test('generateJoinCode honors length', () {
+      expect(generateJoinCode(Random(1), length: 8).length, 8);
+    });
+
+    test('generateUniqueJoinCode skips taken codes', () {
+      // Same seed => the first internal attempt IS `first`; it must be
+      // skipped and a different code returned.
+      final first = generateJoinCode(Random(7));
+      final unique = generateUniqueJoinCode(Random(7), {first});
+      expect(unique, isNot(first));
+      expect(unique.length, 6);
+    });
+
+    test('normalizeJoinCode uppercases and trims', () {
+      expect(normalizeJoinCode('  abC234 '), 'ABC234');
+    });
+
+    test('validateJoinCode enforces length, charset, uniqueness', () {
+      expect(validateJoinCode('ABC234'), isNull);
+      expect(validateJoinCode('abc234'), isNull); // normalized first
+      expect(validateJoinCode('AB'), isNotNull); // too short
+      expect(validateJoinCode('ABCDEFGHJKLMN'), isNotNull); // 13 chars
+      expect(validateJoinCode('ABC 23'), isNotNull); // space
+      expect(validateJoinCode('ABC234', taken: {'abc234'}), isNotNull);
+      expect(validateJoinCode('ABC234', taken: {'XYZ789'}), isNull);
+    });
+  });
+
+  group('matchJoinCode', () {
+    const approved = RegTeam(
+        id: 'a',
+        name: 'Approved FC',
+        captainUid: 'u1',
+        status: 'approved',
+        joinCode: 'GOOD22');
+    const pending = RegTeam(
+        id: 'p',
+        name: 'Pending FC',
+        captainUid: 'u2',
+        status: 'pending',
+        joinCode: 'WAIT33');
+    final teams = {'a': approved, 'p': pending};
+
+    test('finds an approved team case-insensitively', () {
+      final m = matchJoinCode(teams, ' good22 ');
+      expect(m.status, 'ok');
+      expect(m.team!.id, 'a');
+    });
+
+    test('flags a non-approved team as notApproved', () {
+      final m = matchJoinCode(teams, 'WAIT33');
+      expect(m.status, 'notApproved');
+      expect(m.team!.id, 'p');
+    });
+
+    test('unknown or empty input is notFound', () {
+      expect(matchJoinCode(teams, 'NOPE99').status, 'notFound');
+      expect(matchJoinCode(teams, '').status, 'notFound');
+      expect(matchJoinCode(const {}, 'GOOD22').status, 'notFound');
+    });
+
+    test('an approved team wins over a pending one holding the same code', () {
+      const shadow = RegTeam(
+          id: 's',
+          name: 'Shadow',
+          captainUid: 'u3',
+          status: 'pending',
+          joinCode: 'GOOD22');
+      final m = matchJoinCode({'s': shadow, 'a': approved}, 'GOOD22');
+      expect(m.status, 'ok');
+      expect(m.team!.id, 'a');
+    });
+  });
+
+  group('hasDuplicateTeamName', () {
+    final teams = {
+      'a': const RegTeam(id: 'a', name: 'Red Dragons', captainUid: 'u1'),
+      'b': const RegTeam(id: 'b', name: 'red dragons ', captainUid: 'u2'),
+      'c': const RegTeam(id: 'c', name: 'Blue Sharks', captainUid: 'u3'),
+    };
+
+    test('true when another team shares the name (case/space-insensitive)',
+        () {
+      expect(hasDuplicateTeamName(teams, 'a', 'Red Dragons'), isTrue);
+    });
+
+    test('false when the name is unique (own entry ignored)', () {
+      expect(hasDuplicateTeamName(teams, 'c', 'Blue Sharks'), isFalse);
+    });
+  });
+
+  group('amountOwed', () {
+    const both = RegistrationConfig(
+        targetType: 'league',
+        sport: 'Futsal',
+        season: '17',
+        fee: 20,
+        teamFee: 300,
+        paymentMode: 'both');
+    const teamFee = RegistrationConfig(
+        targetType: 'league',
+        sport: 'Futsal',
+        season: '17',
+        fee: 20,
+        teamFee: 300,
+        paymentMode: 'teamFee');
+
+    RegSubmission sub(String path, {bool paid = false}) =>
+        RegSubmission(path: path, answers: const {}, paid: paid);
+
+    test('captain owes the TEAM fee, not the player fee', () {
+      expect(amountOwed(config: both, submission: sub('captain')), 300);
+      expect(amountOwed(config: teamFee, submission: sub('captain')), 300);
+    });
+
+    test('individual owes the player fee under perPlayer/both, 0 under teamFee',
+        () {
+      expect(amountOwed(config: both, submission: sub('individual')), 20);
+      expect(amountOwed(config: teamFee, submission: sub('individual')), 0);
+    });
+
+    test('joiner owes the player fee unless the code waives it', () {
+      expect(amountOwed(config: teamFee, submission: sub('joiner')), 20);
+      expect(
+          amountOwed(
+              config: teamFee,
+              submission: sub('joiner'),
+              codeWaivesPayment: true),
+          0);
+    });
+
+    test('anything already paid owes 0', () {
+      expect(
+          amountOwed(config: both, submission: sub('captain', paid: true)), 0);
     });
   });
 }
