@@ -34,6 +34,10 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
   Stream<RegTeam?>? _teamStream;
   String _teamStreamTeamId = '';
 
+  // Same caching pattern for the captain's roster stream.
+  Stream<List<RegSubmission>>? _rosterStream;
+  String _rosterStreamTeamId = '';
+
   @override
   void initState() {
     super.initState();
@@ -47,6 +51,15 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
       _teamStream = RegistrationService.watchTeam(widget.regId, teamId);
     }
     return _teamStream!;
+  }
+
+  Stream<List<RegSubmission>> _rosterStreamFor(String teamId) {
+    if (_rosterStream == null || _rosterStreamTeamId != teamId) {
+      _rosterStreamTeamId = teamId;
+      _rosterStream =
+          RegistrationService.watchTeamMembers(widget.regId, teamId);
+    }
+    return _rosterStream!;
   }
 
   String _displayValue(RegQuestion? q, Object? value) {
@@ -158,6 +171,8 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
                 ),
               ),
             ),
+            const Divider(height: 1),
+            _teamRoster(team),
           ],
         ),
       );
@@ -173,6 +188,62 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
             ? "You're on the team — payment covered by your captain."
             : "You're on the team."),
       ),
+    );
+  }
+
+  Widget _teamRoster(RegTeam team) {
+    return StreamBuilder<List<RegSubmission>>(
+      stream: _rosterStreamFor(team.id),
+      builder: (context, snapshot) {
+        final members = snapshot.data ?? const <RegSubmission>[];
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(15, 12, 15, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Team roster (${members.length})',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+              if (team.codeWaivesPayment) ...[
+                const SizedBox(height: 4),
+                Text(
+                  'Fees covered by you — players register free.',
+                  style: TextStyle(
+                      color: Theme.of(context).textTheme.bodySmall?.color,
+                      fontStyle: FontStyle.italic,
+                      fontSize: 13),
+                ),
+              ],
+              const SizedBox(height: 8),
+              if (members.isEmpty)
+                Text(
+                  'No players have joined with your code yet — share it with your team!',
+                  style: TextStyle(
+                      color: Theme.of(context).textTheme.bodySmall?.color),
+                )
+              else
+                for (final member in members)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                            child: Text(member.displayName.isEmpty
+                                ? '(no name)'
+                                : member.displayName)),
+                        if (!team.codeWaivesPayment)
+                          Chip(
+                            label: Text(member.paid ? 'Paid' : 'Not paid'),
+                            backgroundColor: member.paid
+                                ? Colors.green.shade100
+                                : Colors.orange.shade100,
+                          ),
+                      ],
+                    ),
+                  ),
+            ],
+          ),
+        );
+      },
     );
   }
 

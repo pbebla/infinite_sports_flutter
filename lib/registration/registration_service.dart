@@ -245,6 +245,36 @@ class RegistrationService {
     });
   }
 
+  /// Live roster of a team's joiners for the captain's status page — every
+  /// Submission with Path 'joiner' and this [teamId], sorted by display name
+  /// (case-insensitive). Defensive: junk children are skipped and a
+  /// missing/malformed Submissions node yields an empty list.
+  static Stream<List<RegSubmission>> watchTeamMembers(
+      String regId, String teamId) {
+    return FirebaseDatabase.instance
+        .ref('Registrations/$regId/Submissions')
+        .onValue
+        .map((event) {
+      try {
+        final value = event.snapshot.value;
+        if (value is! Map) return <RegSubmission>[];
+        final out = <RegSubmission>[];
+        value.forEach((_, node) {
+          final sub = RegSubmission.fromFirebase(node);
+          if (sub != null && sub.path == 'joiner' && sub.teamId == teamId) {
+            out.add(sub);
+          }
+        });
+        out.sort((a, b) => a.displayName
+            .toLowerCase()
+            .compareTo(b.displayName.toLowerCase()));
+        return out;
+      } catch (_) {
+        return <RegSubmission>[];
+      }
+    });
+  }
+
   /// Captain-path submit:
   ///  1. pushes the pending Team under Registrations/{regId}/Teams
   ///     {Name (hygiene-cleaned), CaptainUid, Status:'pending',
