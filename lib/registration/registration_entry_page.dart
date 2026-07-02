@@ -5,10 +5,11 @@ import 'package:infinite_sports_flutter/registration/registration_path_page.dart
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
 
-/// Lists every open registration. Tapping one shows the player's existing
-/// submission (status page) or starts the path selector. Registering twice
-/// for the same registration is therefore impossible — the status page opens
-/// instead (spec section 7).
+/// Lists every open registration, LIVE — an admin opening or closing a
+/// registration updates this list instantly, no refresh. Tapping one shows
+/// the player's existing submission (status page) or starts the path
+/// selector. Registering twice for the same registration is therefore
+/// impossible — the status page opens instead (spec section 7).
 class RegistrationEntryPage extends StatefulWidget {
   const RegistrationEntryPage({super.key});
 
@@ -17,12 +18,12 @@ class RegistrationEntryPage extends StatefulWidget {
 }
 
 class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
-  late Future<Map<String, RegistrationConfig>> _openRegs;
+  late final Stream<Map<String, RegistrationConfig>> _openRegs;
 
   @override
   void initState() {
     super.initState();
-    _openRegs = RegistrationService.getOpenRegistrations();
+    _openRegs = RegistrationService.watchOpenRegistrations();
   }
 
   Future<void> _openRegistration(
@@ -49,8 +50,8 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),
-      body: FutureBuilder(
-        future: _openRegs,
+      body: StreamBuilder(
+        stream: _openRegs,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return Center(

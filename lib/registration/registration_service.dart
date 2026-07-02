@@ -26,11 +26,32 @@ class RegistrationService {
     }
   }
 
+  /// Live {regId: config} stream of every open registration. Emits
+  /// immediately from RTDB's local cache (if any) then on every change, so
+  /// registrations opening/closing appear on the entry page without a
+  /// refresh. Same stream style as TournamentService.watchMatches.
+  static Stream<Map<String, RegistrationConfig>> watchOpenRegistrations() {
+    return FirebaseDatabase.instance.ref('Registrations').onValue.map((event) {
+      final value = event.snapshot.value;
+      if (value is! Map) return <String, RegistrationConfig>{};
+      final out = <String, RegistrationConfig>{};
+      value.forEach((regId, node) {
+        if (node is! Map) return;
+        try {
+          final config = RegistrationConfig.fromFirebase(node['Config']);
+          if (config != null && config.isOpen) out[regId.toString()] = config;
+        } catch (_) {}
+      });
+      return out;
+    });
+  }
+
   /// The ordered question list for a registration ([] on error).
   static Future<List<RegQuestion>> getForm(String regId) async {
     try {
-      final snap =
-          await FirebaseDatabase.instance.ref('Registrations/$regId/Form').get();
+      final snap = await FirebaseDatabase.instance
+          .ref('Registrations/$regId/Form')
+          .get();
       return regQuestionsFromNode(snap.value);
     } catch (_) {
       return [];
@@ -49,6 +70,24 @@ class RegistrationService {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Live stream of the signed-in user's submission — a Paid flip in the
+  /// Manager shows up on the open status page instantly. Emits null when the
+  /// node is missing/malformed; a signed-out user gets a single null.
+  static Stream<RegSubmission?> watchMySubmission(String regId) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream.value(null);
+    return FirebaseDatabase.instance
+        .ref('Registrations/$regId/Submissions/$uid')
+        .onValue
+        .map((event) {
+      try {
+        return RegSubmission.fromFirebase(event.snapshot.value);
+      } catch (_) {
+        return null;
+      }
+    });
   }
 
   /// Pre-fills well-known keys from Users/{uid} (First Name, Last Name,
@@ -156,7 +195,9 @@ class RegistrationService {
     if (age != null) infoUpdates['Age'] = age;
     final height = answers['height'];
     if (height is String && height.isNotEmpty) infoUpdates['Height'] = height;
-    if (infoUpdates.isNotEmpty) await root.child('Information').update(infoUpdates);
+    if (infoUpdates.isNotEmpty) {
+      await root.child('Information').update(infoUpdates);
+    }
   }
 
   // -------- Teams (L1b) --------
@@ -185,6 +226,23 @@ class RegistrationService {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Live stream of one team — the captain sees approval, the join code and
+  /// waive changes the moment an admin writes them. Emits null while the
+  /// node is missing/malformed; an empty [teamId] gets a single null.
+  static Stream<RegTeam?> watchTeam(String regId, String teamId) {
+    if (teamId.isEmpty) return Stream.value(null);
+    return FirebaseDatabase.instance
+        .ref('Registrations/$regId/Teams/$teamId')
+        .onValue
+        .map((event) {
+      try {
+        return RegTeam.fromNode(teamId, event.snapshot.value);
+      } catch (_) {
+        return null;
+      }
+    });
   }
 
   /// Captain-path submit:

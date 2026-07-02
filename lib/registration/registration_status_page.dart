@@ -10,6 +10,10 @@ import 'package:share_plus/share_plus.dart';
 /// copy + Share once approved; a joiner sees their team name), the submitted
 /// answers, and a persistent "Complete payment" button (reopening the
 /// payment screen with the right amount) while unpaid.
+///
+/// LIVE: the submission and team ride RTDB streams, so an admin approving
+/// the team or flipping Paid in the Manager updates this open screen
+/// instantly — no refresh, no back-and-forth.
 class RegistrationStatusPage extends StatefulWidget {
   final String regId;
   final RegistrationConfig config;
@@ -22,25 +26,27 @@ class RegistrationStatusPage extends StatefulWidget {
 }
 
 class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
-  late Future<(RegSubmission?, List<RegQuestion>, RegTeam?)> _load;
+  late final Stream<RegSubmission?> _submission;
+  late final Future<List<RegQuestion>> _form;
+
+  // The team stream is created lazily from the live submission's teamId and
+  // cached so rebuilds don't resubscribe (which would flash a spinner).
+  Stream<RegTeam?>? _teamStream;
+  String _teamStreamTeamId = '';
 
   @override
   void initState() {
     super.initState();
-    _load = _loadAll();
+    _submission = RegistrationService.watchMySubmission(widget.regId);
+    _form = RegistrationService.getForm(widget.regId);
   }
 
-  Future<(RegSubmission?, List<RegQuestion>, RegTeam?)> _loadAll() async {
-    final sub = await RegistrationService.getMySubmission(widget.regId);
-    final form = await RegistrationService.getForm(widget.regId);
-    final team = (sub == null || sub.teamId.isEmpty)
-        ? null
-        : await RegistrationService.getTeam(widget.regId, sub.teamId);
-    return (sub, form, team);
-  }
-
-  void _refresh() {
-    setState(() => _load = _loadAll());
+  Stream<RegTeam?> _teamStreamFor(String teamId) {
+    if (_teamStream == null || _teamStreamTeamId != teamId) {
+      _teamStreamTeamId = teamId;
+      _teamStream = RegistrationService.watchTeam(widget.regId, teamId);
+    }
+    return _teamStream!;
   }
 
   String _displayValue(RegQuestion? q, Object? value) {
@@ -120,8 +126,7 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
               leading: const Icon(Icons.verified, color: Colors.green),
               title: Text(team.name,
                   style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: const Text(
-                  'Approved! Teammates join with this code.'),
+              subtitle: const Text('Approved! Teammates join with this code.'),
             ),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -171,6 +176,12 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
     );
   }
 
+  Widget _spinner(BuildContext context) {
+    return Center(
+        child: CircularProgressIndicator(
+            color: Theme.of(context).colorScheme.primary));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -181,102 +192,122 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
         foregroundColor: Colors.white,
       ),
       body: FutureBuilder(
-        future: _load,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(
-                child: CircularProgressIndicator(
-                    color: Theme.of(context).colorScheme.primary));
-          }
-          final (sub, form, team) =
-              snapshot.data ?? (null, const <RegQuestion>[], null);
-          if (sub == null) {
-            return const Center(
-                child: Text('No registration found for your account.'));
-          }
-          final byKey = {for (final q in form) q.key: q};
-          final orderedKeys = [
-            ...form.map((q) => q.key).where(sub.answers.containsKey),
-            ...sub.answers.keys.where((k) => !byKey.containsKey(k)),
-          ];
-          final owes = paymentOwed(config: widget.config, submission: sub);
-          final teamCard = _teamCard(sub, team);
-          return Column(
+        future: _form,
+        builder: (context, formSnapshot) => StreamBuilder(
+          stream: _submission,
+          builder: (context, subSnapshot) {
+            if (formSnapshot.connectionState == ConnectionState.waiting ||
+                subSnapshot.connectionState == ConnectionState.waiting) {
+              return _spinner(context);
+            }
+            final sub = subSnapshot.data;
+            if (sub == null) {
+              return const Center(
+                  child: Text('No registration found for your account.'));
+            }
+            final form = formSnapshot.data ?? const <RegQuestion>[];
+            if (sub.teamId.isEmpty) return _statusBody(sub, form, null);
+            // Nested team stream: approval / join code / waive changes land
+            // live while the captain (or joiner) is looking at the page.
+            return StreamBuilder(
+              stream: _teamStreamFor(sub.teamId),
+              builder: (context, teamSnapshot) {
+                if (teamSnapshot.connectionState == ConnectionState.waiting) {
+                  return _spinner(context);
+                }
+                return _statusBody(sub, form, teamSnapshot.data);
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _statusBody(RegSubmission sub, List<RegQuestion> form, RegTeam? team) {
+    final byKey = {for (final q in form) q.key: q};
+    final orderedKeys = [
+      ...form.map((q) => q.key).where(sub.answers.containsKey),
+      ...sub.answers.keys.where((k) => !byKey.containsKey(k)),
+    ];
+    final owes = paymentOwed(
+        config: widget.config,
+        submission: sub,
+        codeWaivesPayment: team?.codeWaivesPayment ?? false);
+    final teamCard = _teamCard(sub, team);
+    return Column(
+      children: [
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(15),
             children: [
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.all(15),
-                  children: [
-                    Card(
-                      elevation: 2,
-                      child: ListTile(
-                        title: Text(widget.config.label,
-                            style:
-                                const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text(
-                            'Registered as: ${_pathLabel(sub.path)}'),
-                        trailing: Chip(
-                          label: Text(sub.paid
-                              ? (sub.paidVia == 'team code'
-                                  ? 'Paid via team code'
-                                  : 'Paid')
-                              : 'Payment pending'),
-                          backgroundColor: sub.paid
-                              ? Colors.green.shade100
-                              : Colors.orange.shade100,
-                        ),
-                      ),
-                    ),
-                    if (teamCard != null) ...[
-                      const SizedBox(height: 8),
-                      teamCard,
-                    ],
-                    const SizedBox(height: 8),
-                    for (final key in orderedKeys)
-                      ListTile(
-                        dense: true,
-                        title: Text(byKey[key]?.label ?? key),
-                        subtitle:
-                            Text(_displayValue(byKey[key], sub.answers[key])),
-                      ),
-                  ],
-                ),
-              ),
-              if (owes)
-                SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.all(15),
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: 50,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              Theme.of(context).colorScheme.primary,
-                          foregroundColor: Colors.white,
-                        ),
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (_) => PaymentScreen(
-                                    regId: widget.regId,
-                                    config: widget.config,
-                                    amount: amountOwed(
-                                        config: widget.config,
-                                        submission: sub))),
-                          ).then((_) => _refresh());
-                        },
-                        child: const Text('Complete payment',
-                            style: TextStyle(fontSize: 18)),
-                      ),
-                    ),
+              Card(
+                elevation: 2,
+                child: ListTile(
+                  title: Text(widget.config.label,
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text('Registered as: ${_pathLabel(sub.path)}'),
+                  trailing: Chip(
+                    label: Text(sub.paid
+                        ? (sub.paidVia == 'team code'
+                            ? 'Paid via team code'
+                            : 'Paid')
+                        : 'Payment pending'),
+                    backgroundColor: sub.paid
+                        ? Colors.green.shade100
+                        : Colors.orange.shade100,
                   ),
                 ),
+              ),
+              if (teamCard != null) ...[
+                const SizedBox(height: 8),
+                teamCard,
+              ],
+              const SizedBox(height: 8),
+              for (final key in orderedKeys)
+                ListTile(
+                  dense: true,
+                  title: Text(byKey[key]?.label ?? key),
+                  subtitle: Text(_displayValue(byKey[key], sub.answers[key])),
+                ),
             ],
-          );
-        },
-      ),
+          ),
+        ),
+        if (owes)
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(15),
+              child: SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () {
+                    // No refresh-on-return needed — the submission
+                    // stream picks up the admin's Paid flip live.
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => PaymentScreen(
+                              regId: widget.regId,
+                              config: widget.config,
+                              amount: amountOwed(
+                                  config: widget.config,
+                                  submission: sub,
+                                  codeWaivesPayment:
+                                      team?.codeWaivesPayment ?? false))),
+                    );
+                  },
+                  child: const Text('Complete payment',
+                      style: TextStyle(fontSize: 18)),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
