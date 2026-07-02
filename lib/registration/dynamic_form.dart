@@ -43,7 +43,11 @@ class _DynamicRegistrationFormState extends State<DynamicRegistrationForm> {
       );
 
   Widget _buildField(RegQuestion q) {
-    switch (q.type) {
+    // Registrations created before the height type existed store the height
+    // question as shortText — render the ft/in input for them anyway.
+    final effectiveType =
+        (q.key == 'height' && q.type == 'shortText') ? 'height' : q.type;
+    switch (effectiveType) {
       case 'shortText':
         return FormBuilderTextField(
           name: q.key,
