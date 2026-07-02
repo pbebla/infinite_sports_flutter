@@ -500,10 +500,7 @@ const List<RegQuestion> kDefaultRegQuestions = [
       key: 'phone', type: 'phone', label: 'Phone Number', isRequired: true),
   RegQuestion(key: 'age', type: 'number', label: 'Age', isRequired: true),
   RegQuestion(
-      key: 'height',
-      type: 'shortText',
-      label: "Height (e.g. 5'10)",
-      isRequired: true),
+      key: 'height', type: 'height', label: 'Height', isRequired: true),
   RegQuestion(
     key: 'positions',
     type: 'multiChoice',

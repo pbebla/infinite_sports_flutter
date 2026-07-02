@@ -100,7 +100,7 @@ class RegistrationService {
   }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return false;
-    final displayName = user.displayName ?? '';
+    final displayName = collapseTrailingSpaces(user.displayName ?? '');
     try {
       final submission = RegSubmission(
         path: 'individual',
