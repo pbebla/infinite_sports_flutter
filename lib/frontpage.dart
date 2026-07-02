@@ -86,15 +86,41 @@ class _FrontPageState extends State<FrontPage> {
   }
 
   Future<int> getFrontPageValues() async {
-    currentSport = await getCurrentSport();
-    currentSeason = await getCurrentSeason(currentSport);
-    currentAFCSeason = await getAFCCurrentSeason();
-    currentDate = await getCurrentDate(currentSport, currentSeason);
-    currentAFCDate = await getCurrentDate("AFC San Jose", currentAFCSeason);
-    isCurrentFinished = await isSeasonFinished(currentSport, currentSeason);
-    isCurrentAFCFinished = await isAFCSeasonFinished(currentAFCSeason);
-    await _loadActiveTournaments();
-    openRegistrations = await RegistrationService.getOpenRegistrations();
+    // These reads gate the first paint of the Matches screen, so the four
+    // independent chains (league, AFC, tournaments, registrations) run
+    // concurrently instead of as one long sequential chain of round trips.
+    await Future.wait([
+      () async {
+        currentSport = await getCurrentSport();
+        currentSeason = await getCurrentSeason(currentSport);
+        await Future.wait([
+          () async {
+            currentDate = await getCurrentDate(currentSport, currentSeason);
+          }(),
+          () async {
+            isCurrentFinished =
+                await isSeasonFinished(currentSport, currentSeason);
+          }(),
+        ]);
+      }(),
+      () async {
+        currentAFCSeason = await getAFCCurrentSeason();
+        await Future.wait([
+          () async {
+            currentAFCDate =
+                await getCurrentDate("AFC San Jose", currentAFCSeason);
+          }(),
+          () async {
+            isCurrentAFCFinished =
+                await isAFCSeasonFinished(currentAFCSeason);
+          }(),
+        ]);
+      }(),
+      _loadActiveTournaments(),
+      () async {
+        openRegistrations = await RegistrationService.getOpenRegistrations();
+      }(),
+    ]);
     return 1;
   }
 
