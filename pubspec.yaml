@@ -71,6 +71,8 @@ dependencies:
   form_builder_validators: ^11.2.0
   mask_text_input_formatter: ^2.9.0
   pin_code_fields: ^8.0.1
+  flutter_stripe: ^12.1.0
+  cloud_functions: ^6.1.0
 
 dev_dependencies:
   flutter_test:
