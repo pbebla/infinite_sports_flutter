@@ -231,12 +231,9 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
                                 ? '(no name)'
                                 : member.displayName)),
                         if (!team.codeWaivesPayment)
-                          Chip(
-                            label: Text(member.paid ? 'Paid' : 'Not paid'),
-                            backgroundColor: member.paid
-                                ? Colors.green.shade100
-                                : Colors.orange.shade100,
-                          ),
+                          _paidChip(context,
+                              paid: member.paid,
+                              label: member.paid ? 'Paid' : 'Not paid'),
                       ],
                     ),
                   ),
@@ -244,6 +241,25 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
           ),
         );
       },
+    );
+  }
+
+  /// Paid/Not-paid chip that reads correctly in BOTH light and dark mode
+  /// (pale shade100 fills wash out on a dark background).
+  Widget _paidChip(BuildContext context,
+      {required bool paid, required String label}) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final Color background = paid
+        ? (dark ? Colors.green.shade900 : Colors.green.shade100)
+        : (dark ? Colors.orange.shade900 : Colors.orange.shade100);
+    final Color foreground = paid
+        ? (dark ? Colors.green.shade100 : Colors.green.shade900)
+        : (dark ? Colors.orange.shade100 : Colors.orange.shade900);
+    return Chip(
+      label: Text(label),
+      labelStyle: TextStyle(color: foreground),
+      backgroundColor: background,
+      side: BorderSide.none,
     );
   }
 
@@ -318,16 +334,13 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
                   title: Text(widget.config.label,
                       style: const TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text('Registered as: ${_pathLabel(sub.path)}'),
-                  trailing: Chip(
-                    label: Text(sub.paid
-                        ? (sub.paidVia == 'team code'
-                            ? 'Paid via team code'
-                            : 'Paid')
-                        : 'Payment pending'),
-                    backgroundColor: sub.paid
-                        ? Colors.green.shade100
-                        : Colors.orange.shade100,
-                  ),
+                  trailing: _paidChip(context,
+                      paid: sub.paid,
+                      label: sub.paid
+                          ? (sub.paidVia == 'team code'
+                              ? 'Paid via team code'
+                              : 'Paid')
+                          : 'Payment pending'),
                 ),
               ),
               if (teamCard != null) ...[
