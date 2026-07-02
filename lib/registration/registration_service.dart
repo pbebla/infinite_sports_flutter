@@ -2,10 +2,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 
-/// Fan-side reads/writes for the new registration engine (L1a: individual
-/// path only). Static-method style matching TournamentService
-/// (lib/misc/tournament_service.dart). The fan app NEVER sets Paid — only
-/// the Manager's markPaid does.
+/// Fan-side reads/writes for the new registration engine (L1a individual
+/// path + L1b team paths). Static-method style matching TournamentService
+/// (lib/misc/tournament_service.dart). The fan app NEVER sets Paid — with
+/// ONE exception: a joiner whose team code waives payment is born
+/// Paid/'team code' (spec section 5); everything else is the Manager's
+/// markPaid.
 class RegistrationService {
   /// {regId: config} for every registration whose Status is "open".
   static Future<Map<String, RegistrationConfig>> getOpenRegistrations() async {
@@ -155,5 +157,123 @@ class RegistrationService {
     final height = answers['height'];
     if (height is String && height.isNotEmpty) infoUpdates['Height'] = height;
     if (infoUpdates.isNotEmpty) await root.child('Information').update(infoUpdates);
+  }
+
+  // -------- Teams (L1b) --------
+
+  /// {teamId: team} for a registration ({} on error). The joiner code page
+  /// matches entered codes against this map (matchJoinCode).
+  static Future<Map<String, RegTeam>> getTeams(String regId) async {
+    try {
+      final snap = await FirebaseDatabase.instance
+          .ref('Registrations/$regId/Teams')
+          .get();
+      return regTeamsFromNode(snap.value);
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// One team, or null (missing / malformed / error).
+  static Future<RegTeam?> getTeam(String regId, String teamId) async {
+    if (teamId.isEmpty) return null;
+    try {
+      final snap = await FirebaseDatabase.instance
+          .ref('Registrations/$regId/Teams/$teamId')
+          .get();
+      return RegTeam.fromNode(teamId, snap.value);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Captain-path submit:
+  ///  1. pushes the pending Team under Registrations/{regId}/Teams
+  ///     {Name (hygiene-cleaned), CaptainUid, Status:'pending',
+  ///      CodeWaivesPayment:false, CreatedAt}
+  ///  2. writes Submission{Path:'captain', TeamId, Paid:false}
+  ///  3. legacy dual-write Sign Ups NotPaid + profile write-back — exactly
+  ///     like submitIndividual.
+  /// Returns false when signed out or any write throws.
+  static Future<bool> submitCaptain({
+    required String regId,
+    required RegistrationConfig config,
+    required String teamName,
+    required Map<String, dynamic> answers,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return false;
+    final displayName = collapseTrailingSpaces(user.displayName ?? '');
+    try {
+      final teamNode =
+          FirebaseDatabase.instance.ref('Registrations/$regId/Teams').push();
+      final teamId = teamNode.key!;
+      final team = RegTeam(
+        id: teamId,
+        name: cleanTeamName(teamName),
+        captainUid: user.uid,
+        status: 'pending',
+        createdAt: DateTime.now().millisecondsSinceEpoch,
+      );
+      await teamNode.set(team.toFirebaseMap());
+      final submission = RegSubmission(
+        path: 'captain',
+        answers: answers,
+        teamId: teamId,
+        paid: false,
+        displayName: displayName,
+        submittedAt: DateTime.now().millisecondsSinceEpoch,
+      );
+      await FirebaseDatabase.instance
+          .ref('Registrations/$regId/Submissions/${user.uid}')
+          .set(submission.toFirebaseMap());
+      final target = legacySignUpTarget(config);
+      await FirebaseDatabase.instance
+          .ref('Sign Ups/${target.league}/${target.season}/NotPaid/${user.uid}')
+          .set(displayName);
+      await _writeBackProfile(user.uid, config.sport, answers);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Joiner-path submit. When [team].codeWaivesPayment the submission is
+  /// born Paid ('team code') and the legacy dual-write goes straight to the
+  /// Paid bucket; otherwise it lands in NotPaid exactly like an individual.
+  /// Returns false when signed out or any write throws.
+  static Future<bool> submitJoiner({
+    required String regId,
+    required RegistrationConfig config,
+    required RegTeam team,
+    required Map<String, dynamic> answers,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return false;
+    final displayName = collapseTrailingSpaces(user.displayName ?? '');
+    try {
+      final waived = team.codeWaivesPayment;
+      final submission = RegSubmission(
+        path: 'joiner',
+        answers: answers,
+        teamId: team.id,
+        paid: waived,
+        paidVia: waived ? 'team code' : '',
+        displayName: displayName,
+        submittedAt: DateTime.now().millisecondsSinceEpoch,
+      );
+      await FirebaseDatabase.instance
+          .ref('Registrations/$regId/Submissions/${user.uid}')
+          .set(submission.toFirebaseMap());
+      final target = legacySignUpTarget(config);
+      final bucket = waived ? 'Paid' : 'NotPaid';
+      await FirebaseDatabase.instance
+          .ref('Sign Ups/${target.league}/${target.season}/$bucket/${user.uid}')
+          .set(displayName);
+      await _writeBackProfile(user.uid, config.sport, answers);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 }
