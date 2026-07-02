@@ -22,6 +22,7 @@ const List<String> kRegQuestionTypes = [
   'singleChoice',
   'multiChoice',
   'yesNo',
+  'height',
   'linkAcknowledge',
 ];
 
@@ -214,6 +215,10 @@ Map<String, dynamic> cleanAnswers(
 // Registration config
 // ---------------------------------------------------------------------------
 
+/// Valid RegistrationConfig.paymentMode values. 'both' charges the per-player
+/// fee to individuals and the flat teamFee to captains.
+const List<String> kRegPaymentModes = ['perPlayer', 'teamFee', 'both'];
+
 class RegistrationConfig {
   final String targetType; // 'league' | 'tournament'
   final String sport; // league sport key / tournament sport label
@@ -221,9 +226,10 @@ class RegistrationConfig {
   final String tournamentId; // '' for league targets
   final String tournamentName; // legacy dual-write bucket for tournaments
   final String status; // 'open' | 'closed'
-  final num fee;
+  final num fee; // per-player fee
+  final num teamFee; // flat fee owed by a team's captain
   final String feeNote;
-  final String paymentMode; // 'perPlayer' | 'teamFee'
+  final String paymentMode; // 'perPlayer' | 'teamFee' | 'both'
   final bool venmo;
   final bool zelle;
   final bool stripe;
@@ -237,6 +243,7 @@ class RegistrationConfig {
     this.tournamentName = '',
     this.status = 'closed',
     this.fee = 0,
+    this.teamFee = 0,
     this.feeNote = '',
     this.paymentMode = 'perPlayer',
     this.venmo = true,
@@ -260,6 +267,7 @@ class RegistrationConfig {
         if (tournamentName.isNotEmpty) 'TournamentName': tournamentName,
         'Status': status,
         'Fee': fee,
+        'TeamFee': teamFee,
         'FeeNote': feeNote,
         'PaymentMode': paymentMode,
         'Methods': {'venmo': venmo, 'zelle': zelle, 'stripe': stripe},
@@ -284,9 +292,13 @@ class RegistrationConfig {
       fee: raw['Fee'] is num
           ? raw['Fee'] as num
           : num.tryParse(raw['Fee']?.toString() ?? '') ?? 0,
+      teamFee: raw['TeamFee'] is num
+          ? raw['TeamFee'] as num
+          : num.tryParse(raw['TeamFee']?.toString() ?? '') ?? 0,
       feeNote: raw['FeeNote']?.toString() ?? '',
-      paymentMode:
-          raw['PaymentMode']?.toString() == 'teamFee' ? 'teamFee' : 'perPlayer',
+      paymentMode: kRegPaymentModes.contains(raw['PaymentMode']?.toString())
+          ? raw['PaymentMode'].toString()
+          : 'perPlayer',
       venmo: method('venmo', true),
       zelle: method('zelle', true),
       stripe: method('stripe', false),
@@ -318,6 +330,60 @@ String regIdFor(RegistrationConfig c) => c.targetType == 'tournament'
             season: c.tournamentId,
           )
         : (league: c.sport, season: c.season);
+
+// ---------------------------------------------------------------------------
+// Named form templates (FormTemplates/{id})
+// ---------------------------------------------------------------------------
+
+/// A saved, named question list under FormTemplates/{id}. Legacy data (from
+/// before named templates existed) stores a plain question List directly at
+/// FormTemplates/{id} — [fromNode] treats that shape as a template named
+/// 'Default'. New data stores {'Name': ..., 'Questions': [...]}.
+class RegTemplate {
+  final String id;
+  final String name;
+  final List<RegQuestion> questions;
+
+  const RegTemplate({
+    required this.id,
+    required this.name,
+    required this.questions,
+  });
+
+  /// Parses a FormTemplates/{id} node. Accepts the legacy flat-List shape
+  /// (name defaults to 'Default') and the new {'Name','Questions'} shape.
+  /// Never returns null — malformed/missing nodes become an empty template.
+  static RegTemplate fromNode(String id, Object? node) {
+    // New shape: a Map carrying a 'Questions' key. (A legacy index-keyed
+    // question Map from RTDB has no 'Questions' key, so this test is safe.)
+    if (node is Map && node.containsKey('Questions')) {
+      return RegTemplate(
+        id: id,
+        name: node['Name']?.toString() ?? id,
+        questions: regQuestionsFromNode(node['Questions']),
+      );
+    }
+    // Legacy shape: node is the question list/map itself (List, or an
+    // index-keyed Map from RTDB).
+    return RegTemplate(
+      id: id,
+      name: 'Default',
+      questions: regQuestionsFromNode(node),
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'Name': name,
+        'Questions': regQuestionsToList(questions),
+      };
+
+  RegTemplate copyWith({String? name, List<RegQuestion>? questions}) =>
+      RegTemplate(
+        id: id,
+        name: name ?? this.name,
+        questions: questions ?? this.questions,
+      );
+}
 
 // ---------------------------------------------------------------------------
 // Submission
@@ -378,18 +444,27 @@ class RegSubmission {
 
 /// Whether this submission still owes a payment. Joiners are governed by
 /// their team's CodeWaivesPayment flag (L1b passes it in; L1a's individual
-/// path never sets it). Captains and individuals owe in both payment modes —
-/// in teamFee mode an individual is not covered by any team's fee until an
-/// admin moves them onto one.
+/// path never sets it).
+///
+/// Individuals owe [RegistrationConfig.fee] under 'perPlayer' or 'both' (0
+/// under 'teamFee' — nothing is owed until an admin moves them onto a team).
+/// Captains (L1b) owe [RegistrationConfig.teamFee] under 'teamFee' or 'both'.
 bool paymentOwed({
   required RegistrationConfig config,
   required RegSubmission submission,
   bool codeWaivesPayment = false,
 }) {
   if (submission.paid) return false;
-  if (config.fee <= 0) return false;
-  if (submission.path == 'joiner') return !codeWaivesPayment;
-  return true;
+  if (submission.path == 'joiner') {
+    return config.fee > 0 && !codeWaivesPayment;
+  }
+  if (submission.path == 'captain') {
+    return config.teamFee > 0 &&
+        (config.paymentMode == 'teamFee' || config.paymentMode == 'both');
+  }
+  // individual (and any other/legacy path)
+  return config.fee > 0 &&
+      (config.paymentMode == 'perPlayer' || config.paymentMode == 'both');
 }
 
 // ---------------------------------------------------------------------------

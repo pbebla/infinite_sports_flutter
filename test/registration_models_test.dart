@@ -2,6 +2,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 
 void main() {
+  group('kRegQuestionTypes', () {
+    test('includes height', () {
+      expect(kRegQuestionTypes.contains('height'), isTrue);
+    });
+  });
+
   group('RegQuestion (de)serialization', () {
     test('round-trips through toMap/fromMap', () {
       const q = RegQuestion(
@@ -179,6 +185,7 @@ void main() {
       expect(parsed.season, '17');
       expect(parsed.isOpen, isTrue);
       expect(parsed.fee, 120);
+      expect(parsed.teamFee, 0);
       expect(parsed.feeNote, 'Due by week 1');
       expect(parsed.paymentMode, 'perPlayer');
       expect(parsed.venmo, isTrue);
@@ -186,6 +193,34 @@ void main() {
       expect(parsed.stripe, isFalse);
       expect(parsed.createdAt, 1750000000000);
       expect(parsed.label, 'Futsal Season 17');
+    });
+
+    test('round-trips teamFee and paymentMode "both"', () {
+      const config = RegistrationConfig(
+        targetType: 'league',
+        sport: 'Futsal',
+        season: '17',
+        status: 'open',
+        fee: 20,
+        teamFee: 300,
+        paymentMode: 'both',
+      );
+      final map = config.toFirebaseMap();
+      expect(map['TeamFee'], 300);
+      expect(map['PaymentMode'], 'both');
+      final parsed = RegistrationConfig.fromFirebase(map);
+      expect(parsed!.fee, 20);
+      expect(parsed.teamFee, 300);
+      expect(parsed.paymentMode, 'both');
+    });
+
+    test('fromFirebase defaults an unknown PaymentMode to perPlayer', () {
+      final parsed = RegistrationConfig.fromFirebase({
+        'TargetType': 'league',
+        'Sport': 'Futsal',
+        'PaymentMode': 'nonsense',
+      });
+      expect(parsed!.paymentMode, 'perPlayer');
     });
 
     test('round-trips tournament config; label uses tournament name', () {
@@ -270,23 +305,27 @@ void main() {
         sport: 'Futsal',
         season: '17',
         fee: 120,
+        teamFee: 500,
         paymentMode: 'perPlayer');
     const teamFee = RegistrationConfig(
         targetType: 'league',
         sport: 'Futsal',
         season: '17',
-        fee: 500,
+        fee: 120,
+        teamFee: 500,
         paymentMode: 'teamFee');
+    const both = RegistrationConfig(
+        targetType: 'league',
+        sport: 'Futsal',
+        season: '17',
+        fee: 120,
+        teamFee: 500,
+        paymentMode: 'both');
     const free = RegistrationConfig(
         targetType: 'league', sport: 'Futsal', season: '17', fee: 0);
 
     RegSubmission sub(String path, {bool paid = false}) =>
         RegSubmission(path: path, answers: const {}, paid: paid);
-
-    test('unpaid individual owes in both modes', () {
-      expect(paymentOwed(config: perPlayer, submission: sub('individual')), isTrue);
-      expect(paymentOwed(config: teamFee, submission: sub('individual')), isTrue);
-    });
 
     test('paid submission owes nothing', () {
       expect(
@@ -298,9 +337,48 @@ void main() {
       expect(paymentOwed(config: free, submission: sub('individual')), isFalse);
     });
 
-    test('captain owes in both modes', () {
-      expect(paymentOwed(config: perPlayer, submission: sub('captain')), isTrue);
-      expect(paymentOwed(config: teamFee, submission: sub('captain')), isTrue);
+    group('individual', () {
+      test('owes fee under perPlayer', () {
+        expect(paymentOwed(config: perPlayer, submission: sub('individual')),
+            isTrue);
+      });
+
+      test('owes nothing under teamFee', () {
+        expect(paymentOwed(config: teamFee, submission: sub('individual')),
+            isFalse);
+      });
+
+      test('owes fee under both', () {
+        expect(
+            paymentOwed(config: both, submission: sub('individual')), isTrue);
+      });
+    });
+
+    group('captain', () {
+      test('owes nothing under perPlayer', () {
+        expect(paymentOwed(config: perPlayer, submission: sub('captain')),
+            isFalse);
+      });
+
+      test('owes teamFee under teamFee', () {
+        expect(
+            paymentOwed(config: teamFee, submission: sub('captain')), isTrue);
+      });
+
+      test('owes teamFee under both', () {
+        expect(paymentOwed(config: both, submission: sub('captain')), isTrue);
+      });
+
+      test('owes nothing when teamFee is 0', () {
+        const noTeamFee = RegistrationConfig(
+            targetType: 'league',
+            sport: 'Futsal',
+            season: '17',
+            fee: 120,
+            paymentMode: 'both');
+        expect(paymentOwed(config: noTeamFee, submission: sub('captain')),
+            isFalse);
+      });
     });
 
     test('joiner follows CodeWaivesPayment', () {
@@ -316,6 +394,62 @@ void main() {
           paymentOwed(
               config: perPlayer, submission: sub('joiner'), codeWaivesPayment: true),
           isFalse);
+    });
+  });
+
+  group('RegTemplate', () {
+    test('fromNode parses legacy flat-List shape as "Default"', () {
+      final node = [
+        {'key': 'firstName', 'type': 'shortText', 'label': 'First Name'},
+        {'key': 'age', 'type': 'number', 'label': 'Age'},
+      ];
+      final template = RegTemplate.fromNode('default', node);
+      expect(template.id, 'default');
+      expect(template.name, 'Default');
+      expect(template.questions.map((q) => q.key).toList(),
+          ['firstName', 'age']);
+    });
+
+    test('fromNode parses legacy index-keyed Map shape as "Default"', () {
+      final node = {
+        '0': {'key': 'firstName', 'type': 'shortText', 'label': 'First Name'},
+      };
+      final template = RegTemplate.fromNode('default', node);
+      expect(template.name, 'Default');
+      expect(template.questions.single.key, 'firstName');
+    });
+
+    test('fromNode / toMap round-trip the new named shape', () {
+      const template = RegTemplate(
+        id: 'tpl1',
+        name: 'Adult league',
+        questions: [
+          RegQuestion(key: 'firstName', type: 'shortText', label: 'First Name'),
+          RegQuestion(key: 'ht', type: 'height', label: 'Height'),
+        ],
+      );
+      final map = template.toMap();
+      expect(map['Name'], 'Adult league');
+      final parsed = RegTemplate.fromNode('tpl1', map);
+      expect(parsed.id, 'tpl1');
+      expect(parsed.name, 'Adult league');
+      expect(parsed.questions.map((q) => q.key).toList(), ['firstName', 'ht']);
+      expect(parsed.questions.last.type, 'height');
+    });
+
+    test('fromNode on null/junk gives an empty "Default" template', () {
+      final template = RegTemplate.fromNode('default', null);
+      expect(template.name, 'Default');
+      expect(template.questions, isEmpty);
+    });
+
+    test('copyWith overrides only the given fields', () {
+      const template =
+          RegTemplate(id: 'tpl1', name: 'Original', questions: []);
+      final renamed = template.copyWith(name: 'Renamed');
+      expect(renamed.id, 'tpl1');
+      expect(renamed.name, 'Renamed');
+      expect(renamed.questions, isEmpty);
     });
   });
 

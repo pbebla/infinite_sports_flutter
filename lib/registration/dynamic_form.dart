@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_form_builder/flutter_form_builder.dart';
 import 'package:form_builder_validators/form_builder_validators.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
@@ -169,6 +171,11 @@ class _DynamicRegistrationFormState extends State<DynamicRegistrationForm> {
           ],
           validator: q.isRequired ? FormBuilderValidators.required() : null,
         );
+      case 'height':
+        return _HeightField(
+          question: q,
+          initialValue: widget.initialValues[q.key]?.toString(),
+        );
       case 'linkAcknowledge':
         return _LinkAcknowledgeField(question: q);
       default:
@@ -225,16 +232,166 @@ class _DynamicRegistrationFormState extends State<DynamicRegistrationForm> {
   }
 }
 
+/// Height question: a feet + inches pair composed into a single "F'I" answer
+/// string (e.g. "6'1"), wrapped in a [FormBuilderField] so required-gating and
+/// saveAndValidate participate like every other field. Prefills by splitting
+/// an existing "F'I"-style value back into the two boxes.
+class _HeightField extends StatefulWidget {
+  final RegQuestion question;
+  final String? initialValue;
+  const _HeightField({required this.question, this.initialValue});
+
+  @override
+  State<_HeightField> createState() => _HeightFieldState();
+}
+
+class _HeightFieldState extends State<_HeightField> {
+  late final TextEditingController _feet;
+  late final TextEditingController _inches;
+
+  @override
+  void initState() {
+    super.initState();
+    final parts = (widget.initialValue ?? '').split("'");
+    _feet = TextEditingController(text: parts.isNotEmpty ? parts[0] : '');
+    _inches = TextEditingController(text: parts.length > 1 ? parts[1] : '');
+  }
+
+  @override
+  void dispose() {
+    _feet.dispose();
+    _inches.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final q = widget.question;
+    return FormBuilderField<String>(
+      name: q.key,
+      initialValue: widget.initialValue,
+      validator: (value) => (q.isRequired &&
+              (value == null || value.trim().isEmpty || value.trim() == "'"))
+          ? 'This field is required'
+          : null,
+      builder: (field) {
+        void update() {
+          final feet = _feet.text.trim();
+          final inches = _inches.text.trim();
+          field.didChange((feet.isEmpty && inches.isEmpty)
+              ? null
+              : "$feet'$inches");
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(q.label,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyLarge
+                    ?.copyWith(color: Theme.of(context).hintColor)),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _feet,
+                    keyboardType: TextInputType.number,
+                    maxLength: 1,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                    ],
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      labelText: 'Feet',
+                      counterText: '',
+                    ),
+                    onChanged: (_) => update(),
+                  ),
+                ),
+                const SizedBox(width: 15),
+                Expanded(
+                  child: TextField(
+                    controller: _inches,
+                    keyboardType: TextInputType.number,
+                    maxLength: 2,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                    ],
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      labelText: 'Inches',
+                      counterText: '',
+                    ),
+                    onChanged: (_) => update(),
+                  ),
+                ),
+              ],
+            ),
+            if (field.errorText != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(field.errorText!,
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error)),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 /// Waiver/rules acknowledgement: a tile that must be tapped — opening its URL
-/// (stored in the question's hint) in an in-app web view — before its checkbox
-/// reads true. Required questions block submission until read. With an empty
-/// URL, tapping simply marks it read.
-class _LinkAcknowledgeField extends StatelessWidget {
+/// in an in-app web view — before its checkbox reads true. Required questions
+/// block submission until read.
+///
+/// URL resolution (lazy, on first tap): the question's hint if non-empty;
+/// otherwise the legacy RTDB document for well-known keys ('rules' ->
+/// Sign Ups/Rules, 'waiver' -> Sign Ups/Waiver) via [getSignUpRules] /
+/// [getSignUpWaiver]. Only when no URL resolves anywhere does the tile fall
+/// back to marking itself read on tap (with a "(no document attached)" note).
+///
+/// The checkbox becomes checked only after the web view screen has been
+/// opened and returned from — matching the old sign-up form's behavior.
+class _LinkAcknowledgeField extends StatefulWidget {
   final RegQuestion question;
   const _LinkAcknowledgeField({required this.question});
 
   @override
+  State<_LinkAcknowledgeField> createState() => _LinkAcknowledgeFieldState();
+}
+
+class _LinkAcknowledgeFieldState extends State<_LinkAcknowledgeField> {
+  bool _resolving = false;
+  String? _resolvedUrl; // '' once resolution finds nothing anywhere
+
+  Future<String> _resolveUrl() async {
+    final hintUrl = widget.question.hint.trim();
+    if (hintUrl.isNotEmpty) return hintUrl;
+    try {
+      switch (widget.question.key) {
+        case 'rules':
+          return (await getSignUpRules()).trim();
+        case 'waiver':
+          return (await getSignUpWaiver()).trim();
+        default:
+          return '';
+      }
+    } catch (e) {
+      // Defensive: getSignUpRules/getSignUpWaiver call
+      // FirebaseDatabase.instance before their own try/catch, so a
+      // not-yet-initialized Firebase app (or any other lookup failure)
+      // would otherwise crash the tile instead of degrading to "no
+      // document attached".
+      return '';
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final question = widget.question;
     return FormBuilderField<bool>(
       name: question.key,
       initialValue: false,
@@ -243,38 +400,67 @@ class _LinkAcknowledgeField extends StatelessWidget {
           : null,
       builder: (field) {
         final read = field.value == true;
+        String subtitle;
+        if (field.errorText != null) {
+          subtitle = field.errorText!;
+        } else if (read) {
+          subtitle = 'Read — thank you!';
+        } else if (_resolving) {
+          subtitle = 'Loading…';
+        } else if (_resolvedUrl == '') {
+          subtitle = 'Tap to mark as read (no document attached)';
+        } else {
+          subtitle = 'Tap to open and read';
+        }
         return Material(
           color: Theme.of(context).colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(20),
           child: ListTile(
             title: Text(question.label,
                 style: const TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: field.errorText != null
-                ? Text(field.errorText!,
-                    style:
-                        TextStyle(color: Theme.of(context).colorScheme.error))
-                : Text(read ? 'Read — thank you!' : 'Tap to open and read'),
-            trailing: Checkbox(value: read, onChanged: null),
-            onTap: () async {
-              final url = question.hint.trim();
-              if (url.isNotEmpty) {
-                await Navigator.push(context,
-                    MaterialPageRoute(builder: (context) {
-                  final controller = WebViewController()
-                    ..loadRequest(Uri.parse(url));
-                  return Scaffold(
-                    appBar: AppBar(
-                      centerTitle: true,
-                      backgroundColor: Theme.of(context).colorScheme.primary,
-                      foregroundColor: Colors.white,
-                      title: Text(question.label),
-                    ),
-                    body: WebViewStack(controller: controller),
-                  );
-                }));
-              }
-              field.didChange(true);
-            },
+            subtitle: Text(subtitle,
+                style: field.errorText != null
+                    ? TextStyle(color: Theme.of(context).colorScheme.error)
+                    : null),
+            trailing: _resolving
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : Checkbox(value: read, onChanged: null),
+            onTap: _resolving
+                ? null
+                : () async {
+                    var url = _resolvedUrl;
+                    if (url == null) {
+                      setState(() => _resolving = true);
+                      url = await _resolveUrl();
+                      if (!mounted) return;
+                      setState(() {
+                        _resolvedUrl = url;
+                        _resolving = false;
+                      });
+                    }
+                    if (url.isNotEmpty) {
+                      if (!context.mounted) return;
+                      await Navigator.push(context,
+                          MaterialPageRoute(builder: (context) {
+                        final controller = WebViewController()
+                          ..loadRequest(Uri.parse(url!));
+                        return Scaffold(
+                          appBar: AppBar(
+                            centerTitle: true,
+                            backgroundColor:
+                                Theme.of(context).colorScheme.primary,
+                            foregroundColor: Colors.white,
+                            title: Text(question.label),
+                          ),
+                          body: WebViewStack(controller: controller),
+                        );
+                      }));
+                    }
+                    field.didChange(true);
+                  },
           ),
         );
       },

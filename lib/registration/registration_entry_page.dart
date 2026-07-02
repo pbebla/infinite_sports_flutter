@@ -70,14 +70,21 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
             itemBuilder: (context, index) {
               final regId = entries[index].key;
               final config = entries[index].value;
+              // L1a only offers the individual path, so show what an
+              // individual registrant would owe: config.fee under
+              // 'perPlayer'/'both', but nothing under 'teamFee' — that fee
+              // belongs to a captain (not offered here), and an individual
+              // owes nothing until an admin places them on a team.
+              final individualFee =
+                  config.paymentMode == 'teamFee' ? 0 : config.fee;
               return ListTile(
                 enabled: signedIn,
                 leading: const Icon(Icons.how_to_reg),
                 title: Text(config.label,
                     style: const TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: Text(signedIn
-                    ? (config.fee > 0
-                        ? 'Fee: \$${config.fee}${config.feeNote.isNotEmpty ? ' — ${config.feeNote}' : ''}'
+                    ? (individualFee > 0
+                        ? 'Fee: \$$individualFee${config.feeNote.isNotEmpty ? ' — ${config.feeNote}' : ''}'
                         : 'Free')
                     : 'Log in to register'),
                 onTap: () => _openRegistration(regId, config),
