@@ -1,20 +1,23 @@
 // Cloud Function (L1c): Stripe webhook. On payment_intent.succeeded, flips
-// Paid/PaidVia on the matching submission and moves the legacy Sign Ups
-// entry from NotPaid to Paid — the same two writes the Manager's manual
-// "Mark Paid" flip performs, so every existing consumer (Sign Ups page,
-// Add-from-signups roster builder) keeps working unchanged.
+// Paid/PaidVia/PaidAmount on the matching submission and moves the legacy
+// Sign Ups entry from NotPaid to Paid — the same two writes the Manager's
+// manual "Mark Paid" flip performs, so every existing consumer (Sign Ups
+// page, Add-from-signups roster builder) keeps working unchanged.
 
 import * as admin from 'firebase-admin';
 import * as logger from 'firebase-functions/logger';
 import { defineSecret } from 'firebase-functions/params';
 import { onRequest } from 'firebase-functions/v2/https';
 import Stripe from 'stripe';
-import { parseWebhookMetadata } from './lib/stripe_pay';
+import { centsToDollars, parseWebhookMetadata } from './lib/stripe_pay';
 
 export const stripeWebhookSecret = defineSecret('STRIPE_WEBHOOK_SECRET');
 export const stripeSecretKeyForWebhook = defineSecret('STRIPE_SECRET_KEY');
 
-async function markPaid(meta: { regId: string; uid: string; league: string; season: string }): Promise<void> {
+async function markPaid(
+  meta: { regId: string; uid: string; league: string; season: string },
+  amountReceivedCents: number,
+): Promise<void> {
   const db = admin.database();
   const submissionRef = db.ref(`Registrations/${meta.regId}/Submissions/${meta.uid}`);
   const snap = await submissionRef.get();
@@ -29,7 +32,11 @@ async function markPaid(meta: { regId: string; uid: string; league: string; seas
   }
 
   const displayName = typeof submission['DisplayName'] === 'string' ? submission['DisplayName'] : '';
-  await submissionRef.update({ Paid: true, PaidVia: 'card' });
+  await submissionRef.update({
+    Paid: true,
+    PaidVia: 'card',
+    PaidAmount: centsToDollars(amountReceivedCents),
+  });
 
   const notPaidRef = db.ref(`Sign Ups/${meta.league}/${meta.season}/NotPaid/${meta.uid}`);
   const paidRef = db.ref(`Sign Ups/${meta.league}/${meta.season}/Paid/${meta.uid}`);
@@ -78,7 +85,8 @@ export const stripeWebhook = onRequest(
     }
 
     try {
-      await markPaid(meta);
+      const amountReceivedCents = intent.amount_received || intent.amount;
+      await markPaid(meta, amountReceivedCents);
       response.status(200).send('ok');
     } catch (err) {
       logger.error('stripeWebhook: failed to mark Paid', { err: String(err), meta });

@@ -34,6 +34,12 @@ function toCents(dollars: number): number {
   return Math.round(dollars * 100);
 }
 
+/** Integer cents -> dollars, for writing RegSubmission.PaidAmount (a Dart
+ *  `num`, stored in dollars — the reverse of [toCents]). */
+export function centsToDollars(cents: number): number {
+  return cents / 100;
+}
+
 /**
  * The amount (in cents) [submission] owes right now — 0 whenever nothing is
  * owed. Mirrors Dart's `paymentOwed` + `amountOwed` combined:

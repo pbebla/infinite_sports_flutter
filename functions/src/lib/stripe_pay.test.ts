@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  legacyTarget, owedCents, parseWebhookMetadata, RegistrationConfigLike,
+  centsToDollars, legacyTarget, owedCents, parseWebhookMetadata, RegistrationConfigLike,
   SubmissionLike, TeamLike, webhookMetadata,
 } from './stripe_pay';
 
@@ -64,6 +64,18 @@ describe('owedCents', () => {
   it('rounds fractional dollar fees to the nearest cent', () => {
     expect(owedCents(config({ fee: 19.99, paymentMode: 'perPlayer' }), submission())).toBe(1999);
     expect(owedCents(config({ fee: 12.345, paymentMode: 'perPlayer' }), submission())).toBe(1235);
+  });
+});
+
+describe('centsToDollars', () => {
+  it('converts integer cents back to dollars', () => {
+    expect(centsToDollars(2000)).toBe(20);
+    expect(centsToDollars(30000)).toBe(300);
+  });
+
+  it('round-trips toCents-rounded fractional fees', () => {
+    expect(centsToDollars(1999)).toBeCloseTo(19.99);
+    expect(centsToDollars(1235)).toBeCloseTo(12.35);
   });
 });
 

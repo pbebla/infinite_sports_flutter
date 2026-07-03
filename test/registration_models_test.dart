@@ -293,6 +293,27 @@ void main() {
       expect(parsed.submittedAt, 1750000000000);
       expect(parsed.teamId, '');
       expect(parsed.paidVia, '');
+      expect(parsed.paidAmount, isNull);
+    });
+
+    test('toFirebaseMap omits PaidAmount when null', () {
+      const sub = RegSubmission(path: 'individual', answers: {});
+      expect(sub.toFirebaseMap().containsKey('PaidAmount'), isFalse);
+    });
+
+    test('round-trips PaidAmount when set', () {
+      const sub = RegSubmission(
+        path: 'captain',
+        answers: {},
+        paid: true,
+        paidVia: 'card',
+        paidAmount: 300,
+      );
+      final map = sub.toFirebaseMap();
+      expect(map['PaidAmount'], 300);
+      final parsed = RegSubmission.fromFirebase(map);
+      expect(parsed!.paidAmount, 300);
+      expect(parsed.paidVia, 'card');
     });
 
     test('fromFirebase rejects junk', () {

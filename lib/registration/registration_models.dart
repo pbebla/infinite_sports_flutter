@@ -396,7 +396,8 @@ class RegSubmission {
   final Map<String, dynamic> answers;
   final String teamId; // '' until team paths land (L1b)
   final bool paid;
-  final String paidVia; // '' | 'team code' | 'card' | ...
+  final String paidVia; // '' | 'team code' | 'card' | 'manual'
+  final num? paidAmount; // dollars actually charged/recorded; null if unknown
   final String displayName; // account display name at submit time
   final int submittedAt; // millisecondsSinceEpoch
 
@@ -406,6 +407,7 @@ class RegSubmission {
     this.teamId = '',
     this.paid = false,
     this.paidVia = '',
+    this.paidAmount,
     this.displayName = '',
     this.submittedAt = 0,
   });
@@ -416,6 +418,7 @@ class RegSubmission {
         if (teamId.isNotEmpty) 'TeamId': teamId,
         'Paid': paid,
         if (paidVia.isNotEmpty) 'PaidVia': paidVia,
+        if (paidAmount != null) 'PaidAmount': paidAmount,
         'DisplayName': displayName,
         'SubmittedAt': submittedAt,
       };
@@ -426,6 +429,7 @@ class RegSubmission {
     final path = raw['Path']?.toString() ?? '';
     if (path.isEmpty) return null;
     final rawAnswers = raw['Answers'];
+    final rawPaidAmount = raw['PaidAmount'];
     return RegSubmission(
       path: path,
       answers: rawAnswers is Map
@@ -434,6 +438,9 @@ class RegSubmission {
       teamId: raw['TeamId']?.toString() ?? '',
       paid: raw['Paid'] == true,
       paidVia: raw['PaidVia']?.toString() ?? '',
+      paidAmount: rawPaidAmount is num
+          ? rawPaidAmount
+          : num.tryParse(rawPaidAmount?.toString() ?? ''),
       displayName: raw['DisplayName']?.toString() ?? '',
       submittedAt: int.tryParse(raw['SubmittedAt']?.toString() ?? '') ?? 0,
     );
