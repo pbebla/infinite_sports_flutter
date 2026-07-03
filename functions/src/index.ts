@@ -288,3 +288,8 @@ export const onPredictMatchQuestion = onValueWritten(
   '/Tournaments/{tid}/Matches/{mid}/PredictionQuestions/{qid}',
   async (event) => { await recomputeLeaderboard(dbRoot(event), event.params['tid'] as string); },
 );
+
+// ---- Registration payments (L1c) ----
+
+export { createRegistrationPaymentIntent } from './createRegistrationPaymentIntent';
+export { stripeWebhook } from './stripeWebhook';
