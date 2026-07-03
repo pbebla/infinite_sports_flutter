@@ -128,9 +128,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
             merchantCountryCode: 'US',
             testEnv: true, // flip to false for the production Stripe key
           ),
-          applePay: const PaymentSheetApplePay(
-            merchantCountryCode: 'US',
-          ),
+          // Apple Pay stays off until an Apple merchant identifier exists
+          // (Stripe.merchantIdentifier) — passing applePay without one
+          // asserts at runtime. Card + Google Pay cover Android fully.
         ),
       );
       await Stripe.instance.presentPaymentSheet();
