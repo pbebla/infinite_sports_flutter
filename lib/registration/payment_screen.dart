@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -5,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_stripe/flutter_stripe.dart' hide Card;
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
+import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -21,12 +24,17 @@ const String kVenmoHandle = 'infinite-sports';
 /// a distinct payment method next to Venmo blue and the Zelle card.
 const Color kStripePurple = Color(0xFF635BFF);
 
-/// Payment screen (L1a: Venmo + Zelle; L1c adds card via Stripe PaymentSheet).
-/// Venmo/Zelle never auto-confirm — the admin flips Paid in the Manager.
-/// Card payments DO auto-confirm: a webhook flips Paid the moment Stripe
-/// reports success, and the status page (which streams the submission live)
-/// picks it up with no extra work here. Re-openable from the status page
-/// until Paid.
+/// Payment screen (L1a: Venmo + Zelle; L1c adds card via Stripe PaymentSheet;
+/// L1c.2 makes the screen itself live).
+///
+/// The whole body rides RegistrationService.watchMySubmission so ANY method
+/// flipping Paid — the card webhook, the owner manually marking Paid in the
+/// Manager, anything — swaps this screen straight to a paid state and hides
+/// the pay buttons (no double-pay window). After presentPaymentSheet
+/// succeeds the screen shows a brief "processing" state while it waits for
+/// the webhook; a ~10s fallback timer surfaces the old "still processing"
+/// snackbar if the stream hasn't flipped yet. Re-openable from the status
+/// page until Paid.
 class PaymentScreen extends StatefulWidget {
   final String regId;
   final RegistrationConfig config;
@@ -57,10 +65,28 @@ class _PaymentScreenState extends State<PaymentScreen> {
   String? _publishableKey;
   bool _payingWithCard = false;
 
+  /// True right after presentPaymentSheet succeeds, until the submission
+  /// stream reports Paid (or the fallback timer below gives up waiting).
+  bool _processing = false;
+
+  /// Started when _processing turns true; if the stream still hasn't
+  /// flipped Paid after ~10s, shows the old "webhook delayed" snackbar
+  /// as a fallback instead of leaving the user staring at a spinner.
+  Timer? _processingFallback;
+
+  late final Stream<RegSubmission?> _submission;
+
   @override
   void initState() {
     super.initState();
     if (widget.config.stripe) _loadPublishableKey();
+    _submission = RegistrationService.watchMySubmission(widget.regId);
+  }
+
+  @override
+  void dispose() {
+    _processingFallback?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadPublishableKey() async {
@@ -102,8 +128,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
   Future<void> _payWithCard() async {
     setState(() => _payingWithCard = true);
     try {
-      final callable =
-          FirebaseFunctions.instance.httpsCallable('createRegistrationPaymentIntent');
+      final callable = FirebaseFunctions.instance
+          .httpsCallable('createRegistrationPaymentIntent');
       final result = await callable.call<Map<String, dynamic>>({
         'regId': widget.regId,
       });
@@ -136,16 +162,26 @@ class _PaymentScreenState extends State<PaymentScreen> {
       await Stripe.instance.presentPaymentSheet();
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Payment received — confirming...')));
+      // The submission stream flips to Paid on its own once the webhook
+      // lands (typically 1-3s) and the StreamBuilder in build() swaps to
+      // the paid state automatically. Show a brief processing state in the
+      // meantime; if the webhook is unusually slow, fall back to the old
+      // snackbar after ~10s so the user isn't left guessing.
+      setState(() => _processing = true);
+      _processingFallback?.cancel();
+      _processingFallback = Timer(const Duration(seconds: 10), () {
+        if (!mounted || !_processing) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Still processing — your status page will update once the payment is confirmed.')));
+      });
     } on StripeException catch (e) {
       // User-cancelled the sheet is the common case — stay silent for that,
       // show everything else.
       final isCancel = e.error.code == FailureCode.Canceled;
       if (!isCancel && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(
-                e.error.localizedMessage ?? 'Card payment failed.')));
+            content: Text(e.error.localizedMessage ?? 'Card payment failed.')));
       }
     } catch (e) {
       if (mounted) {
@@ -159,6 +195,81 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   @override
   Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        centerTitle: true,
+        title: const Text('Payment'),
+        backgroundColor: Theme.of(context).colorScheme.primary,
+        foregroundColor: Colors.white,
+      ),
+      body: StreamBuilder<RegSubmission?>(
+        stream: _submission,
+        builder: (context, snapshot) {
+          final sub = snapshot.data;
+          // Paid wins regardless of how it happened — card webhook, manual
+          // admin flip, anything — and regardless of our own local
+          // _processing flag, killing the double-pay window for good.
+          if (sub != null && sub.paid) return _paidBody(context);
+          if (_processing) return _processingBody(context);
+          return _unpaidBody(context);
+        },
+      ),
+    );
+  }
+
+  Widget _paidBody(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.check_circle, color: Colors.green, size: 96),
+            const SizedBox(height: 24),
+            Text(
+              "Payment received — you're all set.",
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: _exit,
+                child: const Text('View my registration'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _processingBody(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(
+                color: Theme.of(context).colorScheme.primary),
+            const SizedBox(height: 24),
+            const Text('Processing…', textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Text(
+              'Confirming your payment — this only takes a moment.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: Theme.of(context).textTheme.bodySmall?.color),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _unpaidBody(BuildContext context) {
     final showCardButton = widget.config.stripe &&
         widget.amount > 0 &&
         _publishableKey != null &&
@@ -168,129 +279,120 @@ class _PaymentScreenState extends State<PaymentScreen> {
         _publishableKey != null &&
         _publishableKey!.isEmpty;
 
-    return Scaffold(
-      appBar: AppBar(
-        centerTitle: true,
-        title: const Text('Payment'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(15),
-        children: [
-          Card(
-            elevation: 2,
-            child: ListTile(
-              leading: const Icon(Icons.attach_money),
-              title: Text('\$${widget.amount}',
-                  style: Theme.of(context).textTheme.headlineSmall),
-              subtitle: Text([
-                widget.config.label,
-                if (widget.config.feeNote.isNotEmpty) widget.config.feeNote,
-              ].join(' — ')),
+    return ListView(
+      padding: const EdgeInsets.all(15),
+      children: [
+        Card(
+          elevation: 2,
+          child: ListTile(
+            leading: const Icon(Icons.attach_money),
+            title: Text('\$${widget.amount}',
+                style: Theme.of(context).textTheme.headlineSmall),
+            subtitle: Text([
+              widget.config.label,
+              if (widget.config.feeNote.isNotEmpty) widget.config.feeNote,
+            ].join(' — ')),
+          ),
+        ),
+        const SizedBox(height: 15),
+        if (showCardButton) ...[
+          SizedBox(
+            height: 50,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kStripePurple,
+                foregroundColor: Colors.white,
+              ),
+              icon: _payingWithCard
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.credit_card),
+              label:
+                  const Text('Pay with card', style: TextStyle(fontSize: 18)),
+              onPressed: _payingWithCard ? null : _payWithCard,
             ),
           ),
           const SizedBox(height: 15),
-          if (showCardButton) ...[
-            SizedBox(
-              height: 50,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: kStripePurple,
-                  foregroundColor: Colors.white,
-                ),
-                icon: _payingWithCard
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Icon(Icons.credit_card),
-                label: const Text('Pay with card',
-                    style: TextStyle(fontSize: 18)),
-                onPressed: _payingWithCard ? null : _payWithCard,
-              ),
+        ] else if (cardUnavailable) ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 15),
+            child: Text(
+              'Card payments unavailable right now.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: Theme.of(context).textTheme.bodySmall?.color,
+                  fontStyle: FontStyle.italic),
             ),
-            const SizedBox(height: 15),
-          ] else if (cardUnavailable) ...[
-            Padding(
-              padding: const EdgeInsets.only(bottom: 15),
-              child: Text(
-                'Card payments unavailable right now.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    color: Theme.of(context).textTheme.bodySmall?.color,
-                    fontStyle: FontStyle.italic),
-              ),
-            ),
-          ],
-          if (widget.config.venmo) ...[
-            SizedBox(
-              height: 50,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF008CFF),
-                  foregroundColor: Colors.white,
-                ),
-                icon: const Icon(Icons.open_in_new),
-                label: const Text('Pay with Venmo',
-                    style: TextStyle(fontSize: 18)),
-                onPressed: () async {
-                  await launchUrl(_venmoUri,
-                      mode: LaunchMode.externalApplication);
-                },
-              ),
-            ),
-            const SizedBox(height: 15),
-          ],
-          if (widget.config.zelle) ...[
-            Card(
-              elevation: 2,
-              child: Column(
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.account_balance),
-                    title: const Text('Zelle',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: const Text(kZelleNumber,
-                        style: TextStyle(fontSize: 18)),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.copy),
-                      tooltip: 'Copy number',
-                      onPressed: () {
-                        Clipboard.setData(
-                            const ClipboardData(text: kZelleNumber));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('Zelle number copied.')),
-                        );
-                      },
-                    ),
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(15, 0, 15, 12),
-                    child: Text(
-                        'Before sending, confirm the recipient name shows "$kZelleDisplayName".'),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 15),
-          ],
-          Text(
-            showCardButton
-                ? 'Card payments confirm automatically — your status page updates as soon as Stripe processes it. Venmo/Zelle still require an admin to mark you Paid.'
-                : 'Nothing confirms automatically yet — an admin marks you Paid once your payment arrives. You can reopen this screen from your registration status any time until then.',
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 15),
-          OutlinedButton(
-            onPressed: _exit,
-            child: const Text('View my registration'),
           ),
         ],
-      ),
+        if (widget.config.venmo) ...[
+          SizedBox(
+            height: 50,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF008CFF),
+                foregroundColor: Colors.white,
+              ),
+              icon: const Icon(Icons.open_in_new),
+              label:
+                  const Text('Pay with Venmo', style: TextStyle(fontSize: 18)),
+              onPressed: () async {
+                await launchUrl(_venmoUri,
+                    mode: LaunchMode.externalApplication);
+              },
+            ),
+          ),
+          const SizedBox(height: 15),
+        ],
+        if (widget.config.zelle) ...[
+          Card(
+            elevation: 2,
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.account_balance),
+                  title: const Text('Zelle',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle:
+                      const Text(kZelleNumber, style: TextStyle(fontSize: 18)),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.copy),
+                    tooltip: 'Copy number',
+                    onPressed: () {
+                      Clipboard.setData(
+                          const ClipboardData(text: kZelleNumber));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Zelle number copied.')),
+                      );
+                    },
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(15, 0, 15, 12),
+                  child: Text(
+                      'Before sending, confirm the recipient name shows "$kZelleDisplayName".'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 15),
+        ],
+        Text(
+          showCardButton
+              ? 'Card payments confirm automatically — your status page updates as soon as Stripe processes it. Venmo/Zelle still require an admin to mark you Paid.'
+              : 'Nothing confirms automatically yet — an admin marks you Paid once your payment arrives. You can reopen this screen from your registration status any time until then.',
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 15),
+        OutlinedButton(
+          onPressed: _exit,
+          child: const Text('View my registration'),
+        ),
+      ],
     );
   }
 }

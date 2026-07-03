@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  centsToDollars, legacyTarget, owedCents, parseWebhookMetadata, RegistrationConfigLike,
-  SubmissionLike, TeamLike, webhookMetadata,
+  centsToDollars, isAlreadyPaid, legacyTarget, owedCents, parseWebhookMetadata,
+  RegistrationConfigLike, SubmissionLike, TeamLike, webhookMetadata,
 } from './stripe_pay';
 
 function config(overrides: Partial<RegistrationConfigLike> = {}): RegistrationConfigLike {
@@ -64,6 +64,18 @@ describe('owedCents', () => {
   it('rounds fractional dollar fees to the nearest cent', () => {
     expect(owedCents(config({ fee: 19.99, paymentMode: 'perPlayer' }), submission())).toBe(1999);
     expect(owedCents(config({ fee: 12.345, paymentMode: 'perPlayer' }), submission())).toBe(1235);
+  });
+});
+
+describe('isAlreadyPaid', () => {
+  it('is true when the submission is Paid, regardless of path', () => {
+    expect(isAlreadyPaid(submission({ paid: true }))).toBe(true);
+    expect(isAlreadyPaid(submission({ path: 'captain', paid: true }))).toBe(true);
+    expect(isAlreadyPaid(submission({ path: 'joiner', paid: true }))).toBe(true);
+  });
+
+  it('is false when the submission is not yet paid', () => {
+    expect(isAlreadyPaid(submission({ paid: false }))).toBe(false);
   });
 });
 

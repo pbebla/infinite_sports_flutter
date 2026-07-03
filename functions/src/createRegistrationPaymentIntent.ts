@@ -8,7 +8,7 @@ import { defineSecret } from 'firebase-functions/params';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import Stripe from 'stripe';
 import {
-  legacyTarget, owedCents, RegistrationConfigLike, SubmissionLike, TeamLike,
+  isAlreadyPaid, legacyTarget, owedCents, RegistrationConfigLike, SubmissionLike, TeamLike,
   webhookMetadata,
 } from './lib/stripe_pay';
 
@@ -76,6 +76,13 @@ export const createRegistrationPaymentIntent = onCall(
     const submission = parseSubmission(submissionSnap.val());
     if (!submission) {
       throw new HttpsError('not-found', 'No registration submission found for your account.');
+    }
+    // Double-pay server guard: reject up front (distinct from the generic
+    // "nothing owed" message) if this submission is already Paid by ANY
+    // method — card webhook, or the owner manually marking Paid in the
+    // Manager while a client had the payment sheet open.
+    if (isAlreadyPaid(submission)) {
+      throw new HttpsError('failed-precondition', 'Already paid.');
     }
 
     let team: TeamLike | null = null;

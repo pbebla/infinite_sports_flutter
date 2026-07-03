@@ -41,6 +41,17 @@ export function centsToDollars(cents: number): number {
 }
 
 /**
+ * True when [submission] is already marked Paid — the double-pay server
+ * guard (createRegistrationPaymentIntent) checks this FIRST so a caller who
+ * re-opens the payment sheet after already paying (card webhook, or the
+ * owner manually marking Paid in the Manager) gets a distinct 'Already
+ * paid.' error instead of the generic "nothing owed" message.
+ */
+export function isAlreadyPaid(submission: SubmissionLike): boolean {
+  return submission.paid;
+}
+
+/**
  * The amount (in cents) [submission] owes right now — 0 whenever nothing is
  * owed. Mirrors Dart's `paymentOwed` + `amountOwed` combined:
  *  - already paid -> 0
