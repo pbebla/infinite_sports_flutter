@@ -65,6 +65,27 @@ class _LiveScorePageState extends State<LiveScorePage> {
             Expanded(child:Text(game is SoccerGame && game.startTime != "" ? game.startTime : gameTimeText(game.storedTime, game.Time),textAlign: TextAlign.right, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
           ],
         ),
+        if (game.stage.isNotEmpty)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  stageDisplayName(game.stage),
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSecondaryContainer,
+                  ),
+                ),
+              ),
+            ],
+          ),
         Row(
           children: <Widget>[
             SizedBox(
@@ -72,7 +93,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
-                  game.team1SourcePath.isNotEmpty ? Image.network(width: 70, height: 70, game.team1SourcePath) : SizedBox(width: 0, height: 0),
+                  game.team1SourcePath.isNotEmpty ? Image.network(width: 70, height: 70, game.team1SourcePath) : (isPlaceholderTeam(game.team1) ? const Icon(Icons.emoji_events, size: 50) : SizedBox(width: 0, height: 0)),
                   Center(child: Text(game.team1, textAlign: TextAlign.center,),),
                 ],
               ),
@@ -90,7 +111,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
-                  game.team2SourcePath.isNotEmpty ? Image.network(width: 70, height: 70, game.team2SourcePath) : SizedBox(width: 0, height: 0),
+                  game.team2SourcePath.isNotEmpty ? Image.network(width: 70, height: 70, game.team2SourcePath) : (isPlaceholderTeam(game.team2) ? const Icon(Icons.emoji_events, size: 50) : SizedBox(width: 0, height: 0)),
                   Center(child: Text(game.team2, textAlign: TextAlign.center),),
                 ],
               ),
@@ -193,7 +214,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
         elevation: 2,
         child: SizedBox(
           width: MediaQuery.sizeOf(context).width - 38,
-          height: 240,
+          height: game.stage.isNotEmpty ? 270 : 240,
           child: Container(
             padding: const EdgeInsets.all(13),
             child: Column(
