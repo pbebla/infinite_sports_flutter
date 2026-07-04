@@ -269,6 +269,16 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
             color: Theme.of(context).colorScheme.primary));
   }
 
+  /// "Done" always exits all the way to this navigator's home route —
+  /// whether we were reached post-submission (the entry/path/form stack is
+  /// already cleared, so this is a no-op pop-wise beyond leaving this page)
+  /// or from the entry page's "already registered" tap (where back would
+  /// otherwise just return to the entry list; Done skips that and leaves
+  /// the registration area entirely).
+  void _done(BuildContext context) {
+    Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -277,6 +287,11 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
         title: const Text('My Registration'),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          tooltip: 'Done',
+          onPressed: () => _done(context),
+        ),
       ),
       body: FutureBuilder(
         future: _form,

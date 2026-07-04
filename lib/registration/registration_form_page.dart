@@ -91,12 +91,19 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
       paidVia: bornPaid ? 'team code' : '',
       submittedAt: DateTime.now().millisecondsSinceEpoch,
     );
+    // A successful submission ends the registration flow — clear the whole
+    // entry -> path -> [join code] -> form stack underneath so the back
+    // button (and the status page's own back arrow) can't walk the user
+    // back into "register again" screens. (route) => route.isFirst keeps
+    // whatever the flow was pushed onto (the app's root navigator when
+    // opened from the drawer, or the Matches tab's nested navigator when
+    // opened from the frontpage banner) landing on that navigator's home
+    // route.
     if (paymentOwed(
         config: widget.config,
         submission: submission,
         codeWaivesPayment: waived)) {
-      Navigator.pushReplacement(
-        context,
+      Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
             builder: (_) => PaymentScreen(
                 regId: widget.regId,
@@ -106,13 +113,14 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
                     submission: submission,
                     codeWaivesPayment: waived),
                 fromSubmission: true)),
+        (route) => route.isFirst,
       );
     } else {
-      Navigator.pushReplacement(
-        context,
+      Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
             builder: (_) => RegistrationStatusPage(
                 regId: widget.regId, config: widget.config)),
+        (route) => route.isFirst,
       );
     }
   }
