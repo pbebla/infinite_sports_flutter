@@ -5,7 +5,7 @@
 /// (24h) string from the game node's 'Time' key; [derivedTime] is the
 /// legacy start-hour + index already computed by getGames (game.Time).
 /// Invalid/absent stored time falls back to the EXACT legacy rendering
-/// '<derivedTime>:00PM' so untouched seasons look identical.
+/// `'<derivedTime>:00PM'` so untouched seasons look identical.
 String gameTimeText(String storedTime, int derivedTime) {
   final m = RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(storedTime.trim());
   if (m != null) {
