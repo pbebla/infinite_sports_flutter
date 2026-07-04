@@ -540,6 +540,8 @@ Future<Map<String, List<FutsalGame>>> getAllFutsalGames(sport, season) async {
         game.team2score = (val["team2score"] ?? val["team2Score"]).toString();
         game.date = val["Date"] ?? val["date"];
         game.status = val["status"];
+        game.storedTime = (val["Time"] ?? "").toString();
+        game.stage = (val["Stage"] ?? "").toString();
         if(val.containsKey("link")) {
           game.link = val["link"];
         }
@@ -584,6 +586,8 @@ Future<Map<String, List<BasketballGame>>> getAllBasketballGames(sport, season) a
         game.team2score = val["team2score"].toString();
         game.date = val["Date"];
         game.status = val["status"] ?? 0;
+        game.storedTime = (val["Time"] ?? "").toString();
+        game.stage = (val["Stage"] ?? "").toString();
         if(val.containsKey("link")) {
           game.link = val["link"];
         }
@@ -628,6 +632,8 @@ Future<Map<String, List<FlagFootballGame>>> getAllFlagFootballGames(sport, seaso
         game.team2score = val["team2score"].toString();
         game.date = val["Date"];
         game.status = val["status"] ?? 0;
+        game.storedTime = (val["Time"] ?? "").toString();
+        game.stage = (val["Stage"] ?? "").toString();
         if(val.containsKey("link")) {
           game.link = val["link"];
         }

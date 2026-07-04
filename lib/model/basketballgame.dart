@@ -22,6 +22,12 @@ class BasketballGame implements Game
   late int Time;
 
   @override
+  String storedTime = "";
+
+  @override
+  String stage = "";
+
+  @override
   String UrlPath = "";
 
   @override
