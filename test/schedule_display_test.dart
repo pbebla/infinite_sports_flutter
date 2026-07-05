@@ -21,11 +21,12 @@ void main() {
   });
 
   group('stageDisplayName', () {
-    test('maps the four stages, empty otherwise', () {
+    test('maps the five stages, empty otherwise', () {
       expect(stageDisplayName('quarterfinal'), 'Quarterfinal');
       expect(stageDisplayName('semifinal'), 'Semifinal');
       expect(stageDisplayName('final'), 'Championship');
       expect(stageDisplayName('thirdPlace'), '3rd Place');
+      expect(stageDisplayName('friendly'), 'Friendly');
       expect(stageDisplayName(''), '');
       expect(stageDisplayName('regular'), '');
     });

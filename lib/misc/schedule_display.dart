@@ -21,7 +21,8 @@ String gameTimeText(String storedTime, int derivedTime) {
   return '$derivedTime:00PM';
 }
 
-/// Fan-facing playoff stage tag; '' means "no chip" (regular-season game).
+/// Fan-facing stage tag (playoff round or exhibition marker); '' means
+/// "no chip" (regular-season game).
 String stageDisplayName(String stage) {
   switch (stage) {
     case 'quarterfinal':
@@ -32,6 +33,8 @@ String stageDisplayName(String stage) {
       return 'Championship';
     case 'thirdPlace':
       return '3rd Place';
+    case 'friendly':
+      return 'Friendly';
     default:
       return '';
   }
