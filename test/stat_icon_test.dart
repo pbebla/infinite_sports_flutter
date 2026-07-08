@@ -47,4 +47,32 @@ void main() {
       expect(statIconAssetForStat('rebounds'), isNull);
     });
   });
+
+  group('statIconAsset — league activity types (League Experience P2)', () {
+    test('league penalty + own-goal spellings map to the tournament artwork',
+        () {
+      expect(statIconAsset('PenGoal'), 'assets/goal_penalty.png');
+      expect(statIconAsset('PenMissed'), 'assets/penalty_missed.png');
+      expect(statIconAsset('PenSaved'), 'assets/penalty_saved.png');
+      expect(statIconAsset('OwnGoal'), 'assets/own_goal.png');
+    });
+
+    test('league card spellings map to card artwork', () {
+      expect(statIconAsset('Yellow'), 'assets/yellow.png');
+      expect(statIconAsset('SecondYellow'), 'assets/second_yellow.png');
+      expect(statIconAsset('Red'), 'assets/red.png');
+    });
+
+    test('legacy league Blue still renders (retired for new capture)', () {
+      expect(statIconAsset('Blue'), 'assets/blue.png');
+    });
+
+    test('league row events already resolved via lowercase — stays true', () {
+      expect(statIconAsset('Goal'), 'assets/goal.png');
+      expect(statIconAsset('Assist'), 'assets/assist.png');
+      expect(statIconAsset('Save'), 'assets/save.png');
+      expect(statIconAsset('DPL'), 'assets/dpl.png');
+      expect(statIconAsset('Foul'), 'assets/foul.png');
+    });
+  });
 }

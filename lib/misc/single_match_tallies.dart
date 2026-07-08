@@ -24,6 +24,7 @@ void _applyEvent(Map<String, MatchPlayerTally> out, String type, String player) 
   switch (type.toLowerCase().trim()) {
     case 'goal':
     case 'penalty goal':
+    case 'pengoal': // league PenGoal — one timeline entry, counts as a goal
       t.goals++;
       break;
     case 'assist':
@@ -31,6 +32,7 @@ void _applyEvent(Map<String, MatchPlayerTally> out, String type, String player) 
       break;
     case 'save':
     case 'penalty saved':
+    case 'pensaved': // league PenSaved — keeper credit
       t.saves++;
       break;
     case 'dpl':
