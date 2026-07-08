@@ -1,0 +1,242 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/misc/league_adapters.dart';
+
+void main() {
+  group('leagueGameId / parseLeagueGameId', () {
+    test('round-trips date + index', () {
+      final id = leagueGameId('06152026', 2);
+      expect(id, '06152026#2');
+      final parsed = parseLeagueGameId(id)!;
+      expect(parsed.dateKey, '06152026');
+      expect(parsed.index, 2);
+    });
+
+    test('rejects non-league ids', () {
+      expect(parseLeagueGameId('m1'), isNull);
+      expect(parseLeagueGameId('06152026#x'), isNull);
+    });
+  });
+
+  group('leagueMatchFromGameMap', () {
+    Map<dynamic, dynamic> baseGame() => {
+          'team1': 'Nineveh',
+          'team2': 'Babylon',
+          'team1score': '3',
+          'team2Score': 1,
+          'status': 1,
+          'Time': '19:30',
+          'team1activity': {
+            "7'": [
+              {'Goal': 'Ashur'},
+            ],
+          },
+          'Clock': {'StartedAt': 1000, 'PausedAccumMs': 0},
+          'link': 'https://youtu.be/abc',
+        };
+
+    test('maps identity, teams, scores (string OR int), status, clock', () {
+      final m = leagueMatchFromGameMap(
+          dateKey: '06152026', index: 0, raw: baseGame());
+      expect(m.id, '06152026#0');
+      expect(m.team1Id, 'Nineveh');
+      expect(m.team2Id, 'Babylon');
+      expect(m.team1Score, 3);
+      expect(m.team2Score, 1);
+      expect(m.status, 1);
+      expect(m.matchStatus.isLive, isTrue);
+      expect(m.clock, isNotNull);
+      expect(m.clock!.startedAtMs, 1000);
+      expect(m.link, 'https://youtu.be/abc');
+      expect(m.team1Activity!["7'"], isNotNull);
+      expect(m.date, '06152026');
+    });
+
+    test('stored Time renders 12h; missing Time falls back to legacy derived',
+        () {
+      final m = leagueMatchFromGameMap(
+          dateKey: '06152026', index: 0, raw: baseGame(), startHour: 6);
+      expect(m.time, '7:30 PM');
+      final legacy = baseGame()..remove('Time');
+      final m2 = leagueMatchFromGameMap(
+          dateKey: '06152026', index: 2, raw: legacy, startHour: 6);
+      expect(m2.time, '8:00PM'); // startHour 6 + index 2, exact legacy text
+    });
+
+    test('regular-season games label as League; stages get display names', () {
+      final m = leagueMatchFromGameMap(
+          dateKey: '06152026', index: 0, raw: baseGame());
+      expect(m.stage, 'League');
+      expect(m.label, 'League');
+
+      final semi = baseGame()..['Stage'] = 'semifinal';
+      final ms = leagueMatchFromGameMap(
+          dateKey: '06152026', index: 0, raw: semi);
+      expect(ms.stage, 'semifinal');
+      expect(ms.label, 'Semifinal');
+
+      final friendly = baseGame()..['Stage'] = 'friendly';
+      final mf = leagueMatchFromGameMap(
+          dateKey: '06152026', index: 0, raw: friendly);
+      expect(mf.label, 'Friendly');
+
+      final champ = baseGame()..['Stage'] = 'final';
+      final mc = leagueMatchFromGameMap(
+          dateKey: '06152026', index: 0, raw: champ);
+      expect(mc.label, 'Championship');
+    });
+
+    test('keepers + index-keyed activity maps survive', () {
+      final raw = baseGame()
+        ..['team1keeper'] = 'Sargon'
+        ..['team2activity'] = {
+          "12'": {
+            '0': {'Save': 'Sargon'},
+            '1': {'DPL': 'Ramina'},
+          },
+        };
+      final m =
+          leagueMatchFromGameMap(dateKey: '06152026', index: 0, raw: raw);
+      expect(m.team1Keeper, 'Sargon');
+      expect(m.team2Activity!["12'"], isNotNull);
+    });
+
+    test('placeholder team names pass through for bracket rendering', () {
+      final raw = baseGame()
+        ..['team1'] = 'Winner of SF1'
+        ..['team2'] = 'Winner of SF2'
+        ..['Stage'] = 'final'
+        ..['status'] = 0;
+      final m =
+          leagueMatchFromGameMap(dateKey: '07202026', index: 0, raw: raw);
+      expect(m.team1Id, 'Winner of SF1');
+      expect(m.team2Id, 'Winner of SF2');
+    });
+  });
+
+  group('leagueMatchesFromDateNode', () {
+    test('parses List-shaped dates and index-keyed Map dates, skips holes',
+        () {
+      final node = {
+        '06152026': [
+          {'team1': 'A', 'team2': 'B', 'team1score': 0, 'team2score': 0, 'status': 0},
+          null,
+          {'team1': 'C', 'team2': 'D', 'team1score': 0, 'team2score': 0, 'status': 0},
+        ],
+        '06222026': {
+          '1': {'team1': 'E', 'team2': 'F', 'team1score': 0, 'team2score': 0, 'status': 0},
+        },
+      };
+      final matches = leagueMatchesFromDateNode(node);
+      expect(matches.length, 3);
+      final ids = matches.map((m) => m.id).toSet();
+      // Index = the real RTDB position, so the null hole is SKIPPED but the
+      // surviving indexes stay addressable (06152026#2, not #1).
+      expect(ids, {'06152026#0', '06152026#2', '06222026#1'});
+    });
+
+    test('garbage in, empty list out', () {
+      expect(leagueMatchesFromDateNode(null), isEmpty);
+      expect(leagueMatchesFromDateNode('nope'), isEmpty);
+    });
+  });
+
+  group('standings adapters', () {
+    final teamsNode = {
+      'Babylon': {'Wins': 5, 'Draws': 1, 'Losses': 2, 'GP': 8, 'GS': 20, 'GC': 10, 'GD': 10, 'Points': 16},
+      'Nineveh': {'Wins': 5, 'Draws': 1, 'Losses': 2, 'GP': 8, 'GS': 25, 'GC': 12, 'GD': 13, 'Points': 16},
+      'Ashur FC': {'Wins': 7, 'Draws': 0, 'Losses': 1, 'GP': 8, 'GS': 30, 'GC': 8, 'GD': 22, 'Points': 21},
+    };
+
+    test('parses rows + sorts Points desc, GD desc, GS desc', () {
+      final rows = leagueStandingsFromTeamsNode(
+          teamsNode, {'Ashur FC': 'http://logo/a.png'});
+      expect(rows.map((t) => t.name).toList(),
+          ['Ashur FC', 'Nineveh', 'Babylon']);
+      expect(rows.first.logoUrl, 'http://logo/a.png');
+      expect(rows.first.points, 21);
+      expect(rows.first.gp, 8);
+      expect(rows[1].gd, 13);
+    });
+
+    test('missing GP falls back to W+D+L; garbage in, empty out', () {
+      final rows = leagueStandingsFromTeamsNode({
+        'A': {'Wins': 2, 'Draws': 1, 'Losses': 1, 'GS': 5, 'GC': 3, 'GD': 2, 'Points': 7},
+      }, const {});
+      expect(rows.single.gp, 4);
+      expect(leagueStandingsFromTeamsNode(null, const {}), isEmpty);
+    });
+
+    test('leagueTeamsById covers standings + logo-only stubs', () {
+      final rows = leagueStandingsFromTeamsNode(teamsNode, const {});
+      final byId = leagueTeamsById(
+          rows, {'Akkad': 'http://logo/k.png', 'Babylon': 'http://logo/b.png'});
+      expect(byId['Babylon']!.points, 16);
+      expect(byId['Babylon']!.logoUrl, 'http://logo/b.png');
+      expect(byId['Akkad']!.points, 0); // stub for a team missing from Teams
+      expect(byId['Akkad']!.logoUrl, 'http://logo/k.png');
+    });
+  });
+
+  group('roster adapters + leaders', () {
+    final lineups = {
+      'Nineveh': {
+        'Ashur': {'Goals': 7, 'Assists': 2, 'number': '10', 'UID': 'uid-1'},
+        'Sargon': {'Saves': 12, 'CleanSheets': 3, 'Yellow': 1, 'number': '1', 'UID': '0'},
+      },
+      'Babylon': {
+        'Ninos': {'Goals': 7, 'DPL': 4, 'Red': 1, 'number': '7'},
+      },
+    };
+
+    test('players map league stat keys onto TournamentPlayer.statByName', () {
+      final rosters = leagueRostersFromLineupsNode(lineups);
+      final sargon =
+          rosters['Nineveh']!.firstWhere((p) => p.name == 'Sargon');
+      expect(sargon.statByName('saves'), 12);
+      expect(sargon.statByName('cleanSheets'), 3);
+      expect(sargon.statByName('yellowCards'), 1);
+      expect(sargon.teamId, 'Nineveh');
+      expect(sargon.teamName, 'Nineveh');
+      final ninos = rosters['Babylon']!.single;
+      expect(ninos.statByName('dpl'), 4);
+      expect(ninos.statByName('redCards'), 1);
+    });
+
+    test("legacy UID '0' means unlinked -> uid null (profile stays limited)",
+        () {
+      final rosters = leagueRostersFromLineupsNode(lineups);
+      final sargon =
+          rosters['Nineveh']!.firstWhere((p) => p.name == 'Sargon');
+      expect(sargon.uid, isNull);
+      final ashur = rosters['Nineveh']!.firstWhere((p) => p.name == 'Ashur');
+      expect(ashur.uid, 'uid-1');
+    });
+
+    test('rosters sort by shirt number', () {
+      final rosters = leagueRostersFromLineupsNode(lineups);
+      expect(rosters['Nineveh']!.first.name, 'Sargon'); // #1 before #10
+    });
+
+    test('sortedLeagueLeaders filters zeros, sorts desc, ties by name', () {
+      final rosters = leagueRostersFromLineupsNode(lineups);
+      final leaders = sortedLeagueLeaders(rosters, 'goals');
+      expect(leaders.length, 2);
+      // Ashur and Ninos both have 7 -> alphabetical tie-break.
+      expect(leaders[0].name, 'Ashur');
+      expect(leaders[1].name, 'Ninos');
+      expect(sortedLeagueLeaders(rosters, 'cleanSheets').single.name,
+          'Sargon');
+      expect(sortedLeagueLeaders(rosters, 'assists').single.name, 'Ashur');
+    });
+  });
+
+  group('leagueTeamStub', () {
+    test('carries name + logo with zeroed standings', () {
+      final t = leagueTeamStub('Nineveh', 'http://logo/n.png');
+      expect(t.id, 'Nineveh');
+      expect(t.name, 'Nineveh');
+      expect(t.logoUrl, 'http://logo/n.png');
+      expect(t.points, 0);
+    });
+  });
+}
