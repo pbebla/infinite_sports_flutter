@@ -9,3 +9,10 @@ String tournamentTopic(String tournamentId) =>
 
 String teamTopic(String tournamentId, String teamId) =>
     'tournament_${sanitizeTopicId(tournamentId)}_team_${sanitizeTopicId(teamId)}';
+
+/// League team follow topic (League Experience P2). Bell UI + FollowStore
+/// subscribe this today; NO pushes are addressed to it until the P3
+/// functions watcher lands — extend functions/src/lib/decide.ts with this
+/// EXACT builder before sending league notifications.
+String leagueTeamTopic(String sport, String season, String teamName) =>
+    'league_${sanitizeTopicId(sport)}_${sanitizeTopicId(season)}_team_${sanitizeTopicId(teamName)}';
