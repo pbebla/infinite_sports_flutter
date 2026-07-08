@@ -1,5 +1,6 @@
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/league_detail_page.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 
@@ -50,6 +51,14 @@ Future<List<ListTile>> getSeasonTiles(sport, context) async {
     var seasonView = ListTile(
       title: Text("Season $i"),
       onTap: () {
+        // League Experience P2: futsal opens the tournament-parity league
+        // page. Basketball/Flag Football keep ShowLeaguePage until P4.
+        if (sport == "Futsal") {
+          Navigator.push(context, MaterialPageRoute(builder:(context) {
+            return LeagueDetailPage(sport: "Futsal", season: season);
+          },));
+          return;
+        }
         Navigator.push(context, MaterialPageRoute(builder:(context) {
           return ShowLeaguePage(sport: sport, season: season.toString());
         },));
