@@ -19,6 +19,7 @@ import 'package:infinite_sports_flutter/tournament_match_detail.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/fixtures_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/tournament_day_view.dart';
 import 'package:infinite_sports_flutter/tournamentdetail.dart';
+import 'package:infinite_sports_flutter/widgets/league_day_view.dart';
 import 'package:infinite_sports_flutter/widgets/live_filter_bar.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
@@ -68,6 +69,10 @@ class _FrontPageState extends State<FrontPage> {
 
   // Open new-style registrations (regId -> config) for the sign-up banner.
   Map<String, RegistrationConfig> openRegistrations = {};
+
+  /// Matches-tab header for the current-league section, e.g. "Futsal League"
+  /// (P2.1 owner feedback: was the hardcoded "Infinite Sports").
+  String get _leagueTabTitle => "$currentSport League";
 
   // Drives whether the app-bar table/leaderboard shortcut buttons are hidden
   // (they are league-only and make no sense on a tournament tab).
@@ -260,7 +265,7 @@ class _FrontPageState extends State<FrontPage> {
               tabNames.clear();
               tabIsTournament.clear();
               if (!isCurrentFinished) {
-                tabNames.add(Tab(text: "Infinite Sports"));
+                tabNames.add(Tab(text: _leagueTabTitle));
                 tabIsTournament.add(false);
                 tabs.add(Column(children: [
                   if (openRegistrations.isNotEmpty)
@@ -295,9 +300,11 @@ class _FrontPageState extends State<FrontPage> {
                     },
                   ),
                   Divider(color: Theme.of(context).dividerColor, thickness: 1),
-                  Center(child: Text(convertDatabaseDateToFormatDate(currentDate), style: const TextStyle(fontWeight: FontWeight.bold))),
+                  // P2.1: live compact day view (the FixturesTab list renders
+                  // its own "Friday, June 12" date header, so the old
+                  // standalone date line above it is gone).
                   Expanded(
-                      child: LiveScorePage(sport: currentSport, season: currentSeason, date: currentDate, onTitleSelect: (String value) { widget.onTitleSelect(value); })
+                      child: LeagueDayView(sport: currentSport, season: currentSeason, date: currentDate)
                   )
                 ]));
               }
@@ -361,7 +368,7 @@ class _FrontPageState extends State<FrontPage> {
                           tabs: tabNames,
                           onTap: (value) {
                             _onTournamentTab.value = tabIsTournament[value];
-                            if (tabNames[value].text == "Infinite Sports") {
+                            if (tabNames[value].text == _leagueTabTitle) {
                               headerNotifier.value = [currentSport, currentSeason];
                             } else if (tabNames[value].text == "AFC San Jose") {
                               headerNotifier.value = ["AFC San Jose", currentAFCSeason];
@@ -468,7 +475,7 @@ class _FrontPageState extends State<FrontPage> {
     if (tabNames.isEmpty) return;
     _onTournamentTab.value =
         tabIsTournament.isNotEmpty ? tabIsTournament[0] : false;
-    if (tabNames[0].text == "Infinite Sports") {
+    if (tabNames[0].text == _leagueTabTitle) {
       headerNotifier.value = [currentSport, currentSeason];
     } else if (tabNames[0].text == "AFC San Jose") {
       headerNotifier.value = ["AFC San Jose", currentAFCSeason];

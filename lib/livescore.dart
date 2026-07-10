@@ -9,6 +9,7 @@ import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/scorepage.dart';
 import 'package:infinite_sports_flutter/misc/schedule_display.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
@@ -280,10 +281,13 @@ class _LiveScorePageState extends State<LiveScorePage> {
       future: _fetchGamesList, 
       builder:(context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(
-            child: CircularProgressIndicator(
-              color: Theme.of(context).colorScheme.primary,
-            )
+          // P2.1: skeleton rows instead of the red spinner while games load.
+          return const SingleChildScrollView(
+            physics: NeverScrollableScrollPhysics(),
+            child: Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: SkeletonMatchList(count: 6),
+            ),
           );
         }
         if (!snapshot.hasData) {

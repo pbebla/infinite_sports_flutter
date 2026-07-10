@@ -61,6 +61,17 @@ class LeagueService {
             startHour: startHour));
   }
 
+  /// Live stream of ONE date's games (P2.1: the Matches-tab league day view
+  /// watches just its date node instead of the whole season schedule).
+  /// Reuses the whole-node adapter by wrapping the single date.
+  static Stream<List<TournamentMatch>> watchDateGames(
+      String sport, String season, String dateKey,
+      {int startHour = 0}) {
+    return _ref('/$sport/$season/Date/$dateKey').onValue.map((event) =>
+        leagueMatchesFromDateNode({dateKey: event.snapshot.value},
+            startHour: startHour));
+  }
+
   /// Live stream of ONE game node. null while the node is missing.
   static Stream<TournamentMatch?> watchGame(
       String sport, String season, String dateKey, int gameIndex,

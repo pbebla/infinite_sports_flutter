@@ -138,6 +138,22 @@ void main() {
       expect(leagueMatchesFromDateNode(null), isEmpty);
       expect(leagueMatchesFromDateNode('nope'), isEmpty);
     });
+
+    // watchDateGames (P2.1 day view) wraps ONE date's snapshot value as
+    // {dateKey: value} and reuses this adapter — cover both wrapped shapes.
+    test('single-date wrapper: list of games parses, missing node is empty',
+        () {
+      final matches = leagueMatchesFromDateNode({
+        '06152026': [
+          {'team1': 'A', 'team2': 'B', 'team1score': 1, 'team2score': 0, 'status': 1},
+        ],
+      });
+      expect(matches.length, 1);
+      expect(matches.first.id, '06152026#0');
+      expect(matches.first.date, '06152026');
+      // Date node absent -> snapshot value null -> no matches.
+      expect(leagueMatchesFromDateNode({'06152026': null}), isEmpty);
+    });
   });
 
   group('standings adapters', () {
