@@ -46,6 +46,7 @@ class LeagueDayView extends StatefulWidget {
 class _LeagueDayViewState extends State<LeagueDayView> {
   List<TournamentMatch>? _matches; // null = first paint -> skeleton
   Map<String, String> _logos = {};
+  int _startHour = 0;
   StreamSubscription<List<TournamentMatch>>? _gamesSub;
 
   /// Guards the tap-time legacy fetch so a double tap doesn't push twice.
@@ -54,27 +55,32 @@ class _LeagueDayViewState extends State<LeagueDayView> {
   @override
   void initState() {
     super.initState();
-    _start();
-  }
-
-  Future<void> _start() async {
     if (widget.date.isEmpty) {
       // No current date (legacy getGames returned [] for this too).
-      setState(() => _matches = const []);
+      _matches = const [];
       return;
     }
-    final results = await Future.wait([
-      LeagueService.getStartHour(widget.sport, widget.season),
-      LeagueService.leagueLogoUrls(widget.sport, widget.season),
-    ]);
-    if (!mounted) return;
-    final startHour = results[0] as int;
-    _logos = results[1] as Map<String, String>;
+    // First paint speed (P2.1): subscribe immediately with default seeds
+    // (startHour 0, no logos); each seed re-applies when it arrives.
+    _subscribeGames();
+    LeagueService.getStartHour(widget.sport, widget.season).then((h) {
+      if (!mounted || h == _startHour) return;
+      _startHour = h;
+      _subscribeGames();
+    });
+    LeagueService.leagueLogoUrls(widget.sport, widget.season).then((logos) {
+      if (!mounted || logos.isEmpty) return;
+      setState(() => _logos = logos);
+    });
+  }
+
+  void _subscribeGames() {
+    _gamesSub?.cancel();
     _gamesSub = LeagueService.watchDateGames(
       widget.sport,
       widget.season,
       widget.date,
-      startHour: startHour,
+      startHour: _startHour,
     ).listen((m) {
       if (mounted) setState(() => _matches = m);
     });

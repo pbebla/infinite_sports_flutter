@@ -6,11 +6,13 @@ import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 /// streamed from the Manager-maintained Teams node — exact legacy
 /// table.dart futsal columns (GP W D L GF GA GD P). Staged (playoff /
 /// friendly) games are already excluded at the source: L3's finalize flow
-/// skips standings for games with a Stage.
+/// skips standings for games with a Stage. Rows are tappable when
+/// [onOpenTeam] is set (P2.1: opens the league team page).
 class LeagueTableTab extends StatelessWidget {
   final List<TournamentTeam> standings;
+  final void Function(String teamName)? onOpenTeam;
 
-  const LeagueTableTab({super.key, required this.standings});
+  const LeagueTableTab({super.key, required this.standings, this.onOpenTeam});
 
   @override
   Widget build(BuildContext context) {
@@ -22,6 +24,7 @@ class LeagueTableTab extends StatelessWidget {
         width: MediaQuery.of(context).size.width,
         child: DataTable(
           columnSpacing: 0,
+          showCheckboxColumn: false,
           headingRowColor: WidgetStateProperty.resolveWith<Color?>(
               (Set<WidgetState> states) =>
                   Theme.of(context).colorScheme.surfaceContainerHighest),
@@ -39,21 +42,25 @@ class LeagueTableTab extends StatelessWidget {
           ],
           rows: [
             for (final team in standings)
-              DataRow(cells: [
-                DataCell(TeamLogo(url: team.logoUrl, size: 26)),
-                DataCell(Text(team.name)),
-                DataCell(Text('${team.gp}')),
-                DataCell(Text('${team.wins}')),
-                DataCell(Text('${team.draws}')),
-                DataCell(Text('${team.losses}')),
-                DataCell(Text('${team.gs}')),
-                DataCell(Text('${team.gc}')),
-                DataCell(Text('${team.gd}')),
-                DataCell(Text(
-                  '${team.points}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                )),
-              ]),
+              DataRow(
+                  onSelectChanged: onOpenTeam == null
+                      ? null
+                      : (_) => onOpenTeam!(team.id),
+                  cells: [
+                    DataCell(TeamLogo(url: team.logoUrl, size: 26)),
+                    DataCell(Text(team.name)),
+                    DataCell(Text('${team.gp}')),
+                    DataCell(Text('${team.wins}')),
+                    DataCell(Text('${team.draws}')),
+                    DataCell(Text('${team.losses}')),
+                    DataCell(Text('${team.gs}')),
+                    DataCell(Text('${team.gc}')),
+                    DataCell(Text('${team.gd}')),
+                    DataCell(Text(
+                      '${team.points}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    )),
+                  ]),
           ],
         ),
       ),

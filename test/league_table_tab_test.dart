@@ -28,4 +28,22 @@ void main() {
         home: Scaffold(body: LeagueTableTab(standings: []))));
     expect(find.text('Table not yet available'), findsOneWidget);
   });
+
+  testWidgets('tapping a row reports that team via onOpenTeam',
+      (tester) async {
+    final standings = leagueStandingsFromTeamsNode({
+      'Babylon': {'Wins': 3, 'Draws': 0, 'Losses': 5, 'GP': 8, 'GS': 9, 'GC': 20, 'GD': -11, 'Points': 9},
+      'Nineveh': {'Wins': 7, 'Draws': 1, 'Losses': 0, 'GP': 8, 'GS': 30, 'GC': 5, 'GD': 25, 'Points': 22},
+    }, const {});
+    final opened = <String>[];
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: LeagueTableTab(
+      standings: standings,
+      onOpenTeam: opened.add,
+    ))));
+    await tester.tap(find.text('Babylon'));
+    await tester.pump();
+    expect(opened, ['Babylon']);
+  });
 }

@@ -51,6 +51,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
   TournamentMatch? _match;
   Map<String, List<TournamentPlayer>> _rosters = {};
   Map<String, String> _logos = {};
+  int _startHour = 0;
   StreamSubscription<TournamentMatch?>? _matchSub;
   StreamSubscription<Map<String, List<TournamentPlayer>>>? _rosterSub;
 
@@ -58,28 +59,34 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
   void initState() {
     super.initState();
     _match = widget.initialMatch;
-    _start();
+    // First paint speed (P2.1): subscribe immediately with default seeds;
+    // startHour (kick-off fallback text) re-applies via re-subscribe and
+    // logos apply at build time when they arrive.
+    _subscribeMatch();
+    _rosterSub =
+        LeagueService.watchRosters(widget.sport, widget.season).listen((r) {
+      if (mounted) setState(() => _rosters = r);
+    });
+    LeagueService.getStartHour(widget.sport, widget.season).then((h) {
+      if (!mounted || h == _startHour) return;
+      _startHour = h;
+      _subscribeMatch();
+    });
+    LeagueService.leagueLogoUrls(widget.sport, widget.season).then((logos) {
+      if (!mounted || logos.isEmpty) return;
+      setState(() => _logos = logos);
+    });
   }
 
-  Future<void> _start() async {
-    final results = await Future.wait([
-      LeagueService.getStartHour(widget.sport, widget.season),
-      LeagueService.leagueLogoUrls(widget.sport, widget.season),
-    ]);
-    if (!mounted) return;
-    final startHour = results[0] as int;
-    setState(() => _logos = results[1] as Map<String, String>);
+  void _subscribeMatch() {
+    _matchSub?.cancel();
     _matchSub = LeagueService.watchGame(
       widget.sport,
       widget.season,
       widget.dateKey,
       widget.gameIndex,
-      startHour: startHour,
+      startHour: _startHour,
     ).listen(_onMatch);
-    _rosterSub =
-        LeagueService.watchRosters(widget.sport, widget.season).listen((r) {
-      if (mounted) setState(() => _rosters = r);
-    });
   }
 
   /// Live score-increase detection while the page is open → in-app goal

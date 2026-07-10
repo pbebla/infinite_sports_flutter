@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/league_match_detail.dart';
+import 'package:infinite_sports_flutter/league_tabs/league_fixtures_tab.dart';
 import 'package:infinite_sports_flutter/league_tabs/league_player_stats_tab.dart';
 import 'package:infinite_sports_flutter/league_tabs/league_playoffs_tab.dart';
 import 'package:infinite_sports_flutter/league_tabs/league_table_tab.dart';
@@ -14,7 +15,6 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
-import 'package:infinite_sports_flutter/tournament_tabs/fixtures_tab.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 /// Tournament-parity league season page (League Experience P2): Fixtures /
@@ -49,11 +49,14 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
   late final TabController _tabController =
       TabController(length: _tabs.length, vsync: this);
 
-  List<TournamentMatch>? _matches; // null = first paint → skeleton
-  List<TournamentTeam> _standings = [];
-  Map<String, List<TournamentPlayer>> _rosters = {};
+  // null = that stream's first snapshot hasn't arrived → tab skeleton.
+  List<TournamentMatch>? _matches;
+  List<TournamentTeam>? _standings;
+  Map<String, List<TournamentPlayer>>? _rosters;
   LeaguePlayoffs? _playoffs;
+  bool _playoffsLoaded = false; // null is meaningful (no playoffs yet)
   Map<String, String> _logos = {};
+  int _startHour = 0;
 
   StreamSubscription<List<TournamentMatch>>? _gamesSub;
   StreamSubscription<List<TournamentTeam>>? _standingsSub;
@@ -63,34 +66,58 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
   @override
   void initState() {
     super.initState();
-    _start();
-  }
-
-  Future<void> _start() async {
-    final results = await Future.wait([
-      LeagueService.getStartHour(widget.sport, widget.season),
-      LeagueService.leagueLogoUrls(widget.sport, widget.season),
-    ]);
-    if (!mounted) return;
-    final startHour = results[0] as int;
-    _logos = results[1] as Map<String, String>;
-    _gamesSub = LeagueService
-        .watchGames(widget.sport, widget.season, startHour: startHour)
-        .listen((m) {
-      if (mounted) setState(() => _matches = m);
-    });
-    _standingsSub = LeagueService
-        .watchStandings(widget.sport, widget.season, _logos)
-        .listen((s) {
-      if (mounted) setState(() => _standings = s);
-    });
+    // First paint speed (P2.1): the 4 streams subscribe IMMEDIATELY with
+    // default display seeds (startHour 0, no logos) instead of waiting two
+    // round trips; the seeds re-apply below when they arrive.
+    _subscribeGames();
+    _subscribeStandings();
     _rostersSub =
         LeagueService.watchRosters(widget.sport, widget.season).listen((r) {
       if (mounted) setState(() => _rosters = r);
     });
     _playoffsSub =
         LeagueService.watchPlayoffs(widget.sport, widget.season).listen((p) {
-      if (mounted) setState(() => _playoffs = p);
+      if (mounted) {
+        setState(() {
+          _playoffs = p;
+          _playoffsLoaded = true;
+        });
+      }
+    });
+    _loadDisplaySeeds();
+  }
+
+  void _subscribeGames() {
+    _gamesSub?.cancel();
+    _gamesSub = LeagueService
+        .watchGames(widget.sport, widget.season, startHour: _startHour)
+        .listen((m) {
+      if (mounted) setState(() => _matches = m);
+    });
+  }
+
+  void _subscribeStandings() {
+    _standingsSub?.cancel();
+    _standingsSub = LeagueService
+        .watchStandings(widget.sport, widget.season, _logos)
+        .listen((s) {
+      if (mounted) setState(() => _standings = s);
+    });
+  }
+
+  /// startHour (kick-off fallback text) and logos are cosmetic seeds, not
+  /// gates: when each arrives, re-subscribe the stream that maps with it —
+  /// Firebase re-emits instantly from its local cache.
+  void _loadDisplaySeeds() {
+    LeagueService.getStartHour(widget.sport, widget.season).then((h) {
+      if (!mounted || h == _startHour) return;
+      _startHour = h;
+      _subscribeGames();
+    });
+    LeagueService.leagueLogoUrls(widget.sport, widget.season).then((logos) {
+      if (!mounted || logos.isEmpty) return;
+      setState(() => _logos = logos);
+      _subscribeStandings();
     });
   }
 
@@ -105,7 +132,17 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
   }
 
   Map<String, TournamentTeam> get _teamsById =>
-      leagueTeamsById(_standings, _logos);
+      leagueTeamsById(_standings ?? const [], _logos);
+
+  /// Skeleton body for a tab whose stream hasn't emitted yet (P2.1 audit:
+  /// skeletons, never spinners, on league first loads).
+  Widget _tabSkeleton() => const SingleChildScrollView(
+        physics: NeverScrollableScrollPhysics(),
+        child: Padding(
+          padding: EdgeInsets.only(top: 8),
+          child: SkeletonMatchList(count: 8),
+        ),
+      );
 
   void _openMatch(TournamentMatch m) {
     final ref = parseLeagueGameId(m.id);
@@ -181,33 +218,43 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
               body: TabBarView(
                 controller: _tabController,
                 children: [
-                  FixturesTab(
+                  LeagueFixturesTab(
                     matches: matches,
                     teams: _teamsById,
-                    rosters: _rosters,
-                    tournamentId: '',
+                    rosters: _rosters ?? const {},
                     sport: widget.sport,
                     onMatchTap: _openMatch,
                   ),
-                  LeagueTableTab(standings: _standings),
-                  LeaguePlayoffsTab(
-                    playoffs: _playoffs,
-                    matches: matches,
-                    teams: _teamsById,
-                    season: widget.season,
-                    onMatchTap: _openMatch,
-                  ),
-                  LeaguePlayerStatsTab(
-                    rosters: _rosters,
-                    teams: _teamsById,
-                    onOpenTeam: _openTeam,
-                  ),
-                  LeagueTeamsTab(
-                    sport: widget.sport,
-                    season: widget.season,
-                    standings: _standings,
-                    matches: matches,
-                  ),
+                  _standings == null
+                      ? _tabSkeleton()
+                      : LeagueTableTab(
+                          standings: _standings!,
+                          onOpenTeam: _openTeam,
+                        ),
+                  !_playoffsLoaded
+                      ? _tabSkeleton()
+                      : LeaguePlayoffsTab(
+                          playoffs: _playoffs,
+                          matches: matches,
+                          teams: _teamsById,
+                          season: widget.season,
+                          onMatchTap: _openMatch,
+                        ),
+                  _rosters == null
+                      ? _tabSkeleton()
+                      : LeaguePlayerStatsTab(
+                          rosters: _rosters!,
+                          teams: _teamsById,
+                          onOpenTeam: _openTeam,
+                        ),
+                  _standings == null
+                      ? _tabSkeleton()
+                      : LeagueTeamsTab(
+                          sport: widget.sport,
+                          season: widget.season,
+                          standings: _standings!,
+                          matches: matches,
+                        ),
                 ],
               ),
             ),

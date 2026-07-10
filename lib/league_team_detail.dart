@@ -13,6 +13,7 @@ import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:infinite_sports_flutter/widgets/follow_bell.dart';
 import 'package:infinite_sports_flutter/widgets/form_chips.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:intl/intl.dart';
 
@@ -37,10 +38,12 @@ class LeagueTeamDetailPage extends StatefulWidget {
 }
 
 class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage> {
-  List<TournamentMatch> _matches = [];
-  List<TournamentTeam> _standings = [];
-  Map<String, List<TournamentPlayer>> _rosters = {};
+  // null = that stream's first snapshot hasn't arrived → section skeleton.
+  List<TournamentMatch>? _matches;
+  List<TournamentTeam>? _standings;
+  Map<String, List<TournamentPlayer>>? _rosters;
   Map<String, String> _logos = {};
+  int _startHour = 0;
   StreamSubscription<List<TournamentMatch>>? _gamesSub;
   StreamSubscription<List<TournamentTeam>>? _standingsSub;
   StreamSubscription<Map<String, List<TournamentPlayer>>>? _rostersSub;
@@ -48,30 +51,41 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage> {
   @override
   void initState() {
     super.initState();
-    _start();
+    // First paint speed (P2.1): subscribe immediately with default seeds
+    // (startHour 0, no logos); each seed re-applies when it arrives.
+    _subscribeGames();
+    _subscribeStandings();
+    _rostersSub =
+        LeagueService.watchRosters(widget.sport, widget.season).listen((r) {
+      if (mounted) setState(() => _rosters = r);
+    });
+    LeagueService.getStartHour(widget.sport, widget.season).then((h) {
+      if (!mounted || h == _startHour) return;
+      _startHour = h;
+      _subscribeGames();
+    });
+    LeagueService.leagueLogoUrls(widget.sport, widget.season).then((logos) {
+      if (!mounted || logos.isEmpty) return;
+      setState(() => _logos = logos);
+      _subscribeStandings();
+    });
   }
 
-  Future<void> _start() async {
-    final results = await Future.wait([
-      LeagueService.getStartHour(widget.sport, widget.season),
-      LeagueService.leagueLogoUrls(widget.sport, widget.season),
-    ]);
-    if (!mounted) return;
-    final startHour = results[0] as int;
-    setState(() => _logos = results[1] as Map<String, String>);
+  void _subscribeGames() {
+    _gamesSub?.cancel();
     _gamesSub = LeagueService
-        .watchGames(widget.sport, widget.season, startHour: startHour)
+        .watchGames(widget.sport, widget.season, startHour: _startHour)
         .listen((m) {
       if (mounted) setState(() => _matches = m);
     });
+  }
+
+  void _subscribeStandings() {
+    _standingsSub?.cancel();
     _standingsSub = LeagueService
         .watchStandings(widget.sport, widget.season, _logos)
         .listen((s) {
       if (mounted) setState(() => _standings = s);
-    });
-    _rostersSub =
-        LeagueService.watchRosters(widget.sport, widget.season).listen((r) {
-      if (mounted) setState(() => _rosters = r);
     });
   }
 
@@ -84,7 +98,7 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage> {
   }
 
   /// Live record straight from the standings stream; stub until it lands.
-  TournamentTeam get _team => _standings.firstWhere(
+  TournamentTeam get _team => (_standings ?? const <TournamentTeam>[]).firstWhere(
         (t) => t.id == widget.teamName,
         orElse: () =>
             leagueTeamStub(widget.teamName, _logos[widget.teamName]),
@@ -116,9 +130,10 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage> {
   @override
   Widget build(BuildContext context) {
     final team = _team;
-    final myMatches = teamLeagueMatches(widget.teamName, _matches);
-    final form = teamLeagueForm(widget.teamName, _matches);
-    final roster = _rosters[widget.teamName] ?? <TournamentPlayer>[];
+    final matches = _matches ?? const <TournamentMatch>[];
+    final myMatches = teamLeagueMatches(widget.teamName, matches);
+    final form = teamLeagueForm(widget.teamName, matches);
+    final roster = _rosters?[widget.teamName] ?? <TournamentPlayer>[];
 
     return Scaffold(
       body: NestedScrollView(
@@ -145,11 +160,17 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage> {
           padding: const EdgeInsets.only(bottom: 24),
           children: [
             _sectionHeader(context, 'RESULTS & FIXTURES'),
-            if (myMatches.isEmpty)
+            // Skeleton rows until each section's stream lands (P2.1 audit).
+            if (_matches == null)
+              const SkeletonMatchList(count: 3)
+            else if (myMatches.isEmpty)
               _emptyNote(context, 'No games scheduled yet'),
             ...myMatches.map((m) => _matchRow(context, m)),
             _sectionHeader(context, 'SQUAD'),
-            if (roster.isEmpty) _emptyNote(context, 'No roster yet'),
+            if (_rosters == null)
+              const SkeletonMatchList(count: 3)
+            else if (roster.isEmpty)
+              _emptyNote(context, 'No roster yet'),
             ...roster.map((p) => _playerRow(context, p)),
           ],
         ),
@@ -192,11 +213,15 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage> {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      'W${team.wins} D${team.draws} L${team.losses} · ${team.points} pts · Season ${widget.season}',
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 12),
-                    ),
+                    if (_standings == null)
+                      // Record skeleton until the standings stream lands.
+                      const SkeletonBox(width: 170, height: 12)
+                    else
+                      Text(
+                        'W${team.wins} D${team.draws} L${team.losses} · ${team.points} pts · Season ${widget.season}',
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 12),
+                      ),
                     if (form.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       FormChips(form: form),
