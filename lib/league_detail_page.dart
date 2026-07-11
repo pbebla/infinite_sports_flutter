@@ -181,7 +181,17 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
       body: matches == null
           ? Column(
               children: [
-                Container(height: 150, color: const Color(0xFF1A237E)),
+                // Skeleton header keeps a visible white back arrow too
+                // (P2.1 Task A3 back-arrow audit).
+                Container(
+                  height: 150,
+                  color: const Color(0xFF1A237E),
+                  alignment: Alignment.topLeft,
+                  child: const SafeArea(
+                    bottom: false,
+                    child: BackButton(color: Colors.white),
+                  ),
+                ),
                 const Expanded(
                   child: SingleChildScrollView(
                     physics: NeverScrollableScrollPhysics(),
@@ -200,6 +210,11 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                   pinned: true,
                   backgroundColor: const Color(0xFF1A237E),
                   foregroundColor: Colors.white,
+                  // Force the back arrow white in BOTH themes — the global
+                  // appBarTheme.iconTheme is onSurface, which goes dark on
+                  // this navy header in light mode (P2.1 Task A3 fix).
+                  iconTheme: const IconThemeData(color: Colors.white),
+                  actionsIconTheme: const IconThemeData(color: Colors.white),
                   flexibleSpace: FlexibleSpaceBar(
                     background: _buildHeader(context),
                   ),

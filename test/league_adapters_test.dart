@@ -1,3 +1,5 @@
+import 'dart:ui' show Color;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 
@@ -253,6 +255,80 @@ void main() {
       expect(t.name, 'Nineveh');
       expect(t.logoUrl, 'http://logo/n.png');
       expect(t.points, 0);
+      expect(t.homeColor, isNull);
+      expect(t.coachName, isNull);
+    });
+
+    test('optionally carries color + coach (empty coach means unset)', () {
+      final t = leagueTeamStub('Nineveh', null,
+          color: const Color(0xFF1A237E), coach: 'Sargon');
+      expect(t.homeColor, const Color(0xFF1A237E));
+      expect(t.coachName, 'Sargon');
+      expect(leagueTeamStub('Nineveh', null, coach: '  ').coachName, isNull);
+    });
+  });
+
+  // P2.1 Task A3 read contract:
+  // `{sport}/{season}/Teams/{team}/Captain|Color|Coach` — all optional
+  // strings maintained by the Manager app.
+  group('team metadata (Captain / Color / Coach)', () {
+    test('parseLeagueTeamColor: tournament hex formats plus plain hex', () {
+      expect(parseLeagueTeamColor('#D00000'), const Color(0xFFD00000));
+      expect(parseLeagueTeamColor('D00000'), const Color(0xFFD00000));
+      expect(parseLeagueTeamColor(' #1A237E '), const Color(0xFF1A237E));
+      expect(parseLeagueTeamColor('801A237E'), const Color(0x801A237E));
+      expect(parseLeagueTeamColor('0xFF1A237E'), const Color(0xFF1A237E));
+    });
+
+    test('parseLeagueTeamColor fails gracefully to null', () {
+      expect(parseLeagueTeamColor(null), isNull);
+      expect(parseLeagueTeamColor(''), isNull);
+      expect(parseLeagueTeamColor('red'), isNull);
+      expect(parseLeagueTeamColor('#12'), isNull);
+      expect(parseLeagueTeamColor('#GGGGGG'), isNull);
+      expect(parseLeagueTeamColor(12345), isNull);
+    });
+
+    test('standings rows carry optional Color + Coach', () {
+      final rows = leagueStandingsFromTeamsNode({
+        'Nineveh': {
+          'Wins': 4, 'Draws': 0, 'Losses': 0, 'Points': 12,
+          'Color': '#1A237E',
+          'Coach': 'Sargon',
+          'Captain': 'Ashur',
+        },
+        'Babylon': {'Wins': 1, 'Draws': 0, 'Losses': 3, 'Points': 3},
+      }, const {});
+      final nineveh = rows.firstWhere((t) => t.id == 'Nineveh');
+      expect(nineveh.homeColor, const Color(0xFF1A237E));
+      expect(nineveh.coachName, 'Sargon');
+      final babylon = rows.firstWhere((t) => t.id == 'Babylon');
+      expect(babylon.homeColor, isNull);
+      expect(babylon.coachName, isNull);
+    });
+
+    test('invalid Color / empty Coach parse to null (row hidden in UI)', () {
+      final rows = leagueStandingsFromTeamsNode({
+        'Nineveh': {'Points': 12, 'Color': 'navy blue', 'Coach': ''},
+      }, const {});
+      expect(rows.single.homeColor, isNull);
+      expect(rows.single.coachName, isNull);
+    });
+
+    test('leagueCaptainsFromTeamsNode: captain side-channel by team name',
+        () {
+      final captains = leagueCaptainsFromTeamsNode({
+        'Nineveh': {'Points': 12, 'Captain': 'Ashur'},
+        'Babylon': {'Points': 3}, // no captain -> absent
+        'Akkad': {'Points': 1, 'Captain': '  '}, // blank -> absent
+      });
+      expect(captains, {'Nineveh': 'Ashur'});
+    });
+
+    test('leagueCaptainsFromTeamsNode: garbage in, empty out', () {
+      expect(leagueCaptainsFromTeamsNode(null), isEmpty);
+      expect(leagueCaptainsFromTeamsNode('nope'), isEmpty);
+      expect(leagueCaptainsFromTeamsNode({'Nineveh': 'not-a-map'}), isEmpty);
     });
   });
 }

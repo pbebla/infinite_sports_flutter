@@ -2,12 +2,20 @@
 // reused tournament widgets (FixturesTab, KnockoutTab, MatchFactsTab,
 // ShareMatchCard, ...) render. League Experience P2.
 // NO Flutter/Firebase imports — unit-tested in test/league_adapters_test.dart.
+// (dart:ui Color only, same as the TournamentTeam model itself.)
 //
 // Conventions:
 // - League teams are keyed by NAME everywhere, so TournamentTeam.id and
 //   TournamentPlayer.teamId carry the team name.
 // - Game identity is the RTDB pair the game node lives under:
 //   '{MMDDYYYY}#{index}' (leagueGameId / parseLeagueGameId).
+// - Team metadata (P2.1 Task A3) read contract, maintained by the Manager
+//   app: `{sport}/{season}/Teams/{team}/Captain|Color|Coach` — ALL optional
+//   strings. Color/Coach ride on TournamentTeam (homeColor/coachName);
+//   Captain has no TournamentTeam field, so it travels via the
+//   leagueCaptainsFromTeamsNode side-channel.
+
+import 'dart:ui' show Color;
 
 import 'package:infinite_sports_flutter/misc/match_clock.dart';
 import 'package:infinite_sports_flutter/misc/match_location.dart';
@@ -127,9 +135,29 @@ List<TournamentMatch> leagueMatchesFromDateNode(dynamic dateNode,
   return out;
 }
 
+/// League jersey `Color` string -> [Color]. Accepts the formats tournament
+/// teams already use PLUS plain hex: optional `#` or `0x` prefix, 6 hex
+/// digits (RGB, alpha forced opaque) or 8 (ARGB). Anything else -> null,
+/// so callers fail gracefully by hiding the jersey row.
+Color? parseLeagueTeamColor(dynamic value) {
+  if (value == null) return null;
+  var clean = value.toString().trim();
+  if (clean.startsWith('#')) clean = clean.substring(1);
+  if (clean.toLowerCase().startsWith('0x')) clean = clean.substring(2);
+  if (clean.length == 6) clean = 'FF$clean';
+  if (clean.length != 8) return null;
+  final intValue = int.tryParse(clean, radix: 16);
+  if (intValue == null) return null;
+  return Color(intValue);
+}
+
 /// Logo-only team (name + crest, zeroed standings) for teams that are not
 /// (yet) in the Teams node — e.g. match pages before standings exist.
-TournamentTeam leagueTeamStub(String name, String? logoUrl) => TournamentTeam(
+/// [color]/[coach] let callers that already hold the season metadata keep
+/// carrying it on the stub (homeColor/coachName, the tournament fields).
+TournamentTeam leagueTeamStub(String name, String? logoUrl,
+        {Color? color, String? coach}) =>
+    TournamentTeam(
       id: name,
       name: name,
       logoUrl: logoUrl,
@@ -142,6 +170,8 @@ TournamentTeam leagueTeamStub(String name, String? logoUrl) => TournamentTeam(
       gc: 0,
       gd: 0,
       points: 0,
+      homeColor: color,
+      coachName: (coach == null || coach.trim().isEmpty) ? null : coach,
     );
 
 /// Futsal standings sort (exact table.dart parity):
@@ -168,6 +198,7 @@ List<TournamentTeam> leagueStandingsFromTeamsNode(
     final wins = parseInt(v['Wins']);
     final draws = parseInt(v['Draws']);
     final losses = parseInt(v['Losses']);
+    final coach = v['Coach']?.toString();
     out.add(TournamentTeam(
       id: name.toString(),
       name: name.toString(),
@@ -181,9 +212,28 @@ List<TournamentTeam> leagueStandingsFromTeamsNode(
       gc: parseInt(v['GC']),
       gd: parseInt(v['GD']),
       points: parseInt(v['Points']),
+      // Optional Manager-maintained metadata (P2.1 Task A3 read contract).
+      homeColor: parseLeagueTeamColor(v['Color']),
+      coachName: (coach == null || coach.trim().isEmpty) ? null : coach,
     ));
   });
   sortLeagueStandings(out);
+  return out;
+}
+
+/// Captain side-channel for the `{sport}/{season}/Teams/{team}/Captain`
+/// key (TournamentTeam has no captain field): team name -> captain player
+/// name. Teams without a (non-empty) Captain are simply absent.
+Map<String, String> leagueCaptainsFromTeamsNode(dynamic teamsNode) {
+  final out = <String, String>{};
+  if (teamsNode is! Map) return out;
+  teamsNode.forEach((name, v) {
+    if (v is! Map) return;
+    final captain = v['Captain']?.toString().trim();
+    if (captain != null && captain.isNotEmpty) {
+      out[name.toString()] = captain;
+    }
+  });
   return out;
 }
 

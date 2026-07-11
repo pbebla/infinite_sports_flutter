@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/league_team_detail.dart';
 import 'package:infinite_sports_flutter/misc/goal_toast.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
@@ -129,6 +130,21 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
     return leagueTeamStub(name, _logos[name]);
   }
 
+  /// Score-header team tap → that team's league page (P2.1 Task A3
+  /// tap-through audit).
+  void _openTeam(String teamName) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LeagueTeamDetailPage(
+          sport: widget.sport,
+          season: widget.season,
+          teamName: teamName,
+        ),
+      ),
+    );
+  }
+
   String _formatDate(String mmddyyyy) {
     final dt = parseDatabaseDate(mmddyyyy);
     if (dt == null) return mmddyyyy;
@@ -217,7 +233,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
     Widget teamColumn(TournamentTeam? team, String? fallbackName) {
       final placeholder =
           fallbackName != null && isPlaceholderTeam(fallbackName);
-      return Column(
+      final column = Column(
         children: [
           placeholder
               ? const Icon(Icons.emoji_events,
@@ -236,6 +252,14 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
             maxLines: 2,
           ),
         ],
+      );
+      // Real teams (not 'Winner of SF1' placeholders) tap through to the
+      // league team page.
+      if (team == null) return column;
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _openTeam(team.id),
+        child: column,
       );
     }
 
@@ -309,6 +333,11 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
         appBar: AppBar(
           backgroundColor: const Color(0xFF1A237E),
           foregroundColor: Colors.white,
+          // Force the back arrow white in BOTH themes — the global
+          // appBarTheme.iconTheme is onSurface, which goes dark on this
+          // navy header in light mode (P2.1 Task A3 fix).
+          iconTheme: const IconThemeData(color: Colors.white),
+          actionsIconTheme: const IconThemeData(color: Colors.white),
         ),
         body: const SingleChildScrollView(
           physics: NeverScrollableScrollPhysics(),
@@ -337,6 +366,9 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
               pinned: true,
               backgroundColor: const Color(0xFF1A237E),
               foregroundColor: Colors.white,
+              // White back arrow + actions in BOTH themes (see above).
+              iconTheme: const IconThemeData(color: Colors.white),
+              actionsIconTheme: const IconThemeData(color: Colors.white),
               actions: [
                 IconButton(
                   icon: const Icon(Icons.ios_share),

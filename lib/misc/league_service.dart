@@ -98,6 +98,16 @@ class LeagueService {
         leagueStandingsFromTeamsNode(event.snapshot.value, logoUrls));
   }
 
+  /// Live captain map (team name -> Captain player name) from the same
+  /// Manager-maintained Teams node (P2.1 Task A3 side-channel — Captain has
+  /// no TournamentTeam field to ride on).
+  static Stream<Map<String, String>> watchCaptains(
+      String sport, String season) {
+    return _ref('/$sport/$season/Teams')
+        .onValue
+        .map((event) => leagueCaptainsFromTeamsNode(event.snapshot.value));
+  }
+
   /// Live rosters (season-total player stats) from Line Ups.
   static Stream<Map<String, List<TournamentPlayer>>> watchRosters(
       String sport, String season) {

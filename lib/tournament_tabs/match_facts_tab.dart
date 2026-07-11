@@ -128,6 +128,36 @@ class MatchFactsTab extends StatelessWidget {
     return StatIcon(asset: statIconAsset(eventType), size: 24);
   }
 
+  /// Resolves a timeline name against the threaded rosters (own team first)
+  /// so timeline taps open the right profile. Guests / unlinked players
+  /// resolve to null -> limited profile by name.
+  TournamentPlayer? _rosterPlayer(String name, bool isTeam1) {
+    final primary = isTeam1 ? team1Players : team2Players;
+    final secondary = isTeam1 ? team2Players : team1Players;
+    for (final p in primary) {
+      if (p.name == name) return p;
+    }
+    for (final p in secondary) {
+      if (p.name == name) return p;
+    }
+    return null;
+  }
+
+  /// Timeline player names open profiles, matching the Match Leaders rows
+  /// (P2.1 Task A3 tap-through audit).
+  Widget _tappableName(BuildContext context, Widget child, String? name,
+      bool isTeam1) {
+    if (name == null || name.trim().isEmpty) return child;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        final p = _rosterPlayer(name, isTeam1);
+        openPlayerProfileById(context, uid: p?.uid, name: name);
+      },
+      child: child,
+    );
+  }
+
   Widget _buildEventRow(BuildContext context, Map<String, dynamic> event) {
     final isTeam1 = event['isTeam1'] as bool;
     final minute = event['minute'] as String;
@@ -144,27 +174,40 @@ class MatchFactsTab extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (subOn != null)
-            Text(subOn,
-                style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF0A7D2C),
-                    fontWeight: FontWeight.w600),
-                overflow: TextOverflow.ellipsis),
+            _tappableName(
+                context,
+                Text(subOn,
+                    style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF0A7D2C),
+                        fontWeight: FontWeight.w600),
+                    overflow: TextOverflow.ellipsis),
+                subOn,
+                isTeam1),
           if (subOff != null)
-            Text(subOff,
-                style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFFEF5350),
-                    fontWeight: FontWeight.w600),
-                overflow: TextOverflow.ellipsis),
+            _tappableName(
+                context,
+                Text(subOff,
+                    style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFFEF5350),
+                        fontWeight: FontWeight.w600),
+                    overflow: TextOverflow.ellipsis),
+                subOff,
+                isTeam1),
         ],
       );
     } else {
-      nameWidget = Text(
+      nameWidget = _tappableName(
+        context,
+        Text(
+          playerName,
+          style: const TextStyle(fontSize: 12),
+          overflow: TextOverflow.ellipsis,
+          textAlign: isTeam1 ? TextAlign.left : TextAlign.right,
+        ),
         playerName,
-        style: const TextStyle(fontSize: 12),
-        overflow: TextOverflow.ellipsis,
-        textAlign: isTeam1 ? TextAlign.left : TextAlign.right,
+        isTeam1,
       );
     }
 

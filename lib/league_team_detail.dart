@@ -13,14 +13,20 @@ import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:infinite_sports_flutter/widgets/follow_bell.dart';
 import 'package:infinite_sports_flutter/widgets/form_chips.dart';
+import 'package:infinite_sports_flutter/widgets/jersey_painter.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:intl/intl.dart';
 
-/// League team detail (League Experience P2): live record header + follow
-/// bell (bell UI + FollowStore persistence only — league pushes arrive
-/// with the P3 watcher), form chips, results/fixtures that open the league
-/// match page, and the squad with player-profile taps.
+/// League team page (P2.1 Task A3): structurally the tournament team page
+/// (lib/tournamentteamdetail.dart) — same Overview / Squad / Stats inner
+/// tabs on the navy SliverAppBar — but SEASON-SCOPED: record, results,
+/// squad and info are all THIS season's; no cross-season history card.
+/// League differences: Team Info shows Captain + Players (not
+/// Established/City), the record box is titled "League Record", and the
+/// Overview keeps the results & fixtures list below the info cards.
+/// Metadata read contract: `{sport}/{season}/Teams/{team}/Captain|Color|
+/// Coach` (all optional strings, Manager-maintained).
 class LeagueTeamDetailPage extends StatefulWidget {
   final String sport;
   final String season;
@@ -37,16 +43,22 @@ class LeagueTeamDetailPage extends StatefulWidget {
   State<LeagueTeamDetailPage> createState() => _LeagueTeamDetailPageState();
 }
 
-class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage> {
+class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController =
+      TabController(length: 3, vsync: this);
+
   // null = that stream's first snapshot hasn't arrived → section skeleton.
   List<TournamentMatch>? _matches;
   List<TournamentTeam>? _standings;
   Map<String, List<TournamentPlayer>>? _rosters;
+  Map<String, String>? _captains;
   Map<String, String> _logos = {};
   int _startHour = 0;
   StreamSubscription<List<TournamentMatch>>? _gamesSub;
   StreamSubscription<List<TournamentTeam>>? _standingsSub;
   StreamSubscription<Map<String, List<TournamentPlayer>>>? _rostersSub;
+  StreamSubscription<Map<String, String>>? _captainsSub;
 
   @override
   void initState() {
@@ -58,6 +70,10 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage> {
     _rostersSub =
         LeagueService.watchRosters(widget.sport, widget.season).listen((r) {
       if (mounted) setState(() => _rosters = r);
+    });
+    _captainsSub =
+        LeagueService.watchCaptains(widget.sport, widget.season).listen((c) {
+      if (mounted) setState(() => _captains = c);
     });
     LeagueService.getStartHour(widget.sport, widget.season).then((h) {
       if (!mounted || h == _startHour) return;
@@ -94,6 +110,8 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage> {
     _gamesSub?.cancel();
     _standingsSub?.cancel();
     _rostersSub?.cancel();
+    _captainsSub?.cancel();
+    _tabController.dispose();
     super.dispose();
   }
 
@@ -121,10 +139,8 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage> {
     );
   }
 
-  String _shortDate(String mmddyyyy) {
-    final dt = parseDatabaseDate(mmddyyyy);
-    if (dt == null) return mmddyyyy;
-    return DateFormat('MMM d').format(dt);
+  void _openPlayer(TournamentPlayer p) {
+    openPlayerProfileById(context, uid: p.uid, name: p.name);
   }
 
   @override
@@ -139,10 +155,15 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage> {
       body: NestedScrollView(
         headerSliverBuilder: (context, innerBoxIsScrolled) => [
           SliverAppBar(
-            expandedHeight: 170,
+            expandedHeight: 185,
             pinned: true,
             backgroundColor: const Color(0xFF1A237E),
             foregroundColor: Colors.white,
+            // Force the back arrow (and actions) white in BOTH themes — the
+            // global appBarTheme.iconTheme is onSurface, which goes dark on
+            // this navy header in light mode (P2.1 Task A3 fix).
+            iconTheme: const IconThemeData(color: Colors.white),
+            actionsIconTheme: const IconThemeData(color: Colors.white),
             actions: [
               FollowBell(
                 topic: leagueTeamTopic(
@@ -154,24 +175,45 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage> {
             flexibleSpace: FlexibleSpaceBar(
               background: _buildHeader(context, team, form),
             ),
+            bottom: TabBar(
+              controller: _tabController,
+              tabs: const [
+                Tab(text: 'Overview'),
+                Tab(text: 'Squad'),
+                Tab(text: 'Stats'),
+              ],
+              labelColor: Colors.white,
+              unselectedLabelColor: Colors.white70,
+              indicatorColor: infiniteSportsPrimaryColor,
+              indicatorWeight: 3,
+            ),
           ),
         ],
-        body: ListView(
-          padding: const EdgeInsets.only(bottom: 24),
+        body: TabBarView(
+          controller: _tabController,
           children: [
-            _sectionHeader(context, 'RESULTS & FIXTURES'),
-            // Skeleton rows until each section's stream lands (P2.1 audit).
-            if (_matches == null)
-              const SkeletonMatchList(count: 3)
-            else if (myMatches.isEmpty)
-              _emptyNote(context, 'No games scheduled yet'),
-            ...myMatches.map((m) => _matchRow(context, m)),
-            _sectionHeader(context, 'SQUAD'),
-            if (_rosters == null)
-              const SkeletonMatchList(count: 3)
-            else if (roster.isEmpty)
-              _emptyNote(context, 'No roster yet'),
-            ...roster.map((p) => _playerRow(context, p)),
+            LeagueTeamOverviewTab(
+              team: team,
+              captain: _captains?[widget.teamName],
+              roster: roster,
+              matches: myMatches,
+              standingsLoaded: _standings != null,
+              matchesLoaded: _matches != null,
+              rosterLoaded: _rosters != null,
+              onMatchTap: _openMatch,
+              onPlayerTap: _openPlayer,
+            ),
+            LeagueTeamSquadTab(
+              coach: team.coachName,
+              roster: roster,
+              rosterLoaded: _rosters != null,
+              onPlayerTap: _openPlayer,
+            ),
+            LeagueTeamStatsTab(
+              roster: roster,
+              rosterLoaded: _rosters != null,
+              onPlayerTap: _openPlayer,
+            ),
           ],
         ),
       ),
@@ -191,7 +233,7 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage> {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(56, 8, 16, 16),
+          padding: const EdgeInsets.fromLTRB(56, 8, 16, 52),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -235,44 +277,555 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage> {
       ),
     );
   }
+}
 
-  Widget _sectionHeader(BuildContext context, String title) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 18, 16, 6),
-      child: Text(
-        title,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 1.1,
-          color:
-              Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
+// ---------------------------------------------------------------------------
+// Tab bodies — public, Firebase-free widgets (pure data + callbacks) so
+// widget tests can pump them directly, league_tabs-style.
+// ---------------------------------------------------------------------------
+
+/// Overview (tournament-team-page structure, season-scoped): Team Info
+/// (Captain + Players), Jersey Color, Coaching Staff, the "League Record"
+/// box, then the results & fixtures list the owner loves.
+class LeagueTeamOverviewTab extends StatelessWidget {
+  final TournamentTeam team;
+  final String? captain;
+  final List<TournamentPlayer> roster;
+
+  /// This team's matches, sorted chronologically (teamLeagueMatches).
+  final List<TournamentMatch> matches;
+  final bool standingsLoaded;
+  final bool matchesLoaded;
+  final bool rosterLoaded;
+  final void Function(TournamentMatch) onMatchTap;
+  final void Function(TournamentPlayer) onPlayerTap;
+
+  const LeagueTeamOverviewTab({
+    super.key,
+    required this.team,
+    required this.captain,
+    required this.roster,
+    required this.matches,
+    required this.standingsLoaded,
+    required this.matchesLoaded,
+    required this.rosterLoaded,
+    required this.onMatchTap,
+    required this.onPlayerTap,
+  });
+
+  /// The captain's roster entry when the named player is in THIS season's
+  /// squad — that's what makes the captain row tappable.
+  TournamentPlayer? get _captainPlayer {
+    if (captain == null) return null;
+    for (final p in roster) {
+      if (p.name == captain) return p;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+      children: [
+        _buildTeamInfoCard(context),
+        if (team.homeColor != null) _buildJerseyCard(context),
+        if (team.coachName != null && team.coachName!.isNotEmpty)
+          _buildCoachCard(context),
+        _buildLeagueRecordCard(context),
+        _sectionHeader(context, 'RESULTS & FIXTURES'),
+        if (!matchesLoaded)
+          const SkeletonMatchList(count: 3)
+        else if (matches.isEmpty)
+          _emptyNote(context, 'No games scheduled yet'),
+        ...matches.map((m) => LeagueTeamMatchRow(
+              teamName: team.id,
+              match: m,
+              onTap: () => onMatchTap(m),
+            )),
+      ],
+    );
+  }
+
+  Widget _buildTeamInfoCard(BuildContext context) {
+    final captainPlayer = _captainPlayer;
+    final captainText = captain ?? '—';
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Team Info',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  const Icon(Icons.military_tech, size: 16, color: Colors.grey),
+                  const SizedBox(width: 6),
+                  const Text('Captain: ', style: TextStyle(fontSize: 13)),
+                  captainPlayer != null
+                      ? InkWell(
+                          onTap: () => onPlayerTap(captainPlayer),
+                          child: Text(
+                            captainText,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                          ),
+                        )
+                      : Text(captainText,
+                          style: const TextStyle(fontSize: 13)),
+                ],
+              ),
+            ),
+            Row(
+              children: [
+                const Icon(Icons.group, size: 16, color: Colors.grey),
+                const SizedBox(width: 6),
+                Text(
+                  'Players: ${rosterLoaded ? '${roster.length}' : '—'}',
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _emptyNote(BuildContext context, String text) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Text(
-        text,
-        style: TextStyle(
-          color:
-              Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+  Widget _buildJerseyCard(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Jersey Color',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 14),
+            CustomPaint(
+              size: const Size(40, 44),
+              painter: JerseyPainter(color: team.homeColor!),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _matchRow(BuildContext context, TournamentMatch m) {
+  Widget _buildCoachCard(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Coaching Staff',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const TeamLogo(url: null, size: 44, fallbackIcon: Icons.person),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(team.coachName!,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 14)),
+                    Text('Head Coach',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.5),
+                        )),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The tournament page's record box, titled "League Record" and fed by
+  /// THIS season's live standings row.
+  Widget _buildLeagueRecordCard(BuildContext context) {
+    final stats = [
+      {'label': 'W', 'value': '${team.wins}'},
+      {'label': 'D', 'value': '${team.draws}'},
+      {'label': 'L', 'value': '${team.losses}'},
+      {'label': 'GF', 'value': '${team.gs}'},
+      {'label': 'GA', 'value': '${team.gc}'},
+      {'label': 'GD', 'value': team.gd >= 0 ? '+${team.gd}' : '${team.gd}'},
+      {'label': 'Pts', 'value': '${team.points}'},
+    ];
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('League Record',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            const SizedBox(height: 12),
+            if (!standingsLoaded)
+              const SkeletonBox(width: double.infinity, height: 34)
+            else
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: stats.map((s) {
+                  return Column(
+                    children: [
+                      Text(
+                        s['value']!,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 18),
+                      ),
+                      Text(
+                        s['label']!,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.6),
+                        ),
+                      ),
+                    ],
+                  );
+                }).toList(),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Squad (tournament-team-page structure): coaching staff section, then the
+/// season roster with player-profile taps.
+class LeagueTeamSquadTab extends StatelessWidget {
+  final String? coach;
+  final List<TournamentPlayer> roster;
+  final bool rosterLoaded;
+  final void Function(TournamentPlayer) onPlayerTap;
+
+  const LeagueTeamSquadTab({
+    super.key,
+    required this.coach,
+    required this.roster,
+    required this.rosterLoaded,
+    required this.onPlayerTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.only(top: 8, bottom: 24),
+      children: [
+        if (coach != null && coach!.isNotEmpty) ...[
+          _sectionHeader(context, 'COACHING STAFF', inset: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Row(
+              children: [
+                const TeamLogo(url: null, size: 44, fallbackIcon: Icons.person),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(coach!,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 14)),
+                    Text('Head Coach',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.5),
+                        )),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const Divider(),
+        ],
+        _sectionHeader(context, 'PLAYERS', inset: 16),
+        if (!rosterLoaded)
+          const SkeletonMatchList(count: 3)
+        else if (roster.isEmpty)
+          _emptyNote(context, 'No roster yet', inset: 16),
+        ...roster.map((p) => _playerRow(context, p)),
+      ],
+    );
+  }
+
+  Widget _playerRow(BuildContext context, TournamentPlayer p) {
+    return ListTile(
+      dense: true,
+      leading: SizedBox(
+        width: 40,
+        child: Center(
+          child: Text(
+            p.number ?? '–',
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+          ),
+        ),
+      ),
+      title: Text(
+        p.name,
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      ),
+      subtitle: Text(
+        'G ${p.goals} · A ${p.assists} · SV ${p.saves}',
+        style: const TextStyle(fontSize: 11),
+      ),
+      trailing: Icon(
+        Icons.chevron_right,
+        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.35),
+      ),
+      onTap: () => onPlayerTap(p),
+    );
+  }
+}
+
+/// Stats (tournament-team-page structure): expandable leader cards per stat
+/// category, computed from THIS season's roster totals (season-scoped).
+class LeagueTeamStatsTab extends StatefulWidget {
+  final List<TournamentPlayer> roster;
+  final bool rosterLoaded;
+  final void Function(TournamentPlayer) onPlayerTap;
+
+  const LeagueTeamStatsTab({
+    super.key,
+    required this.roster,
+    required this.rosterLoaded,
+    required this.onPlayerTap,
+  });
+
+  @override
+  State<LeagueTeamStatsTab> createState() => _LeagueTeamStatsTabState();
+}
+
+class _LeagueTeamStatsTabState extends State<LeagueTeamStatsTab> {
+  static const _categories = [
+    {'label': 'Goals', 'stat': 'goals'},
+    {'label': 'Assists', 'stat': 'assists'},
+    {'label': 'Saves', 'stat': 'saves'},
+    {'label': 'Defensive Plays (DPL)', 'stat': 'dpl'},
+    {'label': 'Clean Sheets', 'stat': 'cleanSheets'},
+    {'label': 'Yellow Cards', 'stat': 'yellowCards'},
+    {'label': 'Red Cards', 'stat': 'redCards'},
+  ];
+
+  final Set<String> _expandedStats = {};
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.rosterLoaded) {
+      return const SingleChildScrollView(
+        physics: NeverScrollableScrollPhysics(),
+        child: Padding(
+          padding: EdgeInsets.only(top: 8),
+          child: SkeletonMatchList(count: 6),
+        ),
+      );
+    }
+    if (widget.roster.isEmpty) {
+      return const Center(child: Text('No player data'));
+    }
+
+    List<TournamentPlayer> sortedFor(String stat) {
+      final filtered = widget.roster
+          .where((p) => p.statByName(stat) > 0)
+          .toList()
+        ..sort((a, b) => b.statByName(stat).compareTo(a.statByName(stat)));
+      return filtered;
+    }
+
+    final cards = <Widget>[];
+    for (final cat in _categories) {
+      final label = cat['label']!;
+      final stat = cat['stat']!;
+      final allSorted = sortedFor(stat);
+      if (allSorted.isEmpty) continue;
+      cards.add(_statCard(context, label, stat, allSorted));
+    }
+
+    if (cards.isEmpty) {
+      return const Center(child: Text('No stats recorded yet'));
+    }
+
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      children: cards,
+    );
+  }
+
+  Widget _statCard(BuildContext context, String label, String stat,
+      List<TournamentPlayer> allSorted) {
+    final isExpanded = _expandedStats.contains(stat);
+    final displayed = isExpanded ? allSorted : allSorted.take(3).toList();
+
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          if (!_expandedStats.remove(stat)) _expandedStats.add(stat);
+        });
+      },
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    label,
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleSmall
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  const Spacer(),
+                  AnimatedRotation(
+                    turns: isExpanded ? 0.25 : 0.0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Icon(
+                      Icons.chevron_right,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withValues(alpha: 0.4),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              ...displayed.asMap().entries.map((entry) {
+                final rank = entry.key;
+                final player = entry.value;
+                final value = player.statByName(stat);
+                return InkWell(
+                  onTap: () => widget.onPlayerTap(player),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 5),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            player.name,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w600, fontSize: 13),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        rank == 0
+                            ? Container(
+                                width: 32,
+                                height: 32,
+                                decoration: BoxDecoration(
+                                  color: infiniteSportsPrimaryColor,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    '$value',
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 13),
+                                  ),
+                                ),
+                              )
+                            : SizedBox(
+                                width: 32,
+                                child: Center(
+                                  child: Text(
+                                    '$value',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurface
+                                          .withValues(alpha: 0.6),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One results-&-fixtures row (the list the owner loves, kept from P2):
+/// form-chip / LIVE / clock leading, score or kick-off trailing, tap →
+/// the league match page.
+class LeagueTeamMatchRow extends StatelessWidget {
+  final String teamName;
+  final TournamentMatch match;
+  final VoidCallback onTap;
+
+  const LeagueTeamMatchRow({
+    super.key,
+    required this.teamName,
+    required this.match,
+    required this.onTap,
+  });
+
+  String _shortDate(String mmddyyyy) {
+    final dt = parseDatabaseDate(mmddyyyy);
+    if (dt == null) return mmddyyyy;
+    return DateFormat('MMM d').format(dt);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final m = match;
     final isFinished = m.matchStatus.isFinished;
     final isLive = m.matchStatus.isLive;
 
     Widget leading;
     if (isFinished && m.stage.toLowerCase() != 'friendly') {
-      leading =
-          FormChips(form: [teamResultLetter(widget.teamName, m)], size: 24);
+      leading = FormChips(form: [teamResultLetter(teamName, m)], size: 24);
     } else if (isLive) {
       leading = Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -326,35 +879,38 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage> {
       subtitle:
           Text(subtitleBits.join(' · '), style: const TextStyle(fontSize: 11)),
       trailing: trailing,
-      onTap: () => _openMatch(m),
+      onTap: onTap,
     );
   }
+}
 
-  Widget _playerRow(BuildContext context, TournamentPlayer p) {
-    return ListTile(
-      dense: true,
-      leading: SizedBox(
-        width: 40,
-        child: Center(
-          child: Text(
-            p.number ?? '–',
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-          ),
-        ),
+// Shared bits for the tab bodies above. [inset] is the extra horizontal
+// padding — the Overview list already carries 12, the Squad list none.
+
+Widget _sectionHeader(BuildContext context, String title,
+    {double inset = 4}) {
+  return Padding(
+    padding: EdgeInsets.fromLTRB(inset, 14, inset, 6),
+    child: Text(
+      title,
+      style: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 1.1,
+        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
       ),
-      title: Text(
-        p.name,
-        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+    ),
+  );
+}
+
+Widget _emptyNote(BuildContext context, String text, {double inset = 4}) {
+  return Padding(
+    padding: EdgeInsets.symmetric(horizontal: inset, vertical: 8),
+    child: Text(
+      text,
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
       ),
-      subtitle: Text(
-        'G ${p.goals} · A ${p.assists} · SV ${p.saves}',
-        style: const TextStyle(fontSize: 11),
-      ),
-      trailing: Icon(
-        Icons.chevron_right,
-        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.35),
-      ),
-      onTap: () => openPlayerProfileById(context, uid: p.uid, name: p.name),
-    );
-  }
+    ),
+  );
 }

@@ -8,6 +8,7 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
+import 'package:infinite_sports_flutter/widgets/jersey_painter.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:infinite_sports_flutter/misc/notification_topics.dart';
 import 'package:infinite_sports_flutter/widgets/follow_bell.dart';
@@ -221,7 +222,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       children: [
         CustomPaint(
           size: const Size(20, 22),
-          painter: _JerseyPainter(color: color),
+          painter: JerseyPainter(color: color),
         ),
         const SizedBox(width: 4),
         Text(label,
@@ -312,7 +313,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                           children: [
                             CustomPaint(
                               size: const Size(40, 44),
-                              painter: _JerseyPainter(
+                              painter: JerseyPainter(
                                   color: team.homeColor!),
                             ),
                             const SizedBox(height: 4),
@@ -327,7 +328,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                           children: [
                             CustomPaint(
                               size: const Size(40, 44),
-                              painter: _JerseyPainter(
+                              painter: JerseyPainter(
                                   color: team.awayColor!),
                             ),
                             const SizedBox(height: 4),
@@ -953,43 +954,4 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       ),
     );
   }
-}
-
-class _JerseyPainter extends CustomPainter {
-  final Color color;
-  const _JerseyPainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-    final borderPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.5)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-
-    final w = size.width;
-    final h = size.height;
-
-    final path = Path();
-    path.moveTo(0, h * 0.2);
-    path.lineTo(w * 0.25, h * 0.08);
-    path.lineTo(w * 0.35, 0);
-    path.lineTo(w * 0.5, h * 0.12);
-    path.lineTo(w * 0.65, 0);
-    path.lineTo(w * 0.75, h * 0.08);
-    path.lineTo(w, h * 0.2);
-    path.lineTo(w * 0.75, h * 0.38);
-    path.lineTo(w * 0.75, h);
-    path.lineTo(w * 0.25, h);
-    path.lineTo(w * 0.25, h * 0.38);
-    path.close();
-
-    canvas.drawPath(path, paint);
-    canvas.drawPath(path, borderPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _JerseyPainter old) => old.color != color;
 }
