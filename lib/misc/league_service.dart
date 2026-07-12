@@ -108,12 +108,64 @@ class LeagueService {
         .map((event) => leagueCaptainsFromTeamsNode(event.snapshot.value));
   }
 
-  /// Live rosters (season-total player stats) from Line Ups.
+  /// Session-scoped cache of /Users/{uid}/ProfileUrl values (uid -> url,
+  /// '' = known-absent) — the league mirror of TournamentService's cache,
+  /// so squad avatars resolve once per player per session.
+  static final Map<String, String> _profileUrlCache = {};
+
+  /// Clears the in-memory ProfileUrl cache (rare — e.g. after sign-out).
+  static void clearProfileUrlCache() => _profileUrlCache.clear();
+
+  /// Live rosters (season-total player stats) from Line Ups, with each
+  /// linked player's profile photo attached (P2.2: squad-row avatars).
   static Stream<Map<String, List<TournamentPlayer>>> watchRosters(
       String sport, String season) {
-    return _ref('/$sport/$season/Line Ups')
-        .onValue
-        .map((event) => leagueRostersFromLineupsNode(event.snapshot.value));
+    return _ref('/$sport/$season/Line Ups').onValue.asyncMap((event) =>
+        _withProfileUrls(leagueRostersFromLineupsNode(event.snapshot.value)));
+  }
+
+  /// The exact photo-enrichment approach of TournamentService.getRosters
+  /// (tournament_service.dart): collect linked uids still missing a photo,
+  /// fetch /Users/{uid}/ProfileUrl for all of them in PARALLEL (cached per
+  /// session), then substitute via copyWith. Unlinked players (uid null —
+  /// the adapter already normalizes '0'/empty) keep photoUrl null, so the
+  /// UI's neutral person icon renders.
+  static Future<Map<String, List<TournamentPlayer>>> _withProfileUrls(
+      Map<String, List<TournamentPlayer>> rosters) async {
+    final uidsToFetch = <String>{};
+    for (final players in rosters.values) {
+      for (final p in players) {
+        final uid = p.uid;
+        if (uid != null &&
+            uid.isNotEmpty &&
+            (p.photoUrl == null || p.photoUrl!.isEmpty) &&
+            !_profileUrlCache.containsKey(uid)) {
+          uidsToFetch.add(uid);
+        }
+      }
+    }
+    if (uidsToFetch.isNotEmpty) {
+      await Future.wait(uidsToFetch.map((uid) async {
+        try {
+          final snap = await _ref('/Users/$uid/ProfileUrl').get();
+          _profileUrlCache[uid] = snap.value?.toString() ?? '';
+        } catch (_) {
+          _profileUrlCache[uid] = '';
+        }
+      }));
+    }
+    rosters.forEach((team, players) {
+      for (var i = 0; i < players.length; i++) {
+        final p = players[i];
+        if (p.uid == null || p.uid!.isEmpty) continue;
+        if (p.photoUrl != null && p.photoUrl!.isNotEmpty) continue;
+        final cached = _profileUrlCache[p.uid!];
+        if (cached != null && cached.isNotEmpty) {
+          players[i] = p.copyWith(photoUrl: cached);
+        }
+      }
+    });
+    return rosters;
   }
 
   /// Live playoffs node. null until playoffs are generated.

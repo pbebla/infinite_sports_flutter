@@ -225,7 +225,9 @@ class _KnockoutTabState extends State<KnockoutTab> {
     double totalH = baseH;
     if (isFinalPresent && centersPerRound[finalRoundIdx].isNotEmpty) {
       final finalCenterY = centersPerRound[finalRoundIdx][0];
-      final heroTop = finalCenterY - _heroH / 2;
+      // Same clamp as the hero's Positioned top (P2.2) so totalH covers the
+      // hero + bronze at their real, clamped position.
+      final heroTop = (finalCenterY - _heroH / 2).clamp(0.0, double.infinity);
       final bottomEdge = heroTop +
           _heroH +
           _heroBronzeGap +
@@ -373,7 +375,12 @@ class _KnockoutTabState extends State<KnockoutTab> {
       if (isFinalRound) {
         // Change 1: Final column = hero (fixed 150 h) + bronze beneath it,
         // all in a single Positioned Column so bronze scrolls with the hero.
-        final heroTop = centerY - _heroH / 2;
+        // P2.2: clamp to 0 — in a final-only bracket the first-round center
+        // (48) puts the hero top at -27, and Stack children above the top
+        // edge paint (Clip.none) but never receive taps, leaving a dead
+        // strip on the box. Multi-round brackets are unaffected (their
+        // final centers sit well below _heroH / 2).
+        final heroTop = (centerY - _heroH / 2).clamp(0.0, double.infinity);
         result.add(Positioned(
           top: heroTop,
           left: leftX,
@@ -452,8 +459,14 @@ class _KnockoutTabState extends State<KnockoutTab> {
     final team1IsWinner = winnerId.isNotEmpty && winnerId == match.team1Id;
     final team2IsWinner = winnerId.isNotEmpty && winnerId == match.team2Id;
 
+    // P2.2: require NON-EMPTY ids, matching _KnockoutMatchCard — league
+    // adapters use '' (never null) for unresolved slots, so the hero for an
+    // unresolved final must not open a match page for a half-empty game.
+    // Tournament ids are null-or-real, so its behavior is unchanged.
     final canTap = match.team1Id != null &&
+        match.team1Id!.isNotEmpty &&
         match.team2Id != null &&
+        match.team2Id!.isNotEmpty &&
         (widget.onMatchTap != null || widget.tournamentId != null);
 
     Widget hero = Container(

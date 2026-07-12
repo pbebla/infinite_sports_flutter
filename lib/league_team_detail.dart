@@ -6,11 +6,13 @@ import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/misc/league_form.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/notification_topics.dart';
+import 'package:infinite_sports_flutter/misc/top_stats.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:infinite_sports_flutter/widgets/follow_bell.dart';
 import 'package:infinite_sports_flutter/widgets/form_chips.dart';
 import 'package:infinite_sports_flutter/widgets/jersey_painter.dart';
@@ -207,6 +209,7 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage>
               coach: team.coachName,
               roster: roster,
               rosterLoaded: _rosters != null,
+              sport: widget.sport,
               onPlayerTap: _openPlayer,
             ),
             LeagueTeamStatsTab(
@@ -527,11 +530,17 @@ class LeagueTeamOverviewTab extends StatelessWidget {
 }
 
 /// Squad (tournament-team-page structure): coaching staff section, then the
-/// season roster with player-profile taps.
+/// season roster with player-profile taps. P2.2: each row shows the
+/// player's profile photo (person icon for unlinked/missing) and their 3
+/// strongest stats as icon+value chips under the name (topThreeStats).
 class LeagueTeamSquadTab extends StatelessWidget {
   final String? coach;
   final List<TournamentPlayer> roster;
   final bool rosterLoaded;
+
+  /// Picks the per-sport top-stat lists (misc/top_stats.dart) — league
+  /// pages serve futsal until P4, hence the default.
+  final String sport;
   final void Function(TournamentPlayer) onPlayerTap;
 
   const LeagueTeamSquadTab({
@@ -539,6 +548,7 @@ class LeagueTeamSquadTab extends StatelessWidget {
     required this.coach,
     required this.roster,
     required this.rosterLoaded,
+    this.sport = 'Futsal',
     required this.onPlayerTap,
   });
 
@@ -587,30 +597,94 @@ class LeagueTeamSquadTab extends StatelessWidget {
   }
 
   Widget _playerRow(BuildContext context, TournamentPlayer p) {
-    return ListTile(
-      dense: true,
-      leading: SizedBox(
-        width: 40,
-        child: Center(
-          child: Text(
-            p.number ?? '–',
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-          ),
+    final topStats = topThreeStatsForPlayer(p, sport);
+    return InkWell(
+      onTap: () => onPlayerTap(p),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 30,
+              child: Center(
+                child: Text(
+                  p.number ?? '–',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 14),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            // P2.2: profile photo — LeagueService.watchRosters attaches
+            // Users/{uid}/ProfileUrl for linked players (the tournament
+            // squad's TeamLogo+person pattern); unlinked or photo-less
+            // players get the neutral person icon.
+            TeamLogo(url: p.photoUrl, size: 36, fallbackIcon: Icons.person),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    p.name,
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  // The player's 3 strongest stats (fallback-filled) as
+                  // icon+value chips.
+                  Row(
+                    children: [
+                      for (final s in topStats) _statChip(context, s),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right,
+              color: Theme.of(context)
+                  .colorScheme
+                  .onSurface
+                  .withValues(alpha: 0.35),
+            ),
+          ],
         ),
       ),
-      title: Text(
-        p.name,
-        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+    );
+  }
+
+  /// Small icon+value chip. surfaceContainerHighest + onSurface read in
+  /// BOTH light and dark mode; StatIcon's white tile keeps the line-art
+  /// legible on either.
+  Widget _statChip(BuildContext context, TopStat s) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.only(right: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
       ),
-      subtitle: Text(
-        'G ${p.goals} · A ${p.assists} · SV ${p.saves}',
-        style: const TextStyle(fontSize: 11),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          StatIcon(
+            asset: statIconAsset(leagueTopStatIconKey(s.stat)),
+            size: 16,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            '${s.value}',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: cs.onSurface,
+            ),
+          ),
+        ],
       ),
-      trailing: Icon(
-        Icons.chevron_right,
-        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.35),
-      ),
-      onTap: () => onPlayerTap(p),
     );
   }
 }
@@ -634,14 +708,17 @@ class LeagueTeamStatsTab extends StatefulWidget {
 }
 
 class _LeagueTeamStatsTabState extends State<LeagueTeamStatsTab> {
+  /// label → statByName key → statIconAsset key — the EXACT icon treatment
+  /// of the league Player Stats tab (league_player_stats_tab.dart, P2.2
+  /// owner item 3); '' = no icon, matching its iconless Clean Sheets.
   static const _categories = [
-    {'label': 'Goals', 'stat': 'goals'},
-    {'label': 'Assists', 'stat': 'assists'},
-    {'label': 'Saves', 'stat': 'saves'},
-    {'label': 'Defensive Plays (DPL)', 'stat': 'dpl'},
-    {'label': 'Clean Sheets', 'stat': 'cleanSheets'},
-    {'label': 'Yellow Cards', 'stat': 'yellowCards'},
-    {'label': 'Red Cards', 'stat': 'redCards'},
+    {'label': 'Goals', 'stat': 'goals', 'icon': 'goal'},
+    {'label': 'Assists', 'stat': 'assists', 'icon': 'assist'},
+    {'label': 'Saves', 'stat': 'saves', 'icon': 'save'},
+    {'label': 'Defensive Plays (DPL)', 'stat': 'dpl', 'icon': 'dpl'},
+    {'label': 'Clean Sheets', 'stat': 'cleanSheets', 'icon': ''},
+    {'label': 'Yellow Cards', 'stat': 'yellowCards', 'icon': 'yellow'},
+    {'label': 'Red Cards', 'stat': 'redCards', 'icon': 'red'},
   ];
 
   final Set<String> _expandedStats = {};
@@ -673,9 +750,10 @@ class _LeagueTeamStatsTabState extends State<LeagueTeamStatsTab> {
     for (final cat in _categories) {
       final label = cat['label']!;
       final stat = cat['stat']!;
+      final icon = cat['icon']!;
       final allSorted = sortedFor(stat);
       if (allSorted.isEmpty) continue;
-      cards.add(_statCard(context, label, stat, allSorted));
+      cards.add(_statCard(context, label, stat, icon, allSorted));
     }
 
     if (cards.isEmpty) {
@@ -689,7 +767,7 @@ class _LeagueTeamStatsTabState extends State<LeagueTeamStatsTab> {
   }
 
   Widget _statCard(BuildContext context, String label, String stat,
-      List<TournamentPlayer> allSorted) {
+      String icon, List<TournamentPlayer> allSorted) {
     final isExpanded = _expandedStats.contains(stat);
     final displayed = isExpanded ? allSorted : allSorted.take(3).toList();
 
@@ -710,6 +788,11 @@ class _LeagueTeamStatsTabState extends State<LeagueTeamStatsTab> {
             children: [
               Row(
                 children: [
+                  if (icon.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: StatIcon(asset: statIconAsset(icon), size: 18),
+                    ),
                   Text(
                     label,
                     style: Theme.of(context)

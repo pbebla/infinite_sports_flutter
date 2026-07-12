@@ -9,6 +9,8 @@ import 'package:infinite_sports_flutter/misc/league_form.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 TournamentTeam _team({String? colorHex, String? coach}) =>
     leagueStandingsFromTeamsNode({
@@ -166,6 +168,20 @@ void main() {
   });
 
   group('LeagueTeamSquadTab', () {
+    /// The stat chips inside the squad row that contains [playerName].
+    Finder chipsOf(String playerName) => find.descendant(
+          of: find.ancestor(
+              of: find.text(playerName), matching: find.byType(InkWell)),
+          matching: find.byType(StatIcon),
+        );
+
+    /// A value text inside [playerName]'s squad row.
+    Finder rowText(String playerName, String text) => find.descendant(
+          of: find.ancestor(
+              of: find.text(playerName), matching: find.byType(InkWell)),
+          matching: find.text(text),
+        );
+
     testWidgets('coach section + number-sorted players with profile taps',
         (tester) async {
       TournamentPlayer? tapped;
@@ -182,10 +198,62 @@ void main() {
       final sargonY = tester.getTopLeft(find.text('Sargon')).dy;
       final ashurY = tester.getTopLeft(find.text('Ashur')).dy;
       expect(sargonY, lessThan(ashurY));
-      expect(find.text('G 7 · A 2 · SV 0'), findsOneWidget);
 
       await tester.tap(find.text('Ashur'));
       expect(tapped?.name, 'Ashur');
+    });
+
+    testWidgets(
+        'P2.2: every player row has a photo slot (person fallback) and its'
+        ' top-3 stat chips, fallback-filled with zeros', (tester) async {
+      await tester.pumpWidget(_wrap(LeagueTeamSquadTab(
+        coach: null,
+        roster: _roster(),
+        rosterLoaded: true,
+        onPlayerTap: (_) {},
+      )));
+
+      // One avatar per player: TeamLogo with the neutral person fallback
+      // (no coach section here, so exactly the 3 roster rows).
+      expect(
+        find.byWidgetPredicate((w) =>
+            w is TeamLogo && w.url == null && w.fallbackIcon == Icons.person),
+        findsNWidgets(3),
+      );
+
+      // 3 chips per player, always (fallback fills to 3).
+      expect(chipsOf('Ashur'), findsNWidgets(3));
+      expect(chipsOf('Sargon'), findsNWidgets(3));
+      expect(chipsOf('Ninos'), findsNWidgets(3));
+
+      // Ashur (G7 A2): goals 7, assists 2, then DPL 0 from the fallback.
+      expect(rowText('Ashur', '7'), findsOneWidget);
+      expect(rowText('Ashur', '2'), findsOneWidget);
+      expect(rowText('Ashur', '0'), findsOneWidget);
+      // Sargon (SV12 CS3): saves 12, clean sheets 3, then goals 0.
+      expect(rowText('Sargon', '12'), findsOneWidget);
+      expect(rowText('Sargon', '3'), findsOneWidget);
+      expect(rowText('Sargon', '0'), findsOneWidget);
+      // Ninos (all zero): the full fallback at 0.
+      expect(rowText('Ninos', '0'), findsNWidgets(3));
+    });
+
+    testWidgets('P2.2: linked player with a profile photo gets it on the row',
+        (tester) async {
+      final withPhoto = [
+        _roster().first.copyWith(photoUrl: 'http://pic/sargon.jpg'),
+      ];
+      await tester.pumpWidget(_wrap(LeagueTeamSquadTab(
+        coach: null,
+        roster: withPhoto,
+        rosterLoaded: true,
+        onPlayerTap: (_) {},
+      )));
+      expect(
+        find.byWidgetPredicate(
+            (w) => w is TeamLogo && w.url == 'http://pic/sargon.jpg'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('no coach -> no staff section; empty roster note',
@@ -219,6 +287,21 @@ void main() {
       expect(find.text('Ninos'), findsNothing);
       expect(find.text('7'), findsOneWidget); // Ashur's goals
       expect(find.text('12'), findsOneWidget); // Sargon's saves
+
+      // P2.2 owner item 3: category headers carry the same stat icons as
+      // the league Player Stats tab (Clean Sheets stays iconless there
+      // too) — Goals/Assists/Saves rendered here -> 3 icons.
+      expect(
+        find.byWidgetPredicate(
+            (w) => w is StatIcon && w.asset == 'assets/goal.png'),
+        findsOneWidget,
+      );
+      expect(
+        find.byWidgetPredicate(
+            (w) => w is StatIcon && w.asset == 'assets/save.png'),
+        findsOneWidget,
+      );
+      expect(find.byType(StatIcon), findsNWidgets(3));
     });
 
     testWidgets('stat rows tap through to player profiles', (tester) async {
