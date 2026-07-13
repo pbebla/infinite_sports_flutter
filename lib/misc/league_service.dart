@@ -8,6 +8,10 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/misc/league_playoffs_view.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/leaderboard_entry.dart';
+import 'package:infinite_sports_flutter/model/prediction.dart';
+import 'package:infinite_sports_flutter/model/prediction_config.dart';
+import 'package:infinite_sports_flutter/model/prediction_question.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
@@ -173,5 +177,107 @@ class LeagueService {
     return _ref('/$sport/$season/Playoffs')
         .onValue
         .map((event) => LeaguePlayoffs.fromNode(event.snapshot.value));
+  }
+
+  // ── Predictions (League Experience P3) ─────────────────────────────────
+  // League mirror of TournamentService's prediction methods; paths sit
+  // under the league-season node, per-game questions/results ride ON the
+  // game node, and answers are keyed by leaguePredictionMatchKey.
+
+  /// League PredictionConfig. ABSENT NODE = CLOSED — legacy seasons must
+  /// not grow a Predict tab (the tournament parse defaults OPEN, so the
+  /// null check must happen here, before PredictionConfig.fromFirebase).
+  static Stream<PredictionConfig> watchPredictionConfig(
+      String sport, String season) {
+    return _ref('/$sport/$season/PredictionConfig').onValue.map((event) {
+      final v = event.snapshot.value;
+      if (v == null) {
+        return const PredictionConfig(
+            open: false, matchWinnerPoints: 1, exactScorePoints: 3);
+      }
+      return PredictionConfig.fromFirebase(v);
+    });
+  }
+
+  static List<PredictionQuestion> _parseQuestions(dynamic value) {
+    final out = <PredictionQuestion>[];
+    if (value is Map) {
+      value.forEach((qid, q) =>
+          out.add(PredictionQuestion.fromFirebase(qid.toString(), q)));
+    }
+    out.sort((a, b) => a.order.compareTo(b.order));
+    return out;
+  }
+
+  /// Season-wide default questions (tournament-level equivalent).
+  static Stream<List<PredictionQuestion>> watchSeasonQuestions(
+      String sport, String season) {
+    return _ref('/$sport/$season/PredictionQuestions')
+        .onValue
+        .map((event) => _parseQuestions(event.snapshot.value));
+  }
+
+  /// Per-game extra questions — ON the game node (tournament-match parity;
+  /// they travel with Schedule Manager moves/compaction).
+  static Stream<List<PredictionQuestion>> watchGameQuestions(
+      String sport, String season, String dateKey, int index) {
+    return _ref('/$sport/$season/Date/$dateKey/$index/PredictionQuestions')
+        .onValue
+        .map((event) => _parseQuestions(event.snapshot.value));
+  }
+
+  /// Owner-resolved results for custom questions: {qid: optionId}.
+  static Stream<Map<String, String>> watchGameResults(
+      String sport, String season, String dateKey, int index) {
+    return _ref('/$sport/$season/Date/$dateKey/$index/PredictionResults')
+        .onValue
+        .map((event) {
+      final v = event.snapshot.value;
+      if (v is! Map) return const <String, String>{};
+      return {
+        for (final e in v.entries) e.key.toString(): e.value.toString(),
+      };
+    });
+  }
+
+  /// My answers for one game: {qid: QuestionAnswer}.
+  static Stream<Map<String, QuestionAnswer>> watchMyGameAnswers(
+      String sport, String season, String dateKey, int index, String uid) {
+    final key = leaguePredictionMatchKey(dateKey, index);
+    return _ref('/$sport/$season/Predictions/$key/$uid').onValue.map((event) {
+      final v = event.snapshot.value;
+      final out = <String, QuestionAnswer>{};
+      if (v is Map) {
+        v.forEach((qid, raw) {
+          final a = QuestionAnswer.fromFirebase(raw);
+          if (a != null) out[qid.toString()] = a;
+        });
+      }
+      return out;
+    });
+  }
+
+  /// Writes one answer (same {Answer, UpdatedAt} leaf the scorer reads;
+  /// UpdatedAt must predate Clock/StartedAt to count — functions fairness).
+  static Future<void> submitAnswer(String sport, String season, String dateKey,
+      int index, String uid, String qid, String value, int nowMs) {
+    final key = leaguePredictionMatchKey(dateKey, index);
+    return _ref('/$sport/$season/Predictions/$key/$uid/$qid')
+        .set(QuestionAnswer(value: value, updatedAt: nowMs).toFirebase());
+  }
+
+  /// Functions-maintained league leaderboard, sorted for display.
+  static Stream<List<LeaderboardEntry>> watchLeaderboard(
+      String sport, String season) {
+    return _ref('/$sport/$season/Leaderboard').onValue.map((event) {
+      final v = event.snapshot.value;
+      final out = <LeaderboardEntry>[];
+      if (v is Map) {
+        v.forEach((uid, raw) =>
+            out.add(LeaderboardEntry.fromFirebase(uid.toString(), raw)));
+      }
+      out.sort(compareLeaderboard);
+      return out;
+    });
   }
 }
