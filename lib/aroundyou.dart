@@ -142,15 +142,19 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
       ? const Center(child: CircularProgressIndicator())
       : Scaffold(
         appBar: AppBar(
-          leading: Builder(
-            builder: (context) {
-              return IconButton(
-                icon: const ImageIcon(AssetImage('assets/profile.png')),
-                onPressed: () {
-                  Scaffold.of(mainScaffoldContext!).openDrawer();
-                },);
-            },
-          ),
+          // Pushed from the search hub: the root drawer would open hidden
+          // behind this route, so show a back button instead.
+          leading: Navigator.canPop(context)
+              ? const BackButton()
+              : Builder(
+                  builder: (context) {
+                    return IconButton(
+                      icon: const ImageIcon(AssetImage('assets/profile.png')),
+                      onPressed: () {
+                        Scaffold.of(mainScaffoldContext!).openDrawer();
+                      },);
+                  },
+                ),
           backgroundColor: Theme.of(context).colorScheme.primary,
           centerTitle: true,
           foregroundColor: Colors.white,
