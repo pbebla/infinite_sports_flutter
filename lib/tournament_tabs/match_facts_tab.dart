@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/login.dart';
-import 'package:infinite_sports_flutter/misc/tournament_service.dart';
+import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:infinite_sports_flutter/model/prediction.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
@@ -26,6 +26,9 @@ class MatchFactsTab extends StatelessWidget {
   final PredictionConfig? predictionConfig;
   final String? currentUid;
 
+  /// Null = tournament behavior (built from [tournamentId] when present).
+  final PredictionScope? scope;
+
   const MatchFactsTab({
     super.key,
     required this.match,
@@ -36,6 +39,7 @@ class MatchFactsTab extends StatelessWidget {
     this.tournamentId,
     this.predictionConfig,
     this.currentUid,
+    this.scope,
   });
 
   // Parse minute string to sortable double: "90+3'" -> 90.3, "45'" -> 45.0
@@ -475,14 +479,16 @@ class MatchFactsTab extends StatelessWidget {
 
     // Teaser visibility: only when prediction context is fully provided and both
     // teams are confirmed — rendered at the very top of either code path.
-    final showTeaser = tournamentId != null &&
+    final PredictionScope? teaserScope = scope ??
+        (tournamentId != null ? TournamentPredictionScope(tournamentId!) : null);
+    final showTeaser = teaserScope != null &&
         predictionConfig?.open == true &&
         match.team1Id != null &&
         match.team2Id != null;
 
     final teaser = showTeaser
         ? _WhoWillWinTeaser(
-            tournamentId: tournamentId!,
+            scope: teaserScope,
             match: match,
             team1: team1,
             team2: team2,
@@ -549,7 +555,7 @@ class MatchFactsTab extends StatelessWidget {
 const _greenWin = Color(0xFF0A7D2C);
 
 class _WhoWillWinTeaser extends StatefulWidget {
-  final String tournamentId;
+  final PredictionScope scope;
   final TournamentMatch match;
   final TournamentTeam? team1;
   final TournamentTeam? team2;
@@ -559,7 +565,7 @@ class _WhoWillWinTeaser extends StatefulWidget {
   final List<TournamentPlayer> team2Players;
 
   const _WhoWillWinTeaser({
-    required this.tournamentId,
+    required this.scope,
     required this.match,
     required this.team1,
     required this.team2,
@@ -585,14 +591,8 @@ class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
     if (uid == null || _submitting) return;
     setState(() => _submitting = true);
     try {
-      await TournamentService.submitAnswer(
-        widget.tournamentId,
-        widget.match.id,
-        uid,
-        qid,
-        value,
-        DateTime.now().millisecondsSinceEpoch,
-      );
+      await widget.scope.submitAnswer(
+          widget.match, uid, qid, value, DateTime.now().millisecondsSinceEpoch);
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -603,7 +603,8 @@ class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
       context,
       MaterialPageRoute(
         builder: (_) => PredictionRoomPage(
-          tournamentId: widget.tournamentId,
+          tournamentId: '',
+          scope: widget.scope,
           match: widget.match,
           team1: widget.team1,
           team2: widget.team2,
@@ -627,7 +628,7 @@ class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
   Widget build(BuildContext context) {
     // Stream the tournament-wide questions and pick the first matchWinner.
     return StreamBuilder<List<PredictionQuestion>>(
-      stream: TournamentService.watchTournamentQuestions(widget.tournamentId),
+      stream: widget.scope.watchDefaultQuestions(),
       builder: (context, qSnap) {
         final questions = qSnap.data ?? const [];
         final PredictionQuestion? winnerQ = questions
@@ -643,8 +644,7 @@ class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
         // When signed in, also stream the user's current answers for this match.
         if (uid != null) {
           return StreamBuilder<Map<String, QuestionAnswer>>(
-            stream: TournamentService.watchMyMatchAnswers(
-                widget.tournamentId, widget.match.id, uid),
+            stream: widget.scope.watchMyMatchAnswers(widget.match, uid),
             builder: (context, ansSnap) {
               final answers = ansSnap.data ?? const {};
               final currentAnswer = answers[winnerQ.id]?.value;
