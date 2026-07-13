@@ -14,8 +14,10 @@ class Event {
   List<Map<String, String>>? buttons;
   Map<String, String>? attendees;
   Image? imageSrc;
-  
+  DateTime? eventDateTime;
+
   void format() {
+    eventDateTime = parseDatabaseDate(eventDate!);
     eventDate = convertDatabaseDateToFormatDate(eventDate!);
     date = convertDatabaseDateToFormatDate(date!);
     if (imageUrl != null) {
