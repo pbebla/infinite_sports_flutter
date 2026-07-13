@@ -1,8 +1,18 @@
 import * as admin from 'firebase-admin';
 import * as logger from 'firebase-functions/logger';
-import type { AlertDecision } from './decide';
 
-export async function sendAlert(d: AlertDecision): Promise<void> {
+/** Structural shape both the tournament AlertDecision and the league
+ *  LeagueAlertDecision satisfy — sendAlert is payload-agnostic. */
+export interface PushAlert {
+  kind: string;
+  title: string;
+  body: string;
+  condition: string;
+  color: string;
+  data: Record<string, string>;
+}
+
+export async function sendAlert(d: PushAlert): Promise<void> {
   if (process.env.FUNCTIONS_EMULATOR === 'true') {
     // Emulator dress rehearsal: log instead of sending real pushes.
     logger.info('DRY-RUN sendAlert', {
