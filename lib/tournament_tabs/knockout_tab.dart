@@ -281,8 +281,9 @@ class _KnockoutTabState extends State<KnockoutTab> {
           // ── Continuous bracket ─────────────────────────────────────────────
           Expanded(
             child: SingleChildScrollView(
-              // Outer vertical scroll
-              padding: EdgeInsets.zero,
+              // Outer vertical scroll. Bottom inset keeps the last bracket
+              // row reachable above the floating glass nav bar.
+              padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 controller: _hCtrl,

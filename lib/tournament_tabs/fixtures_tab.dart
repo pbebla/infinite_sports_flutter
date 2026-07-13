@@ -359,7 +359,7 @@ class FixturesTab extends StatelessWidget {
     final showBanner = predictionsOpen && onOpenPredict != null;
 
     return ListView.builder(
-      padding: const EdgeInsets.only(top: 8, bottom: 16),
+      padding: EdgeInsets.only(top: 8, bottom: 16 + MediaQuery.paddingOf(context).bottom),
       itemCount: sortedDates.length + (showBanner ? 1 : 0),
       itemBuilder: (context, index) {
         if (showBanner && index == 0) return _predictBanner(context);

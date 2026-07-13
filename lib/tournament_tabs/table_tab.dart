@@ -96,7 +96,11 @@ class TableTab extends StatelessWidget {
               ],
             ),
           ),
-          _legend(context),
+          // Keep the legend visible above the floating glass nav bar.
+          Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
+            child: _legend(context),
+          ),
         ],
       );
     } else {
@@ -113,7 +117,11 @@ class TableTab extends StatelessWidget {
               itemBuilder: (context, index) => _teamRow(context, sorted[index], rank: index),
             ),
           ),
-          _legend(context),
+          // Keep the legend visible above the floating glass nav bar.
+          Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
+            child: _legend(context),
+          ),
         ],
       );
     }

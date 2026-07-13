@@ -650,7 +650,8 @@ class _ScorePageState extends State<ScorePage> {
                   return _refreshData(setState);
                 },
                 child: ListView(
-                      padding: const EdgeInsets.all(15),
+                      padding: EdgeInsets.fromLTRB(
+                          15, 15, 15, 15 + MediaQuery.paddingOf(context).bottom),
                       children: buildItemList()
                   )
                 );

@@ -448,6 +448,7 @@ class MatchFactsTab extends StatelessWidget {
 
     if (allEvents.isEmpty && team1Players.isEmpty && team2Players.isEmpty) {
       return SingleChildScrollView(
+        padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -470,6 +471,7 @@ class MatchFactsTab extends StatelessWidget {
     }
 
     return SingleChildScrollView(
+      padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

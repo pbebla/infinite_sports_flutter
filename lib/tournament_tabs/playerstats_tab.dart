@@ -72,7 +72,7 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
     ];
 
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      padding: EdgeInsets.fromLTRB(12, 8, 12, 8 + MediaQuery.paddingOf(context).bottom),
       itemCount: categories.length,
       itemBuilder: (context, index) {
         final cat = categories[index];

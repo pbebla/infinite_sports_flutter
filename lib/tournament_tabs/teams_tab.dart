@@ -49,7 +49,7 @@ class TeamsTab extends StatelessWidget {
       });
 
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.fromLTRB(0, 8, 0, 8 + MediaQuery.paddingOf(context).bottom),
       itemCount: teamList.length,
       itemBuilder: (context, index) {
         final team = teamList[index];

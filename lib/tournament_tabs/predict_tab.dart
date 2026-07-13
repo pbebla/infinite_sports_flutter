@@ -124,7 +124,7 @@ class _PredictTabState extends State<PredictTab> {
     }
     final dates = byDate.keys.toList();
     return ListView.builder(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: EdgeInsets.only(bottom: 16 + MediaQuery.paddingOf(context).bottom),
       itemCount: dates.length,
       itemBuilder: (context, i) {
         final date = dates[i];

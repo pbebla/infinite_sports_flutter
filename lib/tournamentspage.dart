@@ -186,7 +186,7 @@ class _TournamentsPageState extends State<TournamentsPage> {
           final past = all.where((t) => t.finished).toList();
 
           return ListView(
-            padding: const EdgeInsets.only(top: 8, bottom: 16),
+            padding: EdgeInsets.only(top: 8, bottom: 16 + MediaQuery.paddingOf(context).bottom),
             children: [
               if (current.isNotEmpty) ...[
                 Padding(
