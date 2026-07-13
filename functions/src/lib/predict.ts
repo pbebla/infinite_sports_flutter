@@ -34,9 +34,9 @@ export function matchStatLeaders(team1Activity: unknown, team2Activity: unknown,
   const bump = (type: string, player: string) => {
     const t = type.toLowerCase().trim();
     let key: string | null = null;
-    if (t === 'goal' || t === 'penalty goal') key = 'goals';
+    if (t === 'goal' || t === 'penalty goal' || t === 'pengoal') key = 'goals';
     else if (t === 'assist') key = 'assists';
-    else if (t === 'save' || t === 'penalty saved') key = 'saves';
+    else if (t === 'save' || t === 'penalty saved' || t === 'pensaved') key = 'saves';
     else if (t === 'dpl') key = 'dpl';
     if (key !== stat) return;
     tally[player] = (tally[player] ?? 0) + 1;

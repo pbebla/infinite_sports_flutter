@@ -130,3 +130,20 @@ describe('matchStatLeaders', () => {
     expect(matchStatLeaders(null, null, 'saves')).toEqual([]);
   });
 });
+
+describe('matchStatLeaders league aliases (P3)', () => {
+  test('counts league PenGoal as goals and PenSaved as saves, skipping _t', () => {
+    // League activity shape: minute keys keep a trailing apostrophe and every
+    // entry carries a _t insertion stamp.
+    const act = {
+      "5'": [{ PenGoal: 'Ana', _t: 1000 }],
+      "9'": [{ PenSaved: 'Kim', _t: 2000 }, { Goal: 'Ana', _t: 3000 }],
+    };
+    expect(matchStatLeaders(act, null, 'goals')).toEqual(['Ana']);
+    expect(matchStatLeaders(act, null, 'saves')).toEqual(['Kim']);
+  });
+  test('tournament spellings still count (no regression)', () => {
+    const act = { '5': [{ 'Penalty Goal': 'Bo' }] };
+    expect(matchStatLeaders(act, null, 'goals')).toEqual(['Bo']);
+  });
+});
