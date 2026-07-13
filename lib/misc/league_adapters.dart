@@ -37,6 +37,13 @@ String leagueGameId(String dateKey, int index) => '$dateKey#$index';
   return (dateKey: id.substring(0, at), index: index);
 }
 
+/// Path-safe storage key for one league game's predictions ('#' is ILLEGAL
+/// in RTDB keys, so the in-memory '{date}#{index}' id cannot be a path):
+/// answers live at '{sport}/{season}/Predictions/{dateKey}_{index}'.
+/// MUST stay in parity with functions/src/league_watch.ts leagueMatchKey.
+String leaguePredictionMatchKey(String dateKey, int index) =>
+    '${dateKey}_$index';
+
 /// One league game node -> [TournamentMatch].
 ///
 /// - Scores tolerate the legacy string/int + casing mix

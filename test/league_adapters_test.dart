@@ -331,4 +331,15 @@ void main() {
       expect(leagueCaptainsFromTeamsNode({'Nineveh': 'not-a-map'}), isEmpty);
     });
   });
+
+  group('leaguePredictionMatchKey (P3)', () {
+    test('is the path-safe twin of leagueGameId', () {
+      expect(leaguePredictionMatchKey('05202026', 3), '05202026_3');
+    });
+
+    test('round-trips from a league match id', () {
+      final ref = parseLeagueGameId(leagueGameId('11302026', 12))!;
+      expect(leaguePredictionMatchKey(ref.dateKey, ref.index), '11302026_12');
+    });
+  });
 }
