@@ -21,6 +21,11 @@ class LeagueFixturesTab extends StatefulWidget {
   final String sport;
   final void Function(TournamentMatch match)? onMatchTap;
 
+  /// Predict banner above the day's fixtures (tournament FixturesTab
+  /// parity) — shown when the season's predictions are open.
+  final bool predictionsOpen;
+  final VoidCallback? onOpenPredict;
+
   /// Test seam for "today"; production callers leave it null (DateTime.now()).
   final DateTime? now;
 
@@ -31,6 +36,8 @@ class LeagueFixturesTab extends StatefulWidget {
     required this.rosters,
     required this.sport,
     this.onMatchTap,
+    this.predictionsOpen = false,
+    this.onOpenPredict,
     this.now,
   });
 
@@ -76,6 +83,8 @@ class _LeagueFixturesTabState extends State<LeagueFixturesTab> {
             tournamentId: '',
             sport: widget.sport,
             onMatchTap: widget.onMatchTap,
+            predictionsOpen: widget.predictionsOpen,
+            onOpenPredict: widget.onOpenPredict,
           ),
         ),
       ],

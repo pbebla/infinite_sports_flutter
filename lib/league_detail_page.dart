@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/league_match_detail.dart';
 import 'package:infinite_sports_flutter/league_tabs/league_fixtures_tab.dart';
@@ -11,10 +12,13 @@ import 'package:infinite_sports_flutter/league_team_detail.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/misc/league_playoffs_view.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
+import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/predict_tab.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 /// Tournament-parity league season page (League Experience P2): Fixtures /
@@ -38,7 +42,7 @@ class LeagueDetailPage extends StatefulWidget {
 
 class _LeagueDetailPageState extends State<LeagueDetailPage>
     with SingleTickerProviderStateMixin {
-  static const List<Tab> _tabs = [
+  static const List<Tab> _baseTabs = [
     Tab(text: 'Fixtures'),
     Tab(text: 'Table'),
     Tab(text: 'Playoffs'),
@@ -46,8 +50,38 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
     Tab(text: 'Teams'),
   ];
 
-  late final TabController _tabController =
+  List<Tab> _tabs = _baseTabs;
+  late TabController _tabController =
       TabController(length: _tabs.length, vsync: this);
+
+  PredictionConfig? _predictionConfig;
+  bool get _predictionsOpen => _predictionConfig?.open ?? false;
+  int get _predictTabIndex => _baseTabs.length; // 6th tab when open
+
+  LeaguePredictionScope get _predictionScope =>
+      LeaguePredictionScope(sport: widget.sport, season: widget.season);
+
+  /// Rebuilds tabs + controller when the Predict tab toggles (live config).
+  /// The current index is clamped so removing the tab never crashes.
+  void _applyPredictionConfig(PredictionConfig config) {
+    final tabs = <Tab>[
+      ..._baseTabs,
+      if (config.open) const Tab(text: 'Predict'),
+    ];
+    setState(() {
+      _predictionConfig = config;
+      if (tabs.length != _tabs.length) {
+        final oldIndex = _tabController.index;
+        _tabController.dispose();
+        _tabs = tabs;
+        _tabController = TabController(
+          length: tabs.length,
+          vsync: this,
+          initialIndex: oldIndex.clamp(0, tabs.length - 1),
+        );
+      }
+    });
+  }
 
   // null = that stream's first snapshot hasn't arrived → tab skeleton.
   List<TournamentMatch>? _matches;
@@ -62,6 +96,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
   StreamSubscription<List<TournamentTeam>>? _standingsSub;
   StreamSubscription<Map<String, List<TournamentPlayer>>>? _rostersSub;
   StreamSubscription<LeaguePlayoffs?>? _playoffsSub;
+  StreamSubscription<PredictionConfig>? _configSub;
 
   @override
   void initState() {
@@ -85,6 +120,10 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
       }
     });
     _loadDisplaySeeds();
+    _configSub = LeagueService.watchPredictionConfig(widget.sport, widget.season)
+        .listen((config) {
+      if (mounted) _applyPredictionConfig(config);
+    });
   }
 
   void _subscribeGames() {
@@ -127,6 +166,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
     _standingsSub?.cancel();
     _rostersSub?.cancel();
     _playoffsSub?.cancel();
+    _configSub?.cancel();
     _tabController.dispose();
     super.dispose();
   }
@@ -239,6 +279,10 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                     rosters: _rosters ?? const {},
                     sport: widget.sport,
                     onMatchTap: _openMatch,
+                    predictionsOpen: _predictionsOpen,
+                    onOpenPredict: _predictionsOpen
+                        ? () => _tabController.animateTo(_predictTabIndex)
+                        : null,
                   ),
                   _standings == null
                       ? _tabSkeleton()
@@ -270,6 +314,18 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                           standings: _standings!,
                           matches: matches,
                         ),
+                  if (_predictionsOpen)
+                    PredictTab(
+                      matches: matches
+                          .where((m) => m.stage != 'friendly')
+                          .toList(),
+                      teams: _teamsById,
+                      tournamentId: '',
+                      scope: _predictionScope,
+                      config: _predictionConfig!,
+                      currentUid: FirebaseAuth.instance.currentUser?.uid,
+                      rosters: _rosters ?? const {},
+                    ),
                 ],
               ),
             ),
