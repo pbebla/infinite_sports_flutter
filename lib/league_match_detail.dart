@@ -1,13 +1,16 @@
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/league_team_detail.dart';
 import 'package:infinite_sports_flutter/misc/goal_toast.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
+import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
 import 'package:infinite_sports_flutter/misc/schedule_display.dart';
 import 'package:infinite_sports_flutter/misc/share_match_card_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
@@ -55,6 +58,8 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
   int _startHour = 0;
   StreamSubscription<TournamentMatch?>? _matchSub;
   StreamSubscription<Map<String, List<TournamentPlayer>>>? _rosterSub;
+  PredictionConfig? _predictionConfig;
+  StreamSubscription<PredictionConfig>? _configSub;
 
   @override
   void initState() {
@@ -67,6 +72,10 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
     _rosterSub =
         LeagueService.watchRosters(widget.sport, widget.season).listen((r) {
       if (mounted) setState(() => _rosters = r);
+    });
+    _configSub = LeagueService.watchPredictionConfig(widget.sport, widget.season)
+        .listen((config) {
+      if (mounted) setState(() => _predictionConfig = config);
     });
     LeagueService.getStartHour(widget.sport, widget.season).then((h) {
       if (!mounted || h == _startHour) return;
@@ -119,6 +128,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
   void dispose() {
     _matchSub?.cancel();
     _rosterSub?.cancel();
+    _configSub?.cancel();
     super.dispose();
   }
 
@@ -406,14 +416,21 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
         // The reused Facts body: icon timeline (all league event types via
         // the Task 2 aliases, minute labels, Guest entries as plain names),
         // Match Leaders (Task 2 tallies), and the §6 location card (renders
-        // only when the game node has a Location). No tournamentId /
-        // predictionConfig → the predict teaser stays hidden until P3.
+        // only when the game node has a Location).
         body: MatchFactsTab(
           match: match,
           team1: team1,
           team2: team2,
           team1Players: team1Players,
           team2Players: team2Players,
+          // Predict teaser (P3): only on predictable games — config open,
+          // both teams real (placeholders resolve to null), not a friendly.
+          scope: (match.stage != 'friendly' && team1 != null && team2 != null)
+              ? LeaguePredictionScope(
+                  sport: widget.sport, season: widget.season)
+              : null,
+          predictionConfig: _predictionConfig,
+          currentUid: FirebaseAuth.instance.currentUser?.uid,
         ),
       ),
     );
