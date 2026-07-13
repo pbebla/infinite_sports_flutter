@@ -5,7 +5,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_config/flutter_config.dart';
-import 'package:infinite_sports_flutter/aroundyou.dart';
+import 'package:infinite_sports_flutter/calendar_tab.dart';
 import 'package:infinite_sports_flutter/misc/goal_toast.dart';
 import 'package:infinite_sports_flutter/misc/notification_router.dart';
 import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
@@ -16,6 +16,8 @@ import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/navigations/current_livescore_navigation.dart';
 import 'package:infinite_sports_flutter/navigations/leagues_navigation.dart';
 import 'package:infinite_sports_flutter/navigations/tournaments_navigation.dart';
+import 'package:infinite_sports_flutter/search_hub_page.dart';
+import 'package:infinite_sports_flutter/widgets/glass_nav_bar.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -195,7 +197,7 @@ class _MyHomePageState extends State<MyHomePage> {
       _tournamentsTabBuilt
           ? const TournamentsNavigation()
           : const SizedBox.shrink(),
-      const AroundYou(),
+      const CalendarTab(),
     ];
     // This method is rerun every time setState is called, for instance as done
     // by the _incrementCounter method above.
@@ -205,6 +207,9 @@ class _MyHomePageState extends State<MyHomePage> {
     // than having to individually change instances of widgets.
     return Scaffold(
       drawer: const NavBar(),
+      // Let page content scroll underneath the floating glass bar so the
+      // frosted blur has something to sample.
+      extendBody: true,
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Builder(
         builder: (context) {
@@ -215,30 +220,34 @@ class _MyHomePageState extends State<MyHomePage> {
           );
         }
       ),
-      bottomNavigationBar: NavigationBar(
+      bottomNavigationBar: GlassNavBar(
         destinations: const [
-          NavigationDestination(
+          GlassNavDestination(
             icon: ImageIcon(AssetImage('assets/scores.png')),
-            selectedIcon: ImageIcon(AssetImage('assets/scores.png'), color: Colors.white,),
             label: 'Matches'),
-          NavigationDestination(
+          GlassNavDestination(
             icon: ImageIcon(AssetImage('assets/leagues.png')),
-            selectedIcon: ImageIcon(AssetImage('assets/leagues.png'), color: Colors.white,),
             label: 'Leagues'),
-          NavigationDestination(
+          GlassNavDestination(
             icon: Icon(Icons.emoji_events_outlined),
-            selectedIcon: Icon(Icons.emoji_events, color: Colors.white),
+            selectedIcon: Icon(Icons.emoji_events),
             label: 'Tournaments'),
-          NavigationDestination(
-            icon: ImageIcon(AssetImage('assets/aroundyou.png')),
-            selectedIcon: ImageIcon(AssetImage('assets/aroundyou.png'), color: Colors.white,),
-            label: 'Around You'),
+          GlassNavDestination(
+            icon: Icon(Icons.calendar_month_outlined),
+            selectedIcon: Icon(Icons.calendar_month),
+            label: 'Calendar'),
         ],
-        indicatorColor: Theme.of(context).colorScheme.primary,
         selectedIndex: _selectedIndex,
         onDestinationSelected: _onItemTapped,
+        onSearchTap: _openSearchHub,
         ) // This trailing comma makes auto-formatting nicer for build methods.
     );
+  }
+
+  void _openSearchHub() {
+    Navigator.push(context, MaterialPageRoute(builder: (context) {
+      return const SearchHubPage();
+    }));
   }
 
   void _onItemTapped(int index) {
@@ -256,7 +265,7 @@ class _MyHomePageState extends State<MyHomePage> {
         break;
         case 2: { _title = 'Tournaments'; }
         break;
-        case 3: { _title = 'Around You'; }
+        case 3: { _title = 'Calendar'; }
         break;
       } 
     });
