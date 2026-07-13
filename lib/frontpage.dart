@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
 import 'package:infinite_sports_flutter/leaderboard.dart';
+import 'package:infinite_sports_flutter/league_detail_page.dart';
 import 'package:infinite_sports_flutter/livescore.dart';
 import 'package:infinite_sports_flutter/misc/game_day.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
@@ -270,31 +271,47 @@ class _FrontPageState extends State<FrontPage> {
                 tabs.add(Column(children: [
                   if (openRegistrations.isNotEmpty)
                     _registrationBanner(context),
+                  // P3.1 owner feedback: header opens the season hub
+                  // (LeagueDetailPage), mirroring the tournament header card
+                  // below. Root navigator, matching league_day_view's pushes.
+                  // AFC San Jose keeps its own header (separate tab block).
                   LayoutBuilder(
                     builder: (context, constraints) {
                       return GestureDetector(
                         onTap: () {
-                          Navigator.push(context, MaterialPageRoute(builder: (context) {
-                            return ShowLeaguePage(sport: currentSport, season: currentSeason);
-                          },));
+                          Navigator.push(mainContext!, MaterialPageRoute(builder: (_) {
+                            return LeagueDetailPage(sport: currentSport, season: currentSeason);
+                          }));
                         },
                         child: Card(
-                            elevation: 2,
-                            child: SizedBox(
-                                width: constraints.maxWidth - 38,
-                                height: 70,
-                                child: Container(
-                                  padding: const EdgeInsets.all(13),
-                                  child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.center,
-                                    children: [
-                                      Text("Assyrian $currentSport League Season $currentSeason", style: const TextStyle(fontWeight: FontWeight.bold)),
-                                      const Spacer(),
-                                      getSportIcon(currentSport),
-                                    ],
-                                  ),
-                                )
-                            )
+                          elevation: 2,
+                          child: SizedBox(
+                            width: constraints.maxWidth - 38,
+                            height: 70,
+                            child: Container(
+                              padding: const EdgeInsets.all(13),
+                              child: Center(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    getSportIcon(currentSport),
+                                    const SizedBox(width: 8),
+                                    Flexible(
+                                      child: Text(
+                                        _leagueTabTitle,
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(fontWeight: FontWeight.bold),
+                                        overflow: TextOverflow.ellipsis,
+                                        maxLines: 2,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Icon(Icons.chevron_right),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                       );
                     },
