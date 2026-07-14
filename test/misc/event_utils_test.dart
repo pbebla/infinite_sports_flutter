@@ -44,9 +44,9 @@ void main() {
         _event('evening', DateTime(2026, 7, 20, 18)),
         _event('other day', DateTime(2026, 7, 21)),
       ]);
-      expect(byDay[DateTime(2026, 7, 20)]!.map((e) => e.event.title).toList(),
+      expect(byDay[DateTime(2026, 7, 20)]!.map((e) => e.event!.title).toList(),
           ['morning', 'evening']);
-      expect(byDay[DateTime(2026, 7, 21)]!.single.event.title, 'other day');
+      expect(byDay[DateTime(2026, 7, 21)]!.single.event!.title, 'other day');
     });
 
     test('keys are midnight-normalized and legacy indexes preserved', () {

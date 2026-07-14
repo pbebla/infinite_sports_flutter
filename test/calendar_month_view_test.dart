@@ -45,7 +45,7 @@ void main() {
     await tester.tap(find.text('20'));
     expect(tapped, day);
     expect(tappedEvents!.single.legacyIndex, 3);
-    expect(tappedEvents!.single.event.title, 'Futsal Finals');
+    expect(tappedEvents!.single.event!.title, 'Futsal Finals');
   });
 
   testWidgets('days without events do not trigger the day sheet', (tester) async {

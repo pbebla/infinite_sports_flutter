@@ -99,7 +99,7 @@ void main() {
         _legacy('same day', DateTime(2026, 8, 7)),
       ]);
       expect(byDay[DateTime(2026, 8, 7)]!.length, 2);
-      expect(byDay[DateTime(2026, 8, 8)]!.single.event.title, 'weekend');
+      expect(byDay[DateTime(2026, 8, 8)]!.single.event!.title, 'weekend');
     });
 
     test('entries know when their event is fully past', () {
@@ -141,14 +141,14 @@ void main() {
 
     test('selecting categories keeps matches and drops days left empty', () {
       final filtered = filterByCategories(byDay(), const {'Futsal'});
-      expect(filtered[DateTime(2026, 8, 7)]!.single.event.title, 'futsal');
+      expect(filtered[DateTime(2026, 8, 7)]!.single.event!.title, 'futsal');
       final none = filterByCategories(byDay(), const {'Soccer'});
       expect(none.containsKey(DateTime(2026, 8, 7)), isFalse);
     });
 
     test('uncategorized legacy events show under Community', () {
       final filtered = filterByCategories(byDay(), const {'Community'});
-      expect(filtered[DateTime(2026, 8, 7)]!.single.event.title, 'uncategorized');
+      expect(filtered[DateTime(2026, 8, 7)]!.single.event!.title, 'uncategorized');
     });
   });
 }

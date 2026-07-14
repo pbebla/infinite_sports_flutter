@@ -1,8 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/eventpage.dart';
+import 'package:infinite_sports_flutter/league_detail_page.dart';
+import 'package:infinite_sports_flutter/misc/calendar_sources.dart';
 import 'package:infinite_sports_flutter/misc/event_repo.dart';
 import 'package:infinite_sports_flutter/misc/event_utils.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/tournamentdetail.dart';
 import 'package:intl/intl.dart';
 
 /// Calendar tab: vertically scrolling month grids. Opens on the current
@@ -25,18 +30,32 @@ class _CalendarTabState extends State<CalendarTab> {
   final Key _centerKey = const ValueKey('calendar-current-month');
   final ScrollController _scroll = ScrollController();
   final Set<String> _selectedCategories = {};
-  // Live: dots update in place whenever events change in the database —
-  // no refresh, same as the tournament screens.
-  Stream<Map<DateTime, List<CalendarEntry>>>? _byDayStream;
+  // Live: three sources (events, league match days, tournament days) each
+  // update in place whenever their data changes — no refresh anywhere.
+  Map<DateTime, List<CalendarEntry>> _events = {};
+  Map<DateTime, List<CalendarEntry>> _leagueDays = {};
+  Map<DateTime, List<CalendarEntry>> _tournamentDays = {};
+  final List<StreamSubscription> _subs = [];
 
   @override
   void initState() {
     super.initState();
-    _byDayStream = watchAllEvents().map(eventsByDay);
+    _subs.add(watchAllEvents().map(eventsByDay).listen((byDay) {
+      if (mounted) setState(() => _events = byDay);
+    }));
+    _subs.add(watchLeagueDays().listen((byDay) {
+      if (mounted) setState(() => _leagueDays = byDay);
+    }));
+    _subs.add(watchTournamentDays().listen((byDay) {
+      if (mounted) setState(() => _tournamentDays = byDay);
+    }));
   }
 
   @override
   void dispose() {
+    for (final sub in _subs) {
+      sub.cancel();
+    }
     _scroll.dispose();
     super.dispose();
   }
@@ -84,12 +103,11 @@ class _CalendarTabState extends State<CalendarTab> {
           ),
         ],
       ),
-      body: StreamBuilder(
-        stream: _byDayStream,
-        builder: (context, snapshot) {
-          // No spinner: the month grid renders immediately and event dots
-          // stream in as data arrives (instantly from cache when offline).
-          final all = snapshot.data ?? const <DateTime, List<CalendarEntry>>{};
+      body: Builder(
+        builder: (context) {
+          // No spinner: the month grid renders immediately and dots stream
+          // in per source as data arrives (instantly from cache offline).
+          final all = mergeDayMaps([_events, _leagueDays, _tournamentDays]);
           final byDay = filterByCategories(all, _selectedCategories);
           final now = DateTime.now();
           final currentMonth = DateTime(now.year, now.month, 1);
@@ -174,23 +192,55 @@ class _CalendarTabState extends State<CalendarTab> {
                   itemCount: events.length,
                   itemBuilder: (context, i) {
                     final entry = events[i];
-                    final event = entry.event;
-                    return ListTile(
-                      leading: event.imageSrc == null
-                          ? Icon(Icons.event, color: Theme.of(context).colorScheme.primary)
-                          : SizedBox(width: 48, height: 48,
-                              child: FittedBox(fit: BoxFit.cover, clipBehavior: Clip.hardEdge, child: event.imageSrc!)),
-                      title: Text(event.title ?? ''),
-                      subtitle: Text('${entry.category} · ${event.startTime} - ${event.endTime}\n${event.location}'),
-                      isThreeLine: true,
-                      onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (context) {
-                          return entry.v2Id != null
-                              ? EventPage(v2Id: entry.v2Id)
-                              : EventPage(index: entry.legacyIndex);
-                        }));
-                      },
-                    );
+                    final accent = Theme.of(context).colorScheme.primary;
+                    switch (entry.kind) {
+                      case CalendarKind.league:
+                        return ListTile(
+                          leading: Icon(Icons.sports_soccer, color: accent),
+                          title: Text(entry.displayTitle),
+                          subtitle: Text('Match day · Season ${entry.season}'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () {
+                            Navigator.push(context, MaterialPageRoute(builder: (context) {
+                              return LeagueDetailPage(
+                                  sport: entry.sport ?? 'Futsal',
+                                  season: entry.season ?? '');
+                            }));
+                          },
+                        );
+                      case CalendarKind.tournament:
+                        return ListTile(
+                          leading: Icon(Icons.emoji_events, color: accent),
+                          title: Text(entry.displayTitle),
+                          subtitle: const Text('Tournament match day'),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () {
+                            Navigator.push(context, MaterialPageRoute(builder: (context) {
+                              return TournamentDetailPage(
+                                  tournamentId: entry.tournamentId ?? '',
+                                  tournamentName: entry.displayTitle);
+                            }));
+                          },
+                        );
+                      case CalendarKind.event:
+                        final event = entry.event!;
+                        return ListTile(
+                          leading: event.imageSrc == null
+                              ? Icon(Icons.event, color: accent)
+                              : SizedBox(width: 48, height: 48,
+                                  child: FittedBox(fit: BoxFit.cover, clipBehavior: Clip.hardEdge, child: event.imageSrc!)),
+                          title: Text(event.title ?? ''),
+                          subtitle: Text('${entry.category} · ${event.startTime} - ${event.endTime}\n${event.location}'),
+                          isThreeLine: true,
+                          onTap: () {
+                            Navigator.push(context, MaterialPageRoute(builder: (context) {
+                              return entry.v2Id != null
+                                  ? EventPage(v2Id: entry.v2Id)
+                                  : EventPage(index: entry.legacyIndex);
+                            }));
+                          },
+                        );
+                    }
                   },
                 ),
               ),

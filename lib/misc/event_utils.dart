@@ -16,21 +16,45 @@ const List<String> kEventCategories = [
 /// Uncategorized (legacy) events are treated as Community for filtering.
 const String kDefaultCategory = 'Community';
 
-/// One event's presence on the calendar. Legacy events carry their Events
-/// list index (EventPage addresses them by index); V2 events carry their id.
-class CalendarEntry {
-  const CalendarEntry({required this.event, this.legacyIndex, this.v2Id, this.lastDay});
+/// What a calendar dot stands for: a community event, a league match day,
+/// or a tournament day.
+enum CalendarKind { event, league, tournament }
 
-  final Event event;
+/// One item's presence on a calendar day. Events carry their Events-list
+/// index (legacy) or EventsV2 id; league days carry sport+season; tournament
+/// days carry the tournament id+name.
+class CalendarEntry {
+  const CalendarEntry({
+    this.event,
+    this.legacyIndex,
+    this.v2Id,
+    this.lastDay,
+    this.kind = CalendarKind.event,
+    this.title,
+    this.categoryOverride,
+    this.tournamentId,
+    this.sport,
+    this.season,
+  });
+
+  final Event? event;
   final int? legacyIndex;
   final String? v2Id;
+  final CalendarKind kind;
+  final String? title;
+  final String? categoryOverride;
+  final String? tournamentId;
+  final String? sport;
+  final String? season;
 
-  /// The event's final occurrence day; used to grey out fully-past events.
+  /// The item's final day; used to grey out fully-past entries.
   final DateTime? lastDay;
 
-  String get category => event.category ?? kDefaultCategory;
+  String get category => categoryOverride ?? event?.category ?? kDefaultCategory;
 
-  /// True once the event is completely over (its last day is before today).
+  String get displayTitle => title ?? event?.title ?? '';
+
+  /// True once the item is completely over (its last day is before today).
   bool isPastOn(DateTime today) =>
       lastDay != null && lastDay!.isBefore(DateTime(today.year, today.month, today.day));
 }
