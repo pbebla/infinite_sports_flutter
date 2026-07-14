@@ -25,12 +25,14 @@ class _CalendarTabState extends State<CalendarTab> {
   final Key _centerKey = const ValueKey('calendar-current-month');
   final ScrollController _scroll = ScrollController();
   final Set<String> _selectedCategories = {};
-  Future<Map<DateTime, List<CalendarEntry>>>? _future;
+  // Live: dots update in place whenever events change in the database —
+  // no refresh, same as the tournament screens.
+  Stream<Map<DateTime, List<CalendarEntry>>>? _byDayStream;
 
   @override
   void initState() {
     super.initState();
-    _future = _load();
+    _byDayStream = watchAllEvents().map(eventsByDay);
   }
 
   @override
@@ -40,22 +42,11 @@ class _CalendarTabState extends State<CalendarTab> {
   }
 
   /// Scroll offset 0 is the top of the current month (the center sliver),
-  /// so "Today" is a plain glide back to origin. Also re-checks for new
-  /// events while we're at it.
+  /// so "Today" is a plain glide back to origin.
   void _jumpToToday() {
     if (_scroll.hasClients) {
       _scroll.animateTo(0,
           duration: const Duration(milliseconds: 400), curve: Curves.easeOut);
-    }
-    setState(() { _future = _load(); });
-  }
-
-  Future<Map<DateTime, List<CalendarEntry>>> _load() async {
-    try {
-      return eventsByDay(await getAllEvents());
-    } catch (_) {
-      // Offline or Events unavailable: still show the calendar, just bare.
-      return {};
     }
   }
 
@@ -93,12 +84,11 @@ class _CalendarTabState extends State<CalendarTab> {
           ),
         ],
       ),
-      body: FutureBuilder(
-        future: _future,
+      body: StreamBuilder(
+        stream: _byDayStream,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+          // No spinner: the month grid renders immediately and event dots
+          // stream in as data arrives (instantly from cache when offline).
           final all = snapshot.data ?? const <DateTime, List<CalendarEntry>>{};
           final byDay = filterByCategories(all, _selectedCategories);
           final now = DateTime.now();

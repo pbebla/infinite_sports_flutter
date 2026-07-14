@@ -13,6 +13,7 @@ import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_path_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -32,14 +33,15 @@ class EventPage extends StatefulWidget {
 class _EventPageState extends State<EventPage> {
   bool attending = false;
   late Event event;
+  // Live record: attend/edit changes appear without reopening the page.
+  Stream<Event?>? _eventStream;
+  Future<Map<String, MyUser>>? _users;
 
-  Future<Map<String, MyUser>> fetchEvent() async {
-    if (widget.v2Id != null) {
-      event = await getEventV2(widget.v2Id!) ?? Event();
-    } else {
-      event = await getEvent(widget.index!);
-    }
-    return await getAllUsers();
+  @override
+  void initState() {
+    super.initState();
+    _eventStream = watchEvent(v2Id: widget.v2Id, legacyIndex: widget.index);
+    _users = getAllUsers();
   }
 
   /// Attendees live under the record the page was opened from.
@@ -167,18 +169,61 @@ class _EventPageState extends State<EventPage> {
 
   }
 
+  /// Shimmering placeholder shaped like the loaded page: flyer, register
+  /// bar, contact circles, button row.
+  Widget _skeleton(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    return Scaffold(
+      appBar: AppBar(
+        centerTitle: true,
+        backgroundColor: appBarBackground(context),
+        foregroundColor: appBarForeground(context),
+      ),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          SkeletonBox(width: width, height: 320, radius: 0),
+          const SizedBox(height: 14),
+          SkeletonBox(width: width - 30, height: 44, radius: 22),
+          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              SkeletonBox(width: 44, height: 44, radius: 22),
+              SizedBox(width: 18),
+              SkeletonBox(width: 44, height: 44, radius: 22),
+              SizedBox(width: 18),
+              SkeletonBox(width: 44, height: 44, radius: 22),
+            ],
+          ),
+          const SizedBox(height: 14),
+          SkeletonBox(width: width - 30, height: 36),
+          const SizedBox(height: 10),
+          SkeletonBox(width: width - 90, height: 14),
+          const SizedBox(height: 6),
+          SkeletonBox(width: width - 140, height: 14),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder(
-      future: fetchEvent(), 
-      builder: (context, snapshot) {
-        if(snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+    return StreamBuilder<Event?>(
+      stream: _eventStream,
+      builder: (context, eventSnapshot) {
+        return FutureBuilder(
+          future: _users,
+          builder: (context, snapshot) {
+        if (!eventSnapshot.hasData || !snapshot.hasData) {
+          return _skeleton(context);
         }
+        event = eventSnapshot.data ?? Event();
         Map<String, MyUser> users = snapshot.data!;
         List<Attendee> attendees = List.empty(growable: true);
+        // Recomputed on every live update so un-attending elsewhere is
+        // reflected here too.
+        attending = false;
         event.attendees?.forEach((uid, val) {
           String name = '${users[uid]?.firstName ?? ""} ${users[uid]?.lastName ?? ""}';
           attendees.add(Attendee(name, Image.network(users[uid]!.profileURL!, errorBuilder:(context, error, stackTrace) => Image.asset("assets/portraitplaceholder.png"))));
@@ -311,6 +356,8 @@ class _EventPageState extends State<EventPage> {
                 ],
               )
             ),
+        );
+          },
         );
       }
     );

@@ -1,4 +1,6 @@
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
@@ -10,6 +12,7 @@ import 'package:infinite_sports_flutter/misc/event_utils.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/business.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 class AroundYou extends StatefulWidget {
   const AroundYou({super.key});
 
@@ -39,14 +42,30 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
   List<Event>? events;
   Set<Marker> markers = {};
   GoogleMap? _googleMap;
-  List<Location?> eventLocations = List.empty(growable: true);
-  Future<int>? _loadBusinessesAndEvents;
+  // Geocode results cached by address so live event updates don't re-hit
+  // the geocoder for addresses we already resolved.
+  final Map<String, Location?> _geocodeCache = {};
+  StreamSubscription<List<Event>>? _eventsSub;
 
   @override
   void initState() {
     super.initState();
-    _loadBusinessesAndEvents = _getBusinessesAndEvents();
+    _loadBusinesses();
+    // Live events: the list, markers, and upcoming/past split update in
+    // place whenever an event is added, edited, or removed.
+    _eventsSub = watchAllEvents().listen((list) async {
+      events = list;
+      _splitEvents();
+      await _rebuildEventMarkers();
+      if (mounted) setState(() {});
+    });
     _getUserLocation();
+  }
+
+  @override
+  void dispose() {
+    _eventsSub?.cancel();
+    super.dispose();
   }
 
   void _onMapCreated(GoogleMapController controller) {
@@ -116,45 +135,51 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
     _pastIdx = past;
   }
 
-  Future<int> _getBusinessesAndEvents() async {
+  Future<void> _loadBusinesses() async {
     businesses = await getBusinesses();
-    events = await getAllEvents();
-    _splitEvents();
     for (var i = 0; i < businesses!.length ; i++) {
       if (!businesses![i].lat.isNaN) {
         Marker marker = Marker(
-          markerId: MarkerId(i.toString()),
+          markerId: MarkerId('biz-$i'),
           position: LatLng(businesses![i].lat, businesses![i].long),
           infoWindow: InfoWindow(title: businesses![i].name),
         );
         markers.add(marker);
       }
     }
-    for (var i = 0; i < events!.length ; i++) {
-      if (events![i].address != null) {
-        try {
-          List<Location> locations = await GeocodingPlatform.instance!.locationFromAddress(events![i].address!);
-          Marker marker = Marker(
-            markerId: MarkerId(((businesses?.length ?? 0) + i).toString()),
-            position: LatLng(locations[0].latitude, locations[0].longitude),
-            infoWindow: InfoWindow(title: events![i].title),
-          );
-          markers.add(marker);
-          eventLocations.add(locations[0]);
-        } catch (e) {
-          eventLocations.add(null);
-        }
-      } else {
-        eventLocations.add(null);
-      }
+    if (mounted) setState(() {});
+  }
+
+  Future<Location?> _locationFor(Event event) async {
+    final address = event.address;
+    if (address == null || address.isEmpty) return null;
+    if (_geocodeCache.containsKey(address)) return _geocodeCache[address];
+    try {
+      final locations = await GeocodingPlatform.instance!.locationFromAddress(address);
+      _geocodeCache[address] = locations.isEmpty ? null : locations[0];
+    } catch (_) {
+      _geocodeCache[address] = null;
     }
-    return 1;
+    return _geocodeCache[address];
+  }
+
+  Future<void> _rebuildEventMarkers() async {
+    markers.removeWhere((m) => m.markerId.value.startsWith('event-'));
+    for (var i = 0; i < (events?.length ?? 0); i++) {
+      final location = await _locationFor(events![i]);
+      if (location == null) continue;
+      markers.add(Marker(
+        markerId: MarkerId('event-$i'),
+        position: LatLng(location.latitude, location.longitude),
+        infoWindow: InfoWindow(title: events![i].title),
+      ));
+    }
   }
 
   Future<void> _refreshData() async {
-    _loadBusinessesAndEvents = _getBusinessesAndEvents();
-    await _loadBusinessesAndEvents;
-    setState(() {});
+    // Events are live; only businesses need a manual re-pull.
+    markers.removeWhere((m) => m.markerId.value.startsWith('biz-'));
+    await _loadBusinesses();
   }
 
   Future<String> getAddress(LatLng position) async
@@ -217,12 +242,10 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
             )
           ],
         ),
-        body: FutureBuilder(
-          future: _loadBusinessesAndEvents, 
-          builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Center(child:  CircularProgressIndicator(),);
-          }
+        body: Builder(
+          builder: (context) {
+          // No gate: map + sheet render immediately; each tab shows
+          // skeleton rows until its data arrives (events are live).
           return Scaffold(
             body: Stack(
               children: [
@@ -281,7 +304,11 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                           SliverFillRemaining(
                             child: TabBarView(
                               children: [
-                                ListView.builder(
+                                businesses == null
+                                    ? const SingleChildScrollView(
+                                        physics: ClampingScrollPhysics(),
+                                        child: SkeletonMatchList(count: 7))
+                                    : ListView.builder(
                                   itemCount: businesses?.length ?? 0,
                                   //controller: scrollController,
                                   physics: const ClampingScrollPhysics(),
@@ -290,7 +317,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                     leading: businesses![index].logo ?? SizedBox(width: 0, height: 0),
                                     title: Text('${businesses![index].name}'),
                                     subtitle: Text('${businesses![index].description}', overflow: TextOverflow.ellipsis,),
-                                    trailing: (!businesses![index].lat.isNaN) ? Text('${businesses![index].getMiles(_currentPosition!).toString().substring(0,4)} mi' ) : SizedBox(width: 0, height: 0),
+                                    trailing: (_currentPosition != null && !businesses![index].lat.isNaN) ? Text('${businesses![index].getMiles(_currentPosition!).toString().substring(0,4)} mi' ) : SizedBox(width: 0, height: 0),
                                     onTap: () async {
                                       var address = "";
                                       if (!businesses![index].lat.isNaN) {
@@ -306,7 +333,11 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                     },
                                   ),
                                 ),
-                                ListView.builder(
+                                events == null
+                                    ? const SingleChildScrollView(
+                                        physics: ClampingScrollPhysics(),
+                                        child: SkeletonMatchList(count: 7))
+                                    : ListView.builder(
                                   itemCount: _upcomingIdx.length +
                                       (_pastIdx.isEmpty ? 0 : _pastIdx.length + 1),
                                   //controller: scrollController,
@@ -336,8 +367,9 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                       title: Text('${event.title}'),
                                       subtitle: Text('on ${event.eventDate}\nat ${event.location}\n${event.startTime} - ${event.endTime}'),
                                       onTap: () async {
-                                        if (index < eventLocations.length && eventLocations[index] != null) {
-                                          mapController!.animateCamera(CameraUpdate.newLatLng(LatLng(eventLocations[index]!.latitude-0.08, eventLocations[index]!.longitude)));
+                                        final location = _geocodeCache[event.address];
+                                        if (location != null && mapController != null) {
+                                          mapController!.animateCamera(CameraUpdate.newLatLng(LatLng(location.latitude-0.08, location.longitude)));
                                         }
                                         Navigator.push(context, MaterialPageRoute(
                                           builder: (context) {
