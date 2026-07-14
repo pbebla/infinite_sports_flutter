@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
@@ -145,8 +146,10 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
 
   Widget _buildHeader(BuildContext context) {
     final team = _team;
-    // Determine header color
-    Color headerColor = team?.overrideColor ?? const Color(0xFF1A237E);
+    // Determine header color — a team overrideColor always wins (both
+    // modes); only the DEFAULT follows light navy / dark grey (P3.2).
+    Color headerColor =
+        team?.overrideColor ?? TournamentColors.headerBackground(context);
 
     final darkened = Color.fromARGB(
       255,
@@ -864,7 +867,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
     if (_loadError != null) {
       return Scaffold(
         appBar: AppBar(
-          backgroundColor: const Color(0xFF1A237E),
+          backgroundColor: TournamentColors.headerBackground(context),
           foregroundColor: Colors.white,
         ),
         body: Center(
@@ -901,7 +904,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
     if (_isLoading) {
       return Scaffold(
         appBar: AppBar(
-          backgroundColor: const Color(0xFF1A237E),
+          backgroundColor: TournamentColors.headerBackground(context),
           foregroundColor: Colors.white,
         ),
         body: const Center(child: CircularProgressIndicator()),
@@ -915,7 +918,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
             SliverAppBar(
               expandedHeight: 160,
               pinned: true,
-              backgroundColor: const Color(0xFF1A237E),
+              backgroundColor: TournamentColors.headerBackground(context),
               foregroundColor: Colors.white,
               actions: [
                 FollowBell(

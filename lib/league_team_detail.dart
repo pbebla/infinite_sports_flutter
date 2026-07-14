@@ -7,6 +7,7 @@ import 'package:infinite_sports_flutter/misc/league_form.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/notification_topics.dart';
 import 'package:infinite_sports_flutter/misc/top_stats.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -159,7 +160,7 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage>
           SliverAppBar(
             expandedHeight: 185,
             pinned: true,
-            backgroundColor: const Color(0xFF1A237E),
+            backgroundColor: TournamentColors.headerBackground(context),
             foregroundColor: Colors.white,
             // Force the back arrow (and actions) white in BOTH themes — the
             // global appBarTheme.iconTheme is onSurface, which goes dark on
@@ -226,12 +227,8 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage>
   Widget _buildHeader(
       BuildContext context, TournamentTeam team, List<String> form) {
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF1A237E), Color(0xFF283593)],
-        ),
+      decoration: BoxDecoration(
+        gradient: TournamentColors.headerGradient(context),
       ),
       child: SafeArea(
         bottom: false,

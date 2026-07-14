@@ -13,6 +13,8 @@ import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/misc/league_playoffs_view.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
+import 'package:infinite_sports_flutter/misc/tab_swap.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -39,8 +41,10 @@ class LeagueDetailPage extends StatefulWidget {
   State<LeagueDetailPage> createState() => _LeagueDetailPageState();
 }
 
+// TickerProviderStateMixin (not Single…): the P3.2 tab swap keeps the old
+// and new TabController alive for one frame during the 5↔6 transition.
 class _LeagueDetailPageState extends State<LeagueDetailPage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   static const List<Tab> _baseTabs = [
     Tab(text: 'Fixtures'),
     Tab(text: 'Table'),
@@ -61,24 +65,33 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
       LeaguePredictionScope(sport: widget.sport, season: widget.season);
 
   /// Rebuilds tabs + controller when the Predict tab toggles (live config).
-  /// The current index is clamped so removing the tab never crashes.
+  ///
+  /// P3.2 fix: never dispose a controller the mounted TabBar still
+  /// references — doing that mid-swap broke the SliverAppBar chrome (TabBar
+  /// and back arrow stopped painting, RenderFlex overflow under the header).
+  /// [swapTabController] creates the replacement first and disposes the old
+  /// controller post-frame, and [build] keys the NestedScrollView by tab
+  /// count so the tabbed subtree remounts cleanly on 5↔6. The selected index
+  /// carries over, clamped so removing the Predict tab while it's selected
+  /// never crashes.
   void _applyPredictionConfig(PredictionConfig config) {
     final tabs = <Tab>[
       ..._baseTabs,
       if (config.open) const Tab(text: 'Predict'),
     ];
+    if (tabs.length == _tabs.length) {
+      setState(() => _predictionConfig = config);
+      return;
+    }
+    final controller = swapTabController(
+      old: _tabController,
+      newLength: tabs.length,
+      vsync: this,
+    );
     setState(() {
       _predictionConfig = config;
-      if (tabs.length != _tabs.length) {
-        final oldIndex = _tabController.index;
-        _tabController.dispose();
-        _tabs = tabs;
-        _tabController = TabController(
-          length: tabs.length,
-          vsync: this,
-          initialIndex: oldIndex.clamp(0, tabs.length - 1),
-        );
-      }
+      _tabs = tabs;
+      _tabController = controller;
     });
   }
 
@@ -224,7 +237,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                 // (P2.1 Task A3 back-arrow audit).
                 Container(
                   height: 150,
-                  color: const Color(0xFF1A237E),
+                  color: TournamentColors.headerBackground(context),
                   alignment: Alignment.topLeft,
                   child: const SafeArea(
                     bottom: false,
@@ -243,11 +256,15 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
               ],
             )
           : NestedScrollView(
+              // P3.2: remount the tabbed subtree whenever the tab count
+              // changes (Predict toggling live) so TabBar/TabBarView attach
+              // to the new controller fresh — see swapTabController.
+              key: ValueKey(_tabs.length),
               headerSliverBuilder: (context, innerBoxIsScrolled) => [
                 SliverAppBar(
                   expandedHeight: 160,
                   pinned: true,
-                  backgroundColor: const Color(0xFF1A237E),
+                  backgroundColor: TournamentColors.headerBackground(context),
                   foregroundColor: Colors.white,
                   // Force the back arrow white in BOTH themes — the global
                   // appBarTheme.iconTheme is onSurface, which goes dark on
@@ -337,12 +354,8 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
         ? 'Assyrian Futsal League'
         : widget.sport;
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF1A237E), Color(0xFF283593)],
-        ),
+      decoration: BoxDecoration(
+        gradient: TournamentColors.headerGradient(context),
       ),
       child: SafeArea(
         bottom: false,

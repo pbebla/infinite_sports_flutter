@@ -9,6 +9,7 @@ import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
 import 'package:infinite_sports_flutter/misc/schedule_display.dart';
 import 'package:infinite_sports_flutter/misc/share_match_card_service.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
@@ -274,12 +275,8 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
     }
 
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF1A237E), Color(0xFF283593)],
-        ),
+      decoration: BoxDecoration(
+        gradient: TournamentColors.headerGradient(context),
       ),
       child: SafeArea(
         bottom: false,
@@ -341,7 +338,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
     if (match == null) {
       return Scaffold(
         appBar: AppBar(
-          backgroundColor: const Color(0xFF1A237E),
+          backgroundColor: TournamentColors.headerBackground(context),
           foregroundColor: Colors.white,
           // Force the back arrow white in BOTH themes — the global
           // appBarTheme.iconTheme is onSurface, which goes dark on this
@@ -374,7 +371,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
           return [
             SliverAppBar(
               pinned: true,
-              backgroundColor: const Color(0xFF1A237E),
+              backgroundColor: TournamentColors.headerBackground(context),
               foregroundColor: Colors.white,
               // White back arrow + actions in BOTH themes (see above).
               iconTheme: const IconThemeData(color: Colors.white),
