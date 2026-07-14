@@ -4,10 +4,12 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/league_match_detail.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/scorepage.dart';
 import 'package:infinite_sports_flutter/misc/schedule_display.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
@@ -228,6 +230,21 @@ class _LiveScorePageState extends State<LiveScorePage> {
       cardList.add(GestureDetector(
         child: card,
         onTap: () {
+          // League Experience P2: futsal league games open the live league
+          // match page (game identity = this date + list index, which
+          // getGames stores as GameNum). Basketball/FF/AFC keep the legacy
+          // ScorePage until P4.
+          if (widget.sport == "Futsal") {
+            Navigator.push(mainContext!, MaterialPageRoute(builder: (_) =>
+              LeagueMatchDetailPage(
+                sport: "Futsal",
+                season: widget.season,
+                dateKey: widget.date,
+                gameIndex: game.GameNum,
+              ),
+            ));
+            return;
+          }
           Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
             initialEntries: [OverlayEntry(
               builder: (context) {
@@ -264,10 +281,13 @@ class _LiveScorePageState extends State<LiveScorePage> {
       future: _fetchGamesList, 
       builder:(context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(
-            child: CircularProgressIndicator(
-              color: Theme.of(context).colorScheme.primary,
-            )
+          // P2.1: skeleton rows instead of the red spinner while games load.
+          return const SingleChildScrollView(
+            physics: NeverScrollableScrollPhysics(),
+            child: Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: SkeletonMatchList(count: 6),
+            ),
           );
         }
         if (!snapshot.hasData) {

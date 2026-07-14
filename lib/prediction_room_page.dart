@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/login.dart';
+import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
 import 'package:infinite_sports_flutter/misc/single_match_tallies.dart';
-import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/model/prediction.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/prediction_question.dart';
@@ -25,6 +25,10 @@ class PredictionRoomPage extends StatelessWidget {
   final List<TournamentPlayer> team1Players;
   final List<TournamentPlayer> team2Players;
 
+  /// Where this match's prediction data lives. Null = tournament behavior
+  /// (built from [tournamentId]) — every pre-P3 call site is unchanged.
+  final PredictionScope? scope;
+
   const PredictionRoomPage({
     super.key,
     required this.tournamentId,
@@ -35,7 +39,11 @@ class PredictionRoomPage extends StatelessWidget {
     required this.currentUid,
     this.team1Players = const [],
     this.team2Players = const [],
+    this.scope,
   });
+
+  PredictionScope get _scope =>
+      scope ?? TournamentPredictionScope(tournamentId);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -53,14 +61,10 @@ class PredictionRoomPage extends StatelessWidget {
   void _submit(BuildContext context, String qid, String value) {
     final uid = currentUid;
     if (uid == null) return;
-    TournamentService.submitAnswer(
-      tournamentId,
-      match.id,
-      uid,
-      qid,
-      value,
-      DateTime.now().millisecondsSinceEpoch,
-    ).then((_) {
+    _scope
+        .submitAnswer(
+            match, uid, qid, value, DateTime.now().millisecondsSinceEpoch)
+        .then((_) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -97,10 +101,10 @@ class PredictionRoomPage extends StatelessWidget {
         titleSpacing: 12,
       ),
       body: StreamBuilder<List<PredictionQuestion>>(
-        stream: TournamentService.watchTournamentQuestions(tournamentId),
+        stream: _scope.watchDefaultQuestions(),
         builder: (context, tourneySnap) {
           return StreamBuilder<List<PredictionQuestion>>(
-            stream: TournamentService.watchMatchQuestions(tournamentId, match.id),
+            stream: _scope.watchMatchQuestions(match),
             builder: (context, matchSnap) {
               // Merge and sort question lists; tournament-wide + per-match
               final allQuestions = _mergeQuestions(
@@ -109,15 +113,14 @@ class PredictionRoomPage extends StatelessWidget {
               );
 
               return StreamBuilder<Map<String, String>>(
-                stream: TournamentService.watchMatchResults(tournamentId, match.id),
+                stream: _scope.watchMatchResults(match),
                 builder: (context, resultsSnap) {
                   final results = resultsSnap.data ?? const {};
 
                   // Only open the answer stream when signed in
                   if (currentUid != null) {
                     return StreamBuilder<Map<String, QuestionAnswer>>(
-                      stream: TournamentService.watchMyMatchAnswers(
-                          tournamentId, match.id, currentUid!),
+                      stream: _scope.watchMyMatchAnswers(match, currentUid!),
                       builder: (context, answersSnap) {
                         final answers = answersSnap.data ?? const {};
                         return _buildBody(

@@ -15,6 +15,11 @@ class KnockoutTab extends StatefulWidget {
   final Map<String, List<TournamentPlayer>> rosters;
   final String sport;
 
+  /// League Experience P2: when set, match taps (cards + final hero) call
+  /// this instead of pushing TournamentMatchDetailPage. Default null keeps
+  /// tournament behavior unchanged.
+  final void Function(TournamentMatch match)? onMatchTap;
+
   const KnockoutTab({
     super.key,
     required this.matches,
@@ -22,6 +27,7 @@ class KnockoutTab extends StatefulWidget {
     this.tournamentId,
     this.rosters = const {},
     this.sport = '',
+    this.onMatchTap,
   });
 
   @override
@@ -219,7 +225,9 @@ class _KnockoutTabState extends State<KnockoutTab> {
     double totalH = baseH;
     if (isFinalPresent && centersPerRound[finalRoundIdx].isNotEmpty) {
       final finalCenterY = centersPerRound[finalRoundIdx][0];
-      final heroTop = finalCenterY - _heroH / 2;
+      // Same clamp as the hero's Positioned top (P2.2) so totalH covers the
+      // hero + bronze at their real, clamped position.
+      final heroTop = (finalCenterY - _heroH / 2).clamp(0.0, double.infinity);
       final bottomEdge = heroTop +
           _heroH +
           _heroBronzeGap +
@@ -367,7 +375,12 @@ class _KnockoutTabState extends State<KnockoutTab> {
       if (isFinalRound) {
         // Change 1: Final column = hero (fixed 150 h) + bronze beneath it,
         // all in a single Positioned Column so bronze scrolls with the hero.
-        final heroTop = centerY - _heroH / 2;
+        // P2.2: clamp to 0 — in a final-only bracket the first-round center
+        // (48) puts the hero top at -27, and Stack children above the top
+        // edge paint (Clip.none) but never receive taps, leaving a dead
+        // strip on the box. Multi-round brackets are unaffected (their
+        // final centers sit well below _heroH / 2).
+        final heroTop = (centerY - _heroH / 2).clamp(0.0, double.infinity);
         result.add(Positioned(
           top: heroTop,
           left: leftX,
@@ -403,6 +416,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
             tournamentId: widget.tournamentId,
             rosters: widget.rosters,
             sport: widget.sport,
+            onMatchTap: widget.onMatchTap,
             formatDate: _formatMatchDate,
             compact: true,
             allMatches: allMatches,
@@ -445,9 +459,15 @@ class _KnockoutTabState extends State<KnockoutTab> {
     final team1IsWinner = winnerId.isNotEmpty && winnerId == match.team1Id;
     final team2IsWinner = winnerId.isNotEmpty && winnerId == match.team2Id;
 
+    // P2.2: require NON-EMPTY ids, matching _KnockoutMatchCard — league
+    // adapters use '' (never null) for unresolved slots, so the hero for an
+    // unresolved final must not open a match page for a half-empty game.
+    // Tournament ids are null-or-real, so its behavior is unchanged.
     final canTap = match.team1Id != null &&
+        match.team1Id!.isNotEmpty &&
         match.team2Id != null &&
-        widget.tournamentId != null;
+        match.team2Id!.isNotEmpty &&
+        (widget.onMatchTap != null || widget.tournamentId != null);
 
     Widget hero = Container(
       decoration: BoxDecoration(
@@ -628,18 +648,24 @@ class _KnockoutTabState extends State<KnockoutTab> {
     if (canTap) {
       hero = InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => TournamentMatchDetailPage(
-              match: match,
-              teams: widget.teams,
-              rosters: widget.rosters,
-              tournamentId: widget.tournamentId!,
-              sport: widget.sport,
+        onTap: () {
+          if (widget.onMatchTap != null) {
+            widget.onMatchTap!(match);
+            return;
+          }
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => TournamentMatchDetailPage(
+                match: match,
+                teams: widget.teams,
+                rosters: widget.rosters,
+                tournamentId: widget.tournamentId!,
+                sport: widget.sport,
+              ),
             ),
-          ),
-        ),
+          );
+        },
         child: hero,
       );
     }
@@ -671,6 +697,7 @@ class _KnockoutTabState extends State<KnockoutTab> {
           tournamentId: widget.tournamentId,
           rosters: widget.rosters,
           sport: widget.sport,
+          onMatchTap: widget.onMatchTap,
           formatDate: _formatMatchDate,
           headerLabel: '🥉 Third place',
           allMatches: widget.matches,
@@ -804,6 +831,9 @@ class _KnockoutMatchCard extends StatelessWidget {
   /// When true, applies muted styling appropriate for the 3rd-place bronze card.
   final bool isBronze;
 
+  /// See [KnockoutTab.onMatchTap].
+  final void Function(TournamentMatch match)? onMatchTap;
+
   const _KnockoutMatchCard({
     required this.match,
     required this.teams,
@@ -816,6 +846,7 @@ class _KnockoutMatchCard extends StatelessWidget {
     this.headerLabel,
     this.compact = false,
     this.isBronze = false,
+    this.onMatchTap,
   });
 
   @override
@@ -844,7 +875,7 @@ class _KnockoutMatchCard extends StatelessWidget {
         match.team1Id!.isNotEmpty &&
         match.team2Id != null &&
         match.team2Id!.isNotEmpty &&
-        tournamentId != null;
+        (onMatchTap != null || tournamentId != null);
 
     final hPad = compact ? 8.0 : 10.0;
     final vPadHeader = compact ? 4.0 : 6.0;
@@ -978,18 +1009,24 @@ class _KnockoutMatchCard extends StatelessWidget {
     if (canTap) {
       card = InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => TournamentMatchDetailPage(
-              match: match,
-              teams: teams,
-              rosters: rosters,
-              tournamentId: tournamentId!,
-              sport: sport,
+        onTap: () {
+          if (onMatchTap != null) {
+            onMatchTap!(match);
+            return;
+          }
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => TournamentMatchDetailPage(
+                match: match,
+                teams: teams,
+                rosters: rosters,
+                tournamentId: tournamentId!,
+                sport: sport,
+              ),
             ),
-          ),
-        ),
+          );
+        },
         child: card,
       );
     }

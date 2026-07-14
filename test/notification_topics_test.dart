@@ -19,4 +19,16 @@ void main() {
       expect(teamTopic('T1', 'team a'), 'tournament_T1_team_team_a');
     });
   });
+
+  group('leagueTeamTopic (League Experience P2)', () {
+    test('builds the league team topic from sanitized parts', () {
+      expect(leagueTeamTopic('Futsal', '16', 'Nineveh'),
+          'league_Futsal_16_team_Nineveh');
+    });
+
+    test('sanitizes spaces and specials in every part', () {
+      expect(leagueTeamTopic('Flag Football', '3', "Ashur's XI"),
+          'league_Flag_Football_3_team_Ashur_s_XI');
+    });
+  });
 }

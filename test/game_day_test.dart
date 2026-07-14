@@ -36,4 +36,42 @@ void main() {
       expect(result, '05292026');
     });
   });
+
+  group('defaultFixturesDay', () {
+    test('picks today when a match is scheduled today', () {
+      final result = defaultFixturesDay(
+          ['05202026', '05292026', '06012026'], const {}, now: now);
+      expect(result, '05292026');
+    });
+
+    test('picks the earliest future day when nothing is today', () {
+      final result = defaultFixturesDay(
+          ['05202026', '06012026', '06152026'], const {}, now: now);
+      expect(result, '06012026');
+    });
+
+    test('falls back to the LAST day when every day is in the past', () {
+      final result =
+          defaultFixturesDay(['05012026', '05202026'], const {}, now: now);
+      expect(result, '05202026');
+    });
+
+    test('a live day wins over the nearest upcoming day', () {
+      final result = defaultFixturesDay(
+          ['05202026', '06012026'], {'05202026'}, now: now);
+      expect(result, '05202026');
+    });
+
+    test('earliest live day wins when several days are live', () {
+      final result = defaultFixturesDay(
+          ['05202026', '05292026', '06012026'],
+          {'05292026', '05202026'},
+          now: now);
+      expect(result, '05202026');
+    });
+
+    test('returns null only for an empty day list', () {
+      expect(defaultFixturesDay(const [], const {}, now: now), isNull);
+    });
+  });
 }

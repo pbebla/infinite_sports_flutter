@@ -55,4 +55,50 @@ void main() {
     }, null));
     expect(t['Sam']!.goals, 1);
   });
+
+  group('league activity types (League Experience P2)', () {
+    test('PenGoal counts as a goal — a penalty goal writes ONE entry', () {
+      final tallies = playerTalliesForActivity({
+        "5'": [
+          {'PenGoal': 'Ashur'},
+        ],
+      });
+      expect(tallies['Ashur']!.goals, 1);
+    });
+
+    test('PenSaved counts as a save for the keeper', () {
+      final tallies = playerTalliesForActivity({
+        "12'": [
+          {'PenSaved': 'Sargon'},
+        ],
+      });
+      expect(tallies['Sargon']!.saves, 1);
+    });
+
+    test('OwnGoal does NOT count toward goals leaders', () {
+      final tallies = playerTalliesForActivity({
+        "20'": [
+          {'OwnGoal': 'Ninos'},
+        ],
+      });
+      expect(tallies['Ninos']?.goals ?? 0, 0);
+    });
+
+    test('league Goal/Assist/Save/DPL spellings keep counting', () {
+      final tallies = playerTalliesForActivity({
+        "3'": [
+          {'Goal': 'Ashur'},
+          {'Assist': 'Ninos'},
+        ],
+        "9'": [
+          {'Save': 'Sargon'},
+          {'DPL': 'Ramina'},
+        ],
+      });
+      expect(tallies['Ashur']!.goals, 1);
+      expect(tallies['Ninos']!.assists, 1);
+      expect(tallies['Sargon']!.saves, 1);
+      expect(tallies['Ramina']!.dpl, 1);
+    });
+  });
 }

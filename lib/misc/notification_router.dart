@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/league_match_detail.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
@@ -17,6 +18,30 @@ RemoteMessage? pendingLaunchMessage;
 /// a tap must never crash the app. Shows an immediate loading overlay so the
 /// tap always gives instant feedback while the match data downloads.
 Future<void> openMatchFromNotification(Map<String, dynamic> data) async {
+  // League watcher payloads (P3) carry sport/season/dateKey/gameIndex —
+  // route straight to the league match page (it self-streams + has its
+  // own skeleton, so no preloading dialog is needed).
+  final sport = data['sport']?.toString() ?? '';
+  if (sport.isNotEmpty) {
+    final season = data['season']?.toString() ?? '';
+    final dateKey = data['dateKey']?.toString() ?? '';
+    final gameIndex = int.tryParse(data['gameIndex']?.toString() ?? '');
+    final leagueCtx = mainContext;
+    if (season.isEmpty || dateKey.isEmpty || gameIndex == null ||
+        leagueCtx == null) {
+      return; // bad payload: a tap must never crash the app
+    }
+    Navigator.of(leagueCtx, rootNavigator: true).push(MaterialPageRoute(
+      builder: (_) => LeagueMatchDetailPage(
+        sport: sport,
+        season: season,
+        dateKey: dateKey,
+        gameIndex: gameIndex,
+      ),
+    ));
+    return;
+  }
+
   final tid = data['tournamentId']?.toString() ?? '';
   final mid = data['matchId']?.toString() ?? '';
   if (tid.isEmpty || mid.isEmpty) return;
