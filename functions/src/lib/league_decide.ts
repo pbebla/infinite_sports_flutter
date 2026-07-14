@@ -125,8 +125,74 @@ export function parseLeagueGame(raw: unknown): LeagueGameContext {
 
 // ---- scorer / assist pairing -------------------------------------------------
 
-// League scorer spellings (league_sport_config vocabulary, lowercased).
-const SCORER_EVENTS = new Set(['goal', 'pengoal']);
+// ---- per-sport alert vocabulary (P4) ---------------------------------------
+
+/** Per-sport wording + scorer vocabulary. Keys are the RTDB sport roots;
+ *  unknown sports read as futsal (soccer wording) — safe default. */
+interface LeagueSportVocab {
+  /** Timeline types (lowercased) whose newest entry names the scorer. */
+  scorerEvents: Set<string>;
+  /** Scorer types that headline with tdTitle (flag football TDs). */
+  tdEvents: Set<string>;
+  /** Second-player pairing: the paired event type, its body label, and
+   *  which scorer types it pairs with. null pairEvent = no pairing. */
+  pairEvent: string | null;
+  pairLabel: string;
+  pairScorers: Set<string>;
+  /** Futsal only: fall back to the opponent's newest OwnGoal. */
+  ownGoalFallback: boolean;
+  goalTitle: (t1: string, s1: number, s2: number, t2: string) => string;
+  tdTitle: ((t1: string, s1: number, s2: number, t2: string) => string) | null;
+  kickoffPrefix: string;
+  fulltimePrefix: string;
+}
+
+const FUTSAL_VOCAB: LeagueSportVocab = {
+  // League scorer spellings (league_sport_config vocabulary, lowercased).
+  scorerEvents: new Set(['goal', 'pengoal']),
+  tdEvents: new Set(),
+  pairEvent: 'assist',
+  pairLabel: 'Assist',
+  pairScorers: new Set(['goal', 'pengoal']),
+  ownGoalFallback: true,
+  goalTitle: (t1, s1, s2, t2) => `⚽ GOAL! ${t1} ${s1} – ${s2} ${t2}`,
+  tdTitle: null,
+  kickoffPrefix: '🟢 Kickoff:',
+  fulltimePrefix: '🏁 Full time:',
+};
+
+const SPORT_VOCAB: Record<string, LeagueSportVocab> = {
+  Futsal: FUTSAL_VOCAB,
+  Basketball: {
+    scorerEvents: new Set(['onepointer', 'twopointer', 'threepointer']),
+    tdEvents: new Set(),
+    pairEvent: null,
+    pairLabel: '',
+    pairScorers: new Set(),
+    ownGoalFallback: false,
+    goalTitle: (t1, s1, s2, t2) => `🏀 Score! ${t1} ${s1} – ${s2} ${t2}`,
+    tdTitle: null,
+    kickoffPrefix: '🟢 Tip-off:',
+    fulltimePrefix: '🏁 Final:',
+  },
+  'Flag Football': {
+    scorerEvents: new Set(
+        ['receiving td', 'rushing td', 'int td', 'pat1', 'twopt']),
+    tdEvents: new Set(['receiving td', 'rushing td', 'int td']),
+    pairEvent: 'pass td',
+    pairLabel: 'Thrown by',
+    pairScorers: new Set(['receiving td']),
+    ownGoalFallback: false,
+    goalTitle: (t1, s1, s2, t2) => `🏈 Score! ${t1} ${s1} – ${s2} ${t2}`,
+    tdTitle: (t1, s1, s2, t2) => `🏈 TOUCHDOWN! ${t1} ${s1} – ${s2} ${t2}`,
+    kickoffPrefix: '🟢 Kickoff:',
+    fulltimePrefix: '🏁 Final:',
+  },
+};
+
+function vocabFor(sport: string): LeagueSportVocab {
+  return SPORT_VOCAB[sport] ?? FUTSAL_VOCAB;
+}
 
 interface MinuteEvent { minute: number; eventType: string; player: string }
 
@@ -161,19 +227,23 @@ function allEvents(activity: Record<string, unknown> | null): MinuteEvent[] {
     .flatMap(({ minute, bucket }) => bucketEvents(bucket, minute));
 }
 
-/** Newest scorer-type event, plus an assist in the same or next minute
- *  (the Manager's chained "Assisted by?" writes land in the same clock
- *  minute; the +1 tolerance mirrors the tournament watcher). */
-function findScorerAndAssist(activity: Record<string, unknown> | null):
-    { scorer: MinuteEvent | null; assist: MinuteEvent | null } {
+/** Newest scorer-type event, plus the vocab's paired event (assist /
+ *  pass td) in the same or next minute when the scorer type pairs. */
+function findScorerAndPair(
+    activity: Record<string, unknown> | null,
+    vocab: LeagueSportVocab,
+): { scorer: MinuteEvent | null; pair: MinuteEvent | null } {
   const events = allEvents(activity);
   const scorer = [...events].reverse()
-    .find((e) => SCORER_EVENTS.has(e.eventType)) ?? null;
-  if (!scorer) return { scorer: null, assist: null };
-  const assist = [...events].reverse().find((e) =>
-    e.eventType === 'assist' &&
+    .find((e) => vocab.scorerEvents.has(e.eventType)) ?? null;
+  if (!scorer) return { scorer: null, pair: null };
+  if (!vocab.pairEvent || !vocab.pairScorers.has(scorer.eventType)) {
+    return { scorer, pair: null };
+  }
+  const pair = [...events].reverse().find((e) =>
+    e.eventType === vocab.pairEvent &&
     (e.minute === scorer.minute || e.minute === scorer.minute + 1)) ?? null;
-  return { scorer, assist };
+  return { scorer, pair };
 }
 
 function newestOwnGoal(activity: Record<string, unknown> | null): MinuteEvent | null {
@@ -199,21 +269,29 @@ export function decideLeagueGoal(args: {
   const activity = teamTag === 1 ? game.team1Activity : game.team2Activity;
   const opposing = teamTag === 1 ? game.team2Activity : game.team1Activity;
 
-  const { scorer, assist } = findScorerAndAssist(activity);
+  const vocab = vocabFor(sport);
+  const { scorer, pair } = findScorerAndPair(activity, vocab);
   let body = '';
   if (scorer) {
     body = `${scorer.player} (${scoringTeamName}) ${scorer.minute}'`;
-    if (assist) body += ` · Assist: ${assist.player}`;
-  } else {
+    if (pair) body += ` · ${vocab.pairLabel}: ${pair.player}`;
+  } else if (vocab.ownGoalFallback) {
     // An own goal scores for THIS team but its event sits on the opponent.
     const og = newestOwnGoal(opposing);
     if (og) body = `Own goal · ${og.player} ${og.minute}'`;
   }
 
+  const t1 = game.team1 ?? 'Team 1';
+  const t2 = game.team2 ?? 'Team 2';
+  const title =
+    scorer && vocab.tdTitle && vocab.tdEvents.has(scorer.eventType)
+      ? vocab.tdTitle(t1, game.team1Score, game.team2Score, t2)
+      : vocab.goalTitle(t1, game.team1Score, game.team2Score, t2);
+
   return {
     kind: 'goal',
     dedupeKey: `goal_t${teamTag}_${after}`,
-    title: `⚽ GOAL! ${game.team1 ?? 'Team 1'} ${game.team1Score} – ${game.team2Score} ${game.team2 ?? 'Team 2'}`,
+    title,
     body,
     condition,
     color: ALERT_COLOR,
@@ -234,6 +312,7 @@ export function decideLeagueStatus(args: {
   const condition = buildLeagueCondition(sport, season, game.team1, game.team2);
   if (!condition) return null;
 
+  const vocab = vocabFor(sport);
   const n1 = game.team1 ?? 'Team 1';
   const n2 = game.team2 ?? 'Team 2';
 
@@ -241,7 +320,7 @@ export function decideLeagueStatus(args: {
     return {
       kind: 'kickoff',
       dedupeKey: 'kickoff',
-      title: `🟢 Kickoff: ${n1} vs ${n2}`,
+      title: `${vocab.kickoffPrefix} ${n1} vs ${n2}`,
       body: game.location
         ? `Now playing — ${game.location}`
         : 'Now playing — follow it live!',
@@ -255,7 +334,7 @@ export function decideLeagueStatus(args: {
     return {
       kind: 'fulltime',
       dedupeKey: 'fulltime',
-      title: `🏁 Full time: ${n1} ${game.team1Score} – ${game.team2Score} ${n2}`,
+      title: `${vocab.fulltimePrefix} ${n1} ${game.team1Score} – ${game.team2Score} ${n2}`,
       body: '',
       condition,
       color: ALERT_COLOR,

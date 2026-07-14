@@ -162,3 +162,116 @@ describe('decideLeagueStatus', () => {
     expect(decideLeagueStatus({ ...base, before: 1, after: 1, game: liveGame() })).toBeNull();
   });
 });
+
+describe('P4 — basketball wording', () => {
+  const CTX_B = { sport: 'Basketball', season: '1', dateKey: '01012027', gameIndex: 0 };
+
+  function bballGame(extra: Record<string, unknown> = {}) {
+    return parseLeagueGame({
+      team1: 'Eagles', team2: 'Lions',
+      team1score: 42, team2score: 38, status: 1,
+      team1activity: {
+        "12'": [{ TwoPointer: 'Sam Smith', _t: 1000 }],
+      },
+      ...extra,
+    });
+  }
+
+  test('score alert: 🏀 title, scorer body, no assist pairing', () => {
+    const d = decideLeagueGoal({
+      teamTag: 1, before: 40, after: 42, game: bballGame(), ...CTX_B,
+    });
+    expect(d).not.toBeNull();
+    expect(d!.title).toBe('🏀 Score! Eagles 42 – 38 Lions');
+    expect(d!.body).toBe("Sam Smith (Eagles) 12'");
+    expect(d!.dedupeKey).toBe('goal_t1_42');
+    expect(d!.data.sport).toBe('Basketball');
+  });
+
+  test('all three shot types are scorer events', () => {
+    for (const type of ['OnePointer', 'ThreePointer']) {
+      const d = decideLeagueGoal({
+        teamTag: 1, before: 40, after: 42,
+        game: bballGame({
+          team1activity: { "9'": [{ [type]: 'Alex' }] },
+        }),
+        ...CTX_B,
+      });
+      expect(d!.body).toBe("Alex (Eagles) 9'");
+    }
+  });
+
+  test('tip-off and final wording', () => {
+    const kick = decideLeagueStatus({
+      before: 0, after: 1, game: bballGame({ status: 1 }), ...CTX_B,
+    });
+    expect(kick!.title).toBe('🟢 Tip-off: Eagles vs Lions');
+    const ft = decideLeagueStatus({
+      before: 1, after: 2, game: bballGame({ status: 2 }), ...CTX_B,
+    });
+    expect(ft!.title).toBe('🏁 Final: Eagles 42 – 38 Lions');
+  });
+});
+
+describe('P4 — flag football wording', () => {
+  const CTX_F = { sport: 'Flag Football', season: '1', dateKey: '01012027', gameIndex: 0 };
+
+  function ffGame(extra: Record<string, unknown> = {}) {
+    return parseLeagueGame({
+      team1: 'Eagles', team2: 'Lions',
+      team1score: 12, team2score: 6, status: 1,
+      team1activity: {
+        "5'": [
+          { 'Receiving TD': 'Sam Smith', _t: 1000 },
+          { 'Pass TD': 'Quinn Boyd', _t: 2000 },
+        ],
+      },
+      ...extra,
+    });
+  }
+
+  test('TD alert: 🏈 TOUCHDOWN title + Thrown by pairing', () => {
+    const d = decideLeagueGoal({
+      teamTag: 1, before: 6, after: 12, game: ffGame(), ...CTX_F,
+    });
+    expect(d).not.toBeNull();
+    expect(d!.title).toBe('🏈 TOUCHDOWN! Eagles 12 – 6 Lions');
+    expect(d!.body).toBe(
+        "Sam Smith (Eagles) 5' · Thrown by: Quinn Boyd");
+  });
+
+  test('rushing TD headlines TOUCHDOWN without a thrower', () => {
+    const d = decideLeagueGoal({
+      teamTag: 1, before: 6, after: 12,
+      game: ffGame({
+        team1activity: { "8'": [{ 'Rushing TD': 'Alex' }] },
+      }),
+      ...CTX_F,
+    });
+    expect(d!.title).toBe('🏈 TOUCHDOWN! Eagles 12 – 6 Lions');
+    expect(d!.body).toBe("Alex (Eagles) 8'");
+  });
+
+  test('PAT/2PT are score alerts, not touchdowns', () => {
+    const d = decideLeagueGoal({
+      teamTag: 1, before: 12, after: 13,
+      game: ffGame({
+        team1score: 13,
+        team1activity: { "6'": [{ PAT1: 'Sam Smith' }] },
+      }),
+      ...CTX_F,
+    });
+    expect(d!.title).toBe('🏈 Score! Eagles 13 – 6 Lions');
+  });
+
+  test('kickoff and final wording', () => {
+    const kick = decideLeagueStatus({
+      before: 0, after: 1, game: ffGame(), ...CTX_F,
+    });
+    expect(kick!.title).toBe('🟢 Kickoff: Eagles vs Lions');
+    const ft = decideLeagueStatus({
+      before: 1, after: 2, game: ffGame({ status: 2 }), ...CTX_F,
+    });
+    expect(ft!.title).toBe('🏁 Final: Eagles 12 – 6 Lions');
+  });
+});
