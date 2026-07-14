@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/eventpage.dart';
+import 'package:infinite_sports_flutter/misc/event_repo.dart';
 import 'package:infinite_sports_flutter/misc/event_utils.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
-import 'package:infinite_sports_flutter/model/event.dart';
 import 'package:intl/intl.dart';
 
 /// Calendar tab: vertically scrolling month grids. Opens on the current
@@ -24,7 +24,8 @@ class _CalendarTabState extends State<CalendarTab> {
 
   final Key _centerKey = const ValueKey('calendar-current-month');
   final ScrollController _scroll = ScrollController();
-  Future<Map<DateTime, List<MapEntry<int, Event>>>>? _future;
+  final Set<String> _selectedCategories = {};
+  Future<Map<DateTime, List<CalendarEntry>>>? _future;
 
   @override
   void initState() {
@@ -49,9 +50,9 @@ class _CalendarTabState extends State<CalendarTab> {
     setState(() { _future = _load(); });
   }
 
-  Future<Map<DateTime, List<MapEntry<int, Event>>>> _load() async {
+  Future<Map<DateTime, List<CalendarEntry>>> _load() async {
     try {
-      return eventsByDay(await getEvents());
+      return eventsByDay(await getAllEvents());
     } catch (_) {
       // Offline or Events unavailable: still show the calendar, just bare.
       return {};
@@ -98,11 +99,24 @@ class _CalendarTabState extends State<CalendarTab> {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-          final byDay = snapshot.data ?? const <DateTime, List<MapEntry<int, Event>>>{};
+          final all = snapshot.data ?? const <DateTime, List<CalendarEntry>>{};
+          final byDay = filterByCategories(all, _selectedCategories);
           final now = DateTime.now();
           final currentMonth = DateTime(now.year, now.month, 1);
           return Column(
             children: [
+              _CategoryChips(
+                selected: _selectedCategories,
+                onChanged: (category) {
+                  setState(() {
+                    if (category == null) {
+                      _selectedCategories.clear();
+                    } else if (!_selectedCategories.remove(category)) {
+                      _selectedCategories.add(category);
+                    }
+                  });
+                },
+              ),
               _WeekdayHeader(labels: _weekdayLabels),
               Expanded(
                 child: CustomScrollView(
@@ -145,7 +159,7 @@ class _CalendarTabState extends State<CalendarTab> {
     );
   }
 
-  void _showDaySheet(DateTime day, List<MapEntry<int, Event>> events) {
+  void _showDaySheet(DateTime day, List<CalendarEntry> events) {
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
@@ -169,18 +183,21 @@ class _CalendarTabState extends State<CalendarTab> {
                   shrinkWrap: true,
                   itemCount: events.length,
                   itemBuilder: (context, i) {
-                    final event = events[i].value;
+                    final entry = events[i];
+                    final event = entry.event;
                     return ListTile(
                       leading: event.imageSrc == null
                           ? Icon(Icons.event, color: Theme.of(context).colorScheme.primary)
                           : SizedBox(width: 48, height: 48,
                               child: FittedBox(fit: BoxFit.cover, clipBehavior: Clip.hardEdge, child: event.imageSrc!)),
                       title: Text(event.title ?? ''),
-                      subtitle: Text('${event.startTime} - ${event.endTime}\n${event.location}'),
+                      subtitle: Text('${entry.category} · ${event.startTime} - ${event.endTime}\n${event.location}'),
                       isThreeLine: true,
                       onTap: () {
                         Navigator.push(context, MaterialPageRoute(builder: (context) {
-                          return EventPage(index: events[i].key);
+                          return entry.v2Id != null
+                              ? EventPage(v2Id: entry.v2Id)
+                              : EventPage(index: entry.legacyIndex);
                         }));
                       },
                     );
@@ -192,6 +209,59 @@ class _CalendarTabState extends State<CalendarTab> {
           ),
         );
       },
+    );
+  }
+}
+
+/// Horizontal category filter row. "All" clears the selection; category
+/// chips toggle independently (multi-select).
+class _CategoryChips extends StatelessWidget {
+  const _CategoryChips({required this.selected, required this.onChanged});
+
+  final Set<String> selected;
+  /// Called with a category to toggle, or null for "All".
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      height: 48,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: FilterChip(
+              label: const Text('All'),
+              selected: selected.isEmpty,
+              onSelected: (_) => onChanged(null),
+              selectedColor: scheme.primary,
+              labelStyle: TextStyle(
+                  color: selected.isEmpty ? scheme.onPrimary : scheme.onSurface,
+                  fontWeight: FontWeight.bold),
+              showCheckmark: false,
+            ),
+          ),
+          for (final category in kEventCategories)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: FilterChip(
+                label: Text(category),
+                selected: selected.contains(category),
+                onSelected: (_) => onChanged(category),
+                selectedColor: scheme.primary,
+                labelStyle: TextStyle(
+                    color: selected.contains(category)
+                        ? scheme.onPrimary
+                        : scheme.onSurface,
+                    fontWeight: FontWeight.bold),
+                showCheckmark: false,
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -232,8 +302,8 @@ class CalendarMonthView extends StatelessWidget {
 
   /// First day of the month shown.
   final DateTime month;
-  final Map<DateTime, List<MapEntry<int, Event>>> eventsByDay;
-  final void Function(DateTime day, List<MapEntry<int, Event>> events) onDayTap;
+  final Map<DateTime, List<CalendarEntry>> eventsByDay;
+  final void Function(DateTime day, List<CalendarEntry> events) onDayTap;
 
   @override
   Widget build(BuildContext context) {
@@ -301,8 +371,8 @@ class _DayCell extends StatelessWidget {
 
   final DateTime day;
   final bool isToday;
-  final List<MapEntry<int, Event>> events;
-  final void Function(DateTime day, List<MapEntry<int, Event>> events) onDayTap;
+  final List<CalendarEntry> events;
+  final void Function(DateTime day, List<CalendarEntry> events) onDayTap;
 
   @override
   Widget build(BuildContext context) {

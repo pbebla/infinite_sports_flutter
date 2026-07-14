@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/event_repo.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/attendee.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
@@ -11,10 +12,14 @@ import 'package:infinite_sports_flutter/model/myuser.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+/// Opens either a legacy event (by Events-list [index]) or an EventsV2
+/// event (by [v2Id]). Exactly one must be provided.
 class EventPage extends StatefulWidget {
-  const EventPage({super.key, required this.index});
+  const EventPage({super.key, this.index, this.v2Id})
+      : assert(index != null || v2Id != null);
 
-  final int index;
+  final int? index;
+  final String? v2Id;
 
   @override
   _EventPageState createState() => _EventPageState();
@@ -25,9 +30,18 @@ class _EventPageState extends State<EventPage> {
   late Event event;
 
   Future<Map<String, MyUser>> fetchEvent() async {
-    event = await getEvent(widget.index);
+    if (widget.v2Id != null) {
+      event = await getEventV2(widget.v2Id!) ?? Event();
+    } else {
+      event = await getEvent(widget.index!);
+    }
     return await getAllUsers();
   }
+
+  /// Attendees live under the record the page was opened from.
+  String get _attendeesPath => widget.v2Id != null
+      ? "EventsV2/${widget.v2Id}/Attendees/"
+      : "Events/${widget.index}/Attendees/";
 
   Future<void> share_Clicked() async {
     final result = await Share.share((event.title ?? "") + ' is on ' + (event.date ?? "") + ". Download the Infinite Sports app for more info!", subject: "Share Event");
@@ -39,7 +53,7 @@ class _EventPageState extends State<EventPage> {
 
   Future<void> attend_Clicked() async {
     try {
-      DatabaseReference newClient = FirebaseDatabase.instance.ref("Events/${widget.index}/Attendees/");
+      DatabaseReference newClient = FirebaseDatabase.instance.ref(_attendeesPath);
       if (!attending)
       {
           if (signedIn && FirebaseAuth.instance.currentUser!.photoURL != null)
@@ -160,10 +174,26 @@ class _EventPageState extends State<EventPage> {
                         ),
                       ),
                   ],),
+                  if (event.category != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Chip(
+                        label: Text(event.category!,
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.onPrimary,
+                                fontWeight: FontWeight.bold)),
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
                   Padding(
                     padding: const EdgeInsets.all(15),
                     child: Text(event.info ?? ""),
                   ),
+                  if (event.details?.isNotEmpty ?? false)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(15, 0, 15, 15),
+                      child: Text(event.details!),
+                    ),
                   Column(
                     children: [
                       Text(attendees.isNotEmpty ? "Attendees" : "", style: Theme.of(context).textTheme.headlineMedium,),

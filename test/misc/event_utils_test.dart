@@ -44,18 +44,18 @@ void main() {
         _event('evening', DateTime(2026, 7, 20, 18)),
         _event('other day', DateTime(2026, 7, 21)),
       ]);
-      expect(byDay[DateTime(2026, 7, 20)]!.map((e) => e.value.title).toList(),
+      expect(byDay[DateTime(2026, 7, 20)]!.map((e) => e.event.title).toList(),
           ['morning', 'evening']);
-      expect(byDay[DateTime(2026, 7, 21)]!.single.value.title, 'other day');
+      expect(byDay[DateTime(2026, 7, 21)]!.single.event.title, 'other day');
     });
 
-    test('keys are midnight-normalized and indexes preserved', () {
+    test('keys are midnight-normalized and legacy indexes preserved', () {
       final byDay = eventsByDay([
         _event('skipped', null),
         _event('kept', DateTime(2026, 8, 2, 14, 45)),
       ]);
       expect(byDay.keys.single, DateTime(2026, 8, 2));
-      expect(byDay.values.single.single.key, 1);
+      expect(byDay.values.single.single.legacyIndex, 1);
     });
   });
 }
