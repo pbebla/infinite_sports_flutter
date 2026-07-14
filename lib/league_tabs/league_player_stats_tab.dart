@@ -50,7 +50,7 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
       return const Center(child: Text('No player stats yet'));
     }
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      padding: EdgeInsets.fromLTRB(12, 8, 12, 8 + MediaQuery.paddingOf(context).bottom),
       itemCount: _categories.length,
       itemBuilder: (context, index) {
         final cat = _categories[index];

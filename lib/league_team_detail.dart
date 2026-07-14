@@ -326,7 +326,8 @@ class LeagueTeamOverviewTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+      padding: EdgeInsets.fromLTRB(
+          12, 8, 12, 24 + MediaQuery.paddingOf(context).bottom),
       children: [
         _buildTeamInfoCard(context),
         if (team.homeColor != null) _buildJerseyCard(context),
@@ -552,7 +553,8 @@ class LeagueTeamSquadTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.only(top: 8, bottom: 24),
+      padding: EdgeInsets.only(
+          top: 8, bottom: 24 + MediaQuery.paddingOf(context).bottom),
       children: [
         if (coach != null && coach!.isNotEmpty) ...[
           _sectionHeader(context, 'COACHING STAFF', inset: 16),
@@ -758,7 +760,8 @@ class _LeagueTeamStatsTabState extends State<LeagueTeamStatsTab> {
     }
 
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      padding: EdgeInsets.fromLTRB(
+          12, 8, 12, 8 + MediaQuery.paddingOf(context).bottom),
       children: cards,
     );
   }

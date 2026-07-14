@@ -20,6 +20,9 @@ class LeagueTableTab extends StatelessWidget {
       return const Center(child: Text('Table not yet available'));
     }
     return SingleChildScrollView(
+      // Bottom inset keeps the last table row reachable above the floating
+      // glass nav bar.
+      padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
       child: SizedBox(
         width: MediaQuery.of(context).size.width,
         child: DataTable(
