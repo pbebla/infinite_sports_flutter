@@ -318,6 +318,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                   _standings == null
                       ? _tabSkeleton()
                       : LeagueTableTab(
+                          sport: widget.sport,
                           standings: _standings!,
                           onOpenTeam: _openTeam,
                         ),
