@@ -14,9 +14,10 @@ import 'package:infinite_sports_flutter/model/futsalgame.dart';
 import 'package:infinite_sports_flutter/model/futsalplayerstats.dart';
 import 'package:infinite_sports_flutter/model/gameactivity.dart';
 import 'package:infinite_sports_flutter/model/playerstats.dart';
+import 'package:infinite_sports_flutter/misc/schedule_display.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
-import 'package:infinite_sports_flutter/playerpage.dart';
+import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:infinite_sports_flutter/table.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
@@ -460,12 +461,7 @@ class _ScorePageState extends State<ScorePage> {
           return DataRow(cells: [
             DataCell(Center(child: Text(key.number),)),
             DataCell(Text(key.name), onTap: () {
-              Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
-                  initialEntries: [OverlayEntry(
-                    builder: (mainContext) {
-                      return PlayerPage(uid: key.uid);
-                    })],
-                )));
+              openPlayerProfileById(context, uid: key.uid, name: key.name);
             },),
             DataCell(Text(key.goals.toString())),
             DataCell(Text(key.assists.toString())),
@@ -497,12 +493,7 @@ class _ScorePageState extends State<ScorePage> {
         rows: (teamPlayers as List).map((key) => DataRow(cells: [
             DataCell(Center(child: Text(key.number),)),
             DataCell(Text(key.name), onTap: () {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-                  initialEntries: [OverlayEntry(
-                    builder: (context) {
-                      return PlayerPage(uid: key.uid);
-                    })],
-                )));
+              openPlayerProfileById(context, uid: key.uid, name: key.name);
             },),
             DataCell(Text(key.total.toString())),
             DataCell(Text(key.rebounds.toString())),
@@ -549,12 +540,7 @@ class _ScorePageState extends State<ScorePage> {
         rows: (teamPlayers as List).map((key) => DataRow(cells: [
             DataCell(Center(child: Text(key.number),)),
             DataCell(Text(key.name), onTap: () {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-                  initialEntries: [OverlayEntry(
-                    builder: (context) {
-                      return PlayerPage(uid: key.uid);
-                    })],
-                )));
+              openPlayerProfileById(context, uid: key.uid, name: key.name);
             },),
             DataCell(Text(key.qbCompletions.toString())),
             DataCell(Text((key.qbCompletions+key.qbIncompletions).toString())),
@@ -762,9 +748,30 @@ class _ScorePageState extends State<ScorePage> {
       Row(
         children: <Widget>[
           Expanded(child:Text(game!.stringStatus,textAlign: TextAlign.left, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: game!.statusColor))),
-          Expanded(child:Text(game is SoccerGame && (game! as SoccerGame).startTime != "" ? (game! as SoccerGame).startTime : '${game!.Time.toString()}:00PM',textAlign: TextAlign.right, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
+          Expanded(child:Text(game is SoccerGame && (game! as SoccerGame).startTime != "" ? (game! as SoccerGame).startTime : gameTimeText(game!.storedTime, game!.Time),textAlign: TextAlign.right, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
         ],
       ),
+      if (game!.stage.isNotEmpty)
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.secondaryContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                stageDisplayName(game!.stage),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onSecondaryContainer,
+                ),
+              ),
+            ),
+          ],
+        ),
       Row(
         children: <Widget>[
           SizedBox(
@@ -772,7 +779,7 @@ class _ScorePageState extends State<ScorePage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                Image.network(width: 70, height: 70, game!.team1SourcePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0)),
+                isPlaceholderTeam(game!.team1) ? const Icon(Icons.emoji_events, size: 50) : Image.network(width: 70, height: 70, game!.team1SourcePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0)),
                 Center(child: Text(game!.team1, textAlign: TextAlign.center,),),
               ],
             ),
@@ -788,7 +795,7 @@ class _ScorePageState extends State<ScorePage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                Image.network(width: 70, height: 70, game!.team2SourcePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0)),
+                isPlaceholderTeam(game!.team2) ? const Icon(Icons.emoji_events, size: 50) : Image.network(width: 70, height: 70, game!.team2SourcePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0)),
                 Center(child: Text(game!.team2, textAlign: TextAlign.center),),
               ],
             ),
@@ -918,7 +925,7 @@ class _ScorePageState extends State<ScorePage> {
       elevation: 2,
       child: SizedBox(
         width: MediaQuery.sizeOf(context).width - 38,
-        height: 240,
+        height: game!.stage.isNotEmpty ? 270 : 240,
         child: Container(
           padding: const EdgeInsets.all(13),
           child: Column(

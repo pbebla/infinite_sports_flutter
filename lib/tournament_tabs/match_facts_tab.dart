@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/login.dart';
-import 'package:infinite_sports_flutter/misc/tournament_service.dart';
+import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:infinite_sports_flutter/model/prediction.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
@@ -9,6 +9,7 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/prediction_room_page.dart';
+import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:infinite_sports_flutter/misc/single_match_tallies.dart';
 
@@ -25,6 +26,9 @@ class MatchFactsTab extends StatelessWidget {
   final PredictionConfig? predictionConfig;
   final String? currentUid;
 
+  /// Null = tournament behavior (built from [tournamentId] when present).
+  final PredictionScope? scope;
+
   const MatchFactsTab({
     super.key,
     required this.match,
@@ -35,6 +39,7 @@ class MatchFactsTab extends StatelessWidget {
     this.tournamentId,
     this.predictionConfig,
     this.currentUid,
+    this.scope,
   });
 
   // Parse minute string to sortable double: "90+3'" -> 90.3, "45'" -> 45.0
@@ -127,6 +132,36 @@ class MatchFactsTab extends StatelessWidget {
     return StatIcon(asset: statIconAsset(eventType), size: 24);
   }
 
+  /// Resolves a timeline name against the threaded rosters (own team first)
+  /// so timeline taps open the right profile. Guests / unlinked players
+  /// resolve to null -> limited profile by name.
+  TournamentPlayer? _rosterPlayer(String name, bool isTeam1) {
+    final primary = isTeam1 ? team1Players : team2Players;
+    final secondary = isTeam1 ? team2Players : team1Players;
+    for (final p in primary) {
+      if (p.name == name) return p;
+    }
+    for (final p in secondary) {
+      if (p.name == name) return p;
+    }
+    return null;
+  }
+
+  /// Timeline player names open profiles, matching the Match Leaders rows
+  /// (P2.1 Task A3 tap-through audit).
+  Widget _tappableName(BuildContext context, Widget child, String? name,
+      bool isTeam1) {
+    if (name == null || name.trim().isEmpty) return child;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        final p = _rosterPlayer(name, isTeam1);
+        openPlayerProfileById(context, uid: p?.uid, name: name);
+      },
+      child: child,
+    );
+  }
+
   Widget _buildEventRow(BuildContext context, Map<String, dynamic> event) {
     final isTeam1 = event['isTeam1'] as bool;
     final minute = event['minute'] as String;
@@ -143,27 +178,40 @@ class MatchFactsTab extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (subOn != null)
-            Text(subOn,
-                style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF0A7D2C),
-                    fontWeight: FontWeight.w600),
-                overflow: TextOverflow.ellipsis),
+            _tappableName(
+                context,
+                Text(subOn,
+                    style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF0A7D2C),
+                        fontWeight: FontWeight.w600),
+                    overflow: TextOverflow.ellipsis),
+                subOn,
+                isTeam1),
           if (subOff != null)
-            Text(subOff,
-                style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFFEF5350),
-                    fontWeight: FontWeight.w600),
-                overflow: TextOverflow.ellipsis),
+            _tappableName(
+                context,
+                Text(subOff,
+                    style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFFEF5350),
+                        fontWeight: FontWeight.w600),
+                    overflow: TextOverflow.ellipsis),
+                subOff,
+                isTeam1),
         ],
       );
     } else {
-      nameWidget = Text(
+      nameWidget = _tappableName(
+        context,
+        Text(
+          playerName,
+          style: const TextStyle(fontSize: 12),
+          overflow: TextOverflow.ellipsis,
+          textAlign: isTeam1 ? TextAlign.left : TextAlign.right,
+        ),
         playerName,
-        style: const TextStyle(fontSize: 12),
-        overflow: TextOverflow.ellipsis,
-        textAlign: isTeam1 ? TextAlign.left : TextAlign.right,
+        isTeam1,
       );
     }
 
@@ -347,10 +395,13 @@ class MatchFactsTab extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: Text(
-                '${top.name} (${top.teamName})',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-                overflow: TextOverflow.ellipsis,
+              child: GestureDetector(
+                onTap: () => openPlayerProfileById(context, uid: top.uid, name: top.name),
+                child: Text(
+                  '${top.name} (${top.teamName})',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
             Text(
@@ -428,14 +479,16 @@ class MatchFactsTab extends StatelessWidget {
 
     // Teaser visibility: only when prediction context is fully provided and both
     // teams are confirmed — rendered at the very top of either code path.
-    final showTeaser = tournamentId != null &&
+    final PredictionScope? teaserScope = scope ??
+        (tournamentId != null ? TournamentPredictionScope(tournamentId!) : null);
+    final showTeaser = teaserScope != null &&
         predictionConfig?.open == true &&
         match.team1Id != null &&
         match.team2Id != null;
 
     final teaser = showTeaser
         ? _WhoWillWinTeaser(
-            tournamentId: tournamentId!,
+            scope: teaserScope,
             match: match,
             team1: team1,
             team2: team2,
@@ -504,7 +557,7 @@ class MatchFactsTab extends StatelessWidget {
 const _greenWin = Color(0xFF0A7D2C);
 
 class _WhoWillWinTeaser extends StatefulWidget {
-  final String tournamentId;
+  final PredictionScope scope;
   final TournamentMatch match;
   final TournamentTeam? team1;
   final TournamentTeam? team2;
@@ -514,7 +567,7 @@ class _WhoWillWinTeaser extends StatefulWidget {
   final List<TournamentPlayer> team2Players;
 
   const _WhoWillWinTeaser({
-    required this.tournamentId,
+    required this.scope,
     required this.match,
     required this.team1,
     required this.team2,
@@ -540,14 +593,8 @@ class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
     if (uid == null || _submitting) return;
     setState(() => _submitting = true);
     try {
-      await TournamentService.submitAnswer(
-        widget.tournamentId,
-        widget.match.id,
-        uid,
-        qid,
-        value,
-        DateTime.now().millisecondsSinceEpoch,
-      );
+      await widget.scope.submitAnswer(
+          widget.match, uid, qid, value, DateTime.now().millisecondsSinceEpoch);
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -558,7 +605,8 @@ class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
       context,
       MaterialPageRoute(
         builder: (_) => PredictionRoomPage(
-          tournamentId: widget.tournamentId,
+          tournamentId: '',
+          scope: widget.scope,
           match: widget.match,
           team1: widget.team1,
           team2: widget.team2,
@@ -582,7 +630,7 @@ class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
   Widget build(BuildContext context) {
     // Stream the tournament-wide questions and pick the first matchWinner.
     return StreamBuilder<List<PredictionQuestion>>(
-      stream: TournamentService.watchTournamentQuestions(widget.tournamentId),
+      stream: widget.scope.watchDefaultQuestions(),
       builder: (context, qSnap) {
         final questions = qSnap.data ?? const [];
         final PredictionQuestion? winnerQ = questions
@@ -598,8 +646,7 @@ class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
         // When signed in, also stream the user's current answers for this match.
         if (uid != null) {
           return StreamBuilder<Map<String, QuestionAnswer>>(
-            stream: TournamentService.watchMyMatchAnswers(
-                widget.tournamentId, widget.match.id, uid),
+            stream: widget.scope.watchMyMatchAnswers(widget.match, uid),
             builder: (context, ansSnap) {
               final answers = ansSnap.data ?? const {};
               final currentAnswer = answers[winnerQ.id]?.value;

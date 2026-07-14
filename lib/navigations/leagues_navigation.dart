@@ -33,15 +33,12 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                     }
                     return Scaffold(
                       appBar: AppBar(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Theme.of(context).colorScheme.primary,
                         centerTitle: true,
                         title: Text("Futsal")
                       ),
-                      body: ListView.separated(
-                        separatorBuilder: (context, index) => Divider(
-                              color: Theme.of(context).dividerColor,
-                            ),
+                      // P2.1: SeasonCards need no dividers between rows.
+                      body: ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
                         itemCount: snapshot.data!.length,
                         itemBuilder: (context, index) => snapshot.data![index]
                       )
@@ -60,15 +57,12 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                     }
                     return Scaffold(
                       appBar: AppBar(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Theme.of(context).colorScheme.primary,
                         centerTitle: true,
                         title: Text("Basketball")
                       ),
-                      body: ListView.separated(
-                        separatorBuilder: (context, index) => Divider(
-                              color: Theme.of(context).dividerColor,
-                            ),
+                      // P2.1: SeasonCards need no dividers between rows.
+                      body: ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
                         itemCount: snapshot.data!.length,
                         itemBuilder: (context, index) => snapshot.data![index]
                       )
@@ -87,15 +81,12 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                     }
                     return Scaffold(
                       appBar: AppBar(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Theme.of(context).colorScheme.primary,
                         centerTitle: true,
                         title: Text("Flag Football")
                       ),
-                      body: ListView.separated(
-                        separatorBuilder: (context, index) => Divider(
-                              color: Theme.of(context).dividerColor,
-                            ),
+                      // P2.1: SeasonCards need no dividers between rows.
+                      body: ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
                         itemCount: snapshot.data!.length,
                         itemBuilder: (context, index) => snapshot.data![index]
                       )
@@ -116,8 +107,6 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                     }
                     return Scaffold(
                       appBar: AppBar(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Theme.of(context).colorScheme.primary,
                         centerTitle: true,
                         title: Text("AFC San Jose")
                       ),

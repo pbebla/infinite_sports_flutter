@@ -11,6 +11,8 @@ import { loadNames } from './lib/names';
 import { sendAlert } from './lib/fcm';
 import { computeLeaderboardV2, FinalMatch, PredQuestion, QAnswer }
   from './lib/predict';
+import { readUserName } from './lib/user_names';
+import { makeLeagueTriggers } from './league_watch';
 
 admin.initializeApp();
 
@@ -25,19 +27,6 @@ function sleep(ms: number): Promise<void> {
  *  and namespace, which matters in the emulator (demo project + custom ns). */
 function dbRoot(event: DatabaseEvent<Change<DataSnapshot>>): Reference {
   return event.data.before.ref.root as Reference;
-}
-
-async function readUserName(root: Reference, uid: string): Promise<string> {
-  try {
-    const [f, l] = await Promise.all([
-      root.child(`Users/${uid}/First Name`).get(),
-      root.child(`Users/${uid}/Last Name`).get(),
-    ]);
-    const name = `${f.val() ?? ''} ${l.val() ?? ''}`.trim();
-    return name.length > 0 ? name : 'Player';
-  } catch {
-    return 'Player';
-  }
 }
 
 async function recomputeLeaderboard(root: Reference, tid: string): Promise<void> {
@@ -288,3 +277,14 @@ export const onPredictMatchQuestion = onValueWritten(
   '/Tournaments/{tid}/Matches/{mid}/PredictionQuestions/{qid}',
   async (event) => { await recomputeLeaderboard(dbRoot(event), event.params['tid'] as string); },
 );
+
+// ---- Registration payments (L1c) ----
+
+export { createRegistrationPaymentIntent } from './createRegistrationPaymentIntent';
+export { stripeWebhook } from './stripeWebhook';
+
+// ---- League Experience P3: league watcher + prediction scoring ----
+
+/** Grouped export -> deploys as leagueFutsal-onTeam1Score, ... (P4 adds
+ *  one line per sport: leagueBasketball, leagueFlagFootball). */
+export const leagueFutsal = makeLeagueTriggers('Futsal');

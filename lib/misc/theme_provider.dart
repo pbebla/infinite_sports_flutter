@@ -2,6 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+final _lightScheme = ColorScheme.fromSeed(
+  brightness: Brightness.light,
+  seedColor: Colors.white,
+  primary: infiniteSportsPrimaryColor,
+  dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
+);
+
+final _darkScheme = ColorScheme.fromSeed(
+  brightness: Brightness.dark,
+  seedColor: Colors.black,
+  primary: infiniteSportsPrimaryColor,
+  dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
+);
+
 ThemeData lightMode = ThemeData(
   // This is the theme of your application.
   //
@@ -19,14 +33,32 @@ ThemeData lightMode = ThemeData(
   // This works for code too, not just values: Most code changes can be
   // tested with just a hot reload.
   brightness: Brightness.light,
-  colorScheme: ColorScheme.fromSeed(brightness: Brightness.light, seedColor: Colors.white, primary: infiniteSportsPrimaryColor, dynamicSchemeVariant: DynamicSchemeVariant.fidelity,),
+  colorScheme: _lightScheme,
   useMaterial3: true,
+  appBarTheme: AppBarTheme(
+    backgroundColor: _lightScheme.surface,
+    foregroundColor: _lightScheme.onSurface,
+    elevation: 0,
+    scrolledUnderElevation: 0.5,
+    centerTitle: true,
+    iconTheme: IconThemeData(color: _lightScheme.onSurface),
+    actionsIconTheme: IconThemeData(color: _lightScheme.onSurface),
+  ),
 );
 
 ThemeData darkMode = ThemeData(
   brightness: Brightness.dark,
-  colorScheme: ColorScheme.fromSeed(brightness: Brightness.dark, seedColor: Colors.black, primary: infiniteSportsPrimaryColor, dynamicSchemeVariant: DynamicSchemeVariant.fidelity,),
+  colorScheme: _darkScheme,
   useMaterial3: true,
+  appBarTheme: AppBarTheme(
+    backgroundColor: _darkScheme.surface,
+    foregroundColor: _darkScheme.onSurface,
+    elevation: 0,
+    scrolledUnderElevation: 0.5,
+    centerTitle: true,
+    iconTheme: IconThemeData(color: _darkScheme.onSurface),
+    actionsIconTheme: IconThemeData(color: _darkScheme.onSurface),
+  ),
 );
 
 enum ThemeModes{

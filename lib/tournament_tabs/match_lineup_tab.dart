@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
+import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 class MatchLineupTab extends StatelessWidget {
@@ -90,34 +91,37 @@ class MatchLineupTab extends StatelessWidget {
   }
 
   Widget _buildPlayerRow(BuildContext context, TournamentPlayer p) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
-      child: Row(
-        children: [
-          // Jersey number badge
-          Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              shape: BoxShape.circle,
-            ),
-            child: Center(
-              child: Text(
-                p.number ?? '-',
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+    return InkWell(
+      onTap: () => openPlayerProfileById(context, uid: p.uid, name: p.name),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
+        child: Row(
+          children: [
+            // Jersey number badge
+            Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Text(
+                  p.number ?? '-',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              p.name,
-              softWrap: true,
-              overflow: TextOverflow.fade,
-            ),
-          )
-        ],
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                p.name,
+                softWrap: true,
+                overflow: TextOverflow.fade,
+              ),
+            )
+          ],
+        ),
       ),
     );
   }

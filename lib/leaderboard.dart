@@ -6,7 +6,7 @@ import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/flagfootballplayer.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/player.dart';
-import 'package:infinite_sports_flutter/playerpage.dart';
+import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:data_table_2/data_table_2.dart';
 
 class LeaderboardPage extends StatefulWidget {
@@ -150,12 +150,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         DataCell(Center(child: Text(key.number),)),
         DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0),),)),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-            initialEntries: [OverlayEntry(
-                builder: (context) {
-                  return PlayerPage(uid: key.uid);
-                })],
-          )));
+          openPlayerProfileById(context, uid: key.uid, name: key.name);
         },),
         DataCell(Text(key.goals.toString())),
         DataCell(Text(key.assists.toString())),
@@ -186,12 +181,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0),),)),
         //DataCell(Row(children: [Text(key.number), Spacer(), ])),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-            initialEntries: [OverlayEntry(
-                builder: (context) {
-                  return PlayerPage(uid: key.uid);
-                })],
-          )));
+          openPlayerProfileById(context, uid: key.uid, name: key.name);
         },),
         DataCell(Text(key.total.toString())),
         DataCell(Text(key.rebounds.toString())),
@@ -227,12 +217,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         DataCell(Center(child: Text(key.number),)),
         DataCell(Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0),)),
         DataCell(Container(decoration: verticalDividerRight, alignment: Alignment.centerLeft, child: Padding(padding: EdgeInsets.fromLTRB(0.0, 0, 0.0, 0), child: Text(key.name.toString(), softWrap: true,)),), onTap: () {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-            initialEntries: [OverlayEntry(
-                builder: (context) {
-                  return PlayerPage(uid: key.uid);
-                })],
-          )));
+          openPlayerProfileById(context, uid: key.uid, name: key.name);
         },),
         DataCell(Text(key.qbCompletionRate)),
         DataCell(Text(key.passingTouchdowns.toString())),
@@ -281,12 +266,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         DataCell(Text(key.position)),
         DataCell(Center(child: Text(key.number),)),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-            initialEntries: [OverlayEntry(
-                builder: (context) {
-                  return PlayerPage(uid: key.uid);
-                })],
-          )));
+          openPlayerProfileById(context, uid: key.uid, name: key.name);
         },),
         DataCell(Text(key.goals.toString())),
         DataCell(Text(key.assists.toString())),

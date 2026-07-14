@@ -30,6 +30,25 @@ String? statIconAsset(String eventType) {
       return 'assets/foul.png';
     case 'dpl':
       return 'assets/dpl.png';
+    // League Experience P2 — league activity-type spellings (P1 capture
+    // writes these verbatim; the tournament spellings above keep working).
+    case 'pengoal':
+      return 'assets/goal_penalty.png';
+    case 'penmissed':
+      return 'assets/penalty_missed.png';
+    case 'pensaved':
+      return 'assets/penalty_saved.png';
+    case 'owngoal':
+      return 'assets/own_goal.png';
+    case 'yellow':
+      return 'assets/yellow.png';
+    case 'secondyellow':
+      return 'assets/second_yellow.png';
+    case 'red':
+      return 'assets/red.png';
+    // Legacy league blue card — retired for new capture, still renders.
+    case 'blue':
+      return 'assets/blue.png';
     default:
       return null;
   }

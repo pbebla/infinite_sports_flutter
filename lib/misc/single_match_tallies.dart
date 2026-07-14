@@ -19,55 +19,64 @@ class MatchPlayerTally {
   }
 }
 
-/// Tallies goals/assists/saves/dpl from a single match's activity, keyed by
-/// player name. Mirrors the Spec-1 engine's event mapping (goal/penalty goal
-/// -> goals, assist -> assists, save/penalty saved -> saves, dpl -> dpl); all
-/// other events are timeline-only. Pure.
+void _applyEvent(Map<String, MatchPlayerTally> out, String type, String player) {
+  final t = out.putIfAbsent(player, () => MatchPlayerTally());
+  switch (type.toLowerCase().trim()) {
+    case 'goal':
+    case 'penalty goal':
+    case 'pengoal': // league PenGoal — one timeline entry, counts as a goal
+      t.goals++;
+      break;
+    case 'assist':
+      t.assists++;
+      break;
+    case 'save':
+    case 'penalty saved':
+    case 'pensaved': // league PenSaved — keeper credit
+      t.saves++;
+      break;
+    case 'dpl':
+      t.dpl++;
+      break;
+    default:
+      break;
+  }
+}
+
+void _scanInto(Map<String, MatchPlayerTally> out, Map<String, dynamic>? activity) {
+  if (activity == null) return;
+  void addEntry(dynamic entry) {
+    if (entry is Map) {
+      entry.forEach((k, v) => _applyEvent(out, k.toString(), v.toString()));
+    }
+  }
+  activity.forEach((_, bucket) {
+    if (bucket is List) {
+      for (final e in bucket) {
+        addEntry(e);
+      }
+    } else if (bucket is Map) {
+      bucket.forEach((_, e) => addEntry(e));
+    }
+  });
+}
+
+/// Per-player tallies for a SINGLE team's activity map (keyed by player name).
+/// Mirrors the event mapping (goal/penalty goal -> goals, assist -> assists,
+/// save/penalty saved -> saves, dpl -> dpl). Pure.
+Map<String, MatchPlayerTally> playerTalliesForActivity(
+    Map<String, dynamic>? activity) {
+  final out = <String, MatchPlayerTally>{};
+  _scanInto(out, activity);
+  return out;
+}
+
+/// Tallies goals/assists/saves/dpl from BOTH teams' activity, keyed by player
+/// name. Pure.
 Map<String, MatchPlayerTally> singleMatchPlayerTallies(TournamentMatch match) {
   final out = <String, MatchPlayerTally>{};
-
-  void apply(String type, String player) {
-    final t = out.putIfAbsent(player, () => MatchPlayerTally());
-    switch (type.toLowerCase().trim()) {
-      case 'goal':
-      case 'penalty goal':
-        t.goals++;
-        break;
-      case 'assist':
-        t.assists++;
-        break;
-      case 'save':
-      case 'penalty saved':
-        t.saves++;
-        break;
-      case 'dpl':
-        t.dpl++;
-        break;
-      default:
-        break;
-    }
-  }
-
-  void scan(Map<String, dynamic>? activity) {
-    if (activity == null) return;
-    void addEntry(dynamic entry) {
-      if (entry is Map) {
-        entry.forEach((k, v) => apply(k.toString(), v.toString()));
-      }
-    }
-    activity.forEach((_, bucket) {
-      if (bucket is List) {
-        for (final e in bucket) {
-          addEntry(e);
-        }
-      } else if (bucket is Map) {
-        bucket.forEach((_, e) => addEntry(e));
-      }
-    });
-  }
-
-  scan(match.team1Activity);
-  scan(match.team2Activity);
+  _scanInto(out, match.team1Activity);
+  _scanInto(out, match.team2Activity);
   return out;
 }
 

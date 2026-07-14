@@ -1,6 +1,6 @@
 import 'dart:collection';
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/misc/tournament_service.dart';
+import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/leaderboard_entry.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/prediction_question_card.dart'
@@ -19,6 +19,9 @@ class PredictTab extends StatefulWidget {
   final String? currentUid; // null = signed out
   final Map<String, List<TournamentPlayer>> rosters;
 
+  /// Null = tournament behavior (built from [tournamentId]).
+  final PredictionScope? scope;
+
   const PredictTab({
     super.key,
     required this.matches,
@@ -27,6 +30,7 @@ class PredictTab extends StatefulWidget {
     required this.config,
     required this.currentUid,
     this.rosters = const {},
+    this.scope,
   });
 
   @override
@@ -37,6 +41,9 @@ class _PredictTabState extends State<PredictTab> {
   bool _showLeaderboard = false;
 
   String? get _uid => widget.currentUid;
+
+  PredictionScope get _scope =>
+      widget.scope ?? TournamentPredictionScope(widget.tournamentId);
 
   @override
   Widget build(BuildContext context) {
@@ -77,7 +84,7 @@ class _PredictTabState extends State<PredictTab> {
     final uid = _uid;
     if (uid == null) return const SizedBox.shrink();
     return StreamBuilder<List<LeaderboardEntry>>(
-      stream: TournamentService.watchLeaderboard(widget.tournamentId),
+      stream: _scope.watchLeaderboard(),
       builder: (context, snap) {
         int? pts;
         for (final e in (snap.data ?? const <LeaderboardEntry>[])) {
@@ -166,6 +173,7 @@ class _PredictTabState extends State<PredictTab> {
             currentUid: widget.currentUid,
             team1Players: m.team1Id != null ? (widget.rosters[m.team1Id] ?? const []) : const [],
             team2Players: m.team2Id != null ? (widget.rosters[m.team2Id] ?? const []) : const [],
+            scope: widget.scope,
           ),
         )),
       ),
@@ -174,7 +182,7 @@ class _PredictTabState extends State<PredictTab> {
 
   Widget _leaderboardView() {
     return StreamBuilder<List<LeaderboardEntry>>(
-      stream: TournamentService.watchLeaderboard(widget.tournamentId),
+      stream: _scope.watchLeaderboard(),
       builder: (context, snap) {
         final rows = snap.data ?? const <LeaderboardEntry>[];
         if (rows.isEmpty) {

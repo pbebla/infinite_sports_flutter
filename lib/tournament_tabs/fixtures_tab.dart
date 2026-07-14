@@ -34,6 +34,11 @@ class FixturesTab extends StatelessWidget {
   final bool predictionsOpen;
   final VoidCallback? onOpenPredict;
 
+  /// League Experience P2: when set, card taps call this instead of pushing
+  /// TournamentMatchDetailPage (the league detail page routes taps to the
+  /// league match page). Default null keeps tournament behavior unchanged.
+  final void Function(TournamentMatch match)? onMatchTap;
+
   const FixturesTab({
     super.key,
     required this.matches,
@@ -43,6 +48,7 @@ class FixturesTab extends StatelessWidget {
     required this.sport,
     this.predictionsOpen = false,
     this.onOpenPredict,
+    this.onMatchTap,
   });
 
   String _formatDate(String mmddyyyy) {
@@ -209,6 +215,10 @@ class FixturesTab extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
         onTap: () {
+          if (onMatchTap != null) {
+            onMatchTap!(match);
+            return;
+          }
           Navigator.push(
             context,
             MaterialPageRoute(

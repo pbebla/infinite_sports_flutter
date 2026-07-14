@@ -33,6 +33,8 @@ abstract class Game
   late DatabaseReference databaseReference;
   late int GameNum;
   late int Time;
+  String storedTime = "";
+  String stage = "";
   void setUpVote();
   void getLineUpImages();
 }
