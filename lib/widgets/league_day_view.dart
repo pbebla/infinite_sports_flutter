@@ -18,9 +18,10 @@ import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 /// - Streams the single date node via [LeagueService.watchDateGames], so
 ///   score/clock/status changes arrive without a refresh.
 /// - Skeleton rows ([SkeletonMatchList]) while the first snapshot loads.
-/// - Tap: Futsal -> [LeagueMatchDetailPage] (same routing livescore.dart
-///   wired in P2); other league sports -> legacy [ScorePage] until P4
-///   (the legacy Game object is fetched one-shot at tap time).
+/// - Tap: Futsal/Basketball/Flag Football -> [LeagueMatchDetailPage] (same
+///   routing livescore.dart wired in P2, opened for all league engine
+///   sports in P4); other sports -> legacy [ScorePage] (the legacy Game
+///   object is fetched one-shot at tap time).
 ///
 /// AFC San Jose does NOT use this view (different RTDB layout under
 /// /AFC San Jose/Seasons and startTime/location/type semantics) — it stays
@@ -95,10 +96,11 @@ class _LeagueDayViewState extends State<LeagueDayView> {
   void _openMatch(TournamentMatch m) {
     final ref = parseLeagueGameId(m.id);
     if (ref == null) return;
-    // Same futsal-vs-legacy branch livescore.dart used: futsal opens the
-    // live league match page; basketball/flag football keep the legacy
-    // ScorePage (with its voting UI) until P4.
-    if (widget.sport == 'Futsal') {
+    // Same league-engine-vs-legacy branch livescore.dart used: futsal,
+    // basketball and flag football open the live league match page; AFC
+    // San Jose (and any unknown sport) keeps the legacy ScorePage (with its
+    // voting UI).
+    if (isLeagueEngineSport(widget.sport)) {
       Navigator.push(
         mainContext!,
         MaterialPageRoute(

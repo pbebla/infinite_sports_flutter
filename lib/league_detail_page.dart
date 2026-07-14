@@ -191,6 +191,19 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
   String get _leagueName =>
       widget.sport == 'Futsal' ? 'Assyrian Futsal League' : widget.sport;
 
+  /// Header crest per sport (P4) — matches the exact asset paths
+  /// `_sportIconAsset` in `lib/leagues.dart` already uses on the leagues menu.
+  String get _leagueCrestAsset {
+    switch (widget.sport) {
+      case 'Basketball':
+        return 'assets/BasketLeague.png';
+      case 'Flag Football':
+        return 'assets/FlagFootballLeague.png';
+      default:
+        return 'assets/FutsalLeague.png';
+    }
+  }
+
   /// Skeleton body for a tab whose stream hasn't emitted yet (P2.1 audit:
   /// skeletons, never spinners, on league first loads).
   Widget _tabSkeleton() => const SingleChildScrollView(
@@ -388,7 +401,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                   shape: BoxShape.circle,
                 ),
                 child: Image.asset(
-                  'assets/FutsalLeague.png',
+                  _leagueCrestAsset,
                   color: Colors.white,
                 ),
               ),

@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/league_match_detail.dart';
+import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/scorepage.dart';
 import 'package:infinite_sports_flutter/misc/schedule_display.dart';
@@ -230,14 +231,14 @@ class _LiveScorePageState extends State<LiveScorePage> {
       cardList.add(GestureDetector(
         child: card,
         onTap: () {
-          // League Experience P2: futsal league games open the live league
-          // match page (game identity = this date + list index, which
-          // getGames stores as GameNum). Basketball/FF/AFC keep the legacy
-          // ScorePage until P4.
-          if (widget.sport == "Futsal") {
+          // League Experience P2/P4: futsal, basketball and flag football
+          // league games open the live league match page (game identity =
+          // this date + list index, which getGames stores as GameNum). AFC
+          // San Jose keeps the legacy ScorePage.
+          if (isLeagueEngineSport(widget.sport)) {
             Navigator.push(mainContext!, MaterialPageRoute(builder: (_) =>
               LeagueMatchDetailPage(
-                sport: "Futsal",
+                sport: widget.sport,
                 season: widget.season,
                 dateKey: widget.date,
                 gameIndex: game.GameNum,
