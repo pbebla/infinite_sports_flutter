@@ -45,7 +45,11 @@ class _TournamentPlayerProfilePageState
             expandedHeight: 160,
             pinned: true,
             backgroundColor: TournamentColors.headerBackground(context),
-            foregroundColor: Colors.white,
+            foregroundColor: TournamentColors.headerForeground(context),
+            // Theme-aware back arrow (P4.1): dark on the white light-mode
+            // header, white on the dark grey.
+            iconTheme: IconThemeData(
+                color: TournamentColors.headerForeground(context)),
             flexibleSpace: FlexibleSpaceBar(
               background: _buildHeader(context, player),
             ),
@@ -64,6 +68,8 @@ class _TournamentPlayerProfilePageState
   }
 
   Widget _buildHeader(BuildContext context, TournamentPlayer player) {
+    final fg = TournamentColors.headerForeground(context);
+    final muted = TournamentColors.headerForegroundMuted(context);
     return Container(
       decoration: BoxDecoration(
         gradient: TournamentColors.headerGradient(context),
@@ -78,7 +84,7 @@ class _TournamentPlayerProfilePageState
                 url: player.photoUrl,
                 size: 56,
                 fallbackIcon: Icons.person,
-                fallbackBackground: Colors.white.withValues(alpha: 0.2),
+                fallbackBackground: TournamentColors.headerChipFill(context),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -88,8 +94,8 @@ class _TournamentPlayerProfilePageState
                   children: [
                     Text(
                       player.name,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: fg,
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                       ),
@@ -97,8 +103,7 @@ class _TournamentPlayerProfilePageState
                     const SizedBox(height: 4),
                     Text(
                       player.teamName,
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 13),
+                      style: TextStyle(color: muted, fontSize: 13),
                     ),
                   ],
                 ),

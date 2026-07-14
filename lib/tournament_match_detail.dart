@@ -78,6 +78,10 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
     final team2 = _match.team2Id != null ? widget.teams[_match.team2Id] : null;
     final isLive = _match.matchStatus.isLive;
     final isFinished = _match.matchStatus.isFinished;
+    // Theme-aware header foreground (P4.1): dark text on the white
+    // light-mode header, white on the dark-mode grey.
+    final fg = TournamentColors.headerForeground(context);
+    final muted = TournamentColors.headerForegroundMuted(context);
 
     Widget scoreWidget;
     if (isLive) {
@@ -88,18 +92,14 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ScoreText(
-                  value: _match.team1Score,
-                  fontSize: 28,
-                  baseColor: Colors.white),
-              const Text(' - ',
+                  value: _match.team1Score, fontSize: 28, baseColor: fg),
+              Text(' - ',
                   style: TextStyle(
-                      color: Colors.white,
+                      color: fg,
                       fontWeight: FontWeight.bold,
                       fontSize: 28)),
               ScoreText(
-                  value: _match.team2Score,
-                  fontSize: 28,
-                  baseColor: Colors.white),
+                  value: _match.team2Score, fontSize: 28, baseColor: fg),
             ],
           ),
           const SizedBox(height: 4),
@@ -125,8 +125,8 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
     } else if (isFinished) {
       scoreWidget = Text(
         '${_match.team1Score} - ${_match.team2Score}',
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: fg,
           fontWeight: FontWeight.bold,
           fontSize: 28,
         ),
@@ -134,10 +134,10 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
     } else {
       scoreWidget = Column(
         children: [
-          const Text(
+          Text(
             'VS',
             style: TextStyle(
-              color: Colors.white,
+              color: fg,
               fontWeight: FontWeight.bold,
               fontSize: 22,
             ),
@@ -145,7 +145,7 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
           if (_match.time != null)
             Text(
               _match.time!,
-              style: const TextStyle(color: Colors.white70, fontSize: 13),
+              style: TextStyle(color: muted, fontSize: 13),
             ),
         ],
       );
@@ -172,13 +172,13 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.15),
+                    color: TournamentColors.headerChipFill(context),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
                     _match.label,
-                    style: const TextStyle(
-                      color: Colors.white70,
+                    style: TextStyle(
+                      color: muted,
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                     ),
@@ -197,8 +197,8 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                         const SizedBox(height: 6),
                         Text(
                           team1?.name ?? _match.team1Id ?? 'TBD',
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: fg,
                             fontWeight: FontWeight.bold,
                             fontSize: 13,
                           ),
@@ -222,8 +222,8 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                         const SizedBox(height: 6),
                         Text(
                           team2?.name ?? _match.team2Id ?? 'TBD',
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: fg,
                             fontWeight: FontWeight.bold,
                             fontSize: 13,
                           ),
@@ -242,7 +242,7 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                 const SizedBox(height: 10),
                 Text(
                   _formatDate(_match.date),
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  style: TextStyle(color: muted, fontSize: 12),
                 ),
               ],
             ],
@@ -268,7 +268,13 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
               SliverAppBar(
                 pinned: true,
                 backgroundColor: TournamentColors.headerBackground(context),
-                foregroundColor: Colors.white,
+                foregroundColor: TournamentColors.headerForeground(context),
+                // Theme-aware back arrow + actions (P4.1): dark on the white
+                // light-mode header, white on the dark grey.
+                iconTheme: IconThemeData(
+                    color: TournamentColors.headerForeground(context)),
+                actionsIconTheme: IconThemeData(
+                    color: TournamentColors.headerForeground(context)),
                 actions: [
                   IconButton(
                     icon: const Icon(Icons.ios_share),
@@ -300,14 +306,18 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                 flexibleSpace: FlexibleSpaceBar(
                   background: _buildScoreboardHeader(context),
                 ),
-                bottom: const TabBar(
-                  tabs: [
+                bottom: TabBar(
+                  tabs: const [
                     Tab(text: 'Facts'),
                     Tab(text: 'Lineup')
                   ],
-                  labelColor: Colors.white,
-                  unselectedLabelColor: Colors.white70,
-                  indicatorColor: Colors.white,
+                  labelColor: TournamentColors.headerForeground(context),
+                  unselectedLabelColor:
+                      TournamentColors.headerForegroundMuted(context),
+                  // Was Colors.white — invisible on the white light-mode
+                  // header, so the indicator follows the foreground (still
+                  // white in dark mode).
+                  indicatorColor: TournamentColors.headerForeground(context),
                   indicatorWeight: 2,
                 ),
               ),

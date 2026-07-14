@@ -161,12 +161,14 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage>
             expandedHeight: 185,
             pinned: true,
             backgroundColor: TournamentColors.headerBackground(context),
-            foregroundColor: Colors.white,
-            // Force the back arrow (and actions) white in BOTH themes — the
-            // global appBarTheme.iconTheme is onSurface, which goes dark on
-            // this navy header in light mode (P2.1 Task A3 fix).
-            iconTheme: const IconThemeData(color: Colors.white),
-            actionsIconTheme: const IconThemeData(color: Colors.white),
+            foregroundColor: TournamentColors.headerForeground(context),
+            // Theme-aware back arrow + actions (P4.1): dark on the white
+            // light-mode header, white on the dark grey — the back arrow
+            // stays visible in both modes (P2.1 Task A3).
+            iconTheme: IconThemeData(
+                color: TournamentColors.headerForeground(context)),
+            actionsIconTheme: IconThemeData(
+                color: TournamentColors.headerForeground(context)),
             actions: [
               FollowBell(
                 topic: leagueTeamTopic(
@@ -185,8 +187,9 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage>
                 Tab(text: 'Squad'),
                 Tab(text: 'Stats'),
               ],
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white70,
+              labelColor: TournamentColors.headerForeground(context),
+              unselectedLabelColor:
+                  TournamentColors.headerForegroundMuted(context),
               indicatorColor: Theme.of(context).colorScheme.primary,
               indicatorWeight: 3,
             ),
@@ -226,6 +229,8 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage>
 
   Widget _buildHeader(
       BuildContext context, TournamentTeam team, List<String> form) {
+    final fg = TournamentColors.headerForeground(context);
+    final muted = TournamentColors.headerForegroundMuted(context);
     return Container(
       decoration: BoxDecoration(
         gradient: TournamentColors.headerGradient(context),
@@ -246,8 +251,8 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage>
                   children: [
                     Text(
                       team.name,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: fg,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
@@ -261,8 +266,7 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage>
                     else
                       Text(
                         'W${team.wins} D${team.draws} L${team.losses} · ${team.points} pts · Season ${widget.season}',
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 12),
+                        style: TextStyle(color: muted, fontSize: 12),
                       ),
                     if (form.isNotEmpty) ...[
                       const SizedBox(height: 8),

@@ -167,6 +167,10 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
       TournamentTeam? team1, TournamentTeam? team2) {
     final isLive = match.matchStatus.isLive;
     final isFinished = match.matchStatus.isFinished;
+    // Theme-aware header foreground (P4.1): dark text on the white
+    // light-mode header, white on the dark-mode grey.
+    final fg = TournamentColors.headerForeground(context);
+    final muted = TournamentColors.headerForegroundMuted(context);
 
     Widget scoreWidget;
     if (isLive) {
@@ -177,18 +181,14 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ScoreText(
-                  value: match.team1Score,
-                  fontSize: 28,
-                  baseColor: Colors.white),
-              const Text(' - ',
+                  value: match.team1Score, fontSize: 28, baseColor: fg),
+              Text(' - ',
                   style: TextStyle(
-                      color: Colors.white,
+                      color: fg,
                       fontWeight: FontWeight.bold,
                       fontSize: 28)),
               ScoreText(
-                  value: match.team2Score,
-                  fontSize: 28,
-                  baseColor: Colors.white),
+                  value: match.team2Score, fontSize: 28, baseColor: fg),
             ],
           ),
           const SizedBox(height: 4),
@@ -216,8 +216,8 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
     } else if (isFinished) {
       scoreWidget = Text(
         '${match.team1Score} - ${match.team2Score}',
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: fg,
           fontWeight: FontWeight.bold,
           fontSize: 28,
         ),
@@ -225,10 +225,10 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
     } else {
       scoreWidget = Column(
         children: [
-          const Text(
+          Text(
             'VS',
             style: TextStyle(
-              color: Colors.white,
+              color: fg,
               fontWeight: FontWeight.bold,
               fontSize: 22,
             ),
@@ -236,7 +236,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
           if (match.time != null)
             Text(
               match.time!,
-              style: const TextStyle(color: Colors.white70, fontSize: 13),
+              style: TextStyle(color: muted, fontSize: 13),
             ),
         ],
       );
@@ -248,14 +248,13 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
       final column = Column(
         children: [
           placeholder
-              ? const Icon(Icons.emoji_events,
-                  size: 40, color: Colors.white70)
+              ? Icon(Icons.emoji_events, size: 40, color: muted)
               : TeamLogo(url: team?.logoUrl, size: 40),
           const SizedBox(height: 6),
           Text(
             team?.name ?? fallbackName ?? 'TBD',
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: fg,
               fontWeight: FontWeight.bold,
               fontSize: 13,
             ),
@@ -294,13 +293,13 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.15),
+                    color: TournamentColors.headerChipFill(context),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
                     match.label,
-                    style: const TextStyle(
-                      color: Colors.white70,
+                    style: TextStyle(
+                      color: muted,
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                     ),
@@ -323,7 +322,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
                 const SizedBox(height: 10),
                 Text(
                   _formatDate(match.date),
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  style: TextStyle(color: muted, fontSize: 12),
                 ),
               ],
             ],
@@ -340,12 +339,13 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
       return Scaffold(
         appBar: AppBar(
           backgroundColor: TournamentColors.headerBackground(context),
-          foregroundColor: Colors.white,
-          // Force the back arrow white in BOTH themes — the global
-          // appBarTheme.iconTheme is onSurface, which goes dark on this
-          // navy header in light mode (P2.1 Task A3 fix).
-          iconTheme: const IconThemeData(color: Colors.white),
-          actionsIconTheme: const IconThemeData(color: Colors.white),
+          foregroundColor: TournamentColors.headerForeground(context),
+          // Theme-aware back arrow (P4.1): dark on the white light-mode
+          // header, white on the dark grey — always visible (P2.1 A3).
+          iconTheme: IconThemeData(
+              color: TournamentColors.headerForeground(context)),
+          actionsIconTheme: IconThemeData(
+              color: TournamentColors.headerForeground(context)),
         ),
         body: const SingleChildScrollView(
           physics: NeverScrollableScrollPhysics(),
@@ -373,10 +373,12 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
             SliverAppBar(
               pinned: true,
               backgroundColor: TournamentColors.headerBackground(context),
-              foregroundColor: Colors.white,
-              // White back arrow + actions in BOTH themes (see above).
-              iconTheme: const IconThemeData(color: Colors.white),
-              actionsIconTheme: const IconThemeData(color: Colors.white),
+              foregroundColor: TournamentColors.headerForeground(context),
+              // Theme-aware back arrow + actions in BOTH themes (see above).
+              iconTheme: IconThemeData(
+                  color: TournamentColors.headerForeground(context)),
+              actionsIconTheme: IconThemeData(
+                  color: TournamentColors.headerForeground(context)),
               actions: [
                 IconButton(
                   icon: const Icon(Icons.ios_share),
