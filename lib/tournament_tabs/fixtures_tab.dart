@@ -316,7 +316,7 @@ class FixturesTab extends StatelessWidget {
                     icon: const Icon(Icons.play_circle_outline, size: 16),
                     label: const Text('Watch', style: TextStyle(fontSize: 12)),
                     style: TextButton.styleFrom(
-                      foregroundColor: infiniteSportsPrimaryColor,
+                      foregroundColor: Theme.of(context).colorScheme.primary,
                       padding:
                           const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,

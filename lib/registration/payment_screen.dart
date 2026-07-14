@@ -6,6 +6,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_stripe/flutter_stripe.dart' hide Card;
+import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
@@ -199,8 +200,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
       appBar: AppBar(
         centerTitle: true,
         title: const Text('Payment'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
+        backgroundColor: appBarBackground(context),
+        foregroundColor: appBarForeground(context),
       ),
       body: StreamBuilder<RegSubmission?>(
         stream: _submission,

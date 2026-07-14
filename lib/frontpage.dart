@@ -179,16 +179,22 @@ class _FrontPageState extends State<FrontPage> {
       child: Card(
         color: Theme.of(context).colorScheme.primary,
         child: ListTile(
-          leading: const Icon(Icons.how_to_reg, color: Colors.white),
+          leading: Icon(Icons.how_to_reg,
+              color: Theme.of(context).colorScheme.onPrimary),
           title: Text(
             openRegistrations.length == 1
                 ? 'Registration open: ${config.label}'
                 : 'Registrations are open',
-            style: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold),
+            style: TextStyle(
+                color: Theme.of(context).colorScheme.onPrimary,
+                fontWeight: FontWeight.bold),
           ),
-          subtitle: const Text('Tap to sign up',
-              style: TextStyle(color: Colors.white70)),
+          subtitle: Text('Tap to sign up',
+              style: TextStyle(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onPrimary
+                      .withValues(alpha: 0.7))),
           onTap: () {
             Navigator.push(context, MaterialPageRoute(builder: (_) {
               return const RegistrationEntryPage();

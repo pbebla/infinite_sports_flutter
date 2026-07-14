@@ -47,8 +47,8 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
       appBar: AppBar(
         centerTitle: true,
         title: const Text('Registration'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
+        backgroundColor: appBarBackground(context),
+        foregroundColor: appBarForeground(context),
       ),
       body: StreamBuilder(
         stream: _openRegs,

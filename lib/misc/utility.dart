@@ -48,6 +48,13 @@ Color appBarForeground(BuildContext context) =>
         ? infiniteSportsGoldColor
         : Colors.white;
 
+/// Text/icon color for content sitting on a brand-accent fill (buttons,
+/// banners): white on red in light mode, near-black on gold in dark mode.
+Color onBrandAccent(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFF1A1206)
+        : Colors.white;
+
 Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
 Map<String, Map<String, Map<String, BasketballPlayer>>> basketballLineups = {};
 Map<String, Map<String, Map<String, FlagFootballPlayer>>> flagFootballLineups = {};

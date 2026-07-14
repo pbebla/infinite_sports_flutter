@@ -4,7 +4,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
@@ -204,7 +203,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                       isScrollable: true,
                       labelColor: Colors.white,
                       unselectedLabelColor: Colors.white70,
-                      indicatorColor: infiniteSportsPrimaryColor,
+                      indicatorColor: Theme.of(context).colorScheme.primary,
                       indicatorWeight: 3,
                       tabAlignment: TabAlignment.start,
                     ),

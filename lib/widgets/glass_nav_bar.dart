@@ -30,7 +30,7 @@ class GlassNavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final unselected = scheme.onSurface.withOpacity(0.65);
+    final unselected = scheme.onSurface.withValues(alpha: 0.65);
     final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
     return Padding(
       padding: EdgeInsets.fromLTRB(12, 0, 12, bottomInset > 0 ? bottomInset : 10),

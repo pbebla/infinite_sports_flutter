@@ -82,8 +82,8 @@ class _LeagueFormState extends State<LeagueForm> {
       appBar: AppBar(
         centerTitle: true,
         title: const Text("Sign Up Form"),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
+        backgroundColor: appBarBackground(context),
+        foregroundColor: appBarForeground(context),
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -193,8 +193,8 @@ class _LeagueFormState extends State<LeagueForm> {
                       return Scaffold(
                         appBar: AppBar(
                           centerTitle: true,
-                          backgroundColor: Theme.of(context).colorScheme.primary,
-                          foregroundColor: Colors.white,
+                          backgroundColor: appBarBackground(context),
+                          foregroundColor: appBarForeground(context),
                           title: const Text("Season Rules"),
                         ),
                         body: WebViewStack(controller: controller,)
@@ -229,8 +229,8 @@ class _LeagueFormState extends State<LeagueForm> {
                     return Scaffold(
                       appBar: AppBar(
                         centerTitle: true,
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor: Colors.white,
+                        backgroundColor: appBarBackground(context),
+                        foregroundColor: appBarForeground(context),
                         title: const Text("Waiver Conditions"),
                       ),
                       body: WebViewStack(controller: controller,)
@@ -312,8 +312,8 @@ class _LeagueFormState extends State<LeagueForm> {
                               return Scaffold(
                                 appBar: AppBar(
                                   centerTitle: true,
-                                  backgroundColor: Theme.of(context).colorScheme.primary,
-                                  foregroundColor: Colors.white,
+                                  backgroundColor: appBarBackground(context),
+                                  foregroundColor: appBarForeground(context),
                                   title: const Text("Venmo"),
                                 ),
                                 body: WebViewStack(controller: controller,)

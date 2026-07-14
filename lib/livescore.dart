@@ -139,7 +139,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
                     lineWidth: 4.0,
                     percent: game.finalvote1,
                     center: Text(game.percvote1),
-                    progressColor: infiniteSportsPrimaryColor,
+                    progressColor: Theme.of(context).colorScheme.primary,
               ),
               Expanded(
                 child: Visibility(
@@ -190,9 +190,9 @@ class _LiveScorePageState extends State<LiveScorePage> {
                               ),
                             ),);
                         },
-                        child: const Text(
+                        child: Text(
                           'Vote',
-                          style: TextStyle(color: Colors.white, fontSize: 18),
+                          style: TextStyle(color: Theme.of(context).colorScheme.onPrimary, fontSize: 18),
                         ),
                       ),
                     ),
@@ -205,7 +205,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
                     lineWidth: 4.0,
                     percent: game.finalvote2,
                     center: Text(game.percvote2),
-                    progressColor: infiniteSportsPrimaryColor,
+                    progressColor: Theme.of(context).colorScheme.primary,
               )
             ],
           )

@@ -574,8 +574,8 @@ class _ScorePageState extends State<ScorePage> {
     // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
+        backgroundColor: appBarBackground(context),
+        foregroundColor: appBarForeground(context),
         centerTitle: true,
         title: RichText(
           textAlign: TextAlign.center,
@@ -696,8 +696,8 @@ class _ScorePageState extends State<ScorePage> {
                             ..loadRequest(Uri.parse(game!.link));
                           return Scaffold(
                             appBar: AppBar(
-                              backgroundColor: Theme.of(context).colorScheme.primary,
-                              foregroundColor: Colors.white,
+                              backgroundColor: appBarBackground(context),
+                              foregroundColor: appBarForeground(context),
                               title: const Text(""),
                               actions: [
                                 NavigationControls(controller: webController)
@@ -821,7 +821,7 @@ class _ScorePageState extends State<ScorePage> {
                   lineWidth: 4.0,
                   percent: game!.finalvote1,
                   center: Text(game!.percvote1),
-                  progressColor: infiniteSportsPrimaryColor,
+                  progressColor: Theme.of(context).colorScheme.primary,
             ),
             Expanded(
               child: Visibility(
@@ -872,9 +872,9 @@ class _ScorePageState extends State<ScorePage> {
                             ),
                           ),);
                       },
-                      child: const Text(
+                      child: Text(
                         'Vote',
-                        style: TextStyle(color: Colors.white, fontSize: 18),
+                        style: TextStyle(color: Theme.of(context).colorScheme.onPrimary, fontSize: 18),
                       ),
                     ),
                   ),
@@ -887,7 +887,7 @@ class _ScorePageState extends State<ScorePage> {
                   lineWidth: 4.0,
                   percent: game!.finalvote2,
                   center: Text(game!.percvote2),
-                  progressColor: infiniteSportsPrimaryColor,
+                  progressColor: Theme.of(context).colorScheme.primary,
             )
           ],
         )

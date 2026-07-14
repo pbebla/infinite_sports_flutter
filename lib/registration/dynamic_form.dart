@@ -218,7 +218,7 @@ class _DynamicRegistrationFormState extends State<DynamicRegistrationForm> {
               onPressed: _submitting ? null : _submit,
               style: ElevatedButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.primary,
-                foregroundColor: Colors.white,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
               ),
               child: _submitting
                   ? const SizedBox(
@@ -454,9 +454,8 @@ class _LinkAcknowledgeFieldState extends State<_LinkAcknowledgeField> {
                         return Scaffold(
                           appBar: AppBar(
                             centerTitle: true,
-                            backgroundColor:
-                                Theme.of(context).colorScheme.primary,
-                            foregroundColor: Colors.white,
+                            backgroundColor: appBarBackground(context),
+                            foregroundColor: appBarForeground(context),
                             title: Text(question.label),
                           ),
                           body: WebViewStack(controller: controller),

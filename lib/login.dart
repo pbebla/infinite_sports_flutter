@@ -50,8 +50,8 @@ class _LoginDemoState extends State<LoginPage> {
       appBar: AppBar(
         centerTitle: true,
         title: const Text("Login or Sign Up"),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
+        backgroundColor: appBarBackground(context),
+        foregroundColor: appBarForeground(context),
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -116,9 +116,9 @@ class _LoginDemoState extends State<LoginPage> {
                 onPressed: () async {
                   _processSignIn();
                 },
-                child: const Text(
+                child: Text(
                   'Login',
-                  style: TextStyle(color: Colors.white, fontSize: 25),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onPrimary, fontSize: 25),
                 ),
               ),
             ),

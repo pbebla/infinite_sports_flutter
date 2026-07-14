@@ -113,8 +113,8 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
       appBar: AppBar(
         centerTitle: true,
         title: const Text("Sign Up"),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
+        backgroundColor: appBarBackground(context),
+        foregroundColor: appBarForeground(context),
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -309,9 +309,9 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                     },
                   );
                 },
-                child: const Text(
+                child: Text(
                   'Register',
-                  style: TextStyle(color: Colors.white, fontSize: 25),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onPrimary, fontSize: 25),
                 ),
               ),
             ),

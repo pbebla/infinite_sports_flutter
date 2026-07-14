@@ -155,7 +155,8 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                       },);
                   },
                 ),
-          backgroundColor: Theme.of(context).colorScheme.primary,
+          backgroundColor: appBarBackground(context),
+          foregroundColor: appBarForeground(context),
           centerTitle: true,
           title: Image.asset('assets/infinitelarge_dark.png', height: 30),
           actions: [

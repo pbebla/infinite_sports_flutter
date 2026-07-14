@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
@@ -763,14 +762,14 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                                   width: 32,
                                   height: 32,
                                   decoration: BoxDecoration(
-                                    color: infiniteSportsPrimaryColor,
+                                    color: Theme.of(context).colorScheme.primary,
                                     shape: BoxShape.circle,
                                   ),
                                   child: Center(
                                     child: Text(
                                       '$value',
-                                      style: const TextStyle(
-                                          color: Colors.white,
+                                      style: TextStyle(
+                                          color: Theme.of(context).colorScheme.onPrimary,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 13),
                                     ),
@@ -937,7 +936,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                 ],
                 labelColor: Colors.white,
                 unselectedLabelColor: Colors.white70,
-                indicatorColor: infiniteSportsPrimaryColor,
+                indicatorColor: Theme.of(context).colorScheme.primary,
                 indicatorWeight: 3,
               ),
             ),

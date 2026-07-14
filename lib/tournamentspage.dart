@@ -1,6 +1,5 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/tournamentdetail.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
@@ -193,7 +192,7 @@ class _TournamentsPageState extends State<TournamentsPage> {
                     'Current',
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.bold,
-                          color: infiniteSportsPrimaryColor,
+                          color: Theme.of(context).colorScheme.primary,
                           letterSpacing: 1.2,
                         ),
                   ),

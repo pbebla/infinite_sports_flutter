@@ -398,8 +398,8 @@ class _TablePageState extends State<TablePage> {
                 ]
             ),
           ),
-          backgroundColor: Theme.of(context).colorScheme.primary,
-          foregroundColor: Colors.white,
+          backgroundColor: appBarBackground(context),
+          foregroundColor: appBarForeground(context),
         ),
         body: FutureBuilder(
             future: getSeasonTable(),

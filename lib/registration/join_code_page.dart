@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/registration/registration_form_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
@@ -89,8 +90,8 @@ class _JoinCodePageState extends State<JoinCodePage> {
       appBar: AppBar(
         centerTitle: true,
         title: Text(widget.config.label),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
+        backgroundColor: appBarBackground(context),
+        foregroundColor: appBarForeground(context),
       ),
       body: ListView(
         padding: const EdgeInsets.all(15),
@@ -167,7 +168,7 @@ class _JoinCodePageState extends State<JoinCodePage> {
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Theme.of(context).colorScheme.primary,
-                  foregroundColor: Colors.white,
+                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
                 ),
                 onPressed: _continue,
                 child: const Text('Continue', style: TextStyle(fontSize: 18)),

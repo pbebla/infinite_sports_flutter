@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/registration/dynamic_form.dart';
 import 'package:infinite_sports_flutter/registration/payment_screen.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
@@ -131,8 +132,8 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
       appBar: AppBar(
         centerTitle: true,
         title: Text(widget.config.label),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
+        backgroundColor: appBarBackground(context),
+        foregroundColor: appBarForeground(context),
         bottom: widget.path == 'individual'
             ? null
             : PreferredSize(
@@ -143,7 +144,7 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
                     widget.path == 'captain'
                         ? 'New team: ${widget.teamName}'
                         : 'Joining ${widget.team?.name ?? 'team'}',
-                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                    style: TextStyle(color: appBarForeground(context), fontSize: 14),
                   ),
                 ),
               ),

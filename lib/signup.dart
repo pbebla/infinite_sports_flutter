@@ -57,8 +57,8 @@ class _SignupState extends State<Signup> {
                 return Scaffold(
                   appBar: AppBar(
                     centerTitle: true,
-                    backgroundColor: Theme.of(context).colorScheme.primary,
-                    foregroundColor: Colors.white,
+                    backgroundColor: appBarBackground(context),
+                    foregroundColor: appBarForeground(context),
                     title: Text(v["Name"]),
                     actions: [
                       NavigationControls(controller: controller)
@@ -98,8 +98,8 @@ class _SignupState extends State<Signup> {
           appBar: AppBar(
             centerTitle: true,
             title: const Text("Sign Up List"),
-            backgroundColor: Theme.of(context).colorScheme.primary, 
-            foregroundColor: Colors.white,
+            backgroundColor: appBarBackground(context), 
+            foregroundColor: appBarForeground(context),
           ),
           body: ListView.separated(
             separatorBuilder: (context, index) => Divider(

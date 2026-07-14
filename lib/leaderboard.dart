@@ -315,8 +315,8 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
                 ]
             ),
           ),
-          backgroundColor: Theme.of(context).colorScheme.primary,
-          foregroundColor: Colors.white,
+          backgroundColor: appBarBackground(context),
+          foregroundColor: appBarForeground(context),
         ),
         body: FutureBuilder(
             future: getPlayersList(),

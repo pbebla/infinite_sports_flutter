@@ -88,7 +88,7 @@ class _DayPillStripState extends State<DayPillStrip> {
         margin: const EdgeInsets.symmetric(horizontal: 4),
         decoration: BoxDecoration(
           color: selected
-              ? infiniteSportsPrimaryColor
+              ? Theme.of(context).colorScheme.primary
               : onSurface.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(12),
         ),
@@ -99,8 +99,9 @@ class _DayPillStripState extends State<DayPillStrip> {
               dow,
               style: TextStyle(
                 fontSize: 10,
-                color:
-                    selected ? Colors.white : onSurface.withValues(alpha: 0.7),
+                color: selected
+                    ? Theme.of(context).colorScheme.onPrimary
+                    : onSurface.withValues(alpha: 0.7),
               ),
             ),
             const SizedBox(height: 2),
@@ -109,8 +110,9 @@ class _DayPillStripState extends State<DayPillStrip> {
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.bold,
-                color:
-                    selected ? Colors.white : onSurface.withValues(alpha: 0.7),
+                color: selected
+                    ? Theme.of(context).colorScheme.onPrimary
+                    : onSurface.withValues(alpha: 0.7),
               ),
             ),
             Text(
@@ -118,7 +120,9 @@ class _DayPillStripState extends State<DayPillStrip> {
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: selected ? Colors.white : onSurface,
+                color: selected
+                    ? Theme.of(context).colorScheme.onPrimary
+                    : onSurface,
               ),
             ),
           ],

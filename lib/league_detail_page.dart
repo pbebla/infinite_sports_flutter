@@ -13,7 +13,6 @@ import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/misc/league_playoffs_view.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -264,7 +263,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                     isScrollable: true,
                     labelColor: Colors.white,
                     unselectedLabelColor: Colors.white70,
-                    indicatorColor: infiniteSportsPrimaryColor,
+                    indicatorColor: Theme.of(context).colorScheme.primary,
                     indicatorWeight: 3,
                     tabAlignment: TabAlignment.start,
                   ),

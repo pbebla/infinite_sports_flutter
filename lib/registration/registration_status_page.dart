@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/registration/payment_screen.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
@@ -163,7 +164,7 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Theme.of(context).colorScheme.primary,
-                    foregroundColor: Colors.white,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
                   ),
                   icon: const Icon(Icons.share),
                   label: const Text('Share code'),
@@ -285,8 +286,8 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
       appBar: AppBar(
         centerTitle: true,
         title: const Text('My Registration'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
+        backgroundColor: appBarBackground(context),
+        foregroundColor: appBarForeground(context),
         leading: IconButton(
           icon: const Icon(Icons.close),
           tooltip: 'Done',
@@ -382,7 +383,7 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Theme.of(context).colorScheme.primary,
-                    foregroundColor: Colors.white,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
                   ),
                   onPressed: () {
                     // No refresh-on-return needed — the submission

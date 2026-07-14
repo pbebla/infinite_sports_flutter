@@ -19,11 +19,11 @@ class GlassSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final tint = isDark
-        ? Colors.black.withOpacity(0.38)
-        : Colors.white.withOpacity(0.60);
+        ? Colors.black.withValues(alpha: 0.38)
+        : Colors.white.withValues(alpha: 0.60);
     final edge = isDark
-        ? Colors.white.withOpacity(0.16)
-        : Colors.black.withOpacity(0.08);
+        ? Colors.white.withValues(alpha: 0.16)
+        : Colors.black.withValues(alpha: 0.08);
     return ClipRRect(
       borderRadius: borderRadius,
       child: BackdropFilter(

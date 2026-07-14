@@ -186,7 +186,7 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage>
               ],
               labelColor: Colors.white,
               unselectedLabelColor: Colors.white70,
-              indicatorColor: infiniteSportsPrimaryColor,
+              indicatorColor: Theme.of(context).colorScheme.primary,
               indicatorWeight: 3,
             ),
           ),
@@ -838,14 +838,14 @@ class _LeagueTeamStatsTabState extends State<LeagueTeamStatsTab> {
                                 width: 32,
                                 height: 32,
                                 decoration: BoxDecoration(
-                                  color: infiniteSportsPrimaryColor,
+                                  color: Theme.of(context).colorScheme.primary,
                                   shape: BoxShape.circle,
                                 ),
                                 child: Center(
                                   child: Text(
                                     '$value',
-                                    style: const TextStyle(
-                                        color: Colors.white,
+                                    style: TextStyle(
+                                        color: Theme.of(context).colorScheme.onPrimary,
                                         fontWeight: FontWeight.bold,
                                         fontSize: 13),
                                   ),

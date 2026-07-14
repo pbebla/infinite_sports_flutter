@@ -2,6 +2,7 @@
 import 'package:email_validator/email_validator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 
 class ForgotPasswordPage extends StatefulWidget {
   const ForgotPasswordPage({super.key});
@@ -54,8 +55,8 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       appBar: AppBar(
         centerTitle: true,
         title: const Text("Forgot Password"),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
+        backgroundColor: appBarBackground(context),
+        foregroundColor: appBarForeground(context),
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -89,9 +90,9 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 onPressed: () async {
                   _handleResetPassword();
                 },
-                child: const Text(
+                child: Text(
                   'Send Reset Email',
-                  style: TextStyle(color: Colors.white, fontSize: 25),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onPrimary, fontSize: 25),
                 ),
               ),
             ),

@@ -89,8 +89,8 @@ class _EventPageState extends State<EventPage> {
           child: Scaffold(
             appBar: AppBar(
               centerTitle: true,
-              backgroundColor: Theme.of(context).colorScheme.primary,
-              foregroundColor: Colors.white,
+              backgroundColor: appBarBackground(context),
+              foregroundColor: appBarForeground(context),
               title: Text(event.title ?? "", style: const TextStyle(fontSize: 16),),
             ),
             body: SingleChildScrollView(

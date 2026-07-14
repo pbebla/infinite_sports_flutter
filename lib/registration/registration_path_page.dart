@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/registration/join_code_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_form_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
@@ -31,8 +32,8 @@ class RegistrationPathPage extends StatelessWidget {
       appBar: AppBar(
         centerTitle: true,
         title: Text(config.label),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
+        backgroundColor: appBarBackground(context),
+        foregroundColor: appBarForeground(context),
       ),
       body: ListView(
         padding: const EdgeInsets.all(15),

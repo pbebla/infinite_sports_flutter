@@ -1,5 +1,4 @@
 ﻿import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -246,14 +245,14 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
                   width: 32,
                   height: 32,
                   decoration: BoxDecoration(
-                    color: infiniteSportsPrimaryColor,
+                    color: Theme.of(context).colorScheme.primary,
                     shape: BoxShape.circle,
                   ),
                   child: Center(
                     child: Text(
                       '$value',
-                      style: const TextStyle(
-                          color: Colors.white,
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.onPrimary,
                           fontWeight: FontWeight.bold,
                           fontSize: 13),
                     ),
