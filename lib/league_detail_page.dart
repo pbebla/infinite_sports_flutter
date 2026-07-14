@@ -14,6 +14,7 @@ import 'package:infinite_sports_flutter/misc/league_playoffs_view.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
 import 'package:infinite_sports_flutter/misc/tab_swap.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
@@ -237,7 +238,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                 // (P2.1 Task A3 back-arrow audit).
                 Container(
                   height: 150,
-                  color: const Color(0xFF1A237E),
+                  color: TournamentColors.headerBackground(context),
                   alignment: Alignment.topLeft,
                   child: const SafeArea(
                     bottom: false,
@@ -264,7 +265,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                 SliverAppBar(
                   expandedHeight: 160,
                   pinned: true,
-                  backgroundColor: const Color(0xFF1A237E),
+                  backgroundColor: TournamentColors.headerBackground(context),
                   foregroundColor: Colors.white,
                   // Force the back arrow white in BOTH themes — the global
                   // appBarTheme.iconTheme is onSurface, which goes dark on
@@ -354,12 +355,8 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
         ? 'Assyrian Futsal League'
         : widget.sport;
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF1A237E), Color(0xFF283593)],
-        ),
+      decoration: BoxDecoration(
+        gradient: TournamentColors.headerGradient(context),
       ),
       child: SafeArea(
         bottom: false,

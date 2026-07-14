@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/share_match_card_service.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
@@ -155,12 +156,8 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
     }
 
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF1A237E), Color(0xFF283593)],
-        ),
+      decoration: BoxDecoration(
+        gradient: TournamentColors.headerGradient(context),
       ),
       child: SafeArea(
         bottom: false,
@@ -270,7 +267,7 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
             return [
               SliverAppBar(
                 pinned: true,
-                backgroundColor: const Color(0xFF1A237E),
+                backgroundColor: TournamentColors.headerBackground(context),
                 foregroundColor: Colors.white,
                 actions: [
                   IconButton(

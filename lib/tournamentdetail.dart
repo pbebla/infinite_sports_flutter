@@ -2,6 +2,7 @@
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -168,7 +169,9 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
           ? Column(
               children: [
                 // Placeholder for the navy scoreboard/header area.
-                Container(height: 150, color: const Color(0xFF1A237E)),
+                Container(
+                    height: 150,
+                    color: TournamentColors.headerBackground(context)),
                 const Expanded(
                   child: SingleChildScrollView(
                     physics: NeverScrollableScrollPhysics(),
@@ -186,7 +189,8 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                   SliverAppBar(
                     expandedHeight: 160,
                     pinned: true,
-                    backgroundColor: const Color(0xFF1A237E),
+                    backgroundColor:
+                        TournamentColors.headerBackground(context),
                     foregroundColor: Colors.white,
                     actions: [
                       FollowBell(
@@ -275,12 +279,8 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
   Widget _buildHeader(BuildContext context) {
     final tournament = _tournament;
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF1A237E), Color(0xFF283593)],
-        ),
+      decoration: BoxDecoration(
+        gradient: TournamentColors.headerGradient(context),
       ),
       child: SafeArea(
         bottom: false,

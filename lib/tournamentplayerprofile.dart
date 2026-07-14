@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
@@ -43,7 +44,7 @@ class _TournamentPlayerProfilePageState
           SliverAppBar(
             expandedHeight: 160,
             pinned: true,
-            backgroundColor: const Color(0xFF1A237E),
+            backgroundColor: TournamentColors.headerBackground(context),
             foregroundColor: Colors.white,
             flexibleSpace: FlexibleSpaceBar(
               background: _buildHeader(context, player),
@@ -64,12 +65,8 @@ class _TournamentPlayerProfilePageState
 
   Widget _buildHeader(BuildContext context, TournamentPlayer player) {
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF1A237E), Color(0xFF283593)],
-        ),
+      decoration: BoxDecoration(
+        gradient: TournamentColors.headerGradient(context),
       ),
       child: SafeArea(
         bottom: false,
