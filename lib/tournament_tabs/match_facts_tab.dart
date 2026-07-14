@@ -29,6 +29,12 @@ class MatchFactsTab extends StatelessWidget {
   /// Null = tournament behavior (built from [tournamentId] when present).
   final PredictionScope? scope;
 
+  /// Match Leaders categories (P4). Null = the tournament default
+  /// (Goals/Assists/Saves/DPL) — every existing tournament call site
+  /// keeps compiling unchanged. League call sites pass
+  /// `leagueMatchLeaderCategories(sport)`.
+  final List<Map<String, String>>? leaderCategories;
+
   const MatchFactsTab({
     super.key,
     required this.match,
@@ -40,6 +46,7 @@ class MatchFactsTab extends StatelessWidget {
     this.predictionConfig,
     this.currentUid,
     this.scope,
+    this.leaderCategories,
   });
 
   // Parse minute string to sortable double: "90+3'" -> 90.3, "45'" -> 45.0
@@ -359,12 +366,13 @@ class MatchFactsTab extends StatelessWidget {
     final allPlayers = [...team1Players, ...team2Players];
     final tallies = singleMatchPlayerTallies(match);
 
-    final categories = [
-      {'label': 'Goals', 'stat': 'goals'},
-      {'label': 'Assists', 'stat': 'assists'},
-      {'label': 'Saves', 'stat': 'saves'},
-      {'label': 'DPL', 'stat': 'dpl'},
-    ];
+    final categories = leaderCategories ??
+        const [
+          {'label': 'Goals', 'stat': 'goals'},
+          {'label': 'Assists', 'stat': 'assists'},
+          {'label': 'Saves', 'stat': 'saves'},
+          {'label': 'DPL', 'stat': 'dpl'},
+        ];
 
     int getValue(TournamentPlayer p, String stat) =>
         tallies[p.name]?.byStat(stat) ?? 0;

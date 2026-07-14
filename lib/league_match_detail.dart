@@ -9,6 +9,7 @@ import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
 import 'package:infinite_sports_flutter/misc/schedule_display.dart';
 import 'package:infinite_sports_flutter/misc/share_match_card_service.dart';
+import 'package:infinite_sports_flutter/misc/single_match_tallies.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
@@ -428,6 +429,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
               : null,
           predictionConfig: _predictionConfig,
           currentUid: FirebaseAuth.instance.currentUser?.uid,
+          leaderCategories: leagueMatchLeaderCategories(widget.sport),
         ),
       ),
     );

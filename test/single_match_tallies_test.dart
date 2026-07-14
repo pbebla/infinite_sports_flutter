@@ -9,6 +9,14 @@ TournamentMatch m(Map<String, dynamic>? a1, Map<String, dynamic>? a2) =>
       team1Activity: a1, team2Activity: a2, bracketPosition: 0,
     );
 
+/// Named-parameter fixture builder (P4) — mirrors [m] for tests that only
+/// care about one team's activity.
+TournamentMatch matchWithActivities({
+  Map<String, dynamic>? team1Activity,
+  Map<String, dynamic>? team2Activity,
+}) =>
+    m(team1Activity, team2Activity);
+
 void main() {
   test('tallies goals/assists/saves/dpl across both teams', () {
     final t = singleMatchPlayerTallies(m(
@@ -99,6 +107,86 @@ void main() {
       expect(tallies['Ninos']!.assists, 1);
       expect(tallies['Sargon']!.saves, 1);
       expect(tallies['Ramina']!.dpl, 1);
+    });
+  });
+
+  group('P4 — basketball/flag football tallies', () {
+    test('basketball: points weighted 1/2/3 + counting stats', () {
+      final match = matchWithActivities(team1Activity: {
+        "3'": [
+          {'OnePointer': 'Sam'},
+          {'TwoPointer': 'Sam'},
+          {'ThreePointer': 'Sam'},
+          {'Rebound': 'Sam'},
+          {'Assist': 'Alex'},
+          {'Steal': 'Sam'},
+          {'Block': 'Alex'},
+        ],
+      });
+      final tallies = singleMatchPlayerTallies(match);
+      expect(tallies['Sam']!.byStat('points'), 6); // 1+2+3
+      expect(tallies['Sam']!.byStat('rebounds'), 1);
+      expect(tallies['Sam']!.byStat('steals'), 1);
+      expect(tallies['Alex']!.byStat('assists'), 1);
+      expect(tallies['Alex']!.byStat('blocks'), 1);
+    });
+
+    test('flag football: touchdowns sum the three TD types', () {
+      final match = matchWithActivities(team1Activity: {
+        "5'": [
+          {'Receiving TD': 'Sam'},
+          {'Rushing TD': 'Sam'},
+          {'INT TD': 'Alex'},
+          {'Pass TD': 'Q'},
+          {'REC': 'Sam'},
+          {'Interception': 'Alex'},
+          {'FP': 'Alex'},
+          {'Sack': 'Alex'},
+        ],
+      });
+      final tallies = singleMatchPlayerTallies(match);
+      expect(tallies['Sam']!.byStat('touchdowns'), 2);
+      expect(tallies['Alex']!.byStat('touchdowns'), 1);
+      expect(tallies['Q']!.byStat('passTouchdowns'), 1);
+      expect(tallies['Sam']!.byStat('receptions'), 1);
+      expect(tallies['Alex']!.byStat('interceptions'), 1);
+      expect(tallies['Alex']!.byStat('flagPulls'), 1);
+      expect(tallies['Alex']!.byStat('sacks'), 1);
+    });
+
+    test('futsal tallies unchanged', () {
+      final match = matchWithActivities(team1Activity: {
+        "7'": [
+          {'Goal': 'Sam'},
+          {'PenGoal': 'Sam'},
+          {'Assist': 'Alex'},
+        ],
+      });
+      final tallies = singleMatchPlayerTallies(match);
+      expect(tallies['Sam']!.byStat('goals'), 2);
+      expect(tallies['Alex']!.byStat('assists'), 1);
+    });
+
+    test('leagueMatchLeaderCategories per sport', () {
+      expect(
+        leagueMatchLeaderCategories('Basketball')
+            .map((c) => c['stat'])
+            .toList(),
+        ['points', 'rebounds', 'assists', 'steals', 'blocks'],
+      );
+      expect(
+        leagueMatchLeaderCategories('Flag Football')
+            .map((c) => c['stat'])
+            .toList(),
+        ['touchdowns', 'passTouchdowns', 'receptions', 'interceptions',
+          'flagPulls', 'sacks'],
+      );
+      expect(
+        leagueMatchLeaderCategories('Futsal')
+            .map((c) => c['stat'])
+            .toList(),
+        ['goals', 'assists', 'saves', 'dpl'],
+      );
     });
   });
 }
