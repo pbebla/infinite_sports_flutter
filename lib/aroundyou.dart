@@ -1,6 +1,7 @@
 
 import 'dart:async';
 
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
@@ -34,23 +35,30 @@ class AroundYou extends StatefulWidget {
 
 class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMixin {
   GoogleMapController? mapController;
-  LatLng? _center;
+  // Map shows immediately centered on San Jose, then glides to the user
+  // once their location resolves — no full-screen wait.
+  static const LatLng _fallbackCenter = LatLng(37.3382, -121.8863);
+  bool _locationReady = false;
   Position? _currentPosition;
   final DraggableScrollableController sheetController = DraggableScrollableController();
   bool isSheetExpanded = true;
   List<Business>? businesses;
   List<Event>? events;
   Set<Marker> markers = {};
-  GoogleMap? _googleMap;
   // Geocode results cached by address so live event updates don't re-hit
   // the geocoder for addresses we already resolved.
   final Map<String, Location?> _geocodeCache = {};
   StreamSubscription<List<Event>>? _eventsSub;
+  StreamSubscription<DatabaseEvent>? _bizSub;
 
   @override
   void initState() {
     super.initState();
-    _loadBusinesses();
+    // Live businesses: onValue fires immediately with current data and
+    // again on every change to the Map node.
+    _bizSub = FirebaseDatabase.instance.ref('Map').onValue.listen((_) {
+      _loadBusinesses();
+    });
     // Live events: the list, markers, and upcoming/past split update in
     // place whenever an event is added, edited, or removed.
     _eventsSub = watchAllEvents().listen((list) async {
@@ -65,6 +73,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
   @override
   void dispose() {
     _eventsSub?.cancel();
+    _bizSub?.cancel();
     super.dispose();
   }
 
@@ -92,22 +101,12 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
       return;
     }
     }
-    // Get the current location of the user
+    // Get the current location of the user, then glide the map over.
     _currentPosition = await Geolocator.getCurrentPosition();
-    setState(() {
-      _center = LatLng(_currentPosition!.latitude, _currentPosition!.longitude);
-      _googleMap = GoogleMap(
-        myLocationEnabled: true,
-        padding: const EdgeInsets.only(
-          bottom:45),
-        onMapCreated: _onMapCreated,
-        initialCameraPosition: CameraPosition(
-          target: _center!,
-          zoom: 11.0,
-        ),
-        markers: markers,
-      );
-    });
+    if (!mounted) return;
+    setState(() => _locationReady = true);
+    mapController?.animateCamera(CameraUpdate.newLatLng(
+        LatLng(_currentPosition!.latitude, _currentPosition!.longitude)));
   }
   
   // Merged-list indices split by whether the event is fully over; upcoming
@@ -170,6 +169,8 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
       if (location == null) continue;
       markers.add(Marker(
         markerId: MarkerId('event-$i'),
+        // Gold pins distinguish events from the red business pins.
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
         position: LatLng(location.latitude, location.longitude),
         infoWindow: InfoWindow(title: events![i].title),
       ));
@@ -191,9 +192,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
 
   @override
   Widget build(BuildContext context) {
-    return _center == null
-      ? const Center(child: CircularProgressIndicator())
-      : Scaffold(
+    return Scaffold(
         appBar: AppBar(
           // Pushed from the search hub: the root drawer would open hidden
           // behind this route, so show a back button instead.
@@ -251,7 +250,18 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
               children: [
                 SizedBox(
                   height: double.infinity,
-                    child: _googleMap,
+                    // Rebuilt with a fresh marker set every build so live
+                    // event/business changes actually reach the map.
+                    child: GoogleMap(
+                      myLocationEnabled: _locationReady,
+                      padding: const EdgeInsets.only(bottom: 45),
+                      onMapCreated: _onMapCreated,
+                      initialCameraPosition: const CameraPosition(
+                        target: _fallbackCenter,
+                        zoom: 10.5,
+                      ),
+                      markers: Set.of(markers),
+                    ),
                 ),
                 DraggableScrollableSheet(
                   controller: sheetController,
@@ -293,8 +303,8 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                             ),
                             title: const TabBar(
                               tabs: [
-                                Tab(child: Text("Businesses"),),
-                                Tab(child: Text("Events"),)
+                                Tab(child: Text("Events"),),
+                                Tab(child: Text("Businesses"),)
                               ],
                             ),
                             primary: false,
@@ -304,35 +314,6 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                           SliverFillRemaining(
                             child: TabBarView(
                               children: [
-                                businesses == null
-                                    ? const SingleChildScrollView(
-                                        physics: ClampingScrollPhysics(),
-                                        child: SkeletonMatchList(count: 7))
-                                    : ListView.builder(
-                                  itemCount: businesses?.length ?? 0,
-                                  //controller: scrollController,
-                                  physics: const ClampingScrollPhysics(),
-                                  padding: EdgeInsets.zero,
-                                  itemBuilder: (context, index) => ListTile(
-                                    leading: businesses![index].logo ?? SizedBox(width: 0, height: 0),
-                                    title: Text('${businesses![index].name}'),
-                                    subtitle: Text('${businesses![index].description}', overflow: TextOverflow.ellipsis,),
-                                    trailing: (_currentPosition != null && !businesses![index].lat.isNaN) ? Text('${businesses![index].getMiles(_currentPosition!).toString().substring(0,4)} mi' ) : SizedBox(width: 0, height: 0),
-                                    onTap: () async {
-                                      var address = "";
-                                      if (!businesses![index].lat.isNaN) {
-                                        mapController!.animateCamera(CameraUpdate.newLatLng(LatLng(businesses![index].lat-0.08, businesses![index].long)));
-                                        address = await getAddress(LatLng(businesses![index].lat,  businesses![index].long));
-                                      }
-                                      Navigator.push(context, ModalBottomSheetRoute(
-                                        isScrollControlled: true,
-                                        modalBarrierColor: Colors.transparent,
-                                        builder: (context) {
-                                        return BusinessPage(business: businesses![index], address: address);
-                                      }));
-                                    },
-                                  ),
-                                ),
                                 events == null
                                     ? const SingleChildScrollView(
                                         physics: ClampingScrollPhysics(),
@@ -381,6 +362,35 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                     );
                                     return isPast ? Opacity(opacity: 0.55, child: tile) : tile;
                                   },
+                                ),
+                                businesses == null
+                                    ? const SingleChildScrollView(
+                                        physics: ClampingScrollPhysics(),
+                                        child: SkeletonMatchList(count: 7))
+                                    : ListView.builder(
+                                  itemCount: businesses?.length ?? 0,
+                                  //controller: scrollController,
+                                  physics: const ClampingScrollPhysics(),
+                                  padding: EdgeInsets.zero,
+                                  itemBuilder: (context, index) => ListTile(
+                                    leading: businesses![index].logo ?? SizedBox(width: 0, height: 0),
+                                    title: Text('${businesses![index].name}'),
+                                    subtitle: Text('${businesses![index].description}', overflow: TextOverflow.ellipsis,),
+                                    trailing: (_currentPosition != null && !businesses![index].lat.isNaN) ? Text('${businesses![index].getMiles(_currentPosition!).toString().substring(0,4)} mi' ) : SizedBox(width: 0, height: 0),
+                                    onTap: () async {
+                                      var address = "";
+                                      if (!businesses![index].lat.isNaN) {
+                                        mapController!.animateCamera(CameraUpdate.newLatLng(LatLng(businesses![index].lat-0.08, businesses![index].long)));
+                                        address = await getAddress(LatLng(businesses![index].lat,  businesses![index].long));
+                                      }
+                                      Navigator.push(context, ModalBottomSheetRoute(
+                                        isScrollControlled: true,
+                                        modalBarrierColor: Colors.transparent,
+                                        builder: (context) {
+                                        return BusinessPage(business: businesses![index], address: address);
+                                      }));
+                                    },
+                                  ),
                                 ),
                               ],
                         ),
