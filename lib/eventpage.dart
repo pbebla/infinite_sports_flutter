@@ -196,7 +196,62 @@ class _EventPageState extends State<EventPage> {
             body: SingleChildScrollView(
               child: Column(
                 children: [
+                  // Owner-approved order: flyer, Register, contact/socials,
+                  // Attend/Share, address, then the write-up.
                   event.imageSrc ?? SizedBox(width: 0, height: 0),
+                  if (event.registrationId?.isNotEmpty ?? false)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(15, 8, 15, 0),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Theme.of(context).colorScheme.primary,
+                            foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          icon: const Icon(Icons.how_to_reg),
+                          label: const Text('Register',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          onPressed: _register,
+                        ),
+                      ),
+                    ),
+                  _contactRow(context),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child:ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                                shape: const RoundedRectangleBorder(
+                                borderRadius: BorderRadius.all(Radius.circular(10)),
+                              ),),
+                            onPressed: () async {
+                              await attend_Clicked();
+                              setState(() {
+                              });
+                            },
+                            child: Text(attending ? "Remove" : "Attend")
+                          ),
+                        ),
+                        Expanded(
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                                shape: const RoundedRectangleBorder(
+                                borderRadius: BorderRadius.all(Radius.circular(10)),
+                              ),),
+                            onPressed: () async {
+                              await share_Clicked();
+                              setState(() {
+                              });
+                            },
+                            child: const Text("Share")
+                          ),
+                        ),
+                    ],),
+                  ),
                   Visibility(
                     visible: event.address?.isNotEmpty ?? false,
                     child: ElevatedButton(
@@ -229,67 +284,6 @@ class _EventPageState extends State<EventPage> {
                       },
                     )
                   ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child:ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                              shape: const RoundedRectangleBorder(
-                              borderRadius: BorderRadius.all(Radius.circular(10)),
-                            ),),
-                          onPressed: () async {
-                            await attend_Clicked();
-                            setState(() {
-                            });
-                          }, 
-                          child: Text(attending ? "Remove" : "Attend")
-                        ),
-                      ),
-                      Expanded(
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                              shape: const RoundedRectangleBorder(
-                              borderRadius: BorderRadius.all(Radius.circular(10)),
-                            ),),
-                          onPressed: () async {
-                            await share_Clicked();
-                            setState(() {
-                            });
-                          },
-                          child: const Text("Share")
-                        ),
-                      ),
-                  ],),
-                  if (event.registrationId?.isNotEmpty ?? false)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(15, 8, 15, 0),
-                      child: SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: Theme.of(context).colorScheme.primary,
-                            foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                          ),
-                          icon: const Icon(Icons.how_to_reg),
-                          label: const Text('Register',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          onPressed: _register,
-                        ),
-                      ),
-                    ),
-                  _contactRow(context),
-                  if (event.category != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Chip(
-                        label: Text(event.category!,
-                            style: TextStyle(
-                                color: Theme.of(context).colorScheme.onPrimary,
-                                fontWeight: FontWeight.bold)),
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
                   Padding(
                     padding: const EdgeInsets.all(15),
                     child: Text(event.info ?? ""),
