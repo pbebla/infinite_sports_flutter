@@ -23,12 +23,30 @@ class _CalendarTabState extends State<CalendarTab> {
   static const _weekdayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
   final Key _centerKey = const ValueKey('calendar-current-month');
+  final ScrollController _scroll = ScrollController();
   Future<Map<DateTime, List<MapEntry<int, Event>>>>? _future;
 
   @override
   void initState() {
     super.initState();
     _future = _load();
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// Scroll offset 0 is the top of the current month (the center sliver),
+  /// so "Today" is a plain glide back to origin. Also re-checks for new
+  /// events while we're at it.
+  void _jumpToToday() {
+    if (_scroll.hasClients) {
+      _scroll.animateTo(0,
+          duration: const Duration(milliseconds: 400), curve: Curves.easeOut);
+    }
+    setState(() { _future = _load(); });
   }
 
   Future<Map<DateTime, List<MapEntry<int, Event>>>> _load() async {
@@ -57,9 +75,20 @@ class _CalendarTabState extends State<CalendarTab> {
         centerTitle: true,
         title: Image.asset('assets/infinitelarge_dark.png', height: 30),
         actions: [
-          IconButton(
-            onPressed: () => setState(() { _future = _load(); }),
-            icon: const Icon(Icons.refresh),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: TextButton(
+              onPressed: _jumpToToday,
+              style: TextButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                visualDensity: VisualDensity.compact,
+                shape: const StadiumBorder(),
+              ),
+              child: const Text('Today',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
           ),
         ],
       ),
@@ -77,6 +106,7 @@ class _CalendarTabState extends State<CalendarTab> {
               _WeekdayHeader(labels: _weekdayLabels),
               Expanded(
                 child: CustomScrollView(
+                  controller: _scroll,
                   center: _centerKey,
                   slivers: [
                     // Months before today, built upward from the current month.
