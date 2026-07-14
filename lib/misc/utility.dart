@@ -22,6 +22,31 @@ import 'dart:async';
 
 
 var infiniteSportsPrimaryColor = const Color.fromARGB(255, 208, 0, 0);
+// Dark mode swaps red accents for gold (owner's black & gold dark theme).
+// Light mode keeps the brand red everywhere.
+var infiniteSportsGoldColor = const Color(0xFFE3B84C);
+
+/// Brand accent for the current brightness: red in light, gold in dark.
+/// Prefer Theme.of(context).colorScheme.primary (already brightness-aware);
+/// use this only where no ColorScheme is in play.
+Color brandAccent(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? infiniteSportsGoldColor
+        : infiniteSportsPrimaryColor;
+
+/// Header bar background: brand red in light mode, near-black surface in
+/// dark mode (black & gold treatment).
+Color appBarBackground(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? Theme.of(context).colorScheme.surfaceContainer
+        : infiniteSportsPrimaryColor;
+
+/// Foreground (title/icons) that pairs with [appBarBackground]:
+/// white on red in light mode, gold on black in dark mode.
+Color appBarForeground(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? infiniteSportsGoldColor
+        : Colors.white;
 
 Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
 Map<String, Map<String, Map<String, BasketballPlayer>>> basketballLineups = {};

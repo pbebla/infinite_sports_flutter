@@ -9,11 +9,16 @@ final _lightScheme = ColorScheme.fromSeed(
   dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
 );
 
+// Dark mode is black & gold: gold accents wherever light mode uses red.
+// onPrimary is near-black so anything filled with primary (buttons, pills,
+// banners) gets readable dark text on gold instead of white.
 final _darkScheme = ColorScheme.fromSeed(
   brightness: Brightness.dark,
   seedColor: Colors.black,
-  primary: infiniteSportsPrimaryColor,
+  primary: infiniteSportsGoldColor,
   dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
+).copyWith(
+  onPrimary: const Color(0xFF1A1206),
 );
 
 ThemeData lightMode = ThemeData(

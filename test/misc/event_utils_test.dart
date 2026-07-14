@@ -36,4 +36,26 @@ void main() {
     final result = upcomingEvents([_event('broken', null)], now);
     expect(result, isEmpty);
   });
+
+  group('eventsByDay', () {
+    test('groups events on the same calendar day regardless of time', () {
+      final byDay = eventsByDay([
+        _event('morning', DateTime(2026, 7, 20, 9)),
+        _event('evening', DateTime(2026, 7, 20, 18)),
+        _event('other day', DateTime(2026, 7, 21)),
+      ]);
+      expect(byDay[DateTime(2026, 7, 20)]!.map((e) => e.value.title).toList(),
+          ['morning', 'evening']);
+      expect(byDay[DateTime(2026, 7, 21)]!.single.value.title, 'other day');
+    });
+
+    test('keys are midnight-normalized and indexes preserved', () {
+      final byDay = eventsByDay([
+        _event('skipped', null),
+        _event('kept', DateTime(2026, 8, 2, 14, 45)),
+      ]);
+      expect(byDay.keys.single, DateTime(2026, 8, 2));
+      expect(byDay.values.single.single.key, 1);
+    });
+  });
 }
