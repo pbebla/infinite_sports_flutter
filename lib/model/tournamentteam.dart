@@ -40,6 +40,10 @@ class TournamentTeam {
   final String? cityState;
   final String? established;
 
+  /// Additive per-sport standings numbers (P4): basketball PPG/PCPG/PD,
+  /// flag football PF/PA/PD. Tournament/futsal rows leave it empty.
+  final Map<String, num> leagueStats;
+
   const TournamentTeam({
     required this.id,
     required this.name,
@@ -62,6 +66,7 @@ class TournamentTeam {
     this.coachPhotoUrl,
     this.cityState,
     this.established,
+    this.leagueStats = const {},
   });
 
   factory TournamentTeam.fromFirebase(

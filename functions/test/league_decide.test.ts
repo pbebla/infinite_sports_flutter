@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  leagueTeamTopic, buildLeagueCondition, isPlaceholderTeam,
+  leagueSeasonTopic, leagueTeamTopic, buildLeagueCondition, isPlaceholderTeam,
   parseLeagueGame, decideLeagueGoal, decideLeagueStatus,
 } from '../src/lib/league_decide';
 
@@ -26,16 +26,34 @@ describe('league topics', () => {
     expect(leagueTeamTopic('Flag Football', '7', 'A-Team'))
       .toBe('league_Flag_Football_7_team_A-Team');
   });
-  test('buildLeagueCondition: two team topics, no season-wide topic', () => {
-    expect(buildLeagueCondition('Futsal', '16', 'Eagles', 'Lions')).toBe(
-      "'league_Futsal_16_team_Eagles' in topics || 'league_Futsal_16_team_Lions' in topics");
+  test('leagueSeasonTopic matches the fan builder byte-for-byte (P3.3)', () => {
+    // Fan contract (lib/misc/notification_topics.dart leagueSeasonTopic):
+    // 'league_{sport}_{season}', each part through the same sanitizer.
+    expect(leagueSeasonTopic('Futsal', '16')).toBe('league_Futsal_16');
+    expect(leagueSeasonTopic('Flag Football', '7')).toBe('league_Flag_Football_7');
   });
-  test('placeholders and empties are excluded; nothing left -> null', () => {
+  test('season topic is a strict prefix-sibling of the team topic', () => {
+    expect(leagueTeamTopic('Flag Football', '7', 'A-Team'))
+      .toBe(`${leagueSeasonTopic('Flag Football', '7')}_team_A-Team`);
+  });
+  test('buildLeagueCondition: season topic first, then both team topics (P3.3)', () => {
+    expect(buildLeagueCondition('Futsal', '16', 'Eagles', 'Lions')).toBe(
+      "'league_Futsal_16' in topics || " +
+      "'league_Futsal_16_team_Eagles' in topics || " +
+      "'league_Futsal_16_team_Lions' in topics");
+  });
+  test('placeholders drop their TEAM topic only — season followers still covered', () => {
     expect(isPlaceholderTeam('Winner of SF1')).toBe(true);
     expect(buildLeagueCondition('Futsal', '16', 'Winner of SF1', 'Lions')).toBe(
-      "'league_Futsal_16_team_Lions' in topics");
-    expect(buildLeagueCondition('Futsal', '16', 'Winner of SF1', 'Loser of QF2')).toBeNull();
+      "'league_Futsal_16' in topics || 'league_Futsal_16_team_Lions' in topics");
+    // P3.3 silence-rule change: a two-placeholder game is still a REAL game
+    // (bracket names lagging data entry) — season followers get its alerts.
+    expect(buildLeagueCondition('Futsal', '16', 'Winner of SF1', 'Loser of QF2')).toBe(
+      "'league_Futsal_16' in topics");
+  });
+  test('malformed game (no team names at all) -> null: nobody gets alerted', () => {
     expect(buildLeagueCondition('Futsal', '16', null, null)).toBeNull();
+    expect(buildLeagueCondition('Futsal', '16', '', '   ')).toBeNull();
   });
 });
 
@@ -66,7 +84,9 @@ describe('decideLeagueGoal', () => {
     expect(d!.body).toBe("Sam Smith (Eagles) 12' · Assist: Skylar Jackson");
     expect(d!.dedupeKey).toBe('goal_t1_2');
     expect(d!.condition).toBe(
-      "'league_Futsal_16_team_Eagles' in topics || 'league_Futsal_16_team_Lions' in topics");
+      "'league_Futsal_16' in topics || " +
+      "'league_Futsal_16_team_Eagles' in topics || " +
+      "'league_Futsal_16_team_Lions' in topics");
     expect(d!.data).toEqual({
       type: 'goal', sport: 'Futsal', season: '16',
       dateKey: '05202026', gameIndex: '3',
@@ -83,14 +103,22 @@ describe('decideLeagueGoal', () => {
     });
     expect(decideLeagueGoal({ ...base, game: g })!.body).toBe("Own goal · Bad Luck Bo 20'");
   });
-  test('silent when: not live, no increase, friendly, or no followable team', () => {
+  test('silent ONLY when not live, no increase, friendly, or malformed (P3.3)', () => {
     expect(decideLeagueGoal({ ...base, game: liveGame({ status: 2 }) })).toBeNull();
     expect(decideLeagueGoal({ ...base, before: 2, after: 2, game: liveGame() })).toBeNull();
     expect(decideLeagueGoal({ ...base, game: liveGame({ Stage: 'friendly' }) })).toBeNull();
+    // Malformed: no team names at all.
     expect(decideLeagueGoal({
+      ...base, game: liveGame({ team1: null, team2: null }),
+    })).toBeNull();
+  });
+  test('P3.3: two-placeholder game still alerts season followers (season-only condition)', () => {
+    const d = decideLeagueGoal({
       ...base,
       game: liveGame({ team1: 'Winner of SF1', team2: 'Loser of QF2' }),
-    })).toBeNull();
+    });
+    expect(d).not.toBeNull();
+    expect(d!.condition).toBe("'league_Futsal_16' in topics");
   });
 });
 
@@ -105,6 +133,11 @@ describe('decideLeagueStatus', () => {
     expect(d!.title).toBe('🟢 Kickoff: Eagles vs Lions');
     expect(d!.body).toBe('Now playing — Main Gym');
     expect(d!.data['type']).toBe('kickoff');
+    // P3.3: kickoff condition carries the season topic too.
+    expect(d!.condition).toBe(
+      "'league_Futsal_16' in topics || " +
+      "'league_Futsal_16_team_Eagles' in topics || " +
+      "'league_Futsal_16_team_Lions' in topics");
   });
   test('kickoff without venue uses the generic body', () => {
     const g = liveGame({ team1score: 0, team2score: 0 });
@@ -115,6 +148,11 @@ describe('decideLeagueStatus', () => {
     const d = decideLeagueStatus({ ...base, before: 1, after: 2, game: liveGame({ status: 2 }) });
     expect(d!.kind).toBe('fulltime');
     expect(d!.title).toBe('🏁 Full time: Eagles 2 – 1 Lions');
+    // P3.3: full-time condition carries the season topic too.
+    expect(d!.condition).toBe(
+      "'league_Futsal_16' in topics || " +
+      "'league_Futsal_16_team_Eagles' in topics || " +
+      "'league_Futsal_16_team_Lions' in topics");
   });
   test('silent on friendly, reopen (2->1), reset (->0), and no-change', () => {
     expect(decideLeagueStatus({ ...base, before: 0, after: 1,
@@ -122,5 +160,118 @@ describe('decideLeagueStatus', () => {
     expect(decideLeagueStatus({ ...base, before: 2, after: 1, game: liveGame() })).toBeNull();
     expect(decideLeagueStatus({ ...base, before: 1, after: 0, game: liveGame() })).toBeNull();
     expect(decideLeagueStatus({ ...base, before: 1, after: 1, game: liveGame() })).toBeNull();
+  });
+});
+
+describe('P4 — basketball wording', () => {
+  const CTX_B = { sport: 'Basketball', season: '1', dateKey: '01012027', gameIndex: 0 };
+
+  function bballGame(extra: Record<string, unknown> = {}) {
+    return parseLeagueGame({
+      team1: 'Eagles', team2: 'Lions',
+      team1score: 42, team2score: 38, status: 1,
+      team1activity: {
+        "12'": [{ TwoPointer: 'Sam Smith', _t: 1000 }],
+      },
+      ...extra,
+    });
+  }
+
+  test('score alert: 🏀 title, scorer body, no assist pairing', () => {
+    const d = decideLeagueGoal({
+      teamTag: 1, before: 40, after: 42, game: bballGame(), ...CTX_B,
+    });
+    expect(d).not.toBeNull();
+    expect(d!.title).toBe('🏀 Score! Eagles 42 – 38 Lions');
+    expect(d!.body).toBe("Sam Smith (Eagles) 12'");
+    expect(d!.dedupeKey).toBe('goal_t1_42');
+    expect(d!.data.sport).toBe('Basketball');
+  });
+
+  test('all three shot types are scorer events', () => {
+    for (const type of ['OnePointer', 'ThreePointer']) {
+      const d = decideLeagueGoal({
+        teamTag: 1, before: 40, after: 42,
+        game: bballGame({
+          team1activity: { "9'": [{ [type]: 'Alex' }] },
+        }),
+        ...CTX_B,
+      });
+      expect(d!.body).toBe("Alex (Eagles) 9'");
+    }
+  });
+
+  test('tip-off and final wording', () => {
+    const kick = decideLeagueStatus({
+      before: 0, after: 1, game: bballGame({ status: 1 }), ...CTX_B,
+    });
+    expect(kick!.title).toBe('🟢 Tip-off: Eagles vs Lions');
+    const ft = decideLeagueStatus({
+      before: 1, after: 2, game: bballGame({ status: 2 }), ...CTX_B,
+    });
+    expect(ft!.title).toBe('🏁 Final: Eagles 42 – 38 Lions');
+  });
+});
+
+describe('P4 — flag football wording', () => {
+  const CTX_F = { sport: 'Flag Football', season: '1', dateKey: '01012027', gameIndex: 0 };
+
+  function ffGame(extra: Record<string, unknown> = {}) {
+    return parseLeagueGame({
+      team1: 'Eagles', team2: 'Lions',
+      team1score: 12, team2score: 6, status: 1,
+      team1activity: {
+        "5'": [
+          { 'Receiving TD': 'Sam Smith', _t: 1000 },
+          { 'Pass TD': 'Quinn Boyd', _t: 2000 },
+        ],
+      },
+      ...extra,
+    });
+  }
+
+  test('TD alert: 🏈 TOUCHDOWN title + Thrown by pairing', () => {
+    const d = decideLeagueGoal({
+      teamTag: 1, before: 6, after: 12, game: ffGame(), ...CTX_F,
+    });
+    expect(d).not.toBeNull();
+    expect(d!.title).toBe('🏈 TOUCHDOWN! Eagles 12 – 6 Lions');
+    expect(d!.body).toBe(
+        "Sam Smith (Eagles) 5' · Thrown by: Quinn Boyd");
+  });
+
+  test('rushing TD headlines TOUCHDOWN without a thrower', () => {
+    const d = decideLeagueGoal({
+      teamTag: 1, before: 6, after: 12,
+      game: ffGame({
+        team1activity: { "8'": [{ 'Rushing TD': 'Alex' }] },
+      }),
+      ...CTX_F,
+    });
+    expect(d!.title).toBe('🏈 TOUCHDOWN! Eagles 12 – 6 Lions');
+    expect(d!.body).toBe("Alex (Eagles) 8'");
+  });
+
+  test('PAT/2PT are score alerts, not touchdowns', () => {
+    const d = decideLeagueGoal({
+      teamTag: 1, before: 12, after: 13,
+      game: ffGame({
+        team1score: 13,
+        team1activity: { "6'": [{ PAT1: 'Sam Smith' }] },
+      }),
+      ...CTX_F,
+    });
+    expect(d!.title).toBe('🏈 Score! Eagles 13 – 6 Lions');
+  });
+
+  test('kickoff and final wording', () => {
+    const kick = decideLeagueStatus({
+      before: 0, after: 1, game: ffGame(), ...CTX_F,
+    });
+    expect(kick!.title).toBe('🟢 Kickoff: Eagles vs Lions');
+    const ft = decideLeagueStatus({
+      before: 1, after: 2, game: ffGame({ status: 2 }), ...CTX_F,
+    });
+    expect(ft!.title).toBe('🏁 Final: Eagles 12 – 6 Lions');
   });
 });

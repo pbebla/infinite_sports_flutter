@@ -372,16 +372,28 @@ Future<void> getAllFlagFootballLineUps(String season) async
       temp2.name = name;
       temp2.number = info["number"]?.toString() ?? '0';
       temp2.uid = info["UID"] ?? '0';
-      temp2.receptions = info["Receptions"] ?? 0;
-      temp2.receivingTouchdowns = info["Receiving Touchdowns"] ?? 0;
-      temp2.receptionMisses = info["Receiver Miss"] ?? 0;
-      temp2.passingTouchdowns = info["Passing Touchdowns"] ?? 0;
-      temp2.qbCompletions = info["QB Completions"] ?? 0;
-      temp2.qbIncompletions = info["QB Incomplete"] ?? 0;
-      temp2.interceptions = info["Interceptions"] ?? 0;
-      temp2.flagPulls = info["Flag Pulls"] ?? 0;
-      temp2.passBreakups = info["Pass Breakups"] ?? 0;
-      temp2.sacks = info["Sacks"] ?? 0;
+      // P4 FF stat-key fix: the Manager writes SHORT keys (REC, RECTD,
+      // QBComp, ...). Read those first; fall back to the legacy long
+      // names so pre-Manager seasons still render.
+      temp2.receptions = info["REC"] ?? info["Receptions"] ?? 0;
+      temp2.receivingTouchdowns =
+          info["RECTD"] ?? info["Receiving Touchdowns"] ?? 0;
+      temp2.receptionMisses = info["RECMiss"] ?? info["Receiver Miss"] ?? 0;
+      temp2.passingTouchdowns =
+          info["PassTD"] ?? info["Passing Touchdowns"] ?? 0;
+      temp2.qbCompletions = info["QBComp"] ?? info["QB Completions"] ?? 0;
+      temp2.qbIncompletions = info["QBInc"] ?? info["QB Incomplete"] ?? 0;
+      temp2.interceptions = info["INT"] ?? info["Interceptions"] ?? 0;
+      temp2.flagPulls = info["FP"] ?? info["Flag Pulls"] ?? 0;
+      temp2.passBreakups = info["PBU"] ?? info["Pass Breakups"] ?? 0;
+      temp2.sacks = info["Sack"] ?? info["Sacks"] ?? 0;
+      // Never parsed before P4 (model fields existed all along):
+      temp2.passingInterceptions = info["PassINT"] ?? 0;
+      temp2.rushingTouchdowns = info["RushTD"] ?? 0;
+      temp2.interceptionTouchdowns = info["INTTD"] ?? 0;
+      temp2.pointAfterTouchdownMakes = info["PAT1"] ?? 0;
+      temp2.pointAfterTouchdownMisses = info["PAT1Miss"] ?? 0;
+      temp2.twoPointConversions = info["TwoPT"] ?? 0;
       temp2.getCompletionPercentage();
       temp2.getCatchRate();
       temp[name] = temp2;

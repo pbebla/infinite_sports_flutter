@@ -21,7 +21,7 @@ class FirebaseTopicMessaging implements TopicMessaging {
 class FollowedChannel {
   final String topic;
   final String label;
-  final String kind; // 'tournament' | 'team'
+  final String kind; // 'tournament' | 'team' | 'league'
 
   const FollowedChannel(
       {required this.topic, required this.label, required this.kind});

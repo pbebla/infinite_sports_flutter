@@ -10,9 +10,16 @@ String tournamentTopic(String tournamentId) =>
 String teamTopic(String tournamentId, String teamId) =>
     'tournament_${sanitizeTopicId(tournamentId)}_team_${sanitizeTopicId(teamId)}';
 
-/// League team follow topic (League Experience P2). Bell UI + FollowStore
-/// subscribe this today; NO pushes are addressed to it until the P3
-/// functions watcher lands — extend functions/src/lib/decide.ts with this
-/// EXACT builder before sending league notifications.
+/// League team follow topic (League Experience P2). MUST stay in parity with
+/// functions/src/lib/league_decide.ts leagueTeamTopic — the league watcher
+/// addresses this exact topic in its FCM conditions.
 String leagueTeamTopic(String sport, String season, String teamName) =>
     'league_${sanitizeTopicId(sport)}_${sanitizeTopicId(season)}_team_${sanitizeTopicId(teamName)}';
+
+/// Season-wide league follow topic (League Experience P3.3): every game
+/// alert for the whole season, tournament-bell parity. A strict
+/// prefix-sibling of [leagueTeamTopic] ('league_{sport}_{season}' vs
+/// 'league_{sport}_{season}_team_{team}'). MUST stay in parity with
+/// functions/src/lib/league_decide.ts leagueSeasonTopic.
+String leagueSeasonTopic(String sport, String season) =>
+    'league_${sanitizeTopicId(sport)}_${sanitizeTopicId(season)}';

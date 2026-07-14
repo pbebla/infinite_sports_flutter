@@ -28,7 +28,7 @@ class LeagueTeamsTab extends StatelessWidget {
       return const Center(child: Text('No teams available'));
     }
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: EdgeInsets.fromLTRB(0, 8, 0, 8 + MediaQuery.paddingOf(context).bottom),
       itemCount: standings.length,
       itemBuilder: (context, index) {
         final team = standings[index];

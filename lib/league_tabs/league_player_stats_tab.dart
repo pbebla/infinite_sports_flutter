@@ -8,16 +8,19 @@ import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 /// Season leaders per stat (League Experience P2) — the league version of
 /// the tournament PlayerStatsTab, driven by the live Line Ups season
-/// totals. Categories are hardcoded fan-side this slice: the P1 engine
-/// twin has no leaderboard-defs field yet, and adding one would break the
-/// byte-for-byte twin — P4 adds it to BOTH repos.
+/// totals. Categories are hardcoded fan-side, per sport (see
+/// misc/top_stats.dart header) — the P1 engine twin carries no
+/// leaderboard-defs field and stays byte-pinned; adding one there would
+/// churn the twin for data the Manager never reads.
 class LeaguePlayerStatsTab extends StatefulWidget {
+  final String sport;
   final Map<String, List<TournamentPlayer>> rosters;
   final Map<String, TournamentTeam> teams;
   final void Function(String teamName)? onOpenTeam;
 
   const LeaguePlayerStatsTab({
     super.key,
+    required this.sport,
     required this.rosters,
     required this.teams,
     this.onOpenTeam,
@@ -31,16 +34,39 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
   final Set<String> _expanded = {};
 
   /// label → statByName key → statIconAsset key ('' = no icon, matching
-  /// the tournament tab's iconless Clean Sheets).
-  static const List<Map<String, String>> _categories = [
-    {'label': 'Top Scorer', 'stat': 'goals', 'icon': 'goal'},
-    {'label': 'Assists', 'stat': 'assists', 'icon': 'assist'},
-    {'label': 'Saves', 'stat': 'saves', 'icon': 'save'},
-    {'label': 'Defensive Plays (DPL)', 'stat': 'dpl', 'icon': 'dpl'},
-    {'label': 'Clean Sheets', 'stat': 'cleanSheets', 'icon': ''},
-    {'label': 'Yellow Cards', 'stat': 'yellowCards', 'icon': 'yellow'},
-    {'label': 'Red Cards', 'stat': 'redCards', 'icon': 'red'},
-  ];
+  /// the tournament tab's iconless Clean Sheets). Per-sport, fan-side by
+  /// convention (see top_stats.dart header) — the config twin carries no
+  /// leaderboard defs.
+  static const Map<String, List<Map<String, String>>> _categoriesBySport = {
+    'Futsal': [
+      {'label': 'Top Scorer', 'stat': 'goals', 'icon': 'goal'},
+      {'label': 'Assists', 'stat': 'assists', 'icon': 'assist'},
+      {'label': 'Saves', 'stat': 'saves', 'icon': 'save'},
+      {'label': 'Defensive Plays (DPL)', 'stat': 'dpl', 'icon': 'dpl'},
+      {'label': 'Clean Sheets', 'stat': 'cleanSheets', 'icon': ''},
+      {'label': 'Yellow Cards', 'stat': 'yellowCards', 'icon': 'yellow'},
+      {'label': 'Red Cards', 'stat': 'redCards', 'icon': 'red'},
+    ],
+    'Basketball': [
+      {'label': 'Points', 'stat': 'points', 'icon': ''},
+      {'label': 'Rebounds', 'stat': 'rebounds', 'icon': 'rebound'},
+      {'label': 'Assists', 'stat': 'assists', 'icon': 'assist'},
+      {'label': '3-Pointers', 'stat': 'threePointers', 'icon': 'threepointer'},
+      {'label': 'Steals', 'stat': 'steals', 'icon': ''},
+      {'label': 'Blocks', 'stat': 'blocks', 'icon': ''},
+    ],
+    'Flag Football': [
+      {'label': 'Touchdowns', 'stat': 'touchdowns', 'icon': ''},
+      {'label': 'Receptions', 'stat': 'receptions', 'icon': ''},
+      {'label': 'Pass TDs', 'stat': 'passTouchdowns', 'icon': ''},
+      {'label': 'Interceptions', 'stat': 'interceptions', 'icon': ''},
+      {'label': 'Flag Pulls', 'stat': 'flagPulls', 'icon': ''},
+      {'label': 'Sacks', 'stat': 'sacks', 'icon': ''},
+    ],
+  };
+
+  List<Map<String, String>> get _categories =>
+      _categoriesBySport[widget.sport] ?? _categoriesBySport['Futsal']!;
 
   @override
   Widget build(BuildContext context) {
@@ -50,7 +76,7 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
       return const Center(child: Text('No player stats yet'));
     }
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      padding: EdgeInsets.fromLTRB(12, 8, 12, 8 + MediaQuery.paddingOf(context).bottom),
       itemCount: _categories.length,
       itemBuilder: (context, index) {
         final cat = _categories[index];

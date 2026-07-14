@@ -285,6 +285,8 @@ export { stripeWebhook } from './stripeWebhook';
 
 // ---- League Experience P3: league watcher + prediction scoring ----
 
-/** Grouped export -> deploys as leagueFutsal-onTeam1Score, ... (P4 adds
- *  one line per sport: leagueBasketball, leagueFlagFootball). */
+/** Grouped export -> deploys as leagueFutsal-onTeam1Score, ... (P4 landed:
+ *  leagueBasketball, leagueFlagFootball below). */
 export const leagueFutsal = makeLeagueTriggers('Futsal');
+export const leagueBasketball = makeLeagueTriggers('Basketball');
+export const leagueFlagFootball = makeLeagueTriggers('Flag Football');

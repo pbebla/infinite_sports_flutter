@@ -20,6 +20,22 @@ typedef TopStat = ({String stat, int value});
 /// not a stat a player is "very good at".
 const Map<String, List<String>> leagueTopStatCandidates = {
   'Futsal': ['goals', 'assists', 'dpl', 'saves', 'cleanSheets'],
+  'Basketball': [
+    'points',
+    'rebounds',
+    'assists',
+    'threePointers',
+    'steals',
+    'blocks',
+  ],
+  'Flag Football': [
+    'touchdowns',
+    'receptions',
+    'flagPulls',
+    'interceptions',
+    'sacks',
+    'passTouchdowns',
+  ],
 };
 
 /// Per-sport fallback list (owner: Goals, Assists, DPL for futsal): when a
@@ -27,6 +43,8 @@ const Map<String, List<String>> leagueTopStatCandidates = {
 /// fill from this list in order — zero values included.
 const Map<String, List<String>> leagueTopStatFallbacks = {
   'Futsal': ['goals', 'assists', 'dpl'],
+  'Basketball': ['points', 'rebounds', 'assists'],
+  'Flag Football': ['touchdowns', 'receptions', 'flagPulls'],
 };
 
 /// statByName key -> statIconAsset vocabulary for the squad chips, matching
@@ -46,6 +64,14 @@ String leagueTopStatIconKey(String stat) {
       return 'yellow';
     case 'redCards':
       return 'red';
+    case 'rebounds':
+      return 'rebound';
+    case 'threePointers':
+      return 'threepointer';
+    case 'twoPointers':
+      return 'twopointer';
+    case 'freeThrows':
+      return 'onepointer';
     default:
       return '';
   }
@@ -57,7 +83,7 @@ String leagueTopStatIconKey(String stat) {
 /// - when fewer than 3 are non-zero, the remaining slots fill from the
 ///   sport's fallback list in order (skipping stats already picked),
 ///   including zero values.
-/// Unknown sports use the futsal lists until P4 registers theirs.
+/// Unknown sports use the futsal lists.
 List<TopStat> topThreeStats(Map<String, int> stats, String sport) {
   final candidates =
       leagueTopStatCandidates[sport] ?? leagueTopStatCandidates['Futsal']!;

@@ -6,7 +6,7 @@ import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 void main() {
   testWidgets('renders standings-ordered team cards with record + form',
       (tester) async {
-    final standings = leagueStandingsFromTeamsNode({
+    final standings = leagueStandingsFromTeamsNode('Futsal', {
       'Babylon': {'Wins': 1, 'Draws': 0, 'Losses': 3, 'GP': 4, 'GS': 3, 'GC': 9, 'GD': -6, 'Points': 3},
       'Nineveh': {'Wins': 4, 'Draws': 0, 'Losses': 0, 'GP': 4, 'GS': 12, 'GC': 2, 'GD': 10, 'Points': 12},
     }, const {});

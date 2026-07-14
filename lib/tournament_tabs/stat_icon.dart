@@ -46,6 +46,15 @@ String? statIconAsset(String eventType) {
       return 'assets/second_yellow.png';
     case 'red':
       return 'assets/red.png';
+    // Basketball (P4) — legacy league activity spellings, bundled art.
+    case 'onepointer':
+      return 'assets/onepointer.png';
+    case 'twopointer':
+      return 'assets/twopointer.png';
+    case 'threepointer':
+      return 'assets/threepointer.png';
+    case 'rebound':
+      return 'assets/rebound.png';
     // Legacy league blue card — retired for new capture, still renders.
     case 'blue':
       return 'assets/blue.png';

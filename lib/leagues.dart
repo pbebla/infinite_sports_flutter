@@ -1,6 +1,7 @@
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/league_detail_page.dart';
+import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 
@@ -125,16 +126,17 @@ Future<List<Widget>> getSeasonTiles(sport, context) async {
   while (i <= max)
   {
     var season = i.toString();
-    // P2.1: modern SeasonCard, same navigation as before — futsal opens the
-    // tournament-parity league page (P2); Basketball/Flag Football keep
-    // ShowLeaguePage until P4.
+    // P2.1: modern SeasonCard, same navigation as before — futsal, basketball
+    // and flag football open the tournament-parity league page (P2/P4); any
+    // other sport (AFC San Jose) keeps ShowLeaguePage.
     var seasonView = SeasonCard(
       title: "Season $i",
       iconAsset: _sportIconAsset(sport.toString()),
       onTap: () {
-        if (sport == "Futsal") {
+        if (isLeagueEngineSport(sport.toString())) {
           Navigator.push(context, MaterialPageRoute(builder:(context) {
-            return LeagueDetailPage(sport: "Futsal", season: season);
+            return LeagueDetailPage(
+                sport: sport.toString(), season: season);
           },));
           return;
         }
