@@ -5,6 +5,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:infinite_sports_flutter/businesspage.dart';
 import 'package:infinite_sports_flutter/eventpage.dart';
+import 'package:infinite_sports_flutter/misc/event_repo.dart';
+import 'package:infinite_sports_flutter/misc/event_utils.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/business.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
@@ -89,9 +91,35 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
     });
   }
   
+  // Merged-list indices split by whether the event is fully over; upcoming
+  // soonest-first, past most-recent-first (browsable history, never deleted).
+  List<int> _upcomingIdx = [];
+  List<int> _pastIdx = [];
+
+  void _splitEvents() {
+    final today = DateTime.now();
+    final midnight = DateTime(today.year, today.month, today.day);
+    final upcoming = <int>[];
+    final past = <int>[];
+    for (var i = 0; i < (events?.length ?? 0); i++) {
+      final days = occurrenceDays(events![i]);
+      if (days.isNotEmpty && days.last.isBefore(midnight)) {
+        past.add(i);
+      } else {
+        upcoming.add(i);
+      }
+    }
+    DateTime sortKey(int i) => events![i].eventDateTime ?? midnight;
+    upcoming.sort((a, b) => sortKey(a).compareTo(sortKey(b)));
+    past.sort((a, b) => sortKey(b).compareTo(sortKey(a)));
+    _upcomingIdx = upcoming;
+    _pastIdx = past;
+  }
+
   Future<int> _getBusinessesAndEvents() async {
     businesses = await getBusinesses();
-    events = await getEvents();
+    events = await getAllEvents();
+    _splitEvents();
     for (var i = 0; i < businesses!.length ; i++) {
       if (!businesses![i].lat.isNaN) {
         Marker marker = Marker(
@@ -279,24 +307,48 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                   ),
                                 ),
                                 ListView.builder(
-                                  itemCount: events?.length ?? 0,
+                                  itemCount: _upcomingIdx.length +
+                                      (_pastIdx.isEmpty ? 0 : _pastIdx.length + 1),
                                   //controller: scrollController,
                                   physics: const ClampingScrollPhysics(),
                                   padding: EdgeInsets.zero,
-                                  itemBuilder: (context, index) => ListTile(
-                                    leading: events![index].imageSrc ?? SizedBox(width: 0, height: 0),
-                                    title: Text('${events![index].title}'),
-                                    subtitle: Text('on ${events![index].eventDate}\nat ${events![index].location}\n${events![index].startTime} - ${events![index].endTime}'),
-                                    onTap: () async {
-                                      if (eventLocations[index] != null) {
-                                        mapController!.animateCamera(CameraUpdate.newLatLng(LatLng(eventLocations[index]!.latitude-0.08, eventLocations[index]!.longitude)));
-                                      }
-                                      Navigator.push(context, MaterialPageRoute(
-                                        builder: (context) {
-                                        return EventPage(index: index,);
-                                      }));
-                                    },
-                                  ),
+                                  itemBuilder: (context, position) {
+                                    // Upcoming first, then a header, then
+                                    // past events dimmed (auto-archived by
+                                    // date — nothing is ever deleted).
+                                    if (position == _upcomingIdx.length && _pastIdx.isNotEmpty) {
+                                      return Padding(
+                                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                                        child: Text('Past events',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                                            )),
+                                      );
+                                    }
+                                    final isPast = position > _upcomingIdx.length;
+                                    final index = isPast
+                                        ? _pastIdx[position - _upcomingIdx.length - 1]
+                                        : _upcomingIdx[position];
+                                    final event = events![index];
+                                    final tile = ListTile(
+                                      leading: event.imageSrc ?? SizedBox(width: 0, height: 0),
+                                      title: Text('${event.title}'),
+                                      subtitle: Text('on ${event.eventDate}\nat ${event.location}\n${event.startTime} - ${event.endTime}'),
+                                      onTap: () async {
+                                        if (index < eventLocations.length && eventLocations[index] != null) {
+                                          mapController!.animateCamera(CameraUpdate.newLatLng(LatLng(eventLocations[index]!.latitude-0.08, eventLocations[index]!.longitude)));
+                                        }
+                                        Navigator.push(context, MaterialPageRoute(
+                                          builder: (context) {
+                                          return event.id != null
+                                              ? EventPage(v2Id: event.id)
+                                              : EventPage(index: event.legacyIndex ?? index);
+                                        }));
+                                      },
+                                    );
+                                    return isPast ? Opacity(opacity: 0.55, child: tile) : tile;
+                                  },
                                 ),
                               ],
                         ),

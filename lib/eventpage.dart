@@ -9,6 +9,10 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/attendee.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
 import 'package:infinite_sports_flutter/model/myuser.dart';
+import 'package:infinite_sports_flutter/registration/registration_models.dart';
+import 'package:infinite_sports_flutter/registration/registration_path_page.dart';
+import 'package:infinite_sports_flutter/registration/registration_service.dart';
+import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -51,6 +55,91 @@ class _EventPageState extends State<EventPage> {
     }
   }
 
+  /// Opens the external app for a contact/social action.
+  Future<void> _launch(String url) async {
+    try {
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    } catch (_) {}
+  }
+
+  /// Social fields may be pasted as full links or bare handles.
+  String _socialUrl(String value, String host) {
+    final v = value.trim();
+    if (v.startsWith('http://') || v.startsWith('https://')) return v;
+    return 'https://$host/${v.replaceFirst('@', '')}';
+  }
+
+  /// Same routing the registrations hub uses: status page if this user
+  /// already submitted, otherwise the registration flow. Falls back to a
+  /// snackbar when the linked registration has closed.
+  Future<void> _register() async {
+    final regId = event.registrationId!;
+    Map<String, RegistrationConfig> open = {};
+    try {
+      open = await RegistrationService.getOpenRegistrations();
+    } catch (_) {}
+    if (!mounted) return;
+    final config = open[regId];
+    if (config == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Registration is closed')));
+      return;
+    }
+    final existing = await RegistrationService.getMySubmission(regId);
+    if (!mounted) return;
+    Navigator.push(context, MaterialPageRoute(builder: (_) {
+      return existing != null
+          ? RegistrationStatusPage(regId: regId, config: config)
+          : RegistrationPathPage(regId: regId, config: config);
+    }));
+  }
+
+  /// Round icon buttons for phone/social contact, only for filled fields.
+  Widget _contactRow(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final phone = event.contactPhone?.trim() ?? '';
+    final actions = <(IconData, String, VoidCallback)>[
+      if (phone.isNotEmpty) (Icons.call, 'Call', () => _launch('tel:$phone')),
+      if (phone.isNotEmpty) (Icons.sms, 'Text', () => _launch('sms:$phone')),
+      if (event.instagram?.trim().isNotEmpty ?? false)
+        (Icons.camera_alt, 'Instagram', () => _launch(_socialUrl(event.instagram!, 'instagram.com'))),
+      if (event.facebook?.trim().isNotEmpty ?? false)
+        (Icons.facebook, 'Facebook', () => _launch(_socialUrl(event.facebook!, 'facebook.com'))),
+      if (event.youtube?.trim().isNotEmpty ?? false)
+        (Icons.play_circle_fill, 'YouTube', () => _launch(_socialUrl(event.youtube!, 'youtube.com'))),
+    ];
+    if (actions.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Wrap(
+        spacing: 18,
+        alignment: WrapAlignment.center,
+        children: [
+          for (final (icon, label, onTap) in actions)
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Ink(
+                  decoration: ShapeDecoration(
+                    shape: const CircleBorder(),
+                    color: scheme.primary,
+                  ),
+                  child: IconButton(
+                    icon: Icon(icon),
+                    color: scheme.onPrimary,
+                    onPressed: onTap,
+                    tooltip: label,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(label, style: const TextStyle(fontSize: 11)),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
   Future<void> attend_Clicked() async {
     try {
       DatabaseReference newClient = FirebaseDatabase.instance.ref(_attendeesPath);
@@ -84,9 +173,8 @@ class _EventPageState extends State<EventPage> {
       future: fetchEvent(), 
       builder: (context, snapshot) {
         if(snapshot.connectionState == ConnectionState.waiting) {
-          return SizedBox(
-            height: MediaQuery.sizeOf(context).height * 0.5,
-            child: const Center(child: CircularProgressIndicator(),),
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
           );
         }
         Map<String, MyUser> users = snapshot.data!;
@@ -98,9 +186,7 @@ class _EventPageState extends State<EventPage> {
             attending = true;
           }
         });
-        return SizedBox(
-          height: MediaQuery.sizeOf(context).height * 0.5,
-          child: Scaffold(
+        return Scaffold(
             appBar: AppBar(
               centerTitle: true,
               backgroundColor: appBarBackground(context),
@@ -174,6 +260,25 @@ class _EventPageState extends State<EventPage> {
                         ),
                       ),
                   ],),
+                  if (event.registrationId?.isNotEmpty ?? false)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(15, 8, 15, 0),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Theme.of(context).colorScheme.primary,
+                            foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          icon: const Icon(Icons.how_to_reg),
+                          label: const Text('Register',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          onPressed: _register,
+                        ),
+                      ),
+                    ),
+                  _contactRow(context),
                   if (event.category != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
@@ -211,8 +316,7 @@ class _EventPageState extends State<EventPage> {
                   )
                 ],
               )
-            ),   
-          ),
+            ),
         );
       }
     );
