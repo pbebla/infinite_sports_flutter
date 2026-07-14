@@ -99,4 +99,40 @@ void main() {
       expect(leagueTopStatIconKey('cleanSheets'), '');
     });
   });
+
+  group('P4 — basketball/flag football top stats', () {
+    test('basketball candidates + fallbacks are registered', () {
+      expect(leagueTopStatCandidates['Basketball'],
+          ['points', 'rebounds', 'assists', 'threePointers', 'steals', 'blocks']);
+      expect(leagueTopStatFallbacks['Basketball'],
+          ['points', 'rebounds', 'assists']);
+    });
+
+    test('flag football candidates + fallbacks are registered', () {
+      expect(leagueTopStatCandidates['Flag Football'],
+          ['touchdowns', 'receptions', 'flagPulls', 'interceptions', 'sacks', 'passTouchdowns']);
+      expect(leagueTopStatFallbacks['Flag Football'],
+          ['touchdowns', 'receptions', 'flagPulls']);
+    });
+
+    test('basketball: three non-zero candidates win; zero pads from '
+        'fallback', () {
+      final top = topThreeStats(
+          {'points': 22, 'blocks': 3, 'steals': 0, 'rebounds': 0},
+          'Basketball');
+      expect(top.map((t) => t.stat).toList(),
+          ['points', 'blocks', 'rebounds']); // rebounds padded at 0
+      expect(top[2].value, 0);
+    });
+
+    test('icon keys: rebounds/threePointers have art; the rest are '
+        'icon-less until L6', () {
+      expect(leagueTopStatIconKey('rebounds'), 'rebound');
+      expect(leagueTopStatIconKey('threePointers'), 'threepointer');
+      expect(leagueTopStatIconKey('assists'), 'assist');
+      expect(leagueTopStatIconKey('points'), '');
+      expect(leagueTopStatIconKey('touchdowns'), '');
+      expect(leagueTopStatIconKey('flagPulls'), '');
+    });
+  });
 }

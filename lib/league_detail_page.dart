@@ -334,6 +334,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                   _rosters == null
                       ? _tabSkeleton()
                       : LeaguePlayerStatsTab(
+                          sport: widget.sport,
                           rosters: _rosters!,
                           teams: _teamsById,
                           onOpenTeam: _openTeam,

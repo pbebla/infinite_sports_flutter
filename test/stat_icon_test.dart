@@ -75,4 +75,22 @@ void main() {
       expect(statIconAsset('Foul'), 'assets/foul.png');
     });
   });
+
+  group('P4 — basketball activity icons', () {
+    test('legacy basketball spellings map to the bundled art', () {
+      expect(statIconAsset('OnePointer'), 'assets/onepointer.png');
+      expect(statIconAsset('TwoPointer'), 'assets/twopointer.png');
+      expect(statIconAsset('ThreePointer'), 'assets/threepointer.png');
+      expect(statIconAsset('Rebound'), 'assets/rebound.png');
+    });
+
+    test('art-less P4 types fall back to null (grey StatIcon)', () {
+      expect(statIconAsset('Steal'), isNull);
+      expect(statIconAsset('Block'), isNull);
+      expect(statIconAsset('Turnover'), isNull);
+      expect(statIconAsset('Miss'), isNull);
+      expect(statIconAsset('QBComp'), isNull);
+      expect(statIconAsset('Receiving TD'), isNull);
+    });
+  });
 }

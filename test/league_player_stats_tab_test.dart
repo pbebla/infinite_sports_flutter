@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/league_tabs/league_player_stats_tab.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
+import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 
 void main() {
   final rosters = leagueRostersFromLineupsNode('Futsal', {
@@ -18,7 +19,8 @@ void main() {
       (tester) async {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
-        body: LeaguePlayerStatsTab(rosters: rosters, teams: const {}),
+        body: LeaguePlayerStatsTab(
+            sport: 'Futsal', rosters: rosters, teams: const {}),
       ),
     ));
     expect(find.text('Top Scorer'), findsOneWidget);
@@ -37,9 +39,70 @@ void main() {
   testWidgets('empty rosters show the placeholder', (tester) async {
     await tester.pumpWidget(const MaterialApp(
       home: Scaffold(
-        body: LeaguePlayerStatsTab(rosters: {}, teams: {}),
+        body: LeaguePlayerStatsTab(sport: 'Futsal', rosters: {}, teams: {}),
       ),
     ));
     expect(find.text('No player stats yet'), findsOneWidget);
+  });
+
+  group('P4 — per-sport leader categories', () {
+    TournamentPlayer bballer(String name, Map<String, int> extra) =>
+        TournamentPlayer(
+          name: name, teamId: 'T', teamName: 'T',
+          goals: 0, assists: extra['assists'] ?? 0, saves: 0, dpl: 0,
+          cleanSheets: 0, yellowCards: 0, redCards: 0,
+          extraStats: extra,
+        );
+
+    testWidgets('basketball renders Points/Rebounds/Assists/3-Pointers/'
+        'Steals/Blocks cards', (tester) async {
+      // Six single-player cards overflow the default 600px test viewport
+      // before the lazy ListView builds the last one (the same "below the
+      // fold" caveat as the futsal test above) — grow the surface so every
+      // category actually builds and the label assertions are meaningful.
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final rosters = {
+        'T': [
+          bballer('Sam', {'points': 22, 'rebounds': 9, 'assists': 4,
+            'threePointers': 3, 'steals': 2, 'blocks': 1}),
+        ],
+      };
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: LeaguePlayerStatsTab(
+              sport: 'Basketball', rosters: rosters, teams: const {}),
+        ),
+      ));
+      await tester.pump();
+      for (final label in [
+        'Points', 'Rebounds', 'Assists', '3-Pointers', 'Steals', 'Blocks',
+      ]) {
+        expect(find.text(label), findsOneWidget, reason: label);
+      }
+      expect(find.text('Top Scorer'), findsNothing); // futsal list absent
+    });
+
+    testWidgets('futsal categories unchanged', (tester) async {
+      final rosters = {
+        'T': [
+          const TournamentPlayer(
+            name: 'Sam', teamId: 'T', teamName: 'T',
+            goals: 5, assists: 0, saves: 0, dpl: 0,
+            cleanSheets: 0, yellowCards: 0, redCards: 0,
+          ),
+        ],
+      };
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: LeaguePlayerStatsTab(
+              sport: 'Futsal', rosters: rosters, teams: const {}),
+        ),
+      ));
+      await tester.pump();
+      expect(find.text('Top Scorer'), findsOneWidget);
+    });
   });
 }
