@@ -12,6 +12,7 @@ import 'package:infinite_sports_flutter/league_team_detail.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/misc/league_playoffs_view.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
+import 'package:infinite_sports_flutter/misc/notification_topics.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
 import 'package:infinite_sports_flutter/misc/tab_swap.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
@@ -20,6 +21,7 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/predict_tab.dart';
+import 'package:infinite_sports_flutter/widgets/follow_bell.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 /// Tournament-parity league season page (League Experience P2): Fixtures /
@@ -186,6 +188,9 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
   Map<String, TournamentTeam> get _teamsById =>
       leagueTeamsById(_standings ?? const [], _logos);
 
+  String get _leagueName =>
+      widget.sport == 'Futsal' ? 'Assyrian Futsal League' : widget.sport;
+
   /// Skeleton body for a tab whose stream hasn't emitted yet (P2.1 audit:
   /// skeletons, never spinners, on league first loads).
   Widget _tabSkeleton() => const SingleChildScrollView(
@@ -271,6 +276,16 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                   // this navy header in light mode (P2.1 Task A3 fix).
                   iconTheme: const IconThemeData(color: Colors.white),
                   actionsIconTheme: const IconThemeData(color: Colors.white),
+                  // Season-wide follow bell (P3.3): tournament-page parity —
+                  // one bell on the hub header subscribes every game alert
+                  // (kickoff/goal/full-time) for this sport + season.
+                  actions: [
+                    FollowBell(
+                      topic: leagueSeasonTopic(widget.sport, widget.season),
+                      label: '$_leagueName Season ${widget.season}',
+                      kind: 'league',
+                    ),
+                  ],
                   flexibleSpace: FlexibleSpaceBar(
                     background: _buildHeader(context),
                   ),
@@ -350,9 +365,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
 
   Widget _buildHeader(BuildContext context) {
     final champion = _playoffs?.champion ?? '';
-    final leagueName = widget.sport == 'Futsal'
-        ? 'Assyrian Futsal League'
-        : widget.sport;
+    final leagueName = _leagueName;
     return Container(
       decoration: BoxDecoration(
         gradient: TournamentColors.headerGradient(context),

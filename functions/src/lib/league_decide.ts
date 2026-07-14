@@ -39,8 +39,13 @@ const ALERT_COLOR = '#000000'; // one black disc, tournament parity
 
 // ---- topics ----------------------------------------------------------------
 // MUST stay in parity with fan lib/misc/notification_topics.dart
-// leagueTeamTopic (P2): 'league_{sport}_{season}_team_{team}', each part
-// through the same sanitizer the tournament topics use.
+// leagueTeamTopic (P2): 'league_{sport}_{season}_team_{team}' and
+// leagueSeasonTopic (P3.3): 'league_{sport}_{season}', each part through the
+// same sanitizer the tournament topics use.
+
+export function leagueSeasonTopic(sport: string, season: string): string {
+  return `league_${sanitizeId(sport)}_${sanitizeId(season)}`;
+}
 
 export function leagueTeamTopic(
   sport: string, season: string, teamName: string,
@@ -54,20 +59,25 @@ export function isPlaceholderTeam(name: string): boolean {
   return name.startsWith('Winner of ') || name.startsWith('Loser of ');
 }
 
-/** FCM condition over the two team topics. There is NO league season-wide
- *  topic (the fan app only ships team bells). Returns null when neither
- *  team is followable — callers must stay silent then. */
+/** FCM condition: the season-wide topic (P3.3 league follow bell) plus each
+ *  followable team topic — 3 terms max, well under FCM's 5-term limit.
+ *
+ *  P3.3 silence-rule change: the season topic alone justifies sending, so a
+ *  game whose teams are both bracket placeholders STILL alerts season
+ *  followers (it is a real game whose names lag data entry). Returns null —
+ *  callers stay silent — ONLY for a malformed node with no team names at
+ *  all. (Friendlies are gated separately by the decide functions.) */
 export function buildLeagueCondition(
   sport: string, season: string,
   team1: string | null, team2: string | null,
 ): string | null {
-  const topics: string[] = [];
-  for (const t of [team1, team2]) {
-    if (t && t.trim().length && !isPlaceholderTeam(t)) {
-      topics.push(leagueTeamTopic(sport, season, t));
-    }
+  const named = [team1, team2].filter(
+    (t): t is string => !!t && t.trim().length > 0);
+  if (!named.length) return null; // malformed: not a real game
+  const topics: string[] = [leagueSeasonTopic(sport, season)];
+  for (const t of named) {
+    if (!isPlaceholderTeam(t)) topics.push(leagueTeamTopic(sport, season, t));
   }
-  if (!topics.length) return null;
   return topics.map((t) => `'${t}' in topics`).join(' || ');
 }
 

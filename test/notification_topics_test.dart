@@ -31,4 +31,20 @@ void main() {
           'league_Flag_Football_3_team_Ashur_s_XI');
     });
   });
+
+  group('leagueSeasonTopic (League Experience P3.3)', () {
+    test('builds the season-wide topic from sanitized parts', () {
+      expect(leagueSeasonTopic('Futsal', '16'), 'league_Futsal_16');
+    });
+
+    test('sanitizes spaces and specials in every part', () {
+      expect(leagueSeasonTopic('Flag Football', 'S 3!'),
+          'league_Flag_Football_S_3_');
+    });
+
+    test('is a strict prefix-sibling of leagueTeamTopic', () {
+      expect(leagueTeamTopic('Flag Football', '3', "Ashur's XI"),
+          '${leagueSeasonTopic('Flag Football', '3')}_team_Ashur_s_XI');
+    });
+  });
 }

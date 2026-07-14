@@ -146,7 +146,7 @@ class _SettingsState extends State<Settings> {
                   const ListTile(
                     minTileHeight: 40,
                     title: Text(
-                      "Turn on the bell on any tournament or team page to follow it here.",
+                      "Turn on the bell on any tournament, league or team page to follow it here.",
                       style: TextStyle(fontSize: 13, color: Colors.grey),
                     ),
                   )
@@ -156,7 +156,9 @@ class _SettingsState extends State<Settings> {
                       minTileHeight: 40,
                       title: Text(channel.label),
                       subtitle: Text(
-                        channel.kind == 'tournament' ? 'All matches' : 'Team',
+                        // 'tournament' and 'league' (P3.3 season bell) both
+                        // mean every match; only 'team' is a single team.
+                        channel.kind == 'team' ? 'Team' : 'All matches',
                         style: const TextStyle(fontSize: 12),
                       ),
                       trailing: IconButton(

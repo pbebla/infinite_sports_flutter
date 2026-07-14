@@ -2,12 +2,13 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/follow_store.dart';
 
-/// AppBar bell that follows/unfollows one channel (tournament or team).
-/// Outline = not following, filled = following — FotMob-style.
+/// AppBar bell that follows/unfollows one channel (tournament, league
+/// season, or team). Outline = not following, filled = following —
+/// FotMob-style.
 class FollowBell extends StatefulWidget {
   final String topic;
   final String label;
-  final String kind; // 'tournament' | 'team'
+  final String kind; // 'tournament' | 'team' | 'league'
 
   const FollowBell({
     super.key,
@@ -74,9 +75,13 @@ class _FollowBellState extends State<FollowBell> {
             topic: widget.topic, label: widget.label, kind: widget.kind));
         if (!mounted) return;
         setState(() => _followed = true);
-        final message = widget.kind == 'tournament'
-            ? "You'll get goal, kickoff and full-time alerts for this tournament."
-            : "You'll get alerts when ${widget.label} plays.";
+        final message = switch (widget.kind) {
+          'tournament' =>
+            "You'll get goal, kickoff and full-time alerts for this tournament.",
+          'league' =>
+            "You'll get goal, kickoff and full-time alerts for every game this season.",
+          _ => "You'll get alerts when ${widget.label} plays.",
+        };
         messenger.showSnackBar(SnackBar(content: Text(message)));
       }
     } finally {

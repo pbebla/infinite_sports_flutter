@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  leagueTeamTopic, buildLeagueCondition, isPlaceholderTeam,
+  leagueSeasonTopic, leagueTeamTopic, buildLeagueCondition, isPlaceholderTeam,
   parseLeagueGame, decideLeagueGoal, decideLeagueStatus,
 } from '../src/lib/league_decide';
 
@@ -26,16 +26,34 @@ describe('league topics', () => {
     expect(leagueTeamTopic('Flag Football', '7', 'A-Team'))
       .toBe('league_Flag_Football_7_team_A-Team');
   });
-  test('buildLeagueCondition: two team topics, no season-wide topic', () => {
-    expect(buildLeagueCondition('Futsal', '16', 'Eagles', 'Lions')).toBe(
-      "'league_Futsal_16_team_Eagles' in topics || 'league_Futsal_16_team_Lions' in topics");
+  test('leagueSeasonTopic matches the fan builder byte-for-byte (P3.3)', () => {
+    // Fan contract (lib/misc/notification_topics.dart leagueSeasonTopic):
+    // 'league_{sport}_{season}', each part through the same sanitizer.
+    expect(leagueSeasonTopic('Futsal', '16')).toBe('league_Futsal_16');
+    expect(leagueSeasonTopic('Flag Football', '7')).toBe('league_Flag_Football_7');
   });
-  test('placeholders and empties are excluded; nothing left -> null', () => {
+  test('season topic is a strict prefix-sibling of the team topic', () => {
+    expect(leagueTeamTopic('Flag Football', '7', 'A-Team'))
+      .toBe(`${leagueSeasonTopic('Flag Football', '7')}_team_A-Team`);
+  });
+  test('buildLeagueCondition: season topic first, then both team topics (P3.3)', () => {
+    expect(buildLeagueCondition('Futsal', '16', 'Eagles', 'Lions')).toBe(
+      "'league_Futsal_16' in topics || " +
+      "'league_Futsal_16_team_Eagles' in topics || " +
+      "'league_Futsal_16_team_Lions' in topics");
+  });
+  test('placeholders drop their TEAM topic only — season followers still covered', () => {
     expect(isPlaceholderTeam('Winner of SF1')).toBe(true);
     expect(buildLeagueCondition('Futsal', '16', 'Winner of SF1', 'Lions')).toBe(
-      "'league_Futsal_16_team_Lions' in topics");
-    expect(buildLeagueCondition('Futsal', '16', 'Winner of SF1', 'Loser of QF2')).toBeNull();
+      "'league_Futsal_16' in topics || 'league_Futsal_16_team_Lions' in topics");
+    // P3.3 silence-rule change: a two-placeholder game is still a REAL game
+    // (bracket names lagging data entry) — season followers get its alerts.
+    expect(buildLeagueCondition('Futsal', '16', 'Winner of SF1', 'Loser of QF2')).toBe(
+      "'league_Futsal_16' in topics");
+  });
+  test('malformed game (no team names at all) -> null: nobody gets alerted', () => {
     expect(buildLeagueCondition('Futsal', '16', null, null)).toBeNull();
+    expect(buildLeagueCondition('Futsal', '16', '', '   ')).toBeNull();
   });
 });
 
@@ -66,7 +84,9 @@ describe('decideLeagueGoal', () => {
     expect(d!.body).toBe("Sam Smith (Eagles) 12' · Assist: Skylar Jackson");
     expect(d!.dedupeKey).toBe('goal_t1_2');
     expect(d!.condition).toBe(
-      "'league_Futsal_16_team_Eagles' in topics || 'league_Futsal_16_team_Lions' in topics");
+      "'league_Futsal_16' in topics || " +
+      "'league_Futsal_16_team_Eagles' in topics || " +
+      "'league_Futsal_16_team_Lions' in topics");
     expect(d!.data).toEqual({
       type: 'goal', sport: 'Futsal', season: '16',
       dateKey: '05202026', gameIndex: '3',
@@ -83,14 +103,22 @@ describe('decideLeagueGoal', () => {
     });
     expect(decideLeagueGoal({ ...base, game: g })!.body).toBe("Own goal · Bad Luck Bo 20'");
   });
-  test('silent when: not live, no increase, friendly, or no followable team', () => {
+  test('silent ONLY when not live, no increase, friendly, or malformed (P3.3)', () => {
     expect(decideLeagueGoal({ ...base, game: liveGame({ status: 2 }) })).toBeNull();
     expect(decideLeagueGoal({ ...base, before: 2, after: 2, game: liveGame() })).toBeNull();
     expect(decideLeagueGoal({ ...base, game: liveGame({ Stage: 'friendly' }) })).toBeNull();
+    // Malformed: no team names at all.
     expect(decideLeagueGoal({
+      ...base, game: liveGame({ team1: null, team2: null }),
+    })).toBeNull();
+  });
+  test('P3.3: two-placeholder game still alerts season followers (season-only condition)', () => {
+    const d = decideLeagueGoal({
       ...base,
       game: liveGame({ team1: 'Winner of SF1', team2: 'Loser of QF2' }),
-    })).toBeNull();
+    });
+    expect(d).not.toBeNull();
+    expect(d!.condition).toBe("'league_Futsal_16' in topics");
   });
 });
 
@@ -105,6 +133,11 @@ describe('decideLeagueStatus', () => {
     expect(d!.title).toBe('🟢 Kickoff: Eagles vs Lions');
     expect(d!.body).toBe('Now playing — Main Gym');
     expect(d!.data['type']).toBe('kickoff');
+    // P3.3: kickoff condition carries the season topic too.
+    expect(d!.condition).toBe(
+      "'league_Futsal_16' in topics || " +
+      "'league_Futsal_16_team_Eagles' in topics || " +
+      "'league_Futsal_16_team_Lions' in topics");
   });
   test('kickoff without venue uses the generic body', () => {
     const g = liveGame({ team1score: 0, team2score: 0 });
@@ -115,6 +148,11 @@ describe('decideLeagueStatus', () => {
     const d = decideLeagueStatus({ ...base, before: 1, after: 2, game: liveGame({ status: 2 }) });
     expect(d!.kind).toBe('fulltime');
     expect(d!.title).toBe('🏁 Full time: Eagles 2 – 1 Lions');
+    // P3.3: full-time condition carries the season topic too.
+    expect(d!.condition).toBe(
+      "'league_Futsal_16' in topics || " +
+      "'league_Futsal_16_team_Eagles' in topics || " +
+      "'league_Futsal_16_team_Lions' in topics");
   });
   test('silent on friendly, reopen (2->1), reset (->0), and no-change', () => {
     expect(decideLeagueStatus({ ...base, before: 0, after: 1,
