@@ -25,6 +25,18 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 
+/// The sports served by the NEW league experience (LeagueDetailPage /
+/// LeagueMatchDetailPage). AFC San Jose and anything unknown stay on the
+/// legacy pages.
+const Set<String> leagueEngineSports = {
+  'Futsal',
+  'Basketball',
+  'Flag Football',
+};
+
+bool isLeagueEngineSport(String sport) =>
+    leagueEngineSports.contains(sport.trim());
+
 /// Stable id for a league game: the (date, index) pair its RTDB path needs.
 String leagueGameId(String dateKey, int index) => '$dateKey#$index';
 
@@ -181,31 +193,79 @@ TournamentTeam leagueTeamStub(String name, String? logoUrl,
       coachName: (coach == null || coach.trim().isEmpty) ? null : coach,
     );
 
-/// Futsal standings sort (exact table.dart parity):
-/// Points desc, GD desc, GS desc, then name for stability.
-void sortLeagueStandings(List<TournamentTeam> rows) {
+/// Per-sport standings sort — EXACT parity with the Manager's playoff
+/// seeding (schedule_playoffs.dart seedOrder), so the table order always
+/// agrees with bracket seeds:
+///   Futsal:        Points desc, GD desc, GS desc
+///   Basketball:    Points desc, PD desc, PPG desc
+///   Flag Football: Wins desc, PF-PA desc, PF desc
+/// Name tie-break last for stability.
+void sortLeagueStandings(String sport, List<TournamentTeam> rows) {
+  List<num> keysOf(TournamentTeam t) {
+    switch (sport) {
+      case 'Basketball':
+        return [
+          t.points,
+          t.leagueStats['PD'] ?? 0,
+          t.leagueStats['PPG'] ?? 0,
+        ];
+      case 'Flag Football':
+        return [
+          t.wins,
+          (t.leagueStats['PF'] ?? 0) - (t.leagueStats['PA'] ?? 0),
+          t.leagueStats['PF'] ?? 0,
+        ];
+      default: // Futsal
+        return [t.points, t.gd, t.gs];
+    }
+  }
+
   rows.sort((a, b) {
-    var v = b.points.compareTo(a.points);
-    if (v == 0) v = b.gd.compareTo(a.gd);
-    if (v == 0) v = b.gs.compareTo(a.gs);
-    if (v == 0) v = a.name.compareTo(b.name);
-    return v;
+    final ka = keysOf(a), kb = keysOf(b);
+    for (var i = 0; i < 3; i++) {
+      final v = kb[i].compareTo(ka[i]);
+      if (v != 0) return v;
+    }
+    return a.name.compareTo(b.name);
   });
 }
 
 /// The `/{sport}/{season}/Teams` node -> SORTED standings rows.
 /// The Manager maintains this node and already skips staged (playoff /
 /// friendly) games at finalize time — nothing to exclude here.
+/// Futsal reads the classic table keys; basketball and flag football
+/// (P4) read their finalize-flow keys, with the per-sport numbers on
+/// [TournamentTeam.leagueStats].
 List<TournamentTeam> leagueStandingsFromTeamsNode(
-    dynamic teamsNode, Map<String, String> logoUrls) {
+    String sport, dynamic teamsNode, Map<String, String> logoUrls) {
   final out = <TournamentTeam>[];
   if (teamsNode is! Map) return out;
   teamsNode.forEach((name, v) {
     if (v is! Map) return;
     final wins = parseInt(v['Wins']);
-    final draws = parseInt(v['Draws']);
     final losses = parseInt(v['Losses']);
+    final draws = parseInt(v['Draws']);
     final coach = v['Coach']?.toString();
+
+    num numOf(String key) {
+      final raw = v[key];
+      if (raw is num) return raw;
+      return num.tryParse(raw?.toString() ?? '') ?? 0;
+    }
+
+    final leagueStats = <String, num>{
+      if (sport == 'Basketball') ...{
+        'PPG': numOf('PPG'),
+        'PCPG': numOf('PCPG'),
+        'PD': numOf('PD'),
+      },
+      if (sport == 'Flag Football') ...{
+        'PF': parseInt(v['PF']),
+        'PA': parseInt(v['PA']),
+        'PD': parseInt(v['PF']) - parseInt(v['PA']),
+      },
+    };
+
     out.add(TournamentTeam(
       id: name.toString(),
       name: name.toString(),
@@ -222,9 +282,10 @@ List<TournamentTeam> leagueStandingsFromTeamsNode(
       // Optional Manager-maintained metadata (P2.1 Task A3 read contract).
       homeColor: parseLeagueTeamColor(v['Color']),
       coachName: (coach == null || coach.trim().isEmpty) ? null : coach,
+      leagueStats: leagueStats,
     ));
   });
-  sortLeagueStandings(out);
+  sortLeagueStandings(sport, out);
   return out;
 }
 
@@ -281,18 +342,22 @@ Map<String, TournamentTeam> leagueTeamsById(
         coachPhotoUrl: existing.coachPhotoUrl,
         cityState: existing.cityState,
         established: existing.established,
+        leagueStats: existing.leagueStats,
       );
     }
   });
   return out;
 }
 
-/// One Line Ups player node -> [TournamentPlayer]. League stat keys map onto
-/// the statByName vocabulary: Goals/Assists/Saves/DPL/CleanSheets plus the
-/// league card keys Yellow -> yellowCards, Red -> redCards.
-/// Legacy UID '0' (and empty) means UNLINKED -> uid null, so profile taps
-/// open the limited profile instead of a bogus uid lookup.
+/// One Line Ups player node -> [TournamentPlayer], per sport (P4).
+/// Futsal: the classic mapping (Goals/Assists/Saves/DPL/CleanSheets,
+/// Yellow -> yellowCards, Red -> redCards). Basketball/flag football:
+/// the Manager's short stat keys land on [TournamentPlayer.extraStats]
+/// under the fan statByName vocabulary; basketball ALSO fills the core
+/// assists field (statByName('assists') is an existing switch case).
+/// Legacy UID '0' (and empty) means UNLINKED -> uid null.
 TournamentPlayer leaguePlayerFromLineup({
+  required String sport,
   required String name,
   required String teamName,
   required Map<dynamic, dynamic> raw,
@@ -301,26 +366,78 @@ TournamentPlayer leaguePlayerFromLineup({
   if (uid == null || uid.trim().isEmpty || uid.trim() == '0') uid = null;
   String? number = (raw['number'] ?? raw['Number'])?.toString();
   if (number != null && number.isEmpty) number = null;
+
+  int i(String key) => parseInt(raw[key]);
+
+  Map<String, int> extraStats = const {};
+  var assists = 0;
+  var goals = 0, saves = 0, dpl = 0, cleanSheets = 0;
+  var yellowCards = 0, redCards = 0;
+
+  switch (sport) {
+    case 'Basketball':
+      assists = i('Assists');
+      final storedTotal = raw['Total'];
+      final points = storedTotal is num
+          ? storedTotal.toInt()
+          : i('OnePoint') + 2 * i('TwoPoints') + 3 * i('ThreePoints');
+      extraStats = {
+        'points': points,
+        'freeThrows': i('OnePoint'),
+        'twoPointers': i('TwoPoints'),
+        'threePointers': i('ThreePoints'),
+        'misses': i('Misses'),
+        'rebounds': i('Rebounds'),
+        'steals': i('Steals'),
+        'blocks': i('Blocks'),
+        'fouls': i('Fouls'),
+        'turnovers': i('Turnovers'),
+      };
+    case 'Flag Football':
+      extraStats = {
+        // The L6 "Most TDs" definition: TDs a player SCORED (not threw).
+        'touchdowns': i('RECTD') + i('RushTD') + i('INTTD'),
+        'receivingTouchdowns': i('RECTD'),
+        'rushingTouchdowns': i('RushTD'),
+        'interceptionTouchdowns': i('INTTD'),
+        'passTouchdowns': i('PassTD'),
+        'receptions': i('REC'),
+        'interceptions': i('INT'),
+        'flagPulls': i('FP'),
+        'sacks': i('Sack'),
+        'passBreakups': i('PBU'),
+      };
+    default: // Futsal
+      goals = i('Goals');
+      assists = i('Assists');
+      saves = i('Saves');
+      dpl = i('DPL');
+      cleanSheets = i('CleanSheets');
+      yellowCards = i('Yellow');
+      redCards = i('Red');
+  }
+
   return TournamentPlayer(
     name: name,
     teamId: teamName,
     teamName: teamName,
     uid: uid,
     number: number,
-    goals: parseInt(raw['Goals']),
-    assists: parseInt(raw['Assists']),
-    saves: parseInt(raw['Saves']),
-    dpl: parseInt(raw['DPL']),
-    cleanSheets: parseInt(raw['CleanSheets']),
-    yellowCards: parseInt(raw['Yellow']),
-    redCards: parseInt(raw['Red']),
+    goals: goals,
+    assists: assists,
+    saves: saves,
+    dpl: dpl,
+    cleanSheets: cleanSheets,
+    yellowCards: yellowCards,
+    redCards: redCards,
+    extraStats: extraStats,
   );
 }
 
 /// The whole `/{sport}/{season}/Line Ups` node -> rosters keyed by team
 /// name, each roster sorted by shirt number (non-numeric numbers last).
 Map<String, List<TournamentPlayer>> leagueRostersFromLineupsNode(
-    dynamic lineupsNode) {
+    String sport, dynamic lineupsNode) {
   final out = <String, List<TournamentPlayer>>{};
   if (lineupsNode is! Map) return out;
   lineupsNode.forEach((team, lineup) {
@@ -329,6 +446,7 @@ Map<String, List<TournamentPlayer>> leagueRostersFromLineupsNode(
     lineup.forEach((player, info) {
       if (info is Map) {
         players.add(leaguePlayerFromLineup(
+          sport: sport,
           name: player.toString(),
           teamName: team.toString(),
           raw: info,

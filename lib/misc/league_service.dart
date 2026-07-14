@@ -99,7 +99,7 @@ class LeagueService {
   static Stream<List<TournamentTeam>> watchStandings(
       String sport, String season, Map<String, String> logoUrls) {
     return _ref('/$sport/$season/Teams').onValue.map((event) =>
-        leagueStandingsFromTeamsNode(event.snapshot.value, logoUrls));
+        leagueStandingsFromTeamsNode(sport, event.snapshot.value, logoUrls));
   }
 
   /// Live captain map (team name -> Captain player name) from the same
@@ -125,7 +125,8 @@ class LeagueService {
   static Stream<Map<String, List<TournamentPlayer>>> watchRosters(
       String sport, String season) {
     return _ref('/$sport/$season/Line Ups').onValue.asyncMap((event) =>
-        _withProfileUrls(leagueRostersFromLineupsNode(event.snapshot.value)));
+        _withProfileUrls(
+            leagueRostersFromLineupsNode(sport, event.snapshot.value)));
   }
 
   /// The exact photo-enrichment approach of TournamentService.getRosters

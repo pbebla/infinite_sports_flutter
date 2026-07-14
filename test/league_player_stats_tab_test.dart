@@ -4,7 +4,7 @@ import 'package:infinite_sports_flutter/league_tabs/league_player_stats_tab.dart
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 
 void main() {
-  final rosters = leagueRostersFromLineupsNode({
+  final rosters = leagueRostersFromLineupsNode('Futsal', {
     'Nineveh': {
       'Ashur': {'Goals': 9, 'Assists': 3, 'number': '10'},
       'Sargon': {'Saves': 20, 'CleanSheets': 4, 'number': '1'},

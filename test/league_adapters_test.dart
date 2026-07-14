@@ -167,7 +167,7 @@ void main() {
 
     test('parses rows + sorts Points desc, GD desc, GS desc', () {
       final rows = leagueStandingsFromTeamsNode(
-          teamsNode, {'Ashur FC': 'http://logo/a.png'});
+          'Futsal', teamsNode, {'Ashur FC': 'http://logo/a.png'});
       expect(rows.map((t) => t.name).toList(),
           ['Ashur FC', 'Nineveh', 'Babylon']);
       expect(rows.first.logoUrl, 'http://logo/a.png');
@@ -177,15 +177,15 @@ void main() {
     });
 
     test('missing GP falls back to W+D+L; garbage in, empty out', () {
-      final rows = leagueStandingsFromTeamsNode({
+      final rows = leagueStandingsFromTeamsNode('Futsal', {
         'A': {'Wins': 2, 'Draws': 1, 'Losses': 1, 'GS': 5, 'GC': 3, 'GD': 2, 'Points': 7},
       }, const {});
       expect(rows.single.gp, 4);
-      expect(leagueStandingsFromTeamsNode(null, const {}), isEmpty);
+      expect(leagueStandingsFromTeamsNode('Futsal', null, const {}), isEmpty);
     });
 
     test('leagueTeamsById covers standings + logo-only stubs', () {
-      final rows = leagueStandingsFromTeamsNode(teamsNode, const {});
+      final rows = leagueStandingsFromTeamsNode('Futsal', teamsNode, const {});
       final byId = leagueTeamsById(
           rows, {'Akkad': 'http://logo/k.png', 'Babylon': 'http://logo/b.png'});
       expect(byId['Babylon']!.points, 16);
@@ -207,7 +207,7 @@ void main() {
     };
 
     test('players map league stat keys onto TournamentPlayer.statByName', () {
-      final rosters = leagueRostersFromLineupsNode(lineups);
+      final rosters = leagueRostersFromLineupsNode('Futsal', lineups);
       final sargon =
           rosters['Nineveh']!.firstWhere((p) => p.name == 'Sargon');
       expect(sargon.statByName('saves'), 12);
@@ -222,7 +222,7 @@ void main() {
 
     test("legacy UID '0' means unlinked -> uid null (profile stays limited)",
         () {
-      final rosters = leagueRostersFromLineupsNode(lineups);
+      final rosters = leagueRostersFromLineupsNode('Futsal', lineups);
       final sargon =
           rosters['Nineveh']!.firstWhere((p) => p.name == 'Sargon');
       expect(sargon.uid, isNull);
@@ -231,12 +231,12 @@ void main() {
     });
 
     test('rosters sort by shirt number', () {
-      final rosters = leagueRostersFromLineupsNode(lineups);
+      final rosters = leagueRostersFromLineupsNode('Futsal', lineups);
       expect(rosters['Nineveh']!.first.name, 'Sargon'); // #1 before #10
     });
 
     test('sortedLeagueLeaders filters zeros, sorts desc, ties by name', () {
-      final rosters = leagueRostersFromLineupsNode(lineups);
+      final rosters = leagueRostersFromLineupsNode('Futsal', lineups);
       final leaders = sortedLeagueLeaders(rosters, 'goals');
       expect(leaders.length, 2);
       // Ashur and Ninos both have 7 -> alphabetical tie-break.
@@ -290,7 +290,7 @@ void main() {
     });
 
     test('standings rows carry optional Color + Coach', () {
-      final rows = leagueStandingsFromTeamsNode({
+      final rows = leagueStandingsFromTeamsNode('Futsal', {
         'Nineveh': {
           'Wins': 4, 'Draws': 0, 'Losses': 0, 'Points': 12,
           'Color': '#1A237E',
@@ -308,7 +308,7 @@ void main() {
     });
 
     test('invalid Color / empty Coach parse to null (row hidden in UI)', () {
-      final rows = leagueStandingsFromTeamsNode({
+      final rows = leagueStandingsFromTeamsNode('Futsal', {
         'Nineveh': {'Points': 12, 'Color': 'navy blue', 'Coach': ''},
       }, const {});
       expect(rows.single.homeColor, isNull);
@@ -340,6 +340,161 @@ void main() {
     test('round-trips from a league match id', () {
       final ref = parseLeagueGameId(leagueGameId('11302026', 12))!;
       expect(leaguePredictionMatchKey(ref.dateKey, ref.index), '11302026_12');
+    });
+  });
+
+  group('P4 — per-sport league engine', () {
+    test('isLeagueEngineSport: the three league sports, not AFC/unknown',
+        () {
+      expect(isLeagueEngineSport('Futsal'), isTrue);
+      expect(isLeagueEngineSport('Basketball'), isTrue);
+      expect(isLeagueEngineSport('Flag Football'), isTrue);
+      expect(isLeagueEngineSport('AFC San Jose'), isFalse);
+      expect(isLeagueEngineSport('Cricket'), isFalse);
+    });
+
+    test('basketball roster: extraStats vocabulary + Total fallback', () {
+      final p = leaguePlayerFromLineup(
+        sport: 'Basketball',
+        name: 'Sam',
+        teamName: 'Eagles',
+        raw: {
+          'number': '7',
+          'OnePoint': 2,
+          'TwoPoints': 3,
+          'ThreePoints': 1,
+          'Misses': 4,
+          'Rebounds': 5,
+          'Assists': 6,
+          'Steals': 2,
+          'Blocks': 1,
+          'Fouls': 3,
+          'Turnovers': 2,
+          // NO 'Total' -> fallback-computed 2 + 6 + 3 = 11
+        },
+      );
+      expect(p.statByName('points'), 11);
+      expect(p.statByName('freeThrows'), 2);
+      expect(p.statByName('twoPointers'), 3);
+      expect(p.statByName('threePointers'), 1);
+      expect(p.statByName('misses'), 4);
+      expect(p.statByName('rebounds'), 5);
+      expect(p.statByName('assists'), 6); // core field, populated
+      expect(p.statByName('steals'), 2);
+      expect(p.statByName('blocks'), 1);
+      expect(p.statByName('fouls'), 3);
+      expect(p.statByName('turnovers'), 2);
+      expect(p.statByName('goals'), 0); // futsal keys stay silent
+    });
+
+    test('basketball roster: stored Total wins over the fallback', () {
+      final p = leaguePlayerFromLineup(
+        sport: 'Basketball',
+        name: 'Sam',
+        teamName: 'Eagles',
+        raw: {'OnePoint': 2, 'Total': 40},
+      );
+      expect(p.statByName('points'), 40);
+    });
+
+    test('flag football roster: extraStats vocabulary + touchdowns sum',
+        () {
+      final p = leaguePlayerFromLineup(
+        sport: 'Flag Football',
+        name: 'Sam',
+        teamName: 'Eagles',
+        raw: {
+          'RECTD': 2,
+          'RushTD': 1,
+          'INTTD': 1,
+          'PassTD': 5,
+          'REC': 10,
+          'INT': 3,
+          'FP': 8,
+          'Sack': 2,
+          'PBU': 4,
+        },
+      );
+      expect(p.statByName('touchdowns'), 4); // RECTD+RushTD+INTTD, NOT PassTD
+      expect(p.statByName('receivingTouchdowns'), 2);
+      expect(p.statByName('rushingTouchdowns'), 1);
+      expect(p.statByName('interceptionTouchdowns'), 1);
+      expect(p.statByName('passTouchdowns'), 5);
+      expect(p.statByName('receptions'), 10);
+      expect(p.statByName('interceptions'), 3);
+      expect(p.statByName('flagPulls'), 8);
+      expect(p.statByName('sacks'), 2);
+      expect(p.statByName('passBreakups'), 4);
+    });
+
+    test('futsal roster parsing is unchanged by the sport param', () {
+      final p = leaguePlayerFromLineup(
+        sport: 'Futsal',
+        name: 'Sam',
+        teamName: 'Eagles',
+        raw: {'Goals': 3, 'Assists': 2, 'Yellow': 1},
+      );
+      expect(p.statByName('goals'), 3);
+      expect(p.statByName('assists'), 2);
+      expect(p.statByName('yellowCards'), 1);
+    });
+
+    test('basketball standings: Teams keys parsed + seedOrder sort '
+        '(Points desc, PD desc, PPG desc)', () {
+      final rows = leagueStandingsFromTeamsNode(
+        'Basketball',
+        {
+          'Low': {'GP': 2, 'Wins': 0, 'Losses': 2, 'Points': 0,
+            'PPG': 30.0, 'PCPG': 40.0, 'PD': -10.0},
+          'High': {'GP': 2, 'Wins': 2, 'Losses': 0, 'Points': 6,
+            'PPG': 50.5, 'PCPG': 40.0, 'PD': 10.5},
+          'Mid': {'GP': 2, 'Wins': 2, 'Losses': 0, 'Points': 6,
+            'PPG': 45.0, 'PCPG': 40.0, 'PD': 5.0},
+        },
+        const {},
+      );
+      expect(rows.map((t) => t.name).toList(), ['High', 'Mid', 'Low']);
+      expect(rows.first.gp, 2);
+      expect(rows.first.wins, 2);
+      expect(rows.first.points, 6);
+      expect(rows.first.leagueStats['PPG'], 50.5);
+      expect(rows.first.leagueStats['PCPG'], 40.0);
+      expect(rows.first.leagueStats['PD'], 10.5);
+    });
+
+    test('flag football standings: Teams keys parsed + seedOrder sort '
+        '(Wins desc, PF-PA desc, PF desc)', () {
+      final rows = leagueStandingsFromTeamsNode(
+        'Flag Football',
+        {
+          'B': {'Wins': 2, 'Losses': 1, 'PF': 40, 'PA': 30},
+          'A': {'Wins': 2, 'Losses': 1, 'PF': 46, 'PA': 36},
+          'C': {'Wins': 1, 'Losses': 2, 'PF': 60, 'PA': 20},
+        },
+        const {},
+      );
+      // A and B tie on Wins and on PF-PA (10) -> PF breaks it (46 > 40);
+      // C's monster PD never matters: Wins first.
+      expect(rows.map((t) => t.name).toList(), ['A', 'B', 'C']);
+      expect(rows.first.wins, 2);
+      expect(rows.first.leagueStats['PF'], 46);
+      expect(rows.first.leagueStats['PA'], 36);
+      expect(rows.first.leagueStats['PD'], 10);
+    });
+
+    test('futsal standings: parsing and Pts/GD/GS sort unchanged', () {
+      final rows = leagueStandingsFromTeamsNode(
+        'Futsal',
+        {
+          'Two': {'GP': 1, 'Wins': 0, 'Draws': 1, 'Losses': 0,
+            'GS': 2, 'GC': 2, 'GD': 0, 'Points': 1},
+          'One': {'GP': 1, 'Wins': 1, 'Draws': 0, 'Losses': 0,
+            'GS': 3, 'GC': 1, 'GD': 2, 'Points': 3},
+        },
+        const {},
+      );
+      expect(rows.map((t) => t.name).toList(), ['One', 'Two']);
+      expect(rows.first.gd, 2);
     });
   });
 }

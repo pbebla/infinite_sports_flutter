@@ -6,7 +6,7 @@ import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 void main() {
   testWidgets('renders futsal columns + rows in given order',
       (tester) async {
-    final standings = leagueStandingsFromTeamsNode({
+    final standings = leagueStandingsFromTeamsNode('Futsal', {
       'Babylon': {'Wins': 3, 'Draws': 0, 'Losses': 5, 'GP': 8, 'GS': 9, 'GC': 20, 'GD': -11, 'Points': 9},
       'Nineveh': {'Wins': 7, 'Draws': 1, 'Losses': 0, 'GP': 8, 'GS': 30, 'GC': 5, 'GD': 25, 'Points': 22},
     }, const {});
@@ -31,7 +31,7 @@ void main() {
 
   testWidgets('tapping a row reports that team via onOpenTeam',
       (tester) async {
-    final standings = leagueStandingsFromTeamsNode({
+    final standings = leagueStandingsFromTeamsNode('Futsal', {
       'Babylon': {'Wins': 3, 'Draws': 0, 'Losses': 5, 'GP': 8, 'GS': 9, 'GC': 20, 'GD': -11, 'Points': 9},
       'Nineveh': {'Wins': 7, 'Draws': 1, 'Losses': 0, 'GP': 8, 'GS': 30, 'GC': 5, 'GD': 25, 'Points': 22},
     }, const {});

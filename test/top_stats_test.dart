@@ -77,6 +77,7 @@ void main() {
     test('reads the candidate stats off a TournamentPlayer via statByName',
         () {
       final player = leaguePlayerFromLineup(
+        sport: 'Futsal',
         name: 'Sargon',
         teamName: 'Nineveh',
         raw: {'Saves': 12, 'CleanSheets': 3, 'number': '1'},

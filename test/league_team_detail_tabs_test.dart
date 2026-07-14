@@ -13,7 +13,7 @@ import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 TournamentTeam _team({String? colorHex, String? coach}) =>
-    leagueStandingsFromTeamsNode({
+    leagueStandingsFromTeamsNode('Futsal', {
       'Nineveh': {
         'Wins': 4, 'Draws': 1, 'Losses': 2, 'GP': 7,
         'GS': 15, 'GC': 9, 'GD': 6, 'Points': 13,
@@ -23,7 +23,7 @@ TournamentTeam _team({String? colorHex, String? coach}) =>
     }, const {}).single;
 
 List<TournamentPlayer> _roster() =>
-    leagueRostersFromLineupsNode({
+    leagueRostersFromLineupsNode('Futsal', {
       'Nineveh': {
         'Ashur': {'Goals': 7, 'Assists': 2, 'number': '10', 'UID': 'uid-1'},
         'Sargon': {'Saves': 12, 'CleanSheets': 3, 'number': '1'},
