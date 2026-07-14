@@ -19,13 +19,20 @@ const String kDefaultCategory = 'Community';
 /// One event's presence on the calendar. Legacy events carry their Events
 /// list index (EventPage addresses them by index); V2 events carry their id.
 class CalendarEntry {
-  const CalendarEntry({required this.event, this.legacyIndex, this.v2Id});
+  const CalendarEntry({required this.event, this.legacyIndex, this.v2Id, this.lastDay});
 
   final Event event;
   final int? legacyIndex;
   final String? v2Id;
 
+  /// The event's final occurrence day; used to grey out fully-past events.
+  final DateTime? lastDay;
+
   String get category => event.category ?? kDefaultCategory;
+
+  /// True once the event is completely over (its last day is before today).
+  bool isPastOn(DateTime today) =>
+      lastDay != null && lastDay!.isBefore(DateTime(today.year, today.month, today.day));
 }
 
 /// Bound on weekly-repeat expansion (~1 year) so a bad Until date can't
@@ -89,15 +96,17 @@ Map<DateTime, List<CalendarEntry>> eventsByDay(List<Event> events) {
   var counter = 0;
   for (final event in events) {
     final isV2 = event.id != null;
+    final days = occurrenceDays(event);
     // Merged lists carry the true legacy index on the event; plain
     // getEvents() lists are sequential so the counter matches.
     final entry = CalendarEntry(
       event: event,
       legacyIndex: isV2 ? null : (event.legacyIndex ?? counter),
       v2Id: event.id,
+      lastDay: days.isEmpty ? null : days.last,
     );
     if (!isV2) counter++;
-    for (final day in occurrenceDays(event)) {
+    for (final day in days) {
       result.putIfAbsent(day, () => []).add(entry);
     }
   }

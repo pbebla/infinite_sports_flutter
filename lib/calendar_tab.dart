@@ -408,13 +408,18 @@ class _DayCell extends StatelessWidget {
                   ? Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
+                        // Fully-past events grey out so people can spot
+                        // "there was something here" without mistaking it
+                        // for an upcoming event.
                         for (var i = 0; i < (events.length > 3 ? 3 : events.length); i++)
                           Container(
                             width: 5,
                             height: 5,
                             margin: const EdgeInsets.symmetric(horizontal: 1),
                             decoration: BoxDecoration(
-                              color: isToday ? scheme.onSurface : scheme.primary,
+                              color: events[i].isPastOn(DateTime.now())
+                                  ? scheme.onSurface.withValues(alpha: 0.35)
+                                  : (isToday ? scheme.onSurface : scheme.primary),
                               shape: BoxShape.circle,
                             ),
                           ),

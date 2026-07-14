@@ -102,6 +102,18 @@ void main() {
       expect(byDay[DateTime(2026, 8, 8)]!.single.event.title, 'weekend');
     });
 
+    test('entries know when their event is fully past', () {
+      final byDay = eventsByDay([
+        _v2('over', start: DateTime(2026, 7, 1), end: DateTime(2026, 7, 2)),
+        _v2('ongoing', start: DateTime(2026, 7, 1), end: DateTime(2026, 7, 20)),
+      ]);
+      final today = DateTime(2026, 7, 13);
+      final entries = byDay[DateTime(2026, 7, 1)]!;
+      expect(entries[0].isPastOn(today), isTrue);
+      expect(entries[1].isPastOn(today), isFalse,
+          reason: 'still running through Jul 20, so not past');
+    });
+
     test('entries carry legacy index for old events and v2 id for new ones', () {
       final byDay = eventsByDay([
         _legacy('old', DateTime(2026, 8, 7)),
