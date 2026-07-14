@@ -8,6 +8,7 @@
 // sport = writing a config instance here, not building screens (spec §1).
 // Basketball and flag football configs are pure additions in P4.
 
+import 'package:infinite_sports_flutter/misc/activity_entry.dart';
 import 'package:infinite_sports_flutter/misc/match_clock.dart';
 
 // ---------------------------------------------------------------------------
@@ -43,6 +44,12 @@ enum LeagueChainedPrompt {
 
   /// Goal → "Assisted by?" (teammates + Guest + Skip).
   assistedBy,
+
+  /// FF Rec TD → "Thrown by?" (the receiver's teammates + Skip; no Guest
+  /// — a Guest QB earns no stats and the pairing would be noise). The
+  /// capture page records the sport's chained-only 'Pass TD' event for
+  /// the chosen QB at the SAME minute (P4).
+  thrownBy,
 }
 
 /// One capture button: what it writes to the timeline, which player stats
@@ -109,6 +116,12 @@ class LeagueSportConfig {
   /// Rare events in the top action bar (tap → player picker).
   final List<LeagueEventDef> topBarEvents;
 
+  /// Events with NO button of their own — recorded only by a chained
+  /// prompt (FF 'Pass TD') or present only in legacy data (FF 'Pass
+  /// INT'). Kept resolvable so the undo strip / event editor / score
+  /// math treat them like any other event (P4).
+  final List<LeagueEventDef> chainedOnlyEvents;
+
   /// Stat key auto-credited to a team's picked keeper at Final when the
   /// team concedes 0 ('' = sport has no keeper/clean-sheet concept).
   final String cleanSheetStatKey;
@@ -118,6 +131,7 @@ class LeagueSportConfig {
     required this.statCatalog,
     required this.rowEvents,
     required this.topBarEvents,
+    this.chainedOnlyEvents = const [],
     this.cleanSheetStatKey = '',
   });
 
@@ -129,6 +143,9 @@ class LeagueSportConfig {
       if (e.activityType == activityType) return e;
     }
     for (final e in topBarEvents) {
+      if (e.activityType == activityType) return e;
+    }
+    for (final e in chainedOnlyEvents) {
       if (e.activityType == activityType) return e;
     }
     return null;
@@ -269,6 +286,285 @@ const LeagueSportConfig futsalLeagueConfig = LeagueSportConfig(
 );
 
 // ---------------------------------------------------------------------------
+// Basketball (P4) — owner-approved layout, spec §3 table
+// ---------------------------------------------------------------------------
+
+/// Basketball activity/stat vocabulary. Legacy types kept verbatim
+/// ('OnePointer', 'TwoPointer', 'ThreePointer', 'Rebound', 'Foul'); new
+/// types are additive singular event names with explicit stat keys.
+/// 'Foul' was activity-only before P4 — it now counts into the NEW
+/// 'Fouls' stat key (legacy pre-journal games clamp an absent counter at
+/// 0 on reset, the futsal Fouls precedent).
+class BasketballLeagueEvents {
+  static const String onePointer = 'OnePointer';
+  static const String twoPointer = 'TwoPointer';
+  static const String threePointer = 'ThreePointer';
+  static const String miss = 'Miss';
+  static const String rebound = 'Rebound';
+  static const String assist = 'Assist';
+  static const String steal = 'Steal';
+  static const String block = 'Block';
+  static const String foul = 'Foul';
+  static const String turnover = 'Turnover';
+}
+
+const LeagueSportConfig basketballLeagueConfig = LeagueSportConfig(
+  sportKey: 'Basketball',
+  statCatalog: [
+    LeagueStatDef(key: 'OnePoint', label: 'Free Throws', iconId: 'onepointer'),
+    LeagueStatDef(key: 'TwoPoints', label: '2-Pointers', iconId: 'twopointer'),
+    LeagueStatDef(
+        key: 'ThreePoints', label: '3-Pointers', iconId: 'threepointer'),
+    LeagueStatDef(key: 'Misses', label: 'Misses', iconId: 'miss'),
+    LeagueStatDef(key: 'Rebounds', label: 'Rebounds', iconId: 'rebound'),
+    LeagueStatDef(key: 'Assists', label: 'Assists', iconId: 'assist'),
+    LeagueStatDef(key: 'Steals', label: 'Steals', iconId: 'steal'),
+    LeagueStatDef(key: 'Blocks', label: 'Blocks', iconId: 'block'),
+    LeagueStatDef(key: 'Fouls', label: 'Fouls', iconId: 'foul'),
+    LeagueStatDef(key: 'Turnovers', label: 'Turnovers', iconId: 'turnover'),
+  ],
+  rowEvents: [
+    LeagueEventDef(
+      activityType: BasketballLeagueEvents.onePointer,
+      shortLabel: '+1',
+      label: '🏀 Free Throw',
+      statKeys: ['OnePoint'],
+      scorePoints: 1,
+    ),
+    LeagueEventDef(
+      activityType: BasketballLeagueEvents.twoPointer,
+      shortLabel: '+2',
+      label: '🏀 2-Pointer',
+      statKeys: ['TwoPoints'],
+      scorePoints: 2,
+    ),
+    LeagueEventDef(
+      activityType: BasketballLeagueEvents.threePointer,
+      shortLabel: '+3',
+      label: '🏀 3-Pointer',
+      statKeys: ['ThreePoints'],
+      scorePoints: 3,
+    ),
+    LeagueEventDef(
+      activityType: BasketballLeagueEvents.miss,
+      shortLabel: 'M',
+      label: '❌ Miss',
+      statKeys: ['Misses'],
+    ),
+    LeagueEventDef(
+      activityType: BasketballLeagueEvents.rebound,
+      shortLabel: 'RB',
+      label: '🔁 Rebound',
+      statKeys: ['Rebounds'],
+    ),
+    LeagueEventDef(
+      activityType: BasketballLeagueEvents.assist,
+      shortLabel: 'A',
+      label: '🅰 Assist',
+      statKeys: ['Assists'],
+    ),
+    LeagueEventDef(
+      activityType: BasketballLeagueEvents.steal,
+      shortLabel: 'ST',
+      label: '🖐 Steal',
+      statKeys: ['Steals'],
+    ),
+    LeagueEventDef(
+      activityType: BasketballLeagueEvents.block,
+      shortLabel: 'BK',
+      label: '🚫 Block',
+      statKeys: ['Blocks'],
+    ),
+    LeagueEventDef(
+      activityType: BasketballLeagueEvents.foul,
+      shortLabel: 'F',
+      label: '🦶 Foul',
+      statKeys: ['Fouls'],
+    ),
+  ],
+  topBarEvents: [
+    LeagueEventDef(
+      activityType: BasketballLeagueEvents.turnover,
+      shortLabel: 'TO',
+      label: '↪ Turnover',
+      statKeys: ['Turnovers'],
+    ),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Flag Football (P4) — owner-approved layout, spec §3 table
+// ---------------------------------------------------------------------------
+
+/// Flag football activity/stat vocabulary. Legacy activity types kept
+/// verbatim ('Pass TD', 'Pass INT', 'Receiving TD', 'Interception',
+/// 'Sack', 'Rushing TD', 'INT TD'); new types are additive and spelled
+/// exactly like their stat keys. All 17 legacy stat keys survive.
+/// 'Pass INT' has NO button in the owner-locked layout — it lives in
+/// chainedOnlyEvents so LEGACY entries still undo/reassign correctly.
+class FlagFootballLeagueEvents {
+  static const String qbComp = 'QBComp';
+  static const String qbInc = 'QBInc';
+  static const String rec = 'REC';
+  static const String recMiss = 'RECMiss';
+  static const String flagPull = 'FP';
+  static const String recTd = 'Receiving TD';
+  static const String rushTd = 'Rushing TD';
+  static const String intTd = 'INT TD';
+  static const String interception = 'Interception';
+  static const String sack = 'Sack';
+  static const String pbu = 'PBU';
+  static const String pat1 = 'PAT1';
+  static const String pat1Miss = 'PAT1Miss';
+  static const String twoPt = 'TwoPT';
+  static const String twoPtMiss = 'TwoPTMiss';
+  static const String passTd = 'Pass TD';
+  static const String passInt = 'Pass INT';
+}
+
+const LeagueSportConfig flagFootballLeagueConfig = LeagueSportConfig(
+  sportKey: 'Flag Football',
+  statCatalog: [
+    LeagueStatDef(key: 'QBComp', label: 'Completions', iconId: 'qb_comp'),
+    LeagueStatDef(key: 'QBInc', label: 'Incompletions', iconId: 'qb_inc'),
+    LeagueStatDef(key: 'PassTD', label: 'Pass TDs', iconId: 'pass_td'),
+    LeagueStatDef(
+        key: 'PassINT', label: 'Pass INTs Thrown', iconId: 'pass_int'),
+    LeagueStatDef(key: 'REC', label: 'Receptions', iconId: 'rec'),
+    LeagueStatDef(key: 'RECMiss', label: 'Drops', iconId: 'rec_miss'),
+    LeagueStatDef(key: 'RECTD', label: 'Receiving TDs', iconId: 'rec_td'),
+    LeagueStatDef(key: 'INT', label: 'Interceptions', iconId: 'int'),
+    LeagueStatDef(key: 'FP', label: 'Flag Pulls', iconId: 'flag_pull'),
+    LeagueStatDef(key: 'Sack', label: 'Sacks', iconId: 'sack'),
+    LeagueStatDef(key: 'PBU', label: 'Pass Breakups', iconId: 'pbu'),
+    LeagueStatDef(key: 'RushTD', label: 'Rushing TDs', iconId: 'rush_td'),
+    LeagueStatDef(key: 'INTTD', label: 'Pick-Sixes', iconId: 'int_td'),
+    LeagueStatDef(key: 'PAT1', label: 'PAT Makes', iconId: 'pat'),
+    LeagueStatDef(key: 'PAT1Miss', label: 'PAT Misses', iconId: 'pat_miss'),
+    LeagueStatDef(key: 'TwoPT', label: '2PT Makes', iconId: 'two_pt'),
+    LeagueStatDef(
+        key: 'TwoPTMiss', label: '2PT Misses', iconId: 'two_pt_miss'),
+  ],
+  rowEvents: [
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.qbComp,
+      shortLabel: 'CP',
+      label: '🏈 Completion',
+      statKeys: ['QBComp'],
+    ),
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.qbInc,
+      shortLabel: 'IC',
+      label: '❌ Incompletion',
+      statKeys: ['QBInc'],
+    ),
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.rec,
+      shortLabel: 'RC',
+      label: '🙌 Reception',
+      statKeys: ['REC'],
+    ),
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.recMiss,
+      shortLabel: 'DR',
+      label: '😬 Drop',
+      statKeys: ['RECMiss'],
+    ),
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.flagPull,
+      shortLabel: 'FP',
+      label: '🚩 Flag Pull',
+      statKeys: ['FP'],
+    ),
+  ],
+  topBarEvents: [
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.recTd,
+      shortLabel: 'RTD',
+      label: '🏈 Rec TD',
+      statKeys: ['RECTD'],
+      scorePoints: 6,
+      chained: LeagueChainedPrompt.thrownBy,
+    ),
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.rushTd,
+      shortLabel: 'RUTD',
+      label: '🏃 Rush TD',
+      statKeys: ['RushTD'],
+      scorePoints: 6,
+    ),
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.intTd,
+      shortLabel: 'ITD',
+      label: '🔄 INT TD',
+      statKeys: ['INTTD'],
+      scorePoints: 6,
+    ),
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.interception,
+      shortLabel: 'INT',
+      label: '🖐 Interception',
+      statKeys: ['INT'],
+    ),
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.sack,
+      shortLabel: 'SK',
+      label: '💥 Sack',
+      statKeys: ['Sack'],
+    ),
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.pbu,
+      shortLabel: 'PBU',
+      label: '🛡 Pass Breakup',
+      statKeys: ['PBU'],
+    ),
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.pat1,
+      shortLabel: 'PAT',
+      label: '✅ PAT Made',
+      statKeys: ['PAT1'],
+      scorePoints: 1,
+    ),
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.pat1Miss,
+      shortLabel: 'PATx',
+      label: '❌ PAT Missed',
+      statKeys: ['PAT1Miss'],
+    ),
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.twoPt,
+      shortLabel: '2PT',
+      label: '✅ 2PT Made',
+      statKeys: ['TwoPT'],
+      scorePoints: 2,
+    ),
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.twoPtMiss,
+      shortLabel: '2PTx',
+      label: '❌ 2PT Missed',
+      statKeys: ['TwoPTMiss'],
+    ),
+  ],
+  chainedOnlyEvents: [
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.passTd,
+      shortLabel: 'PTD',
+      label: '🎯 Pass TD',
+      statKeys: ['PassTD'],
+      // The +6 rode on the Rec TD that chained here — never double-score.
+    ),
+    LeagueEventDef(
+      activityType: FlagFootballLeagueEvents.passInt,
+      shortLabel: 'PINT',
+      label: '🎯 Pass INT',
+      statKeys: ['PassINT'],
+      // No button in the owner-locked P4 layout; resolvable for LEGACY
+      // 'Pass INT' entries (undo/reassign parity with the reset fallback).
+    ),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Capture helpers (pure): minute stamping, 2nd-yellow detect, recent
 // events, undo score math
 // ---------------------------------------------------------------------------
@@ -297,6 +593,7 @@ bool playerHasLeagueActivity(
 
   bool entryMatches(Map<String, dynamic> entry) {
     for (final e in entry.entries) {
+      if (isActivityMetadataKey(e.key)) continue; // `_t` stamps (P2.1)
       if (e.key.toLowerCase().trim() == wantedType &&
           e.value.toString().trim() == wantedPlayer) {
         return true;
@@ -329,12 +626,18 @@ class LeagueRecordedEvent {
   final String activityType;
   final String player;
 
+  /// Insertion stamp (`_t`, epoch ms) carried by events recorded since
+  /// P2.1 — orders same-minute events across teams in true record order.
+  /// null for legacy entries.
+  final int? tsMs;
+
   const LeagueRecordedEvent({
     required this.teamTag,
     required this.minuteKey,
     required this.index,
     required this.activityType,
     required this.player,
+    this.tsMs,
   });
 }
 
@@ -373,8 +676,10 @@ int _minuteOf(String minuteKey) =>
     int.tryParse(minuteKey.replaceAll("'", '').trim()) ?? 0;
 
 /// Both teams' timelines flattened newest-first: highest minute first,
-/// later-recorded first within a minute, team1 before team2 on exact
-/// ties. Drives the pinned Recent-events undo strip (callers `.take(5)`).
+/// later-recorded first within a minute (by `_t` insertion stamp when
+/// both events carry one — the only ordering that sees ACROSS teams —
+/// else by in-bucket index), team1 before team2 on exact ties. Drives
+/// the pinned Recent-events undo strip (callers `.take(5)`).
 List<LeagueRecordedEvent> recentLeagueEvents({
   required Map<String, dynamic>? team1Activity,
   required Map<String, dynamic>? team2Activity,
@@ -387,13 +692,16 @@ List<LeagueRecordedEvent> recentLeagueEvents({
       final events = _flattenBucket(bucket);
       for (var i = 0; i < events.length; i++) {
         final e = events[i];
-        if (e.isEmpty) continue;
+        final event = activityEventOf(e);
+        if (event == null) continue; // empty or metadata-only leaf
+        final ts = e['_t'];
         out.add(LeagueRecordedEvent(
           teamTag: teamTag,
           minuteKey: minuteKey.toString(),
           index: i,
-          activityType: e.keys.first,
-          player: e[e.keys.first].toString(),
+          activityType: event.key,
+          player: event.value.toString(),
+          tsMs: ts is num ? ts.toInt() : null,
         ));
       }
     });
@@ -406,11 +714,54 @@ List<LeagueRecordedEvent> recentLeagueEvents({
     final byMinute =
         _minuteOf(b.minuteKey).compareTo(_minuteOf(a.minuteKey));
     if (byMinute != 0) return byMinute;
+    // `_t` stamps (P2.1) give true record order across teams; legacy
+    // entries without one fall back to index/team order.
+    final at = a.tsMs, bt = b.tsMs;
+    if (at != null && bt != null && at != bt) {
+      return bt.compareTo(at); // later-recorded first
+    }
     final byIndex = b.index.compareTo(a.index); // later-recorded first
     if (byIndex != 0) return byIndex;
     return a.teamTag.compareTo(b.teamTag);
   });
   return out;
+}
+
+/// One stat mutation in a reassign plan: apply [delta] (-1 take from the
+/// old player, +1 give to the new player) to [statKey] for [player].
+typedef LeagueStatMove = ({String player, String statKey, int delta});
+
+/// The stat moves that re-credit an [activityType] event from [oldPlayer]
+/// to [newPlayer] on the SAME team (the full event editor's Reassign,
+/// P2.1 Task B3): all of the event's statKeys are decremented for the old
+/// player, then incremented for the new one — paired credits (PenGoal's
+/// Goals, SecondYellow's Red) follow statKeys automatically. The score is
+/// never part of the plan: the event stays on the same team.
+///
+/// Gating mirrors capture/undo exactly:
+/// - friendly games never accrue stats → empty plan;
+/// - Guest never holds stats → reassigning TO Guest only decrements the
+///   old player, FROM Guest only increments the new one;
+/// - unknown/legacy types (e.g. 'Blue') are timeline-only → empty plan;
+/// - same-player reassigns are no-ops.
+List<LeagueStatMove> reassignStatMoves(
+  LeagueSportConfig config,
+  String activityType,
+  String oldPlayer,
+  String newPlayer, {
+  required bool isFriendly,
+}) {
+  if (isFriendly || oldPlayer == newPlayer) return const [];
+  final event = config.eventForActivity(activityType);
+  if (event == null) return const [];
+  return [
+    if (oldPlayer != 'Guest')
+      for (final k in event.statKeys)
+        (player: oldPlayer, statKey: k, delta: -1),
+    if (newPlayer != 'Guest')
+      for (final k in event.statKeys)
+        (player: newPlayer, statKey: k, delta: 1),
+  ];
 }
 
 /// The score change that undoes [activityType] recorded for [teamTag] —
