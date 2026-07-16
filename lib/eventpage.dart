@@ -3,9 +3,10 @@ import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:flutter/foundation.dart' show consolidateHttpClientResponseBytes;
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/event_repo.dart';
+import 'package:infinite_sports_flutter/misc/share_match_card_service.dart' show captureCardToPng;
+import 'package:infinite_sports_flutter/widgets/event_share_card.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/attendee.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
@@ -69,33 +70,45 @@ class _EventPageState extends State<EventPage> {
     return '${parts.join(' ')}\n\n$cta';
   }
 
-  /// Downloads the flyer to a temp file so it can ride along with the share.
-  /// Returns null when there's no flyer or the download fails (text-only share).
-  Future<XFile?> _downloadFlyer() async {
-    final url = event.imageUrl?.trim() ?? '';
-    if (url.isEmpty) return null;
-    try {
-      final client = HttpClient();
-      final request = await client.getUrl(Uri.parse(url));
-      final response = await request.close();
-      if (response.statusCode != 200) return null;
-      final bytes = await consolidateHttpClientResponseBytes(response);
-      final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/flyer_${event.id ?? widget.index}.jpg');
-      await file.writeAsBytes(bytes);
-      return XFile(file.path, mimeType: 'image/jpeg');
-    } catch (_) {
-      return null;
-    }
-  }
-
+  /// Shares a single image that bakes the flyer + caption together, so the
+  /// words always travel with the flyer (many apps drop separate text when
+  /// an image is attached). Text is also passed for apps that accept it.
   Future<void> share_Clicked() async {
     final message = _shareMessage();
-    final flyer = await _downloadFlyer();
-    if (flyer != null) {
-      await Share.shareXFiles([flyer],
+    final url = event.imageUrl?.trim() ?? '';
+
+    ImageProvider? flyer;
+    if (url.isNotEmpty && mounted) {
+      flyer = NetworkImage(url);
+      try {
+        await precacheImage(flyer, context);
+      } catch (_) {
+        flyer = null; // flyer failed to load; card falls back to a banner
+      }
+    }
+    if (!mounted) return;
+
+    try {
+      final bytes = await captureCardToPng(
+        context,
+        EventShareCard(
+          title: event.title ?? 'Event',
+          flyer: flyer,
+          caption: event.shareCaption,
+          dateLine: [
+            if ((event.eventDate ?? '').isNotEmpty) event.eventDate!,
+            if ((event.startTime ?? '').isNotEmpty) event.startTime!,
+          ].join(' · '),
+          location: event.location,
+        ),
+      );
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/event_${event.id ?? widget.index}.png');
+      await file.writeAsBytes(bytes);
+      await Share.shareXFiles([XFile(file.path, mimeType: 'image/png')],
           text: message, subject: event.title ?? 'Share Event');
-    } else {
+    } catch (_) {
+      // Fall back to text-only if the card can't be rendered.
       await Share.share(message, subject: event.title ?? 'Share Event');
     }
   }
