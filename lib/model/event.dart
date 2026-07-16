@@ -29,6 +29,7 @@ class Event {
   String? facebook;
   String? youtube;
   String? registrationId;
+  String? shareCaption;
   int? legacyIndex;
 
   void format() {
@@ -69,6 +70,7 @@ class Event {
     event.facebook = json['Facebook']?.toString();
     event.youtube = json['Youtube']?.toString();
     event.registrationId = json['RegistrationId']?.toString();
+    event.shareCaption = json['ShareCaption']?.toString();
     event.legacyIndex = json['LegacyIndex'] is int ? json['LegacyIndex'] : int.tryParse('${json['LegacyIndex']}');
     event.imageUrl = json['ImageUrl']?.toString() ?? '';
     if (event.imageUrl!.isNotEmpty) {

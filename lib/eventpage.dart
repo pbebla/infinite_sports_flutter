@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart' show consolidateHttpClientResponseBytes;
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/event_repo.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -51,16 +52,52 @@ class _EventPageState extends State<EventPage> {
       ? "EventsV2/${widget.v2Id}/Attendees/"
       : "Events/${widget.index}/Attendees/";
 
-  Future<void> share_Clicked() async {
+  /// The message that goes out with a share. Owner's custom caption when set
+  /// (from the manager event form), otherwise auto-built from the details.
+  /// Always ends with the app call-to-action.
+  String _shareMessage() {
+    const cta =
+        'Download the Infinite Sports app for details and to sign up!';
+    final caption = event.shareCaption?.trim() ?? '';
+    if (caption.isNotEmpty) return '$caption\n\n$cta';
     final parts = <String>[
       event.title ?? 'Event',
       if ((event.eventDate ?? '').isNotEmpty) 'on ${event.eventDate}',
       if ((event.startTime ?? '').isNotEmpty) 'at ${event.startTime}',
       if ((event.location ?? '').isNotEmpty) '· ${event.location}',
     ];
-    final message =
-        '${parts.join(' ')}\n\nDownload the Infinite Sports app for details and to sign up!';
-    await Share.share(message, subject: event.title ?? 'Share Event');
+    return '${parts.join(' ')}\n\n$cta';
+  }
+
+  /// Downloads the flyer to a temp file so it can ride along with the share.
+  /// Returns null when there's no flyer or the download fails (text-only share).
+  Future<XFile?> _downloadFlyer() async {
+    final url = event.imageUrl?.trim() ?? '';
+    if (url.isEmpty) return null;
+    try {
+      final client = HttpClient();
+      final request = await client.getUrl(Uri.parse(url));
+      final response = await request.close();
+      if (response.statusCode != 200) return null;
+      final bytes = await consolidateHttpClientResponseBytes(response);
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/flyer_${event.id ?? widget.index}.jpg');
+      await file.writeAsBytes(bytes);
+      return XFile(file.path, mimeType: 'image/jpeg');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> share_Clicked() async {
+    final message = _shareMessage();
+    final flyer = await _downloadFlyer();
+    if (flyer != null) {
+      await Share.shareXFiles([flyer],
+          text: message, subject: event.title ?? 'Share Event');
+    } else {
+      await Share.share(message, subject: event.title ?? 'Share Event');
+    }
   }
 
   /// Writes a one-event .ics to a temp file and hands it to the OS. On iOS
