@@ -13,7 +13,9 @@ import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_path_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
+import 'package:infinite_sports_flutter/misc/ics.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -50,10 +52,37 @@ class _EventPageState extends State<EventPage> {
       : "Events/${widget.index}/Attendees/";
 
   Future<void> share_Clicked() async {
-    final result = await Share.share((event.title ?? "") + ' is on ' + (event.date ?? "") + ". Download the Infinite Sports app for more info!", subject: "Share Event");
+    final parts = <String>[
+      event.title ?? 'Event',
+      if ((event.eventDate ?? '').isNotEmpty) 'on ${event.eventDate}',
+      if ((event.startTime ?? '').isNotEmpty) 'at ${event.startTime}',
+      if ((event.location ?? '').isNotEmpty) '· ${event.location}',
+    ];
+    final message =
+        '${parts.join(' ')}\n\nDownload the Infinite Sports app for details and to sign up!';
+    await Share.share(message, subject: event.title ?? 'Share Event');
+  }
 
-    if (result.status == ShareResultStatus.success) {
-
+  /// Writes a one-event .ics to a temp file and hands it to the OS. On iOS
+  /// this opens the Calendar "Add Event" sheet; on Android the calendar app
+  /// (or a chooser) offers to add it — the user sets their own alerts there.
+  Future<void> addToCalendar_Clicked() async {
+    final ics = buildEventIcs(event, stampMs: DateTime.now().millisecondsSinceEpoch);
+    if (ics.isEmpty) return;
+    try {
+      final dir = await getTemporaryDirectory();
+      final safeName = (event.title ?? 'event')
+          .replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_')
+          .toLowerCase();
+      final file = File('${dir.path}/$safeName.ics');
+      await file.writeAsString(ics);
+      await Share.shareXFiles([XFile(file.path, mimeType: 'text/calendar')],
+          subject: event.title ?? 'Event');
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Couldn't open calendar")));
+      }
     }
   }
 
@@ -296,6 +325,24 @@ class _EventPageState extends State<EventPage> {
                           ),
                         ),
                     ],),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Theme.of(context).colorScheme.primary,
+                          side: BorderSide(color: Theme.of(context).colorScheme.primary),
+                          shape: const RoundedRectangleBorder(
+                            borderRadius: BorderRadius.all(Radius.circular(10)),
+                          ),
+                        ),
+                        icon: const Icon(Icons.calendar_month),
+                        label: const Text('Add to my calendar'),
+                        onPressed: addToCalendar_Clicked,
+                      ),
+                    ),
                   ),
                   Visibility(
                     visible: event.address?.isNotEmpty ?? false,
