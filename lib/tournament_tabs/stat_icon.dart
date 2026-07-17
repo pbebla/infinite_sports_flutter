@@ -186,6 +186,48 @@ bool isBadgeLeagueSport(String sportKey) =>
         default:
           return (asset: null, badge: false);
       }
+    case 'Flag Football':
+      switch (t) {
+        case 'receiving td':
+        case 'receivingtouchdowns':
+          return (asset: 'assets/ff_rec_td.png', badge: true);
+        case 'rushing td':
+        case 'rushingtouchdowns':
+          return (asset: 'assets/ff_rush_td.png', badge: true);
+        case 'int td':
+        case 'interceptiontouchdowns':
+          return (asset: 'assets/ff_int_td.png', badge: true);
+        case 'touchdowns':
+          return (asset: 'assets/ff_touchdown.png', badge: true);
+        case 'pass td':
+        case 'passtouchdowns':
+          return (asset: 'assets/ff_pass_td.png', badge: true);
+        case 'rec':
+        case 'receptions':
+          return (asset: 'assets/ff_rec.png', badge: true);
+        case 'interception':
+        case 'interceptions':
+          return (asset: 'assets/ff_int.png', badge: true);
+        case 'fp':
+        case 'flagpulls':
+          return (asset: 'assets/ff_flag_pull.png', badge: true);
+        case 'sack':
+        case 'sacks':
+          return (asset: 'assets/ff_sack.png', badge: true);
+        case 'pbu':
+        case 'passbreakups':
+          return (asset: 'assets/ff_pbu.png', badge: true);
+        case 'qbcomp':
+          return (asset: 'assets/ff_qb_comp.png', badge: true);
+        case 'pat1':
+          return (asset: 'assets/ff_pat.png', badge: true);
+        case 'twopt':
+          return (asset: 'assets/ff_two_pt.png', badge: true);
+        // QBInc / RECMiss / PAT1Miss / TwoPTMiss (hidden negatives) and
+        // 'Pass INT' (thrown INT, buttonless) carry no timeline icon.
+        default:
+          return (asset: null, badge: false);
+      }
     default:
       return (asset: null, badge: false);
   }

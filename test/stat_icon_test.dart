@@ -164,4 +164,37 @@ void main() {
       expect(isBadgeLeagueSport('Futsal'), isFalse);
     });
   });
+
+  group('leagueStatIcon — flag football badges (L6 Group F)', () {
+    test('scored-TD timeline events map to badge assets', () {
+      expect(leagueStatIcon('Flag Football', 'Receiving TD').asset,
+          'assets/ff_rec_td.png');
+      expect(leagueStatIcon('Flag Football', 'Rushing TD').badge, isTrue);
+      expect(leagueStatIcon('Flag Football', 'INT TD').asset,
+          'assets/ff_int_td.png');
+      expect(leagueStatIcon('Flag Football', 'Interception').asset,
+          'assets/ff_int.png');
+      expect(leagueStatIcon('Flag Football', 'Sack').asset,
+          'assets/ff_sack.png');
+    });
+
+    test('leader stat keys map to badge assets', () {
+      expect(leagueStatIcon('Flag Football', 'touchdowns').asset,
+          'assets/ff_touchdown.png');
+      expect(leagueStatIcon('Flag Football', 'receptions').asset,
+          'assets/ff_rec.png');
+      expect(leagueStatIcon('Flag Football', 'passTouchdowns').asset,
+          'assets/ff_pass_td.png');
+      expect(leagueStatIcon('Flag Football', 'flagPulls').asset,
+          'assets/ff_flag_pull.png');
+      expect(leagueStatIcon('Flag Football', 'sacks').asset,
+          'assets/ff_sack.png');
+    });
+
+    test('hidden negatives / thrown INT carry no icon', () {
+      expect(leagueStatIcon('Flag Football', 'QBInc').asset, isNull);
+      expect(leagueStatIcon('Flag Football', 'RECMiss').asset, isNull);
+      expect(leagueStatIcon('Flag Football', 'Pass INT').asset, isNull);
+    });
+  });
 }
