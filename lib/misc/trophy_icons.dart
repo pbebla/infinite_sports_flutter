@@ -48,6 +48,9 @@ const Map<String, String> kTrophyAssetIcons = {
   'most_interceptions':   'assets/trophies/most_interceptions.png',
   'best_receiver':        'assets/trophies/best_receiver.png',
   'ff_mvp':               'assets/trophies/ff_mvp.png',
+  // Basketball-specific MVP badge (basketball trophy) — like ff_mvp, keeps the
+  // shared 'mvp' art untouched for soccer/futsal.
+  'bball_mvp':            'assets/trophies/bball_mvp.png',
 };
 
 const List<String> kTrophyAssetIconKeys = [
@@ -75,6 +78,7 @@ const List<String> kTrophyAssetIconKeys = [
   'most_interceptions',
   'best_receiver',
   'ff_mvp',
+  'bball_mvp',
 ];
 
 bool isAssetIcon(String key) => kTrophyAssetIcons.containsKey(key);
