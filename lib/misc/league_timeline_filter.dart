@@ -13,7 +13,11 @@ bool isHiddenLeagueTimelineActivity(String sportKey, String activityType) {
   switch (sportKey) {
     case 'Basketball':
       return t == 'miss';
-    // Flag Football hidden set added in Group F (Task 21).
+    case 'Flag Football':
+      return t == 'qbinc' ||
+          t == 'recmiss' ||
+          t == 'pat1miss' ||
+          t == 'twoptmiss';
     default:
       return false;
   }

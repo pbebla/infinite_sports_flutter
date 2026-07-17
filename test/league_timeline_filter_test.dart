@@ -22,5 +22,20 @@ void main() {
       expect(isHiddenLeagueTimelineActivity('Futsal', 'Goal'), isFalse);
       expect(isHiddenLeagueTimelineActivity('Soccer', 'Miss'), isFalse);
     });
+
+    test('flag football hides QBInc/RECMiss/PAT1Miss/TwoPTMiss', () {
+      for (final t in ['QBInc', 'RECMiss', 'PAT1Miss', 'TwoPTMiss']) {
+        expect(isHiddenLeagueTimelineActivity('Flag Football', t), isTrue,
+            reason: '$t should be hidden');
+      }
+    });
+
+    test('flag football keeps scored + defensive events visible', () {
+      for (final t in ['Receiving TD', 'Rushing TD', 'INT TD', 'Interception',
+          'Sack', 'FP', 'PBU', 'QBComp', 'REC', 'PAT1', 'TwoPT']) {
+        expect(isHiddenLeagueTimelineActivity('Flag Football', t), isFalse,
+            reason: '$t should stay visible');
+      }
+    });
   });
 }
