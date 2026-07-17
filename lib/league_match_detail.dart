@@ -432,6 +432,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
           predictionConfig: _predictionConfig,
           currentUid: FirebaseAuth.instance.currentUser?.uid,
           leaderCategories: leagueMatchLeaderCategories(widget.sport),
+          leagueSportKey: widget.sport,
         ),
       ),
     );

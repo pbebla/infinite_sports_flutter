@@ -35,6 +35,13 @@ class MatchFactsTab extends StatelessWidget {
   /// `leagueMatchLeaderCategories(sport)`.
   final List<Map<String, String>>? leaderCategories;
 
+  /// Non-null for LEAGUE games — the sport's Firebase key ('Basketball',
+  /// 'Flag Football', 'Futsal'). Null = tournament (soccer) behavior, so
+  /// every existing tournament call site keeps compiling unchanged. When set
+  /// to a badge sport, timeline icons render the gold badge art (no white
+  /// chip) via [leagueStatIcon]. Also gates the Group E timeline filter.
+  final String? leagueSportKey;
+
   const MatchFactsTab({
     super.key,
     required this.match,
@@ -47,6 +54,7 @@ class MatchFactsTab extends StatelessWidget {
     this.currentUid,
     this.scope,
     this.leaderCategories,
+    this.leagueSportKey,
   });
 
   // Parse minute string to sortable double: "90+3'" -> 90.3, "45'" -> 45.0
@@ -136,6 +144,11 @@ class MatchFactsTab extends StatelessWidget {
   }
 
   Widget _eventIcon(String eventType) {
+    final sport = leagueSportKey;
+    if (sport != null && isBadgeLeagueSport(sport)) {
+      final ic = leagueStatIcon(sport, eventType);
+      return StatIcon(asset: ic.asset, size: 24, badge: ic.badge);
+    }
     return StatIcon(asset: statIconAsset(eventType), size: 24);
   }
 
