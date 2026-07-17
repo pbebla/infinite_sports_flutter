@@ -146,25 +146,38 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
 
   Widget _buildHeader(BuildContext context) {
     final team = _team;
-    // Determine header color — a team overrideColor always wins (both
-    // modes); only the DEFAULT follows light navy / dark grey (P3.2).
-    Color headerColor =
-        team?.overrideColor ?? TournamentColors.headerBackground(context);
+    // A team overrideColor always wins (both modes) and keeps its original
+    // white-on-color foreground + darkened gradient; only the DEFAULT header
+    // follows the white-light / grey-dark scheme (P4.1).
+    final overrideColor = team?.overrideColor;
 
-    final darkened = Color.fromARGB(
-      255,
-      ((headerColor.r * 255.0).round().clamp(0, 255) * 0.75).round(),
-      ((headerColor.g * 255.0).round().clamp(0, 255) * 0.75).round(),
-      ((headerColor.b * 255.0).round().clamp(0, 255) * 0.75).round(),
-    );
+    LinearGradient gradient;
+    if (overrideColor != null) {
+      final darkened = Color.fromARGB(
+        255,
+        ((overrideColor.r * 255.0).round().clamp(0, 255) * 0.75).round(),
+        ((overrideColor.g * 255.0).round().clamp(0, 255) * 0.75).round(),
+        ((overrideColor.b * 255.0).round().clamp(0, 255) * 0.75).round(),
+      );
+      gradient = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [overrideColor, darkened],
+      );
+    } else {
+      gradient = TournamentColors.headerGradient(context);
+    }
+
+    final fg = overrideColor != null
+        ? Colors.white
+        : TournamentColors.headerForeground(context);
+    final muted = overrideColor != null
+        ? Colors.white70
+        : TournamentColors.headerForegroundMuted(context);
 
     return Container(
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [headerColor, darkened],
-        ),
+        gradient: gradient,
       ),
       child: SafeArea(
         bottom: false,
@@ -178,7 +191,9 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                   TeamLogo(
                     url: team?.logoUrl,
                     size: 60,
-                    fallbackBackground: Colors.white.withValues(alpha: 0.2),
+                    fallbackBackground: overrideColor != null
+                        ? Colors.white.withValues(alpha: 0.2)
+                        : TournamentColors.headerChipFill(context),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -187,8 +202,8 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                       children: [
                         Text(
                           team?.name ?? widget.teamId,
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: fg,
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
                           ),
@@ -197,11 +212,11 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                           const SizedBox(height: 2),
                           Row(
                             children: [
-                              const Icon(Icons.location_on, size: 12, color: Colors.white70),
+                              Icon(Icons.location_on, size: 12, color: muted),
                               const SizedBox(width: 3),
                               Text(
                                 _getFullStateName(team.cityState),
-                                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                style: TextStyle(color: muted, fontSize: 12),
                               ),
                             ],
                           ),
@@ -868,7 +883,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       return Scaffold(
         appBar: AppBar(
           backgroundColor: TournamentColors.headerBackground(context),
-          foregroundColor: Colors.white,
+          foregroundColor: TournamentColors.headerForeground(context),
         ),
         body: Center(
           child: Padding(
@@ -905,11 +920,23 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       return Scaffold(
         appBar: AppBar(
           backgroundColor: TournamentColors.headerBackground(context),
-          foregroundColor: Colors.white,
+          foregroundColor: TournamentColors.headerForeground(context),
         ),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
+
+    // Collapsed-bar colors follow the header rule (P4.1): a team
+    // overrideColor keeps the colored bar with white foregrounds in BOTH
+    // modes; the default is white-with-dark-foreground in light mode, dark
+    // grey with white in dark mode.
+    final overrideColor = _team?.overrideColor;
+    final barFg = overrideColor != null
+        ? Colors.white
+        : TournamentColors.headerForeground(context);
+    final barFgMuted = overrideColor != null
+        ? Colors.white70
+        : TournamentColors.headerForegroundMuted(context);
 
     return Scaffold(
       body: NestedScrollView(
@@ -918,8 +945,11 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
             SliverAppBar(
               expandedHeight: 160,
               pinned: true,
-              backgroundColor: TournamentColors.headerBackground(context),
-              foregroundColor: Colors.white,
+              backgroundColor:
+                  overrideColor ?? TournamentColors.headerBackground(context),
+              foregroundColor: barFg,
+              iconTheme: IconThemeData(color: barFg),
+              actionsIconTheme: IconThemeData(color: barFg),
               actions: [
                 FollowBell(
                   topic: teamTopic(widget.tournamentId, widget.teamId),
@@ -937,8 +967,8 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                   Tab(text: 'Squad'),
                   Tab(text: 'Stats'),
                 ],
-                labelColor: Colors.white,
-                unselectedLabelColor: Colors.white70,
+                labelColor: barFg,
+                unselectedLabelColor: barFgMuted,
                 indicatorColor: Theme.of(context).colorScheme.primary,
                 indicatorWeight: 3,
               ),

@@ -79,7 +79,8 @@ class _MinuteBallState extends State<MinuteBall> with _Ticking {
 }
 
 /// Green mm:ss clock text for the game-card header. Hidden (shrinks to nothing)
-/// if [clock] is null.
+/// if [clock] is null. Theme-aware (P4.1): bright green on the dark-mode grey
+/// header, the darker MinuteBall green on the white light-mode header.
 class MatchClockText extends StatefulWidget {
   final MatchClock? clock;
   const MatchClockText({super.key, required this.clock});
@@ -89,7 +90,8 @@ class MatchClockText extends StatefulWidget {
 }
 
 class _MatchClockTextState extends State<MatchClockText> with _Ticking {
-  static const _green = Color(0xFF7CFC9A);
+  static const _greenOnDark = Color(0xFF7CFC9A);
+  static const _greenOnLight = Color(0xFF0A7D2C);
 
   @override
   void initState() {
@@ -109,10 +111,13 @@ class _MatchClockTextState extends State<MatchClockText> with _Ticking {
     if (clock == null) return const SizedBox.shrink();
     final label =
         clockLabel(clock.elapsedAt(serverNowMs()));
+    final green = Theme.of(context).brightness == Brightness.dark
+        ? _greenOnDark
+        : _greenOnLight;
     return Text(
       label,
-      style: const TextStyle(
-        color: _green,
+      style: TextStyle(
+        color: green,
         fontWeight: FontWeight.w700,
         fontSize: 16,
       ),

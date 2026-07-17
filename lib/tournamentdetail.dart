@@ -167,10 +167,14 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
       body: (_isLoading || _tabController == null)
           ? Column(
               children: [
-                // Placeholder for the navy scoreboard/header area.
+                // Placeholder for the scoreboard/header area (white in light
+                // mode, dark grey in dark mode — P4.1).
                 Container(
                     height: 150,
-                    color: TournamentColors.headerBackground(context)),
+                    decoration: BoxDecoration(
+                      color: TournamentColors.headerBackground(context),
+                      border: TournamentColors.headerHairline(context),
+                    )),
                 const Expanded(
                   child: SingleChildScrollView(
                     physics: NeverScrollableScrollPhysics(),
@@ -190,7 +194,14 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                     pinned: true,
                     backgroundColor:
                         TournamentColors.headerBackground(context),
-                    foregroundColor: Colors.white,
+                    foregroundColor:
+                        TournamentColors.headerForeground(context),
+                    // Theme-aware back arrow + bell (P4.1): dark on the
+                    // white light-mode header, white on the dark grey.
+                    iconTheme: IconThemeData(
+                        color: TournamentColors.headerForeground(context)),
+                    actionsIconTheme: IconThemeData(
+                        color: TournamentColors.headerForeground(context)),
                     actions: [
                       FollowBell(
                         topic: tournamentTopic(widget.tournamentId),
@@ -205,8 +216,9 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                       controller: _tabController!,
                       tabs: _tabs,
                       isScrollable: true,
-                      labelColor: Colors.white,
-                      unselectedLabelColor: Colors.white70,
+                      labelColor: TournamentColors.headerForeground(context),
+                      unselectedLabelColor:
+                          TournamentColors.headerForegroundMuted(context),
                       indicatorColor: Theme.of(context).colorScheme.primary,
                       indicatorWeight: 3,
                       tabAlignment: TabAlignment.start,
@@ -277,6 +289,8 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
 
   Widget _buildHeader(BuildContext context) {
     final tournament = _tournament;
+    final fg = TournamentColors.headerForeground(context);
+    final muted = TournamentColors.headerForegroundMuted(context);
     return Container(
       decoration: BoxDecoration(
         gradient: TournamentColors.headerGradient(context),
@@ -293,7 +307,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                 url: tournament?.logoUrl,
                 size: 54,
                 fallbackIcon: Icons.emoji_events,
-                fallbackBackground: Colors.white.withValues(alpha: 0.15),
+                fallbackBackground: TournamentColors.headerChipFill(context),
               ),
               const SizedBox(width: 14),
               // Info
@@ -304,8 +318,8 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                   children: [
                     Text(
                       tournament?.name ?? widget.tournamentName,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: fg,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
@@ -319,8 +333,8 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                         if (tournament?.hostCity != null)
                           tournament!.hostCity!,
                       ].join(' · '),
-                      style: const TextStyle(
-                        color: Colors.white70,
+                      style: TextStyle(
+                        color: muted,
                         fontSize: 13,
                       ),
                     ),
@@ -329,13 +343,14 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          const Icon(Icons.emoji_events,
-                              size: 14, color: Color(0xFFFFD700)),
+                          Icon(Icons.emoji_events,
+                              size: 14,
+                              color: TournamentColors.championGold(context)),
                           const SizedBox(width: 4),
                           Text(
                             tournament!.champion!,
-                            style: const TextStyle(
-                              color: Colors.white,
+                            style: TextStyle(
+                              color: fg,
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                             ),
@@ -353,12 +368,12 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                       const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white60),
+                    border: Border.all(color: muted),
                   ),
                   child: Text(
                     tournament!.status,
-                    style: const TextStyle(
-                        color: Colors.white,
+                    style: TextStyle(
+                        color: fg,
                         fontSize: 11,
                         fontWeight: FontWeight.w600),
                   ),

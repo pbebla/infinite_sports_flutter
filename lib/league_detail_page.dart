@@ -251,15 +251,20 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
       body: matches == null
           ? Column(
               children: [
-                // Skeleton header keeps a visible white back arrow too
-                // (P2.1 Task A3 back-arrow audit).
+                // Skeleton header keeps a visible back arrow too — theme-
+                // aware since P4.1: dark on the white light-mode header,
+                // white on the dark grey (P2.1 Task A3 back-arrow audit).
                 Container(
                   height: 150,
-                  color: TournamentColors.headerBackground(context),
+                  decoration: BoxDecoration(
+                    color: TournamentColors.headerBackground(context),
+                    border: TournamentColors.headerHairline(context),
+                  ),
                   alignment: Alignment.topLeft,
-                  child: const SafeArea(
+                  child: SafeArea(
                     bottom: false,
-                    child: BackButton(color: Colors.white),
+                    child: BackButton(
+                        color: TournamentColors.headerForeground(context)),
                   ),
                 ),
                 const Expanded(
@@ -283,12 +288,14 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                   expandedHeight: 160,
                   pinned: true,
                   backgroundColor: TournamentColors.headerBackground(context),
-                  foregroundColor: Colors.white,
-                  // Force the back arrow white in BOTH themes — the global
-                  // appBarTheme.iconTheme is onSurface, which goes dark on
-                  // this navy header in light mode (P2.1 Task A3 fix).
-                  iconTheme: const IconThemeData(color: Colors.white),
-                  actionsIconTheme: const IconThemeData(color: Colors.white),
+                  foregroundColor: TournamentColors.headerForeground(context),
+                  // Theme-aware header foreground (P4.1): dark arrows/icons
+                  // on the white light-mode header, white on the dark grey —
+                  // the back arrow stays visible in both modes (P2.1 A3).
+                  iconTheme: IconThemeData(
+                      color: TournamentColors.headerForeground(context)),
+                  actionsIconTheme: IconThemeData(
+                      color: TournamentColors.headerForeground(context)),
                   // Season-wide follow bell (P3.3): tournament-page parity —
                   // one bell on the hub header subscribes every game alert
                   // (kickoff/goal/full-time) for this sport + season.
@@ -306,8 +313,9 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                     controller: _tabController,
                     tabs: _tabs,
                     isScrollable: true,
-                    labelColor: Colors.white,
-                    unselectedLabelColor: Colors.white70,
+                    labelColor: TournamentColors.headerForeground(context),
+                    unselectedLabelColor:
+                        TournamentColors.headerForegroundMuted(context),
                     indicatorColor: Theme.of(context).colorScheme.primary,
                     indicatorWeight: 3,
                     tabAlignment: TabAlignment.start,
@@ -381,6 +389,8 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
   Widget _buildHeader(BuildContext context) {
     final champion = _playoffs?.champion ?? '';
     final leagueName = _leagueName;
+    final fg = TournamentColors.headerForeground(context);
+    final muted = TournamentColors.headerForegroundMuted(context);
     return Container(
       decoration: BoxDecoration(
         gradient: TournamentColors.headerGradient(context),
@@ -397,12 +407,12 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                 height: 54,
                 padding: const EdgeInsets.all(9),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.15),
+                  color: TournamentColors.headerChipFill(context),
                   shape: BoxShape.circle,
                 ),
                 child: Image.asset(
                   _leagueCrestAsset,
-                  color: Colors.white,
+                  color: fg,
                 ),
               ),
               const SizedBox(width: 14),
@@ -413,8 +423,8 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                   children: [
                     Text(
                       leagueName,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: fg,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
@@ -424,20 +434,20 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                     const SizedBox(height: 4),
                     Text(
                       'Season ${widget.season}',
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 13),
+                      style: TextStyle(color: muted, fontSize: 13),
                     ),
                     if (champion.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          const Icon(Icons.emoji_events,
-                              size: 14, color: Color(0xFFFFD700)),
+                          Icon(Icons.emoji_events,
+                              size: 14,
+                              color: TournamentColors.championGold(context)),
                           const SizedBox(width: 4),
                           Text(
                             champion,
-                            style: const TextStyle(
-                              color: Colors.white,
+                            style: TextStyle(
+                              color: fg,
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                             ),
