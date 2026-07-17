@@ -43,7 +43,7 @@ String buildShareMessage(Event e) {
     return '$caption\n\n$kShareCta';
   }
   final title = (e.title?.trim().isNotEmpty ?? false) ? e.title!.trim() : 'this event';
-  final buf = StringBuffer('Join us for $title!');
+  final buf = StringBuffer('Check out $title!');
   final info = e.info?.trim() ?? '';
   if (info.isNotEmpty) buf.write('\n$info');
   final dt = shareDateTimeLine(e);

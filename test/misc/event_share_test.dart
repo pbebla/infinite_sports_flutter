@@ -45,7 +45,7 @@ void main() {
         endTime: '8:00PM',
       ));
       expect(msg,
-          'Join us for Futsal Tournament!\n'
+          'Check out Futsal Tournament!\n'
           'Open to all skill levels\n'
           'September 27, 2026 · 6:00AM - 8:00PM\n\n'
           '$kShareCta');
@@ -64,7 +64,7 @@ void main() {
 
     test('falls back gracefully with almost no data', () {
       final msg = buildShareMessage(_event());
-      expect(msg, 'Join us for this event!\n\n$kShareCta');
+      expect(msg, 'Check out this event!\n\n$kShareCta');
     });
 
     test('single start time only (no end) still shows', () {
