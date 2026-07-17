@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart' show consolidateHttpClientResponseBytes;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:infinite_sports_flutter/misc/event_repo.dart';
 import 'package:infinite_sports_flutter/misc/event_share.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -84,7 +85,17 @@ class _EventPageState extends State<EventPage> {
     final url = event.imageUrl?.trim() ?? '';
     File? flyer;
     if (url.isNotEmpty) flyer = await _downloadFlyer(url);
+
+    // Copy the message first so that if the chosen app drops attached text
+    // (Instagram/Snapchat do), the user can just paste it.
     if (flyer != null) {
+      await Clipboard.setData(ClipboardData(text: message));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Caption copied — paste it if the app drops the text'),
+          duration: Duration(seconds: 4),
+        ));
+      }
       await Share.shareXFiles([XFile(flyer.path)],
           text: message, subject: event.title ?? 'Share Event');
     } else {
