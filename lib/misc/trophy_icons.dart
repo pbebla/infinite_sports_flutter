@@ -52,6 +52,19 @@ const Map<String, String> kTrophyAssetIcons = {
   // Basketball-specific MVP badge (basketball trophy) — like ff_mvp, keeps the
   // shared 'mvp' art untouched for soccer/futsal.
   'bball_mvp':            'assets/trophies/bball_mvp.png',
+  // L6 sport-specific Champion / Runner-Up / Defensive Player / Wonder Kid
+  // badges (owner's per-sport art). Kept as their own keys so each sport's
+  // trophy renders its own badge; the shared champion/runner_up/etc. art
+  // still serves soccer/futsal. Slots without final art carry a copy of the
+  // shared badge as a placeholder until the real PNG is dropped in.
+  'bball_champion':         'assets/trophies/bball_champion.png',
+  'bball_runner_up':        'assets/trophies/bball_runner_up.png',
+  'bball_defensive_player': 'assets/trophies/bball_defensive_player.png',
+  'bball_wonder_kid':       'assets/trophies/bball_wonder_kid.png',
+  'ff_champion':            'assets/trophies/ff_champion.png',
+  'ff_runner_up':           'assets/trophies/ff_runner_up.png',
+  'ff_defensive_player':    'assets/trophies/ff_defensive_player.png',
+  'ff_wonder_kid':          'assets/trophies/ff_wonder_kid.png',
 };
 
 const List<String> kTrophyAssetIconKeys = [
@@ -81,6 +94,14 @@ const List<String> kTrophyAssetIconKeys = [
   'best_receiver',
   'ff_mvp',
   'bball_mvp',
+  'bball_champion',
+  'bball_runner_up',
+  'bball_defensive_player',
+  'bball_wonder_kid',
+  'ff_champion',
+  'ff_runner_up',
+  'ff_defensive_player',
+  'ff_wonder_kid',
 ];
 
 bool isAssetIcon(String key) => kTrophyAssetIcons.containsKey(key);
