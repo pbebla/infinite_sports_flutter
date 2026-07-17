@@ -4,6 +4,7 @@ import 'package:flutter_launcher_icons/constants.dart';
 import 'package:flutter_sticky_header/flutter_sticky_header.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/misc/follow_store.dart';
+import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -33,8 +34,10 @@ class _SettingsState extends State<Settings> {
   TextEditingController? _emailController;
   String? _emailErrorText;
   final FollowStore _followStore = FollowStore();
+  final NotificationPrefs _notifPrefs = NotificationPrefs();
   List<FollowedChannel> _follows = [];
   bool _masterEnabled = true;
+  Set<String> _categoriesOn = {};
 
   @override
   void initState() {
@@ -47,10 +50,16 @@ class _SettingsState extends State<Settings> {
   Future<void> _loadNotificationSettings() async {
     final follows = await _followStore.follows();
     final master = await _followStore.masterEnabled();
+    final categories = await _notifPrefs.currentCategories();
     if (!mounted) return;
     setState(() {
-      _follows = follows;
+      // 'sport' follows are shown as the category toggles below; 'event'
+      // reminders are managed on each event page. Keep both out of the
+      // generic team/tournament/league follows list.
+      _follows =
+          follows.where((c) => c.kind != 'sport' && c.kind != 'event').toList();
       _masterEnabled = master;
+      _categoriesOn = categories;
     });
   }
 
@@ -142,6 +151,31 @@ class _SettingsState extends State<Settings> {
                     },
                   ),
                 ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 4, 16, 0),
+                  child: Text('Sports & events you follow',
+                      style: TextStyle(fontSize: 13, color: Colors.grey)),
+                ),
+                for (final category in kNotificationCategories)
+                  ListTile(
+                    minTileHeight: 40,
+                    title: Text(category),
+                    trailing: Switch(
+                      value: _categoriesOn.contains(category),
+                      onChanged: (value) async {
+                        await _notifPrefs.setCategory(category, value,
+                            uid: FirebaseAuth.instance.currentUser?.uid);
+                        setState(() {
+                          if (value) {
+                            _categoriesOn.add(category);
+                          } else {
+                            _categoriesOn.remove(category);
+                          }
+                        });
+                      },
+                    ),
+                  ),
+                const Divider(color: Colors.grey),
                 if (_follows.isEmpty)
                   const ListTile(
                     minTileHeight: 40,

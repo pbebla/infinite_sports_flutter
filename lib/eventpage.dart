@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:infinite_sports_flutter/misc/event_repo.dart';
 import 'package:infinite_sports_flutter/misc/event_share.dart';
+import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/attendee.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
@@ -37,6 +38,8 @@ class EventPage extends StatefulWidget {
 
 class _EventPageState extends State<EventPage> {
   bool attending = false;
+  bool _reminding = false;
+  final NotificationPrefs _notifPrefs = NotificationPrefs();
   late Event event;
   // Live record: attend/edit changes appear without reopening the page.
   Stream<Event?>? _eventStream;
@@ -45,6 +48,7 @@ class _EventPageState extends State<EventPage> {
   @override
   void initState() {
     super.initState();
+    _loadReminding();
     _eventStream = watchEvent(v2Id: widget.v2Id, legacyIndex: widget.index);
     _users = getAllUsers();
   }
@@ -57,6 +61,29 @@ class _EventPageState extends State<EventPage> {
   /// The message that goes out with a share. Owner's custom caption when set
   /// (from the manager event form), otherwise auto-built from the details.
   /// Always ends with the app call-to-action.
+  /// Remind-me only applies to V2 events (they have an id/topic).
+  bool get _canRemind => widget.v2Id != null;
+
+  Future<void> _loadReminding() async {
+    if (!_canRemind) return;
+    final on = await _notifPrefs.isEventReminderOn(widget.v2Id!);
+    if (mounted) setState(() => _reminding = on);
+  }
+
+  Future<void> _toggleRemind() async {
+    if (!_canRemind) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final next = !_reminding;
+    await _notifPrefs.setEventReminder(widget.v2Id!, next, uid: uid);
+    if (mounted) {
+      setState(() => _reminding = next);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(next
+              ? "You'll be reminded about this event"
+              : "Reminders off for this event")));
+    }
+  }
+
   /// Downloads the flyer to a temp file so it can be shared as its own clean
   /// image (no overlay), with the message carried as separate text.
   Future<File?> _downloadFlyer(String url) async {
@@ -328,6 +355,33 @@ class _EventPageState extends State<EventPage> {
                           label: const Text('Register',
                               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                           onPressed: _register,
+                        ),
+                      ),
+                    ),
+                  if (_canRemind)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(15, 6, 15, 0),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _reminding
+                                ? Theme.of(context).colorScheme.onPrimary
+                                : Theme.of(context).colorScheme.primary,
+                            backgroundColor: _reminding
+                                ? Theme.of(context).colorScheme.primary
+                                : null,
+                            side: BorderSide(
+                                color: Theme.of(context).colorScheme.primary),
+                            shape: const RoundedRectangleBorder(
+                              borderRadius: BorderRadius.all(Radius.circular(10)),
+                            ),
+                          ),
+                          icon: Icon(_reminding
+                              ? Icons.notifications_active
+                              : Icons.notifications_none),
+                          label: Text(_reminding ? 'Reminders on' : 'Remind me'),
+                          onPressed: _toggleRemind,
                         ),
                       ),
                     ),

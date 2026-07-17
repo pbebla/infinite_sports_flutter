@@ -23,3 +23,18 @@ String leagueTeamTopic(String sport, String season, String teamName) =>
 /// functions/src/lib/league_decide.ts leagueSeasonTopic.
 String leagueSeasonTopic(String sport, String season) =>
     'league_${sanitizeTopicId(sport)}_${sanitizeTopicId(season)}';
+
+/// Everyone with the app installed (subscribed on launch). Backing topic for
+/// the campaign "Everyone" audience. MUST stay in parity with the campaign
+/// sender in functions/.
+const String allUsersTopic = 'all_users';
+
+/// A favorite-sport / category channel (P4). Users subscribe when they pick
+/// the category in onboarding or settings; campaigns targeting a sport send
+/// to this topic. MUST stay in parity with the campaign sender.
+String sportTopic(String category) => 'sport_${sanitizeTopicId(category)}';
+
+/// An event's reminder channel (P4). Users subscribe via "Remind me" on the
+/// event page; campaigns targeting an event's subscribers send here. MUST
+/// stay in parity with the campaign sender.
+String eventTopic(String eventId) => 'event_${sanitizeTopicId(eventId)}';

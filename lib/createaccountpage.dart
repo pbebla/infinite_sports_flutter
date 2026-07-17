@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
 import 'package:image_picker/image_picker.dart';
 
 class CreateAccountPage extends StatefulWidget {
@@ -293,8 +294,14 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                             return AlertDialog(
                               title: const Text("You are registered and logged in. Verify your account using the link sent to your email."),
                               actions: [TextButton(child: const Text("OK"), onPressed: () {
-                                    Navigator.pop(context);
-                                    Navigator.pop(context);
+                                    Navigator.pop(context); // dialog
+                                    // Straight into the favorite-sports picker;
+                                    // it pops back to the previous screen when done.
+                                    Navigator.pushReplacement(
+                                      context,
+                                      MaterialPageRoute(
+                                          builder: (_) => const FavoriteSportsPage()),
+                                    );
                               },)],
                             );
                           }

@@ -11,7 +11,9 @@ import 'package:infinite_sports_flutter/misc/notification_router.dart';
 import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
 import 'package:infinite_sports_flutter/misc/server_time.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
+import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/navigations/current_livescore_navigation.dart';
 import 'package:infinite_sports_flutter/navigations/leagues_navigation.dart';
@@ -139,8 +141,26 @@ class _MyHomePageState extends State<MyHomePage> {
         pendingLaunchMessage = null;
         openMatchFromNotification(message.data);
       }
+      _setupNotificationPrefs();
     });
     super.initState();
+  }
+
+  /// Every install joins the app-wide channel (for "Everyone" campaigns), and
+  /// signed-in users who never picked favorites get the one-time prompt.
+  Future<void> _setupNotificationPrefs() async {
+    final prefs = NotificationPrefs();
+    await prefs.subscribeAllUsers();
+    final user = FirebaseAuth.instance.currentUser;
+    if (!signedIn || user == null) return;
+    if (await prefs.hasAnswered(user.uid)) return;
+    final answered = await prefs.serverFavorites(user.uid);
+    if (answered != null) return; // already has favorites recorded
+    final ctx = mainContext;
+    if (ctx != null && mounted) {
+      Navigator.push(ctx,
+          MaterialPageRoute(builder: (_) => const FavoriteSportsPage()));
+    }
   }
 
   void setTitle(String value) {
