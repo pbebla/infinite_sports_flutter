@@ -37,6 +37,7 @@ const Map<String, String> kTrophyAssetIcons = {
   // L6 basketball trophy badges (owner supplies real gold-on-black art later).
   'most_points':          'assets/trophies/most_points.png',
   'most_rebounds':        'assets/trophies/most_rebounds.png',
+  'most_two_pointers':    'assets/trophies/most_two_pointers.png',
   'most_three_pointers':  'assets/trophies/most_three_pointers.png',
   'most_steals':          'assets/trophies/most_steals.png',
   'most_blocks':          'assets/trophies/most_blocks.png',
@@ -71,6 +72,7 @@ const List<String> kTrophyAssetIconKeys = [
   'young_talent',
   'most_points',
   'most_rebounds',
+  'most_two_pointers',
   'most_three_pointers',
   'most_steals',
   'most_blocks',
