@@ -106,12 +106,7 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
                 children: [
                   Row(
                     children: [
-                      if (icon.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child:
-                              StatIcon(asset: statIconAsset(icon), size: 18),
-                        ),
+                      _categoryIcon(stat, icon),
                       Text(
                         label,
                         style: Theme.of(context)
@@ -143,6 +138,26 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
           ),
         );
       },
+    );
+  }
+
+  /// Category header icon. Badge sports (basketball / later FF) resolve gold
+  /// badge art by the stat key via [leagueStatIcon] (covers Points/Steals/
+  /// Blocks that had no icon before); other sports keep the line-art chip
+  /// keyed by the category's icon field ('' = no icon, e.g. Clean Sheets).
+  Widget _categoryIcon(String stat, String iconKey) {
+    if (isBadgeLeagueSport(widget.sport)) {
+      final ic = leagueStatIcon(widget.sport, stat);
+      if (ic.asset == null) return const SizedBox.shrink();
+      return Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: StatIcon(asset: ic.asset, size: 18, badge: ic.badge),
+      );
+    }
+    if (iconKey.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: StatIcon(asset: statIconAsset(iconKey), size: 18),
     );
   }
 

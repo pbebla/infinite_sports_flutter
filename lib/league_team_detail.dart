@@ -673,10 +673,16 @@ class LeagueTeamSquadTab extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          StatIcon(
-            asset: statIconAsset(leagueTopStatIconKey(s.stat)),
-            size: 16,
-          ),
+          Builder(builder: (_) {
+            if (isBadgeLeagueSport(sport)) {
+              final ic = leagueStatIcon(sport, s.stat);
+              return StatIcon(asset: ic.asset, size: 16, badge: ic.badge);
+            }
+            return StatIcon(
+              asset: statIconAsset(leagueTopStatIconKey(s.stat)),
+              size: 16,
+            );
+          }),
           const SizedBox(width: 4),
           Text(
             '${s.value}',
