@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/login.dart';
+import 'package:infinite_sports_flutter/misc/league_timeline_filter.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:infinite_sports_flutter/model/prediction.dart';
@@ -498,6 +499,17 @@ class MatchFactsTab extends StatelessWidget {
       return (a['_mergeIdx'] as int).compareTo(b['_mergeIdx'] as int);
     });
 
+    // L6: drop background-stat rows (basketball Miss; FF negatives later) for
+    // league games. Tournament (leagueSportKey == null) and futsal keep every
+    // event — the predicate returns false for them.
+    final sportKey = leagueSportKey;
+    final visibleEvents = sportKey == null
+        ? allEvents
+        : allEvents
+            .where((e) => !isHiddenLeagueTimelineActivity(
+                sportKey, e['eventType'] as String))
+            .toList();
+
     // Teaser visibility: only when prediction context is fully provided and both
     // teams are confirmed — rendered at the very top of either code path.
     final PredictionScope? teaserScope = scope ??
@@ -520,7 +532,7 @@ class MatchFactsTab extends StatelessWidget {
           )
         : const SizedBox.shrink();
 
-    if (allEvents.isEmpty && team1Players.isEmpty && team2Players.isEmpty) {
+    if (visibleEvents.isEmpty && team1Players.isEmpty && team2Players.isEmpty) {
       return SingleChildScrollView(
         padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
         child: Column(
@@ -551,7 +563,7 @@ class MatchFactsTab extends StatelessWidget {
         children: [
           teaser,
           const Divider(height: 1, thickness: 1),
-          if (allEvents.isEmpty)
+          if (visibleEvents.isEmpty)
             Padding(
               padding: const EdgeInsets.all(24),
               child: Center(
@@ -564,7 +576,7 @@ class MatchFactsTab extends StatelessWidget {
               ),
             )
           else
-            ...allEvents.map((e) => _buildEventRow(context, e)),
+            ...visibleEvents.map((e) => _buildEventRow(context, e)),
           _buildMatchLeaders(context),
           _buildLocationCard(context)
         ],
