@@ -131,3 +131,62 @@ class StatIcon extends StatelessWidget {
     );
   }
 }
+
+/// True for league sports whose stat icons are the owner's gold-on-black
+/// self-contained badges (rendered with NO white chip). Futsal/soccer keep
+/// their line-art icons on the white chip. Flag football joins in Group F.
+bool isBadgeLeagueSport(String sportKey) =>
+    sportKey == 'Basketball' || sportKey == 'Flag Football';
+
+/// Resolves a LEAGUE stat/activity [token] (an activity type like
+/// 'OnePointer' OR a statByName key like 'points', case-insensitive) for a
+/// badge sport to its badge asset + badge flag. Basketball only in L6
+/// Group D; flag football is added in Group F. Callers only invoke this for
+/// [isBadgeLeagueSport] sports — futsal/soccer keep [statIconAsset]. The
+/// intentionally-iconless Miss and any unknown token return (null, false).
+/// Foul deliberately reuses the shared line-art chip icon (badge:false) per
+/// the owner spec ("Basketball Foul reuses existing assets/foul.png").
+({String? asset, bool badge}) leagueStatIcon(String sportKey, String token) {
+  final t = token.toLowerCase().trim();
+  switch (sportKey) {
+    case 'Basketball':
+      switch (t) {
+        case 'onepointer':
+        case 'freethrows':
+          return (asset: 'assets/bball_freethrow.png', badge: true);
+        case 'twopointer':
+        case 'twopointers':
+          return (asset: 'assets/bball_two.png', badge: true);
+        case 'threepointer':
+        case 'threepointers':
+          return (asset: 'assets/bball_three.png', badge: true);
+        case 'points':
+          return (asset: 'assets/bball_points.png', badge: true);
+        case 'rebound':
+        case 'rebounds':
+          return (asset: 'assets/bball_rebound.png', badge: true);
+        case 'assist':
+        case 'assists':
+          return (asset: 'assets/bball_assist.png', badge: true);
+        case 'steal':
+        case 'steals':
+          return (asset: 'assets/bball_steal.png', badge: true);
+        case 'block':
+        case 'blocks':
+          return (asset: 'assets/bball_block.png', badge: true);
+        case 'turnover':
+        case 'turnovers':
+          return (asset: 'assets/bball_turnover.png', badge: true);
+        case 'foul':
+        case 'fouls':
+          return (asset: 'assets/foul.png', badge: false);
+        case 'miss':
+        case 'misses':
+          return (asset: null, badge: false);
+        default:
+          return (asset: null, badge: false);
+      }
+    default:
+      return (asset: null, badge: false);
+  }
+}

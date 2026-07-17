@@ -124,4 +124,44 @@ void main() {
       );
     });
   });
+
+  group('leagueStatIcon — basketball badges (L6)', () {
+    test('badge stat/activity tokens return bball asset + badge:true', () {
+      expect(leagueStatIcon('Basketball', 'OnePointer'),
+          (asset: 'assets/bball_freethrow.png', badge: true));
+      expect(leagueStatIcon('Basketball', 'ThreePointer').badge, isTrue);
+      expect(leagueStatIcon('Basketball', 'points').asset,
+          'assets/bball_points.png');
+      expect(leagueStatIcon('Basketball', 'Steal').asset,
+          'assets/bball_steal.png');
+      expect(leagueStatIcon('Basketball', 'blocks').asset,
+          'assets/bball_block.png');
+      expect(leagueStatIcon('Basketball', 'Assist').asset,
+          'assets/bball_assist.png');
+      expect(leagueStatIcon('Basketball', 'rebounds').asset,
+          'assets/bball_rebound.png');
+      expect(leagueStatIcon('Basketball', 'Turnover').asset,
+          'assets/bball_turnover.png');
+    });
+
+    test('foul reuses the shared chip icon (badge:false)', () {
+      expect(leagueStatIcon('Basketball', 'Foul'),
+          (asset: 'assets/foul.png', badge: false));
+    });
+
+    test('miss is icon-less (hidden background stat)', () {
+      expect(leagueStatIcon('Basketball', 'Miss').asset, isNull);
+    });
+
+    test('unknown sport / token → (null, false)', () {
+      expect(leagueStatIcon('Futsal', 'Goal').asset, isNull);
+      expect(leagueStatIcon('Basketball', 'teleport').asset, isNull);
+    });
+
+    test('isBadgeLeagueSport', () {
+      expect(isBadgeLeagueSport('Basketball'), isTrue);
+      expect(isBadgeLeagueSport('Flag Football'), isTrue);
+      expect(isBadgeLeagueSport('Futsal'), isFalse);
+    });
+  });
 }
