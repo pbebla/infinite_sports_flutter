@@ -40,10 +40,14 @@ const Map<String, String> kTrophyAssetIcons = {
   'most_three_pointers':  'assets/trophies/most_three_pointers.png',
   'most_steals':          'assets/trophies/most_steals.png',
   'most_blocks':          'assets/trophies/most_blocks.png',
-  // L6 flag-football trophy badges (owner art later).
+  // L6 flag-football trophy badges. best_receiver + ff_mvp carry the owner's
+  // real gold-on-black art; the other two are placeholders until art lands.
+  // ff_mvp is a FF-specific MVP badge (football player) so it never overwrites
+  // the shared 'mvp' art that soccer/futsal/basketball trophies still use.
   'most_touchdowns':      'assets/trophies/most_touchdowns.png',
   'most_interceptions':   'assets/trophies/most_interceptions.png',
   'best_receiver':        'assets/trophies/best_receiver.png',
+  'ff_mvp':               'assets/trophies/ff_mvp.png',
 };
 
 const List<String> kTrophyAssetIconKeys = [
@@ -70,6 +74,7 @@ const List<String> kTrophyAssetIconKeys = [
   'most_touchdowns',
   'most_interceptions',
   'best_receiver',
+  'ff_mvp',
 ];
 
 bool isAssetIcon(String key) => kTrophyAssetIcons.containsKey(key);
