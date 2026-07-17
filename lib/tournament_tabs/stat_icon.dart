@@ -80,18 +80,36 @@ String? statIconAssetForStat(String statName) {
   }
 }
 
-/// Renders a stat icon on a white rounded chip so the dark line-art stays
-/// readable in both light and dark themes. Pass a resolved asset path (e.g.
-/// from [statIconAsset]); if it is null, a neutral fallback icon is shown so
-/// an unexpected event type never crashes or shows a broken image.
+/// Renders a stat icon. By default it sits on a white rounded chip so the
+/// dark line-art (soccer/futsal) stays readable in both themes. When
+/// [badge] is true the icon is the owner's gold-on-black self-contained
+/// badge art (basketball / later flag football) and is rendered AS-IS with
+/// no chip, so the gold reads on both light and dark cards. Pass a resolved
+/// asset path (e.g. from [statIconAsset] or [leagueStatIcon]); a null asset
+/// falls back to a neutral chip icon so an unexpected type never crashes.
 class StatIcon extends StatelessWidget {
   final String? asset;
   final double size;
+  final bool badge;
 
-  const StatIcon({super.key, required this.asset, this.size = 24});
+  const StatIcon({
+    super.key,
+    required this.asset,
+    this.size = 24,
+    this.badge = false,
+  });
 
   @override
   Widget build(BuildContext context) {
+    // Badge art: no white chip. (A null asset falls through to the chip
+    // fallback below so we never render an empty bare box.)
+    if (badge && asset != null) {
+      return SizedBox(
+        width: size,
+        height: size,
+        child: Image.asset(asset!, fit: BoxFit.contain),
+      );
+    }
     return Container(
       width: size,
       height: size,
@@ -108,7 +126,6 @@ class StatIcon extends StatelessWidget {
         ],
       ),
       child: asset == null
-          // grey.shade700 keeps the fallback readable against the white chip.
           ? Icon(Icons.sports, size: size * 0.62, color: Colors.grey.shade700)
           : Image.asset(asset!, fit: BoxFit.contain),
     );

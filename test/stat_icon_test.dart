@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 
@@ -91,6 +92,36 @@ void main() {
       expect(statIconAsset('Miss'), isNull);
       expect(statIconAsset('QBComp'), isNull);
       expect(statIconAsset('Receiving TD'), isNull);
+    });
+  });
+
+  group('StatIcon badge path (L6)', () {
+    testWidgets('badge icons render bare (no white chip Container)', (t) async {
+      await t.pumpWidget(const MaterialApp(
+        home: StatIcon(asset: 'assets/rebound.png', badge: true),
+      ));
+      // Bare path is SizedBox + Image, no decorated chip Container.
+      expect(
+        find.descendant(
+            of: find.byType(StatIcon), matching: find.byType(Container)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+            of: find.byType(StatIcon), matching: find.byType(Image)),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('non-badge icons keep the white chip Container', (t) async {
+      await t.pumpWidget(const MaterialApp(
+        home: StatIcon(asset: 'assets/goal.png'),
+      ));
+      expect(
+        find.descendant(
+            of: find.byType(StatIcon), matching: find.byType(Container)),
+        findsOneWidget,
+      );
     });
   });
 }
