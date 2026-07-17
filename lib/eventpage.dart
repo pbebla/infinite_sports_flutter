@@ -3,10 +3,10 @@ import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart' show consolidateHttpClientResponseBytes;
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/event_repo.dart';
-import 'package:infinite_sports_flutter/misc/share_match_card_service.dart' show captureCardToPng;
-import 'package:infinite_sports_flutter/widgets/event_share_card.dart';
+import 'package:infinite_sports_flutter/misc/event_share.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/attendee.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
@@ -56,59 +56,38 @@ class _EventPageState extends State<EventPage> {
   /// The message that goes out with a share. Owner's custom caption when set
   /// (from the manager event form), otherwise auto-built from the details.
   /// Always ends with the app call-to-action.
-  String _shareMessage() {
-    const cta =
-        'Download the Infinite Sports app for details and to sign up!';
-    final caption = event.shareCaption?.trim() ?? '';
-    if (caption.isNotEmpty) return '$caption\n\n$cta';
-    final parts = <String>[
-      event.title ?? 'Event',
-      if ((event.eventDate ?? '').isNotEmpty) 'on ${event.eventDate}',
-      if ((event.startTime ?? '').isNotEmpty) 'at ${event.startTime}',
-      if ((event.location ?? '').isNotEmpty) '· ${event.location}',
-    ];
-    return '${parts.join(' ')}\n\n$cta';
+  /// Downloads the flyer to a temp file so it can be shared as its own clean
+  /// image (no overlay), with the message carried as separate text.
+  Future<File?> _downloadFlyer(String url) async {
+    try {
+      final client = HttpClient();
+      final request = await client.getUrl(Uri.parse(url));
+      final response = await request.close();
+      if (response.statusCode != 200) return null;
+      final bytes = await consolidateHttpClientResponseBytes(response);
+      final dir = await getTemporaryDirectory();
+      final ext = url.toLowerCase().contains('.png') ? 'png' : 'jpg';
+      final file = File('${dir.path}/flyer_${event.id ?? widget.index}.$ext');
+      await file.writeAsBytes(bytes);
+      return file;
+    } catch (_) {
+      return null;
+    }
   }
 
-  /// Shares a single image that bakes the flyer + caption together, so the
-  /// words always travel with the flyer (many apps drop separate text when
-  /// an image is attached). Text is also passed for apps that accept it.
+  /// Shares the flyer as its own clean image with the message as separate
+  /// text (custom caption, or an auto invite when none is set). Apps that
+  /// keep both (Messages, WhatsApp, email) show flyer + text; image-only
+  /// targets still get the flyer.
   Future<void> share_Clicked() async {
-    final message = _shareMessage();
+    final message = buildShareMessage(event);
     final url = event.imageUrl?.trim() ?? '';
-
-    ImageProvider? flyer;
-    if (url.isNotEmpty && mounted) {
-      flyer = NetworkImage(url);
-      try {
-        await precacheImage(flyer, context);
-      } catch (_) {
-        flyer = null; // flyer failed to load; card falls back to a banner
-      }
-    }
-    if (!mounted) return;
-
-    try {
-      final bytes = await captureCardToPng(
-        context,
-        EventShareCard(
-          title: event.title ?? 'Event',
-          flyer: flyer,
-          caption: event.shareCaption,
-          dateLine: [
-            if ((event.eventDate ?? '').isNotEmpty) event.eventDate!,
-            if ((event.startTime ?? '').isNotEmpty) event.startTime!,
-          ].join(' · '),
-          location: event.location,
-        ),
-      );
-      final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/event_${event.id ?? widget.index}.png');
-      await file.writeAsBytes(bytes);
-      await Share.shareXFiles([XFile(file.path, mimeType: 'image/png')],
+    File? flyer;
+    if (url.isNotEmpty) flyer = await _downloadFlyer(url);
+    if (flyer != null) {
+      await Share.shareXFiles([XFile(flyer.path)],
           text: message, subject: event.title ?? 'Share Event');
-    } catch (_) {
-      // Fall back to text-only if the card can't be rendered.
+    } else {
       await Share.share(message, subject: event.title ?? 'Share Event');
     }
   }
