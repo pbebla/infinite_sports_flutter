@@ -497,4 +497,32 @@ void main() {
       expect(rows.first.gd, 2);
     });
   });
+
+  group('FF stat keys read Manager short codes (L6 regression)', () {
+    test('leaguePlayerFromLineup maps FF short codes to fan stats', () {
+      final p = leaguePlayerFromLineup(
+        sport: 'Flag Football',
+        name: 'Rusher',
+        teamName: 'Team A',
+        raw: const {
+          'REC': 7,
+          'RECTD': 2,
+          'RushTD': 1,
+          'INTTD': 1,
+          'PassTD': 5,
+          'INT': 3,
+          'FP': 4,
+          'Sack': 2,
+          'PBU': 1,
+        },
+      );
+      // Scored TDs only (no PassTD): 2 + 1 + 1 = 4.
+      expect(p.statByName('touchdowns'), 4);
+      expect(p.statByName('receptions'), 7);
+      expect(p.statByName('interceptions'), 3);
+      expect(p.statByName('flagPulls'), 4);
+      expect(p.statByName('sacks'), 2);
+      expect(p.statByName('passTouchdowns'), 5);
+    });
+  });
 }
