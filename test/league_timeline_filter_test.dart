@@ -23,10 +23,17 @@ void main() {
       expect(isHiddenLeagueTimelineActivity('Soccer', 'Miss'), isFalse);
     });
 
-    test('flag football hides QBInc/RECMiss/PAT1Miss/TwoPTMiss', () {
-      for (final t in ['QBInc', 'RECMiss', 'PAT1Miss', 'TwoPTMiss']) {
-        expect(isHiddenLeagueTimelineActivity('Flag Football', t), isTrue,
-            reason: '$t should be hidden');
+    test('flag football hides ONLY QBInc (case-insensitive)', () {
+      expect(isHiddenLeagueTimelineActivity('Flag Football', 'QBInc'), isTrue);
+      expect(isHiddenLeagueTimelineActivity('Flag Football', 'qbinc'), isTrue);
+      expect(isHiddenLeagueTimelineActivity('Flag Football', '  QBINC '), isTrue);
+    });
+
+    test('flag football L6.1: RECMiss/PAT1Miss/TwoPTMiss NO LONGER hidden '
+        '— they render on the timeline now', () {
+      for (final t in ['RECMiss', 'PAT1Miss', 'TwoPTMiss']) {
+        expect(isHiddenLeagueTimelineActivity('Flag Football', t), isFalse,
+            reason: '$t should now be visible on the timeline');
       }
     });
 
