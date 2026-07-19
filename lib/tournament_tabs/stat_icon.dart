@@ -223,8 +223,16 @@ bool isBadgeLeagueSport(String sportKey) =>
           return (asset: 'assets/ff_pat.png', badge: true);
         case 'twopt':
           return (asset: 'assets/ff_two_pt.png', badge: true);
-        // QBInc / RECMiss / PAT1Miss / TwoPTMiss (hidden negatives) and
-        // 'Pass INT' (thrown INT, buttonless) carry no timeline icon.
+        // L6.1: the three "miss" negatives now render on the timeline with
+        // their own bundled art (RECMiss also feeds Catch %).
+        case 'recmiss':
+          return (asset: 'assets/ff_rec_miss.png', badge: true);
+        case 'pat1miss':
+          return (asset: 'assets/ff_pat1_miss.png', badge: true);
+        case 'twoptmiss':
+          return (asset: 'assets/ff_two_pt_miss.png', badge: true);
+        // QBInc (still hidden from the timeline) and 'Pass INT' (thrown
+        // INT, buttonless) carry no timeline icon.
         default:
           return (asset: null, badge: false);
       }

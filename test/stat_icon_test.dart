@@ -191,10 +191,21 @@ void main() {
           'assets/ff_sack.png');
     });
 
-    test('hidden negatives / thrown INT carry no icon', () {
+    test('QBInc (still hidden) / thrown INT carry no icon', () {
       expect(leagueStatIcon('Flag Football', 'QBInc').asset, isNull);
-      expect(leagueStatIcon('Flag Football', 'RECMiss').asset, isNull);
       expect(leagueStatIcon('Flag Football', 'Pass INT').asset, isNull);
+    });
+
+    test('L6.1: the 3 miss negatives map to the bundled miss art', () {
+      expect(leagueStatIcon('Flag Football', 'RECMiss'),
+          (asset: 'assets/ff_rec_miss.png', badge: true));
+      expect(leagueStatIcon('Flag Football', 'PAT1Miss'),
+          (asset: 'assets/ff_pat1_miss.png', badge: true));
+      expect(leagueStatIcon('Flag Football', 'TwoPTMiss'),
+          (asset: 'assets/ff_two_pt_miss.png', badge: true));
+      // Case-insensitive / trimmed, matching the rest of the switch.
+      expect(leagueStatIcon('Flag Football', '  recmiss ').asset,
+          'assets/ff_rec_miss.png');
     });
   });
 }
