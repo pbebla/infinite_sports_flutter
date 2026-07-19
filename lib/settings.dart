@@ -4,6 +4,7 @@ import 'package:flutter_launcher_icons/constants.dart';
 import 'package:flutter_sticky_header/flutter_sticky_header.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/misc/follow_store.dart';
+import 'package:infinite_sports_flutter/misc/categories.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
@@ -38,6 +39,7 @@ class _SettingsState extends State<Settings> {
   List<FollowedChannel> _follows = [];
   bool _masterEnabled = true;
   Set<String> _categoriesOn = {};
+  List<String> _allCategories = kDefaultCategories;
 
   @override
   void initState() {
@@ -50,9 +52,14 @@ class _SettingsState extends State<Settings> {
   Future<void> _loadNotificationSettings() async {
     final follows = await _followStore.follows();
     final master = await _followStore.masterEnabled();
-    final categories = await _notifPrefs.currentCategories();
+    final allCategories = await getCategories();
+    final categories = <String>{};
+    for (final c in allCategories) {
+      if (await _notifPrefs.isCategoryOn(c)) categories.add(c);
+    }
     if (!mounted) return;
     setState(() {
+      _allCategories = allCategories;
       // 'sport' follows are shown as the category toggles below; 'event'
       // reminders are managed on each event page. Keep both out of the
       // generic team/tournament/league follows list.
@@ -156,7 +163,7 @@ class _SettingsState extends State<Settings> {
                   child: Text('Sports & events you follow',
                       style: TextStyle(fontSize: 13, color: Colors.grey)),
                 ),
-                for (final category in kNotificationCategories)
+                for (final category in _allCategories)
                   ListTile(
                     minTileHeight: 40,
                     title: Text(category),

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/eventpage.dart';
 import 'package:infinite_sports_flutter/league_detail_page.dart';
 import 'package:infinite_sports_flutter/misc/calendar_sources.dart';
+import 'package:infinite_sports_flutter/misc/categories.dart';
 import 'package:infinite_sports_flutter/misc/event_repo.dart';
 import 'package:infinite_sports_flutter/misc/event_utils.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -35,11 +36,15 @@ class _CalendarTabState extends State<CalendarTab> {
   Map<DateTime, List<CalendarEntry>> _events = {};
   Map<DateTime, List<CalendarEntry>> _leagueDays = {};
   Map<DateTime, List<CalendarEntry>> _tournamentDays = {};
+  List<String> _categories = kDefaultCategories;
   final List<StreamSubscription> _subs = [];
 
   @override
   void initState() {
     super.initState();
+    _subs.add(watchCategories().listen((c) {
+      if (mounted) setState(() => _categories = c);
+    }));
     _subs.add(watchAllEvents().map(eventsByDay).listen((byDay) {
       if (mounted) setState(() => _events = byDay);
     }));
@@ -115,6 +120,7 @@ class _CalendarTabState extends State<CalendarTab> {
             children: [
               _CategoryChips(
                 selected: _selectedCategories,
+                categories: _categories,
                 onChanged: (category) {
                   setState(() {
                     if (category == null) {
@@ -256,9 +262,11 @@ class _CalendarTabState extends State<CalendarTab> {
 /// Horizontal category filter row. "All" clears the selection; category
 /// chips toggle independently (multi-select).
 class _CategoryChips extends StatelessWidget {
-  const _CategoryChips({required this.selected, required this.onChanged});
+  const _CategoryChips(
+      {required this.selected, required this.categories, required this.onChanged});
 
   final Set<String> selected;
+  final List<String> categories;
   /// Called with a category to toggle, or null for "All".
   final ValueChanged<String?> onChanged;
 
@@ -284,7 +292,7 @@ class _CategoryChips extends StatelessWidget {
               showCheckmark: false,
             ),
           ),
-          for (final category in kEventCategories)
+          for (final category in categories)
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: FilterChip(

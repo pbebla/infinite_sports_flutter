@@ -43,10 +43,12 @@ class NotificationPrefs {
     }
   }
 
-  /// Applies a full set of chosen categories at once (onboarding). Categories
-  /// not in [chosen] are turned off.
-  Future<void> setFavorites(Set<String> chosen, {String? uid}) async {
-    for (final category in kNotificationCategories) {
+  /// Applies a full set of chosen categories at once (onboarding). Every
+  /// category in [universe] (the live category list) not in [chosen] is turned
+  /// off; defaults to the built-in list when no universe is given.
+  Future<void> setFavorites(Set<String> chosen,
+      {String? uid, List<String>? universe}) async {
+    for (final category in (universe ?? kNotificationCategories)) {
       await setCategory(category, chosen.contains(category), uid: uid);
     }
   }

@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/categories.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 
 /// "What are you into?" — pick favorite sports/categories. Shown once after
@@ -19,6 +20,15 @@ class _FavoriteSportsPageState extends State<FavoriteSportsPage> {
   late final Set<String> _selected = {...widget.initial};
   final _prefs = NotificationPrefs();
   bool _saving = false;
+  List<String> _categories = kDefaultCategories;
+
+  @override
+  void initState() {
+    super.initState();
+    getCategories().then((c) {
+      if (mounted) setState(() => _categories = c);
+    });
+  }
 
   IconData _iconFor(String category) {
     switch (category) {
@@ -44,7 +54,9 @@ class _FavoriteSportsPageState extends State<FavoriteSportsPage> {
     setState(() => _saving = true);
     final uid = FirebaseAuth.instance.currentUser?.uid;
     try {
-      if (save) await _prefs.setFavorites(_selected, uid: uid);
+      if (save) {
+        await _prefs.setFavorites(_selected, uid: uid, universe: _categories);
+      }
       if (uid != null) await _prefs.markAnswered(uid);
     } catch (_) {}
     if (mounted) Navigator.of(context).pop();
@@ -90,7 +102,7 @@ class _FavoriteSportsPageState extends State<FavoriteSportsPage> {
               mainAxisSpacing: 12,
               crossAxisSpacing: 12,
               children: [
-                for (final category in kNotificationCategories)
+                for (final category in _categories)
                   _CategoryTile(
                     label: category,
                     icon: _iconFor(category),
