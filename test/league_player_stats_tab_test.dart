@@ -85,6 +85,33 @@ void main() {
       expect(find.text('Top Scorer'), findsNothing); // futsal list absent
     });
 
+    testWidgets('flag football renders the Catch % category with a % value '
+        '(L6.1)', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final rosters = {
+        'T': [
+          bballer('Sam', {'receptions': 7, 'catchPercentage': 70}),
+          // Gated player (adapter emitted 0 for a <3-target sample):
+          // excluded from the Catch % card by the "> 0" leaders filter.
+          bballer('Tiny', {'receptions': 1, 'catchPercentage': 0}),
+        ],
+      };
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: LeaguePlayerStatsTab(
+              sport: 'Flag Football', rosters: rosters, teams: const {}),
+        ),
+      ));
+      await tester.pump();
+      expect(find.text('Catch %'), findsOneWidget);
+      expect(find.text('70%'), findsOneWidget);
+      // Receptions card still shows plain counts (no suffix).
+      expect(find.text('7'), findsOneWidget);
+    });
+
     testWidgets('futsal categories unchanged', (tester) async {
       final rosters = {
         'T': [

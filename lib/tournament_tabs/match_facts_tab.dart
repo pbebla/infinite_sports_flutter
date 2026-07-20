@@ -395,6 +395,8 @@ class MatchFactsTab extends StatelessWidget {
     for (final cat in categories) {
       final label = cat['label']!;
       final stat = cat['stat']!;
+      // Optional value suffix ('%' for FF Catch %); absent = plain count.
+      final suffix = cat['suffix'] ?? '';
       final sorted = allPlayers
           .where((p) => getValue(p, stat) > 0)
           .toList()
@@ -427,7 +429,7 @@ class MatchFactsTab extends StatelessWidget {
               ),
             ),
             Text(
-              '$value',
+              '$value$suffix',
               style: TextStyle(
                 color: Theme.of(context).colorScheme.onSurface,
                 fontSize: 14,

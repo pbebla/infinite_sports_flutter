@@ -92,6 +92,7 @@ class _StatsTabState extends State<StatsTab> {
     'passTouchdowns': 'Pass Touchdowns',
     'receivingTouchdowns': 'Receiving Touchdowns',
     'receptions': 'Receptions',
+    'catchPercentage': 'Catch %',
     'interceptions': 'Interceptions',
     'flagPulls': 'Flag Pulls',
     'sacks': 'Sacks',
@@ -296,7 +297,11 @@ class _StatsTabState extends State<StatsTab> {
     return orderedKeys
         .map((key) => _StatRow(
               label: _statLabels[key] ?? _humanize(key),
-              value: _formatValue(comp.stats[key]!),
+              // Catch % (L6.1) renders with its % suffix; everything else
+              // stays a plain count.
+              value: key == 'catchPercentage'
+                  ? '${_formatValue(comp.stats[key]!)}%'
+                  : _formatValue(comp.stats[key]!),
               iconAsset: _statIconAssetForKey(key),
             ))
         .toList();

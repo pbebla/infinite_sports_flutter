@@ -178,8 +178,8 @@ void main() {
         leagueMatchLeaderCategories('Flag Football')
             .map((c) => c['stat'])
             .toList(),
-        ['touchdowns', 'passTouchdowns', 'receptions', 'interceptions',
-          'flagPulls', 'sacks'],
+        ['touchdowns', 'passTouchdowns', 'receptions', 'catchPercentage',
+          'interceptions', 'flagPulls', 'sacks'],
       );
       expect(
         leagueMatchLeaderCategories('Futsal')
@@ -187,6 +187,75 @@ void main() {
             .toList(),
         ['goals', 'assists', 'saves', 'dpl'],
       );
+    });
+
+    test('Catch % leader category carries the % suffix', () {
+      final cat = leagueMatchLeaderCategories('Flag Football')
+          .firstWhere((c) => c['stat'] == 'catchPercentage');
+      expect(cat['label'], 'Catch %');
+      expect(cat['suffix'], '%');
+    });
+  });
+
+  group('L6.1 — catchPercentage (Task 3)', () {
+    test('null when there are zero targets (no data, not 0%)', () {
+      expect(catchPercentage(0, 0), isNull);
+    });
+
+    test('computes a rounded whole-number percent', () {
+      expect(catchPercentage(3, 1), 75); // 3/4
+      expect(catchPercentage(2, 1), 67); // 2/3 = 66.67 -> 67
+      expect(catchPercentage(5, 0), 100);
+      expect(catchPercentage(0, 5), 0); // legitimate 0% (has targets)
+    });
+
+    test('minTargets gates small samples to null (default: no gate)', () {
+      expect(catchPercentage(1, 0), 100); // no gate by default
+      expect(catchPercentage(1, 0, minTargets: 3), isNull); // 1 target < 3
+      expect(catchPercentage(1, 1, minTargets: 3), isNull); // 2 targets < 3
+      expect(catchPercentage(2, 1, minTargets: 3), 67); // 3 targets, passes
+    });
+  });
+
+  group('L6.1 — RECMiss tally + Catch % byStat (Task 3)', () {
+    test('recmiss events tally into recMisses count', () {
+      final match = matchWithActivities(team1Activity: {
+        "5'": [
+          {'REC': 'Sam'},
+          {'REC': 'Sam'},
+          {'RECMiss': 'Sam'},
+        ],
+      });
+      final tallies = singleMatchPlayerTallies(match);
+      expect(tallies['Sam']!.byStat('receptions'), 2);
+      expect(tallies['Sam']!.counts['recMisses'], 1);
+    });
+
+    test('byStat("catchPercentage") applies the built-in >=3-target gate',
+        () {
+      // Only 2 targets (1 REC + 1 RECMiss) -> below the gate -> 0 (hidden
+      // from the Match Leaders "> 0" filter, same as "no data").
+      final below = singleMatchPlayerTallies(matchWithActivities(
+        team1Activity: {
+          "1'": [
+            {'REC': 'Sam'},
+            {'RECMiss': 'Sam'},
+          ],
+        },
+      ));
+      expect(below['Sam']!.byStat('catchPercentage'), 0);
+
+      // 3 targets (2 REC + 1 RECMiss) -> passes the gate -> 67%.
+      final atGate = singleMatchPlayerTallies(matchWithActivities(
+        team1Activity: {
+          "1'": [
+            {'REC': 'Sam'},
+            {'REC': 'Sam'},
+            {'RECMiss': 'Sam'},
+          ],
+        },
+      ));
+      expect(atGate['Sam']!.byStat('catchPercentage'), 67);
     });
   });
 }
