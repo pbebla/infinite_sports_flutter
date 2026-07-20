@@ -206,12 +206,16 @@ class ShareMatchCard extends StatelessWidget {
       child: const Icon(Icons.shield_outlined, color: Colors.white, size: 40),
     );
     if (url == null || url.isEmpty) return shield;
-    return ClipOval(
+    // L6.2 Task 3: contain (not cover + ClipOval) — the full crest renders
+    // undistorted, no crop. Only the missing-logo shield stays circular.
+    return SizedBox(
+      width: size,
+      height: size,
       child: Image.network(
         url,
         width: size,
         height: size,
-        fit: BoxFit.cover,
+        fit: BoxFit.contain,
         errorBuilder: (_, __, ___) => shield,
       ),
     );

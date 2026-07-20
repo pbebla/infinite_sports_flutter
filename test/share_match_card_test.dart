@@ -66,4 +66,35 @@ void main() {
     await _pump(tester, m);
     expect(tester.takeException(), isNull);
   });
+
+  // L6.2 Task 3: the card's crest image renders undistorted (contain), no
+  // ClipOval crop — same fix as TeamLogo.
+  testWidgets('a team logo url renders BoxFit.contain with no ClipOval crop',
+      (tester) async {
+    const m = TournamentMatch(
+      id: 'm', stage: 'Quarterfinal', label: 'QF', date: '08272026',
+      team1Id: 'eagles', team2Id: 'lions', team1Score: 0, team2Score: 0,
+      status: 0, bracketPosition: 1,
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ShareMatchCard(
+          match: m,
+          team1: TournamentTeam(
+            id: 'eagles', name: 'Eagles', qualification: '', gp: 0, wins: 0,
+            draws: 0, losses: 0, gs: 0, gc: 0, gd: 0, points: 0,
+            logoUrl: 'https://example.com/eagles.png',
+          ),
+          team2: _team('lions', 'Lions'),
+          tournamentName: 'Test Tournament 2026',
+        ),
+      ),
+    ));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+
+    final image = tester.widget<Image>(find.byType(Image).first);
+    expect(image.fit, BoxFit.contain);
+    expect(find.byType(ClipOval), findsNothing);
+  });
 }
