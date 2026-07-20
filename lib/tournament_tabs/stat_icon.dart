@@ -231,8 +231,14 @@ bool isBadgeLeagueSport(String sportKey) =>
           return (asset: 'assets/ff_pat1_miss.png', badge: true);
         case 'twoptmiss':
           return (asset: 'assets/ff_two_pt_miss.png', badge: true);
-        // QBInc (still hidden from the timeline) and 'Pass INT' (thrown
-        // INT, buttonless) carry no timeline icon.
+        // L6.2 Task 6: QBInc is un-hidden from the timeline and gets its
+        // own icon — assets/ff_qb_inc.png ships today as a COPY of
+        // ff_qb_comp.png (placeholder); the owner's real QB Inc art drops
+        // in later by overwriting the same filename.
+        case 'qbinc':
+          return (asset: 'assets/ff_qb_inc.png', badge: true);
+        // 'Pass INT' (thrown INT, buttonless) still carries no timeline
+        // icon.
         default:
           return (asset: null, badge: false);
       }

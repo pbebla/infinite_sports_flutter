@@ -23,10 +23,12 @@ void main() {
       expect(isHiddenLeagueTimelineActivity('Soccer', 'Miss'), isFalse);
     });
 
-    test('flag football hides ONLY QBInc (case-insensitive)', () {
-      expect(isHiddenLeagueTimelineActivity('Flag Football', 'QBInc'), isTrue);
-      expect(isHiddenLeagueTimelineActivity('Flag Football', 'qbinc'), isTrue);
-      expect(isHiddenLeagueTimelineActivity('Flag Football', '  QBINC '), isTrue);
+    test('flag football L6.2: QBInc is NO LONGER hidden — the hidden set '
+        'is now empty (case-insensitive)', () {
+      expect(isHiddenLeagueTimelineActivity('Flag Football', 'QBInc'), isFalse);
+      expect(isHiddenLeagueTimelineActivity('Flag Football', 'qbinc'), isFalse);
+      expect(
+          isHiddenLeagueTimelineActivity('Flag Football', '  QBINC '), isFalse);
     });
 
     test('flag football L6.1: RECMiss/PAT1Miss/TwoPTMiss NO LONGER hidden '

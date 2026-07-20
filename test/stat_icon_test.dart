@@ -191,8 +191,15 @@ void main() {
           'assets/ff_sack.png');
     });
 
-    test('QBInc (still hidden) / thrown INT carry no icon', () {
-      expect(leagueStatIcon('Flag Football', 'QBInc').asset, isNull);
+    test('L6.2: QBInc is un-hidden and gets its own badge icon '
+        '(placeholder art, same file as ff_qb_comp today)', () {
+      expect(leagueStatIcon('Flag Football', 'QBInc'),
+          (asset: 'assets/ff_qb_inc.png', badge: true));
+      expect(leagueStatIcon('Flag Football', '  qbinc ').asset,
+          'assets/ff_qb_inc.png');
+    });
+
+    test('thrown INT (Pass INT) still carries no icon', () {
       expect(leagueStatIcon('Flag Football', 'Pass INT').asset, isNull);
     });
 
