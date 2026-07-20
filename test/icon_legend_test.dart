@@ -61,13 +61,14 @@ void main() {
           'assets/bball_rebound.png');
     });
 
-    test('Flag Football resolves all 15 entries in owner order, all badges',
+    test('Flag Football resolves all 16 entries in owner order, all badges',
         () {
       final entries = legendEntriesForSport('Flag Football');
       expect(entries.map((e) => e.label), [
-        'Completion', 'Reception', 'Drop', 'Receiving TD', 'Rushing TD',
-        'Pick-Six', 'Pass TD', 'Interception', 'Flag Pull', 'Sack',
-        'Pass Breakup', 'PAT Made', 'PAT Missed', '2PT Made', '2PT Missed',
+        'Completion', 'Incompletion', 'Reception', 'Drop', 'Receiving TD',
+        'Rushing TD', 'Pick-Six', 'Pass TD', 'Interception', 'Flag Pull',
+        'Sack', 'Pass Breakup', 'PAT Made', 'PAT Missed', '2PT Made',
+        '2PT Missed',
       ]);
       expect(entries.every((e) => e.badge == true), isTrue);
       expect(entries.every((e) => e.asset != null), isTrue);

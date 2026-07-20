@@ -48,6 +48,7 @@ List<LegendEntry> legendEntriesForSport(String? leagueSportKey) {
       // for this list today) is skipped rather than shown broken.
       const tokensInOrder = <String, String>{
         'Completion': 'qbcomp',
+        'Incompletion': 'qbinc',
         'Reception': 'rec',
         'Drop': 'recmiss',
         'Receiving TD': 'receiving td',
