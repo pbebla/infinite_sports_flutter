@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/misc/league_timeline_filter.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/icon_legend.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:infinite_sports_flutter/model/prediction.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
@@ -553,6 +554,9 @@ class MatchFactsTab extends StatelessWidget {
               ),
             ),
             _buildLocationCard(context),
+            // Icon legend (L6.2): always visible, even with no rosters/events
+            // at all — a fan opening a brand-new upcoming match still sees it.
+            IconLegend(leagueSportKey: leagueSportKey),
           ],
         ),
       );
@@ -580,7 +584,11 @@ class MatchFactsTab extends StatelessWidget {
           else
             ...visibleEvents.map((e) => _buildEventRow(context, e)),
           _buildMatchLeaders(context),
-          _buildLocationCard(context)
+          _buildLocationCard(context),
+          // Icon legend (L6.2): rendered at the very bottom, in every match
+          // state (upcoming/live/finished) — same FotMob-style card either
+          // early-return path above also carries.
+          IconLegend(leagueSportKey: leagueSportKey),
         ],
       ),
     );
