@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/league_tabs/league_player_stats_tab.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 
 void main() {
   final rosters = leagueRostersFromLineupsNode('Futsal', {
@@ -54,20 +55,32 @@ void main() {
           extraStats: extra,
         );
 
-    testWidgets('basketball renders Points/Rebounds/Assists/3-Pointers/'
-        'Steals/Blocks cards', (tester) async {
-      // Six single-player cards overflow the default 600px test viewport
+    testWidgets('L6.2 Task 4: basketball renders the FULL individual-stat '
+        'set, in the owner order, with gold badge icons (Fouls stays '
+        'line-art)', (tester) async {
+      // Ten single-player cards overflow the default 600px test viewport
       // before the lazy ListView builds the last one (the same "below the
       // fold" caveat as the futsal test above) — grow the surface so every
-      // category actually builds and the label assertions are meaningful.
-      tester.view.physicalSize = const Size(800, 2400);
+      // category actually builds and the label/order assertions are
+      // meaningful.
+      tester.view.physicalSize = const Size(800, 3600);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
       final rosters = {
         'T': [
-          bballer('Sam', {'points': 22, 'rebounds': 9, 'assists': 4,
-            'threePointers': 3, 'steals': 2, 'blocks': 1}),
+          bballer('Sam', {
+            'points': 22,
+            'threePointers': 3,
+            'twoPointers': 5,
+            'freeThrows': 4,
+            'rebounds': 9,
+            'assists': 4,
+            'steals': 2,
+            'blocks': 1,
+            'turnovers': 3,
+            'fouls': 2,
+          }),
         ],
       };
       await tester.pumpWidget(MaterialApp(
@@ -77,12 +90,36 @@ void main() {
         ),
       ));
       await tester.pump();
-      for (final label in [
-        'Points', 'Rebounds', 'Assists', '3-Pointers', 'Steals', 'Blocks',
-      ]) {
+
+      const labelsInOrder = [
+        'Points', '3-Pointers', '2-Pointers', 'Free Throws Made', 'Rebounds',
+        'Assists', 'Steals', 'Blocks', 'Turnovers', 'Fouls',
+      ];
+      for (final label in labelsInOrder) {
         expect(find.text(label), findsOneWidget, reason: label);
       }
       expect(find.text('Top Scorer'), findsNothing); // futsal list absent
+
+      // Vertical order matches the owner's exact list order.
+      final ys =
+          labelsInOrder.map((l) => tester.getTopLeft(find.text(l)).dy).toList();
+      for (var i = 1; i < ys.length; i++) {
+        expect(ys[i], greaterThan(ys[i - 1]),
+            reason: '${labelsInOrder[i]} should render below '
+                '${labelsInOrder[i - 1]}');
+      }
+
+      // Every category but Fouls resolves the gold badge art; Fouls reuses
+      // the shared line-art chip (badge:false).
+      expect(
+        find.byWidgetPredicate((w) => w is StatIcon && w.badge == true),
+        findsNWidgets(9),
+      );
+      expect(
+        find.byWidgetPredicate((w) =>
+            w is StatIcon && w.badge == false && w.asset == 'assets/foul.png'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('flag football renders the Catch % category with a % value '

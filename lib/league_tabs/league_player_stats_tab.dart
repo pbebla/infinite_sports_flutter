@@ -48,13 +48,21 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
       {'label': 'Yellow Cards', 'stat': 'yellowCards', 'icon': 'yellow'},
       {'label': 'Red Cards', 'stat': 'redCards', 'icon': 'red'},
     ],
+    // L6.2 Task 4: the full individual-stat set, in the owner's order. Every
+    // category here is a badge sport (isBadgeLeagueSport('Basketball')), so
+    // _categoryIcon below resolves the gold bball_*.png badge via
+    // leagueStatIcon(stat) regardless of the 'icon' field — left blank.
     'Basketball': [
       {'label': 'Points', 'stat': 'points', 'icon': ''},
-      {'label': 'Rebounds', 'stat': 'rebounds', 'icon': 'rebound'},
-      {'label': 'Assists', 'stat': 'assists', 'icon': 'assist'},
-      {'label': '3-Pointers', 'stat': 'threePointers', 'icon': 'threepointer'},
+      {'label': '3-Pointers', 'stat': 'threePointers', 'icon': ''},
+      {'label': '2-Pointers', 'stat': 'twoPointers', 'icon': ''},
+      {'label': 'Free Throws Made', 'stat': 'freeThrows', 'icon': ''},
+      {'label': 'Rebounds', 'stat': 'rebounds', 'icon': ''},
+      {'label': 'Assists', 'stat': 'assists', 'icon': ''},
       {'label': 'Steals', 'stat': 'steals', 'icon': ''},
       {'label': 'Blocks', 'stat': 'blocks', 'icon': ''},
+      {'label': 'Turnovers', 'stat': 'turnovers', 'icon': ''},
+      {'label': 'Fouls', 'stat': 'fouls', 'icon': ''},
     ],
     'Flag Football': [
       {'label': 'Touchdowns', 'stat': 'touchdowns', 'icon': ''},
