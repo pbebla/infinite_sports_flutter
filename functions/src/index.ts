@@ -282,6 +282,7 @@ export const onPredictMatchQuestion = onValueWritten(
 
 export { createRegistrationPaymentIntent } from './createRegistrationPaymentIntent';
 export { stripeWebhook } from './stripeWebhook';
+export { onCampaignCreated, processScheduledCampaigns } from './campaign_watch';
 
 // ---- League Experience P3: league watcher + prediction scoring ----
 
