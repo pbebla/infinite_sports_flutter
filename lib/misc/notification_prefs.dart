@@ -127,6 +127,21 @@ class NotificationPrefs {
     }
   }
 
+  /// A fan's write-in for a sport/category we don't offer yet ("Other" on the
+  /// favorites picker). Lands in /CategorySuggestions for the owner to review
+  /// in the manager's Categories screen and promote to a real category.
+  Future<void> submitCategorySuggestion(String text, {String? uid}) async {
+    final cleaned = text.trim();
+    if (cleaned.isEmpty) return;
+    try {
+      await FirebaseDatabase.instance.ref('CategorySuggestions').push().set({
+        'Text': cleaned,
+        'Uid': uid ?? '',
+        'CreatedAt': ServerValue.timestamp,
+      });
+    } catch (_) {}
+  }
+
   /// Every install listens to the app-wide channel so campaigns to "Everyone"
   /// reach them. Safe to call on each launch.
   Future<void> subscribeAllUsers() async {

@@ -19,8 +19,15 @@ class FavoriteSportsPage extends StatefulWidget {
 class _FavoriteSportsPageState extends State<FavoriteSportsPage> {
   late final Set<String> _selected = {...widget.initial};
   final _prefs = NotificationPrefs();
+  final _otherController = TextEditingController();
   bool _saving = false;
   List<String> _categories = kDefaultCategories;
+
+  @override
+  void dispose() {
+    _otherController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -56,8 +63,11 @@ class _FavoriteSportsPageState extends State<FavoriteSportsPage> {
     try {
       if (save) {
         await _prefs.setFavorites(_selected, uid: uid, universe: _categories);
+        await _prefs.submitCategorySuggestion(_otherController.text, uid: uid);
+        // Only a real submission locks the prompt; Skip means "ask me next
+        // time" (owner decision: keep asking until answered).
+        if (uid != null) await _prefs.markAnswered(uid);
       }
-      if (uid != null) await _prefs.markAnswered(uid);
     } catch (_) {}
     if (mounted) Navigator.of(context).pop();
   }
@@ -95,22 +105,42 @@ class _FavoriteSportsPageState extends State<FavoriteSportsPage> {
             ),
           ),
           Expanded(
-            child: GridView.count(
+            child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              crossAxisCount: 2,
-              childAspectRatio: 2.4,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
               children: [
-                for (final category in _categories)
-                  _CategoryTile(
-                    label: category,
-                    icon: _iconFor(category),
-                    selected: _selected.contains(category),
-                    onTap: () => setState(() {
-                      if (!_selected.remove(category)) _selected.add(category);
-                    }),
+                GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 2,
+                  childAspectRatio: 2.4,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  children: [
+                    for (final category in _categories)
+                      _CategoryTile(
+                        label: category,
+                        icon: _iconFor(category),
+                        selected: _selected.contains(category),
+                        onTap: () => setState(() {
+                          if (!_selected.remove(category)) _selected.add(category);
+                        }),
+                      ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 16, bottom: 8),
+                  child: TextField(
+                    controller: _otherController,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: InputDecoration(
+                      labelText: 'Other — something we\'re missing?',
+                      hintText: 'Tennis, chess, backgammon...',
+                      prefixIcon: const Icon(Icons.add_circle_outline),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
                   ),
+                ),
               ],
             ),
           ),

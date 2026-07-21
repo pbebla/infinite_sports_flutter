@@ -7,8 +7,10 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:infinite_sports_flutter/login.dart';
+import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
 import 'package:infinite_sports_flutter/playerpage.dart';
 import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
@@ -235,6 +237,21 @@ class _NavBarState extends State<NavBar> {
             onTap: () {
               Navigator.push(context, MaterialPageRoute(builder:(context) {
                 return PlayerPage(uid: FirebaseAuth.instance.currentUser!.uid,);
+              },));
+            },
+          ),),
+          Visibility(
+            visible: signedIn,
+            child: ListTile(
+            leading: const Icon(Icons.interests, color: Colors.white),
+            title: const Text("Your Interests", style: TextStyle(fontWeight: FontWeight.bold),),
+            textColor: Colors.white,
+            onTap: () async {
+              // Open the favorites picker pre-filled with current choices.
+              final current = await NotificationPrefs().currentCategories();
+              if (!context.mounted) return;
+              Navigator.push(context, MaterialPageRoute(builder:(context) {
+                return FavoriteSportsPage(initial: current);
               },));
             },
           ),),
