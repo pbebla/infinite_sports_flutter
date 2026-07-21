@@ -311,7 +311,8 @@ class BasketballLeagueEvents {
 const LeagueSportConfig basketballLeagueConfig = LeagueSportConfig(
   sportKey: 'Basketball',
   statCatalog: [
-    LeagueStatDef(key: 'OnePoint', label: 'Free Throws', iconId: 'onepointer'),
+    LeagueStatDef(
+        key: 'OnePoint', label: 'Free Throws Made', iconId: 'onepointer'),
     LeagueStatDef(key: 'TwoPoints', label: '2-Pointers', iconId: 'twopointer'),
     LeagueStatDef(
         key: 'ThreePoints', label: '3-Pointers', iconId: 'threepointer'),
@@ -327,7 +328,7 @@ const LeagueSportConfig basketballLeagueConfig = LeagueSportConfig(
     LeagueEventDef(
       activityType: BasketballLeagueEvents.onePointer,
       shortLabel: '+1',
-      label: '🏀 Free Throw',
+      label: '🏀 Free Throw Made',
       statKeys: ['OnePoint'],
       scorePoints: 1,
     ),
