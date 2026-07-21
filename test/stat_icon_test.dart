@@ -144,9 +144,9 @@ void main() {
           'assets/bball_turnover.png');
     });
 
-    test('foul reuses the shared chip icon (badge:false)', () {
+    test('foul is the owner gold badge (L6.2 art)', () {
       expect(leagueStatIcon('Basketball', 'Foul'),
-          (asset: 'assets/foul.png', badge: false));
+          (asset: 'assets/bball_foul.png', badge: true));
     });
 
     test('miss is icon-less (hidden background stat)', () {

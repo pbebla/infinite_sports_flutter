@@ -50,13 +50,12 @@ void main() {
         'Free Throw Made', '2-Pointer', '3-Pointer', 'Rebound', 'Assist',
         'Steal', 'Block', 'Turnover', 'Foul',
       ]);
-      // Everything but the trailing Foul is a gold badge.
-      for (final e in entries.take(entries.length - 1)) {
+      // Every basketball entry is a gold badge (Foul included since L6.2).
+      for (final e in entries) {
         expect(e.badge, isTrue, reason: '${e.label} should be a badge');
       }
       expect(entries.last.label, 'Foul');
-      expect(entries.last.badge, isFalse);
-      expect(entries.last.asset, 'assets/foul.png');
+      expect(entries.last.asset, 'assets/bball_foul.png');
       expect(entries.firstWhere((e) => e.label == 'Rebound').asset,
           'assets/bball_rebound.png');
     });

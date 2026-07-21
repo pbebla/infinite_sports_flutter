@@ -56,8 +56,7 @@ void main() {
         );
 
     testWidgets('L6.2 Task 4: basketball renders the FULL individual-stat '
-        'set, in the owner order, with gold badge icons (Fouls stays '
-        'line-art)', (tester) async {
+        'set, in the owner order, with gold badge icons', (tester) async {
       // Ten single-player cards overflow the default 600px test viewport
       // before the lazy ListView builds the last one (the same "below the
       // fold" caveat as the futsal test above) — grow the surface so every
@@ -109,15 +108,14 @@ void main() {
                 '${labelsInOrder[i - 1]}');
       }
 
-      // Every category but Fouls resolves the gold badge art; Fouls reuses
-      // the shared line-art chip (badge:false).
+      // Every category resolves the gold badge art (Fouls included, L6.2).
       expect(
         find.byWidgetPredicate((w) => w is StatIcon && w.badge == true),
-        findsNWidgets(9),
+        findsNWidgets(10),
       );
       expect(
         find.byWidgetPredicate((w) =>
-            w is StatIcon && w.badge == false && w.asset == 'assets/foul.png'),
+            w is StatIcon && w.asset == 'assets/bball_foul.png'),
         findsOneWidget,
       );
     });

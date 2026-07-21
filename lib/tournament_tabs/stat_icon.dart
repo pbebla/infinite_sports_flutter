@@ -144,8 +144,6 @@ bool isBadgeLeagueSport(String sportKey) =>
 /// Group D; flag football is added in Group F. Callers only invoke this for
 /// [isBadgeLeagueSport] sports — futsal/soccer keep [statIconAsset]. The
 /// intentionally-iconless Miss and any unknown token return (null, false).
-/// Foul deliberately reuses the shared line-art chip icon (badge:false) per
-/// the owner spec ("Basketball Foul reuses existing assets/foul.png").
 ({String? asset, bool badge}) leagueStatIcon(String sportKey, String token) {
   final t = token.toLowerCase().trim();
   switch (sportKey) {
@@ -179,7 +177,7 @@ bool isBadgeLeagueSport(String sportKey) =>
           return (asset: 'assets/bball_turnover.png', badge: true);
         case 'foul':
         case 'fouls':
-          return (asset: 'assets/foul.png', badge: false);
+          return (asset: 'assets/bball_foul.png', badge: true);
         case 'miss':
         case 'misses':
           return (asset: null, badge: false);
