@@ -98,6 +98,22 @@ async function processCampaign(
     const topic = audienceTopic(c.audience);
     if (topic) {
       await sendToTopic(topic, c);
+      // Event audiences also cover people who RSVPed (Attend) but never
+      // tapped Remind me: they aren't on the event topic, so reach them by
+      // token. Reminder-subscribers are excluded to avoid double delivery.
+      if (c.audience.type === 'event' && c.audience.eventId) {
+        const base = root.child(`EventsV2/${c.audience.eventId}`);
+        const [remSnap, attSnap] = await Promise.all([
+          base.child('Reminders').get(),
+          base.child('Attendees').get(),
+        ]);
+        const reminded = new Set(Object.keys(remSnap.val() ?? {}));
+        const attendeesOnly = Object.keys(attSnap.val() ?? {})
+          .filter((uid) => !reminded.has(uid));
+        if (attendeesOnly.length > 0) {
+          await sendToUids(root, attendeesOnly, c);
+        }
+      }
     } else {
       reached = await sendToUids(root, c.audience.uids ?? [], c);
     }
