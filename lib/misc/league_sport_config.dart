@@ -363,6 +363,8 @@ const LeagueSportConfig basketballLeagueConfig = LeagueSportConfig(
       label: '🅰 Assist',
       statKeys: ['Assists'],
     ),
+  ],
+  topBarEvents: [
     LeagueEventDef(
       activityType: BasketballLeagueEvents.steal,
       shortLabel: 'ST',
@@ -381,8 +383,6 @@ const LeagueSportConfig basketballLeagueConfig = LeagueSportConfig(
       label: '🦶 Foul',
       statKeys: ['Fouls'],
     ),
-  ],
-  topBarEvents: [
     LeagueEventDef(
       activityType: BasketballLeagueEvents.turnover,
       shortLabel: 'TO',

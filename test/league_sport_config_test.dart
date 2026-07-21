@@ -470,7 +470,7 @@ void main() {
   });
 
   group('basketballLeagueConfig (P4) — owner-locked layout', () {
-    test('rows are +1/+2/+3/Miss/Reb/Ast/Stl/Blk/Foul in order', () {
+    test('rows are +1/+2/+3/Miss/Reb/Ast in order', () {
       expect(
         basketballLeagueConfig.rowEvents.map((e) => e.activityType).toList(),
         [
@@ -480,19 +480,16 @@ void main() {
           'Miss',
           'Rebound',
           'Assist',
-          'Steal',
-          'Block',
-          'Foul',
         ],
       );
     });
 
-    test('top bar is Turnover only', () {
+    test('top bar is Steal/Block/Foul/Turnover in order', () {
       expect(
         basketballLeagueConfig.topBarEvents
             .map((e) => e.activityType)
             .toList(),
-        ['Turnover'],
+        ['Steal', 'Block', 'Foul', 'Turnover'],
       );
     });
 
