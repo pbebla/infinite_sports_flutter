@@ -49,8 +49,11 @@ class TeamLogo extends StatelessWidget {
         // Contain (not cover + ClipOval): the full crest always renders,
         // undistorted — no crop, no oval mask on the real logo.
         fit: BoxFit.contain,
+        // Width ONLY: giving ResizeImage both dimensions decodes to an
+        // exact square, silently squashing non-square crests (tall Ishtar,
+        // wide Hakkari) before BoxFit even runs. Width-only preserves the
+        // source aspect ratio and still bounds the decoded bitmap.
         memCacheWidth: (size * 2).toInt(),
-        memCacheHeight: (size * 2).toInt(),
         placeholder: (context, url) => _fallback(bg),
         errorWidget: (context, url, error) => _fallback(bg),
       ),
