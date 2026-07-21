@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/login.dart';
+import 'package:infinite_sports_flutter/misc/league_timeline_filter.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/icon_legend.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:infinite_sports_flutter/model/prediction.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
@@ -35,6 +37,13 @@ class MatchFactsTab extends StatelessWidget {
   /// `leagueMatchLeaderCategories(sport)`.
   final List<Map<String, String>>? leaderCategories;
 
+  /// Non-null for LEAGUE games — the sport's Firebase key ('Basketball',
+  /// 'Flag Football', 'Futsal'). Null = tournament (soccer) behavior, so
+  /// every existing tournament call site keeps compiling unchanged. When set
+  /// to a badge sport, timeline icons render the gold badge art (no white
+  /// chip) via [leagueStatIcon]. Also gates the Group E timeline filter.
+  final String? leagueSportKey;
+
   const MatchFactsTab({
     super.key,
     required this.match,
@@ -47,6 +56,7 @@ class MatchFactsTab extends StatelessWidget {
     this.currentUid,
     this.scope,
     this.leaderCategories,
+    this.leagueSportKey,
   });
 
   // Parse minute string to sortable double: "90+3'" -> 90.3, "45'" -> 45.0
@@ -136,6 +146,11 @@ class MatchFactsTab extends StatelessWidget {
   }
 
   Widget _eventIcon(String eventType) {
+    final sport = leagueSportKey;
+    if (sport != null && isBadgeLeagueSport(sport)) {
+      final ic = leagueStatIcon(sport, eventType);
+      return StatIcon(asset: ic.asset, size: 24, badge: ic.badge);
+    }
     return StatIcon(asset: statIconAsset(eventType), size: 24);
   }
 
@@ -381,6 +396,8 @@ class MatchFactsTab extends StatelessWidget {
     for (final cat in categories) {
       final label = cat['label']!;
       final stat = cat['stat']!;
+      // Optional value suffix ('%' for FF Catch %); absent = plain count.
+      final suffix = cat['suffix'] ?? '';
       final sorted = allPlayers
           .where((p) => getValue(p, stat) > 0)
           .toList()
@@ -413,7 +430,7 @@ class MatchFactsTab extends StatelessWidget {
               ),
             ),
             Text(
-              '$value',
+              '$value$suffix',
               style: TextStyle(
                 color: Theme.of(context).colorScheme.onSurface,
                 fontSize: 14,
@@ -485,6 +502,17 @@ class MatchFactsTab extends StatelessWidget {
       return (a['_mergeIdx'] as int).compareTo(b['_mergeIdx'] as int);
     });
 
+    // L6: drop background-stat rows (basketball Miss; FF negatives later) for
+    // league games. Tournament (leagueSportKey == null) and futsal keep every
+    // event — the predicate returns false for them.
+    final sportKey = leagueSportKey;
+    final visibleEvents = sportKey == null
+        ? allEvents
+        : allEvents
+            .where((e) => !isHiddenLeagueTimelineActivity(
+                sportKey, e['eventType'] as String))
+            .toList();
+
     // Teaser visibility: only when prediction context is fully provided and both
     // teams are confirmed — rendered at the very top of either code path.
     final PredictionScope? teaserScope = scope ??
@@ -507,7 +535,7 @@ class MatchFactsTab extends StatelessWidget {
           )
         : const SizedBox.shrink();
 
-    if (allEvents.isEmpty && team1Players.isEmpty && team2Players.isEmpty) {
+    if (visibleEvents.isEmpty && team1Players.isEmpty && team2Players.isEmpty) {
       return SingleChildScrollView(
         padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
         child: Column(
@@ -526,6 +554,9 @@ class MatchFactsTab extends StatelessWidget {
               ),
             ),
             _buildLocationCard(context),
+            // Icon legend (L6.2): always visible, even with no rosters/events
+            // at all — a fan opening a brand-new upcoming match still sees it.
+            IconLegend(leagueSportKey: leagueSportKey),
           ],
         ),
       );
@@ -538,7 +569,7 @@ class MatchFactsTab extends StatelessWidget {
         children: [
           teaser,
           const Divider(height: 1, thickness: 1),
-          if (allEvents.isEmpty)
+          if (visibleEvents.isEmpty)
             Padding(
               padding: const EdgeInsets.all(24),
               child: Center(
@@ -551,9 +582,13 @@ class MatchFactsTab extends StatelessWidget {
               ),
             )
           else
-            ...allEvents.map((e) => _buildEventRow(context, e)),
+            ...visibleEvents.map((e) => _buildEventRow(context, e)),
           _buildMatchLeaders(context),
-          _buildLocationCard(context)
+          _buildLocationCard(context),
+          // Icon legend (L6.2): rendered at the very bottom, in every match
+          // state (upcoming/live/finished) — same FotMob-style card either
+          // early-return path above also carries.
+          IconLegend(leagueSportKey: leagueSportKey),
         ],
       ),
     );

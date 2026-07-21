@@ -1,5 +1,24 @@
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 
+/// Receiver Catch % = REC / (REC + RECMiss), as a rounded whole-number
+/// percent (0-100). Pure — reused by the season Player Stats tab
+/// (league_adapters.dart), the player profile career stats, and the Match
+/// Leaders category below.
+///
+/// Returns null — "no data", never a misleading 0% — when there is nothing
+/// to compute from (zero targets) OR when [minTargets] is set and the
+/// sample is too small to trust as a LEADER: callers that show this as a
+/// competitive leaderboard entry (season category, Match Leaders) pass
+/// [minTargets] (e.g. 3) so a tiny sample like 1/1 can't top the board. The
+/// player's own profile page shows their real rate regardless of sample
+/// size, so it leaves [minTargets] at the default (0 — only the literal
+/// 0-target case is "no data").
+int? catchPercentage(int receptions, int recMisses, {int minTargets = 0}) {
+  final targets = receptions + recMisses;
+  if (targets == 0 || targets < minTargets) return null;
+  return ((receptions / targets) * 100).round();
+}
+
 /// Per-player counters for ONE match (Match Leaders = this game).
 class MatchPlayerTally {
   int goals = 0, assists = 0, saves = 0, dpl = 0;
@@ -20,6 +39,17 @@ class MatchPlayerTally {
         return saves;
       case 'dpl':
         return dpl;
+      // L6.1 Task 3: Catch % for this match, gated to >=3 targets so a
+      // tiny sample (e.g. 1/1) can't top Match Leaders. Below the gate (or
+      // no targets at all) returns 0, which the Match Leaders "> 0" filter
+      // treats the same as "no data".
+      case 'catchPercentage':
+        return catchPercentage(
+              counts['receptions'] ?? 0,
+              counts['recMisses'] ?? 0,
+              minTargets: 3,
+            ) ??
+            0;
       default:
         return counts[stat] ?? 0;
     }
@@ -76,6 +106,9 @@ void _applyEvent(Map<String, MatchPlayerTally> out, String type, String player) 
       break;
     case 'rec':
       t.counts['receptions'] = (t.counts['receptions'] ?? 0) + 1;
+      break;
+    case 'recmiss': // L6.1 Task 3 — feeds Catch %, no timeline-count row.
+      t.counts['recMisses'] = (t.counts['recMisses'] ?? 0) + 1;
       break;
     case 'interception':
       t.counts['interceptions'] =
@@ -147,6 +180,7 @@ Set<String> matchStatLeaders(TournamentMatch match, String stat) {
 
 /// Match Leaders categories per sport (P4) — the league match page hands
 /// these to MatchFactsTab. Futsal = the tab's own tournament default.
+/// An optional 'suffix' renders after the value ('%' for Catch %).
 List<Map<String, String>> leagueMatchLeaderCategories(String sport) {
   switch (sport) {
     case 'Basketball':
@@ -162,6 +196,9 @@ List<Map<String, String>> leagueMatchLeaderCategories(String sport) {
         {'label': 'Touchdowns', 'stat': 'touchdowns'},
         {'label': 'Pass TDs', 'stat': 'passTouchdowns'},
         {'label': 'Receptions', 'stat': 'receptions'},
+        // L6.1: derived from REC/RECMiss with a >=3-target gate inside
+        // MatchPlayerTally.byStat, so a 1/1 game can't top the board.
+        {'label': 'Catch %', 'stat': 'catchPercentage', 'suffix': '%'},
         {'label': 'Interceptions', 'stat': 'interceptions'},
         {'label': 'Flag Pulls', 'stat': 'flagPulls'},
         {'label': 'Sacks', 'stat': 'sacks'},

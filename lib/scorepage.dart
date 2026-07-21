@@ -19,6 +19,7 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:infinite_sports_flutter/table.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -288,7 +289,7 @@ class _ScorePageState extends State<ScorePage> {
             decoration: BoxDecoration(color: activity.color),
             children: [
               Padding(padding: EdgeInsets.fromLTRB(13, 0, 0, 0), child: Center(child: Text(activity.time, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white)),),),
-              Padding(padding: EdgeInsets.fromLTRB(5, 0, 0, 0), child: Image.network(activity.teamImagePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0), width: windowsDefaultIconSize.toDouble()/2 , height: windowsDefaultIconSize.toDouble()/2, fit: BoxFit.scaleDown, alignment: FractionalOffset.center),),
+              Padding(padding: EdgeInsets.fromLTRB(5, 0, 0, 0), child: TeamLogo(url: activity.teamImagePath.isEmpty ? null : activity.teamImagePath, size: windowsDefaultIconSize.toDouble()/2),),
               Padding(padding: EdgeInsets.fromLTRB(5, 0, 5, 0), child: Text(activity.name, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white)),),
               Text(stringToGameText[activity.action]!, style: TextStyle(color: activity.color.computeLuminance() > 0.5 ? Colors.black : Colors.white), textAlign: TextAlign.end,),
               Padding(padding: EdgeInsets.fromLTRB(0, 0, 8, 0), child: stringToGameAction[activity.action],)
@@ -452,7 +453,7 @@ class _ScorePageState extends State<ScorePage> {
           return teamColor; // Use the default value.
         }),
         columns: [
-          DataColumn2(size: ColumnSize.S, label: Image.network(teamSourcePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0), width: windowsDefaultIconSize.toDouble(), height: windowsDefaultIconSize.toDouble(), fit: BoxFit.scaleDown, alignment: FractionalOffset.center,)),
+          DataColumn2(size: ColumnSize.S, label: TeamLogo(url: (teamSourcePath as String).isEmpty ? null : teamSourcePath, size: windowsDefaultIconSize.toDouble())),
           DataColumn2(size: ColumnSize.L, label: Text(teamName), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(size: ColumnSize.S, label: const Text("Goals"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(size: ColumnSize.S, label: const Text("Assists"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
@@ -482,7 +483,7 @@ class _ScorePageState extends State<ScorePage> {
         }),
         columns: [
           DataColumn2(fixedWidth: 20.0, size: ColumnSize.S, label: SizedBox(width: 0, height: 0)),
-          DataColumn2(label: Image.network(teamSourcePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0), width: windowsDefaultIconSize.toDouble(), height: windowsDefaultIconSize.toDouble(), alignment: FractionalOffset.center), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(label: TeamLogo(url: (teamSourcePath as String).isEmpty ? null : teamSourcePath, size: windowsDefaultIconSize.toDouble()), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 40.0, label: Text("PTS", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 40.0, label: Text("REB", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 45.0, label: Text("2PM", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
@@ -519,7 +520,7 @@ class _ScorePageState extends State<ScorePage> {
         }),
         columns: [
           DataColumn2(fixedWidth: 20.0, size: ColumnSize.S, label: SizedBox(width: 0, height: 0)),
-          DataColumn2(size: ColumnSize.L, label: Image.network(teamSourcePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0), width: windowsDefaultIconSize.toDouble(), height: windowsDefaultIconSize.toDouble(), alignment: FractionalOffset.center), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
+          DataColumn2(size: ColumnSize.L, label: TeamLogo(url: (teamSourcePath as String).isEmpty ? null : teamSourcePath, size: windowsDefaultIconSize.toDouble()), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(size: ColumnSize.M, label: Text("CMP", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(size: ColumnSize.S, label: Text("ATT", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(size: ColumnSize.M, label: Text("P-TD", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
@@ -779,7 +780,7 @@ class _ScorePageState extends State<ScorePage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                isPlaceholderTeam(game!.team1) ? const Icon(Icons.emoji_events, size: 50) : Image.network(width: 70, height: 70, game!.team1SourcePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0)),
+                isPlaceholderTeam(game!.team1) ? const Icon(Icons.emoji_events, size: 50) : TeamLogo(url: game!.team1SourcePath.isEmpty ? null : game!.team1SourcePath, size: 70),
                 Center(child: Text(game!.team1, textAlign: TextAlign.center,),),
               ],
             ),
@@ -795,7 +796,7 @@ class _ScorePageState extends State<ScorePage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                isPlaceholderTeam(game!.team2) ? const Icon(Icons.emoji_events, size: 50) : Image.network(width: 70, height: 70, game!.team2SourcePath, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0)),
+                isPlaceholderTeam(game!.team2) ? const Icon(Icons.emoji_events, size: 50) : TeamLogo(url: game!.team2SourcePath.isEmpty ? null : game!.team2SourcePath, size: 70),
                 Center(child: Text(game!.team2, textAlign: TextAlign.center),),
               ],
             ),

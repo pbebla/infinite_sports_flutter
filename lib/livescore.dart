@@ -11,6 +11,7 @@ import 'package:infinite_sports_flutter/scorepage.dart';
 import 'package:infinite_sports_flutter/misc/schedule_display.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
@@ -96,7 +97,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
-                  game.team1SourcePath.isNotEmpty ? Image.network(width: 70, height: 70, game.team1SourcePath) : (isPlaceholderTeam(game.team1) ? const Icon(Icons.emoji_events, size: 50) : SizedBox(width: 0, height: 0)),
+                  isPlaceholderTeam(game.team1) ? const Icon(Icons.emoji_events, size: 50) : TeamLogo(url: game.team1SourcePath.isNotEmpty ? game.team1SourcePath : null, size: 70),
                   Center(child: Text(game.team1, textAlign: TextAlign.center,),),
                 ],
               ),
@@ -114,7 +115,7 @@ class _LiveScorePageState extends State<LiveScorePage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
-                  game.team2SourcePath.isNotEmpty ? Image.network(width: 70, height: 70, game.team2SourcePath) : (isPlaceholderTeam(game.team2) ? const Icon(Icons.emoji_events, size: 50) : SizedBox(width: 0, height: 0)),
+                  isPlaceholderTeam(game.team2) ? const Icon(Icons.emoji_events, size: 50) : TeamLogo(url: game.team2SourcePath.isNotEmpty ? game.team2SourcePath : null, size: 70),
                   Center(child: Text(game.team2, textAlign: TextAlign.center),),
                 ],
               ),
