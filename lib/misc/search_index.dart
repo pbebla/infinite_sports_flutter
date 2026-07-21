@@ -15,6 +15,7 @@ class SearchResult {
     this.tournamentId,
     this.uid,
     this.eventIndex,
+    this.eventId,
   });
 
   final SearchResultType type;
@@ -26,6 +27,9 @@ class SearchResult {
   final String? tournamentId;
   final String? uid;
   final int? eventIndex;
+
+  /// EventsV2 id; set for V2 events (eventIndex is then null).
+  final String? eventId;
 }
 
 /// Client-side search over data the app already loads: the team-logos map,
@@ -98,6 +102,9 @@ class SearchIndex {
     });
   }
 
+  /// [events] must be the MERGED list (getAllEvents): V2 events carry their
+  /// id, unmirrored legacy events carry their true list index — so a search
+  /// hit opens the exact same page the event's own section opens.
   void addEvents(List<Event> events) {
     for (var i = 0; i < events.length; i++) {
       final e = events[i];
@@ -109,7 +116,8 @@ class SearchIndex {
             .where((s) => (s ?? '').isNotEmpty)
             .join(' · '),
         imageUrl: e.imageUrl,
-        eventIndex: i,
+        eventId: e.id,
+        eventIndex: e.id != null ? null : (e.legacyIndex ?? i),
       ));
     }
   }

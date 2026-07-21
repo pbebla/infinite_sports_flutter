@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/aroundyou.dart';
 import 'package:infinite_sports_flutter/eventpage.dart';
+import 'package:infinite_sports_flutter/misc/event_repo.dart';
 import 'package:infinite_sports_flutter/misc/search_index.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -44,7 +45,9 @@ class _SearchHubPageState extends State<SearchHubPage> {
       index.addTournaments(await TournamentService.getAllTournaments());
     } catch (_) {}
     try {
-      index.addEvents(await getEvents());
+      // Merged V2 + legacy list so search opens the same full event page as
+      // the calendar and Around You (never a stripped-down mirror row).
+      index.addEvents(await getAllEvents());
     } catch (_) {}
     try {
       index.addUsers(await getAllUsers());
@@ -70,7 +73,9 @@ class _SearchHubPageState extends State<SearchHubPage> {
         }));
       case SearchResultType.event:
         Navigator.push(context, MaterialPageRoute(builder: (context) {
-          return EventPage(index: result.eventIndex!);
+          return result.eventId != null
+              ? EventPage(v2Id: result.eventId)
+              : EventPage(index: result.eventIndex!);
         }));
     }
   }
