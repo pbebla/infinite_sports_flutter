@@ -17,6 +17,7 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_facts_tab.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/match_lineup_tab.dart';
 import 'package:infinite_sports_flutter/widgets/live_clock.dart';
 import 'package:infinite_sports_flutter/widgets/score_text.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
@@ -366,72 +367,105 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
         ? (_rosters[match.team2Id] ?? <TournamentPlayer>[])
         : <TournamentPlayer>[];
 
-    return Scaffold(
-      body: NestedScrollView(
-        headerSliverBuilder: (context, innerBoxIsScrolled) {
-          return [
-            SliverAppBar(
-              pinned: true,
-              backgroundColor: TournamentColors.headerBackground(context),
-              foregroundColor: TournamentColors.headerForeground(context),
-              // Theme-aware back arrow + actions in BOTH themes (see above).
-              iconTheme: IconThemeData(
-                  color: TournamentColors.headerForeground(context)),
-              actionsIconTheme: IconThemeData(
-                  color: TournamentColors.headerForeground(context)),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.ios_share),
-                  tooltip: 'Share match',
-                  onPressed: () => shareMatchCard(
-                    context,
-                    match: match,
-                    team1: team1,
-                    team2: team2,
-                    tournamentName:
-                        '${widget.sport} Season ${widget.season}',
-                  ),
-                ),
-                if (match.link != null && match.link!.isNotEmpty)
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        body: NestedScrollView(
+          headerSliverBuilder: (context, innerBoxIsScrolled) {
+            return [
+              SliverAppBar(
+                pinned: true,
+                backgroundColor: TournamentColors.headerBackground(context),
+                foregroundColor: TournamentColors.headerForeground(context),
+                // Theme-aware back arrow + actions in BOTH themes (see above).
+                iconTheme: IconThemeData(
+                    color: TournamentColors.headerForeground(context)),
+                actionsIconTheme: IconThemeData(
+                    color: TournamentColors.headerForeground(context)),
+                actions: [
                   IconButton(
-                    icon: const Icon(Icons.live_tv, color: Colors.red),
-                    tooltip: 'Watch Stream',
-                    onPressed: () async {
-                      final uri = Uri.tryParse(match.link!);
-                      if (uri != null) {
-                        await launchUrl(uri,
-                            mode: LaunchMode.externalApplication);
-                      }
-                    },
+                    icon: const Icon(Icons.ios_share),
+                    tooltip: 'Share match',
+                    onPressed: () => shareMatchCard(
+                      context,
+                      match: match,
+                      team1: team1,
+                      team2: team2,
+                      tournamentName:
+                          '${widget.sport} Season ${widget.season}',
+                    ),
                   ),
-              ],
-              expandedHeight: 196,
-              flexibleSpace: FlexibleSpaceBar(
-                background:
-                    _buildScoreboardHeader(context, match, team1, team2),
+                  if (match.link != null && match.link!.isNotEmpty)
+                    IconButton(
+                      icon: const Icon(Icons.live_tv, color: Colors.red),
+                      tooltip: 'Watch Stream',
+                      onPressed: () async {
+                        final uri = Uri.tryParse(match.link!);
+                        if (uri != null) {
+                          await launchUrl(uri,
+                              mode: LaunchMode.externalApplication);
+                        }
+                      },
+                    ),
+                ],
+                expandedHeight: 196,
+                flexibleSpace: FlexibleSpaceBar(
+                  background:
+                      _buildScoreboardHeader(context, match, team1, team2),
+                ),
+                // Facts + Lineup tabs (parity with the tournament match page).
+                bottom: TabBar(
+                  tabs: const [
+                    Tab(text: 'Facts'),
+                    Tab(text: 'Lineup'),
+                  ],
+                  labelColor: TournamentColors.headerForeground(context),
+                  unselectedLabelColor:
+                      TournamentColors.headerForegroundMuted(context),
+                  indicatorColor: TournamentColors.headerForeground(context),
+                  indicatorWeight: 2,
+                ),
               ),
-            ),
-          ];
-        },
-        // The reused Facts body: icon timeline (all league event types via
-        // the Task 2 aliases, minute labels, Guest entries as plain names),
-        // Match Leaders (Task 2 tallies), and the §6 location card (renders
-        // only when the game node has a Location).
-        body: MatchFactsTab(
-          match: match,
-          team1: team1,
-          team2: team2,
-          team1Players: team1Players,
-          team2Players: team2Players,
-          // Predict teaser (P3): only on predictable games — config open,
-          // both teams real (placeholders resolve to null), not a friendly.
-          scope: (match.stage != 'friendly' && team1 != null && team2 != null)
-              ? LeaguePredictionScope(
-                  sport: widget.sport, season: widget.season)
-              : null,
-          predictionConfig: _predictionConfig,
-          currentUid: FirebaseAuth.instance.currentUser?.uid,
-          leaderCategories: leagueMatchLeaderCategories(widget.sport),
+            ];
+          },
+          body: TabBarView(
+            children: [
+              // The reused Facts body: icon timeline (all league event types
+              // via the Task 2 aliases, minute labels, Guest entries as plain
+              // names), Match Leaders (Task 2 tallies), and the §6 location
+              // card (renders only when the game node has a Location).
+              MatchFactsTab(
+                match: match,
+                team1: team1,
+                team2: team2,
+                team1Players: team1Players,
+                team2Players: team2Players,
+                // Predict teaser (P3): only on predictable games — config
+                // open, both teams real (placeholders resolve to null), not a
+                // friendly.
+                scope: (match.stage != 'friendly' &&
+                        team1 != null &&
+                        team2 != null)
+                    ? LeaguePredictionScope(
+                        sport: widget.sport, season: widget.season)
+                    : null,
+                predictionConfig: _predictionConfig,
+                currentUid: FirebaseAuth.instance.currentUser?.uid,
+                leaderCategories: leagueMatchLeaderCategories(widget.sport),
+                leagueSportKey: widget.sport,
+              ),
+              // Lineup tab (Task 1): the same rosters already streamed for
+              // the Facts tab's Match Leaders / timeline name resolution.
+              MatchLineupTab(
+                match: match,
+                team1: team1,
+                team2: team2,
+                team1Players: team1Players,
+                team2Players: team2Players,
+                sport: widget.sport,
+              ),
+            ],
+          ),
         ),
       ),
     );

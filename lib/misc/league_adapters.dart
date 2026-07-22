@@ -21,6 +21,8 @@ import 'package:infinite_sports_flutter/misc/match_clock.dart';
 import 'package:infinite_sports_flutter/misc/match_location.dart';
 import 'package:infinite_sports_flutter/misc/parse_helpers.dart';
 import 'package:infinite_sports_flutter/misc/schedule_display.dart';
+import 'package:infinite_sports_flutter/misc/single_match_tallies.dart'
+    show catchPercentage;
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
@@ -406,6 +408,12 @@ TournamentPlayer leaguePlayerFromLineup({
         'flagPulls': i('FP'),
         'sacks': i('Sack'),
         'passBreakups': i('PBU'),
+        // L6.1 Catch % — RECMiss's ONLY surfaced value (the raw drop count
+        // stays a timeline marker, never a stat row). Gated to >=3 targets
+        // because this feeds the season leaders board; below the gate (or
+        // no targets) -> 0, which sortedLeagueLeaders' "> 0" filter drops.
+        'catchPercentage':
+            catchPercentage(i('REC'), i('RECMiss'), minTargets: 3) ?? 0,
       };
     default: // Futsal
       goals = i('Goals');

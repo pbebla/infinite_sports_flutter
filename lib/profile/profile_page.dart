@@ -2,6 +2,8 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/profile_stat_priority.dart';
 import 'package:infinite_sports_flutter/misc/share_profile_service.dart';
+import 'package:infinite_sports_flutter/misc/single_match_tallies.dart'
+    show catchPercentage;
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/award.dart';
@@ -34,11 +36,17 @@ const Map<String, String> _statLabel = {
   'passTouchdowns': 'Pass TDs',
   'receivingTouchdowns': 'Rec TDs',
   'receptions': 'Receptions',
+  'catchPercentage': 'Catch %',
   'interceptions': 'INTs',
   'flagPulls': 'Flag Pulls',
   'sacks': 'Sacks',
   'passBreakups': 'PBUs',
 };
+
+/// Profile stat values render as plain counts except Catch % (L6.1),
+/// which carries a % suffix.
+String formatProfileStatValue(String key, num value) =>
+    key == 'catchPercentage' ? '$value%' : value.toString();
 
 /// The full tabbed player profile page.
 ///
@@ -268,11 +276,12 @@ class _ProfilePageState extends State<ProfilePage>
 
   Map<String, num> _flagFootballStatMap(
       Map<String, (String, Color, Player)> seasons) {
-    int receptions = 0, receivingTDs = 0, passTDs = 0, interceptions = 0,
-        flagPulls = 0, sacks = 0, passBreakups = 0;
+    int receptions = 0, receptionMisses = 0, receivingTDs = 0, passTDs = 0,
+        interceptions = 0, flagPulls = 0, sacks = 0, passBreakups = 0;
     for (final e in seasons.values) {
       final p = e.$3 as FlagFootballPlayer;
       receptions += p.receptions;
+      receptionMisses += p.receptionMisses;
       receivingTDs += p.receivingTouchdowns;
       passTDs += p.passingTouchdowns;
       interceptions += p.interceptions;
@@ -280,8 +289,13 @@ class _ProfilePageState extends State<ProfilePage>
       sacks += p.sacks;
       passBreakups += p.passBreakups;
     }
+    // Career Catch % (L6.1) from career REC/RECMiss. No minTargets gate —
+    // the player's own profile shows their real rate; null (zero targets)
+    // omits the row entirely instead of showing a misleading 0%.
+    final catchPct = catchPercentage(receptions, receptionMisses);
     return {
       'receptions': receptions,
+      if (catchPct != null) 'catchPercentage': catchPct,
       'receivingTouchdowns': receivingTDs,
       'passTouchdowns': passTDs,
       'interceptions': interceptions,
@@ -423,7 +437,7 @@ class _ProfilePageState extends State<ProfilePage>
       if (statMap.containsKey(key)) {
         result.add((
           label: _statLabel[key] ?? key,
-          value: statMap[key].toString(),
+          value: formatProfileStatValue(key, statMap[key]!),
         ));
         if (result.length == 3) break;
       }
@@ -454,8 +468,12 @@ class _ProfilePageState extends State<ProfilePage>
         };
       case 'Flag Football':
         final p = player as FlagFootballPlayer;
+        // Season Catch % (L6.1) — same no-gate/no-data semantics as the
+        // career map above.
+        final catchPct = catchPercentage(p.receptions, p.receptionMisses);
         return {
           'receptions': p.receptions,
+          if (catchPct != null) 'catchPercentage': catchPct,
           'receivingTouchdowns': p.receivingTouchdowns,
           'passTouchdowns': p.passingTouchdowns,
           'interceptions': p.interceptions,
@@ -734,7 +752,7 @@ class _ProfilePageState extends State<ProfilePage>
           .take(5)
           .map((k) => (
                 label: _statLabel[k] ?? k,
-                value: comp.stats[k].toString(),
+                value: formatProfileStatValue(k, comp.stats[k]!),
               ))
           .toList();
 

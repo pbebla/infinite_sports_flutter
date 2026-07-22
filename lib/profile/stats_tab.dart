@@ -89,9 +89,18 @@ class _StatsTabState extends State<StatsTab> {
     'threePointers': '3-Pointers Made',
     'twoPointers': '2-Pointers Made',
     'freeThrows': 'Free Throws Made',
+    // L6.2 Task 5: these gain gold badge icons — give them a matching
+    // Title Case label instead of falling through to _humanize (which only
+    // splits on capital letters, so an all-lowercase key like 'steals'
+    // would otherwise render as-is).
+    'steals': 'Steals',
+    'blocks': 'Blocks',
+    'turnovers': 'Turnovers',
+    'fouls': 'Fouls',
     'passTouchdowns': 'Pass Touchdowns',
     'receivingTouchdowns': 'Receiving Touchdowns',
     'receptions': 'Receptions',
+    'catchPercentage': 'Catch %',
     'interceptions': 'Interceptions',
     'flagPulls': 'Flag Pulls',
     'sacks': 'Sacks',
@@ -294,47 +303,44 @@ class _StatsTabState extends State<StatsTab> {
     ];
 
     return orderedKeys
-        .map((key) => _StatRow(
-              label: _statLabels[key] ?? _humanize(key),
-              value: _formatValue(comp.stats[key]!),
-              iconAsset: _statIconAssetForKey(key),
-            ))
+        .map((key) {
+          final icon = _statIconForKey(comp.sport, key);
+          return _StatRow(
+            label: _statLabels[key] ?? _humanize(key),
+            // Catch % (L6.1) renders with its % suffix; everything else
+            // stays a plain count.
+            value: key == 'catchPercentage'
+                ? '${_formatValue(comp.stats[key]!)}%'
+                : _formatValue(comp.stats[key]!),
+            iconAsset: icon.asset,
+            badge: icon.badge,
+          );
+        })
         .toList();
   }
 
-  /// Maps a profile stat key to the matching StatIcon asset path.
-  /// Falls back to null (StatIcon will show its generic fallback).
-  static String? _statIconAssetForKey(String key) {
+  /// Maps a profile stat key (+ sport) to the matching StatIcon asset/badge.
+  /// Basketball and Flag Football keys resolve through the SAME gold-badge
+  /// tables ([leagueStatIcon]) the league screens use — this is what gives
+  /// points/steals/blocks/turnovers (previously iconless here) and every FF
+  /// key their bball_*.png / ff_*.png badge art. Futsal/soccer/AFC/
+  /// tournament keys are unchanged: line-art on the white chip (badge:false).
+  static ({String? asset, bool badge}) _statIconForKey(String sport, String key) {
+    if (sport == 'Basketball' || sport == 'Flag Football') {
+      return leagueStatIcon(sport, key);
+    }
     switch (key) {
       case 'goals':
       case 'cleanSheets':
-        return statIconAsset('goal');
+        return (asset: statIconAsset('goal'), badge: false);
       case 'assists':
-        return statIconAsset('assist');
+        return (asset: statIconAsset('assist'), badge: false);
       case 'saves':
-        return statIconAsset('save');
+        return (asset: statIconAsset('save'), badge: false);
       case 'dpl':
-        return statIconAsset('dpl');
-      case 'rebounds':
-        return 'assets/rebound.png';
-      case 'threePointers':
-        return 'assets/threepointer.png';
-      case 'twoPointers':
-        return 'assets/twopointer.png';
-      case 'freeThrows':
-        return 'assets/onepointer.png';
-      // No asset for these — fall back to generic Material icon via null
-      case 'points':
-      case 'passTouchdowns':
-      case 'receivingTouchdowns':
-      case 'receptions':
-      case 'interceptions':
-      case 'flagPulls':
-      case 'sacks':
-      case 'passBreakups':
-      case 'games':
+        return (asset: statIconAsset('dpl'), badge: false);
       default:
-        return null;
+        return (asset: null, badge: false);
     }
   }
 
@@ -357,11 +363,16 @@ class _StatRow extends StatelessWidget {
   final String value;
   /// Asset path for the stat icon. Null → generic bar_chart icon fallback.
   final String? iconAsset;
+  /// True for the gold self-contained badge assets (basketball/flag
+  /// football) — passed straight through to [StatIcon] so they render
+  /// bare, with no white chip (L6.2 Task 5).
+  final bool badge;
 
   const _StatRow({
     required this.label,
     required this.value,
     this.iconAsset,
+    this.badge = false,
   });
 
   @override
@@ -372,7 +383,7 @@ class _StatRow extends StatelessWidget {
       child: Row(
         children: [
           // Stat icon
-          StatIcon(asset: iconAsset, size: 22),
+          StatIcon(asset: iconAsset, size: 22, badge: badge),
           const SizedBox(width: 10),
           // Label
           Expanded(

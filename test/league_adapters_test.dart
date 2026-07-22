@@ -2,6 +2,7 @@ import 'dart:ui' show Color;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
+import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 
 void main() {
   group('leagueGameId / parseLeagueGameId', () {
@@ -495,6 +496,59 @@ void main() {
       );
       expect(rows.map((t) => t.name).toList(), ['One', 'Two']);
       expect(rows.first.gd, 2);
+    });
+  });
+
+  group('FF stat keys read Manager short codes (L6 regression)', () {
+    test('leaguePlayerFromLineup maps FF short codes to fan stats', () {
+      final p = leaguePlayerFromLineup(
+        sport: 'Flag Football',
+        name: 'Rusher',
+        teamName: 'Team A',
+        raw: const {
+          'REC': 7,
+          'RECTD': 2,
+          'RushTD': 1,
+          'INTTD': 1,
+          'PassTD': 5,
+          'INT': 3,
+          'FP': 4,
+          'Sack': 2,
+          'PBU': 1,
+        },
+      );
+      // Scored TDs only (no PassTD): 2 + 1 + 1 = 4.
+      expect(p.statByName('touchdowns'), 4);
+      expect(p.statByName('receptions'), 7);
+      expect(p.statByName('interceptions'), 3);
+      expect(p.statByName('flagPulls'), 4);
+      expect(p.statByName('sacks'), 2);
+      expect(p.statByName('passTouchdowns'), 5);
+    });
+  });
+
+  group('L6.1 — FF season catchPercentage (Task 3)', () {
+    TournamentPlayer ff(Map<dynamic, dynamic> raw) => leaguePlayerFromLineup(
+        sport: 'Flag Football', name: 'Sam', teamName: 'A', raw: raw);
+
+    test('REC + RECMiss derive a gated season Catch %', () {
+      // 7 catches / 3 drops = 10 targets -> 70%.
+      expect(ff(const {'REC': 7, 'RECMiss': 3}).statByName('catchPercentage'),
+          70);
+    });
+
+    test('below 3 targets the leader value is 0 (excluded from leaders)', () {
+      // 1/1 = 100% but only 2 targets -> gated to 0 so it can't top the
+      // season leaders board.
+      expect(ff(const {'REC': 1, 'RECMiss': 1}).statByName('catchPercentage'),
+          0);
+      expect(ff(const {}).statByName('catchPercentage'), 0);
+    });
+
+    test('RECMiss stays a derived input only — no raw recMisses stat', () {
+      // Owner: misses are timeline markers; RECMiss's only surfaced value
+      // is Catch %. No statByName vocabulary for the raw count.
+      expect(ff(const {'REC': 7, 'RECMiss': 3}).statByName('recMisses'), 0);
     });
   });
 }

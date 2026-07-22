@@ -7,6 +7,7 @@ import 'package:infinite_sports_flutter/model/flagfootballplayer.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/player.dart';
 import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:data_table_2/data_table_2.dart';
 
 class LeaderboardPage extends StatefulWidget {
@@ -148,7 +149,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     if (widget.sport == "Futsal") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Center(child: Text(key.number),)),
-        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0),),)),
+        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: TeamLogo(url: key.teamPath.isEmpty ? null : key.teamPath, size: windowsDefaultIconSize.toDouble()/2),)),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           openPlayerProfileById(context, uid: key.uid, name: key.name);
         },),
@@ -178,7 +179,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     } else if (widget.sport == "Basketball") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Center(child: Text(key.number),)),
-        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0),),)),
+        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: TeamLogo(url: key.teamPath.isEmpty ? null : key.teamPath, size: windowsDefaultIconSize.toDouble()/2),)),
         //DataCell(Row(children: [Text(key.number), Spacer(), ])),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           openPlayerProfileById(context, uid: key.uid, name: key.name);
@@ -215,7 +216,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       );
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Center(child: Text(key.number),)),
-        DataCell(Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0),)),
+        DataCell(TeamLogo(url: key.teamPath.isEmpty ? null : key.teamPath, size: windowsDefaultIconSize.toDouble()/2)),
         DataCell(Container(decoration: verticalDividerRight, alignment: Alignment.centerLeft, child: Padding(padding: EdgeInsets.fromLTRB(0.0, 0, 0.0, 0), child: Text(key.name.toString(), softWrap: true,)),), onTap: () {
           openPlayerProfileById(context, uid: key.uid, name: key.name);
         },),

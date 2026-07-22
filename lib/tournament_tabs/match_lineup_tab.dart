@@ -3,7 +3,6 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
-import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 class MatchLineupTab extends StatelessWidget {
   final TournamentMatch match;
@@ -70,10 +69,13 @@ class MatchLineupTab extends StatelessWidget {
         child: CustomPaint(painter: _BasketballCourtPainter()),
       );
     } else if (s == 'flag football') {
+      // Owner-supplied field art (assets/ff_field.png, horizontal yard-line
+      // field). Cover keeps yard lines straight — no stretching — cropping
+      // the excess length evenly on both sides.
       return SizedBox(
         height: 180,
         width: double.infinity,
-        child: CustomPaint(painter: _FlagFootballFieldPainter()),
+        child: Image.asset('assets/ff_field.png', fit: BoxFit.cover),
       );
     } else {
       return Container(
@@ -290,37 +292,3 @@ class _BasketballCourtPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-// Flag football field painter
-class _FlagFootballFieldPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = const Color(0xFF388E3C);
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
-
-    final linePaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.5)
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke;
-
-    final w = size.width;
-    final h = size.height;
-
-    // Yard lines every ~12.5% of width
-    for (int i = 1; i <= 7; i++) {
-      final x = w * i / 8;
-      canvas.drawLine(Offset(x, 0), Offset(x, h), linePaint);
-    }
-
-    // End zones (slightly darker)
-    final endZonePaint = Paint()..color = Colors.black.withValues(alpha: 0.1);
-    canvas.drawRect(Rect.fromLTWH(0, 0, w * 0.1, h), endZonePaint);
-    canvas.drawRect(Rect.fromLTWH(w * 0.9, 0, w * 0.1, h), endZonePaint);
-
-    // End zone borders
-    canvas.drawLine(Offset(w * 0.1, 0), Offset(w * 0.1, h), linePaint);
-    canvas.drawLine(Offset(w * 0.9, 0), Offset(w * 0.9, h), linePaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}

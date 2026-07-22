@@ -11,6 +11,11 @@ import 'package:flutter/material.dart';
 /// - Explicit cacheWidth / cacheHeight sized to the rendered size so the
 ///   decoded bitmap matches what we actually display
 /// - Consistent fallback icon when URL is null/empty/fails
+///
+/// L6.2 Task 3: the logo image itself is NEVER cropped or stretched — it
+/// renders with [BoxFit.contain] inside a [size]x[size] box, so non-square
+/// crests (wide wordmarks, tall shields, ...) show in full. Only the
+/// MISSING-logo fallback keeps its circular shield shape.
 class TeamLogo extends StatelessWidget {
   final String? url;
   final double size;
@@ -34,14 +39,21 @@ class TeamLogo extends StatelessWidget {
       return _fallback(bg);
     }
 
-    return ClipOval(
+    return SizedBox(
+      width: size,
+      height: size,
       child: CachedNetworkImage(
         imageUrl: url!,
         width: size,
         height: size,
-        fit: BoxFit.cover,
+        // Contain (not cover + ClipOval): the full crest always renders,
+        // undistorted — no crop, no oval mask on the real logo.
+        fit: BoxFit.contain,
+        // Width ONLY: giving ResizeImage both dimensions decodes to an
+        // exact square, silently squashing non-square crests (tall Ishtar,
+        // wide Hakkari) before BoxFit even runs. Width-only preserves the
+        // source aspect ratio and still bounds the decoded bitmap.
         memCacheWidth: (size * 2).toInt(),
-        memCacheHeight: (size * 2).toInt(),
         placeholder: (context, url) => _fallback(bg),
         errorWidget: (context, url, error) => _fallback(bg),
       ),

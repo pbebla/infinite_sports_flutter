@@ -36,7 +36,8 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
   /// label → statByName key → statIconAsset key ('' = no icon, matching
   /// the tournament tab's iconless Clean Sheets). Per-sport, fan-side by
   /// convention (see top_stats.dart header) — the config twin carries no
-  /// leaderboard defs.
+  /// leaderboard defs. An optional 'suffix' renders after each value
+  /// ('%' for FF Catch %).
   static const Map<String, List<Map<String, String>>> _categoriesBySport = {
     'Futsal': [
       {'label': 'Top Scorer', 'stat': 'goals', 'icon': 'goal'},
@@ -47,17 +48,29 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
       {'label': 'Yellow Cards', 'stat': 'yellowCards', 'icon': 'yellow'},
       {'label': 'Red Cards', 'stat': 'redCards', 'icon': 'red'},
     ],
+    // L6.2 Task 4: the full individual-stat set, in the owner's order. Every
+    // category here is a badge sport (isBadgeLeagueSport('Basketball')), so
+    // _categoryIcon below resolves the gold bball_*.png badge via
+    // leagueStatIcon(stat) regardless of the 'icon' field — left blank.
     'Basketball': [
       {'label': 'Points', 'stat': 'points', 'icon': ''},
-      {'label': 'Rebounds', 'stat': 'rebounds', 'icon': 'rebound'},
-      {'label': 'Assists', 'stat': 'assists', 'icon': 'assist'},
-      {'label': '3-Pointers', 'stat': 'threePointers', 'icon': 'threepointer'},
+      {'label': '3-Pointers', 'stat': 'threePointers', 'icon': ''},
+      {'label': '2-Pointers', 'stat': 'twoPointers', 'icon': ''},
+      {'label': 'Free Throws Made', 'stat': 'freeThrows', 'icon': ''},
+      {'label': 'Rebounds', 'stat': 'rebounds', 'icon': ''},
+      {'label': 'Assists', 'stat': 'assists', 'icon': ''},
       {'label': 'Steals', 'stat': 'steals', 'icon': ''},
       {'label': 'Blocks', 'stat': 'blocks', 'icon': ''},
+      {'label': 'Turnovers', 'stat': 'turnovers', 'icon': ''},
+      {'label': 'Fouls', 'stat': 'fouls', 'icon': ''},
     ],
     'Flag Football': [
       {'label': 'Touchdowns', 'stat': 'touchdowns', 'icon': ''},
       {'label': 'Receptions', 'stat': 'receptions', 'icon': ''},
+      // L6.1: derived REC/(REC+RECMiss), gated to >=3 targets in the
+      // adapter so tiny samples never reach the board.
+      {'label': 'Catch %', 'stat': 'catchPercentage', 'icon': '',
+        'suffix': '%'},
       {'label': 'Pass TDs', 'stat': 'passTouchdowns', 'icon': ''},
       {'label': 'Interceptions', 'stat': 'interceptions', 'icon': ''},
       {'label': 'Flag Pulls', 'stat': 'flagPulls', 'icon': ''},
@@ -83,6 +96,7 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
         final label = cat['label']!;
         final stat = cat['stat']!;
         final icon = cat['icon']!;
+        final suffix = cat['suffix'] ?? '';
         final leaders = sortedLeagueLeaders(widget.rosters, stat);
         if (leaders.isEmpty) return const SizedBox.shrink();
         final isExpanded = _expanded.contains(stat);
@@ -106,12 +120,7 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
                 children: [
                   Row(
                     children: [
-                      if (icon.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child:
-                              StatIcon(asset: statIconAsset(icon), size: 18),
-                        ),
+                      _categoryIcon(stat, icon),
                       Text(
                         label,
                         style: Theme.of(context)
@@ -136,7 +145,7 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
                   const SizedBox(height: 10),
                   ...displayed.asMap().entries.map((entry) =>
                       _buildPlayerRow(
-                          context, entry.value, stat, entry.key)),
+                          context, entry.value, stat, suffix, entry.key)),
                 ],
               ),
             ),
@@ -146,8 +155,28 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
     );
   }
 
-  Widget _buildPlayerRow(
-      BuildContext context, TournamentPlayer player, String stat, int rank) {
+  /// Category header icon. Badge sports (basketball / later FF) resolve gold
+  /// badge art by the stat key via [leagueStatIcon] (covers Points/Steals/
+  /// Blocks that had no icon before); other sports keep the line-art chip
+  /// keyed by the category's icon field ('' = no icon, e.g. Clean Sheets).
+  Widget _categoryIcon(String stat, String iconKey) {
+    if (isBadgeLeagueSport(widget.sport)) {
+      final ic = leagueStatIcon(widget.sport, stat);
+      if (ic.asset == null) return const SizedBox.shrink();
+      return Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: StatIcon(asset: ic.asset, size: 18, badge: ic.badge),
+      );
+    }
+    if (iconKey.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: StatIcon(asset: statIconAsset(iconKey), size: 18),
+    );
+  }
+
+  Widget _buildPlayerRow(BuildContext context, TournamentPlayer player,
+      String stat, String suffix, int rank) {
     final team = widget.teams[player.teamId];
     final value = player.statByName(stat);
     final canOpenTeam = widget.onOpenTeam != null;
@@ -220,26 +249,34 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
                     shape: BoxShape.circle,
                   ),
                   child: Center(
-                    child: Text(
-                      '$value',
-                      style: TextStyle(
-                          color: Theme.of(context).colorScheme.onPrimary,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13),
+                    // Scale down so suffixed values ('100%') still fit the
+                    // fixed 32px leader circle.
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '$value$suffix',
+                        style: TextStyle(
+                            color: Theme.of(context).colorScheme.onPrimary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13),
+                      ),
                     ),
                   ),
                 )
               : SizedBox(
                   width: 32,
                   child: Center(
-                    child: Text(
-                      '$value',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withValues(alpha: 0.6),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '$value$suffix',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.6),
+                        ),
                       ),
                     ),
                   ),
