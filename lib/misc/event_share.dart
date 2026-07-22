@@ -5,6 +5,19 @@ import 'package:intl/intl.dart';
 const String kShareCta =
     'Download the Infinite Sports app for details and to sign up!';
 
+/// The CTA plus tappable store links (whichever exist) so a recipient
+/// without the app can download it in one tap.
+String shareCtaWithLinks({String? androidUrl, String? iosUrl}) {
+  final buf = StringBuffer(kShareCta);
+  if (androidUrl != null && androidUrl.trim().isNotEmpty) {
+    buf.write('\nAndroid: ${androidUrl.trim()}');
+  }
+  if (iosUrl != null && iosUrl.trim().isNotEmpty) {
+    buf.write('\niPhone: ${iosUrl.trim()}');
+  }
+  return buf.toString();
+}
+
 /// The date/time line for a share message: "September 27, 2026" (or a range
 /// across multiple days) plus "6:00AM - 8:00PM" when times are set.
 String shareDateTimeLine(Event e) {
@@ -37,10 +50,12 @@ String shareDateTimeLine(Event e) {
 /// - Custom caption set: "<caption>\n\n<CTA>".
 /// - No caption: an auto invite from the event's own title, short info, and
 ///   date/time, then the CTA.
-String buildShareMessage(Event e) {
+/// Pass [androidUrl]/[iosUrl] (from getStoreLinks) to append download links.
+String buildShareMessage(Event e, {String? androidUrl, String? iosUrl}) {
+  final cta = shareCtaWithLinks(androidUrl: androidUrl, iosUrl: iosUrl);
   final caption = e.shareCaption?.trim() ?? '';
   if (caption.isNotEmpty) {
-    return '$caption\n\n$kShareCta';
+    return '$caption\n\n$cta';
   }
   final title = (e.title?.trim().isNotEmpty ?? false) ? e.title!.trim() : 'this event';
   final buf = StringBuffer('Check out $title!');
@@ -48,6 +63,6 @@ String buildShareMessage(Event e) {
   if (info.isNotEmpty) buf.write('\n$info');
   final dt = shareDateTimeLine(e);
   if (dt.isNotEmpty) buf.write('\n$dt');
-  buf.write('\n\n$kShareCta');
+  buf.write('\n\n$cta');
   return buf.toString();
 }

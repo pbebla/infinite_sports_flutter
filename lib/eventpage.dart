@@ -6,6 +6,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart' show consolidateHttpClientResponseBytes;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'package:infinite_sports_flutter/misc/app_config.dart';
 import 'package:infinite_sports_flutter/misc/event_repo.dart';
 import 'package:infinite_sports_flutter/misc/event_share.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
@@ -108,7 +109,9 @@ class _EventPageState extends State<EventPage> {
   /// keep both (Messages, WhatsApp, email) show flyer + text; image-only
   /// targets still get the flyer.
   Future<void> share_Clicked() async {
-    final message = buildShareMessage(event);
+    final links = await getStoreLinks();
+    final message = buildShareMessage(event,
+        androidUrl: links.android, iosUrl: links.ios);
     final url = event.imageUrl?.trim() ?? '';
     File? flyer;
     if (url.isNotEmpty) flyer = await _downloadFlyer(url);

@@ -67,6 +67,27 @@ void main() {
       expect(msg, 'Check out this event!\n\n$kShareCta');
     });
 
+    test('store links ride at the end when provided (P5)', () {
+      final msg = buildShareMessage(
+        _event(title: 'Futsal Night', caption: 'Come play!'),
+        androidUrl: 'https://play.google.com/store/apps/details?id=x',
+        iosUrl: 'https://apps.apple.com/app/id123',
+      );
+      expect(msg,
+          'Come play!\n\n$kShareCta\n'
+          'Android: https://play.google.com/store/apps/details?id=x\n'
+          'iPhone: https://apps.apple.com/app/id123');
+    });
+
+    test('only the links that exist are included', () {
+      expect(shareCtaWithLinks(androidUrl: 'a-url'),
+          '$kShareCta\nAndroid: a-url');
+      expect(shareCtaWithLinks(iosUrl: ' i-url '),
+          '$kShareCta\niPhone: i-url');
+      expect(shareCtaWithLinks(), kShareCta);
+      expect(shareCtaWithLinks(androidUrl: '  '), kShareCta);
+    });
+
     test('single start time only (no end) still shows', () {
       final line = shareDateTimeLine(_event(
         eventDate: 'July 4, 2026',
