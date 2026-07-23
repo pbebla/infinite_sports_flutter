@@ -1,3 +1,6 @@
+import 'package:infinite_sports_flutter/misc/league_sport_config.dart';
+import 'package:infinite_sports_flutter/misc/single_match_tallies.dart'
+    show catchPercentage;
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 
@@ -25,10 +28,41 @@ class TeamStanding {
   int get gd => gs - gc;
 }
 
-/// One player's counters.
+/// A single player's counters, generalized (P1) to a per-sport key→value
+/// map so any sport in [LeagueSportConfig] gets tournament stat tracking
+/// for free. Soccer/futsal keep their EXACT legacy RTDB key names
+/// (Goals/Assists/Saves/DPL/CleanSheets/YellowCards/RedCards, via the
+/// getters below) so existing consumers (TournamentPlayer, award_engine,
+/// the fan app) keep reading the same fields unchanged. Basketball/Flag
+/// Football write their [LeagueSportConfig.statCatalog] key names
+/// directly (OnePoint/TwoPoints/.../QBComp/REC/...).
 class PlayerCounters {
-  int goals = 0, assists = 0, saves = 0, dpl = 0, cleanSheets = 0,
-      yellowCards = 0, redCards = 0;
+  final Map<String, int> _byKey = {};
+
+  void bump(String key, [int by = 1]) =>
+      _byKey[key] = (_byKey[key] ?? 0) + by;
+
+  /// Zero-initializes every key in [keys] so a re-finalize always clears a
+  /// stale value that no longer applies (the self-healing behavior the
+  /// original fixed-field toMap() had for free).
+  void seedZero(Iterable<String> keys) {
+    for (final k in keys) {
+      _byKey.putIfAbsent(k, () => 0);
+    }
+  }
+
+  int byKey(String key) => _byKey[key] ?? 0;
+
+  // ---- Legacy soccer/futsal getters — UNCHANGED key names ----
+  int get goals => byKey('Goals');
+  int get assists => byKey('Assists');
+  int get saves => byKey('Saves');
+  int get dpl => byKey('DPL');
+  int get cleanSheets => byKey('CleanSheets');
+  int get yellowCards => byKey('YellowCards');
+  int get redCards => byKey('RedCards');
+
+  Map<String, dynamic> toMap() => Map<String, dynamic>.from(_byKey);
 }
 
 /// Result of a recompute, with convenience accessors for the UI.
@@ -69,6 +103,51 @@ class ComputedTournamentStats {
         return c.redCards;
       case 'goalsAndAssists':
         return c.goals + c.assists;
+      // P3 basketball/flag football derived stats (raw catalog keys live
+      // on PlayerCounters directly via byKey; these are the UI-facing
+      // combinations PlayerStatsTab/TeamDetail read).
+      case 'points':
+        return c.byKey('OnePoint') + 2 * c.byKey('TwoPoints') + 3 * c.byKey('ThreePoints');
+      case 'freeThrows':
+        return c.byKey('OnePoint');
+      case 'twoPointers':
+        return c.byKey('TwoPoints');
+      case 'threePointers':
+        return c.byKey('ThreePoints');
+      case 'misses':
+        return c.byKey('Misses');
+      case 'rebounds':
+        return c.byKey('Rebounds');
+      case 'steals':
+        return c.byKey('Steals');
+      case 'blocks':
+        return c.byKey('Blocks');
+      case 'fouls':
+        return c.byKey('Fouls');
+      case 'turnovers':
+        return c.byKey('Turnovers');
+      case 'touchdowns':
+        return c.byKey('RECTD') + c.byKey('RushTD') + c.byKey('INTTD');
+      case 'receivingTouchdowns':
+        return c.byKey('RECTD');
+      case 'rushingTouchdowns':
+        return c.byKey('RushTD');
+      case 'interceptionTouchdowns':
+        return c.byKey('INTTD');
+      case 'passTouchdowns':
+        return c.byKey('PassTD');
+      case 'receptions':
+        return c.byKey('REC');
+      case 'interceptions':
+        return c.byKey('INT');
+      case 'flagPulls':
+        return c.byKey('FP');
+      case 'sacks':
+        return c.byKey('Sack');
+      case 'passBreakups':
+        return c.byKey('PBU');
+      case 'catchPercentage':
+        return catchPercentage(c.byKey('REC'), c.byKey('RECMiss'), minTargets: 3) ?? 0;
       default:
         return 0;
     }
@@ -81,16 +160,38 @@ class ComputedTournamentStats {
 ComputedTournamentStats computeTournamentStats({
   required List<TournamentMatch> matches,
   required Map<String, List<TournamentPlayer>> rosters,
+  // Defaults to 'Soccer' so every existing call site (and every existing
+  // test) keeps compiling and behaving identically without modification.
+  String sport = 'Soccer',
 }) {
   final standings = <String, TeamStanding>{};
   final players = <String, Map<String, PlayerCounters>>{};
   final unknown = <String>{};
 
+  // P1: the zero-init key set is sport-specific — soccer/futsal keep the
+  // exact legacy 7 keys (no 'Fouls' counter for tournaments — out of scope,
+  // unchanged from today); basketball/flag football zero-init their full
+  // stat catalog so a fix that removes an event always clears the stale
+  // value.
+  const legacySoccerKeys = [
+    'Goals',
+    'Assists',
+    'Saves',
+    'DPL',
+    'CleanSheets',
+    'YellowCards',
+    'RedCards',
+  ];
+  final config = configForSport(sport);
+  final zeroKeys = (sport == 'Basketball' || sport == 'Flag Football')
+      ? (config?.statCatalog.map((s) => s.key).toList() ?? const <String>[])
+      : legacySoccerKeys;
+
   rosters.forEach((teamId, list) {
     standings.putIfAbsent(teamId, () => TeamStanding());
     final byName = players.putIfAbsent(teamId, () => {});
     for (final p in list) {
-      byName.putIfAbsent(p.name, () => PlayerCounters());
+      byName.putIfAbsent(p.name, () => PlayerCounters()..seedZero(zeroKeys));
     }
   });
 
@@ -109,32 +210,47 @@ ComputedTournamentStats computeTournamentStats({
     return c;
   }
 
-  void applyEvent(String? teamId, String type, String playerName) {
+  void applyEvent(String? teamId, String rawType, String playerName) {
     final c = counterFor(teamId, playerName);
     if (c == null) return;
-    switch (type.toLowerCase().trim()) {
-      case TournamentEvents.goal:
-      case TournamentEvents.penaltyGoal:
-        c.goals++;
+    final canonical = canonicalEventType(sport, rawType);
+
+    if (sport == 'Basketball' || sport == 'Flag Football') {
+      // P1: fully config-driven — any sport added to LeagueSportConfig
+      // gets tournament counters for free, no new switch case here.
+      final event = config?.eventForActivity(canonical);
+      if (event == null) return; // unknown/legacy: timeline-only
+      for (final key in event.statKeys) {
+        c.bump(key);
+      }
+      return;
+    }
+
+    // Soccer/Futsal — EXACT legacy mapping, now keyed off the canonical
+    // type so both old and new spellings resolve identically.
+    switch (canonical) {
+      case 'Goal':
+      case 'PenGoal':
+        c.bump('Goals');
         break;
-      case TournamentEvents.assist:
-        c.assists++;
+      case 'Assist':
+        c.bump('Assists');
         break;
-      case TournamentEvents.save:
-      case TournamentEvents.penaltySaved:
-        c.saves++;
+      case 'Save':
+      case 'PenSaved':
+        c.bump('Saves');
         break;
-      case TournamentEvents.dpl:
-        c.dpl++;
+      case 'DPL':
+        c.bump('DPL');
         break;
-      case TournamentEvents.yellowCard:
-        c.yellowCards++;
+      case 'Yellow':
+        c.bump('YellowCards');
         break;
-      case TournamentEvents.redCard:
-      case TournamentEvents.secondYellow:
-        c.redCards++;
+      case 'Red':
+      case 'SecondYellow':
+        c.bump('RedCards');
         break;
-      // own goal, penalty missed, foul, substitution: timeline-only, no counter.
+      // OwnGoal, PenMissed, Foul, Substitution: timeline-only, no counter.
       default:
         break;
     }
@@ -180,11 +296,17 @@ ComputedTournamentStats computeTournamentStats({
       applyEvent(t2, e.type, e.player);
     }
 
-    if (s2 == 0 && m.team1Keeper != null) {
-      counterFor(t1, m.team1Keeper!)?.cleanSheets++;
-    }
-    if (s1 == 0 && m.team2Keeper != null) {
-      counterFor(t2, m.team2Keeper!)?.cleanSheets++;
+    // Clean sheets: keeper of a team that conceded zero gets +1 — only for
+    // sports with a clean-sheet concept (config-driven via
+    // cleanSheetStatKey, empty for basketball/flag football).
+    final cleanSheetKey = config?.cleanSheetStatKey ?? '';
+    if (cleanSheetKey.isNotEmpty) {
+      if (s2 == 0 && m.team1Keeper != null) {
+        counterFor(t1, m.team1Keeper!)?.bump(cleanSheetKey);
+      }
+      if (s1 == 0 && m.team2Keeper != null) {
+        counterFor(t2, m.team2Keeper!)?.bump(cleanSheetKey);
+      }
     }
   }
 
@@ -221,4 +343,22 @@ List<({String type, String player})> _eventsFromActivity(
   });
 
   return out;
+}
+
+/// Standings display mode for [sport] — a pure function so adding a future
+/// sport is a one-line switch case, not a screen-by-screen decision.
+/// 'drawsAllowed' (soccer/futsal): W/D/L/GS/GC/GD/Pts. 'winsOnly'
+/// (basketball/flag football, and any future sport not listed): W/L/PF/PA/
+/// Diff — no D or Pts column. The underlying [TeamStanding] computation is
+/// identical for every sport (see computeTournamentStats): a sport that
+/// never draws sorts identically whether you rank by Pts or by wins, so
+/// this only changes what the fan TableTab RENDERS, never what is computed.
+String standingsModeFor(String sport) {
+  switch (sport) {
+    case 'Soccer':
+    case 'Futsal':
+      return 'drawsAllowed';
+    default:
+      return 'winsOnly';
+  }
 }
