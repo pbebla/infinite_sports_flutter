@@ -775,3 +775,83 @@ List<LeagueStatMove> reassignStatMoves(
   final target = event.scoresOpponent ? 1 - teamTag : teamTag;
   return (teamTag: target, delta: -event.scorePoints);
 }
+
+// ---------------------------------------------------------------------------
+// Tournament sport-config resolution + spelling bridge (Tournaments-for-All-
+// Sports epic, P1). Additive to this twin file (kept byte-identical except
+// imports) — the file is no longer frozen the way L6 froze it, because this
+// epic's whole point is teaching tournaments to read the SAME per-sport
+// config leagues already use.
+// ---------------------------------------------------------------------------
+
+/// Resolves a Tournament's sport string to its [LeagueSportConfig]. 'Soccer'
+/// shares Futsal's vocabulary (identical ruleset family — tournaments have
+/// always treated them the same way NotificationsMeta/vocab-wise). Unknown
+/// sports (e.g. a future Volleyball before its config lands) return null so
+/// callers fall back to legacy/unconfigured behavior instead of crashing.
+LeagueSportConfig? configForSport(String sport) {
+  switch (sport) {
+    case 'Futsal':
+    case 'Soccer':
+      return futsalLeagueConfig;
+    case 'Basketball':
+      return basketballLeagueConfig;
+    case 'Flag Football':
+      return flagFootballLeagueConfig;
+    default:
+      return null;
+  }
+}
+
+/// Legacy TOURNAMENT activity spellings (spaced, lowercase — written by the
+/// pre-unification pick-stat capture flow) -> the canonical league spelling
+/// used by [LeagueSportConfig] going forward. Basketball/Flag Football have
+/// no legacy tournament data (tournaments never supported them before this
+/// epic), so they need no entries here — canonicalEventType folds their
+/// case via the config scan below instead.
+const Map<String, String> _legacyTournamentEventSpellings = {
+  'goal': 'Goal',
+  'penalty goal': 'PenGoal',
+  'penalty saved': 'PenSaved',
+  'penalty missed': 'PenMissed',
+  'own goal': 'OwnGoal',
+  'yellow card': 'Yellow',
+  'second yellow': 'SecondYellow',
+  'red card': 'Red',
+  'assist': 'Assist',
+  'save': 'Save',
+  'dpl': 'DPL',
+  'foul': 'Foul',
+  'substitution': 'Substitution',
+};
+
+/// Normalizes a raw activity-type string (as read off Firebase, in either
+/// its legacy tournament spelling OR its canonical league spelling, in any
+/// case) to the canonical [LeagueSportConfig] spelling for [sport]. Every
+/// consumer that used to switch on hardcoded tournament spellings
+/// (engines, icons, undo, second-yellow detection, notification watchers)
+/// should run raw types through this FIRST so old and new data behave
+/// identically. Unknown/legacy-only types (e.g. the retired league 'Blue')
+/// pass through trimmed but otherwise unchanged — callers that need to
+/// know "is this a real event" still call [LeagueSportConfig.eventForActivity]
+/// on the result and get null, exactly as today. Pure — no Firebase.
+String canonicalEventType(String sport, String raw) {
+  final trimmed = raw.trim();
+  final lower = trimmed.toLowerCase();
+
+  final config = configForSport(sport);
+  if (config != null) {
+    for (final e in [
+      ...config.rowEvents,
+      ...config.topBarEvents,
+      ...config.chainedOnlyEvents,
+    ]) {
+      if (e.activityType.toLowerCase() == lower) return e.activityType;
+    }
+  }
+
+  final legacy = _legacyTournamentEventSpellings[lower];
+  if (legacy != null) return legacy;
+
+  return trimmed;
+}

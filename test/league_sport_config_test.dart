@@ -705,4 +705,60 @@ void main() {
       }
     });
   });
+
+  group('configForSport (P1)', () {
+    test('Futsal and Soccer both resolve to the futsal config', () {
+      expect(configForSport('Futsal'), same(futsalLeagueConfig));
+      expect(configForSport('Soccer'), same(futsalLeagueConfig));
+    });
+
+    test('Basketball and Flag Football resolve to their configs', () {
+      expect(configForSport('Basketball'), same(basketballLeagueConfig));
+      expect(configForSport('Flag Football'), same(flagFootballLeagueConfig));
+    });
+
+    test('unknown sport resolves to null', () {
+      expect(configForSport('Volleyball'), isNull);
+    });
+  });
+
+  group('canonicalEventType (P1 spelling bridge)', () {
+    test('legacy soccer/futsal spaced spellings map to canonical types', () {
+      expect(canonicalEventType('Soccer', 'goal'), 'Goal');
+      expect(canonicalEventType('Soccer', 'penalty goal'), 'PenGoal');
+      expect(canonicalEventType('Soccer', 'penalty saved'), 'PenSaved');
+      expect(canonicalEventType('Soccer', 'penalty missed'), 'PenMissed');
+      expect(canonicalEventType('Soccer', 'own goal'), 'OwnGoal');
+      expect(canonicalEventType('Soccer', 'yellow card'), 'Yellow');
+      expect(canonicalEventType('Soccer', 'second yellow'), 'SecondYellow');
+      expect(canonicalEventType('Soccer', 'red card'), 'Red');
+      expect(canonicalEventType('Soccer', 'assist'), 'Assist');
+      expect(canonicalEventType('Soccer', 'save'), 'Save');
+      expect(canonicalEventType('Soccer', 'dpl'), 'DPL');
+      expect(canonicalEventType('Soccer', 'foul'), 'Foul');
+      expect(canonicalEventType('Futsal', 'substitution'), 'Substitution');
+    });
+
+    test('already-canonical league spellings are idempotent (case-insensitive)', () {
+      expect(canonicalEventType('Futsal', 'Goal'), 'Goal');
+      expect(canonicalEventType('Futsal', 'PENGOAL'), 'PenGoal');
+      expect(canonicalEventType('Futsal', 'secondyellow'), 'SecondYellow');
+    });
+
+    test('basketball/flag football fold case but need no legacy bridge', () {
+      expect(canonicalEventType('Basketball', 'onepointer'), 'OnePointer');
+      expect(canonicalEventType('Basketball', 'ThreePointer'), 'ThreePointer');
+      expect(canonicalEventType('Flag Football', 'receiving td'), 'Receiving TD');
+      expect(canonicalEventType('Flag Football', 'PASS TD'), 'Pass TD');
+    });
+
+    test('unknown/legacy-only types (e.g. retired league Blue) pass through unchanged', () {
+      expect(canonicalEventType('Futsal', 'Blue'), 'Blue');
+      expect(canonicalEventType('Volleyball', 'spike'), 'spike');
+    });
+
+    test('trims whitespace', () {
+      expect(canonicalEventType('Soccer', '  goal  '), 'Goal');
+    });
+  });
 }
