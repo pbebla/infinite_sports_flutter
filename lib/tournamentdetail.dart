@@ -230,6 +230,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                 final stats = computeTournamentStats(
                   matches: _matches,
                   rosters: _rosters,
+                  sport: _tournament?.sport ?? 'Soccer',
                 );
                 return TabBarView(
                 controller: _tabController!,
@@ -250,6 +251,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                     matches: _matches,
                     tournamentId: widget.tournamentId,
                     stats: stats,
+                    sport: _tournament?.sport ?? 'Soccer',
                   ),
                   KnockoutTab(
                     matches: _matches,
@@ -263,6 +265,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                     teams: _teams,
                     tournamentId: widget.tournamentId,
                     stats: stats,
+                    sport: _tournament?.sport ?? 'Soccer',
                   ),
                   TeamsTab(
                     teams: _teams,
@@ -270,6 +273,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                     rosters: _rosters,
                     tournamentId: widget.tournamentId,
                     stats: stats,
+                    sport: _tournament?.sport ?? 'Soccer',
                   ),
                   if (_predictionConfig?.open ?? false)
                     PredictTab(
