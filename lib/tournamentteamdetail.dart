@@ -22,12 +22,17 @@ class TournamentTeamDetailPage extends StatefulWidget {
   final Map<String, TournamentTeam>? preloadedTeams;
   final Map<String, List<TournamentPlayer>>? preloadedRosters;
 
+  /// Defaults to 'Soccer' so any call site this plan didn't touch keeps
+  /// compiling with today's Goals/Assists/Saves/DPL categories.
+  final String sport;
+
   const TournamentTeamDetailPage({
     super.key,
     required this.teamId,
     required this.tournamentId,
     this.preloadedTeams,
     this.preloadedRosters,
+    this.sport = 'Soccer',
   });
 
   @override
@@ -674,7 +679,30 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       return const Center(child: Text('No player data'));
     }
 
-    final categories = [
+    const categoriesBySport = {
+      'Basketball': [
+        {'label': 'Points', 'stat': 'points'},
+        {'label': '3-Pointers', 'stat': 'threePointers'},
+        {'label': '2-Pointers', 'stat': 'twoPointers'},
+        {'label': 'Free Throws Made', 'stat': 'freeThrows'},
+        {'label': 'Rebounds', 'stat': 'rebounds'},
+        {'label': 'Assists', 'stat': 'assists'},
+        {'label': 'Steals', 'stat': 'steals'},
+        {'label': 'Blocks', 'stat': 'blocks'},
+        {'label': 'Turnovers', 'stat': 'turnovers'},
+        {'label': 'Fouls', 'stat': 'fouls'},
+      ],
+      'Flag Football': [
+        {'label': 'Touchdowns', 'stat': 'touchdowns'},
+        {'label': 'Receptions', 'stat': 'receptions'},
+        {'label': 'Catch %', 'stat': 'catchPercentage', 'suffix': '%'},
+        {'label': 'Pass TDs', 'stat': 'passTouchdowns'},
+        {'label': 'Interceptions', 'stat': 'interceptions'},
+        {'label': 'Flag Pulls', 'stat': 'flagPulls'},
+        {'label': 'Sacks', 'stat': 'sacks'},
+      ],
+    };
+    const futsalCategories = [
       {'label': 'Goals', 'stat': 'goals'},
       {'label': 'Assists', 'stat': 'assists'},
       {'label': 'Saves', 'stat': 'saves'},
@@ -683,6 +711,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       {'label': 'Yellow Cards', 'stat': 'yellowCards'},
       {'label': 'Red Cards', 'stat': 'redCards'},
     ];
+    final categories = categoriesBySport[widget.sport] ?? futsalCategories;
 
     final stats = computeTournamentStats(matches: _matches, rosters: _rosters);
     int getValue(TournamentPlayer p, String stat) =>
@@ -701,6 +730,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
         final cat = categories[idx];
         final label = cat['label']!;
         final stat = cat['stat']!;
+        final suffix = cat['suffix'] ?? '';
         final allSorted = getAllSorted(stat);
         if (allSorted.isEmpty) return const SizedBox.shrink();
 
@@ -785,7 +815,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                                   ),
                                   child: Center(
                                     child: Text(
-                                      '$value',
+                                      '$value$suffix',
                                       style: TextStyle(
                                           color: Theme.of(context).colorScheme.onPrimary,
                                           fontWeight: FontWeight.bold,
@@ -797,7 +827,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                                   width: 32,
                                   child: Center(
                                     child: Text(
-                                      '$value',
+                                      '$value$suffix',
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: Theme.of(context)

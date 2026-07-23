@@ -203,6 +203,7 @@ class TableTab extends StatelessWidget {
                     teamId: team.id,
                     tournamentId: tournamentId!,
                     preloadedTeams: teams,
+                    sport: sport,
                   ),
                 ),
               );

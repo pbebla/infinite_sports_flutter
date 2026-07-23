@@ -263,6 +263,7 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
                                 tournamentId: widget.tournamentId!,
                                 preloadedTeams: widget.teams,
                                 preloadedRosters: widget.rosters,
+                                sport: widget.sport,
                               ),
                             ),
                           );
