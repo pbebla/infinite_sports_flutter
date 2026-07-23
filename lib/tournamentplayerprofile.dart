@@ -1,5 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
+import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
@@ -7,11 +8,15 @@ import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 class TournamentPlayerProfilePage extends StatefulWidget {
   final TournamentPlayer player;
   final String tournamentName;
+  final String sport;
+  final ComputedTournamentStats stats;
 
   const TournamentPlayerProfilePage({
     super.key,
     required this.player,
     required this.tournamentName,
+    required this.sport,
+    required this.stats,
   });
 
   @override
@@ -162,13 +167,40 @@ class _TournamentPlayerProfilePageState
   }
 
   Widget _buildStatsCard(BuildContext context, TournamentPlayer player) {
+    const statsBySport = {
+      'Basketball': [
+        {'label': 'Points', 'stat': 'points'},
+        {'label': 'Rebounds', 'stat': 'rebounds'},
+        {'label': 'Assists', 'stat': 'assists'},
+        {'label': 'Steals', 'stat': 'steals'},
+        {'label': 'Blocks', 'stat': 'blocks'},
+        {'label': '3-Pointers', 'stat': 'threePointers'},
+      ],
+      'Flag Football': [
+        {'label': 'Touchdowns', 'stat': 'touchdowns'},
+        {'label': 'Receptions', 'stat': 'receptions'},
+        {'label': 'Catch %', 'stat': 'catchPercentage', 'suffix': '%'},
+        {'label': 'Interceptions', 'stat': 'interceptions'},
+        {'label': 'Sacks', 'stat': 'sacks'},
+        {'label': 'Flag Pulls', 'stat': 'flagPulls'},
+      ],
+    };
+    const futsalStats = [
+      {'label': 'Goals', 'stat': 'goals'},
+      {'label': 'Assists', 'stat': 'assists'},
+      {'label': 'G+A', 'stat': 'goalsAndAssists'},
+      {'label': 'Saves', 'stat': 'saves'},
+      {'label': 'DPL', 'stat': 'dpl'},
+      {'label': 'Clean Sheets', 'stat': 'cleanSheets'},
+    ];
+    final defs = statsBySport[widget.sport] ?? futsalStats;
     final stats = [
-      {'label': 'Goals', 'value': '${player.goals}'},
-      {'label': 'Assists', 'value': '${player.assists}'},
-      {'label': 'G+A', 'value': '${player.goalsAndAssists}'},
-      {'label': 'Saves', 'value': '${player.saves}'},
-      {'label': 'DPL', 'value': '${player.dpl}'},
-      {'label': 'Clean Sheets', 'value': '${player.cleanSheets}'},
+      for (final d in defs)
+        {
+          'label': d['label']!,
+          'value':
+              '${widget.stats.statByName(player.teamId, player.name, d['stat']!)}${d['suffix'] ?? ''}',
+        },
     ];
 
     return Card(
