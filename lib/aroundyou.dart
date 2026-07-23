@@ -10,6 +10,7 @@ import 'package:infinite_sports_flutter/businesspage.dart';
 import 'package:infinite_sports_flutter/eventpage.dart';
 import 'package:infinite_sports_flutter/misc/event_repo.dart';
 import 'package:infinite_sports_flutter/misc/event_utils.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/business.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
@@ -207,8 +208,8 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                       },);
                   },
                 ),
-          backgroundColor: appBarBackground(context),
-          foregroundColor: appBarForeground(context),
+          backgroundColor: TournamentColors.headerBackground(context),
+          foregroundColor: TournamentColors.headerForeground(context),
           centerTitle: true,
           title: Image.asset('assets/infinitelarge_dark.png', height: 30),
           actions: [

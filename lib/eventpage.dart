@@ -10,6 +10,7 @@ import 'package:infinite_sports_flutter/misc/app_config.dart';
 import 'package:infinite_sports_flutter/misc/event_repo.dart';
 import 'package:infinite_sports_flutter/misc/event_share.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/attendee.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
@@ -275,8 +276,8 @@ class _EventPageState extends State<EventPage> {
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
-        backgroundColor: appBarBackground(context),
-        foregroundColor: appBarForeground(context),
+        backgroundColor: TournamentColors.headerBackground(context),
+        foregroundColor: TournamentColors.headerForeground(context),
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -333,8 +334,8 @@ class _EventPageState extends State<EventPage> {
         return Scaffold(
             appBar: AppBar(
               centerTitle: true,
-              backgroundColor: appBarBackground(context),
-              foregroundColor: appBarForeground(context),
+              backgroundColor: TournamentColors.headerBackground(context),
+              foregroundColor: TournamentColors.headerForeground(context),
               title: Text(event.title ?? "", style: const TextStyle(fontSize: 16),),
             ),
             body: SingleChildScrollView(

@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/model/business.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -80,8 +80,8 @@ class _BusinessPageState extends State<BusinessPage> {
                             ..loadRequest(Uri.parse(business.url ?? ""));
                             return Scaffold(
                               appBar: AppBar(
-                                backgroundColor: appBarBackground(context),
-                                foregroundColor: appBarForeground(context),
+                                backgroundColor: TournamentColors.headerBackground(context),
+                                foregroundColor: TournamentColors.headerForeground(context),
                                 title: const Text(""),
                                 actions: [
                                   NavigationControls(controller: controller)
