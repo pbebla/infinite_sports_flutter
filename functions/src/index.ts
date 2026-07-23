@@ -48,6 +48,9 @@ async function recomputeLeaderboard(root: Reference, tid: string): Promise<void>
   }
 
   // Build the list of final matches (Status==2 with a known kick-off time)
+  const sportSnap = await root.child(`Tournaments/${tid}/Sport`).get();
+  const sport = typeof sportSnap.val() === 'string' && sportSnap.val().length > 0
+    ? (sportSnap.val() as string) : 'Soccer';
   const matchesSnap = await root.child(`Tournaments/${tid}/Matches`).get();
   const matches = (matchesSnap.val() ?? {}) as Record<string, any>;
   const finals: FinalMatch[] = [];
@@ -62,6 +65,7 @@ async function recomputeLeaderboard(root: Reference, tid: string): Promise<void>
         startedAtMs,
         team1Activity: m?.Team1Activity ?? m?.team1Activity ?? null,
         team2Activity: m?.Team2Activity ?? m?.team2Activity ?? null,
+        sport,
       });
     }
   }

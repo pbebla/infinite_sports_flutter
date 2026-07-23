@@ -147,3 +147,58 @@ describe('matchStatLeaders league aliases (P3)', () => {
     expect(matchStatLeaders(act, null, 'goals')).toEqual(['Bo']);
   });
 });
+
+describe('matchStatLeaders — per sport (P4)', () => {
+  test('Soccer/Futsal default behavior unchanged (3-arg call)', () => {
+    const a1 = { '10': [{ Goal: 'Ann' }] };
+    expect(matchStatLeaders(a1, null, 'goals')).toEqual(['Ann']);
+  });
+
+  test('Basketball: points is weighted 1/2/3, ties share', () => {
+    const a1 = {
+      '1': [{ OnePointer: 'Ann' }],
+      '2': [{ TwoPointer: 'Ann' }],
+      '3': [{ ThreePointer: 'Amy' }],
+    };
+    // Ann: 1 + 2 = 3. Amy: 3. Tied.
+    expect(matchStatLeaders(a1, null, 'points', 'Basketball').sort())
+      .toEqual(['Amy', 'Ann']);
+  });
+
+  test('Basketball: rebounds/steals/blocks/assists tally independently', () => {
+    const a1 = {
+      '1': [{ Rebound: 'Ann' }, { Rebound: 'Ann' }],
+      '2': [{ Steal: 'Amy' }],
+      '3': [{ Block: 'Amy' }],
+    };
+    expect(matchStatLeaders(a1, null, 'rebounds', 'Basketball')).toEqual(['Ann']);
+    expect(matchStatLeaders(a1, null, 'steals', 'Basketball')).toEqual(['Amy']);
+  });
+
+  test('Flag Football: touchdowns combine Receiving/Rushing/INT TD', () => {
+    const a1 = {
+      '1': [{ 'Receiving TD': 'Ann' }],
+      '2': [{ 'Rushing TD': 'Ann' }],
+    };
+    expect(matchStatLeaders(a1, null, 'touchdowns', 'Flag Football')).toEqual(['Ann']);
+  });
+
+  test('Flag Football: catchPercentage gated to >=3 targets', () => {
+    const a1 = {
+      '1': [{ REC: 'Ann' }],
+      '2': [{ REC: 'Ann' }],
+    };
+    // Only 2 targets — below the gate, so nobody leads.
+    expect(matchStatLeaders(a1, null, 'catchPercentage', 'Flag Football')).toEqual([]);
+  });
+
+  test('Flag Football: catchPercentage at exactly 3 targets computes a rate', () => {
+    const a1 = {
+      '1': [{ REC: 'Ann' }],
+      '2': [{ REC: 'Ann' }],
+      '3': [{ RECMiss: 'Ann' }],
+    };
+    // 2/3 = 67%.
+    expect(matchStatLeaders(a1, null, 'catchPercentage', 'Flag Football')).toEqual(['Ann']);
+  });
+});
