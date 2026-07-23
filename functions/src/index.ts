@@ -29,6 +29,16 @@ function dbRoot(event: DatabaseEvent<Change<DataSnapshot>>): Reference {
   return event.data.before.ref.root as Reference;
 }
 
+/** Reads Tournaments/{tid}/Sport once per handler invocation. Defaults to
+ *  'Soccer' (vocabFor's own Futsal fallback then applies) so a tournament
+ *  written before the Sport field existed keeps notifying exactly as
+ *  before. */
+async function readTournamentSport(root: Reference, tid: string): Promise<string> {
+  const snap = await root.child(`Tournaments/${tid}/Sport`).get();
+  const v = snap.val();
+  return typeof v === 'string' && v.length > 0 ? v : 'Soccer';
+}
+
 async function recomputeLeaderboard(root: Reference, tid: string): Promise<void> {
   const cfgSnap = await root.child(`Tournaments/${tid}/PredictionConfig`).get();
   const cfg = (cfgSnap.val() ?? {}) as Record<string, unknown>;
@@ -171,8 +181,11 @@ async function handleScore(
     // Re-read for fresh activity (scorer + assist), keep pre-grace live status.
     const match = parseMatch((await matchRef.get()).val());
     match.status = 1;
-    const names = await loadNames(root, tid, match);
-    const decision = decideGoal({ teamTag, before, after, match, names, tid, mid });
+    const [names, sport] = await Promise.all([
+      loadNames(root, tid, match),
+      readTournamentSport(root, tid),
+    ]);
+    const decision = decideGoal({ teamTag, before, after, match, names, tid, mid, sport });
     if (decision) {
       await sendAlert(decision);
     } else {
@@ -230,8 +243,11 @@ export const onMatchStatus = onValueWritten(
     try {
       const matchRef = root.child(`Tournaments/${tid}/Matches/${mid}`);
       const match = parseMatch((await matchRef.get()).val());
-      const names = await loadNames(root, tid, match);
-      const decision = decideStatus({ before, after, match, names, tid, mid });
+      const [names, sport] = await Promise.all([
+        loadNames(root, tid, match),
+        readTournamentSport(root, tid),
+      ]);
+      const decision = decideStatus({ before, after, match, names, tid, mid, sport });
       if (decision) await sendAlert(decision);
     } catch (err) {
       // Release the claim so a retry can deliver the lost alert.
