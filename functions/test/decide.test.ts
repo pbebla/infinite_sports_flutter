@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import {
   sanitizeId, tournamentTopic, teamTopic, buildCondition,
   parseMatch, decideGoal, decideStatus, goalKeysToClear,
+  canonicalizeTournamentActivity,
 } from '../src/lib/decide';
 
 const NAMES = { tournament: 'Test Tournament 2026', team1: 'Eagles', team2: 'Lions' };
@@ -54,7 +55,7 @@ describe('parseMatch', () => {
       Team1Activity: [null, [{ Goal: 'Ana' }]], // minute 1 as array index
     });
     const d = decideGoal({ teamTag: 1, before: 0, after: 1, match: m,
-      names: NAMES, tid: 'T1', mid: 'M1' });
+      names: NAMES, tid: 'T1', mid: 'M1', sport: 'Soccer' });
     expect(d?.body).toBe("Ana (Eagles) 1'");
   });
 
@@ -67,7 +68,7 @@ describe('parseMatch', () => {
 });
 
 describe('decideGoal', () => {
-  const base = { teamTag: 1 as const, before: 1, after: 2, tid: 'T1', mid: 'M1', names: NAMES };
+  const base = { teamTag: 1 as const, before: 1, after: 2, tid: 'T1', mid: 'M1', names: NAMES, sport: 'Soccer' };
 
   test('full goal alert with scorer and assist', () => {
     const d = decideGoal({ ...base, match: liveMatch() });
@@ -145,7 +146,7 @@ describe('decideGoal', () => {
 });
 
 describe('decideStatus', () => {
-  const base = { tid: 'T1', mid: 'M1', names: NAMES };
+  const base = { tid: 'T1', mid: 'M1', names: NAMES, sport: 'Soccer' };
 
   test('kickoff on 0 -> 1, with location', () => {
     const d = decideStatus({ ...base, before: 0, after: 1,
@@ -185,5 +186,99 @@ describe('goalKeysToClear (re-arm on undo)', () => {
     expect(goalKeysToClear(1, 3, 1)).toEqual(['goal_t1_2', 'goal_t1_3']);
     expect(goalKeysToClear(2, 5, 4)).toEqual(['goal_t2_5']);
     expect(goalKeysToClear(1, 2, 2)).toEqual([]);
+  });
+});
+
+describe('canonicalizeTournamentActivity (P4 spelling bridge)', () => {
+  test('bridges legacy spaced spellings to the compact league token', () => {
+    const activity = {
+      '10': [{ 'penalty goal': 'Ann' }],
+      '30': [{ 'own goal': 'Ann' }],
+    };
+    const out = canonicalizeTournamentActivity(activity)!;
+    expect(Object.keys(out['10'][0])).toEqual(['pengoal']);
+    expect(Object.keys(out['30'][0])).toEqual(['owngoal']);
+  });
+
+  test('leaves already-canonical / unrelated keys untouched', () => {
+    const activity = { '10': [{ Goal: 'Ann', _t: 555 }] };
+    const out = canonicalizeTournamentActivity(activity)!;
+    expect(out['10'][0]).toEqual({ Goal: 'Ann', _t: 555 });
+  });
+
+  test('null activity passes through as null', () => {
+    expect(canonicalizeTournamentActivity(null)).toBeNull();
+  });
+});
+
+describe('decideGoal — per sport (P4)', () => {
+  test('Soccer output is BYTE-IDENTICAL to the pre-P4 hardcoded strings', () => {
+    const match = liveMatch(); // team1Score 2, team2Score 1, Goal+Assist at '12'
+    const d = decideGoal({
+      teamTag: 1, before: 1, after: 2, match, names: NAMES,
+      tid: 'T1', mid: 'M1', sport: 'Soccer',
+    })!;
+    expect(d.title).toBe('⚽ GOAL! Eagles 2 – 1 Lions');
+    expect(d.body).toBe("Sam Smith (Eagles) 12' · Assist: Skylar Jackson");
+  });
+
+  test('legacy "penalty goal" spelling still resolves a scorer', () => {
+    const match = parseMatch({
+      Team1Id: 'e', Team2Id: 'l', Team1Score: 1, Team2Score: 0, Status: 1,
+      Team1Activity: { '40': [{ 'penalty goal': 'Ann' }] },
+    });
+    const d = decideGoal({
+      teamTag: 1, before: 0, after: 1, match, names: NAMES,
+      tid: 'T1', mid: 'M1', sport: 'Soccer',
+    })!;
+    expect(d.body).toContain('Ann (Eagles)');
+  });
+
+  test('Basketball: no assist pairing, sport-specific title', () => {
+    const match = parseMatch({
+      Team1Id: 'e', Team2Id: 'l', Team1Score: 3, Team2Score: 0, Status: 1,
+      Team1Activity: { '2': [{ ThreePointer: 'Ann' }] },
+    });
+    const d = decideGoal({
+      teamTag: 1, before: 0, after: 3, match, names: NAMES,
+      tid: 'T1', mid: 'M1', sport: 'Basketball',
+    })!;
+    expect(d.title).toBe('🏀 Score! Eagles 3 – 0 Lions');
+    expect(d.body).toBe("Ann (Eagles) 2'");
+  });
+
+  test('Flag Football: Rec TD headlines TOUCHDOWN + pairs with Pass TD', () => {
+    const match = parseMatch({
+      Team1Id: 'e', Team2Id: 'l', Team1Score: 6, Team2Score: 0, Status: 1,
+      Team1Activity: {
+        '5': [{ 'Receiving TD': 'Ann' }, { 'Pass TD': 'Amy' }],
+      },
+    });
+    const d = decideGoal({
+      teamTag: 1, before: 0, after: 6, match, names: NAMES,
+      tid: 'T1', mid: 'M1', sport: 'Flag Football',
+    })!;
+    expect(d.title).toBe('🏈 TOUCHDOWN! Eagles 6 – 0 Lions');
+    expect(d.body).toContain('Thrown by: Amy');
+  });
+});
+
+describe('decideStatus — per sport (P4)', () => {
+  test('Soccer kickoff/fulltime wording unchanged', () => {
+    const match = parseMatch({ Team1Id: 'e', Team2Id: 'l', Status: 1 });
+    const kickoff = decideStatus({
+      before: 0, after: 1, match, names: NAMES, tid: 'T1', mid: 'M1',
+      sport: 'Soccer',
+    })!;
+    expect(kickoff.title).toBe('🟢 Kickoff: Eagles vs Lions');
+  });
+
+  test('Basketball uses Tip-off / Final wording', () => {
+    const match = parseMatch({ Team1Id: 'e', Team2Id: 'l', Status: 1 });
+    const kickoff = decideStatus({
+      before: 0, after: 1, match, names: NAMES, tid: 'T1', mid: 'M1',
+      sport: 'Basketball',
+    })!;
+    expect(kickoff.title).toBe('🟢 Tip-off: Eagles vs Lions');
   });
 });

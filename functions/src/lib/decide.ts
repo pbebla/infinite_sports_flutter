@@ -1,6 +1,10 @@
 // Pure decision logic for the notification Watcher. No Firebase imports —
 // everything here is unit-testable with plain objects.
 
+import {
+  vocabFor, findScorerAndPair, newestOwnGoal,
+} from './league_decide';
+
 export interface MatchContext {
   team1Id: string | null;
   team2Id: string | null;
@@ -101,73 +105,94 @@ export function parseMatch(raw: unknown): MatchContext {
   };
 }
 
-// ---- scorer / assist pairing ----
+// ---- P4: tournament activity spelling bridge ----------------------------
+// Bridges the two legacy TOURNAMENT-only spaced spellings ('penalty goal',
+// 'own goal') to the compact league token ('pengoal', 'owngoal') that the
+// shared SPORT_VOCAB recognizes. New capture (Manager P2) already writes
+// canonical spellings, and every other legacy spelling case-folds for free
+// via findScorerAndPair's own lowercasing — only these two need bridging.
 
-const SCORER_EVENTS = new Set(['goal', 'penalty goal']);
+const LEGACY_TOURNAMENT_EVENT_SPELLINGS: Record<string, string> = {
+  'penalty goal': 'pengoal',
+  'own goal': 'owngoal',
+};
 
-interface MinuteEvent { minute: number; eventType: string; player: string }
+function remapLeafKey(key: string): string {
+  const lower = key.toLowerCase().trim();
+  return LEGACY_TOURNAMENT_EVENT_SPELLINGS[lower] ?? key;
+}
 
-function bucketEvents(bucket: unknown, minute: number): MinuteEvent[] {
-  const list = Array.isArray(bucket)
-    ? bucket
-    : (bucket && typeof bucket === 'object' ? Object.values(bucket) : []);
-  const out: MinuteEvent[] = [];
-  for (const ev of list) {
-    if (!ev || typeof ev !== 'object') continue;
-    const entries = Object.entries(ev as Record<string, unknown>);
-    if (!entries.length) continue;
-    // The Manager app writes each activity event as a single-entry {EventType: PlayerName}
-    // map, so only the first entry is meaningful.
-    const [type, player] = entries[0];
-    out.push({ minute, eventType: type.toLowerCase().trim(), player: String(player) });
+function remapLeaf(leaf: unknown): unknown {
+  if (!leaf || typeof leaf !== 'object') return leaf;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(leaf as Record<string, unknown>)) {
+    out[remapLeafKey(k)] = v;
   }
   return out;
 }
 
-function allEvents(activity: Record<string, unknown> | null): MinuteEvent[] {
-  if (!activity) return [];
-  return Object.entries(activity)
-    .map(([k, v]) => ({ minute: toInt(k), bucket: v }))
-    .sort((a, b) => a.minute - b.minute)
-    .flatMap(({ minute, bucket }) => bucketEvents(bucket, minute));
+function remapBucket(bucket: unknown): unknown {
+  if (Array.isArray(bucket)) return bucket.map(remapLeaf);
+  if (bucket && typeof bucket === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(bucket as Record<string, unknown>)) {
+      out[k] = remapLeaf(v);
+    }
+    return out;
+  }
+  return bucket;
 }
 
-/** Newest goal-type event, plus an assist in the same or next minute. */
-function findScorerAndAssist(activity: Record<string, unknown> | null):
-    { scorer: MinuteEvent | null; assist: MinuteEvent | null } {
-  const events = allEvents(activity);
-  const scorer = [...events].reverse().find((e) => SCORER_EVENTS.has(e.eventType)) ?? null;
-  if (!scorer) return { scorer: null, assist: null };
-  const assist = [...events].reverse().find((e) =>
-    e.eventType === 'assist' &&
-    (e.minute === scorer.minute || e.minute === scorer.minute + 1)) ?? null;
-  return { scorer, assist };
+/** Pure, exported for direct unit testing. Preserves every other key
+ *  (including `_t` insertion stamps) untouched. */
+export function canonicalizeTournamentActivity(
+  activity: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!activity) return activity;
+  const out: Record<string, unknown> = {};
+  for (const [minute, bucket] of Object.entries(activity)) {
+    out[minute] = remapBucket(bucket);
+  }
+  return out;
 }
 
 // ---- decisions ----
 
 export function decideGoal(args: {
   teamTag: 1 | 2; before: number; after: number;
-  match: MatchContext; names: Names; tid: string; mid: string;
+  match: MatchContext; names: Names; tid: string; mid: string; sport: string;
 }): AlertDecision | null {
-  const { teamTag, before, after, match, names, tid, mid } = args;
+  const { teamTag, before, after, match, names, tid, mid, sport } = args;
   if (after <= before) return null;
   if (match.status !== 1) return null;
 
   const scoringTeamName = teamTag === 1 ? names.team1 : names.team2;
-  const activity = teamTag === 1 ? match.team1Activity : match.team2Activity;
-  const { scorer, assist } = findScorerAndAssist(activity);
+  const rawActivity = teamTag === 1 ? match.team1Activity : match.team2Activity;
+  const rawOpposing = teamTag === 1 ? match.team2Activity : match.team1Activity;
+  const activity = canonicalizeTournamentActivity(rawActivity);
+  const opposing = canonicalizeTournamentActivity(rawOpposing);
+
+  const vocab = vocabFor(sport);
+  const { scorer, pair } = findScorerAndPair(activity, vocab);
 
   let body = '';
   if (scorer) {
     body = `${scorer.player} (${scoringTeamName}) ${scorer.minute}'`;
-    if (assist) body += ` · Assist: ${assist.player}`;
+    if (pair) body += ` · ${vocab.pairLabel}: ${pair.player}`;
+  } else if (vocab.ownGoalFallback) {
+    const og = newestOwnGoal(opposing);
+    if (og) body = `Own goal · ${og.player} ${og.minute}'`;
   }
+
+  const title =
+    scorer && vocab.tdTitle && vocab.tdEvents.has(scorer.eventType)
+      ? vocab.tdTitle(names.team1, match.team1Score, match.team2Score, names.team2)
+      : vocab.goalTitle(names.team1, match.team1Score, match.team2Score, names.team2);
 
   return {
     kind: 'goal',
     dedupeKey: `goal_t${teamTag}_${after}`,
-    title: `⚽ GOAL! ${names.team1} ${match.team1Score} – ${match.team2Score} ${names.team2}`,
+    title,
     body,
     condition: buildCondition(tid, match.team1Id, match.team2Id),
     color: ALERT_COLORS.goal,
@@ -177,17 +202,18 @@ export function decideGoal(args: {
 
 export function decideStatus(args: {
   before: number; after: number;
-  match: MatchContext; names: Names; tid: string; mid: string;
+  match: MatchContext; names: Names; tid: string; mid: string; sport: string;
 }): AlertDecision | null {
-  const { before, after, match, names, tid, mid } = args;
+  const { before, after, match, names, tid, mid, sport } = args;
   if (before === after) return null;
   const condition = buildCondition(tid, match.team1Id, match.team2Id);
+  const vocab = vocabFor(sport);
 
   if (before === 0 && after === 1) {
     return {
       kind: 'kickoff',
       dedupeKey: 'kickoff',
-      title: `🟢 Kickoff: ${names.team1} vs ${names.team2}`,
+      title: `${vocab.kickoffPrefix} ${names.team1} vs ${names.team2}`,
       body: match.matchLocation
         ? `Now playing — ${match.matchLocation}`
         : 'Now playing — follow it live!',
@@ -201,7 +227,7 @@ export function decideStatus(args: {
     return {
       kind: 'fulltime',
       dedupeKey: 'fulltime',
-      title: `🏁 Full time: ${names.team1} ${match.team1Score} – ${match.team2Score} ${names.team2}`,
+      title: `${vocab.fulltimePrefix} ${names.team1} ${match.team1Score} – ${match.team2Score} ${names.team2}`,
       body: '',
       condition,
       color: ALERT_COLORS.fulltime,
