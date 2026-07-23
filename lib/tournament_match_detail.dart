@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/share_match_card_service.dart';
+import 'package:infinite_sports_flutter/misc/single_match_tallies.dart'
+    show leagueMatchLeaderCategories;
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
@@ -11,6 +13,8 @@ import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_facts_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_lineup_tab.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart'
+    show isBadgeLeagueSport;
 import 'package:infinite_sports_flutter/widgets/live_clock.dart';
 import 'package:infinite_sports_flutter/widgets/score_text.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
@@ -334,6 +338,15 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                 tournamentId: widget.tournamentId,
                 predictionConfig: _predictionConfig,
                 currentUid: FirebaseAuth.instance.currentUser?.uid,
+                // Basketball/flag football tournaments get sport-correct
+                // timeline icons, Match Leaders, and icon legend via the
+                // SAME infrastructure league games already use. Soccer/
+                // futsal tournaments pass neither — unchanged behavior.
+                leaderCategories: isBadgeLeagueSport(widget.sport)
+                    ? leagueMatchLeaderCategories(widget.sport)
+                    : null,
+                leagueSportKey:
+                    isBadgeLeagueSport(widget.sport) ? widget.sport : null,
               ),
               MatchLineupTab(
                 match: _match,
