@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/team_leadership.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
@@ -364,52 +365,9 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
               ),
             ),
           ),
-        // Coaching Staff card
-        if (team != null && team.coachName != null && team.coachName!.isNotEmpty)
-          Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Coaching Staff',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleSmall
-                          ?.copyWith(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      TeamLogo(
-                        url: team.coachPhotoUrl,
-                        size: 44,
-                        fallbackIcon: Icons.person,
-                      ),
-                      const SizedBox(width: 10),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(team.coachName!,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14)),
-                          Text('Head Coach',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurface
-                                    .withValues(alpha: 0.5),
-                              )),
-                        ],
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
+        // Team Leadership card (Coach / Captain, TAS.1): shows whichever of
+        // the two is set, both lines if both are set, hidden if neither is.
+        _buildLeadershipCard(context),
         // Tournament Record card
         _buildSeasonRecord(context),
         // Tournament History card
@@ -530,42 +488,39 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
   Widget _buildSquadTab(BuildContext context) {
     final sorted = _sortedPlayers();
     final team = _team;
+    final leadershipLines = team == null
+        ? const <String>[]
+        : teamLeadershipLines(
+            coachName: team.coachName, captainName: team.captainName);
 
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
-        // Coach section
-        if (team?.coachName != null && team!.coachName!.isNotEmpty) ...[
-          _sectionHeader(context, 'COACHING STAFF'),
+        // Leadership section (Coach / Captain, TAS.1)
+        if (leadershipLines.isNotEmpty) ...[
+          _sectionHeader(context, 'TEAM LEADERSHIP'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: Row(
               children: [
                 TeamLogo(
-                  url: team.coachPhotoUrl,
+                  url: team!.coachPhotoUrl,
                   size: 44,
                   fallbackIcon: Icons.person,
                 ),
                 const SizedBox(width: 10),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      team.coachName!,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w600, fontSize: 14),
-                    ),
-                    Text(
-                      'Head Coach',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withValues(alpha: 0.5),
-                      ),
-                    ),
-                  ],
+                  children: leadershipLines
+                      .map((line) => Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Text(
+                              line,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600, fontSize: 14),
+                            ),
+                          ))
+                      .toList(),
                 ),
               ],
             ),
@@ -848,6 +803,58 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
           ),
         );
       },
+    );
+  }
+
+  /// Team Leadership card (Coach / Captain, TAS.1 Task 3): shows "Coach: X"
+  /// when a coach is set, "Captain: Y" when a captain is set, both lines
+  /// when both are set, and hides the whole card when neither is set. Photo
+  /// slot (if any) always follows the coach — there's no separate captain
+  /// photo field.
+  Widget _buildLeadershipCard(BuildContext context) {
+    final team = _team;
+    if (team == null) return const SizedBox.shrink();
+    final lines = teamLeadershipLines(
+        coachName: team.coachName, captainName: team.captainName);
+    if (lines.isEmpty) return const SizedBox.shrink();
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Team Leadership',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                TeamLogo(
+                  url: team.coachPhotoUrl,
+                  size: 44,
+                  fallbackIcon: Icons.person,
+                ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: lines
+                      .map((line) => Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Text(line,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14)),
+                          ))
+                      .toList(),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
