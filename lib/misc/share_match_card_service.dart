@@ -34,6 +34,7 @@ Future<void> shareMatchCard(
   required TournamentTeam? team1,
   required TournamentTeam? team2,
   required String tournamentName,
+  required String sport,
 }) async {
   final messenger = ScaffoldMessenger.maybeOf(context);
   try {
@@ -59,6 +60,7 @@ Future<void> shareMatchCard(
         team1: team1,
         team2: team2,
         tournamentName: tournamentName,
+        sport: sport,
       ),
     );
 

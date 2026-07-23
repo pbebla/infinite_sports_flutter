@@ -289,6 +289,7 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                       team1: team1,
                       team2: team2,
                       tournamentName: _tournamentName,
+                      sport: widget.sport,
                     ),
                   ),
                   if (_match.link != null && _match.link!.isNotEmpty)

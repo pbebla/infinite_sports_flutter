@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/share_card_leaders.dart';
+import 'package:infinite_sports_flutter/misc/single_match_tallies.dart'
+    show leagueMatchLeaderCategories;
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart'
+    show isBadgeLeagueSport, leagueStatIcon;
 
 /// Fixed-size, theme-independent match card rendered to a PNG for sharing.
 /// Logical size 360x450; capture at pixelRatio 3 -> 1080x1350.
@@ -10,6 +14,7 @@ class ShareMatchCard extends StatelessWidget {
   final TournamentTeam? team1;
   final TournamentTeam? team2;
   final String tournamentName;
+  final String sport;
 
   const ShareMatchCard({
     super.key,
@@ -17,6 +22,7 @@ class ShareMatchCard extends StatelessWidget {
     required this.team1,
     required this.team2,
     required this.tournamentName,
+    required this.sport,
   });
 
   static const double kWidth = 360;
@@ -186,10 +192,8 @@ class ShareMatchCard extends StatelessWidget {
                   height: 1.1,
                   fontWeight: FontWeight.w800)),
           const Spacer(flex: 4),
-          _statRow('goals', team1),
-          _statRow('assists', team1),
-          _statRow('dpl', team1),
-          _statRow('saves', team1),
+          for (final cat in leagueMatchLeaderCategories(sport))
+            _statRow(cat['stat']!, team1),
           const Spacer(flex: 1),
         ],
       ),
@@ -226,11 +230,17 @@ class ShareMatchCard extends StatelessWidget {
     final text = list.isEmpty
         ? '—'
         : list.map((e) => '${e.name} ${e.count}').join('  ·  ');
+    final iconAsset = isBadgeLeagueSport(sport)
+        ? leagueStatIcon(sport, stat).asset
+        : _statIcons[stat];
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 1.5),
       child: Row(
         children: [
-          Image.asset(_statIcons[stat]!, width: 13, height: 13),
+          if (iconAsset != null)
+            Image.asset(iconAsset, width: 13, height: 13)
+          else
+            const SizedBox(width: 13, height: 13),
           const SizedBox(width: 5),
           Expanded(
             child: Text(text,

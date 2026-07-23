@@ -20,6 +20,7 @@ Future<void> _pump(WidgetTester tester, TournamentMatch m) async {
         team1: _team('eagles', 'Eagles'),
         team2: _team('lions', 'Lions'),
         tournamentName: 'Test Tournament 2026',
+        sport: 'Soccer',
       ),
     ),
   ));
@@ -87,6 +88,7 @@ void main() {
           ),
           team2: _team('lions', 'Lions'),
           tournamentName: 'Test Tournament 2026',
+          sport: 'Soccer',
         ),
       ),
     ));

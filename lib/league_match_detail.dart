@@ -393,6 +393,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
                       team2: team2,
                       tournamentName:
                           '${widget.sport} Season ${widget.season}',
+                      sport: widget.sport,
                     ),
                   ),
                   if (match.link != null && match.link!.isNotEmpty)
