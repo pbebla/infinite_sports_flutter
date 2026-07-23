@@ -13,12 +13,14 @@ class PlayerStatsTab extends StatefulWidget {
   final Map<String, TournamentTeam> teams;
   final String? tournamentId;
   final ComputedTournamentStats stats;
+  final String sport;
 
   const PlayerStatsTab({
     super.key,
     required this.rosters,
     required this.teams,
     required this.stats,
+    required this.sport,
     this.tournamentId,
   });
 
@@ -29,8 +31,63 @@ class PlayerStatsTab extends StatefulWidget {
 class _PlayerStatsTabState extends State<PlayerStatsTab> {
   final Set<String> _expanded = {};
 
-  /// Maps a stat key from [categories] to the event-type string that
-  /// [statIconAsset] understands. Returns null when there is no suitable icon.
+  /// label / statByName key / suffix, per sport — identical lists to the
+  /// league Player Stats tab (lib/league_tabs/league_player_stats_tab.dart
+  /// _categoriesBySport), read only, never modified here.
+  static const Map<String, List<Map<String, String>>> _categoriesBySport = {
+    'Basketball': [
+      {'label': 'Points', 'stat': 'points'},
+      {'label': '3-Pointers', 'stat': 'threePointers'},
+      {'label': '2-Pointers', 'stat': 'twoPointers'},
+      {'label': 'Free Throws Made', 'stat': 'freeThrows'},
+      {'label': 'Rebounds', 'stat': 'rebounds'},
+      {'label': 'Assists', 'stat': 'assists'},
+      {'label': 'Steals', 'stat': 'steals'},
+      {'label': 'Blocks', 'stat': 'blocks'},
+      {'label': 'Turnovers', 'stat': 'turnovers'},
+      {'label': 'Fouls', 'stat': 'fouls'},
+    ],
+    'Flag Football': [
+      {'label': 'Touchdowns', 'stat': 'touchdowns'},
+      {'label': 'Receptions', 'stat': 'receptions'},
+      {'label': 'Catch %', 'stat': 'catchPercentage', 'suffix': '%'},
+      {'label': 'Pass TDs', 'stat': 'passTouchdowns'},
+      {'label': 'Interceptions', 'stat': 'interceptions'},
+      {'label': 'Flag Pulls', 'stat': 'flagPulls'},
+      {'label': 'Sacks', 'stat': 'sacks'},
+    ],
+  };
+
+  static const List<Map<String, String>> _futsalCategories = [
+    {'label': 'Top Scorer', 'stat': 'goals'},
+    {'label': 'Assists', 'stat': 'assists'},
+    {'label': 'Saves', 'stat': 'saves'},
+    {'label': 'Defensive Plays (DPL)', 'stat': 'dpl'},
+    {'label': 'Clean Sheets', 'stat': 'cleanSheets'},
+    {'label': 'Yellow Cards', 'stat': 'yellowCards'},
+    {'label': 'Red Cards', 'stat': 'redCards'},
+  ];
+
+  List<Map<String, String>> get _categories =>
+      _categoriesBySport[widget.sport] ?? _futsalCategories;
+
+  /// Category header icon: badge sports (basketball/flag football) resolve
+  /// gold-badge art by stat key via [leagueStatIcon]; futsal/soccer keep
+  /// the existing white-chip line-art via [statIconAsset], mapped from the
+  /// stat key to its matching activity-type token (unchanged behavior).
+  Widget? _categoryIcon(String stat) {
+    if (isBadgeLeagueSport(widget.sport)) {
+      final ic = leagueStatIcon(widget.sport, stat);
+      if (ic.asset == null) return null;
+      return StatIcon(asset: ic.asset, size: 18, badge: ic.badge);
+    }
+    final eventType = _eventTypeForStat(stat);
+    if (eventType == null) return null;
+    return StatIcon(asset: statIconAsset(eventType), size: 18);
+  }
+
+  /// Maps a futsal/soccer stat key to the event-type string [statIconAsset]
+  /// understands. Returns null when there is no suitable icon.
   String? _eventTypeForStat(String stat) {
     switch (stat) {
       case 'goals':
@@ -61,21 +118,11 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
 
   @override
   Widget build(BuildContext context) {
-    final categories = [
-      {'label': 'Top Scorer', 'stat': 'goals'},
-      {'label': 'Assists', 'stat': 'assists'},
-      {'label': 'Saves', 'stat': 'saves'},
-      {'label': 'Defensive Plays (DPL)', 'stat': 'dpl'},
-      {'label': 'Clean Sheets', 'stat': 'cleanSheets'},
-      {'label': 'Yellow Cards', 'stat': 'yellowCards'},
-      {'label': 'Red Cards', 'stat': 'redCards'},
-    ];
-
     return ListView.builder(
       padding: EdgeInsets.fromLTRB(12, 8, 12, 8 + MediaQuery.paddingOf(context).bottom),
-      itemCount: categories.length,
+      itemCount: _categories.length,
       itemBuilder: (context, index) {
-        final cat = categories[index];
+        final cat = _categories[index];
         final label = cat['label']!;
         final stat = cat['stat']!;
         final allPlayers = _getSortedByAll(stat);
@@ -110,14 +157,11 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
                   Row(
                     children: [
                       Builder(builder: (context) {
-                        final eventType = _eventTypeForStat(stat);
-                        if (eventType == null) return const SizedBox.shrink();
+                        final icon = _categoryIcon(stat);
+                        if (icon == null) return const SizedBox.shrink();
                         return Padding(
                           padding: const EdgeInsets.only(right: 6),
-                          child: StatIcon(
-                            asset: statIconAsset(eventType),
-                            size: 18,
-                          ),
+                          child: icon,
                         );
                       }),
                       Text(
@@ -148,7 +192,8 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
                     final value = widget.stats.statByName(player.teamId, player.name, stat);
                     final team = widget.teams[player.teamId];
                     return _buildPlayerRow(
-                        context, player, team, value, rank);
+                        context, player, team, value, rank,
+                        suffix: cat['suffix'] ?? '');
                   }),
                 ],
               ),
@@ -164,8 +209,9 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
     TournamentPlayer player,
     TournamentTeam? team,
     int value,
-    int rank,
-  ) {
+    int rank, {
+    String suffix = '',
+  }) {
     return GestureDetector(
       onTap: () => openPlayerProfileById(context, uid: player.uid, name: player.name),
       child: Padding(
@@ -250,7 +296,7 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
                   ),
                   child: Center(
                     child: Text(
-                      '$value',
+                      '$value$suffix',
                       style: TextStyle(
                           color: Theme.of(context).colorScheme.onPrimary,
                           fontWeight: FontWeight.bold,
@@ -262,7 +308,7 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
                   width: 32,
                   child: Center(
                     child: Text(
-                      '$value',
+                      '$value$suffix',
                       style: TextStyle(
                         fontSize: 13,
                         color: Theme.of(context)
