@@ -10,12 +10,14 @@ class TableTab extends StatelessWidget {
   final List<TournamentMatch> matches;
   final String? tournamentId;
   final ComputedTournamentStats stats;
+  final String sport;
 
   const TableTab({
     super.key,
     required this.teams,
     required this.matches,
     required this.stats,
+    required this.sport,
     this.tournamentId,
   });
 
@@ -147,6 +149,12 @@ class TableTab extends StatelessWidget {
       fontWeight: FontWeight.bold,
       color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
     );
+    final winsOnly = standingsModeFor(sport) == 'winsOnly';
+
+    Widget cell(String label) => Expanded(
+          flex: 1,
+          child: Center(child: Text(label, style: headerStyle)),
+        );
 
     return Container(
       color: Theme.of(context)
@@ -160,38 +168,20 @@ class TableTab extends StatelessWidget {
             flex: 7,
             child: Center(child: Text('Team', style: headerStyle)),
           ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('GP', style: headerStyle)),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('W', style: headerStyle)),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('D', style: headerStyle)),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('L', style: headerStyle)),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('GS', style: headerStyle)),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('GC', style: headerStyle)),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('GD', style: headerStyle)),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('Pts', style: headerStyle)),
-          ),
+          cell('GP'),
+          cell('W'),
+          if (!winsOnly) cell('D'),
+          cell('L'),
+          if (winsOnly) ...[
+            cell('PF'),
+            cell('PA'),
+            cell('Diff'),
+          ] else ...[
+            cell('GS'),
+            cell('GC'),
+            cell('GD'),
+            cell('Pts'),
+          ],
         ],
       ),
     );
@@ -291,10 +281,11 @@ class TableTab extends StatelessWidget {
             flex: 1,
             child: Center(child: Text('${s.w}', style: cellStyle)),
           ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('${s.d}', style: cellStyle)),
-          ),
+          if (standingsModeFor(sport) != 'winsOnly')
+            Expanded(
+              flex: 1,
+              child: Center(child: Text('${s.d}', style: cellStyle)),
+            ),
           Expanded(
             flex: 1,
             child: Center(child: Text('${s.l}', style: cellStyle)),
@@ -322,18 +313,19 @@ class TableTab extends StatelessWidget {
               ),
             ),
           ),
-          Expanded(
-            flex: 1,
-            child: Center(
-              child: Text(
-                '${s.pts}',
-                style: cellStyle.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).colorScheme.onSurface,
+          if (standingsModeFor(sport) != 'winsOnly')
+            Expanded(
+              flex: 1,
+              child: Center(
+                child: Text(
+                  '${s.pts}',
+                  style: cellStyle.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
                 ),
               ),
             ),
-          ),
         ],
         ),
       ),
