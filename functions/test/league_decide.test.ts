@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   leagueSeasonTopic, leagueTeamTopic, buildLeagueCondition, isPlaceholderTeam,
-  parseLeagueGame, decideLeagueGoal, decideLeagueStatus,
+  parseLeagueGame, decideLeagueGoal, decideLeagueStatus, vocabFor,
 } from '../src/lib/league_decide';
 
 const CTX = { sport: 'Futsal', season: '16', dateKey: '05202026', gameIndex: 3 };
@@ -273,5 +273,16 @@ describe('P4 — flag football wording', () => {
       before: 1, after: 2, game: ffGame({ status: 2 }), ...CTX_F,
     });
     expect(ft!.title).toBe('🏁 Final: Eagles 12 – 6 Lions');
+  });
+});
+
+describe('vocabFor (P4 export for the tournament watcher)', () => {
+  test('Soccer falls back to the Futsal vocab (unknown league sport)', () => {
+    expect(vocabFor('Soccer').goalTitle('A', 1, 0, 'B'))
+      .toBe(vocabFor('Futsal').goalTitle('A', 1, 0, 'B'));
+  });
+  test('Basketball / Flag Football resolve their own vocab', () => {
+    expect(vocabFor('Basketball').kickoffPrefix).toBe('🟢 Tip-off:');
+    expect(vocabFor('Flag Football').kickoffPrefix).toBe('🟢 Kickoff:');
   });
 });

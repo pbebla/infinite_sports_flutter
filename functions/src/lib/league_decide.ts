@@ -129,7 +129,7 @@ export function parseLeagueGame(raw: unknown): LeagueGameContext {
 
 /** Per-sport wording + scorer vocabulary. Keys are the RTDB sport roots;
  *  unknown sports read as futsal (soccer wording) — safe default. */
-interface LeagueSportVocab {
+export interface LeagueSportVocab {
   /** Timeline types (lowercased) whose newest entry names the scorer. */
   scorerEvents: Set<string>;
   /** Scorer types that headline with tdTitle (flag football TDs). */
@@ -161,7 +161,7 @@ const FUTSAL_VOCAB: LeagueSportVocab = {
   fulltimePrefix: '🏁 Full time:',
 };
 
-const SPORT_VOCAB: Record<string, LeagueSportVocab> = {
+export const SPORT_VOCAB: Record<string, LeagueSportVocab> = {
   Futsal: FUTSAL_VOCAB,
   Basketball: {
     scorerEvents: new Set(['onepointer', 'twopointer', 'threepointer']),
@@ -190,11 +190,11 @@ const SPORT_VOCAB: Record<string, LeagueSportVocab> = {
   },
 };
 
-function vocabFor(sport: string): LeagueSportVocab {
+export function vocabFor(sport: string): LeagueSportVocab {
   return SPORT_VOCAB[sport] ?? FUTSAL_VOCAB;
 }
 
-interface MinuteEvent { minute: number; eventType: string; player: string }
+export interface MinuteEvent { minute: number; eventType: string; player: string }
 
 /** "12'" -> 12. Tolerates plain integer keys too. */
 function leagueMinute(key: string): number {
@@ -219,7 +219,7 @@ function bucketEvents(bucket: unknown, minute: number): MinuteEvent[] {
   return out;
 }
 
-function allEvents(activity: Record<string, unknown> | null): MinuteEvent[] {
+export function allEvents(activity: Record<string, unknown> | null): MinuteEvent[] {
   if (!activity) return [];
   return Object.entries(activity)
     .map(([k, v]) => ({ minute: leagueMinute(k), bucket: v }))
@@ -229,7 +229,7 @@ function allEvents(activity: Record<string, unknown> | null): MinuteEvent[] {
 
 /** Newest scorer-type event, plus the vocab's paired event (assist /
  *  pass td) in the same or next minute when the scorer type pairs. */
-function findScorerAndPair(
+export function findScorerAndPair(
     activity: Record<string, unknown> | null,
     vocab: LeagueSportVocab,
 ): { scorer: MinuteEvent | null; pair: MinuteEvent | null } {
@@ -246,7 +246,7 @@ function findScorerAndPair(
   return { scorer, pair };
 }
 
-function newestOwnGoal(activity: Record<string, unknown> | null): MinuteEvent | null {
+export function newestOwnGoal(activity: Record<string, unknown> | null): MinuteEvent | null {
   return [...allEvents(activity)].reverse()
     .find((e) => e.eventType === 'owngoal') ?? null;
 }
