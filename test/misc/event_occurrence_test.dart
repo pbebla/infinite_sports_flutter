@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/misc/calendar_sources.dart';
 import 'package:infinite_sports_flutter/misc/event_utils.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
 
@@ -149,6 +150,75 @@ void main() {
     test('uncategorized legacy events show under Community', () {
       final filtered = filterByCategories(byDay(), const {'Community'});
       expect(filtered[DateTime(2026, 8, 7)]!.single.event!.title, 'uncategorized');
+    });
+  });
+
+  group('filterByCategories across events, tournament days and league days '
+      '(calendar filter scope addition)', () {
+    // Same day, four entries: a Basketball tournament day, a Flag Football
+    // tournament day, a Futsal league day, a Basketball league day, plus a
+    // Basketball-categorized event — every kind the calendar merges.
+    Map<DateTime, List<CalendarEntry>> mixedByDay() {
+      final basketballTournament = tournamentDaysFrom({
+        'bball-cup': {
+          'Name': 'Bball Cup',
+          'Sport': 'Basketball',
+          'Matches': {'m1': {'date': '08072026'}},
+        },
+      });
+      final flagFootballTournament = tournamentDaysFrom({
+        'ff-cup': {
+          'Name': 'FF Cup',
+          'Sport': 'Flag Football',
+          'Matches': {'m1': {'date': '08072026'}},
+        },
+      });
+      final futsalLeague =
+          leagueDaysFrom('Futsal', '16', {'08072026': 1});
+      final basketballLeague =
+          leagueDaysFrom('Basketball', '4', {'08072026': 1});
+      final basketballEvent = eventsByDay([
+        _v2('hoop night', start: DateTime(2026, 8, 7), category: 'Basketball'),
+      ]);
+      return mergeDayMaps([
+        basketballTournament,
+        flagFootballTournament,
+        futsalLeague,
+        basketballLeague,
+        basketballEvent,
+      ]);
+    }
+
+    test('All (empty selection) includes every kind for the day', () {
+      final filtered = filterByCategories(mixedByDay(), const {});
+      expect(filtered[DateTime(2026, 8, 7)]!.length, 5);
+    });
+
+    test(
+        'Basketball filter keeps ONLY Basketball tournament days, league '
+        'days and events — never Flag Football or Futsal', () {
+      final filtered = filterByCategories(mixedByDay(), const {'Basketball'});
+      final kept = filtered[DateTime(2026, 8, 7)]!;
+      expect(kept.length, 3);
+      expect(kept.every((e) => e.sport == 'Basketball' || e.category == 'Basketball'),
+          isTrue);
+      expect(kept.any((e) => e.sport == 'Flag Football'), isFalse);
+      expect(kept.any((e) => e.sport == 'Futsal'), isFalse);
+      expect(kept.any((e) => e.kind == CalendarKind.tournament && e.sport == 'Basketball'),
+          isTrue,
+          reason: 'the Basketball tournament day must survive the filter');
+      expect(kept.any((e) => e.kind == CalendarKind.league && e.sport == 'Basketball'),
+          isTrue,
+          reason: 'the Basketball league day must survive the filter');
+    });
+
+    test('Tournaments filter still shows every sport\'s tournament days '
+        '(existing "all tournaments" bucket is unchanged)', () {
+      final filtered = filterByCategories(mixedByDay(), const {'Tournaments'});
+      final kept = filtered[DateTime(2026, 8, 7)]!;
+      expect(kept.length, 2);
+      expect(kept.every((e) => e.kind == CalendarKind.tournament), isTrue);
+      expect(kept.map((e) => e.sport).toSet(), {'Basketball', 'Flag Football'});
     });
   });
 }

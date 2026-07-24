@@ -41,6 +41,11 @@ Map<DateTime, List<CalendarEntry>> tournamentDaysFrom(dynamic tournamentsNode) {
     if (tid.toString() == 'Current Tournament') return;
     if (tournament is! Map) return;
     final name = tournament['Name']?.toString() ?? tid.toString();
+    // Same default as Tournament.fromFirebase — carried so the calendar's
+    // sport filter (Basketball/Futsal/...) can pick this entry up alongside
+    // its category, which stays the dedicated 'Tournaments' bucket below.
+    final sport =
+        firstNonNull(tournament, ['Sport', 'sport'])?.toString() ?? 'Soccer';
     final matches = tournament['Matches'];
 
     final days = <DateTime>{};
@@ -87,6 +92,7 @@ Map<DateTime, List<CalendarEntry>> tournamentDaysFrom(dynamic tournamentsNode) {
             title: name,
             categoryOverride: 'Tournaments',
             tournamentId: tid.toString(),
+            sport: sport,
             lastDay: lastDay,
           ));
     }

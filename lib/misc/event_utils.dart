@@ -139,12 +139,24 @@ Map<DateTime, List<CalendarEntry>> eventsByDay(List<Event> events) {
 
 /// Keeps only entries in the selected categories. Empty selection = show
 /// everything. Days left with no entries are dropped entirely (no dot).
+///
+/// An entry matches if EITHER its [CalendarEntry.category] OR its
+/// [CalendarEntry.sport] is selected. Tournament days always carry the
+/// dedicated 'Tournaments' category (so the "Tournaments" chip keeps
+/// showing every sport's tournaments, unchanged) but ALSO carry their own
+/// sport — so selecting a sport chip (e.g. "Basketball") shows that sport's
+/// tournament days too, alongside its league days and events, and never
+/// another sport's.
 Map<DateTime, List<CalendarEntry>> filterByCategories(
     Map<DateTime, List<CalendarEntry>> byDay, Set<String> selected) {
   if (selected.isEmpty) return byDay;
   final result = <DateTime, List<CalendarEntry>>{};
   byDay.forEach((day, entries) {
-    final kept = entries.where((e) => selected.contains(e.category)).toList();
+    final kept = entries
+        .where((e) =>
+            selected.contains(e.category) ||
+            (e.sport != null && selected.contains(e.sport)))
+        .toList();
     if (kept.isNotEmpty) result[day] = kept;
   });
   return result;

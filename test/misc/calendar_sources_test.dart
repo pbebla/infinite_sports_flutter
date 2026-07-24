@@ -42,6 +42,51 @@ void main() {
     });
   });
 
+  group('tournamentDaysFrom carries Sport for per-sport filtering (scope addition)', () {
+    test('entry.sport reflects the tournament\'s own Sport field', () {
+      final byDay = tournamentDaysFrom({
+        'hoop-cup': {
+          'Name': 'Hoop Cup',
+          'Sport': 'Basketball',
+          'Matches': {
+            'm1': {'date': '08152026'},
+          },
+        },
+      });
+      final entry = byDay[DateTime(2026, 8, 15)]!.single;
+      expect(entry.sport, 'Basketball');
+      // Category stays the dedicated 'Tournaments' bucket (unchanged,
+      // pinned by the test above) — sport is an ADDITIONAL tag so a
+      // sport-specific filter can also pick this entry up.
+      expect(entry.category, 'Tournaments');
+    });
+
+    test('missing Sport field defaults to Soccer (matches Tournament.fromFirebase)', () {
+      final byDay = tournamentDaysFrom({
+        'no-sport-cup': {
+          'Name': 'No Sport Cup',
+          'Matches': {
+            'm1': {'date': '09012026'},
+          },
+        },
+      });
+      expect(byDay[DateTime(2026, 9, 1)]!.single.sport, 'Soccer');
+    });
+
+    test('Sport also carries through the StartDate/EndDate fallback path', () {
+      final byDay = tournamentDaysFrom({
+        'new-hoop-cup': {
+          'Name': 'New Hoop Cup',
+          'Sport': 'Basketball',
+          'StartDate': '10012026',
+          'EndDate': '10022026',
+        },
+      });
+      expect(byDay[DateTime(2026, 10, 1)]!.single.sport, 'Basketball');
+      expect(byDay[DateTime(2026, 10, 2)]!.single.sport, 'Basketball');
+    });
+  });
+
   group('tournamentDaysFrom StartDate/EndDate fallback (TAS.3 Task 1)', () {
     test('no Matches node at all falls back to StartDate..EndDate range', () {
       final byDay = tournamentDaysFrom({
