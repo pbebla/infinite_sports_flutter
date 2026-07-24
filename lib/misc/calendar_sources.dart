@@ -101,7 +101,7 @@ Map<DateTime, List<CalendarEntry>> tournamentDaysFrom(dynamic tournamentsNode) {
 }
 
 /// Match days of the current league season. [dateNodeValue] is the raw
-/// <Sport>/<Season>/Date node (map keyed by MMDDYYYY). Each day is its own
+/// `{Sport}/{Season}/Date` node (map keyed by MMDDYYYY). Each day is its own
 /// entry and greys out individually once it has passed.
 Map<DateTime, List<CalendarEntry>> leagueDaysFrom(
     String sport, String season, dynamic dateNodeValue) {
