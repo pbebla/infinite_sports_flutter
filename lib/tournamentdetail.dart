@@ -43,6 +43,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
   Map<String, TournamentTeam> _teams = {};
   List<TournamentMatch> _matches = [];
   StreamSubscription<List<TournamentMatch>>? _matchesSub;
+  StreamSubscription<Tournament?>? _tournamentSub;
   Map<String, List<TournamentPlayer>> _rosters = {};
 
   static const List<Tab> _baseTabs = [
@@ -67,6 +68,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
   @override
   void dispose() {
     _matchesSub?.cancel();
+    _tournamentSub?.cancel();
     _tabController?.dispose();
     super.dispose();
   }
@@ -112,6 +114,18 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
           TournamentService.watchMatches(widget.tournamentId).listen((live) {
         if (!mounted || live.isEmpty) return;
         setState(() => _matches = live);
+      });
+
+      // Keep the header live too: name/status/sport/champion update in place
+      // (e.g. the owner flips status or crowns a champion) without a manual
+      // refresh. Same mirrored one-shot-then-live shape as matches above; a
+      // null emission means the record is momentarily unparseable, so the
+      // last good header is kept rather than blanked.
+      _tournamentSub?.cancel();
+      _tournamentSub =
+          TournamentService.watchTournament(widget.tournamentId).listen((live) {
+        if (!mounted || live == null) return;
+        setState(() => _tournament = live);
       });
     } catch (e, st) {
       debugPrint('TournamentDetailPage._loadData error: $e\n$st');
