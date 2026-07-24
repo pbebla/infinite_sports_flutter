@@ -1,7 +1,18 @@
+import 'dart:async';
+
 import 'package:firebase_database/firebase_database.dart';
 import 'package:infinite_sports_flutter/misc/event_utils.dart';
 import 'package:infinite_sports_flutter/misc/parse_helpers.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+
+/// League sports that follow the "Current League" shape (a `<Sport> Season`
+/// pointer + `<Sport>/<Season>/Date` node — see utility.dart getCurrentSport/
+/// getCurrentSeason). No single authoritative list of these exists elsewhere
+/// in the codebase yet (AFC San Jose/Soccer use a different Seasons-map
+/// shape and are intentionally excluded here); defined once here so the
+/// calendar can show every league sport's current season, not just whichever
+/// one happens to be "Current League" today.
+const List<String> kLeagueSports = ['Futsal', 'Basketball', 'Flag Football'];
 
 /// League and tournament match days for the calendar ("everything on the
 /// calendar"). Pure parsers below are unit-tested; the watch* wrappers make
@@ -118,21 +129,56 @@ Stream<Map<DateTime, List<CalendarEntry>>> watchTournamentDays() {
       .map((e) => tournamentDaysFrom(e.snapshot.value));
 }
 
-/// Live match days of the current league season.
-Stream<Map<DateTime, List<CalendarEntry>>> watchLeagueDays() async* {
-  String sport;
-  String season;
-  try {
-    sport = await getCurrentSport();
-    season = await getCurrentSeason(sport);
-  } catch (_) {
-    yield {};
-    return;
+/// Live match days across EVERY league sport's current season
+/// ([kLeagueSports]), merged into one map. Each sport's `<Sport> Season`
+/// pointer is read once at subscribe time (same as the old single-sport
+/// version), then its `<Sport>/<Season>/Date` node is streamed live; the
+/// per-sport maps are merged (via [mergeDayMaps]) and re-emitted whenever
+/// any one of them changes. Follows the same manual stream-merge pattern as
+/// [watchAllEvents] in event_repo.dart.
+Stream<Map<DateTime, List<CalendarEntry>>> watchLeagueDays() {
+  final controller = StreamController<Map<DateTime, List<CalendarEntry>>>();
+  final perSport = <String, Map<DateTime, List<CalendarEntry>>>{};
+  final subs = <StreamSubscription>[];
+  var cancelled = false;
+  var emitted = false;
+
+  void emit() {
+    emitted = true;
+    if (!controller.isClosed) controller.add(mergeDayMaps(perSport.values));
   }
-  yield* FirebaseDatabase.instance
-      .ref('$sport/$season/Date')
-      .onValue
-      .map((e) => leagueDaysFrom(sport, season, e.snapshot.value));
+
+  Future<void> watchSport(String sport) async {
+    String season;
+    try {
+      season = await getCurrentSeason(sport);
+    } catch (_) {
+      return;
+    }
+    if (cancelled) return;
+    subs.add(FirebaseDatabase.instance
+        .ref('$sport/$season/Date')
+        .onValue
+        .map((e) => leagueDaysFrom(sport, season, e.snapshot.value))
+        .listen((byDay) {
+      perSport[sport] = byDay;
+      emit();
+    }, onError: (_) {
+      if (!emitted) emit();
+    }));
+  }
+
+  for (final sport in kLeagueSports) {
+    watchSport(sport);
+  }
+
+  controller.onCancel = () {
+    cancelled = true;
+    for (final s in subs) {
+      s.cancel();
+    }
+  };
+  return controller.stream;
 }
 
 /// Overlays several day-maps into one (values concatenated per day).

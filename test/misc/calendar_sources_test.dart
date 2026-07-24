@@ -213,5 +213,36 @@ void main() {
       final merged = mergeDayMaps([a, b]);
       expect(merged[DateTime(2026, 7, 26)]!.length, 2);
     });
+
+    test(
+        'merges every league sport for the same day, each keeping its own '
+        'sport label (TAS.3 Task 2)', () {
+      final futsal = leagueDaysFrom('Futsal', '16', {'07262026': 1});
+      final basketball =
+          leagueDaysFrom('Basketball', '4', {'07262026': 1});
+      final flagFootball =
+          leagueDaysFrom('Flag Football', '2', {'07262026': 1});
+
+      final merged = mergeDayMaps([futsal, basketball, flagFootball]);
+      final entries = merged[DateTime(2026, 7, 26)]!;
+      expect(entries.length, 3);
+      expect(entries.map((e) => e.sport).toSet(),
+          {'Futsal', 'Basketball', 'Flag Football'});
+      expect(entries.map((e) => e.category).toSet(),
+          {'Futsal', 'Basketball', 'Flag Football'});
+      expect(entries.map((e) => e.displayTitle).toSet(), {
+        'Futsal League',
+        'Basketball League',
+        'Flag Football League',
+      });
+    });
+  });
+
+  group('kLeagueSports (TAS.3 Task 2)', () {
+    test('covers every current league sport exactly once', () {
+      expect(kLeagueSports.toSet(),
+          {'Futsal', 'Basketball', 'Flag Football'});
+      expect(kLeagueSports.length, 3);
+    });
   });
 }
