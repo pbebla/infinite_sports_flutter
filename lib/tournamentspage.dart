@@ -1,4 +1,6 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:async';
+
+import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/tournamentdetail.dart';
@@ -12,12 +14,24 @@ class TournamentsPage extends StatefulWidget {
 }
 
 class _TournamentsPageState extends State<TournamentsPage> {
-  late Future<List<Tournament>> _tournamentsFuture;
+  // null = the first snapshot hasn't arrived yet (spinner); live thereafter —
+  // a newly created tournament appears here without restarting the app.
+  List<Tournament>? _tournaments;
+  StreamSubscription<List<Tournament>>? _tournamentsSub;
 
   @override
   void initState() {
     super.initState();
-    _tournamentsFuture = TournamentService.getAllTournaments();
+    _tournamentsSub =
+        TournamentService.watchAllTournaments().listen((tournaments) {
+      if (mounted) setState(() => _tournaments = tournaments);
+    });
+  }
+
+  @override
+  void dispose() {
+    _tournamentsSub?.cancel();
+    super.dispose();
   }
 
   Color _sportColor(String sport) {
@@ -149,17 +163,17 @@ class _TournamentsPageState extends State<TournamentsPage> {
         centerTitle: true,
         title: Image.asset('assets/infinitelarge_dark.png', height: 30),
       ),
-      body: FutureBuilder<List<Tournament>>(
-        future: _tournamentsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+      body: Builder(
+        builder: (context) {
+          final tournaments = _tournaments;
+          if (tournaments == null) {
             return Center(
               child: CircularProgressIndicator(
                 color: Theme.of(context).colorScheme.primary,
               ),
             );
           }
-          if (snapshot.hasError || snapshot.data == null || snapshot.data!.isEmpty) {
+          if (tournaments.isEmpty) {
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -178,7 +192,7 @@ class _TournamentsPageState extends State<TournamentsPage> {
             );
           }
 
-          final all = snapshot.data!;
+          final all = tournaments;
           final current = all.where((t) => !t.finished).toList();
           final past = all.where((t) => t.finished).toList();
 

@@ -19,33 +19,52 @@ class TournamentService {
   /// you need fresh user photos (rare).
   static void clearProfileUrlCache() => _profileUrlCache.clear();
 
+  /// Parses the raw /Tournaments node into a sorted tournament list: active
+  /// (not finished) first, then historical sorted by edition descending.
+  /// Skips the "Current Tournament" pointer key and any non-map entries
+  /// without throwing. Pure — shared by [getAllTournaments] (one-shot) and
+  /// [watchAllTournaments] (live) so both stay in sync by construction.
+  static List<Tournament> parseTournaments(dynamic value) {
+    if (value is! Map) return [];
+    final List<Tournament> tournaments = [];
+    value.forEach((key, v) {
+      // Skip the "Current Tournament" key which is a plain string pointer
+      if (key.toString() == 'Current Tournament') return;
+      if (v is Map) {
+        try {
+          tournaments.add(Tournament.fromFirebase(key.toString(), v));
+        } catch (_) {}
+      }
+    });
+    // Sort: active (not finished) first, then finished sorted by edition desc
+    tournaments.sort((a, b) {
+      if (!a.finished && b.finished) return -1;
+      if (a.finished && !b.finished) return 1;
+      return b.edition.compareTo(a.edition);
+    });
+    return tournaments;
+  }
+
   /// Returns list of all tournaments sorted: active first, then historical newest-first.
   static Future<List<Tournament>> getAllTournaments() async {
     try {
       DatabaseReference ref = FirebaseDatabase.instance.ref('/Tournaments');
       var snap = await ref.get();
-      if (snap.value == null) return [];
-      final data = snap.value as Map;
-      final List<Tournament> tournaments = [];
-      data.forEach((key, value) {
-        // Skip the "Current Tournament" key which is a plain string pointer
-        if (key.toString() == 'Current Tournament') return;
-        if (value is Map) {
-          try {
-            tournaments.add(Tournament.fromFirebase(key.toString(), value));
-          } catch (_) {}
-        }
-      });
-      // Sort: active (not finished) first, then finished sorted by edition desc
-      tournaments.sort((a, b) {
-        if (!a.finished && b.finished) return -1;
-        if (a.finished && !b.finished) return 1;
-        return b.edition.compareTo(a.edition);
-      });
-      return tournaments;
+      return parseTournaments(snap.value);
     } catch (_) {
       return [];
     }
+  }
+
+  /// Live stream of all tournaments, sorted the same way as
+  /// [getAllTournaments] (active first, then historical newest-first).
+  /// Emits on every /Tournaments change, so a newly created tournament (or a
+  /// status flip) appears without restarting the app.
+  static Stream<List<Tournament>> watchAllTournaments() {
+    return FirebaseDatabase.instance
+        .ref('/Tournaments')
+        .onValue
+        .map((event) => parseTournaments(event.snapshot.value));
   }
 
   /// Returns the id string of the current active tournament.
