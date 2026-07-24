@@ -67,6 +67,18 @@ class TournamentService {
         .map((event) => parseTournaments(event.snapshot.value));
   }
 
+  /// Sorted ids of the tournaments in [tournaments] that are NOT finished.
+  /// Pure — used to detect when the SET of active tournaments changes (one
+  /// is created, finishes, or un-finishes) without reacting to routine
+  /// in-tournament updates (score changes, roster edits, ...) that fire the
+  /// same /Tournaments stream but don't change which tournaments are active.
+  /// See FrontPage's live tournament-tab discovery.
+  static List<String> activeTournamentIds(List<Tournament> tournaments) {
+    final ids = tournaments.where((t) => !t.finished).map((t) => t.id).toList();
+    ids.sort();
+    return ids;
+  }
+
   /// Returns the id string of the current active tournament.
   static Future<String?> getCurrentTournamentId() async {
     try {

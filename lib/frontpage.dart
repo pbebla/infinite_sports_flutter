@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
@@ -71,6 +74,14 @@ class _FrontPageState extends State<FrontPage> {
   // Open new-style registrations (regId -> config) for the sign-up banner.
   Map<String, RegistrationConfig> openRegistrations = {};
 
+  // Live tournament-tab discovery (TAS.3 Task 5): the last-seen sorted set
+  // of active (unfinished) tournament ids, used to detect when the SET
+  // changes rather than reacting to every /Tournaments write (e.g. a score
+  // update inside an already-known tournament fires the same stream but
+  // must not churn the tabs).
+  List<String> _lastActiveTournamentIds = [];
+  StreamSubscription<List<Tournament>>? _tournamentsWatchSub;
+
   /// Matches-tab header for the current-league section, e.g. "Futsal League"
   /// (P2.1 owner feedback: was the hardcoded "Infinite Sports").
   String get _leagueTabTitle => "$currentSport League";
@@ -83,12 +94,38 @@ class _FrontPageState extends State<FrontPage> {
   void initState() {
     super.initState();
     _loadingPage = getFrontPageValues();
+    // Live discovery: a tournament created (or finished/un-finished) after
+    // this page loaded shows up as a home tab without restarting the app.
+    _tournamentsWatchSub =
+        TournamentService.watchAllTournaments().listen(_onTournamentsChanged);
   }
 
   @override
   void dispose() {
     _onTournamentTab.dispose();
+    _tournamentsWatchSub?.cancel();
     super.dispose();
+  }
+
+  /// Reacts to a live /Tournaments update by comparing the sorted active-id
+  /// list against the last one seen — routine in-tournament writes (scores,
+  /// rosters, ...) re-fire this same stream but leave the active SET
+  /// unchanged, so they're guarded against here instead of rebuilding tabs
+  /// on every emission.
+  void _onTournamentsChanged(List<Tournament> tournaments) {
+    final ids = TournamentService.activeTournamentIds(tournaments);
+    if (listEquals(ids, _lastActiveTournamentIds)) return;
+    _lastActiveTournamentIds = ids;
+    _refreshActiveTournamentTabs();
+  }
+
+  /// Reloads just the tournament-tab bundles (reusing [_loadActiveTournaments])
+  /// and rebuilds — without resetting [_loadingPage], so this never flashes
+  /// the first-load skeleton the way the manual pull-to-refresh button does.
+  Future<void> _refreshActiveTournamentTabs() async {
+    await _loadActiveTournaments();
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<int> getFrontPageValues() async {

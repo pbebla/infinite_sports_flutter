@@ -57,4 +57,40 @@ void main() {
       expect(TournamentService.parseTournaments('x'), isEmpty);
     });
   });
+
+  group('TournamentService.activeTournamentIds (TAS.3 Task 5)', () {
+    test('keeps only unfinished tournaments, sorted', () {
+      final tournaments = TournamentService.parseTournaments({
+        'zzz-cup': {'Name': 'Zzz', 'Finished': false, 'Edition': '1'},
+        'aaa-cup': {'Name': 'Aaa', 'Finished': false, 'Edition': '1'},
+        'finished-cup': {'Name': 'Done', 'Finished': true, 'Edition': '1'},
+      });
+      expect(TournamentService.activeTournamentIds(tournaments),
+          ['aaa-cup', 'zzz-cup']);
+    });
+
+    test('empty list yields an empty id list', () {
+      expect(TournamentService.activeTournamentIds([]), isEmpty);
+    });
+
+    test('all finished yields an empty id list', () {
+      final tournaments = TournamentService.parseTournaments({
+        'a': {'Name': 'A', 'Finished': true, 'Edition': '1'},
+      });
+      expect(TournamentService.activeTournamentIds(tournaments), isEmpty);
+    });
+
+    test('same active set in different orders compares equal (List ==)', () {
+      final a = TournamentService.parseTournaments({
+        'x': {'Name': 'X', 'Finished': false, 'Edition': '2'},
+        'y': {'Name': 'Y', 'Finished': false, 'Edition': '1'},
+      });
+      final b = TournamentService.parseTournaments({
+        'y': {'Name': 'Y', 'Finished': false, 'Edition': '1'},
+        'x': {'Name': 'X', 'Finished': false, 'Edition': '2'},
+      });
+      expect(TournamentService.activeTournamentIds(a),
+          TournamentService.activeTournamentIds(b));
+    });
+  });
 }
