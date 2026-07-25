@@ -248,7 +248,7 @@ class FixturesTab extends StatelessWidget {
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      _stageLabelShort(match.label),
+                      _stageLabelShort(match.stage),
                       style: TextStyle(
                         fontSize: 11,
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
