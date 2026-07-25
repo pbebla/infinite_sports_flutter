@@ -294,7 +294,11 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                   ),
                   if (_match.link != null && _match.link!.isNotEmpty)
                     IconButton(
-                      icon: const Icon(Icons.live_tv, color: Colors.red),
+                      // colorScheme.primary = brand red in light mode, gold
+                      // in dark mode (see theme_provider.dart) — matches the
+                      // Watch button on match cards.
+                      icon: Icon(Icons.live_tv,
+                          color: Theme.of(context).colorScheme.primary),
                       tooltip: 'Watch Stream',
                       onPressed: () async {
                         final uri = Uri.tryParse(_match.link!);
