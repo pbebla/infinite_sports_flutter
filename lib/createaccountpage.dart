@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/onboarding/about_you_page.dart';
 import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -113,7 +114,16 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         centerTitle: true,
-        title: const Text("Sign Up"),
+        title: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text("Sign Up"),
+            Text(
+              "Step 1 of 3",
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
+            ),
+          ],
+        ),
         backgroundColor: appBarBackground(context),
         foregroundColor: appBarForeground(context),
       ),
@@ -302,12 +312,26 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                               title: const Text("You are registered and logged in. Verify your account using the link sent to your email."),
                               actions: [TextButton(child: const Text("OK"), onPressed: () {
                                     Navigator.pop(context); // dialog
-                                    // Straight into the favorite-sports picker;
-                                    // it pops back to the previous screen when done.
+                                    // Step 2 of 3: About You. Email signup
+                                    // already collected a phone number in
+                                    // Step 1, so askPhone stays false here.
+                                    // Its onDone continues to Step 3 (the
+                                    // existing favorite-sports picker), which
+                                    // pops back to the gate root when done.
                                     Navigator.pushReplacement(
                                       context,
                                       MaterialPageRoute(
-                                          builder: (_) => const FavoriteSportsPage()),
+                                          builder: (routeContext) => AboutYouPage(
+                                                stepIndex: 2,
+                                                stepCount: 3,
+                                                onDone: () =>
+                                                    Navigator.pushReplacement(
+                                                  routeContext,
+                                                  MaterialPageRoute(
+                                                      builder: (_) =>
+                                                          const FavoriteSportsPage()),
+                                                ),
+                                              )),
                                     );
                               },)],
                             );

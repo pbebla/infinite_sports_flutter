@@ -14,7 +14,9 @@ import 'package:infinite_sports_flutter/misc/server_time.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/onboarding/about_you_page.dart';
 import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
+import 'package:infinite_sports_flutter/onboarding/profile_completion.dart';
 import 'package:infinite_sports_flutter/onboarding/welcome_page.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/navigations/current_livescore_navigation.dart';
@@ -184,13 +186,19 @@ class _MyHomePageState extends State<MyHomePage> {
     super.initState();
   }
 
-  /// Every install joins the app-wide channel (for "Everyone" campaigns), and
-  /// signed-in users who never picked favorites get the one-time prompt.
+  /// Every install joins the app-wide channel (for "Everyone" campaigns).
+  /// Signed-in users then go through, in order: (1) the one-time MANDATORY
+  /// "complete your profile" gate for accounts missing the About You fields
+  /// (pre-existing accounts, or anything created before this step existed),
+  /// then (2) the one-time favorites prompt for anyone who never picked any.
+  /// Both are gated so they run at most once per launch (this method itself
+  /// only ever runs once, from the post-frame callback in [initState]).
   Future<void> _setupNotificationPrefs() async {
     final prefs = NotificationPrefs();
     await prefs.subscribeAllUsers();
     final user = FirebaseAuth.instance.currentUser;
     if (!signedIn || user == null) return;
+    await _showAboutYouIfIncomplete(user.uid);
     if (await prefs.hasAnswered(user.uid)) return;
     final answered = await prefs.serverFavorites(user.uid);
     if (answered != null) return; // already has favorites recorded
@@ -199,6 +207,35 @@ class _MyHomePageState extends State<MyHomePage> {
       Navigator.push(ctx,
           MaterialPageRoute(builder: (_) => const FavoriteSportsPage()));
     }
+  }
+
+  /// One-time MANDATORY "Complete your profile" gate (owner decision, no
+  /// skip) for any signed-in account whose `Users/<uid>` node is missing the
+  /// About You fields — chiefly pre-existing accounts created before this
+  /// step existed. Brand-new signups already write `ProfileCompleted: true`
+  /// during Step 2 of 3 (see createaccountpage.dart), so `profileCompleted`
+  /// is already true for them and this never re-prompts.
+  Future<void> _showAboutYouIfIncomplete(String uid) async {
+    dynamic usersNode;
+    try {
+      final snap = await FirebaseDatabase.instance.ref('Users/$uid').get();
+      usersNode = snap.value;
+    } catch (_) {
+      return; // network hiccup: don't block app entry over this check
+    }
+    if (profileCompleted(usersNode)) return;
+    final ctx = mainContext;
+    if (ctx == null || !ctx.mounted) return;
+    // No step labels here (not part of the 3-step signup flow); onDone pops
+    // this route back to MyHomePage, then favorites logic runs as today.
+    await Navigator.push(
+      ctx,
+      MaterialPageRoute(
+        builder: (routeContext) => AboutYouPage(
+          onDone: () => Navigator.pop(routeContext),
+        ),
+      ),
+    );
   }
 
   void setTitle(String value) {
