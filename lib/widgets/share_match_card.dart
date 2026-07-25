@@ -114,7 +114,7 @@ class ShareMatchCard extends StatelessWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Image.asset('assets/infinitelarge_dark.png', height: 34),
+                  Image.asset('assets/infinite_mark.png', height: 34),
                   const SizedBox(width: 6),
                   const Flexible(
                     child: Text.rich(

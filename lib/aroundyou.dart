@@ -211,7 +211,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
           backgroundColor: TournamentColors.headerBackground(context),
           foregroundColor: TournamentColors.headerForeground(context),
           centerTitle: true,
-          title: Image.asset('assets/infinitelarge_dark.png', height: 30),
+          title: Image.asset('assets/infinite_mark.png', height: 32),
           actions: [
             IconButton(
               onPressed: () async {

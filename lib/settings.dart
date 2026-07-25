@@ -323,7 +323,7 @@ class _SettingsState extends State<Settings> {
                         foregroundColor: appBarForeground(context),
                       ),
                       body: Column(children: [
-                        Image.asset("assets/infinite.png"),
+                        Image.asset('assets/infinite_mark.png', height: 120),
                         const SingleChildScrollView(child: Padding(padding: EdgeInsets.all(15), child: Text("Infinite Sports Association is a San Jose-based non-profit Assyrian organization that runs Soccer, Basketball and Volleyball leagues, games, and tournaments for the Assyrian community")))],)
                     );
                   },)); 

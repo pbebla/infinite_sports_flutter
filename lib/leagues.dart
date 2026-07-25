@@ -186,7 +186,7 @@ class _LeaguesPageState extends State<LeaguesPage> {
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
-        title: Image.asset('assets/infinitelarge_dark.png', height: 30),
+        title: Image.asset('assets/infinite_mark.png', height: 32),
       ),
       body: FutureBuilder(
         future: populateMenus(), 

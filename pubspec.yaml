@@ -91,11 +91,22 @@ dev_dependencies:
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
-  image_path: "assets/infinitelarge.png"
-  image_path_ios_dark_transparent: "assets/infinitelarge_dark.png"
+  image_path: "assets/icon_legacy.png"
+  image_path_ios_dark_transparent: "assets/icon_foreground.png"
   min_sdk_android: 21 # android min sdk min:16, default 21
-  adaptive_icon_foreground: "assets/infinitelarge_dark.png"
+  adaptive_icon_foreground: "assets/icon_foreground.png"
   adaptive_icon_background: "#FFFFFF"
+
+flutter_native_splash:
+  color: "#FFFFFF"
+  image: assets/welcome_logo.png
+  color_dark: "#000000"
+  image_dark: assets/welcome_logo.png
+  android_12:
+    image: assets/welcome_logo.png
+    color: "#FFFFFF"
+    image_dark: assets/welcome_logo.png
+    color_dark: "#000000"
 
 # The following section is specific to Flutter packages.
 flutter:

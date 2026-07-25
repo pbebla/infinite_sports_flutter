@@ -82,7 +82,7 @@ class _ProfileCardScaffold extends StatelessWidget {
                 ),
                 // Small IS logo in header (white tinted)
                 Image.asset(
-                  'assets/infinitelarge_dark.png',
+                  'assets/infinite_mark.png',
                   height: 28,
                   color: Colors.white.withValues(alpha: 0.9),
                 ),
@@ -99,7 +99,7 @@ class _ProfileCardScaffold extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Image.asset('assets/infinitelarge_dark.png', height: 34),
+                Image.asset('assets/infinite_mark.png', height: 34),
                 const SizedBox(width: 6),
                 const Flexible(
                   child: Text.rich(

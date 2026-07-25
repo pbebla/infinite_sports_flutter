@@ -89,7 +89,7 @@ class _CalendarTabState extends State<CalendarTab> {
           },
         ),
         centerTitle: true,
-        title: Image.asset('assets/infinitelarge_dark.png', height: 30),
+        title: Image.asset('assets/infinite_mark.png', height: 32),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),

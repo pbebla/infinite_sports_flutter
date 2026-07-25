@@ -246,7 +246,7 @@ class _FrontPageState extends State<FrontPage> {
   Widget build(BuildContext context) {
     return Scaffold(
         appBar: GlobalAppBar(
-          title: Image.asset('assets/infinitelarge_dark.png', height: 30),
+          title: Image.asset('assets/infinite_mark.png', height: 32),
           height: AppBar().preferredSize.height,
           tableWidget: ValueListenableBuilder<bool>(
             valueListenable: _onTournamentTab,

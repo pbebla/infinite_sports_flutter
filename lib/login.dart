@@ -65,7 +65,7 @@ class _LoginDemoState extends State<LoginPage> {
                     /*decoration: BoxDecoration(
                         color: Colors.red,
                         borderRadius: BorderRadius.circular(50.0)),*/
-                    child: Image.asset('assets/infinite.png')),
+                    child: Image.asset('assets/welcome_logo.png')),
               ),
             ),
             Padding(
