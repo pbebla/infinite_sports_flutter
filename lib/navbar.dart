@@ -6,7 +6,6 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -216,18 +215,11 @@ class _NavBarState extends State<NavBar> {
                 ),
                 Text(FirebaseAuth.instance.currentUser?.displayName ?? "", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineMedium!.fontSize)),
               ],)),
-          Visibility(
-            visible: !signedIn,
-            child: ListTile(
-            leading: const ImageIcon(AssetImage("assets/profile.png"), color: Colors.white,),
-            title: const Text("Login or Sign Up", style: TextStyle(fontWeight: FontWeight.bold),),
-            textColor: Colors.white,
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const LoginPage())).then((value) => setState(() {
-              if (signedIn) {
-                Navigator.pop(context);
-              }
-            })),
-          ),),
+          // No "Login or Sign Up" branch here anymore: the auth wall
+          // guarantees `signedIn` is true for every screen this drawer can
+          // possibly be shown on (WelcomePage/LoginPage/CreateAccountPage
+          // have no drawer). See lib/main.dart AuthGate + lib/onboarding/
+          // welcome_page.dart.
           Visibility(
             visible: signedIn,
             child: ListTile(

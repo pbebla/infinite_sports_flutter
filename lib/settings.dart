@@ -8,7 +8,6 @@ import 'package:infinite_sports_flutter/misc/categories.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 
@@ -127,14 +126,6 @@ class _SettingsState extends State<Settings> {
                       }
                     );
                   },),
-                  const Divider(color: Colors.grey),
-                  ListTile(title: const Text("Auto Log In"), minTileHeight: 40, trailing: Checkbox(value: autoSignIn, onChanged: (value) async {
-                    SharedPreferences prefs = await SharedPreferences.getInstance();
-                    await prefs.setBool('autoSignIn', value!);
-                    setState(() {
-                      autoSignIn = value;
-                    });
-                  },),),
                   const Divider(color: Colors.grey),
                 ]
               ),

@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_config/flutter_config.dart';
 import 'package:infinite_sports_flutter/calendar_tab.dart';
+import 'package:infinite_sports_flutter/misc/auth_gate.dart';
 import 'package:infinite_sports_flutter/misc/goal_toast.dart';
 import 'package:infinite_sports_flutter/misc/notification_router.dart';
 import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
@@ -14,6 +15,7 @@ import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
+import 'package:infinite_sports_flutter/onboarding/welcome_page.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/navigations/current_livescore_navigation.dart';
 import 'package:infinite_sports_flutter/navigations/leagues_navigation.dart';
@@ -77,20 +79,56 @@ Future<void> main() async {
   pendingLaunchMessage = await FirebaseMessaging.instance.getInitialMessage();
   SharedPreferences prefs = await SharedPreferences.getInstance();
   darkModeEnabled = prefs.getBool('darkMode') ?? false;
-  autoSignIn = prefs.getBool('autoSignIn') ?? false;
   runApp(ChangeNotifierProvider(create: (context) => ThemeProvider(darkModeEnabled), child: const MyApp()));
 }
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
-  
+
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Infinite Sports',
       theme: Provider.of<ThemeProvider>(context).themeData,
-      home: const MyHomePage(),
+      home: const AuthGate(),
+    );
+  }
+}
+
+/// Hard login wall (owner decision, auth-wall spec): a signed-out user only
+/// ever sees [WelcomePage] — nothing else in the app is reachable. Signed-in
+/// users go straight to [MyHomePage]. Logout signs out of Firebase, which
+/// flips `authStateChanges()` back to `null`, and this rebuilds to the wall
+/// instantly — no manual navigation needed anywhere else in the app.
+///
+/// Auto sign-in is now the ONLY behavior: a persisted Firebase session (from
+/// a previous login) goes straight into the app on launch. There is no
+/// "sign out on launch" path anymore and no user-facing toggle for it.
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          // Brief — matches the native splash colors so there's no flash
+          // between splash, this frame, and the real content.
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+          return Scaffold(
+            backgroundColor: isDark ? const Color(0xFF000000) : const Color(0xFFFFFFFF),
+          );
+        }
+        final user = snapshot.data;
+        signedIn = user != null;
+        return chooseRootWidget(
+          user: user,
+          signedInHome: () => const MyHomePage(),
+          signedOutHome: () => const WelcomePage(),
+        );
+      },
     );
   }
 }
@@ -177,14 +215,15 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   Future<int> setCurrentValues() async {
-    if (FirebaseAuth.instance.currentUser != null && autoSignIn) {
+    // MyHomePage only ever exists once AuthGate has already confirmed a
+    // signed-in Firebase user (auto sign-in is always on now — no more
+    // sign-out-on-launch path), so this is just the FCM token upload.
+    if (FirebaseAuth.instance.currentUser != null) {
       signedIn = true;
       String? token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
         await uploadToken(FirebaseAuth.instance.currentUser!, token);
       }
-    } else {
-      FirebaseAuth.instance.signOut();
     }
     currentSport = await getCurrentSport();
     currentSeason = await getCurrentSeason(currentSport);

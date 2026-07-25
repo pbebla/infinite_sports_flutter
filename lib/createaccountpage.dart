@@ -118,7 +118,8 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
         foregroundColor: appBarForeground(context),
       ),
       body: SingleChildScrollView(
-        child: Column(
+        child: AutofillGroup(
+          child: Column(
           children: <Widget>[
             Padding(
               padding: const EdgeInsets.only(top: 10.0, bottom: 5.0),
@@ -174,6 +175,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
               child: TextField(
                 keyboardType: TextInputType.name,
                 controller: _firstNameController,
+                autofillHints: const [AutofillHints.givenName],
                 decoration: InputDecoration(
                   errorText: _firstNameErrorText,
                   border: const OutlineInputBorder(),
@@ -187,6 +189,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
               child: TextField(
                 keyboardType: TextInputType.name,
                 controller: _lastNameController,
+                autofillHints: const [AutofillHints.familyName],
                 decoration: InputDecoration(
                   errorText: _lastNameErrorText,
                   border: const OutlineInputBorder(),
@@ -203,6 +206,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                   child: TextField(
                     keyboardType: TextInputType.emailAddress,
                     controller: _emailController,
+                    autofillHints: const [AutofillHints.email],
                     decoration: InputDecoration(
                       errorText: (_emailErrorText != null) ? _emailErrorText : null,
                       suffixIcon: (_emailErrorText == null && EmailValidator.validate(_emailController.value.text))
@@ -220,6 +224,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
               child: TextField(
                 keyboardType: TextInputType.phone,
                 controller: _phoneController,
+                autofillHints: const [AutofillHints.telephoneNumber],
                 decoration: const InputDecoration(
                     border: OutlineInputBorder(),
                     labelText: 'Phone Number',
@@ -236,6 +241,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                   child: TextField(
                     controller: _passwordController,
                     obscureText: true,
+                    autofillHints: const [AutofillHints.newPassword],
                     decoration: InputDecoration(
                       errorText: (_passwordErrorText != null) ? _passwordErrorText : null,
                       suffixIcon: (_passwordErrorText == null && _passwordController.value.text.length > 4)
@@ -257,6 +263,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                   child: TextField(
                     controller: _verifyPasswordController,
                     obscureText: true,
+                    autofillHints: const [AutofillHints.newPassword],
                     decoration: InputDecoration(
                       errorText: (_verifyPasswordErrorText != null) ? _verifyPasswordErrorText : null,
                       suffixIcon: (_verifyPasswordErrorText == null && _verifyPasswordController.value.text.length > 4 && _verifyPasswordController.value.text == _passwordController.value.text)
@@ -323,6 +330,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
               ),
             ),
           ],
+          ),
         ),
       ),
     );

@@ -61,7 +61,6 @@ Map<String, Map<String, Map<String, FlagFootballPlayer>>> flagFootballLineups = 
 Map teamLogos = {};
 FirebaseAuthService auth = FirebaseAuthService();
 bool signedIn = false;
-bool autoSignIn = false;
 bool darkModeEnabled = false;
 BuildContext? mainContext;
 BuildContext? mainScaffoldContext;

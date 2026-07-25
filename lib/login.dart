@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/createaccountpage.dart';
 import 'package:infinite_sports_flutter/forgotpasswordpage.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -54,7 +53,8 @@ class _LoginDemoState extends State<LoginPage> {
         foregroundColor: appBarForeground(context),
       ),
       body: SingleChildScrollView(
-        child: Column(
+        child: AutofillGroup(
+          child: Column(
           children: <Widget>[
             Padding(
               padding: const EdgeInsets.only(top: 60.0),
@@ -73,6 +73,8 @@ class _LoginDemoState extends State<LoginPage> {
               padding: const EdgeInsets.symmetric(horizontal: 15),
               child: TextField(
                 controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
+                autofillHints: const [AutofillHints.email],
                 decoration: const InputDecoration(
                     border: OutlineInputBorder(),
                     labelText: 'Email',
@@ -86,6 +88,7 @@ class _LoginDemoState extends State<LoginPage> {
               child: TextField(
                 controller: _passwordController,
                 obscureText: true,
+                autofillHints: const [AutofillHints.password],
                 decoration: InputDecoration(
                     border: const OutlineInputBorder(),
                     errorText: (_loginErrorText),
@@ -122,16 +125,6 @@ class _LoginDemoState extends State<LoginPage> {
                 ),
               ),
             ),
-            Padding(padding: const EdgeInsets.only(
-                  left: 15.0, right: 15.0, top: 5, bottom: 0), child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [const Text("Auto Sign In"), Checkbox(value: autoSignIn, onChanged: (value) async {
-              SharedPreferences prefs = await SharedPreferences.getInstance();
-              await prefs.setBool('autoSignIn', value!);
-              setState(() {
-                autoSignIn = value;
-              });
-            })],),),
             const SizedBox(
               height: 130,
             ),
@@ -151,6 +144,7 @@ class _LoginDemoState extends State<LoginPage> {
               ),
             ),
           ],
+          ),
         ),
       ),
     );
