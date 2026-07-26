@@ -81,7 +81,7 @@ Future<void> main() async {
   });
   pendingLaunchMessage = await FirebaseMessaging.instance.getInitialMessage();
   SharedPreferences prefs = await SharedPreferences.getInstance();
-  darkModeEnabled = prefs.getBool('darkMode') ?? false;
+  darkModeEnabled = resolveDarkModeDefault(prefs.getBool('darkMode'));
   runApp(ChangeNotifierProvider(create: (context) => ThemeProvider(darkModeEnabled), child: const MyApp()));
 }
 
@@ -140,27 +140,34 @@ class AuthGate extends StatelessWidget {
 }
 
 /// Real "Sign up with Google" flow behind [WelcomePage]'s `onGoogle` seam
-/// (auth-wall C2). Deliberately does NOT navigate anywhere itself: signing
-/// in flips `FirebaseAuth.instance.authStateChanges()`, which [AuthGate]
-/// above is already listening to, so it rebuilds straight to [MyHomePage]
-/// on its own. From there the existing [_MyHomePageState._setupNotificationPrefs]
-/// gate (B2) takes over — same single mechanism for brand-new Google users,
-/// returning Google users, and pre-existing accounts alike:
-/// - New Google user: no `Users/<uid>` node/`ProfileCompleted` yet →
-///   `profileCompleted` is false → the gate shows [AboutYouPage]. This
-///   function writes the base profile (name + join date) first so that page
-///   isn't starting from a completely empty account, but even if this write
-///   hasn't landed yet by the time the gate reads the node, the result is
-///   the same (About You still shows) because none of the About You fields
-///   live in this write.
-/// - Returning Google user: `ProfileCompleted` already true → gate no-ops,
+/// (auth-wall C2). Deliberately does NOT rely on
+/// [_MyHomePageState._setupNotificationPrefs] for new users anymore
+/// (auth-wall F2 fix): signing in flips `FirebaseAuth.instance.authStateChanges()`
+/// the instant `signInWithGoogle()` resolves, which [AuthGate] rebuilds to
+/// [MyHomePage] on — racing this very function's own base-profile write
+/// below. That race used to make the gate read `Users/<uid>` too early,
+/// decide the profile was incomplete, and push its own stale duplicate
+/// About You page (with the wrong dynamic `askPhone`) on top of this
+/// function's own steps.
+///
+/// The fix: set [onboardingFlowActive] BEFORE the base-profile write so the
+/// gate sees it and skips itself entirely, then drive About You + favorites
+/// EXPLICITLY from here — mirroring the email chain
+/// (createaccountpage.dart) — for brand-new users only:
+/// - New Google user: no `Users/<uid>` node yet. Writes the base profile
+///   (name + join date), then pushes [AboutYouPage] (`askPhone: true` —
+///   Google never collects a phone at credential sign-in time) whose
+///   `onDone` continues to [FavoriteSportsPage], which clears
+///   [onboardingFlowActive] on completion.
+/// - Returning Google user: [onboardingFlowActive] is never set, so the
+///   main gate runs as usual — `ProfileCompleted` already true → no-ops,
 ///   straight to the home tabs.
 ///
 /// [context] is [AuthGate]'s own `StreamBuilder` builder context, which
 /// stays mounted for the app's lifetime (it's the `MaterialApp.home`) even
 /// as its *child* swaps between [WelcomePage] and [MyHomePage] — but the
-/// `context.mounted` guard is kept anyway since this runs after two awaited
-/// hops (sign-in, then a DB read).
+/// `context.mounted` guard is kept anyway since this runs after several
+/// awaited hops (sign-in, a DB read, the profile write, a token fetch).
 Future<void> _handleGoogleSignIn(BuildContext context) async {
   final credential = await auth.signInWithGoogle();
   if (credential == null) {
@@ -194,6 +201,9 @@ Future<void> _handleGoogleSignIn(BuildContext context) async {
   );
 
   if (isNewUser) {
+    // Set BEFORE the write below: `authStateChanges()` can flip (and the
+    // gate's post-frame callback can fire) at any point from here on.
+    onboardingFlowActive = true;
     final name = splitDisplayName(user.displayName);
     try {
       // `.update()` — never `.set()` — so this can never clobber sibling
@@ -211,22 +221,41 @@ Future<void> _handleGoogleSignIn(BuildContext context) async {
   if (token != null) {
     await uploadToken(user, token);
   }
+
+  if (isNewUser && context.mounted) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (routeContext) => AboutYouPage(
+          askPhone: true,
+          stepIndex: 2,
+          stepCount: 3,
+          onDone: () => Navigator.pushReplacement(
+            routeContext,
+            MaterialPageRoute(builder: (_) => const FavoriteSportsPage()),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// "Sign in with Apple" flow behind [WelcomePage]'s `onApple` seam
 /// (auth-wall D1) — CODE COMPLETE but DORMANT, since [WelcomePage] only ever
 /// renders its Apple button on `Platform.isIOS`, and this repo builds/ships
 /// Android only today. Kept as a straight mirror of [_handleGoogleSignIn]
-/// above so the SAME gate machinery (`_MyHomePageState._setupNotificationPrefs`,
-/// About You, favorites) handles a brand-new Apple sign-up identically to a
-/// brand-new Google one, with no separate code path to keep in sync:
-/// - New Apple user: no `Users/<uid>` node yet → `profileCompleted` false →
-///   gate shows [AboutYouPage]. This function writes the base profile first
-///   (name, from `user.displayName` — which `signInWithApple` may have just
-///   set via `combineAppleName`/`updateDisplayName` when Apple supplied a
-///   name on this FIRST authorization; `null`/empty on every subsequent
-///   Apple sign-in, same as `splitDisplayName` already handles for Google).
-/// - Returning Apple user: `ProfileCompleted` already true → straight in.
+/// above (including the auth-wall F2 [onboardingFlowActive] fix and the
+/// explicit About You/favorites push for new users) so there's no separate
+/// code path to keep in sync:
+/// - New Apple user: no `Users/<uid>` node yet. This function writes the
+///   base profile first (name, from `user.displayName` — which
+///   `signInWithApple` may have just set via
+///   `combineAppleName`/`updateDisplayName` when Apple supplied a name on
+///   this FIRST authorization; `null`/empty on every subsequent Apple
+///   sign-in, same as `splitDisplayName` already handles for Google), then
+///   pushes [AboutYouPage] → [FavoriteSportsPage] explicitly.
+/// - Returning Apple user: [onboardingFlowActive] is never set, so the main
+///   gate runs as usual and no-ops (`ProfileCompleted` already true).
 Future<void> _handleAppleSignIn(BuildContext context) async {
   final credential = await auth.signInWithApple();
   if (credential == null) {
@@ -260,6 +289,9 @@ Future<void> _handleAppleSignIn(BuildContext context) async {
   );
 
   if (isNewUser) {
+    // Set BEFORE the write below: `authStateChanges()` can flip (and the
+    // gate's post-frame callback can fire) at any point from here on.
+    onboardingFlowActive = true;
     final name = splitDisplayName(user.displayName);
     try {
       // `.update()` — never `.set()` — so this can never clobber sibling
@@ -276,6 +308,23 @@ Future<void> _handleAppleSignIn(BuildContext context) async {
   final token = await FirebaseMessaging.instance.getToken();
   if (token != null) {
     await uploadToken(user, token);
+  }
+
+  if (isNewUser && context.mounted) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (routeContext) => AboutYouPage(
+          askPhone: true,
+          stepIndex: 2,
+          stepCount: 3,
+          onDone: () => Navigator.pushReplacement(
+            routeContext,
+            MaterialPageRoute(builder: (_) => const FavoriteSportsPage()),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -338,6 +387,13 @@ class _MyHomePageState extends State<MyHomePage> {
   /// Both are gated so they run at most once per launch (this method itself
   /// only ever runs once, from the post-frame callback in [initState]).
   Future<void> _setupNotificationPrefs() async {
+    // An active signup flow (email, Google, or Apple) is already driving its
+    // own About You + favorites steps and will finish them itself — running
+    // this gate at the same time races the flow's own Users/<uid> writes and
+    // shows a stale duplicate About You page (auth-wall F2 fix).
+    if (shouldSkipOnboardingGate(onboardingFlowActive: onboardingFlowActive)) {
+      return;
+    }
     final prefs = NotificationPrefs();
     await prefs.subscribeAllUsers();
     final user = FirebaseAuth.instance.currentUser;
@@ -356,16 +412,17 @@ class _MyHomePageState extends State<MyHomePage> {
   /// One-time MANDATORY "Complete your profile" gate (owner decision, no
   /// skip) for any signed-in account whose `Users/<uid>` node is missing the
   /// About You fields — pre-existing accounts created before this step
-  /// existed, AND brand-new Google/Apple sign-ups (whose base profile write
-  /// never sets `ProfileCompleted`). Brand-new EMAIL signups already write
-  /// `ProfileCompleted: true` during Step 2 of 3 (see createaccountpage.dart),
-  /// so `profileCompleted` is already true for them and this never re-prompts.
+  /// existed. Brand-new EMAIL, Google, and Apple sign-ups all set
+  /// [onboardingFlowActive] (see `_handleGoogleSignIn`/`_handleAppleSignIn`
+  /// above and `createaccountpage.dart`), which makes the CALLER of this
+  /// method (`_setupNotificationPrefs`) skip entirely (auth-wall F2 fix) —
+  /// so this only ever actually runs for returning/pre-existing accounts,
+  /// for whom `ProfileCompleted` is already true and it no-ops immediately.
   ///
   /// `askPhone` is decided dynamically from the same node read: email
   /// signups always collected a phone in Step 1, but Google/Apple never
-  /// collect one at credential sign-in time, so this asks for it here
-  /// instead whenever `Phone Number` is missing/empty — one shared gate,
-  /// no separate Google-specific flow.
+  /// collect one at credential sign-in time — not that it matters here
+  /// anymore, since Google/Apple new-users never reach this method.
   Future<void> _showAboutYouIfIncomplete(String uid) async {
     dynamic usersNode;
     try {

@@ -2,11 +2,16 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/categories.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 
 /// "What are you into?" — pick favorite sports/categories. Shown once after
 /// signup and once to existing users who haven't answered. Choosing a category
 /// subscribes its notifications (auto opt-in, opt-out later in settings).
 /// Pops itself when done or skipped.
+///
+/// When reached as the final step of a signup flow (email, Google, or
+/// Apple), its completion also clears `onboardingFlowActive` (auth-wall F2
+/// fix) — see `_finish` below.
 class FavoriteSportsPage extends StatefulWidget {
   const FavoriteSportsPage({super.key, this.initial = const {}});
 
@@ -69,6 +74,10 @@ class _FavoriteSportsPageState extends State<FavoriteSportsPage> {
         if (uid != null) await _prefs.markAnswered(uid);
       }
     } catch (_) {}
+    // Terminal step of every signup chain (email, Google, Apple) that sets
+    // `onboardingFlowActive` — clear it here (Skip included) so the main
+    // gate resumes normal behavior for this session (auth-wall F2 fix).
+    onboardingFlowActive = false;
     if (mounted) Navigator.of(context).pop();
   }
 

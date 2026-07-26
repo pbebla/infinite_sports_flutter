@@ -309,24 +309,34 @@ class _NavBarState extends State<NavBar> {
               textColor: Colors.white,
               onTap: () async {
                 showDialog(
-                  context: context, 
-                  builder: (context) {
+                  context: context,
+                  builder: (dialogCtx) {
                     return AlertDialog(
                       title: const Text("Are you sure you want to logout?"),
                       actions: [
                         TextButton(
                           onPressed: () async {
+                            // Pop the dialog FIRST (auth-wall F2 fix): before
+                            // the wall, signing out replaced the whole
+                            // navigation stack, which incidentally closed
+                            // this dialog too. Now AuthGate just swaps its
+                            // content in place, so the dialog has to be
+                            // dismissed explicitly — and before the
+                            // sign-out, since AuthGate can swap the content
+                            // underneath (disposing this dialog's ancestors)
+                            // the instant `auth.signOut()` flips
+                            // authStateChanges().
+                            Navigator.pop(dialogCtx);
                             print(FirebaseAuth.instance.currentUser);
                             await auth.signOut();
                             print("Signed out");
                             signedIn = false;
-                            setState(() {});
-                            Navigator.pop(context);
-                          }, 
+                            if (mounted) setState(() {});
+                          },
                           child: const Text("Yes")
                         ),
                         TextButton(
-                          onPressed: () {Navigator.pop(context);}, 
+                          onPressed: () {Navigator.pop(dialogCtx);},
                           child: const Text("No")
                         ),
                       ],

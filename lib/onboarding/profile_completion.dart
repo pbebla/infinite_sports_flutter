@@ -73,6 +73,18 @@ bool needsPhoneNumber(dynamic usersNode) {
   return value == null || value.toString().trim().isEmpty;
 }
 
+/// True when `MyHomePage._setupNotificationPrefs` (lib/main.dart) — the
+/// one-time "complete your profile" + favorites gate — should skip itself
+/// entirely because an in-flight signup flow (email, Google, or Apple; see
+/// `onboardingFlowActive` in lib/misc/utility.dart) is already driving its
+/// own About You + favorites steps and will finish them itself. Running the
+/// gate at the same time races the flow's own `Users/<uid>` writes: the gate
+/// reads the node before the flow has written to it, decides the profile is
+/// incomplete, and pushes a second, stale About You page on top of the
+/// flow's own one (auth-wall F2 fix).
+bool shouldSkipOnboardingGate({required bool onboardingFlowActive}) =>
+    onboardingFlowActive;
+
 /// Formats [d] as `MM/DD/YYYY`, zero-padded (the DB storage format for DOB).
 String formatDob(DateTime d) {
   String two(int n) => n.toString().padLeft(2, '0');

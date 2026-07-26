@@ -65,6 +65,19 @@ bool darkModeEnabled = false;
 BuildContext? mainContext;
 BuildContext? mainScaffoldContext;
 
+/// True for the duration of an in-flight signup flow (email, Google, or
+/// Apple) — from the moment the account is created/signed-in until the
+/// flow's own final step (About You, then favorites) finishes. While true,
+/// `MyHomePage._setupNotificationPrefs` (lib/main.dart) skips its one-time
+/// "complete your profile" gate entirely: that gate reads `Users/<uid>` the
+/// instant `authStateChanges()` flips to signed-in, which can race the
+/// signup flow's own writes to that same node (the flow hasn't written
+/// `ProfileCompleted`/`Phone Number` yet), causing the gate to push its own
+/// stale duplicate About You page on top of the flow's (auth-wall F2 fix).
+/// Returning users never set this flag, so the gate always runs normally
+/// for them.
+bool onboardingFlowActive = false;
+
 ValueNotifier headerNotifier = ValueNotifier(["", ""]);
 
 final List<String> months = [

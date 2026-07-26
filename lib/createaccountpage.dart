@@ -348,6 +348,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                                       context,
                                       MaterialPageRoute(
                                           builder: (routeContext) => AboutYouPage(
+                                                askPhone: false,
                                                 stepIndex: 2,
                                                 stepCount: 3,
                                                 onDone: () =>
@@ -402,6 +403,12 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     // user typed — stored as-is so exports show the formatted display
     // string (owner spec).
     String phoneNumber = _phoneController.value.text;
+    // Set BEFORE the call below: successful account creation flips
+    // `authStateChanges()` almost immediately, which can race this
+    // function's own writes/steps below and make main.dart's one-time
+    // profile gate fire early and show a stale duplicate About You page
+    // (auth-wall F2 fix). Cleared by FavoriteSportsPage on completion.
+    onboardingFlowActive = true;
     User? user = await auth.signUpWithEmailAndPassword(email, password);
 
     if (user != null) {

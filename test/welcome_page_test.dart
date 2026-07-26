@@ -8,9 +8,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/onboarding/welcome_page.dart';
 
 void main() {
+  testWidgets(
+      'initState resets a stale onboardingFlowActive flag (auth-wall F2 fix)',
+      (tester) async {
+    // Simulates a user who backed out of an in-flight signup flow before it
+    // finished and landed back on the wall signed-out — the flag must not
+    // stay stuck true, or the main gate would wrongly skip itself on their
+    // next sign-in.
+    onboardingFlowActive = true;
+    await tester.pumpWidget(const MaterialApp(home: WelcomePage()));
+
+    expect(onboardingFlowActive, isFalse);
+  });
+
   testWidgets('renders the headline, email signup, and log in buttons',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(home: WelcomePage()));

@@ -14,13 +14,29 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 /// (Apple, iOS-only) replace the placeholder "coming soon" behavior with a
 /// real credential sign-in flow. Leaving them nullable keeps this widget
 /// trivially testable standalone.
-class WelcomePage extends StatelessWidget {
+class WelcomePage extends StatefulWidget {
   const WelcomePage({super.key, this.onGoogle, this.onApple});
 
   final VoidCallback? onGoogle;
   final VoidCallback? onApple;
 
   static const _bg = Color(0xFF0B0B0B);
+
+  @override
+  State<WelcomePage> createState() => _WelcomePageState();
+}
+
+class _WelcomePageState extends State<WelcomePage> {
+  @override
+  void initState() {
+    super.initState();
+    // Defensive reset (auth-wall F2 fix): a user who backed out of an
+    // in-flight signup flow before it finished (email, Google, or Apple)
+    // can land back here signed-out with `onboardingFlowActive` still true.
+    // Reset it so the main gate isn't wrongly skipped on their NEXT
+    // sign-in/signup.
+    onboardingFlowActive = false;
+  }
 
   void _placeholder(BuildContext context, String provider) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -31,7 +47,7 @@ class WelcomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _bg,
+      backgroundColor: WelcomePage._bg,
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -73,13 +89,13 @@ class WelcomePage extends StatelessWidget {
                         ),
                         const Spacer(flex: 3),
                         _GoogleButton(
-                          onPressed: () => (onGoogle ??
+                          onPressed: () => (widget.onGoogle ??
                               () => _placeholder(context, 'Google'))(),
                         ),
                         if (Platform.isIOS) ...[
                           const SizedBox(height: 12),
                           _AppleButton(
-                            onPressed: () => (onApple ??
+                            onPressed: () => (widget.onApple ??
                                 () => _placeholder(context, 'Apple'))(),
                           ),
                         ],

@@ -66,6 +66,15 @@ ThemeData darkMode = ThemeData(
   ),
 );
 
+/// Startup dark-mode default (auth-wall F2 owner feedback): resolves the
+/// persisted `darkMode` pref ([storedPref], from
+/// `SharedPreferences.getBool('darkMode')`) into the value `main()` seeds
+/// `ThemeProvider` with. A brand-new install has no pref yet (`null`) and now
+/// defaults to dark instead of the previous light default. A user who
+/// explicitly chose light before this change shipped has `false` stored,
+/// which is kept as-is — this only changes the ABSENT case.
+bool resolveDarkModeDefault(bool? storedPref) => storedPref ?? true;
+
 enum ThemeModes{
   light,
   dark

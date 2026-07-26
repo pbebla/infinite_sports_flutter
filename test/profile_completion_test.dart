@@ -164,6 +164,16 @@ void main() {
     });
   });
 
+  group('shouldSkipOnboardingGate', () {
+    test('true when an onboarding flow is active', () {
+      expect(shouldSkipOnboardingGate(onboardingFlowActive: true), isTrue);
+    });
+
+    test('false when no onboarding flow is active (returning user)', () {
+      expect(shouldSkipOnboardingGate(onboardingFlowActive: false), isFalse);
+    });
+  });
+
   group('formatDob', () {
     test('zero-pads single-digit month and day', () {
       expect(formatDob(DateTime(2000, 1, 5)), '01/05/2000');
