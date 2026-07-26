@@ -129,8 +129,10 @@ class AuthGate extends StatelessWidget {
         return chooseRootWidget(
           user: user,
           signedInHome: () => const MyHomePage(),
-          signedOutHome: () =>
-              WelcomePage(onGoogle: () => _handleGoogleSignIn(context)),
+          signedOutHome: () => WelcomePage(
+            onGoogle: () => _handleGoogleSignIn(context),
+            onApple: () => _handleAppleSignIn(context),
+          ),
         );
       },
     );
@@ -168,6 +170,72 @@ Future<void> _handleGoogleSignIn(BuildContext context) async {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Google sign-in cancelled or failed.')),
+      );
+    }
+    return;
+  }
+  final user = credential.user;
+  if (user == null) return;
+
+  var usersNodeExists = false;
+  try {
+    final snap = await FirebaseDatabase.instance.ref('Users/${user.uid}').get();
+    usersNodeExists = snap.exists;
+  } catch (_) {
+    // Network hiccup reading the node: fall through with usersNodeExists
+    // false, which only means the (harmless, .update()-based) base-profile
+    // write below might redundantly re-run for an existing user — never a
+    // reason to block sign-in.
+  }
+
+  final isNewUser = isNewSignInUser(
+    isNewUserFlag: credential.additionalUserInfo?.isNewUser == true,
+    usersNodeExists: usersNodeExists,
+  );
+
+  if (isNewUser) {
+    final name = splitDisplayName(user.displayName);
+    try {
+      // `.update()` — never `.set()` — so this can never clobber sibling
+      // fields (About You's answers, the FCM token below) regardless of
+      // write order.
+      await FirebaseDatabase.instance.ref('Users/${user.uid}').update({
+        'First Name': name.first,
+        'Last Name': name.last,
+        'Date Joined': DateTime.now().toString(),
+      });
+    } catch (_) {}
+  }
+
+  final token = await FirebaseMessaging.instance.getToken();
+  if (token != null) {
+    await uploadToken(user, token);
+  }
+}
+
+/// "Sign in with Apple" flow behind [WelcomePage]'s `onApple` seam
+/// (auth-wall D1) — CODE COMPLETE but DORMANT, since [WelcomePage] only ever
+/// renders its Apple button on `Platform.isIOS`, and this repo builds/ships
+/// Android only today. Kept as a straight mirror of [_handleGoogleSignIn]
+/// above so the SAME gate machinery (`_MyHomePageState._setupNotificationPrefs`,
+/// About You, favorites) handles a brand-new Apple sign-up identically to a
+/// brand-new Google one, with no separate code path to keep in sync:
+/// - New Apple user: no `Users/<uid>` node yet → `profileCompleted` false →
+///   gate shows [AboutYouPage]. This function writes the base profile first
+///   (name, from `user.displayName` — which `signInWithApple` may have just
+///   set via `combineAppleName`/`updateDisplayName` when Apple supplied a
+///   name on this FIRST authorization; `null`/empty on every subsequent
+///   Apple sign-in, same as `splitDisplayName` already handles for Google).
+/// - Returning Apple user: `ProfileCompleted` already true → straight in.
+Future<void> _handleAppleSignIn(BuildContext context) async {
+  final credential = await auth.signInWithApple();
+  if (credential == null) {
+    // User backed out of the Face ID/Apple ID sheet, or sign-in genuinely
+    // failed — either way there's nothing to recover from here except
+    // telling them to try again (same convention as the Google handler).
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Apple sign-in cancelled or failed.')),
       );
     }
     return;

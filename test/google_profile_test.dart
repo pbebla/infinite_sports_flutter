@@ -84,4 +84,30 @@ void main() {
       );
     });
   });
+
+  group('combineAppleName', () {
+    test('both null returns null (nothing to update displayName with)', () {
+      expect(combineAppleName(null, null), isNull);
+    });
+
+    test('both blank/whitespace-only returns null', () {
+      expect(combineAppleName('  ', ''), isNull);
+    });
+
+    test('given name only', () {
+      expect(combineAppleName('Cher', null), 'Cher');
+    });
+
+    test('family name only', () {
+      expect(combineAppleName(null, 'Madonna'), 'Madonna');
+    });
+
+    test('both present joins with a single space', () {
+      expect(combineAppleName('Jane', 'Doe'), 'Jane Doe');
+    });
+
+    test('trims surrounding whitespace on each part', () {
+      expect(combineAppleName('  Jane  ', '  Doe  '), 'Jane Doe');
+    });
+  });
 }
