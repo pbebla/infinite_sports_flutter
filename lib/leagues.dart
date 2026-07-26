@@ -4,6 +4,7 @@ import 'package:infinite_sports_flutter/league_detail_page.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 class LeaguesPage extends StatefulWidget {
   const LeaguesPage({super.key});
@@ -156,15 +157,15 @@ Future<List<Widget>> getSeasonTiles(sport, context) async {
 class _LeaguesPageState extends State<LeaguesPage> {
   Future<List<ListTile>> populateMenus() async {
     List<ListTile> list = [
-      ListTile(leading: const ImageIcon(AssetImage('assets/FutsalLeague.png')), title: const Text("Assyrian Futsal League"),
+      ListTile(leading: const ImageIcon(AssetImage('assets/FutsalLeague.png')), title: const Text("Futsal League"),
       onTap: () {
         Navigator.pushNamed(context, "/futsalLeagues");
       },),
-      ListTile(leading: const ImageIcon(AssetImage('assets/BasketLeague.png')), title: const Text("Assyrian Basketball League"),
+      ListTile(leading: const ImageIcon(AssetImage('assets/BasketLeague.png')), title: const Text("Basketball League"),
       onTap:() {
         Navigator.pushNamed(context, "/basketballLeagues");
       },),
-      ListTile(leading: const ImageIcon(AssetImage('assets/FlagFootballLeague.png')), title: const Text("Assyrian Flag Football League"),
+      ListTile(leading: const ImageIcon(AssetImage('assets/FlagFootballLeague.png')), title: const Text("Flag Football League"),
       onTap:() {
         Navigator.pushNamed(context, "/flagFootballLeagues");
       },),
@@ -192,11 +193,8 @@ class _LeaguesPageState extends State<LeaguesPage> {
         future: populateMenus(), 
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(
-                child: CircularProgressIndicator(
-                  color: Theme.of(context).colorScheme.primary,
-                )
-              );
+            // Skeleton sweep (F3 Fix 2): matches the menu ListTiles below.
+            return const SkeletonList(count: 4);
           }
           return ListView.separated(
             separatorBuilder: (context, index) => Divider(

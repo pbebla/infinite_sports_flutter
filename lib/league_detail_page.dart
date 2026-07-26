@@ -189,7 +189,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
       leagueTeamsById(_standings ?? const [], _logos);
 
   String get _leagueName =>
-      widget.sport == 'Futsal' ? 'Assyrian Futsal League' : widget.sport;
+      widget.sport == 'Futsal' ? 'Futsal League' : widget.sport;
 
   /// Header crest per sport (P4) — matches the exact asset paths
   /// `_sportIconAsset` in `lib/leagues.dart` already uses on the leagues menu.
