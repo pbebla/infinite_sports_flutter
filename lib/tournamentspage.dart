@@ -2,8 +2,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/tournamentdetail.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 class TournamentsPage extends StatefulWidget {
@@ -34,39 +36,16 @@ class _TournamentsPageState extends State<TournamentsPage> {
     super.dispose();
   }
 
-  Color _sportColor(String sport) {
-    switch (sport.toLowerCase()) {
-      case 'soccer':
-        return Colors.blue;
-      case 'basketball':
-        return Colors.orange;
-      case 'flag football':
-        return Colors.green;
-      case 'volleyball':
-        return Colors.purple;
-      default:
-        return Colors.grey;
-    }
-  }
+  // F3 Fix 3 (chip redesign): the owner disliked the rainbow of per-sport and
+  // per-stage colors these two used to hand back — every sport got its own
+  // hue (blue soccer, orange basketball, ...) and every stage got its own
+  // hue (blue group stage, indigo QF, deep purple SF, red final). New system:
+  // sport chip is always neutral, stage/progress chip is always the brand
+  // accent, and only "Registration Open" keeps its own (green) color as the
+  // universal "open" signal. See _sportChip / _stageChip below.
 
-  Color _statusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'registration open':
-        return Colors.teal;
-      case 'group stage':
-        return Colors.blue;
-      case 'quarterfinals':
-        return Colors.indigo;
-      case 'semifinals':
-        return Colors.deepPurple;
-      case 'final':
-        return Colors.red;
-      case 'completed':
-        return Colors.grey;
-      default:
-        return Colors.blueGrey;
-    }
-  }
+  bool _isRegistrationOpen(String status) =>
+      status.toLowerCase() == 'registration open';
 
   Widget _buildTournamentCard(BuildContext context, Tournament t) {
     return Card(
@@ -112,7 +91,7 @@ class _TournamentsPageState extends State<TournamentsPage> {
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        _chip(t.sport, _sportColor(t.sport)),
+                        _sportChip(context, t.sport),
                         const SizedBox(width: 6),
                         if (t.edition.isNotEmpty)
                           Text(
@@ -122,7 +101,7 @@ class _TournamentsPageState extends State<TournamentsPage> {
                       ],
                     ),
                     const SizedBox(height: 4),
-                    _chip(t.status, _statusColor(t.status)),
+                    _stageChip(context, t.status),
                   ],
                 ),
               ),
@@ -156,6 +135,40 @@ class _TournamentsPageState extends State<TournamentsPage> {
     );
   }
 
+  /// Sport chip (F3 Fix 3): NEUTRAL in both modes — a flat
+  /// surfaceContainerHighest pill with onSurfaceVariant text, no per-sport
+  /// color. Solid fill (not alpha-blended like [_chip]) since surfaceVariant
+  /// is already a soft neutral tone in both light and dark schemes.
+  Widget _sportChip(BuildContext context, String sport) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        sport,
+        style: TextStyle(
+          fontSize: 11,
+          color: scheme.onSurfaceVariant,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  /// Stage/progress chip (F3 Fix 3): Group Stage / Quarterfinals /
+  /// Semifinals / Final / Finished all render in the brand accent (red in
+  /// light mode, gold in dark — see [brandAccent]). "Registration Open" is
+  /// the one exception, kept green as the universal "open" signal.
+  Widget _stageChip(BuildContext context, String status) {
+    if (_isRegistrationOpen(status)) {
+      return _chip(status, Colors.green);
+    }
+    return _chip(status, brandAccent(context));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -167,9 +180,13 @@ class _TournamentsPageState extends State<TournamentsPage> {
         builder: (context) {
           final tournaments = _tournaments;
           if (tournaments == null) {
-            return Center(
-              child: CircularProgressIndicator(
-                color: Theme.of(context).colorScheme.primary,
+            // Skeleton sweep (F3 Fix 2): matches the tournament card list
+            // this resolves into below.
+            return const SingleChildScrollView(
+              physics: NeverScrollableScrollPhysics(),
+              child: Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: SkeletonMatchList(count: 6),
               ),
             );
           }
