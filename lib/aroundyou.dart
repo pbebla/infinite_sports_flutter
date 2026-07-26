@@ -326,6 +326,16 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                   physics: const ClampingScrollPhysics(),
                                   padding: EdgeInsets.zero,
                                   itemBuilder: (context, position) {
+                                    // Theme-staleness fix (F3.1): this
+                                    // itemBuilder's own `context` can go
+                                    // stale after a theme toggle (same
+                                    // SliverChildBuilderDelegate reuse quirk
+                                    // as fixtures_tab.dart, F3 Fix 1) — the
+                                    // "Past events" header below reads
+                                    // Theme.of(context) directly, so wrap the
+                                    // row content in a Builder for a live,
+                                    // dependency-tracked context.
+                                    return Builder(builder: (context) {
                                     // Upcoming first, then a header, then
                                     // past events dimmed (auto-archived by
                                     // date — nothing is ever deleted).
@@ -362,6 +372,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                       },
                                     );
                                     return isPast ? Opacity(opacity: 0.55, child: tile) : tile;
+                                    });
                                   },
                                 ),
                                 businesses == null

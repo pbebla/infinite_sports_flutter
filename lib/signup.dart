@@ -100,8 +100,14 @@ class _SignupState extends State<Signup> {
             foregroundColor: appBarForeground(context),
           ),
           body: ListView.separated(
-            separatorBuilder: (context, index) => Divider(
-              color: Theme.of(context).dividerColor,
+            // Theme-staleness fix (F3.1): separatorBuilder's own `context`
+            // can go stale after a theme toggle, same as itemBuilder rows
+            // (see fixtures_tab.dart, F3 Fix 1) — wrap in a Builder so this
+            // Divider's Theme.of() lookup stays live/dependency-tracked.
+            separatorBuilder: (context, index) => Builder(
+              builder: (context) => Divider(
+                color: Theme.of(context).dividerColor,
+              ),
             ),
             itemCount: snapshot.data!.length,
             itemBuilder: (context, index) => snapshot.data![index]

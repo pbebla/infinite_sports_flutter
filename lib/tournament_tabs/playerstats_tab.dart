@@ -134,6 +134,13 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
           return const SizedBox.shrink();
         }
 
+        // Theme-staleness fix (F3.1): itemBuilder's own `context` can go
+        // stale after a theme toggle (same SliverChildBuilderDelegate reuse
+        // quirk as fixtures_tab.dart, F3 Fix 1) — the label Text and
+        // _buildPlayerRow below read Theme.of(context) directly, so wrap
+        // the row content in a Builder for a live, dependency-tracked
+        // context.
+        return Builder(builder: (context) {
         return GestureDetector(
           onTap: () {
             setState(() {
@@ -200,6 +207,7 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
             ),
           ),
         );
+        });
       },
     );
   }

@@ -116,7 +116,18 @@ class TableTab extends StatelessWidget {
             child: ListView.builder(
               padding: EdgeInsetsGeometry.all(0),
               itemCount: sorted.length,
-              itemBuilder: (context, index) => _teamRow(context, sorted[index], rank: index),
+              // Theme-staleness fix (F3.1): itemBuilder's own `context` can
+              // go stale after a theme toggle (same
+              // SliverChildBuilderDelegate reuse quirk as
+              // fixtures_tab.dart, F3 Fix 1) — _teamRow reads Theme.of()
+              // via the context passed to it, so wrap in a Builder for a
+              // live, dependency-tracked context. (The other _teamRow call
+              // site above uses a plain ListView's stable context and
+              // doesn't need this.)
+              itemBuilder: (context, index) => Builder(
+                builder: (context) =>
+                    _teamRow(context, sorted[index], rank: index),
+              ),
             ),
           ),
           // Keep the legend visible above the floating glass nav bar.

@@ -190,7 +190,12 @@ class _PredictTabState extends State<PredictTab> {
         }
         return ListView.builder(
           itemCount: rows.length + 1,
-          itemBuilder: (context, i) {
+          // Theme-staleness fix (F3.1): itemBuilder's own `context` can go
+          // stale after a theme toggle (same SliverChildBuilderDelegate
+          // reuse quirk as fixtures_tab.dart, F3 Fix 1) — the data rows
+          // below read Theme.of(context) directly, so wrap the row content
+          // in a Builder for a live, dependency-tracked context.
+          itemBuilder: (context, i) => Builder(builder: (context) {
             if (i == 0) {
               return const Padding(
                 padding: EdgeInsets.fromLTRB(16, 12, 16, 6),
@@ -231,7 +236,7 @@ class _PredictTabState extends State<PredictTab> {
                 SizedBox(width: 48, child: Text('${e.exact}', textAlign: TextAlign.right, style: const TextStyle(color: Color(0xFF0A7D2C), fontWeight: FontWeight.w700))),
               ]),
             );
-          },
+          }),
         );
       },
     );

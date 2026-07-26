@@ -696,6 +696,12 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
         final displayed =
             isExpanded ? allSorted : allSorted.take(3).toList();
 
+        // Theme-staleness fix (F3.1): itemBuilder's own `context` can go
+        // stale after a theme toggle (same SliverChildBuilderDelegate reuse
+        // quirk as fixtures_tab.dart, F3 Fix 1) — this card reads
+        // Theme.of(context) directly below, so wrap the row content in a
+        // Builder for a live, dependency-tracked context.
+        return Builder(builder: (context) {
         return GestureDetector(
           onTap: () {
             setState(() {
@@ -805,6 +811,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
             ),
           ),
         );
+        });
       },
     );
   }

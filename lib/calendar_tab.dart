@@ -196,7 +196,13 @@ class _CalendarTabState extends State<CalendarTab> {
                 child: ListView.builder(
                   shrinkWrap: true,
                   itemCount: events.length,
-                  itemBuilder: (context, i) {
+                  // Theme-staleness fix (F3.1): itemBuilder's own `context`
+                  // can go stale after a theme toggle (same
+                  // SliverChildBuilderDelegate reuse quirk as
+                  // fixtures_tab.dart, F3 Fix 1) — `accent` below reads
+                  // Theme.of(context) directly, so wrap the row content in a
+                  // Builder for a live, dependency-tracked context.
+                  itemBuilder: (context, i) => Builder(builder: (context) {
                     final entry = events[i];
                     final accent = Theme.of(context).colorScheme.primary;
                     switch (entry.kind) {
@@ -247,7 +253,7 @@ class _CalendarTabState extends State<CalendarTab> {
                           },
                         );
                     }
-                  },
+                  }),
                 ),
               ),
               const SizedBox(height: 8),

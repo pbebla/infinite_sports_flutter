@@ -66,8 +66,14 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
           }
           final entries = regs.entries.toList();
           return ListView.separated(
-            separatorBuilder: (context, index) =>
-                Divider(color: Theme.of(context).dividerColor),
+            // Theme-staleness fix (F3.1): separatorBuilder's own `context`
+            // can go stale after a theme toggle, same as itemBuilder rows
+            // (see fixtures_tab.dart, F3 Fix 1) — wrap in a Builder so this
+            // Divider's Theme.of() lookup stays live/dependency-tracked.
+            separatorBuilder: (context, index) => Builder(
+              builder: (context) =>
+                  Divider(color: Theme.of(context).dividerColor),
+            ),
             itemCount: entries.length,
             itemBuilder: (context, index) {
               final regId = entries[index].key;

@@ -30,7 +30,12 @@ class LeagueTeamsTab extends StatelessWidget {
     return ListView.builder(
       padding: EdgeInsets.fromLTRB(0, 8, 0, 8 + MediaQuery.paddingOf(context).bottom),
       itemCount: standings.length,
-      itemBuilder: (context, index) {
+      // Theme-staleness fix (F3.1): itemBuilder's own `context` can go
+      // stale after a theme toggle (same SliverChildBuilderDelegate reuse
+      // quirk as fixtures_tab.dart, F3 Fix 1) — this card reads
+      // Theme.of(context) directly below, so wrap the row content in a
+      // Builder for a live, dependency-tracked context.
+      itemBuilder: (context, index) => Builder(builder: (context) {
         final team = standings[index];
         final form = teamLeagueForm(team.id, matches);
         return Card(
@@ -98,7 +103,7 @@ class LeagueTeamsTab extends StatelessWidget {
             ),
           ),
         );
-      },
+      }),
     );
   }
 }
