@@ -5,6 +5,13 @@ import 'package:infinite_sports_flutter/createaccountpage.dart';
 import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 
+/// Owner decision 2026-07-26: social sign-in is HIDDEN for launch (email
+/// signup only). The Google/Apple flows below are fully built and wired —
+/// flip this to true to bring both buttons back (Apple still renders only
+/// on iOS). Firebase's Google provider stays enabled server-side, so no
+/// console work is needed to re-enable.
+const bool kSocialSignInEnabled = false;
+
 /// The auth wall: every signed-out user lands here and nothing else in the
 /// app is reachable until they sign in or create an account (Volo/Instagram
 /// -style hard gate). Deliberately fixed dark branding in BOTH app themes —
@@ -88,18 +95,20 @@ class _WelcomePageState extends State<WelcomePage> {
                           ),
                         ),
                         const Spacer(flex: 3),
-                        _GoogleButton(
-                          onPressed: () => (widget.onGoogle ??
-                              () => _placeholder(context, 'Google'))(),
-                        ),
-                        if (Platform.isIOS) ...[
-                          const SizedBox(height: 12),
-                          _AppleButton(
-                            onPressed: () => (widget.onApple ??
-                                () => _placeholder(context, 'Apple'))(),
+                        if (kSocialSignInEnabled) ...[
+                          _GoogleButton(
+                            onPressed: () => (widget.onGoogle ??
+                                () => _placeholder(context, 'Google'))(),
                           ),
+                          if (Platform.isIOS) ...[
+                            const SizedBox(height: 12),
+                            _AppleButton(
+                              onPressed: () => (widget.onApple ??
+                                  () => _placeholder(context, 'Apple'))(),
+                            ),
+                          ],
+                          const SizedBox(height: 12),
                         ],
-                        const SizedBox(height: 12),
                         _EmailButton(
                           onPressed: () => Navigator.push(
                             context,

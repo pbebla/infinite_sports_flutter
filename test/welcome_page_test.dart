@@ -32,38 +32,19 @@ void main() {
     expect(find.text('GET IN THE GAME.'), findsOneWidget);
     expect(find.text('Sign up with Email'), findsOneWidget);
     expect(find.text('Log In'), findsOneWidget);
-    expect(find.text('Sign up with Google'), findsOneWidget);
-  });
-
-  testWidgets('hides the Apple button on a non-iOS test host', (tester) async {
-    await tester.pumpWidget(const MaterialApp(home: WelcomePage()));
-
-    // `flutter test` runs on the host OS (Windows/Linux/macOS CI), never
-    // iOS, so Platform.isIOS is false here — the Apple button must not
-    // render, matching the spec's `Platform.isIOS`-gated button.
-    expect(find.text('Sign up with Apple'), findsNothing);
-  });
-
-  testWidgets('tapping "Sign up with Google" invokes onGoogle', (tester) async {
-    var tapped = false;
-    await tester.pumpWidget(MaterialApp(
-      home: WelcomePage(onGoogle: () => tapped = true),
-    ));
-
-    await tester.tap(find.text('Sign up with Google'));
-    expect(tapped, isTrue);
   });
 
   testWidgets(
-      'tapping "Sign up with Google" without a callback shows a placeholder SnackBar',
+      'social sign-in buttons are hidden while kSocialSignInEnabled is false '
+      '(owner decision 2026-07-26 — flows kept dormant for a possible future)',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(home: WelcomePage()));
 
-    await tester.tap(find.text('Sign up with Google'));
-    await tester.pump(); // let the SnackBar animate in
-
-    expect(
-        find.text('Google sign-in coming in the next build'), findsOneWidget);
+    expect(kSocialSignInEnabled, isFalse,
+        reason: 'flip the flag in welcome_page.dart to re-enable social '
+            'sign-in; then restore the Google button tests from git history');
+    expect(find.text('Sign up with Google'), findsNothing);
+    expect(find.text('Sign up with Apple'), findsNothing);
   });
 
   testWidgets('tapping "Sign up with Email" pushes CreateAccountPage',
