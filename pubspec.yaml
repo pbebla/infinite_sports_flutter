@@ -100,14 +100,14 @@ flutter_launcher_icons:
   adaptive_icon_background: "#FFFFFF"
 
 flutter_native_splash:
-  color: "#FFFFFF"
-  image: assets/welcome_logo.png
+  color: "#000000"
+  image: assets/splash_logo.png
   color_dark: "#000000"
-  image_dark: assets/welcome_logo.png
+  image_dark: assets/splash_logo.png
   android_12:
-    image: assets/welcome_logo.png
-    color: "#FFFFFF"
-    image_dark: assets/welcome_logo.png
+    image: assets/splash_logo.png
+    color: "#000000"
+    image_dark: assets/splash_logo.png
     color_dark: "#000000"
 
 # The following section is specific to Flutter packages.
