@@ -4,6 +4,7 @@ import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_path_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 /// Lists every open registration, LIVE — an admin opening or closing a
 /// registration updates this list instantly, no refresh. Tapping one shows
@@ -54,9 +55,9 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
         stream: _openRegs,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(
-                child: CircularProgressIndicator(
-                    color: Theme.of(context).colorScheme.primary));
+            // Skeleton sweep (F3 Fix 2): "sign-ups/registration list"
+            // priority spot — matches the ListView.separated below.
+            return const SkeletonList();
           }
           final regs = snapshot.data ?? {};
           if (regs.isEmpty) {

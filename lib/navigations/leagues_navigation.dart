@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/leagues.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 class LeaguesNavigation extends StatefulWidget {
   const LeaguesNavigation({super.key});
@@ -25,10 +26,12 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                   future: getSeasonTiles("Futsal", context), 
                   builder:(context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
-                      return Center(
-                        child: CircularProgressIndicator(
-                          color: Theme.of(context).colorScheme.primary,
-                        )
+                      // Skeleton sweep (F3 Fix 2): matches the season-tile
+                      // list this resolves into below, app bar included so
+                      // it doesn't pop in once the data arrives.
+                      return Scaffold(
+                        appBar: AppBar(centerTitle: true, title: const Text("Futsal")),
+                        body: const SkeletonList(),
                       );
                     }
                     return Scaffold(
@@ -49,10 +52,12 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                   future: getSeasonTiles("Basketball", context), 
                   builder:(context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
-                      return Center(
-                        child: CircularProgressIndicator(
-                          color: Theme.of(context).colorScheme.primary,
-                        )
+                      // Skeleton sweep (F3 Fix 2): matches the season-tile
+                      // list this resolves into below, app bar included so
+                      // it doesn't pop in once the data arrives.
+                      return Scaffold(
+                        appBar: AppBar(centerTitle: true, title: const Text("Basketball")),
+                        body: const SkeletonList(),
                       );
                     }
                     return Scaffold(
@@ -73,10 +78,12 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                   future: getSeasonTiles("Flag Football", context), 
                   builder:(context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
-                      return Center(
-                        child: CircularProgressIndicator(
-                          color: Theme.of(context).colorScheme.primary,
-                        )
+                      // Skeleton sweep (F3 Fix 2): matches the season-tile
+                      // list this resolves into below, app bar included so
+                      // it doesn't pop in once the data arrives.
+                      return Scaffold(
+                        appBar: AppBar(centerTitle: true, title: const Text("Flag Football")),
+                        body: const SkeletonList(),
                       );
                     }
                     return Scaffold(
@@ -99,10 +106,12 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                   future: getSeasonTiles("AFC San Jose", context), 
                   builder:(context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
-                      return Center(
-                        child: CircularProgressIndicator(
-                          color: Theme.of(context).colorScheme.primary,
-                        )
+                      // Skeleton sweep (F3 Fix 2): matches the season-tile
+                      // list this resolves into below, app bar included so
+                      // it doesn't pop in once the data arrives.
+                      return Scaffold(
+                        appBar: AppBar(centerTitle: true, title: const Text("AFC San Jose")),
+                        body: const SkeletonList(),
                       );
                     }
                     return Scaffold(

@@ -3,6 +3,7 @@ import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 class TournamentPlayerProfilePage extends StatefulWidget {
@@ -294,9 +295,11 @@ class _TournamentPlayerProfilePageState
               future: _historyFuture,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
+                  // Skeleton sweep (F3 Fix 2): a couple of placeholder lines
+                  // for the League History card body below.
                   return const Padding(
                     padding: EdgeInsets.all(16),
-                    child: Center(child: CircularProgressIndicator()),
+                    child: SkeletonLines(),
                   );
                 }
                 final history = snapshot.data ?? [];

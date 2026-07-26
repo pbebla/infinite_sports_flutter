@@ -5,6 +5,7 @@ import 'package:infinite_sports_flutter/registration/payment_screen.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 /// Loads the registration's form + the player's profile prefill, renders the
 /// questions visible on [path] ('individual' | 'captain' | 'joiner'),
@@ -153,9 +154,21 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
         future: _load,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(
-                child: CircularProgressIndicator(
-                    color: Theme.of(context).colorScheme.primary));
+            // Skeleton sweep (F3 Fix 2): matches the form fields below.
+            return const Padding(
+              padding: EdgeInsets.all(15),
+              child: Column(
+                children: [
+                  SkeletonBox(width: double.infinity, height: 56),
+                  SizedBox(height: 14),
+                  SkeletonBox(width: double.infinity, height: 56),
+                  SizedBox(height: 14),
+                  SkeletonBox(width: double.infinity, height: 56),
+                  SizedBox(height: 14),
+                  SkeletonBox(width: double.infinity, height: 56),
+                ],
+              ),
+            );
           }
           final (questions, prefill) =
               snapshot.data ?? (const <RegQuestion>[], const <String, dynamic>{});

@@ -5,6 +5,7 @@ import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/model/userinformation.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 class Signup extends StatefulWidget {
@@ -88,11 +89,8 @@ class _SignupState extends State<Signup> {
       future: populateMenus(), 
       builder:(context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(
-              child: CircularProgressIndicator(
-                color: Theme.of(context).colorScheme.primary,
-              )
-            );
+          // Skeleton sweep (F3 Fix 2): matches the Sign Up List below.
+          return const SkeletonList();
         }
         return Scaffold(
           appBar: AppBar(

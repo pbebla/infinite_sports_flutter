@@ -5,6 +5,7 @@ import 'package:infinite_sports_flutter/model/flagfootballteaminfo.dart';
 import 'package:infinite_sports_flutter/model/futsalteaminfo.dart';
 import 'package:infinite_sports_flutter/model/soccerteaminfo.dart';
 import 'package:infinite_sports_flutter/model/teaminfo.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_launcher_icons/constants.dart';
@@ -406,10 +407,9 @@ class _TablePageState extends State<TablePage> {
             future: getSeasonTable(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return Center(
-                    child: CircularProgressIndicator(
-                  color: Theme.of(context).colorScheme.primary,
-                ));
+                // Skeleton sweep (F3 Fix 2): matches the standings rows
+                // this resolves into below.
+                return const SkeletonList(count: 8);
               }
               teams = snapshot.data as Map<String, TeamInfo>;
               return SizedBox(

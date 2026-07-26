@@ -19,6 +19,7 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:infinite_sports_flutter/table.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:infinite_sports_flutter/model/game.dart';
@@ -622,11 +623,19 @@ class _ScorePageState extends State<ScorePage> {
         future: _loadingGame, 
         builder: (context, snapshot) {
           if(snapshot.connectionState == ConnectionState.waiting) {
-            return Center(
-                child: CircularProgressIndicator(
-                  color: Theme.of(context).colorScheme.primary,
-                )
-              );
+            // Skeleton sweep (F3 Fix 2): a scoreboard-shaped block followed
+            // by a few stat rows, matching the ListView this resolves into
+            // below.
+            return const Padding(
+              padding: EdgeInsets.all(15),
+              child: Column(
+                children: [
+                  SkeletonBox(width: double.infinity, height: 130),
+                  SizedBox(height: 16),
+                  SkeletonList(count: 5),
+                ],
+              ),
+            );
           }
           List<Widget> tabs = List.empty(growable: true);
           List<Tab> tabNames = List.empty(growable: true);

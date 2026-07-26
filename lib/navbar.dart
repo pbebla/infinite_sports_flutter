@@ -16,6 +16,7 @@ import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/settings.dart';
 import 'package:infinite_sports_flutter/signup.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:provider/provider.dart';
 
 
@@ -193,14 +194,13 @@ class _NavBarState extends State<NavBar> {
                       ));
                   },
                   child: FutureBuilder(
-                    future: _loadProfilePic, 
+                    future: _loadProfilePic,
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
-                        return Center(
-                            child: CircularProgressIndicator(
-                              color: Theme.of(context).colorScheme.primary,
-                            )
-                          );
+                        // Skeleton sweep (F3 Fix 2): matches the 100x100
+                        // CircleAvatar this resolves into below.
+                        return const SkeletonBox(
+                            width: 100, height: 100, radius: 50);
                       }
                       if (signedIn) {
                         if (FirebaseAuth.instance.currentUser?.photoURL?.isNotEmpty ?? false) {
@@ -248,14 +248,12 @@ class _NavBarState extends State<NavBar> {
             },
           ),),
           FutureBuilder(
-            future: _getSignUpStatus, 
+            future: _getSignUpStatus,
             builder: (context, snapshot) {
               if(snapshot.connectionState == ConnectionState.waiting) {
-                return Center(
-                    child: CircularProgressIndicator(
-                      color: Theme.of(context).colorScheme.primary,
-                    )
-                  );
+                // Skeleton sweep (F3 Fix 2): placeholder for the ListTile
+                // this resolves into below.
+                return const SkeletonListTile();
               }
               signUpEnabled = signUpsOpen && signedIn;
               return ListTile(

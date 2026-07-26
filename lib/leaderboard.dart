@@ -7,6 +7,7 @@ import 'package:infinite_sports_flutter/model/flagfootballplayer.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/player.dart';
 import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:data_table_2/data_table_2.dart';
 
@@ -323,11 +324,9 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
             future: getPlayersList(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return Center(
-                    child: CircularProgressIndicator(
-                      color: Theme.of(context).colorScheme.primary,
-                    )
-                );
+                // Skeleton sweep (F3 Fix 2): matches the leaderboard rows
+                // this resolves into below.
+                return const SkeletonList(count: 8);
               }
               if (players.isEmpty) {
                 players = snapshot.data!;

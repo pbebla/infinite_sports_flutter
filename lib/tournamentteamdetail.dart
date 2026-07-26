@@ -13,6 +13,7 @@ import 'package:infinite_sports_flutter/widgets/jersey_painter.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:infinite_sports_flutter/misc/notification_topics.dart';
 import 'package:infinite_sports_flutter/widgets/follow_bell.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 class TournamentTeamDetailPage extends StatefulWidget {
   final String teamId;
@@ -375,9 +376,11 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
           future: _historyFuture,
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
+              // Skeleton sweep (F3 Fix 2): a couple of placeholder lines for
+              // the History card body below.
               return const Padding(
                 padding: EdgeInsets.all(16),
-                child: Center(child: CircularProgressIndicator()),
+                child: SkeletonLines(),
               );
             }
             final history = snapshot.data ?? [];
@@ -954,12 +957,44 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       );
     }
     if (_isLoading) {
+      // Skeleton sweep (F3 Fix 2): a team-header block (logo + name/record
+      // bars) over a few placeholder rows, matching the page this resolves
+      // into below.
       return Scaffold(
         appBar: AppBar(
           backgroundColor: TournamentColors.headerBackground(context),
           foregroundColor: TournamentColors.headerForeground(context),
         ),
-        body: const Center(child: CircularProgressIndicator()),
+        body: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+              child: const Row(
+                children: [
+                  SkeletonBox(width: 64, height: 64, radius: 32),
+                  SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SkeletonBox(width: 160, height: 18),
+                        SizedBox(height: 8),
+                        SkeletonBox(width: 100, height: 12),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Expanded(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: SkeletonList(count: 5),
+              ),
+            ),
+          ],
+        ),
       );
     }
 

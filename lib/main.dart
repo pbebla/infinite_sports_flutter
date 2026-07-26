@@ -25,6 +25,7 @@ import 'package:infinite_sports_flutter/navigations/leagues_navigation.dart';
 import 'package:infinite_sports_flutter/navigations/tournaments_navigation.dart';
 import 'package:infinite_sports_flutter/search_hub_page.dart';
 import 'package:infinite_sports_flutter/widgets/glass_nav_bar.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -485,11 +486,15 @@ class _MyHomePageState extends State<MyHomePage> {
     final List<Widget> widgetOptions = <Widget>[
       FutureBuilder(future: _fetchCurrentValues, builder:(context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(
-              child: CircularProgressIndicator(
-                color: Theme.of(context).colorScheme.primary,
-              )
-            );
+          // Skeleton sweep (F3 Fix 2): matches the match-list shape the
+          // Matches tab (frontpage.dart) settles into once loaded.
+          return const SingleChildScrollView(
+            physics: NeverScrollableScrollPhysics(),
+            child: Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: SkeletonMatchList(count: 8),
+            ),
+          );
         }
         if (isCurrentFinished) {
           return const Center(child: Card(child: Text("No Current Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold))));

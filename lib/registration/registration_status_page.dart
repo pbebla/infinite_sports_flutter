@@ -4,6 +4,7 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/registration/payment_screen.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:share_plus/share_plus.dart';
 
 /// The player's registration state: Paid badge, team state (captain sees
@@ -264,10 +265,22 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
     );
   }
 
+  /// Skeleton sweep (F3 Fix 2): "sign-ups/registration list" priority spot —
+  /// matches the stack of Cards _statusBody resolves into (status/team card,
+  /// then the submitted-answers card).
   Widget _spinner(BuildContext context) {
-    return Center(
-        child: CircularProgressIndicator(
-            color: Theme.of(context).colorScheme.primary));
+    return const Padding(
+      padding: EdgeInsets.all(15),
+      child: Column(
+        children: [
+          SkeletonBox(width: double.infinity, height: 90),
+          SizedBox(height: 12),
+          SkeletonBox(width: double.infinity, height: 140),
+          SizedBox(height: 12),
+          SkeletonBox(width: double.infinity, height: 90),
+        ],
+      ),
+    );
   }
 
   /// "Done" always exits all the way to this navigator's home route —

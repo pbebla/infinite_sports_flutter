@@ -8,6 +8,7 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/playerpage.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 import 'package:infinite_sports_flutter/tournamentdetail.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 /// Search across the app plus the hub of extra sections (Around You today;
 /// future sections each add one card here).
@@ -200,7 +201,8 @@ class _SearchHubPageState extends State<SearchHubPage> {
             return _hub();
           }
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            // Skeleton sweep (F3 Fix 2): matches the search results list.
+            return const SkeletonList();
           }
           return _results(snapshot.data!);
         },

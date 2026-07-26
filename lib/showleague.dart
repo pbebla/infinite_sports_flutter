@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/livescore.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 typedef TitleCallback = void Function(String value);
 
@@ -61,11 +62,39 @@ class _ShowLeaguePageState extends State<ShowLeaguePage> {
       future: _league, 
       builder:(context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(
-              child: CircularProgressIndicator(
-                color: Theme.of(context).colorScheme.primary,
-              )
-            );
+          // Skeleton sweep (F3 Fix 2): "season switching" loading state —
+          // matches the app bar + game list this resolves into below.
+          return Scaffold(
+            appBar: GlobalAppBar(
+              title: RichText(
+                textAlign: TextAlign.center,
+                text: TextSpan(
+                  text: widget.sport,
+                  style: TextStyle(
+                      fontSize:
+                          Theme.of(context).textTheme.headlineSmall!.fontSize),
+                  children: <TextSpan>[
+                    TextSpan(
+                      text: '\n${widget.season}',
+                      style: TextStyle(
+                        fontSize: Theme.of(context).textTheme.bodySmall!.fontSize,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              height: AppBar().preferredSize.height,
+              tableWidget: const SizedBox.shrink(),
+              leaderboardWidget: const SizedBox.shrink(),
+            ),
+            body: const SingleChildScrollView(
+              physics: NeverScrollableScrollPhysics(),
+              child: Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: SkeletonMatchList(count: 8),
+              ),
+            ),
+          );
         }
         return DefaultTabController(
           length: dateList.length,
