@@ -81,6 +81,11 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
       if (ic.asset == null) return null;
       return StatIcon(asset: ic.asset, size: 18, badge: ic.badge);
     }
+    // Clean Sheets: the owner's gold badge (2026-07-26) — self-contained
+    // art, rendered badge-style (no white chip) despite being a futsal stat.
+    if (stat == 'cleanSheets') {
+      return const StatIcon(asset: cleanSheetBadgeAsset, size: 18, badge: true);
+    }
     final eventType = _eventTypeForStat(stat);
     if (eventType == null) return null;
     return StatIcon(asset: statIconAsset(eventType), size: 18);

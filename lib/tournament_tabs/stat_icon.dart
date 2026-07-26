@@ -63,6 +63,13 @@ String? statIconAsset(String eventType) {
   }
 }
 
+/// Clean Sheet gold badge (owner art drop 2026-07-26) — the soccer/futsal
+/// goalkeeper stat. Unlike the rest of the futsal set (line-art on a white
+/// chip), this is a self-contained gold-on-black badge like the
+/// basketball/FF art, so render it with `badge: true` (no chip). Used by
+/// both Player Stats tabs' Clean Sheets category headers.
+const String cleanSheetBadgeAsset = 'assets/clean_sheet.png';
+
 /// Maps a fixtures leader-strip stat key to the matching icon asset, so the
 /// strip reuses the same artwork as the timeline. Returns null if unknown.
 String? statIconAssetForStat(String statName) {

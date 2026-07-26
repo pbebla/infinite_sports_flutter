@@ -176,6 +176,14 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
         child: StatIcon(asset: ic.asset, size: 18, badge: ic.badge),
       );
     }
+    // Clean Sheets: the owner's gold badge (2026-07-26) — self-contained
+    // art, rendered badge-style (no white chip) despite being a futsal stat.
+    if (stat == 'cleanSheets') {
+      return const Padding(
+        padding: EdgeInsets.only(right: 6),
+        child: StatIcon(asset: cleanSheetBadgeAsset, size: 18, badge: true),
+      );
+    }
     if (iconKey.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(right: 6),
