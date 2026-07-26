@@ -129,6 +129,41 @@ void main() {
     });
   });
 
+  group('needsPhoneNumber', () {
+    test('true when the node has no Phone Number field at all', () {
+      expect(
+        needsPhoneNumber({
+          'DOB': '01/01/2000',
+          'City': 'San Jose',
+          'Zip': '95123',
+          'Gender': 'Female',
+          'ReferralSource': 'Instagram',
+        }),
+        isTrue,
+      );
+    });
+
+    test('true when Phone Number is present but empty', () {
+      expect(needsPhoneNumber({'Phone Number': ''}), isTrue);
+    });
+
+    test('true when Phone Number is whitespace-only', () {
+      expect(needsPhoneNumber({'Phone Number': '   '}), isTrue);
+    });
+
+    test('false when Phone Number is a non-empty string', () {
+      expect(needsPhoneNumber({'Phone Number': '4085551234'}), isFalse);
+    });
+
+    test('true for a non-map value (null — node does not exist yet)', () {
+      expect(needsPhoneNumber(null), isTrue);
+    });
+
+    test('true for a non-map value (String)', () {
+      expect(needsPhoneNumber('nope'), isTrue);
+    });
+  });
+
   group('formatDob', () {
     test('zero-pads single-digit month and day', () {
       expect(formatDob(DateTime(2000, 1, 5)), '01/05/2000');

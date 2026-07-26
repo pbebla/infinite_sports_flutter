@@ -59,6 +59,20 @@ bool profileCompleted(dynamic usersNode) {
       nonEmpty('ReferralSource');
 }
 
+/// True when [usersNode]'s `Phone Number` field is missing or empty — i.e.
+/// this account still needs the phone-collecting variant of About You.
+/// Email sign-ups always collect a phone in Step 1 (see
+/// `createDatabaseLocation` in lib/misc/utility.dart), so this only ever
+/// returns true for Google/Apple sign-ins, which never collect a phone
+/// number at credential sign-in time. A missing/non-Map node (account
+/// doesn't exist yet, or a network hiccup reading it) is treated as "still
+/// needs a phone" — the safer default.
+bool needsPhoneNumber(dynamic usersNode) {
+  if (usersNode is! Map) return true;
+  final value = usersNode['Phone Number'];
+  return value == null || value.toString().trim().isEmpty;
+}
+
 /// Formats [d] as `MM/DD/YYYY`, zero-padded (the DB storage format for DOB).
 String formatDob(DateTime d) {
   String two(int n) => n.toString().padLeft(2, '0');

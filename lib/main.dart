@@ -16,6 +16,7 @@ import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/onboarding/about_you_page.dart';
 import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
+import 'package:infinite_sports_flutter/onboarding/google_profile.dart';
 import 'package:infinite_sports_flutter/onboarding/profile_completion.dart';
 import 'package:infinite_sports_flutter/onboarding/welcome_page.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
@@ -128,10 +129,85 @@ class AuthGate extends StatelessWidget {
         return chooseRootWidget(
           user: user,
           signedInHome: () => const MyHomePage(),
-          signedOutHome: () => const WelcomePage(),
+          signedOutHome: () =>
+              WelcomePage(onGoogle: () => _handleGoogleSignIn(context)),
         );
       },
     );
+  }
+}
+
+/// Real "Sign up with Google" flow behind [WelcomePage]'s `onGoogle` seam
+/// (auth-wall C2). Deliberately does NOT navigate anywhere itself: signing
+/// in flips `FirebaseAuth.instance.authStateChanges()`, which [AuthGate]
+/// above is already listening to, so it rebuilds straight to [MyHomePage]
+/// on its own. From there the existing [_MyHomePageState._setupNotificationPrefs]
+/// gate (B2) takes over — same single mechanism for brand-new Google users,
+/// returning Google users, and pre-existing accounts alike:
+/// - New Google user: no `Users/<uid>` node/`ProfileCompleted` yet →
+///   `profileCompleted` is false → the gate shows [AboutYouPage]. This
+///   function writes the base profile (name + join date) first so that page
+///   isn't starting from a completely empty account, but even if this write
+///   hasn't landed yet by the time the gate reads the node, the result is
+///   the same (About You still shows) because none of the About You fields
+///   live in this write.
+/// - Returning Google user: `ProfileCompleted` already true → gate no-ops,
+///   straight to the home tabs.
+///
+/// [context] is [AuthGate]'s own `StreamBuilder` builder context, which
+/// stays mounted for the app's lifetime (it's the `MaterialApp.home`) even
+/// as its *child* swaps between [WelcomePage] and [MyHomePage] — but the
+/// `context.mounted` guard is kept anyway since this runs after two awaited
+/// hops (sign-in, then a DB read).
+Future<void> _handleGoogleSignIn(BuildContext context) async {
+  final credential = await auth.signInWithGoogle();
+  if (credential == null) {
+    // Either the user backed out of the account picker, or the sign-in
+    // genuinely failed — either way there's nothing to recover from here
+    // except telling them to try again.
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Google sign-in cancelled or failed.')),
+      );
+    }
+    return;
+  }
+  final user = credential.user;
+  if (user == null) return;
+
+  var usersNodeExists = false;
+  try {
+    final snap = await FirebaseDatabase.instance.ref('Users/${user.uid}').get();
+    usersNodeExists = snap.exists;
+  } catch (_) {
+    // Network hiccup reading the node: fall through with usersNodeExists
+    // false, which only means the (harmless, .update()-based) base-profile
+    // write below might redundantly re-run for an existing user — never a
+    // reason to block sign-in.
+  }
+
+  final isNewUser = isNewSignInUser(
+    isNewUserFlag: credential.additionalUserInfo?.isNewUser == true,
+    usersNodeExists: usersNodeExists,
+  );
+
+  if (isNewUser) {
+    final name = splitDisplayName(user.displayName);
+    try {
+      // `.update()` — never `.set()` — so this can never clobber sibling
+      // fields (About You's answers, the FCM token below) regardless of
+      // write order.
+      await FirebaseDatabase.instance.ref('Users/${user.uid}').update({
+        'First Name': name.first,
+        'Last Name': name.last,
+        'Date Joined': DateTime.now().toString(),
+      });
+    } catch (_) {}
+  }
+
+  final token = await FirebaseMessaging.instance.getToken();
+  if (token != null) {
+    await uploadToken(user, token);
   }
 }
 
@@ -211,10 +287,17 @@ class _MyHomePageState extends State<MyHomePage> {
 
   /// One-time MANDATORY "Complete your profile" gate (owner decision, no
   /// skip) for any signed-in account whose `Users/<uid>` node is missing the
-  /// About You fields — chiefly pre-existing accounts created before this
-  /// step existed. Brand-new signups already write `ProfileCompleted: true`
-  /// during Step 2 of 3 (see createaccountpage.dart), so `profileCompleted`
-  /// is already true for them and this never re-prompts.
+  /// About You fields — pre-existing accounts created before this step
+  /// existed, AND brand-new Google/Apple sign-ups (whose base profile write
+  /// never sets `ProfileCompleted`). Brand-new EMAIL signups already write
+  /// `ProfileCompleted: true` during Step 2 of 3 (see createaccountpage.dart),
+  /// so `profileCompleted` is already true for them and this never re-prompts.
+  ///
+  /// `askPhone` is decided dynamically from the same node read: email
+  /// signups always collected a phone in Step 1, but Google/Apple never
+  /// collect one at credential sign-in time, so this asks for it here
+  /// instead whenever `Phone Number` is missing/empty — one shared gate,
+  /// no separate Google-specific flow.
   Future<void> _showAboutYouIfIncomplete(String uid) async {
     dynamic usersNode;
     try {
@@ -226,12 +309,14 @@ class _MyHomePageState extends State<MyHomePage> {
     if (profileCompleted(usersNode)) return;
     final ctx = mainContext;
     if (ctx == null || !ctx.mounted) return;
+    final askPhone = needsPhoneNumber(usersNode);
     // No step labels here (not part of the 3-step signup flow); onDone pops
     // this route back to MyHomePage, then favorites logic runs as today.
     await Navigator.push(
       ctx,
       MaterialPageRoute(
         builder: (routeContext) => AboutYouPage(
+          askPhone: askPhone,
           onDone: () => Navigator.pop(routeContext),
         ),
       ),
