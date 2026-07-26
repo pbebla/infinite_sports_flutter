@@ -60,12 +60,13 @@ class _LoginDemoState extends State<LoginPage> {
               padding: const EdgeInsets.only(top: 60.0),
               child: Center(
                 child: SizedBox(
-                    width: 200,
-                    height: 150,
+                    width: 230,
+                    height: 230,
                     /*decoration: BoxDecoration(
                         color: Colors.red,
                         borderRadius: BorderRadius.circular(50.0)),*/
-                    child: Image.asset('assets/welcome_logo.png')),
+                    child: Image.asset('assets/welcome_logo.png',
+                        fit: BoxFit.contain)),
               ),
             ),
             Padding(
@@ -126,7 +127,7 @@ class _LoginDemoState extends State<LoginPage> {
               ),
             ),
             const SizedBox(
-              height: 130,
+              height: 28,
             ),
             TextButton(
               onPressed: (){

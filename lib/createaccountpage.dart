@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/onboarding/about_you_page.dart';
 import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
+import 'package:infinite_sports_flutter/onboarding/signup_validation.dart';
 import 'package:image_picker/image_picker.dart';
 
 class CreateAccountPage extends StatefulWidget {
@@ -29,6 +30,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
   String? _firstNameErrorText;
   String? _lastNameErrorText;
   String? _emailErrorText;
+  String? _phoneErrorText;
   String? _passwordErrorText;
   String? _verifyPasswordErrorText;
 
@@ -64,30 +66,25 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     _firstNameErrorText = null;
     _lastNameErrorText = null;
     _emailErrorText = null;
+    _phoneErrorText = null;
     _passwordErrorText = null;
     _verifyPasswordErrorText = null;
     super.didChangeDependencies();
   }
 
   void _nameValidate() {
-    if (_firstNameController.value.text.isEmpty) {
-      _firstNameErrorText = "First Name Required";
-    } else {
-      _firstNameErrorText = null;
-    }
-    if (_lastNameController.value.text.isEmpty) {
-      _lastNameErrorText = "Last Name Required";
-    } else {
-      _lastNameErrorText = null;
-    }
+    _firstNameErrorText =
+        validateRequiredName(_firstNameController.value.text, 'First Name');
+    _lastNameErrorText =
+        validateRequiredName(_lastNameController.value.text, 'Last Name');
   }
 
   void _emailValidate(String email) {
-    if (!EmailValidator.validate(email)) {
-      _emailErrorText = 'Not a valid email address. Should be your@email.com';
-    } else {
-      _emailErrorText = null;
-    }
+    _emailErrorText = validateEmailTrimmed(email);
+  }
+
+  void _phoneValidate() {
+    _phoneErrorText = validatePhone(_phoneController.value.text);
   }
 
   void _passwordValidate() {
@@ -106,6 +103,26 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     } else {
       _verifyPasswordErrorText = null;
     }
+  }
+
+  /// Runs every field validator and stores the resulting error text (or
+  /// null) on each `_xErrorText` field. Returns true iff every field is
+  /// valid. Called synchronously (with a `setState` around it) before the
+  /// Register button is allowed to fire the network signup, so field
+  /// errors appear immediately instead of only after a failed Firebase
+  /// call.
+  bool _validateAll() {
+    _nameValidate();
+    _emailValidate(_emailController.value.text);
+    _phoneValidate();
+    _passwordValidate();
+    _verifyPasswordValidate();
+    return _firstNameErrorText == null &&
+        _lastNameErrorText == null &&
+        _emailErrorText == null &&
+        _phoneErrorText == null &&
+        _passwordErrorText == null &&
+        _verifyPasswordErrorText == null;
   }
 
   @override
@@ -219,7 +236,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                     autofillHints: const [AutofillHints.email],
                     decoration: InputDecoration(
                       errorText: (_emailErrorText != null) ? _emailErrorText : null,
-                      suffixIcon: (_emailErrorText == null && EmailValidator.validate(_emailController.value.text))
+                      suffixIcon: (_emailErrorText == null && EmailValidator.validate(_emailController.value.text.trim()))
         ? const Icon(Icons.done, color: Colors.green,) : null,
                       border: const OutlineInputBorder(),
                       labelText: 'Email',
@@ -228,18 +245,25 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                 );
               }
             ),
-            Padding(
-              padding: const EdgeInsets.only(
-                  left: 15.0, right: 15.0, top: 15, bottom: 0),
-              child: TextField(
-                keyboardType: TextInputType.phone,
-                controller: _phoneController,
-                autofillHints: const [AutofillHints.telephoneNumber],
-                decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    labelText: 'Phone Number',
-                    hintText: 'Enter phone number'),
-              ),
+            ValueListenableBuilder(
+              valueListenable: _phoneController,
+              builder: (_, value, __) {
+                return Padding(
+                  padding: const EdgeInsets.only(
+                      left: 15.0, right: 15.0, top: 15, bottom: 0),
+                  child: TextField(
+                    keyboardType: TextInputType.phone,
+                    controller: _phoneController,
+                    autofillHints: const [AutofillHints.telephoneNumber],
+                    inputFormatters: [const UsPhoneInputFormatter()],
+                    decoration: InputDecoration(
+                        errorText: _phoneErrorText,
+                        border: const OutlineInputBorder(),
+                        labelText: 'Phone Number',
+                        hintText: 'Enter phone number'),
+                  ),
+                );
+              },
             ),
             ValueListenableBuilder(
               valueListenable: _passwordController, 
@@ -293,7 +317,9 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                   color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(20)),
               child: TextButton(
                 onPressed: () {
+                  final valid = _validateAll();
                   setState(() {});
+                  if (!valid) return;
                   showDialog(
                     context: context,
                     builder: (context) {
@@ -361,23 +387,27 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
   }
   
   Future<bool> _signUp() async {
-    _nameValidate();
-    _emailValidate(_emailController.value.text);
-    _passwordValidate();
-    _verifyPasswordValidate();
-    if (_firstNameErrorText != null || _lastNameErrorText != null || _emailErrorText != null || _passwordErrorText != null || _verifyPasswordErrorText != null) {
+    // Field-level validation already ran synchronously in the Register
+    // button's onPressed (_validateAll(), gating whether this is even
+    // called), but re-check defensively in case _signUp is ever invoked
+    // directly (e.g. from a future test) without going through the button.
+    if (!_validateAll()) {
       return false;
     }
     String firstName = _firstNameController.value.text.trim();
     String lastName = _lastNameController.value.text.trim();
     String email = _emailController.text.trim();
     String password = _passwordController.text.trim();
+    // Already formatted as '(408)693-9436' by UsPhoneInputFormatter as the
+    // user typed — stored as-is so exports show the formatted display
+    // string (owner spec).
+    String phoneNumber = _phoneController.value.text;
     User? user = await auth.signUpWithEmailAndPassword(email, password);
 
     if (user != null) {
       signedIn = true;
       await FirebaseAuth.instance.currentUser!.updateDisplayName('$firstName $lastName');
-      await createDatabaseLocation(FirebaseAuth.instance.currentUser!, profileImage, _phoneController.value.text, firstName, lastName);
+      await createDatabaseLocation(FirebaseAuth.instance.currentUser!, profileImage, phoneNumber, firstName, lastName);
       String? token = await FirebaseMessaging.instance.getToken();
       if (token != null) {
         await uploadToken(user, token);

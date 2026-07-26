@@ -35,6 +35,18 @@ class FirebaseAuthService {
 
   Future<void> signOut() async {
     await FirebaseAuth.instance.signOut();
+    // Also end the Google session (auth-wall C2 follow-up) so a
+    // Google-signed-in user who logs out gets the account picker again
+    // next time, instead of GoogleSignIn silently re-authenticating them
+    // with the same cached account. Wrapped in try/catch: this is a
+    // harmless no-op for users who never went through Google sign-in, and
+    // must never block/crash the (already-completed) Firebase sign-out.
+    try {
+      await GoogleSignIn().signOut();
+    } catch (e) {
+      // ignore: avoid_print
+      print(e.toString());
+    }
   }
 
   /// Google credential sign-in (auth-wall C2). Returns `null` — quietly, no

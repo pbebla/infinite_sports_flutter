@@ -46,8 +46,8 @@ class WelcomePage extends StatelessWidget {
                         const Spacer(flex: 3),
                         Image.asset(
                           'assets/welcome_logo.png',
-                          width: 220,
-                          height: 220,
+                          width: 240,
+                          height: 240,
                           fit: BoxFit.contain,
                         ),
                         const SizedBox(height: 28),

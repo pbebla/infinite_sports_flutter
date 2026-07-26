@@ -3,6 +3,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/onboarding/profile_completion.dart';
+import 'package:infinite_sports_flutter/onboarding/signup_validation.dart';
 
 /// Reusable "About You" profile step (auth-wall B2 plan): date of birth,
 /// city, ZIP, gender, and referral source. Serves THREE callers:
@@ -88,9 +89,8 @@ class _AboutYouPageState extends State<AboutYouPage> {
       _zipError = validateZip(_zipController.text.trim());
       _genderError = _gender == null ? 'Select one' : null;
       _referralError = _referralSource == null ? 'Select one' : null;
-      _phoneError = widget.askPhone && _phoneController.text.trim().isEmpty
-          ? 'Phone number is required'
-          : null;
+      _phoneError =
+          widget.askPhone ? validatePhone(_phoneController.text) : null;
     });
     return _dobError == null &&
         _cityError == null &&
@@ -211,6 +211,7 @@ class _AboutYouPageState extends State<AboutYouPage> {
                     controller: _phoneController,
                     keyboardType: TextInputType.phone,
                     autofillHints: const [AutofillHints.telephoneNumber],
+                    inputFormatters: const [UsPhoneInputFormatter()],
                     decoration: InputDecoration(
                       labelText: 'Phone Number',
                       border: const OutlineInputBorder(),

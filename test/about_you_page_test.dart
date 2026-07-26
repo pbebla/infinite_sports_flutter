@@ -131,7 +131,7 @@ void main() {
     await tester.pump();
 
     expect(done, isFalse);
-    expect(find.text('Phone number is required'), findsOneWidget);
+    expect(find.text('Enter a valid 10-digit phone number'), findsOneWidget);
   });
 
   testWidgets(
@@ -175,7 +175,9 @@ void main() {
     expect(written!['Gender'], 'Female');
     expect(written!['ReferralSource'], 'TikTok');
     expect(written!['ProfileCompleted'], true);
-    expect(written!['Phone Number'], '4085551234');
+    // UsPhoneInputFormatter formats as the user types (F1 owner feedback) —
+    // the stored value is the formatted display string, not raw digits.
+    expect(written!['Phone Number'], '(408)555-1234');
   });
 
   testWidgets('does not write a Phone Number key when askPhone is false',
