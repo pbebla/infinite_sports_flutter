@@ -64,8 +64,16 @@ class _DayPillStripState extends State<DayPillStrip> {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         itemCount: widget.days.length,
-        itemBuilder: (context, index) =>
-            _buildPill(context, widget.days[index]),
+        // Builder wrapper (F3 Fix 1): ListView.builder's itemBuilder context
+        // can go stale after a theme toggle (the sliver reuses this row's
+        // element instead of remounting it on ancestor Theme.of() changes),
+        // so Theme.of(context) reads made directly with it can silently
+        // keep returning the OLD ThemeData. _buildPill uses Theme.of(context)
+        // for the selected/unselected pill colors, so it needs a context
+        // that's actually kept live/dependency-tracked across rebuilds.
+        itemBuilder: (context, index) => Builder(
+          builder: (context) => _buildPill(context, widget.days[index]),
+        ),
       ),
     );
   }

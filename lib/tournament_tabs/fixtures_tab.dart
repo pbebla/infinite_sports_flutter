@@ -376,20 +376,34 @@ class FixturesTab extends StatelessWidget {
         final dateIdx = showBanner ? index - 1 : index;
         final date = sortedDates[dateIdx];
         final dateMatches = byDate[date]!;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Text(
-                _formatDate(date),
-                style: TextStyle(fontWeight: FontWeight.bold),
+        // Theme-staleness fix (F3 Fix 1): ListView.builder's own itemBuilder
+        // `context` can go stale after a theme toggle — Flutter's sliver
+        // list reuses this context's element across ancestor Theme.of()
+        // changes instead of remounting it, so Theme.of(context) calls made
+        // directly with it can silently keep returning the OLD ThemeData
+        // until something forces this row to remount (navigating away and
+        // back, etc. — the exact "self-heals on rebuild" symptom reported).
+        // Wrapping in a Builder gives every color lookup below a properly
+        // live, dependency-tracked context instead.
+        return Builder(builder: (context) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: Text(
+                  _formatDate(date),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
               ),
-            ),
-            ...dateMatches.map(
-                (m) => _buildMatchCard(context, m, eliminated)),
-          ],
-        );
+              ...dateMatches.map(
+                  (m) => _buildMatchCard(context, m, eliminated)),
+            ],
+          );
+        });
       },
     );
   }
