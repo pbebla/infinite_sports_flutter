@@ -205,17 +205,31 @@ void main() {
     expect(badgeWrite, isTrue);
   });
 
-  testWidgets('See full leaderboard shows the coming-soon snackbar',
+  testWidgets(
+      'See full leaderboard pushes the leaderboard page builder (Task F6)',
       (tester) async {
-    await _pumpDashboard(tester, insider: _activeInsider());
+    // leaderboardPageBuilder is a test seam (like insiders_info_page.dart's
+    // dashboardPageBuilder) so this test never constructs the real
+    // InsidersLeaderboardPage — which, unwrapped, reaches for
+    // InsiderService's live Firebase streams in its own default wiring.
+    await tester.pumpWidget(MaterialApp(
+      home: InsiderDashboardPage(
+        insiderStream: Stream<Insider?>.value(_activeInsider()),
+        referralsStream: Stream<List<InsiderReferral>>.value(const []),
+        leaderboardPageBuilder: () =>
+            const Scaffold(body: Center(child: Text('stub leaderboard'))),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump();
 
     await tester.ensureVisible(
         find.byKey(const ValueKey('insider_dashboard_leaderboard_button')));
     await tester.tap(
         find.byKey(const ValueKey('insider_dashboard_leaderboard_button')));
-    await tester.pump();
+    await tester.pumpAndSettle();
 
-    expect(find.text('Leaderboard coming in the next update'), findsOneWidget);
+    expect(find.text('stub leaderboard'), findsOneWidget);
   });
 
   testWidgets('renders a suspended notice defensively when status flips while open',

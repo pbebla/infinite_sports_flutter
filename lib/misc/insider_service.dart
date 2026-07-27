@@ -135,4 +135,28 @@ class InsiderService {
     required bool value,
   }) =>
       _ref(uid).update({'ProfileBadgeOptIn': value});
+
+  // -- Public leaderboard (Infinite Insiders P4, Task F6) ----------------
+  // Mirrors the Manager's own InsiderService.watchAllInsiders /
+  // watchAllReferrals (lib/services/firebase/insider_service.dart) — same
+  // node, same live-stream semantics — so both apps agree on what "the
+  // program" looks like right now.
+
+  /// Live {uid: Insider} for every Insider node, any status — the public
+  /// leaderboard page (Task F6) filters this down to active +
+  /// PublicLeaderboardOptIn via [leaderboardRows]/[programStats].
+  static Stream<Map<String, Insider>> watchAllInsiders() =>
+      FirebaseDatabase.instance
+          .ref('Insiders')
+          .onValue
+          .map((event) => insidersFromNode(event.snapshot.value));
+
+  /// Live referral history for every Insider (spec §9 — `/Referrals` is a
+  /// single flat node); callers filter/sort as needed ([leaderboardRows]
+  /// filters by insider/period/sport, [programStats] aggregates program-wide).
+  static Stream<List<InsiderReferral>> watchAllReferrals() =>
+      FirebaseDatabase.instance
+          .ref('Referrals')
+          .onValue
+          .map((event) => referralsFromNode(event.snapshot.value));
 }

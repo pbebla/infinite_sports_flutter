@@ -157,6 +157,19 @@ void main() {
     });
   });
 
+  group('profileStatusLabel (Task F7 — public profile Insider box)', () {
+    test('tier 0 (approved, no tier yet) reads as plain "Insider"', () {
+      expect(profileStatusLabel(0), 'Insider');
+    });
+    test('tiered insiders show their tier name', () {
+      expect(profileStatusLabel(1), 'Bronze');
+      expect(profileStatusLabel(2), 'Silver');
+      expect(profileStatusLabel(3), 'Gold');
+      expect(profileStatusLabel(4), 'Platinum');
+      expect(profileStatusLabel(5), 'Infinite');
+    });
+  });
+
   group('normalizeInsiderCode (Task F3 — code entry on the registration form)',
       () {
     test('trims and uppercases', () {

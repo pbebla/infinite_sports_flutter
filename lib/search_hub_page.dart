@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/aroundyou.dart';
 import 'package:infinite_sports_flutter/eventpage.dart';
+import 'package:infinite_sports_flutter/insiders/insiders_leaderboard_page.dart';
 import 'package:infinite_sports_flutter/misc/event_repo.dart';
 import 'package:infinite_sports_flutter/misc/search_index.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
@@ -10,10 +11,17 @@ import 'package:infinite_sports_flutter/showleague.dart';
 import 'package:infinite_sports_flutter/tournamentdetail.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
-/// Search across the app plus the hub of extra sections (Around You today;
-/// future sections each add one card here).
+/// Search across the app plus the hub of extra sections (Around You,
+/// Infinite Insiders today; future sections each add one card here).
 class SearchHubPage extends StatefulWidget {
-  const SearchHubPage({super.key});
+  const SearchHubPage({super.key, this.insidersLeaderboardPageBuilder});
+
+  /// Test seam replacing the real `Navigator.push(... InsidersLeaderboardPage
+  /// ...)` the "Infinite Insiders" card makes (Task F6) — the real page
+  /// reaches for InsiderService's live Firebase streams in its own default
+  /// wiring, which isn't available in widget tests. Mirrors
+  /// insiders_info_page.dart's `dashboardPageBuilder` seam.
+  final Widget Function()? insidersLeaderboardPageBuilder;
 
   @override
   State<SearchHubPage> createState() => _SearchHubPageState();
@@ -137,6 +145,26 @@ class _SearchHubPageState extends State<SearchHubPage> {
               Navigator.push(context, MaterialPageRoute(builder: (context) {
                 return const AroundYou();
               }));
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: ListTile(
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            leading: Icon(Icons.diamond,
+                size: 32, color: Theme.of(context).colorScheme.primary),
+            title: const Text('Infinite Insiders'),
+            subtitle: const Text('See the public referral leaderboard'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              final builder = widget.insidersLeaderboardPageBuilder ??
+                  () => const InsidersLeaderboardPage();
+              Navigator.push(
+                  context, MaterialPageRoute(builder: (context) => builder()));
             },
           ),
         ),

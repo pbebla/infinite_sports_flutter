@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 
+import 'package:infinite_sports_flutter/insiders/insiders_leaderboard_page.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
@@ -27,6 +28,7 @@ class InsiderDashboardPage extends StatefulWidget {
     this.setLeaderboardOptIn,
     this.setProfileBadgeOptIn,
     this.shareInvite,
+    this.leaderboardPageBuilder,
   });
 
   /// Test seams — mirror the pattern in insiders_info_page.dart. Defaults
@@ -39,6 +41,13 @@ class InsiderDashboardPage extends StatefulWidget {
   /// Test seam replacing the real share-sheet call (SharePlus touches
   /// platform channels, which aren't available in widget tests).
   final void Function(String message)? shareInvite;
+
+  /// Test seam replacing the real `Navigator.push(... InsidersLeaderboardPage
+  /// ...)` call the "See full leaderboard" button makes (Task F6) — the real
+  /// page reaches for InsiderService's live Firebase streams in its own
+  /// default wiring, which isn't available in widget tests. Mirrors
+  /// insiders_info_page.dart's `dashboardPageBuilder` seam.
+  final Widget Function()? leaderboardPageBuilder;
 
   @override
   State<InsiderDashboardPage> createState() => _InsiderDashboardPageState();
@@ -88,11 +97,10 @@ class _InsiderDashboardPageState extends State<InsiderDashboardPage> {
     }
   }
 
-  void _showLeaderboardComingSoon() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Leaderboard coming in the next update')),
-    );
-    // TODO(F6): push the real public leaderboard hub page here once built.
+  void _openLeaderboard() {
+    final builder =
+        widget.leaderboardPageBuilder ?? () => const InsidersLeaderboardPage();
+    Navigator.push(context, MaterialPageRoute(builder: (_) => builder()));
   }
 
   @override
@@ -489,7 +497,7 @@ class _InsiderDashboardPageState extends State<InsiderDashboardPage> {
       width: double.infinity,
       child: OutlinedButton(
         key: const ValueKey('insider_dashboard_leaderboard_button'),
-        onPressed: _showLeaderboardComingSoon,
+        onPressed: _openLeaderboard,
         child: const Text('See full leaderboard'),
       ),
     );

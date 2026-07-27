@@ -323,3 +323,177 @@ Map<String, int> perSportCounts(List<InsiderReferral> referrals) {
   }
   return counts;
 }
+
+/// Parses an /Insiders root node into {uid: Insider}, skipping malformed
+/// entries. Byte-identical semantics to the Manager's insidersFromNode
+/// (lib/models/insider_models.dart) — used by the public leaderboard
+/// (Task F6) via `InsiderService.watchAllInsiders`.
+Map<String, Insider> insidersFromNode(Object? raw) {
+  final out = <String, Insider>{};
+  if (raw is Map) {
+    raw.forEach((uid, value) {
+      final insider = Insider.fromFirebase(uid.toString(), value);
+      if (insider != null) out[uid.toString()] = insider;
+    });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Profile "Infinite Insider" box (Task F7 — spec §7 privacy paragraph)
+// ---------------------------------------------------------------------------
+
+/// The exact "Status:" line value for the public profile box: tier 0 (an
+/// approved Insider who hasn't reached Bronze yet) reads as plain 'Insider'
+/// rather than an empty string; tiered Insiders show their tier name.
+String profileStatusLabel(int tier) => tier == 0 ? 'Insider' : tierName(tier);
+
+// ---------------------------------------------------------------------------
+// Public leaderboard (Task F6 — spec §8)
+// ---------------------------------------------------------------------------
+
+/// Period scope for the leaderboard's ranking + program stats. All-time
+/// ranks by each Insider's lifetime `TotalReferred`; the other two derive
+/// their count from the `/Referrals` list's `CountedAt` timestamps.
+enum LeaderboardPeriod { allTime, thisYear, thisMonth }
+
+/// True when [countedAtMs] (a `CountedAt` epoch-ms timestamp) falls within
+/// [period]'s window as measured from [nowMs] — both interpreted as UTC so
+/// the result doesn't depend on the device's local timezone (matches the
+/// epoch-ms values `/Referrals/*/CountedAt` actually stores). All-time is
+/// always "within".
+bool _withinPeriod(int countedAtMs, LeaderboardPeriod period, int nowMs) {
+  if (period == LeaderboardPeriod.allTime) return true;
+  final now = DateTime.fromMillisecondsSinceEpoch(nowMs, isUtc: true);
+  final counted = DateTime.fromMillisecondsSinceEpoch(countedAtMs, isUtc: true);
+  if (counted.year != now.year) return false;
+  if (period == LeaderboardPeriod.thisYear) return true;
+  return counted.month == now.month;
+}
+
+/// One ranked row on the public leaderboard (spec §8): display name, tier,
+/// the referral count the row is ranked/sorted by (already period- and
+/// sport-filtered), and a per-sport breakdown (period-filtered, but NEVER
+/// narrowed by the sport filter — the breakdown line is meant to show the
+/// Insider's full cross-sport spread for context even while a single sport
+/// is selected for ranking).
+class LeaderboardRow {
+  final String uid;
+  final String name;
+  final int tier;
+  final int referralCount;
+  final Map<String, int> perSport;
+
+  const LeaderboardRow({
+    required this.uid,
+    required this.name,
+    required this.tier,
+    required this.referralCount,
+    required this.perSport,
+  });
+}
+
+/// Builds the ranked, filtered public leaderboard (spec §8) from the live
+/// `/Insiders` and `/Referrals` streams (`InsiderService.watchAllInsiders`,
+/// `watchAllReferrals`). Pure/deterministic given [nowMs] — no wall-clock
+/// reads — so it's directly unit-testable.
+///
+/// Eligibility: only `Status == active` AND `PublicLeaderboardOptIn == true`
+/// Insiders ever appear (opt-out is fully respected — an opted-out Insider
+/// is simply never in the returned list, not merely hidden). [tierFilter],
+/// when given, further restricts to insiders at exactly that tier.
+///
+/// Ranking count:
+/// - [periodFilter] `allTime` with no [sportFilter]: the Insider's lifetime
+///   `TotalReferred` (spec §2 — the canonical lifetime counter, already
+///   void-adjusted).
+/// - Otherwise (a sport filter is set, and/or the period is narrower than
+///   all-time): counted straight from [referrals] — `State == counted`,
+///   matching [sportFilter] when set, and matching [periodFilter]'s
+///   `CountedAt` window when not all-time. This is required because
+///   `TotalReferred` is a single cross-sport lifetime number and can't
+///   answer "how many Futsal referrals" or "how many this month".
+///
+/// Sort: referral count descending, ties broken by name ascending (a
+/// deterministic tie-break, not dependent on input order).
+List<LeaderboardRow> leaderboardRows({
+  required List<Insider> insiders,
+  required List<InsiderReferral> referrals,
+  LeaderboardPeriod periodFilter = LeaderboardPeriod.allTime,
+  String? sportFilter,
+  int? tierFilter,
+  required int nowMs,
+}) {
+  final hasSportFilter = sportFilter != null && sportFilter.isNotEmpty;
+  final rows = <LeaderboardRow>[];
+
+  for (final insider in insiders) {
+    if (!insider.isActive || !insider.publicLeaderboardOptIn) continue;
+    if (tierFilter != null && insider.tier != tierFilter) continue;
+
+    final counted = referrals.where(
+        (r) => r.insiderUid == insider.uid && r.isCounted);
+    final inPeriod = counted
+        .where((r) => _withinPeriod(r.countedAt, periodFilter, nowMs))
+        .toList();
+
+    final int referralCount;
+    if (periodFilter == LeaderboardPeriod.allTime && !hasSportFilter) {
+      referralCount = insider.totalReferred;
+    } else {
+      referralCount = inPeriod
+          .where((r) => !hasSportFilter || r.sport == sportFilter)
+          .length;
+    }
+
+    rows.add(LeaderboardRow(
+      uid: insider.uid,
+      name: insider.name,
+      tier: insider.tier,
+      referralCount: referralCount,
+      perSport: perSportCounts(inPeriod),
+    ));
+  }
+
+  rows.sort((a, b) {
+    final byCount = b.referralCount.compareTo(a.referralCount);
+    return byCount != 0 ? byCount : a.name.compareTo(b.name);
+  });
+  return rows;
+}
+
+/// Program-wide stats for the leaderboard header (spec §8): total active
+/// Insiders, total (currently-counted, i.e. void-adjusted) referrals across
+/// the whole program, and how many of those were counted this UTC month.
+/// Unlike [leaderboardRows], these aggregate numbers don't expose any
+/// individual Insider's identity, so they are NOT gated by
+/// `PublicLeaderboardOptIn`.
+class ProgramStats {
+  final int totalInsiders;
+  final int totalReferrals;
+  final int thisMonth;
+
+  const ProgramStats({
+    required this.totalInsiders,
+    required this.totalReferrals,
+    required this.thisMonth,
+  });
+}
+
+ProgramStats programStats(
+  List<Insider> insiders,
+  List<InsiderReferral> referrals,
+  int nowMs,
+) {
+  final totalInsiders = insiders.where((i) => i.isActive).length;
+  final counted = referrals.where((r) => r.isCounted).toList();
+  final thisMonth = counted
+      .where((r) =>
+          _withinPeriod(r.countedAt, LeaderboardPeriod.thisMonth, nowMs))
+      .length;
+  return ProgramStats(
+    totalInsiders: totalInsiders,
+    totalReferrals: counted.length,
+    thisMonth: thisMonth,
+  );
+}

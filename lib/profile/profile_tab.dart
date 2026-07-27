@@ -1,17 +1,26 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/insiders/insider_tier_colors.dart';
+import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/profile_stat_priority.dart';
 import 'package:infinite_sports_flutter/model/award.dart';
+import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:infinite_sports_flutter/widgets/trophy_cabinet.dart';
 
 /// The "Profile" tab of the tabbed player profile.
 ///
 /// Renders in order:
 /// 1. **"Player Info"** card — biographical fields.
-/// 2. **"Current Team"** card — sport icon, team name, position, jersey #.
-/// 3. **Current-season stats** card — stat grid for the active stint.
-/// 4. [TrophyCabinet].
+/// 2. **Infinite Insider box** (Task F7) — ONLY when this profile's
+///    `/Insiders/<uid>` is `Status == active` AND `ProfileBadgeOptIn == true`
+///    (spec §7 privacy paragraph). Works identically whether [uid] is the
+///    signed-in user's own profile or a visited profile (openPlayerProfile).
+/// 3. **"Current Team"** card — sport icon, team name, position, jersey #.
+/// 4. **Current-season stats** card — stat grid for the active stint.
+/// 5. [TrophyCabinet].
 ///
 /// Parameters:
+/// - [uid] — the profile being viewed (own or visited); drives the Insider
+///   box's live `/Insiders/<uid>` read.
 /// - [information] — raw `Users/{uid}/Information` Firebase map.
 /// - [awards] — pre-loaded award list.
 /// - [current] — active / most-recent [ParticipationStint]; null if none.
@@ -19,22 +28,29 @@ import 'package:infinite_sports_flutter/widgets/trophy_cabinet.dart';
 /// - [currentStatsLabel] — display label for the current-season stats card
 ///   (e.g. "Futsal League Season 13" or "Summer Cup 2026").
 /// - [currentStats] — stat items for the current-season card.
+/// - [insiderStream] — test seam replacing the live `/Insiders/<uid>` stream
+///   (mirrors the seam pattern in insider_dashboard_page.dart); defaults to
+///   `InsiderService.watchMyInsider(uid)`.
 class ProfileTab extends StatelessWidget {
+  final String uid;
   final Map<dynamic, dynamic> information;
   final List<Award> awards;
   final ParticipationStint? current;
   final String? currentTeamNumber;
   final String? currentStatsLabel;
   final List<({String label, String value})> currentStats;
+  final Stream<Insider?>? insiderStream;
 
   const ProfileTab({
     super.key,
+    required this.uid,
     required this.information,
     required this.awards,
     this.current,
     this.currentTeamNumber,
     this.currentStatsLabel,
     this.currentStats = const [],
+    this.insiderStream,
   });
 
   // Known fields shown in this exact order when present and non-empty.
@@ -54,6 +70,7 @@ class ProfileTab extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 24),
       children: [
         if (_hasAnyInfo()) _infoCard(context),
+        _insiderBox(context),
         _currentTeamCard(context),
         if (current != null &&
             currentStatsLabel != null &&
@@ -142,6 +159,73 @@ class ProfileTab extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  /// The public "Infinite Insider" box (Task F7, spec §7 privacy paragraph)
+  /// — LIVE via `/Insiders/<uid>`, so an owner suspending this Insider (or
+  /// the Insider flipping their profile-badge opt-out) removes this box
+  /// immediately, no refresh. Renders nothing at all (not even a loading
+  /// placeholder) for every other case: no application ever submitted,
+  /// pending, suspended, declined, or opted out — a bare uid with no
+  /// Insider history should look exactly like a non-Insider profile.
+  Widget _insiderBox(BuildContext context) {
+    if (uid.trim().isEmpty) return const SizedBox.shrink();
+    final stream = insiderStream ?? InsiderService.watchMyInsider(uid);
+    return StreamBuilder<Insider?>(
+      stream: stream,
+      builder: (context, snapshot) {
+        final insider = snapshot.data;
+        if (insider == null || !insider.isActive || !insider.profileBadgeOptIn) {
+          return const SizedBox.shrink();
+        }
+        final scheme = Theme.of(context).colorScheme;
+        final tierColor = insiderTierColor(insider.tier);
+        return Card(
+          margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.diamond, size: 20, color: tierColor),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Infinite Insider',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.2,
+                              color: scheme.onSurface.withValues(alpha: 0.5),
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Status: ${profileStatusLabel(insider.tier)}',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Total Referrals: ${insider.totalReferred}',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 

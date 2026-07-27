@@ -661,6 +661,7 @@ class _ProfilePageState extends State<ProfilePage>
                   controller: _tabController,
                   children: [
                     ProfileTab(
+                      uid: widget.uid,
                       information: _information,
                       awards: _awards,
                       current: _current,
