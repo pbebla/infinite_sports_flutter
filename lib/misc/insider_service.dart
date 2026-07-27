@@ -22,11 +22,13 @@ class InsiderService {
   /// already-pending, active, or suspended Insider is never clobbered by a
   /// re-tap of "Accept & Apply" (spec §7, owner "once-per-person" guard
   /// amendment applied to re-applying, not just referral crediting).
+  ///
+  /// SportsOfInterest was removed 2026-07-27 (owner decision): Insiders can
+  /// refer anyone for any sport, so the question carried no signal.
   static Future<void> apply({
     required String uid,
     required String name,
     required String email,
-    required List<String> sports,
   }) async {
     final nodeRef = _ref(uid);
     final snapshot = await nodeRef.get();
@@ -36,7 +38,6 @@ class InsiderService {
     await nodeRef.set({
       'Name': name,
       'Email': email,
-      'SportsOfInterest': sports,
       'Status': 'pending',
       'AppliedAt': ServerValue.timestamp,
     });

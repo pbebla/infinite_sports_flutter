@@ -6,17 +6,12 @@ import 'package:infinite_sports_flutter/insiders/insider_dashboard_page.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-/// Sports offered in the "sports of interest" multi-select (Task F2) —
-/// mirrors the sport set in lib/onboarding/favorite_sports_page.dart, scoped
-/// to the sports Infinite Sports currently runs.
-const List<String> kInsiderInterestSports = [
-  'Futsal',
-  'Soccer',
-  'Basketball',
-  'Flag Football',
-  'Volleyball',
-];
+// NOTE (owner decision 2026-07-27): the "sports of interest" question was
+// removed from the application — Insiders can refer anyone for any sport.
+// In its place, applicants must OPEN the Infinite Insiders Playbook PDF
+// (AppConfig/InsidersPlaybookUrl) before the terms checkbox unlocks.
 
 // TODO(owner): replace with the final legal Program Terms copy once
 // supplied — spec §7 only calls for "info + terms", no final legal text yet.
@@ -43,6 +38,8 @@ class InsidersInfoPage extends StatefulWidget {
     this.prefillEmail,
     this.applyOverride,
     this.dashboardPageBuilder,
+    this.playbookUrl,
+    this.openPlaybookOverride,
   });
 
   /// Test seam: replaces the live `/Insiders/<uid>` stream. Defaults to
@@ -59,8 +56,13 @@ class InsidersInfoPage extends StatefulWidget {
   final Future<void> Function({
     required String name,
     required String email,
-    required List<String> sports,
   })? applyOverride;
+
+  /// Test seams for the mandatory Playbook gate: [playbookUrl] replaces the
+  /// AppConfig/InsidersPlaybookUrl read; [openPlaybookOverride] replaces the
+  /// url_launcher call (returns true when the PDF was launched).
+  final String? playbookUrl;
+  final Future<bool> Function(String url)? openPlaybookOverride;
 
   /// Test seam replacing the real `Navigator.push(... InsiderDashboardPage
   /// ...)` call the active state's "Open your Insider dashboard" button
@@ -76,9 +78,14 @@ class _InsidersInfoPageState extends State<InsidersInfoPage> {
   late final Stream<Insider?> _insiderStream;
   String _name = '';
   String _email = '';
-  final Set<String> _selectedSports = {};
   bool _termsAccepted = false;
   bool _applying = false;
+
+  /// Mandatory Playbook gate (owner decision 2026-07-27): the applicant must
+  /// OPEN the Infinite Insiders Playbook PDF before the terms checkbox
+  /// unlocks, so nobody agrees without at least opening the rules.
+  String _playbookUrl = '';
+  bool _playbookOpened = false;
 
   String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
@@ -94,6 +101,32 @@ class _InsidersInfoPageState extends State<InsidersInfoPage> {
     if (widget.prefillName == null || widget.prefillEmail == null) {
       _loadPrefill();
     }
+    _playbookUrl = widget.playbookUrl ?? '';
+    if (widget.playbookUrl == null) _loadPlaybookUrl();
+  }
+
+  Future<void> _loadPlaybookUrl() async {
+    try {
+      final snap = await FirebaseDatabase.instance
+          .ref('AppConfig/InsidersPlaybookUrl')
+          .get();
+      final url = snap.value?.toString() ?? '';
+      if (url.isNotEmpty && mounted) setState(() => _playbookUrl = url);
+    } catch (_) {
+      // Best-effort — the gate falls back to allowing terms when no URL is
+      // configured (see _applyForm) so a missing config never bricks applying.
+    }
+  }
+
+  Future<void> _openPlaybook() async {
+    final open = widget.openPlaybookOverride ??
+        (String url) async {
+          final uri = Uri.tryParse(url);
+          if (uri == null) return false;
+          return launchUrl(uri, mode: LaunchMode.externalApplication);
+        };
+    final launched = await open(_playbookUrl);
+    if (launched && mounted) setState(() => _playbookOpened = true);
   }
 
   Future<void> _loadPrefill() async {
@@ -126,17 +159,14 @@ class _InsidersInfoPageState extends State<InsidersInfoPage> {
   Future<void> _submit() async {
     if (_applying) return;
     setState(() => _applying = true);
-    final sports = _selectedSports.toList();
     try {
       final apply = widget.applyOverride ??
           ({
             required String name,
             required String email,
-            required List<String> sports,
           }) =>
-              InsiderService.apply(
-                  uid: _uid, name: name, email: email, sports: sports);
-      await apply(name: _name, email: _email, sports: sports);
+              InsiderService.apply(uid: _uid, name: name, email: email);
+      await apply(name: _name, email: _email);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -269,8 +299,10 @@ class _InsidersInfoPageState extends State<InsidersInfoPage> {
 
   Widget _applyForm(BuildContext context, {bool declined = false}) {
     final scheme = Theme.of(context).colorScheme;
-    final canSubmit =
-        _selectedSports.isNotEmpty && _termsAccepted && !_applying;
+    // The Playbook gate only applies when a Playbook URL is configured —
+    // a missing AppConfig entry must never brick applications.
+    final playbookGateSatisfied = _playbookUrl.isEmpty || _playbookOpened;
+    final canSubmit = playbookGateSatisfied && _termsAccepted && !_applying;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -308,37 +340,65 @@ class _InsidersInfoPageState extends State<InsidersInfoPage> {
           subtitle: Text(_email.isEmpty ? '—' : _email),
         ),
         const SizedBox(height: 8),
-        Text('Sports of interest',
-            style: Theme.of(context).textTheme.titleSmall),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final sport in kInsiderInterestSports)
-              FilterChip(
-                key: ValueKey('insider_sport_chip_$sport'),
-                label: Text(sport),
-                selected: _selectedSports.contains(sport),
-                onSelected: (selected) => setState(() {
-                  if (selected) {
-                    _selectedSports.add(sport);
-                  } else {
-                    _selectedSports.remove(sport);
-                  }
-                }),
+        if (_playbookUrl.isNotEmpty) ...[
+          Card(
+            key: const ValueKey('insiders_playbook_card'),
+            margin: EdgeInsets.zero,
+            color: _playbookOpened
+                ? scheme.surfaceContainerHighest
+                : scheme.primaryContainer,
+            child: ListTile(
+              leading: Icon(
+                _playbookOpened
+                    ? Icons.check_circle
+                    : Icons.menu_book_outlined,
+                color: _playbookOpened
+                    ? Colors.green
+                    : scheme.onPrimaryContainer,
               ),
-          ],
-        ),
-        const SizedBox(height: 8),
+              title: Text(
+                'Infinite Insiders Playbook',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: _playbookOpened
+                      ? scheme.onSurface
+                      : scheme.onPrimaryContainer,
+                ),
+              ),
+              subtitle: Text(
+                _playbookOpened
+                    ? 'Playbook opened — you can accept the terms below.'
+                    : 'Open this to read the details of the program.',
+                style: TextStyle(
+                  color: _playbookOpened
+                      ? scheme.onSurfaceVariant
+                      : scheme.onPrimaryContainer,
+                ),
+              ),
+              trailing: Icon(Icons.open_in_new,
+                  color: _playbookOpened
+                      ? scheme.onSurfaceVariant
+                      : scheme.onPrimaryContainer),
+              onTap: _openPlaybook,
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
         CheckboxListTile(
           key: const ValueKey('insiders_terms_checkbox'),
           contentPadding: EdgeInsets.zero,
           controlAffinity: ListTileControlAffinity.leading,
           value: _termsAccepted,
-          onChanged: (value) =>
-              setState(() => _termsAccepted = value ?? false),
+          // Locked until the Playbook has been opened (when configured) —
+          // nobody agrees to terms without at least opening the rules.
+          onChanged: playbookGateSatisfied
+              ? (value) => setState(() => _termsAccepted = value ?? false)
+              : null,
           title: const Text('I have read and accept the Program terms above'),
+          subtitle: playbookGateSatisfied
+              ? null
+              : Text('Open the Playbook above first',
+                  style: TextStyle(color: scheme.onSurfaceVariant)),
         ),
         const SizedBox(height: 12),
         SizedBox(

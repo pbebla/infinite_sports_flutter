@@ -45,13 +45,20 @@ void main() {
   });
 
   group('apply flow (no application yet)', () {
-    testWidgets('Accept & Apply is disabled until a sport is picked AND terms are checked',
+    testWidgets(
+        'terms checkbox is locked and Accept & Apply disabled until the Playbook is opened',
         (tester) async {
+      var opened = 0;
       await tester.pumpWidget(wrap(InsidersInfoPage(
         insiderStream: Stream<Insider?>.value(null),
         prefillName: 'Zaya Arami',
         prefillEmail: 'zaya@example.com',
-        applyOverride: ({required name, required email, required sports}) async {},
+        playbookUrl: 'https://example.com/playbook.pdf',
+        openPlaybookOverride: (url) async {
+          opened++;
+          return true;
+        },
+        applyOverride: ({required name, required email}) async {},
       )));
       await tester.pump();
 
@@ -64,30 +71,48 @@ void main() {
         return false;
       }
 
+      CheckboxListTile terms() => tester.widget(
+          find.byKey(const ValueKey('insiders_terms_checkbox')));
+
+      // Playbook not opened: checkbox locked, helper text shown, button off.
+      expect(isEnabled(), isFalse);
+      expect(terms().onChanged, isNull);
+      expect(find.text('Open the Playbook above first'), findsOneWidget);
+      expect(find.byKey(const ValueKey('insiders_playbook_card')),
+          findsOneWidget);
+
+      // Open the Playbook — checkbox unlocks, button still off (terms).
+      await _tapVisible(
+          tester, find.byKey(const ValueKey('insiders_playbook_card')));
+      await tester.pump();
+      expect(opened, 1);
+      expect(terms().onChanged, isNotNull);
       expect(isEnabled(), isFalse);
 
-      // Pick a sport only — still disabled (terms not accepted).
-      await _tapVisible(
-          tester, find.byKey(const ValueKey('insider_sport_chip_Futsal')));
-      await tester.pump();
-      expect(isEnabled(), isFalse);
-
-      // Check terms only (no sport) would also be insufficient, but since a
-      // sport is already picked from the previous step, uncheck it first to
-      // verify the terms-only path is also gated.
-      await _tapVisible(
-          tester, find.byKey(const ValueKey('insider_sport_chip_Futsal')));
-      await tester.pump();
+      // Accept terms — button enables.
       await _tapVisible(
           tester, find.byKey(const ValueKey('insiders_terms_checkbox')));
       await tester.pump();
-      expect(isEnabled(), isFalse);
-
-      // Now both conditions are satisfied.
-      await _tapVisible(
-          tester, find.byKey(const ValueKey('insider_sport_chip_Futsal')));
-      await tester.pump();
       expect(isEnabled(), isTrue);
+    });
+
+    testWidgets(
+        'no Playbook configured: card hidden and terms usable immediately',
+        (tester) async {
+      await tester.pumpWidget(wrap(InsidersInfoPage(
+        insiderStream: Stream<Insider?>.value(null),
+        prefillName: 'Zaya Arami',
+        prefillEmail: 'zaya@example.com',
+        playbookUrl: '',
+        applyOverride: ({required name, required email}) async {},
+      )));
+      await tester.pump();
+
+      expect(
+          find.byKey(const ValueKey('insiders_playbook_card')), findsNothing);
+      final terms = tester.widget<CheckboxListTile>(
+          find.byKey(const ValueKey('insiders_terms_checkbox')));
+      expect(terms.onChanged, isNotNull);
     });
 
     testWidgets('shows read-only prefilled name/email rows', (tester) async {
@@ -95,7 +120,8 @@ void main() {
         insiderStream: Stream<Insider?>.value(null),
         prefillName: 'Zaya Arami',
         prefillEmail: 'zaya@example.com',
-        applyOverride: ({required name, required email, required sports}) async {},
+        playbookUrl: '',
+        applyOverride: ({required name, required email}) async {},
       )));
       await tester.pump();
 
@@ -103,47 +129,27 @@ void main() {
       expect(find.text('zaya@example.com'), findsOneWidget);
     });
 
-    testWidgets('offers all five sport chips', (tester) async {
-      await tester.pumpWidget(wrap(InsidersInfoPage(
-        insiderStream: Stream<Insider?>.value(null),
-        prefillName: 'Zaya Arami',
-        prefillEmail: 'zaya@example.com',
-        applyOverride: ({required name, required email, required sports}) async {},
-      )));
-      await tester.pump();
-
-      for (final sport in [
-        'Futsal',
-        'Soccer',
-        'Basketball',
-        'Flag Football',
-        'Volleyball'
-      ]) {
-        expect(find.byKey(ValueKey('insider_sport_chip_$sport')), findsOneWidget,
-            reason: 'missing sport chip for $sport');
-      }
-    });
-
-    testWidgets('tapping Accept & Apply calls applyOverride with picked sports + prefilled name/email',
+    testWidgets(
+        'tapping Accept & Apply calls applyOverride with prefilled name/email',
         (tester) async {
       String? capturedName;
       String? capturedEmail;
-      List<String>? capturedSports;
 
       await tester.pumpWidget(wrap(InsidersInfoPage(
         insiderStream: Stream<Insider?>.value(null),
         prefillName: 'Zaya Arami',
         prefillEmail: 'zaya@example.com',
-        applyOverride: ({required name, required email, required sports}) async {
+        playbookUrl: 'https://example.com/playbook.pdf',
+        openPlaybookOverride: (url) async => true,
+        applyOverride: ({required name, required email}) async {
           capturedName = name;
           capturedEmail = email;
-          capturedSports = sports;
         },
       )));
       await tester.pump();
 
       await _tapVisible(
-          tester, find.byKey(const ValueKey('insider_sport_chip_Basketball')));
+          tester, find.byKey(const ValueKey('insiders_playbook_card')));
       await tester.pump();
       await _tapVisible(
           tester, find.byKey(const ValueKey('insiders_terms_checkbox')));
@@ -155,7 +161,6 @@ void main() {
 
       expect(capturedName, 'Zaya Arami');
       expect(capturedEmail, 'zaya@example.com');
-      expect(capturedSports, ['Basketball']);
     });
   });
 
@@ -180,7 +185,8 @@ void main() {
           Insider.fromFirebase('u1', {'Status': 'declined'})),
       prefillName: 'Zaya Arami',
       prefillEmail: 'zaya@example.com',
-      applyOverride: ({required name, required email, required sports}) async {},
+      playbookUrl: '',
+      applyOverride: ({required name, required email}) async {},
     )));
     await tester.pump();
 
