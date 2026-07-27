@@ -6,9 +6,12 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:infinite_sports_flutter/insiders/insiders_info_page.dart';
+import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
 import 'package:infinite_sports_flutter/playerpage.dart';
 import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
@@ -47,11 +50,34 @@ class _NavBarState extends State<NavBar> {
   Future<void>? _loadProfilePic;
   Future<void>? _getSignUpStatus;
 
+  // Infinite Insiders (Task F2): live /Insiders/<uid> so an approval/decline
+  // that happens elsewhere flips this row's subtitle instantly, no refresh.
+  late final Stream<Insider?> _insiderStream;
+
   @override
   void initState() {
     super.initState();
     _loadProfilePic = retrieveProfilePic();
     _getSignUpStatus = setUp();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    _insiderStream = (signedIn && uid != null)
+        ? InsiderService.watchMyInsider(uid)
+        : Stream<Insider?>.value(null);
+  }
+
+  /// Drawer-row subtitle per Insider state (Task F2): null (no subtitle) when
+  /// there's no application yet — the row is just an entry point in that
+  /// case.
+  String? _insiderSubtitle(Insider? insider) {
+    if (insider == null) return null;
+    if (insider.isPending) return 'Application pending';
+    if (insider.isDeclined) return 'Application declined — tap to reapply';
+    if (insider.isSuspended) return 'Account suspended';
+    if (insider.isActive) {
+      if (insider.tier == 0) return 'Insider';
+      return '${tierName(insider.tier)} — ${tierDiscountPct(insider.tier)}% off';
+    }
+    return null;
   }
 
   Future<void> retrieveProfilePic() async {
@@ -247,6 +273,28 @@ class _NavBarState extends State<NavBar> {
               },));
             },
           ),),
+          Visibility(
+            visible: signedIn,
+            child: StreamBuilder<Insider?>(
+              stream: _insiderStream,
+              builder: (context, snapshot) {
+                final subtitle = _insiderSubtitle(snapshot.data);
+                return ListTile(
+                  leading: const Icon(Icons.diamond, color: Colors.white),
+                  title: const Text("Infinite Insiders", style: TextStyle(fontWeight: FontWeight.bold),),
+                  subtitle: subtitle != null
+                      ? Text(subtitle, style: const TextStyle(color: Colors.white70))
+                      : null,
+                  textColor: Colors.white,
+                  onTap: () {
+                    Navigator.push(context, MaterialPageRoute(builder: (context) {
+                      return const InsidersInfoPage();
+                    },));
+                  },
+                );
+              },
+            ),
+          ),
           FutureBuilder(
             future: _getSignUpStatus,
             builder: (context, snapshot) {
