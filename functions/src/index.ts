@@ -304,6 +304,10 @@ export { createRegistrationPaymentIntent } from './createRegistrationPaymentInte
 export { stripeWebhook } from './stripeWebhook';
 export { onCampaignCreated, processScheduledCampaigns } from './campaign_watch';
 
+// ---- Infinite Insiders P2: referral counting/voiding watcher (Task X1) ----
+
+export { onSubmissionPaidChange } from './insiders_watch';
+
 // ---- League Experience P3: league watcher + prediction scoring ----
 
 /** Grouped export -> deploys as leagueFutsal-onTeam1Score, ... (P4 landed:

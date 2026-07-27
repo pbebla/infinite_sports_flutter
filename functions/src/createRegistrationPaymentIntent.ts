@@ -7,6 +7,7 @@ import * as logger from 'firebase-functions/logger';
 import { defineSecret } from 'firebase-functions/params';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import Stripe from 'stripe';
+import { effectiveCharge } from './lib/insiders';
 import {
   isAlreadyPaid, legacyTarget, owedCents, RegistrationConfigLike, SubmissionLike, TeamLike,
   webhookMetadata,
@@ -43,6 +44,29 @@ function parseSubmission(raw: unknown): SubmissionLike | null {
   return {
     path,
     paid: s['Paid'] === true,
+  };
+}
+
+/** The Infinite Insiders discount stamp a submission may carry (spec §4/§9,
+ *  registration_models.dart's EligibleFee/AdjustedFee/DiscountPct/
+ *  DiscountSource) — read straight off the raw node since SubmissionLike
+ *  only carries the fields owedCents() needs. */
+interface DiscountStamp {
+  eligibleFee?: number;
+  adjustedFee?: number;
+  discountPct?: number;
+  discountSource: string;
+}
+
+function parseDiscountStamp(raw: unknown): DiscountStamp {
+  if (raw === null || typeof raw !== 'object') return { discountSource: '' };
+  const s = raw as Record<string, unknown>;
+  const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
+  return {
+    eligibleFee: num(s['EligibleFee']),
+    adjustedFee: num(s['AdjustedFee']),
+    discountPct: num(s['DiscountPct']),
+    discountSource: typeof s['DiscountSource'] === 'string' ? s['DiscountSource'] as string : '',
   };
 }
 
@@ -94,7 +118,16 @@ export const createRegistrationPaymentIntent = onCall(
       }
     }
 
-    const amount = owedCents(config, submission, team ?? undefined);
+    const baseCents = owedCents(config, submission, team ?? undefined);
+    // Server-side authority (Infinite Insiders Task X1): the amount actually
+    // charged applies the submission's stamped Insider/first-timer discount
+    // — never the raw base fee — so Stripe always matches what the fan
+    // payment screen shows (promo_engine.dart's bestDiscountedTotal, dollars
+    // twin). Previously this callable trusted only owedCents() and ignored
+    // any discount stamp entirely, which would have overcharged a
+    // first-timer-promo'd or manually-discounted registrant paying by card.
+    const stamp = parseDiscountStamp(submissionSnap.val());
+    const amount = effectiveCharge({ baseCents, ...stamp });
     if (amount <= 0) {
       throw new HttpsError('failed-precondition', 'Nothing is owed for this registration.');
     }
