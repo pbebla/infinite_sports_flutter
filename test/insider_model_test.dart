@@ -137,6 +137,26 @@ void main() {
     });
   });
 
+  group('Insider.fromFirebase — dashboard fields (Task F4)', () {
+    test('parses CurrentYearCount and the two opt-in flags', () {
+      final insider = Insider.fromFirebase('u1', {
+        'CurrentYearCount': 3,
+        'PublicLeaderboardOptIn': false,
+        'ProfileBadgeOptIn': false,
+      });
+      expect(insider!.currentYearCount, 3);
+      expect(insider.publicLeaderboardOptIn, isFalse);
+      expect(insider.profileBadgeOptIn, isFalse);
+    });
+
+    test('opt-ins default to true when absent (tolerant parse)', () {
+      final insider = Insider.fromFirebase('u1', <String, dynamic>{});
+      expect(insider!.publicLeaderboardOptIn, isTrue);
+      expect(insider.profileBadgeOptIn, isTrue);
+      expect(insider.currentYearCount, 0);
+    });
+  });
+
   group('normalizeInsiderCode (Task F3 — code entry on the registration form)',
       () {
     test('trims and uppercases', () {

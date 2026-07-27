@@ -188,7 +188,8 @@ void main() {
     expect(find.byKey(const ValueKey('insiders_apply_button')), findsOneWidget);
   });
 
-  testWidgets('active state shows the tier badge, code, and a coming-soon note',
+  testWidgets(
+      'active state shows the tier badge, code, and an "Open your Insider dashboard" button',
       (tester) async {
     await tester.pumpWidget(wrap(InsidersInfoPage(
       insiderStream: Stream<Insider?>.value(Insider.fromFirebase('u1', {
@@ -204,8 +205,37 @@ void main() {
     await tester.pump();
 
     expect(find.text('ZA4K9P2'), findsOneWidget);
-    expect(find.textContaining('coming'), findsOneWidget);
+    expect(find.textContaining('coming'), findsNothing);
     expect(find.byKey(const ValueKey('insiders_copy_code_button')), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('insiders_open_dashboard_button')),
+        findsOneWidget);
+  });
+
+  testWidgets(
+      'tapping "Open your Insider dashboard" pushes the dashboard page builder',
+      (tester) async {
+    // dashboardPageBuilder is a test seam (like applyOverride) so this test
+    // never constructs the real InsiderDashboardPage — which, unwrapped,
+    // reaches for FirebaseAuth.instance in its own default stream wiring.
+    await tester.pumpWidget(wrap(InsidersInfoPage(
+      insiderStream: Stream<Insider?>.value(Insider.fromFirebase('u1', {
+        'Status': 'active',
+        'Code': 'ZA4K9P2',
+        'Tier': 1,
+      })),
+      prefillName: 'Zaya Arami',
+      prefillEmail: 'zaya@example.com',
+      dashboardPageBuilder: () =>
+          const Scaffold(body: Center(child: Text('stub dashboard'))),
+    )));
+    await tester.pump();
+
+    await _tapVisible(tester,
+        find.byKey(const ValueKey('insiders_open_dashboard_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('stub dashboard'), findsOneWidget);
   });
 
   testWidgets('active state with tier 0 shows "Insider" fallback label',

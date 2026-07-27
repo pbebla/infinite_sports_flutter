@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:infinite_sports_flutter/insiders/insider_dashboard_page.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
@@ -41,6 +42,7 @@ class InsidersInfoPage extends StatefulWidget {
     this.prefillName,
     this.prefillEmail,
     this.applyOverride,
+    this.dashboardPageBuilder,
   });
 
   /// Test seam: replaces the live `/Insiders/<uid>` stream. Defaults to
@@ -59,6 +61,12 @@ class InsidersInfoPage extends StatefulWidget {
     required String email,
     required List<String> sports,
   })? applyOverride;
+
+  /// Test seam replacing the real `Navigator.push(... InsiderDashboardPage
+  /// ...)` call the active state's "Open your Insider dashboard" button
+  /// makes (Task F4) — the real page reaches for FirebaseAuth.instance in
+  /// its own default stream wiring, which isn't available in widget tests.
+  final Widget Function()? dashboardPageBuilder;
 
   @override
   State<InsidersInfoPage> createState() => _InsidersInfoPageState();
@@ -408,6 +416,15 @@ class _InsidersInfoPageState extends State<InsidersInfoPage> {
     );
   }
 
+  void _openDashboard(BuildContext context) {
+    final builder = widget.dashboardPageBuilder ??
+        () => const InsiderDashboardPage();
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => builder()),
+    );
+  }
+
   Widget _activeBody(BuildContext context, Insider insider) {
     final scheme = Theme.of(context).colorScheme;
     final label = insider.tier == 0 ? 'Insider' : tierName(insider.tier);
@@ -464,17 +481,19 @@ class _InsidersInfoPageState extends State<InsidersInfoPage> {
               style: TextStyle(color: scheme.onPrimaryContainer),
             ),
             const SizedBox(height: 16),
-            Container(
+            SizedBox(
               width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: scheme.surface,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Text(
-                'Your Insider dashboard is coming in the next update — '
-                "you'll be able to track referrals, share your code, and "
-                'see your progress live.',
+              child: FilledButton.icon(
+                key: const ValueKey('insiders_open_dashboard_button'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: scheme.surface,
+                  foregroundColor: scheme.onSurface,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                onPressed: () => _openDashboard(context),
+                icon: const Icon(Icons.dashboard_customize_outlined),
+                label: const Text('Open your Insider dashboard',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ),
           ],

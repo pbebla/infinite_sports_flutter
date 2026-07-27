@@ -6,14 +6,18 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_config/flutter_config.dart';
 import 'package:infinite_sports_flutter/calendar_tab.dart';
+import 'package:infinite_sports_flutter/insiders/insider_dashboard_page.dart';
 import 'package:infinite_sports_flutter/misc/auth_gate.dart';
 import 'package:infinite_sports_flutter/misc/goal_toast.dart';
+import 'package:infinite_sports_flutter/misc/home_nav.dart';
+import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/notification_router.dart';
 import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
 import 'package:infinite_sports_flutter/misc/server_time.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:infinite_sports_flutter/onboarding/about_you_page.dart';
 import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
 import 'package:infinite_sports_flutter/onboarding/google_profile.dart';
@@ -364,11 +368,23 @@ class _MyHomePageState extends State<MyHomePage> {
   bool isCurrentAFCFinished = false;
   Future<int>? _fetchCurrentValues;
 
+  // Infinite Insiders (Task F4): the 5th bottom-nav tab appears/disappears
+  // live with this stream — see lib/misc/home_nav.dart's navItemsFor.
+  // _isActiveInsider mirrors the stream's latest value so _onItemTapped (a
+  // user-gesture callback, not a build) can compute the same tab list the
+  // nav bar is currently showing.
+  late final Stream<Insider?> _insiderStream;
+  bool _isActiveInsider = false;
+
   @override
   void initState() {
     // TODO: implement initState
     setTitle(_liveScoresTitle);
     _fetchCurrentValues = setCurrentValues();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    _insiderStream = (uid != null && uid.isNotEmpty)
+        ? InsiderService.watchMyInsider(uid)
+        : Stream<Insider?>.value(null);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final message = pendingLaunchMessage;
       if (message != null) {
@@ -480,78 +496,94 @@ class _MyHomePageState extends State<MyHomePage> {
     return 1;
   }
 
+  /// The page body for a single tab (Task F4 — extracted out of build() so
+  /// the tab list stays index-aligned with [navItemsFor]'s destinations,
+  /// whatever length it currently is).
+  Widget _pageFor(HomeTab tab) {
+    switch (tab) {
+      case HomeTab.matches:
+        return FutureBuilder(
+          future: _fetchCurrentValues,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              // Skeleton sweep (F3 Fix 2): matches the match-list shape the
+              // Matches tab (frontpage.dart) settles into once loaded.
+              return const SingleChildScrollView(
+                physics: NeverScrollableScrollPhysics(),
+                child: Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: SkeletonMatchList(count: 8),
+                ),
+              );
+            }
+            if (isCurrentFinished) {
+              return const Center(
+                  child: Card(
+                      child: Text("No Current Games, Stay Tuned for Next Season!",
+                          style: TextStyle(fontWeight: FontWeight.bold))));
+            }
+            return CurrentLivescoreNavigation(onTitleSelect: setLiveScoreTitle);
+          },
+        );
+      case HomeTab.leagues:
+        return const LeaguesNavigation();
+      case HomeTab.tournaments:
+        // Lazy: don't instantiate TournamentsNavigation (which would trigger
+        // getAllTournaments at app launch) until the user actually taps the
+        // Tournaments tab.
+        return _tournamentsTabBuilt
+            ? const TournamentsNavigation()
+            : const SizedBox.shrink();
+      case HomeTab.calendar:
+        return const CalendarTab();
+      case HomeTab.insider:
+        return const InsiderDashboardPage();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     mainContext = context;
-    final List<Widget> widgetOptions = <Widget>[
-      FutureBuilder(future: _fetchCurrentValues, builder:(context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          // Skeleton sweep (F3 Fix 2): matches the match-list shape the
-          // Matches tab (frontpage.dart) settles into once loaded.
-          return const SingleChildScrollView(
-            physics: NeverScrollableScrollPhysics(),
-            child: Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: SkeletonMatchList(count: 8),
-            ),
-          );
+    // Infinite Insiders (Task F4): the nav tab list is derived live from
+    // /Insiders/<uid>'s Status field — it appears the moment approval
+    // lands and disappears the moment it doesn't (suspend/decline/etc).
+    return StreamBuilder<Insider?>(
+      stream: _insiderStream,
+      builder: (context, insiderSnap) {
+        _isActiveInsider = insiderSnap.data?.isActive == true;
+        final tabs = navItemsFor(_isActiveInsider);
+        // Safety clamp: if the Insider tab just disappeared (suspended
+        // while it was the selected tab, say) and _selectedIndex pointed
+        // past the new shorter list, IndexedStack would throw. This runs
+        // synchronously within the current (stream-driven) build, so the
+        // corrected index is what actually renders this frame — no extra
+        // setState/rebuild needed.
+        if (_selectedIndex >= tabs.length) {
+          _selectedIndex = tabs.length - 1;
         }
-        if (isCurrentFinished) {
-          return const Center(child: Card(child: Text("No Current Games, Stay Tuned for Next Season!", style: TextStyle(fontWeight: FontWeight.bold))));
-        }
-        return CurrentLivescoreNavigation(onTitleSelect: setLiveScoreTitle);
-      },),
-      const LeaguesNavigation(),
-      // Lazy: don't instantiate TournamentsNavigation (which would trigger
-      // getAllTournaments at app launch) until the user actually taps the
-      // Tournaments tab.
-      _tournamentsTabBuilt
-          ? const TournamentsNavigation()
-          : const SizedBox.shrink(),
-      const CalendarTab(),
-    ];
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
-    return Scaffold(
-      drawer: const NavBar(),
-      // Let page content scroll underneath the floating glass bar so the
-      // frosted blur has something to sample.
-      extendBody: true,
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: Builder(
-        builder: (context) {
-          mainScaffoldContext = context;
-          return IndexedStack(
-              index: _selectedIndex,
-              children: widgetOptions
-          );
-        }
-      ),
-      bottomNavigationBar: GlassNavBar(
-        destinations: const [
-          GlassNavDestination(
-            icon: ImageIcon(AssetImage('assets/scores.png')),
-            label: 'Matches'),
-          GlassNavDestination(
-            icon: ImageIcon(AssetImage('assets/leagues.png')),
-            label: 'Leagues'),
-          GlassNavDestination(
-            icon: Icon(Icons.emoji_events_outlined),
-            selectedIcon: Icon(Icons.emoji_events),
-            label: 'Tournaments'),
-          GlassNavDestination(
-            icon: Icon(Icons.calendar_month_outlined),
-            selectedIcon: Icon(Icons.calendar_month),
-            label: 'Calendar'),
-        ],
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: _onItemTapped,
-        onSearchTap: _openSearchHub,
-        ) // This trailing comma makes auto-formatting nicer for build methods.
+        final List<Widget> widgetOptions = [
+          for (final tab in tabs) _pageFor(tab),
+        ];
+        return Scaffold(
+          drawer: const NavBar(),
+          // Let page content scroll underneath the floating glass bar so the
+          // frosted blur has something to sample.
+          extendBody: true,
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          body: Builder(
+            builder: (context) {
+              mainScaffoldContext = context;
+              return IndexedStack(index: _selectedIndex, children: widgetOptions);
+            },
+          ),
+          bottomNavigationBar: GlassNavBar(
+            destinations: [for (final tab in tabs) destinationFor(tab)],
+            selectedIndex: _selectedIndex,
+            onDestinationSelected: _onItemTapped,
+            onSearchTap: _openSearchHub,
+          ), // This trailing comma makes auto-formatting nicer for build methods.
+        );
+      },
     );
   }
 
@@ -562,23 +594,15 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 
   void _onItemTapped(int index) {
+    final tabs = navItemsFor(_isActiveInsider);
+    if (index < 0 || index >= tabs.length) return;
     setState(() {
       _selectedIndex = index;
-      if (index == 2 && !_tournamentsTabBuilt) {
+      final tapped = tabs[index];
+      if (tapped == HomeTab.tournaments && !_tournamentsTabBuilt) {
         _tournamentsTabBuilt = true;
       }
-      switch(index) { 
-        case 0: { 
-          _title = _liveScoresTitle; 
-        } 
-        break; 
-        case 1: { _title = 'Leagues'; }
-        break;
-        case 2: { _title = 'Tournaments'; }
-        break;
-        case 3: { _title = 'Calendar'; }
-        break;
-      } 
+      _title = titleFor(tapped, _liveScoresTitle);
     });
   }
 }

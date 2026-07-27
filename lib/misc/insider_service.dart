@@ -101,4 +101,38 @@ class InsiderService {
       return '';
     }
   }
+
+  // -- Insider dashboard (Infinite Insiders P3, Task F4) -----------------
+
+  /// Live "Your referrals" list for the signed-in Insider — every
+  /// `/Referrals` row with `InsiderUid == uid`, newest-counted first (spec
+  /// §7). A missing/malformed node (or one still using the pre-index
+  /// shape) degrades to an empty list rather than throwing.
+  static Stream<List<InsiderReferral>> watchMyReferrals(String uid) =>
+      FirebaseDatabase.instance
+          .ref('Referrals')
+          .orderByChild('InsiderUid')
+          .equalTo(uid)
+          .onValue
+          .map((event) => sortReferralsNewestFirst<InsiderReferral>(
+                referralsFromNode(event.snapshot.value),
+                (r) => r.countedAt,
+              ));
+
+  /// Toggles the "Show me on the public leaderboard" opt-out (spec §7 —
+  /// individually opt-out-able from the leaderboard row).
+  static Future<void> setLeaderboardOptIn({
+    required String uid,
+    required bool value,
+  }) =>
+      _ref(uid).update({'PublicLeaderboardOptIn': value});
+
+  /// Toggles the "Show Insider badge on my profile" opt-out (spec §7 — the
+  /// profile-box exposure, independently opt-out-able from the leaderboard
+  /// row above).
+  static Future<void> setProfileBadgeOptIn({
+    required String uid,
+    required bool value,
+  }) =>
+      _ref(uid).update({'ProfileBadgeOptIn': value});
 }
