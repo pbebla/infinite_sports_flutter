@@ -1,12 +1,14 @@
 // TDD for the Insider promo-code + first-timer pure engine
-// (Infinite Insiders program, Fan Task F3 — Phase P2).
+// (Infinite Insiders program, Fan Task F3 — Phase P2) plus the insider-tier
+// checkout discount pure engine (Fan Task F5 — Phase P3/checkout).
 //
 // NO Flutter/Firebase imports in lib/registration/promo_engine.dart — every
 // helper here is unit-tested directly. See:
-// docs/superpowers/specs/2026-07-27-infinite-insiders-design.md §3 (referral
-// lifecycle incl. once-ever rule + error copy), §4 (first-timer promo), §5
-// (stacking), §9 (data) and docs/superpowers/plans/2026-07-27-infinite-insiders.md
-// Task F3.
+// docs/superpowers/specs/2026-07-27-infinite-insiders-design.md §2 (tiers —
+// insider's OWN individual fee only), §3 (referral lifecycle incl. once-ever
+// rule + error copy), §4 (first-timer promo), §5 (stacking — best-discount-
+// wins), §9 (data) and docs/superpowers/plans/2026-07-27-infinite-insiders.md
+// Task F3 + Task F5.
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/registration/promo_engine.dart';
@@ -409,6 +411,30 @@ void main() {
         0,
       );
     });
+
+    test('insider_tier (discountSource insider_tier) applies the pct '
+        'against eligibleFee — Task F5', () {
+      expect(
+        bestDiscountedTotal(
+          baseFee: 160,
+          eligibleFee: 160,
+          discountPct: 5,
+          discountSource: 'insider_tier',
+        ),
+        152.0,
+      );
+    });
+
+    test('insider_tier falls back to baseFee when eligibleFee is missing', () {
+      expect(
+        bestDiscountedTotal(
+          baseFee: 160,
+          discountPct: 25,
+          discountSource: 'insider_tier',
+        ),
+        120.0,
+      );
+    });
   });
 
   group('InsiderPromoOutcome', () {
@@ -432,6 +458,115 @@ void main() {
       expect(outcome.discountSource, '');
       expect(outcome.discountPct, isNull);
       expect(outcome.eligibleFee, isNull);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Insider tier discount at checkout (spec §2/§5, Task F5)
+  // ---------------------------------------------------------------------
+
+  group('pickBestDiscount', () {
+    test('neither candidate present is none', () {
+      final result = pickBestDiscount();
+      expect(result.isNone, isTrue);
+      expect(result.source, DiscountWinner.none);
+      expect(result.pct, isNull);
+    });
+
+    test('insider-only picks the insider tier discount', () {
+      final result = pickBestDiscount(insiderPct: 5);
+      expect(result.source, DiscountWinner.insiderTier);
+      expect(result.pct, 5);
+    });
+
+    test('promo-only picks the first-timer promo', () {
+      final result = pickBestDiscount(promoPct: 15);
+      expect(result.source, DiscountWinner.firstTimerPromo);
+      expect(result.pct, 15);
+    });
+
+    test('both present — the bigger percent wins (cheaper for the '
+        'registrant)', () {
+      final insiderWins = pickBestDiscount(insiderPct: 20, promoPct: 10);
+      expect(insiderWins.source, DiscountWinner.insiderTier);
+      expect(insiderWins.pct, 20);
+
+      final promoWins = pickBestDiscount(insiderPct: 5, promoPct: 25);
+      expect(promoWins.source, DiscountWinner.firstTimerPromo);
+      expect(promoWins.pct, 25);
+    });
+
+    test('a tie goes to the insider tier discount (arbitrary-but-'
+        'deterministic — the org pays the same either way at a tie)', () {
+      final result = pickBestDiscount(insiderPct: 15, promoPct: 15);
+      expect(result.source, DiscountWinner.insiderTier);
+      expect(result.pct, 15);
+    });
+
+    test('a zero or negative candidate is treated as absent', () {
+      expect(pickBestDiscount(insiderPct: 0, promoPct: 0).isNone, isTrue);
+      expect(pickBestDiscount(insiderPct: -5, promoPct: 10).source,
+          DiscountWinner.firstTimerPromo);
+    });
+  });
+
+  group('insiderTierDiscountApplies', () {
+    test('applies only on the individual path for an active insider with '
+        'tier >= 1', () {
+      expect(
+        insiderTierDiscountApplies(path: 'individual', active: true, tier: 1),
+        isTrue,
+      );
+    });
+
+    test('never applies on the captain path (spec §2 — individual fees '
+        'only, never team fees)', () {
+      expect(
+        insiderTierDiscountApplies(path: 'captain', active: true, tier: 5),
+        isFalse,
+      );
+    });
+
+    test('never applies on the joiner path', () {
+      expect(
+        insiderTierDiscountApplies(path: 'joiner', active: true, tier: 5),
+        isFalse,
+      );
+    });
+
+    test('never applies to a non-active insider (pending/suspended/'
+        'declined)', () {
+      expect(
+        insiderTierDiscountApplies(
+            path: 'individual', active: false, tier: 5),
+        isFalse,
+      );
+    });
+
+    test('never applies below tier 1 (not yet Bronze)', () {
+      expect(
+        insiderTierDiscountApplies(path: 'individual', active: true, tier: 0),
+        isFalse,
+      );
+    });
+  });
+
+  group('tierNameForDiscountPct', () {
+    test('maps every tier discount percent to its display name', () {
+      expect(tierNameForDiscountPct(5), 'Bronze');
+      expect(tierNameForDiscountPct(10), 'Silver');
+      expect(tierNameForDiscountPct(15), 'Gold');
+      expect(tierNameForDiscountPct(20), 'Platinum');
+      expect(tierNameForDiscountPct(25), 'Infinite');
+    });
+
+    test('rounds a near-integer pct before mapping', () {
+      expect(tierNameForDiscountPct(4.999999), 'Bronze');
+    });
+
+    test('an out-of-range pct maps to no tier name', () {
+      expect(tierNameForDiscountPct(0), '');
+      expect(tierNameForDiscountPct(3), '');
     });
   });
 }

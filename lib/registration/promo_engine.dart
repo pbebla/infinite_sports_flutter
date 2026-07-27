@@ -13,6 +13,8 @@
 // promo engine), §5 (discount stacking/ceiling), §9 (RTDB data shape). Plan:
 // docs/superpowers/plans/2026-07-27-infinite-insiders.md Task F3.
 
+import 'package:infinite_sports_flutter/model/insider.dart'
+    show tierForStanding, tierName;
 import 'package:infinite_sports_flutter/registration/payment_adjustment.dart'
     show adjustedOwed;
 
@@ -259,21 +261,28 @@ class InsiderPromoOutcome {
 // Best-discount-wins display math (spec §5)
 // ---------------------------------------------------------------------------
 
-/// The amount actually owed when a submission may carry EITHER a manual
-/// admin adjustment (`DiscountSource == 'manual'`, spec §6/Task M1) OR an
-/// automatic first-timer promo (`DiscountSource == 'first_timer_promo'`,
-/// this task) in its shared AdjustedFee/DiscountPct fields.
+/// The amount actually owed when a submission may carry a manual admin
+/// adjustment (`DiscountSource == 'manual'`, spec §6/Task M1), an automatic
+/// first-timer promo (`DiscountSource == 'first_timer_promo'`, Task F3), OR
+/// an automatic Insider tier discount (`DiscountSource == 'insider_tier'`,
+/// Task F5 — spec §2) in its shared AdjustedFee/DiscountPct/EligibleFee
+/// fields. 'first_timer_promo' and 'insider_tier' compute IDENTICALLY (a
+/// plain percent off [eligibleFee]) — they are two different WHYS for the
+/// exact same math, and best-discount-wins (spec §5) has already picked the
+/// single winning source before this submission was ever written (see
+/// [pickBestDiscount]), so at read time there is only ever one automatic
+/// source stamped.
 ///
-/// Today the two never truly coexist in the SAME submission (the Manager's
-/// adjustSubmissionAmount always fully overwrites DiscountSource/DiscountPct
-/// to 'manual' — M3, which would let an admin apply a manual adjustment on
-/// top of a live promo, hasn't shipped). This function is written
-/// defensively per spec §5 ("best-discount-wins ... if both exist show the
-/// LARGER single discount") so a future coexistence never under-discounts
-/// the player: it computes both interpretations when both are plausible and
-/// returns whichever total is LOWER (the bigger discount). With only one
-/// signal present it degrades to that signal's total; with neither it
-/// returns [baseFee] unchanged.
+/// Today 'manual' never truly coexists with an automatic source in the SAME
+/// submission (the Manager's adjustSubmissionAmount always fully overwrites
+/// DiscountSource/DiscountPct to 'manual' — M3, which would let an admin
+/// apply a manual adjustment on top of a live automatic discount, hasn't
+/// shipped). This function is written defensively per spec §5
+/// ("best-discount-wins ... if both exist show the LARGER single discount")
+/// so a future coexistence never under-discounts the player: it computes
+/// both interpretations when both are plausible and returns whichever total
+/// is LOWER (the bigger discount). With only one signal present it degrades
+/// to that signal's total; with neither it returns [baseFee] unchanged.
 double bestDiscountedTotal({
   required double baseFee,
   double? eligibleFee,
@@ -288,7 +297,9 @@ double bestDiscountedTotal({
       ? adjustedOwed(
           baseFee: base, adjustedFee: adjustedFee, discountPct: discountPct)
       : null;
-  final promoTotal = discountSource == 'first_timer_promo' && discountPct != null
+  final isAutomaticPromo = discountSource == 'first_timer_promo' ||
+      discountSource == 'insider_tier';
+  final promoTotal = isAutomaticPromo && discountPct != null
       ? promoDiscountedTotal(eligibleFee ?? base, discountPct)
       : null;
 
@@ -303,3 +314,94 @@ double bestDiscountedTotal({
   candidates.sort();
   return candidates.first;
 }
+
+// ---------------------------------------------------------------------------
+// Insider tier discount at checkout (spec §2 "Insider's own-fee discount",
+// §5 "best-discount-wins", Task F5)
+// ---------------------------------------------------------------------------
+
+/// Which discount source wins when both an Insider's own tier discount and
+/// a first-timer promo could apply to the SAME individual registration
+/// (spec §5: automatic discounts never stack — best-discount-wins). [none]
+/// means neither candidate discount applies at all.
+enum DiscountWinner { none, insiderTier, firstTimerPromo }
+
+/// The winning discount computed by [pickBestDiscount] — [pct] is null only
+/// when [source] is [DiscountWinner.none].
+class DiscountCandidate {
+  final DiscountWinner source;
+  final double? pct;
+  const DiscountCandidate(this.source, this.pct);
+
+  bool get isNone => source == DiscountWinner.none;
+}
+
+const DiscountCandidate _kNoDiscount =
+    DiscountCandidate(DiscountWinner.none, null);
+
+/// Best-discount-wins picker (spec §5) for the two AUTOMATIC discount
+/// sources that can compete on the same individual registration: the
+/// Insider's own tier discount ([insiderPct], spec §2 — the registrant's
+/// OWN active-Insider tier percent; callers must apply the
+/// [insiderTierDiscountApplies] guard BEFORE passing a value here, since
+/// this function has no notion of registration path) and the
+/// per-registration first-timer promo ([promoPct], spec §4, already
+/// computed by the F3 engine — pass the promo's pct only when its own
+/// DiscountSource is 'first_timer_promo', i.e. it actually won the
+/// first-timer check).
+///
+/// Neither/either-only degrades to whichever is present (or [none] with
+/// both absent). With BOTH present, the LARGER percent wins (cheaper for the
+/// registrant — spec §5 "best-discount-wins"); a TIE goes to the insider
+/// tier discount. That tie-break is an arbitrary-but-deterministic pick, NOT
+/// a business requirement — the org's payout is identical either way at a
+/// tie, so this only exists to make the function total or deterministic.
+///
+/// A zero-or-negative candidate is treated as absent — a caller should never
+/// pass 0 for an eligible discount, but this keeps the picker defensive
+/// regardless.
+DiscountCandidate pickBestDiscount({double? insiderPct, double? promoPct}) {
+  final insider = (insiderPct != null && insiderPct > 0) ? insiderPct : null;
+  final promo = (promoPct != null && promoPct > 0) ? promoPct : null;
+  if (insider == null && promo == null) return _kNoDiscount;
+  if (promo == null) {
+    return DiscountCandidate(DiscountWinner.insiderTier, insider);
+  }
+  if (insider == null) {
+    return DiscountCandidate(DiscountWinner.firstTimerPromo, promo);
+  }
+  return insider >= promo
+      ? DiscountCandidate(DiscountWinner.insiderTier, insider)
+      : DiscountCandidate(DiscountWinner.firstTimerPromo, promo);
+}
+
+/// Guard (spec §2 "Tier discount applies to the Insider's individual
+/// registration fees only (never team fees)"): the Insider tier discount is
+/// only ever a candidate on the INDIVIDUAL registration path — a
+/// team-captain's fee is a TEAM fee, and the joiner path never owes a fee of
+/// its own. Also requires the registrant's own Insider record to be
+/// [active] with a [tier] of at least 1 (Bronze) — pending/suspended/
+/// declined Insiders and tier 0 (not yet Bronze, discount 0%) never get a
+/// checkout discount.
+bool insiderTierDiscountApplies({
+  required String path,
+  required bool active,
+  required int tier,
+}) =>
+    path == 'individual' && active && tier >= 1;
+
+/// Tier display name for a STAMPED insider-tier discount percent (spec §9
+/// Submission.DiscountPct on a DiscountSource=='insider_tier' submission) —
+/// used by the fan payment screen, which only has the stamped pct (not a
+/// live Insider record, since the discount is stamped once at submission
+/// time per spec's "stamp-at-submit" design and is never re-derived from a
+/// possibly-since-changed tier). The five tier discount percents
+/// (5/10/15/20/25) happen to equal their own ladder threshold (Bronze
+/// unlocks at BOTH standing 5 and discount 5%, Silver at 10/10%, etc.) so
+/// this is exactly [tierForStanding] fed the pct as if it were a standing,
+/// then named via [tierName] — that coincidence is documented here as the
+/// ONE place it's relied on, rather than silently assumed at every call
+/// site. An out-of-range/unrecognized pct (never produced by
+/// [tierDiscountPct] in lib/model/insider.dart) maps to ''.
+String tierNameForDiscountPct(double pct) =>
+    tierName(tierForStanding(pct.round()));

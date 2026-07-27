@@ -401,7 +401,8 @@ export interface EffectiveChargeInput {
   adjustedFee?: number | null;
   /** Submission.DiscountPct — percent off, either mode. */
   discountPct?: number | null;
-  /** Submission.DiscountSource: '' | 'manual' | 'first_timer_promo'. */
+  /** Submission.DiscountSource: '' | 'manual' | 'first_timer_promo' |
+   *  'insider_tier'. */
   discountSource: string;
 }
 
@@ -429,12 +430,17 @@ function promoDiscountedCents(eligibleCents: number, pct: number): number {
  * The amount (integer cents) to actually charge via Stripe once a
  * submission's stamped discount fields are taken into account —
  * best-discount-wins (spec §5): a manual admin adjustment
- * (DiscountSource=='manual', absolute AdjustedFee wins over DiscountPct) or
- * an automatic first-timer promo (DiscountSource=='first_timer_promo', a
- * plain percent off EligibleFee) — whichever total is LOWER, mirroring
- * bestDiscountedTotal's defensive "both plausible -> bigger discount wins"
- * rule. No discount fields at all -> [baseCents] unchanged. Always clamped
- * to zero or more and rounded to the nearest cent.
+ * (DiscountSource=='manual', absolute AdjustedFee wins over DiscountPct), an
+ * automatic first-timer promo (DiscountSource=='first_timer_promo'), or the
+ * registrant's OWN Insider tier discount (DiscountSource=='insider_tier',
+ * Task F5 — spec §2) — the latter two compute IDENTICALLY (a plain percent
+ * off EligibleFee; the fan's promo_engine.dart pickBestDiscount already
+ * picked the single winning automatic source before the submission was
+ * ever written, so only one of them is ever actually stamped) — whichever
+ * total is LOWER, mirroring bestDiscountedTotal's defensive "both plausible
+ * -> bigger discount wins" rule. No discount fields at all -> [baseCents]
+ * unchanged. Always clamped to zero or more and rounded to the nearest
+ * cent.
  */
 export function effectiveCharge(input: EffectiveChargeInput): number {
   const { eligibleFee, adjustedFee, discountPct, discountSource } = input;
@@ -447,7 +453,9 @@ export function effectiveCharge(input: EffectiveChargeInput): number {
   const manualTotal = discountSource === 'manual'
     ? adjustedOwedCents(baseCents, adjustedFeeCents, discountPct ?? null)
     : null;
-  const promoTotal = discountSource === 'first_timer_promo' && discountPct != null
+  const isAutomaticPromo = discountSource === 'first_timer_promo'
+    || discountSource === 'insider_tier';
+  const promoTotal = isAutomaticPromo && discountPct != null
     ? promoDiscountedCents(eligibleCents ?? baseCents, discountPct)
     : null;
 

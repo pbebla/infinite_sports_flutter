@@ -119,12 +119,17 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// The amount THIS registrant currently owes, combining the base
   /// [PaymentScreen.amount] (unadjusted config fee) with whichever discount
   /// is live on [sub] — a manual admin adjustment (Infinite Insiders
-  /// §6/Task F1, `DiscountSource == 'manual'`) OR an automatic first-timer
+  /// §6/Task F1, `DiscountSource == 'manual'`), an automatic first-timer
   /// promo applied at registration time (§4/§5/Task F3,
-  /// `DiscountSource == 'first_timer_promo'`). [bestDiscountedTotal] picks
-  /// the larger discount if a future scenario ever has both signals present
-  /// at once (spec §5's best-discount-wins rule). An owner edit made in the
-  /// Manager shows up here instantly since [_submission] is a live stream.
+  /// `DiscountSource == 'first_timer_promo'`), or the registrant's OWN
+  /// Insider tier discount (§2/§5/Task F5, `DiscountSource ==
+  /// 'insider_tier'`) — best-discount-wins already picked the single
+  /// winning source at submission time (registration_form_page.dart
+  /// _resolveDiscountStamp), so only one of these is ever stamped.
+  /// [bestDiscountedTotal] picks the larger discount if a future scenario
+  /// ever has both signals present at once (spec §5's best-discount-wins
+  /// rule). An owner edit made in the Manager shows up here instantly since
+  /// [_submission] is a live stream.
   num _effectiveAmount(RegSubmission? sub) => bestDiscountedTotal(
         baseFee: widget.amount.toDouble(),
         eligibleFee: sub?.eligibleFee,
@@ -410,12 +415,17 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// The amount card: a plain total when unadjusted (unchanged from before
   /// Infinite Insiders), or an itemized Registration fee / discount line /
   /// Total due breakdown the instant EITHER an admin manually adjusts this
-  /// submission's payment in the Manager (§6/Task M1) OR a first-timer
-  /// promo applied at registration time (§4/Task F3) — [_submission] is a
-  /// live stream, so no refresh is needed to see it. The discount line's
-  /// label/amount follow whichever source [sub.discountSource] carries:
-  /// 'first_timer_promo' -> "First-time player promo (−Y%)"; anything else
-  /// (today, only 'manual') -> the original "Adjusted by Infinite Sports".
+  /// submission's payment in the Manager (§6/Task M1), a first-timer promo
+  /// applied at registration time (§4/Task F3), or the registrant's OWN
+  /// Insider tier discount applied at registration time (§2/Task F5) —
+  /// [_submission] is a live stream, so no refresh is needed to see it. The
+  /// discount line's label/amount follow whichever source
+  /// [sub.discountSource] carries: 'first_timer_promo' -> "First-time player
+  /// promo (−Y%)"; 'insider_tier' -> "Insider discount (Tier name −Y%)"
+  /// ([tierNameForDiscountPct] recovers the tier name from the stamped
+  /// pct — this screen never reads the registrant's live Insider record);
+  /// anything else (today, only 'manual') -> the original "Adjusted by
+  /// Infinite Sports".
   Widget _amountCard(
       BuildContext context, RegSubmission? sub, num effectiveAmount) {
     final mutedColor = Theme.of(context).textTheme.bodySmall?.color;
@@ -437,9 +447,13 @@ class _PaymentScreenState extends State<PaymentScreen> {
     final baseFee = widget.amount;
     final discount = baseFee - effectiveAmount;
     final isPromo = sub.discountSource == 'first_timer_promo';
+    final isInsiderTier = sub.discountSource == 'insider_tier';
     final discountLabel = isPromo
         ? 'First-time player promo (−${_pctLabel(sub.discountPct)}%)'
-        : 'Adjusted by Infinite Sports';
+        : isInsiderTier
+            ? 'Insider discount (${tierNameForDiscountPct(sub.discountPct ?? 0)} '
+                '−${_pctLabel(sub.discountPct)}%)'
+            : 'Adjusted by Infinite Sports';
     return Card(
       elevation: 2,
       child: Padding(

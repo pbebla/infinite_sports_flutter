@@ -1,6 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:infinite_sports_flutter/registration/dynamic_form.dart';
 import 'package:infinite_sports_flutter/registration/insider_promo_field.dart';
 import 'package:infinite_sports_flutter/registration/payment_screen.dart';
@@ -13,12 +15,33 @@ import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 /// Everything [_RegistrationFormPageState._loadAll] fetches once per form
 /// session. [priorSubmissions]/[promo] stay empty/disabled-default on the
 /// joiner path (spec §7 — the promo code field is individual/captain only)
-/// so that path never pays for the extra reads.
+/// so that path never pays for the extra reads. [insider] is a one-shot read
+/// of the SIGNED-IN registrant's own `/Insiders/{uid}` node (Task F5) — null
+/// on every path except individual (spec §2: the tier discount only ever
+/// applies to the Insider's own individual fee, enforced by
+/// [insiderTierDiscountApplies]), and null there too when signed out or the
+/// account has never applied to the program.
 typedef _LoadedForm = ({
   List<RegQuestion> questions,
   Map<String, dynamic> prefill,
   List<Map<String, dynamic>> priorSubmissions,
   RegPromo promo,
+  Insider? insider,
+});
+
+/// The discount stamp [RegistrationFormPage._resolveDiscountStamp] settles
+/// on before writing a submission — either the promo-code field's own
+/// InsiderPromoOutcome carried through unchanged, or (Task F5) the
+/// registrant's OWN Insider tier discount when it beats/ties the promo
+/// under [pickBestDiscount]. insiderCode/firstTimer always describe a code
+/// the registrant entered (referring someone ELSE) — entirely independent
+/// of which discount source wins on their OWN fee.
+typedef _DiscountStamp = ({
+  String insiderCode,
+  bool? firstTimer,
+  String discountSource,
+  double? discountPct,
+  double? eligibleFee,
 });
 
 /// Loads the registration's form + the player's profile prefill, renders the
@@ -79,16 +102,36 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
     final promo = _showPromoField
         ? await RegistrationService.getPromo(widget.regId)
         : const RegPromo();
+    // Task F5 — the Insider tier discount only ever applies on the
+    // individual path (spec §2), so every other path skips this read.
+    final insider =
+        widget.path == 'individual' ? await _loadMyInsider() : null;
     return (
       questions: visible,
       prefill: prefill,
       priorSubmissions: priorSubmissions,
       promo: promo,
+      insider: insider,
     );
   }
 
+  /// One-shot read of the signed-in account's own Insider record via
+  /// [InsiderService.watchMyInsider]'s first emission — null when signed
+  /// out, never applied, or on a stream error (defensive: a broken read
+  /// here should never block registration, it just means no tier discount
+  /// preview/stamp this session).
+  Future<Insider?> _loadMyInsider() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return null;
+    try {
+      return await InsiderService.watchMyInsider(uid).first;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<bool> _submitForPath(
-      Map<String, dynamic> answers, InsiderPromoOutcome? promo) {
+      Map<String, dynamic> answers, _DiscountStamp stamp) {
     switch (widget.path) {
       case 'captain':
         return RegistrationService.submitCaptain(
@@ -96,11 +139,11 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
           config: widget.config,
           teamName: widget.teamName,
           answers: answers,
-          insiderCode: promo?.insiderCode ?? '',
-          firstTimer: promo?.firstTimer,
-          discountSource: promo?.discountSource ?? '',
-          discountPct: promo?.discountPct,
-          eligibleFee: promo?.eligibleFee,
+          insiderCode: stamp.insiderCode,
+          firstTimer: stamp.firstTimer,
+          discountSource: stamp.discountSource,
+          discountPct: stamp.discountPct,
+          eligibleFee: stamp.eligibleFee,
         );
       case 'joiner':
         return RegistrationService.submitJoiner(
@@ -114,13 +157,67 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
           regId: widget.regId,
           config: widget.config,
           answers: answers,
-          insiderCode: promo?.insiderCode ?? '',
-          firstTimer: promo?.firstTimer,
-          discountSource: promo?.discountSource ?? '',
-          discountPct: promo?.discountPct,
-          eligibleFee: promo?.eligibleFee,
+          insiderCode: stamp.insiderCode,
+          firstTimer: stamp.firstTimer,
+          discountSource: stamp.discountSource,
+          discountPct: stamp.discountPct,
+          eligibleFee: stamp.eligibleFee,
         );
     }
+  }
+
+  /// Resolves the discount actually stamped onto this submission (Task F5 —
+  /// spec §2/§5): the promo-code field's own outcome (if a code was entered
+  /// and it won the first-timer-promo check, `promo.discountSource ==
+  /// 'first_timer_promo'`) competes best-discount-wins
+  /// ([pickBestDiscount]) against this registrant's OWN active-Insider tier
+  /// discount — never a candidate on the captain/joiner paths
+  /// ([insiderTierDiscountApplies], spec §2 "individual fees only").
+  ///
+  /// [promo]'s insiderCode/firstTimer are carried through UNCHANGED
+  /// regardless of which discount wins: those describe a code the
+  /// registrant entered (referring someone ELSE), entirely independent of
+  /// whose discount ends up applied to their OWN fee. An Insider paying
+  /// their own fee with their OWN tier discount therefore stamps no
+  /// InsiderCode at all unless they separately entered someone else's valid
+  /// code — self-referral (own code on own registration) is already
+  /// rejected at code-entry time (evaluateCode's selfReferral branch), and
+  /// the payment-watcher's decideOnPaidFlip only ever counts a referral when
+  /// InsiderCode is present, so an Insider's own insider_tier-discounted
+  /// registration never creates a referral for themselves (functions/src/
+  /// lib/insiders.ts).
+  Future<_DiscountStamp> _resolveDiscountStamp(
+      InsiderPromoOutcome? promo) async {
+    final insider = (await _load).insider;
+    final tierApplies = insider != null &&
+        insiderTierDiscountApplies(
+          path: widget.path,
+          active: insider.isActive,
+          tier: insider.tier,
+        );
+    final insiderPct =
+        tierApplies ? tierDiscountPct(insider.tier).toDouble() : null;
+    final promoPct = promo?.discountSource == 'first_timer_promo'
+        ? promo?.discountPct
+        : null;
+    final best = pickBestDiscount(insiderPct: insiderPct, promoPct: promoPct);
+
+    if (best.source == DiscountWinner.insiderTier) {
+      return (
+        insiderCode: promo?.insiderCode ?? '',
+        firstTimer: promo?.firstTimer,
+        discountSource: 'insider_tier',
+        discountPct: best.pct,
+        eligibleFee: _eligibleFee,
+      );
+    }
+    return (
+      insiderCode: promo?.insiderCode ?? '',
+      firstTimer: promo?.firstTimer,
+      discountSource: promo?.discountSource ?? '',
+      discountPct: promo?.discountPct,
+      eligibleFee: promo?.eligibleFee,
+    );
   }
 
   Future<void> _onSubmit(Map<String, dynamic> answers) async {
@@ -130,13 +227,23 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
     // question Answers map (lib/registration/insider_promo_field.dart).
     final promo =
         answers.remove(kInsiderPromoAnswerKey) as InsiderPromoOutcome?;
-    final ok = await _submitForPath(answers, promo);
+    final stamp = await _resolveDiscountStamp(promo);
+    final ok = await _submitForPath(answers, stamp);
     if (!mounted) return;
     if (!ok) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text(
               'Something went wrong — try again, and contact us if it keeps failing.')));
       return;
+    }
+    // Task F5 — a brief confirmation before navigating away; the payment
+    // screen's itemized breakdown (payment_screen.dart _amountCard) is the
+    // authoritative, persistent display of this same stamped discount.
+    if (stamp.discountSource == 'insider_tier' && stamp.discountPct != null) {
+      final tier = tierNameForDiscountPct(stamp.discountPct!);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content:
+              Text('Insider perk applied: $tier −${_pctLabel(stamp.discountPct)}%')));
     }
     // Mirror of what the service just wrote — enough for the owed check.
     final waived = widget.team?.codeWaivesPayment ?? false;
@@ -232,29 +339,93 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
                 prefill: const <String, dynamic>{},
                 priorSubmissions: const <Map<String, dynamic>>[],
                 promo: const RegPromo(),
+                insider: null,
               );
           if (loaded.questions.isEmpty) {
             return const Center(
                 child: Text(
                     'This registration has no form yet — please try again later.'));
           }
-          return DynamicRegistrationForm(
-            questions: loaded.questions,
-            initialValues: loaded.prefill,
-            submitLabel: 'Register',
-            onSubmit: _onSubmit,
-            promoField: _showPromoField
-                ? InsiderPromoCodeField(
-                    eligibleFee: _eligibleFee,
-                    promo: loaded.promo,
-                    priorSubmissions: loaded.priorSubmissions,
-                    myEmail: FirebaseAuth.instance.currentUser?.email ?? '',
-                    myPhone: (loaded.prefill['phone'] ?? '').toString(),
-                  )
-                : null,
+          final insider = loaded.insider;
+          final showInsiderBanner = insider != null &&
+              insiderTierDiscountApplies(
+                path: widget.path,
+                active: insider.isActive,
+                tier: insider.tier,
+              );
+          return Column(
+            children: [
+              if (showInsiderBanner) _insiderPerkBanner(context, insider),
+              Expanded(
+                child: DynamicRegistrationForm(
+                  questions: loaded.questions,
+                  initialValues: loaded.prefill,
+                  submitLabel: 'Register',
+                  onSubmit: _onSubmit,
+                  promoField: _showPromoField
+                      ? InsiderPromoCodeField(
+                          eligibleFee: _eligibleFee,
+                          promo: loaded.promo,
+                          priorSubmissions: loaded.priorSubmissions,
+                          myEmail:
+                              FirebaseAuth.instance.currentUser?.email ?? '',
+                          myPhone: (loaded.prefill['phone'] ?? '').toString(),
+                        )
+                      : null,
+                ),
+              ),
+            ],
           );
         },
       ),
     );
+  }
+
+  /// Task F5 preview banner: shown above the form whenever the signed-in
+  /// registrant is themselves an active Insider whose tier discount applies
+  /// on THIS path (always individual — [insiderTierDiscountApplies]). This
+  /// is a preview, not the authoritative outcome: in the rare edge case
+  /// where the registrant ALSO enters another Insider's code and turns out
+  /// to be a first-timer with a bigger promo percent, [pickBestDiscount]
+  /// may stamp 'first_timer_promo' instead at submit time — the payment
+  /// screen's itemized line always reflects whichever source actually won
+  /// (payment_screen.dart _amountCard).
+  Widget _insiderPerkBanner(BuildContext context, Insider insider) {
+    final scheme = Theme.of(context).colorScheme;
+    final pct = tierDiscountPct(insider.tier);
+    final tier = tierName(insider.tier);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(15, 15, 15, 0),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.star, color: scheme.onPrimaryContainer),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Insider perk applied: $tier −$pct%',
+              style: TextStyle(
+                color: scheme.onPrimaryContainer,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Formats a discount percent without a trailing ".0" ('15' not '15.0') —
+  /// same convention as payment_screen.dart/insider_promo_field.dart.
+  String _pctLabel(double? pct) {
+    if (pct == null) return '';
+    return pct == pct.roundToDouble()
+        ? pct.toStringAsFixed(0)
+        : pct.toString();
   }
 }

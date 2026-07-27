@@ -408,7 +408,7 @@ class RegSubmission {
   // lib/models/registration_models.dart in the Manager repo.
   final double? adjustedFee; // absolute new total owed (wins over discountPct)
   final double? discountPct; // percent off the base fee
-  final String discountSource; // '' | 'manual' | 'first_timer_promo'
+  final String discountSource; // '' | 'manual' | 'first_timer_promo' | 'insider_tier'
   final String adjustReason; // required reason for the most recent adjustment
 
   // -- Insider promo-code entry (Infinite Insiders P2, Task F3) --------
@@ -422,6 +422,17 @@ class RegSubmission {
   // (spec §4/§5) — DiscountSource becomes 'first_timer_promo' rather than
   // 'manual' in that case; see promo_engine.dart's bestDiscountedTotal for
   // how the fan payment screen reconciles the two possible sources.
+  //
+  // -- Insider tier discount at checkout (Infinite Insiders P3, Task F5) --
+  // On the INDIVIDUAL path only, registration_form_page.dart's
+  // _resolveDiscountStamp additionally competes the registrant's OWN
+  // active-Insider tier discount against the first-timer-promo outcome
+  // above (best-discount-wins, spec §5/promo_engine.dart's
+  // pickBestDiscount) — when the tier discount wins, DiscountSource becomes
+  // 'insider_tier' instead, with the SAME DiscountPct/EligibleFee shape
+  // (percent off EligibleFee). InsiderCode/FirstTimer are untouched by this
+  // — they only ever describe a code THIS registrant entered (referring
+  // someone else), never their own tier discount.
   final String insiderCode; // normalized (uppercased); '' when none entered
   final bool? firstTimer; // null until a code was validated
 

@@ -106,6 +106,17 @@ describe('decideOnPaidFlip — count path (unpaid -> paid)', () => {
     expect(decideOnPaidFlip(paidFlip({ insiderCode: '' })).action).toBe('none');
   });
 
+  it('Task F5 interplay: an Insider paying their OWN individual fee with '
+    + 'an insider_tier discount and no entered code creates no referral — '
+    + 'decideOnPaidFlip has no notion of DiscountSource at all, it only '
+    + 'gates on InsiderCode being present', () => {
+    // The registrant is themselves an active Insider whose own tier % won
+    // best-discount-wins (DiscountSource stamped 'insider_tier' on their
+    // submission), but they did not separately enter anyone else's code —
+    // insiderCode is '' exactly like any other code-less submission.
+    expect(decideOnPaidFlip(paidFlip({ insiderCode: '' })).action).toBe('none');
+  });
+
   it('does nothing when the code does not resolve to an Insider', () => {
     expect(decideOnPaidFlip(paidFlip({ insiderUid: null })).action).toBe('none');
   });
@@ -261,6 +272,25 @@ describe('effectiveCharge', () => {
     expect(effectiveCharge({
       baseCents: 2000, adjustedFee: 15, discountSource: 'something_else',
     })).toBe(1500);
+  });
+
+  // Task F5 — insider tier discount at checkout (spec §2/§5)
+  it('insider_tier percent applies against EligibleFee, same math as first_timer_promo', () => {
+    expect(effectiveCharge({
+      baseCents: 2000, eligibleFee: 20, discountPct: 5, discountSource: 'insider_tier',
+    })).toBe(1900);
+  });
+
+  it('insider_tier falls back to baseCents when EligibleFee is missing', () => {
+    expect(effectiveCharge({
+      baseCents: 2000, discountPct: 25, discountSource: 'insider_tier',
+    })).toBe(1500);
+  });
+
+  it('insider_tier comps/clamps like every other source', () => {
+    expect(effectiveCharge({
+      baseCents: 2000, eligibleFee: 20, discountPct: 100, discountSource: 'insider_tier',
+    })).toBe(0);
   });
 });
 
