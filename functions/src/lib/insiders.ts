@@ -180,6 +180,140 @@ export function counterUpdates(input: CounterUpdatesInput): CounterUpdatesResult
 }
 
 // ---------------------------------------------------------------------------
+// Tier-maintenance decision (spec §2 inactivity + Infinite annual, Task X2)
+// ---------------------------------------------------------------------------
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** 30-day "months" (documented, not calendar months — a daily cron only
+ *  needs a stable, easily-tested elapsed-time threshold, not calendar-aware
+ *  month boundaries). 5mo/5.5mo/6mo -> 150/165/180 days. */
+const INACTIVITY_REMIND_DAYS = 150;
+const INACTIVITY_WARN_DAYS = 165;
+const INACTIVITY_DROP_DAYS = 180;
+
+/** Referrals required per calendar year (America/Los_Angeles) to keep
+ *  Infinite (spec §2 "Infinite maintenance"). */
+const INFINITE_ANNUAL_QUOTA = 5;
+
+export type MaintenanceAction =
+  | 'none' | 'remind5mo' | 'warn2wk' | 'dropInactivity' | 'dropInfiniteAnnual';
+
+export interface MaintenanceDecision {
+  action: MaintenanceAction;
+  /** Set only on a drop action. */
+  newStanding?: number;
+  /** Set only on a drop action. */
+  newTier?: number;
+}
+
+export interface MaintenanceInput {
+  /** /Insiders/{uid}/CurrentStanding. */
+  standing: number;
+  /** /Insiders/{uid}/Tier (0 = no tier, 1 = Bronze ... 5 = Infinite). */
+  tier: number;
+  /** /Insiders/{uid}/LastReferralAt (ms). 0/missing is treated as
+   *  insufficient data (returns 'none') rather than "infinitely inactive" —
+   *  every tier>=2 Insider is stamped on their first counted referral
+   *  (insiders_watch.ts applyInsiderCounterDelta), so a missing value here
+   *  signals a data gap, not a real inactivity episode. */
+  lastReferralAtMs: number;
+  /** /Insiders/{uid}/CurrentYearCount — counted referrals so far this
+   *  calendar year (America/Los_Angeles); only read when isYearRollover. */
+  currentYearCount: number;
+  /** The scheduled job's "now", in epoch ms — kept a plain number (not
+   *  Date.now() inside this function) so the whole ladder tests
+   *  deterministically with fixed fixtures. */
+  nowMs: number;
+  /** /Insiders/{uid}/LastInactivityRemindedAt (ms), or null/undefined if
+   *  never sent. A reminder already sent for the CURRENT inactivity episode
+   *  iff this is >= lastReferralAtMs — comparing against lastReferralAtMs
+   *  (rather than tracking a separate "episode id") means a new referral
+   *  automatically starts a fresh episode: LastReferralAt jumps forward,
+   *  so any older stamp is immediately "stale" again. */
+  lastReminderSentMs?: number | null;
+  /** /Insiders/{uid}/LastInactivityWarnedAt (ms) — same episode rule as
+   *  lastReminderSentMs, for the 2-week warning. */
+  lastWarnSentMs?: number | null;
+  /** True ONLY on the one daily run that lands on Dec 31 or Jan 1 in
+   *  America/Los_Angeles (computed by the trigger — see
+   *  insiders_maintenance.ts isYearRolloverNow). Kept as a precomputed bool
+   *  rather than doing timezone math in here so this function stays a
+   *  plain-millis, Intl-free pure function to unit test. */
+  isYearRollover?: boolean;
+  /** Documentation-only: which wall-clock/timezone basis nowMs represents
+   *  at the call site (e.g. 'America/Los_Angeles daily 06:00 run'). Not
+   *  read by this function — the only timezone-sensitive judgment (the
+   *  annual window) is precomputed into isYearRollover by the caller so
+   *  this function never needs Intl/timezone data itself. */
+  tzOffsetNote?: string;
+}
+
+/**
+ * Daily tier-maintenance decision (spec §2, Task X2 scheduled job).
+ *
+ * Two INDEPENDENT degradation paths, both gated to tier >= 2 (Silver+) —
+ * Bronze (1) is the permanent floor and tier 0 has no tier to lose, so both
+ * return 'none' unconditionally for tier < 2:
+ *
+ * 1. Inactivity ladder (checked every day, any tier 2-5): elapsed days since
+ *    LastReferralAt, using 30-day "months" (documented above) —
+ *    >=150 days -> remind once, >=165 days -> warn once, >=180 days -> drop
+ *    ONE tier, landing CurrentStanding on the new tier's own threshold
+ *    (Silver(10)->Bronze(5); Gold(15)->Silver(10); Platinum(20)->Gold(15);
+ *    Infinite(25+)->Platinum(20) — the general inactivity rule applies to
+ *    Infinite too, spec §2 "Silver and above"). Reminders/warnings are
+ *    idempotent per episode via the lastReminderSentMs/lastWarnSentMs >=
+ *    lastReferralAtMs comparison (see field docs above); the drop itself
+ *    needs no such guard because the caller (insiders_maintenance.ts) also
+ *    stamps LastReferralAt = now on a drop, which restarts the elapsed-days
+ *    clock at 0 — without that, a single stale LastReferralAt would
+ *    otherwise cascade into dropping a tier on every subsequent daily run
+ *    instead of the single "drop one tier" spec describes.
+ * 2. Infinite annual maintenance (checked ONLY when isYearRollover): tier 5
+ *    with currentYearCount below the 5-referral quota -> drop to Platinum
+ *    (standing 20). CurrentYearCount resetting to 0 for every Insider on
+ *    rollover is handled by the trigger, not this function (spec §2 "Year
+ *    rollover also resets CurrentYearCount ... handled by trigger").
+ *
+ * Precedence when both could apply the same day (e.g. a Jan-1 run where an
+ * Infinite Insider is BOTH 6-months inactive AND short on the annual quota):
+ * the inactivity drop wins — it's evaluated first and returned immediately,
+ * so the annual check never double-drops the same Insider in one call.
+ */
+export function maintenanceDecision(input: MaintenanceInput): MaintenanceDecision {
+  const {
+    standing, tier, lastReferralAtMs, currentYearCount, nowMs,
+    lastReminderSentMs, lastWarnSentMs, isYearRollover,
+  } = input;
+  void standing; // not needed by the decision itself — kept for call-site symmetry/logging
+
+  const inactivityEligible = tier >= 2 && lastReferralAtMs > 0;
+  const daysSinceReferral = inactivityEligible ? (nowMs - lastReferralAtMs) / MS_PER_DAY : -1;
+
+  if (inactivityEligible && daysSinceReferral >= INACTIVITY_DROP_DAYS) {
+    const newTier = tier - 1;
+    return { action: 'dropInactivity', newTier, newStanding: TIER_THRESHOLDS[newTier] };
+  }
+
+  if (isYearRollover && tier === 5 && currentYearCount < INFINITE_ANNUAL_QUOTA) {
+    return { action: 'dropInfiniteAnnual', newStanding: TIER_THRESHOLDS[4], newTier: 4 };
+  }
+
+  if (inactivityEligible && daysSinceReferral >= INACTIVITY_WARN_DAYS) {
+    const alreadyWarned = lastWarnSentMs != null && lastWarnSentMs >= lastReferralAtMs;
+    return alreadyWarned ? { action: 'none' } : { action: 'warn2wk' };
+  }
+
+  if (inactivityEligible && daysSinceReferral >= INACTIVITY_REMIND_DAYS) {
+    const alreadyReminded = lastReminderSentMs != null && lastReminderSentMs >= lastReferralAtMs;
+    return alreadyReminded ? { action: 'none' } : { action: 'remind5mo' };
+  }
+
+  return { action: 'none' };
+}
+
+// ---------------------------------------------------------------------------
 // Notification copy (spec §7, §10)
 // ---------------------------------------------------------------------------
 
@@ -192,7 +326,11 @@ export type InsiderNotificationEvent =
   | { type: 'referral'; referredName: string; sport: string }
   | { type: 'tierUp'; tier: number }
   | { type: 'tierDown'; tier: number }
-  | { type: 'voided' };
+  | { type: 'voided' }
+  | { type: 'maintenanceRemind' }
+  | { type: 'maintenanceWarn'; tier: number }
+  | { type: 'maintenanceDropped'; tier: number }
+  | { type: 'infiniteMaintenanceDropped'; currentYearCount: number };
 
 /** {title, body} for an Insider push (spec §7 "+1 referral", tier up/down;
  *  §10 automation notifications). */
@@ -219,6 +357,28 @@ export function notificationFor(event: InsiderNotificationEvent): InsiderNotific
       return {
         title: 'Referral update',
         body: 'One of your referrals was reversed after a payment change.',
+      };
+    case 'maintenanceRemind':
+      return {
+        title: 'Keep climbing!',
+        body: 'Bring players to keep your tier! 5 months without a referral.',
+      };
+    case 'maintenanceWarn':
+      return {
+        title: 'Tier at risk',
+        body: `2 weeks until your tier drops — refer a new player to keep ${tierName(event.tier)}.`,
+      };
+    case 'maintenanceDropped':
+      return {
+        title: 'Tier update',
+        body: `Your tier dropped to ${tierName(event.tier)}. Bring new players to climb back up.`,
+      };
+    case 'infiniteMaintenanceDropped':
+      return {
+        title: 'Infinite maintenance',
+        body: `You finished the year with ${event.currentYearCount} referral`
+          + `${event.currentYearCount === 1 ? '' : 's'} (5 needed to keep Infinite) — `
+          + "you're now Platinum. Refer 5 more this year to climb back to Infinite.",
       };
   }
 }

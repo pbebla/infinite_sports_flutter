@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  counterUpdates, decideOnPaidFlip, effectiveCharge, notificationFor,
+  counterUpdates, decideOnPaidFlip, effectiveCharge, maintenanceDecision, notificationFor,
   tierDiscountPct, tierForStanding, tierName,
 } from '../src/lib/insiders';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Tiers
@@ -259,5 +261,211 @@ describe('effectiveCharge', () => {
     expect(effectiveCharge({
       baseCents: 2000, adjustedFee: 15, discountSource: 'something_else',
     })).toBe(1500);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// maintenanceDecision (Task X2 — spec §2 inactivity + Infinite annual)
+// ---------------------------------------------------------------------------
+
+function maint(overrides: Partial<Parameters<typeof maintenanceDecision>[0]> = {}) {
+  const nowMs = Date.parse('2026-07-27T00:00:00Z');
+  return {
+    standing: 10,
+    tier: 2, // Silver
+    lastReferralAtMs: nowMs - 10 * DAY_MS, // recently active by default
+    currentYearCount: 3,
+    nowMs,
+    lastReminderSentMs: null,
+    lastWarnSentMs: null,
+    isYearRollover: false,
+    ...overrides,
+  };
+}
+
+describe('maintenanceDecision — tier floor (tier 0 / Bronze never drop or nag)', () => {
+  it('tier 0 (no tier) never does anything, no matter how inactive', () => {
+    const r = maintenanceDecision(maint({
+      tier: 0, standing: 2, lastReferralAtMs: maint().nowMs - 400 * DAY_MS,
+    }));
+    expect(r.action).toBe('none');
+  });
+
+  it('Bronze (tier 1) never drops or gets inactivity nudges', () => {
+    const r = maintenanceDecision(maint({
+      tier: 1, standing: 6, lastReferralAtMs: maint().nowMs - 400 * DAY_MS,
+    }));
+    expect(r.action).toBe('none');
+  });
+
+  it('tier 0/1 ignore isYearRollover too (annual maintenance is Infinite-only)', () => {
+    const r = maintenanceDecision(maint({
+      tier: 1, standing: 6, currentYearCount: 0, isYearRollover: true,
+    }));
+    expect(r.action).toBe('none');
+  });
+});
+
+describe('maintenanceDecision — inactivity ladder (Silver and above, 30-day months)', () => {
+  it('does nothing well before the 5-month mark', () => {
+    const r = maintenanceDecision(maint({ lastReferralAtMs: maint().nowMs - 100 * DAY_MS }));
+    expect(r.action).toBe('none');
+  });
+
+  it('reminds once at the 5-month (150-day) mark', () => {
+    const r = maintenanceDecision(maint({ lastReferralAtMs: maint().nowMs - 150 * DAY_MS }));
+    expect(r.action).toBe('remind5mo');
+  });
+
+  it('does not re-remind the same episode (lastReminderSentMs already covers it)', () => {
+    const base = maint();
+    const lastReferralAtMs = base.nowMs - 152 * DAY_MS;
+    const r = maintenanceDecision(maint({
+      lastReferralAtMs, lastReminderSentMs: lastReferralAtMs + 1 * DAY_MS,
+    }));
+    expect(r.action).toBe('none');
+  });
+
+  it('warns once at the 5.5-month (165-day) mark', () => {
+    const r = maintenanceDecision(maint({ lastReferralAtMs: maint().nowMs - 165 * DAY_MS }));
+    expect(r.action).toBe('warn2wk');
+  });
+
+  it('still warns even if the 5-month reminder was never recorded (graceful catch-up)', () => {
+    const r = maintenanceDecision(maint({
+      lastReferralAtMs: maint().nowMs - 165 * DAY_MS, lastReminderSentMs: null,
+    }));
+    expect(r.action).toBe('warn2wk');
+  });
+
+  it('does not re-warn the same episode', () => {
+    const base = maint();
+    const lastReferralAtMs = base.nowMs - 170 * DAY_MS;
+    const r = maintenanceDecision(maint({
+      lastReferralAtMs, lastWarnSentMs: lastReferralAtMs + 1 * DAY_MS,
+    }));
+    expect(r.action).toBe('none');
+  });
+
+  it('a stale reminder/warn stamp from a PRIOR episode does not block the new episode', () => {
+    // lastReminderSentMs predates this episode's lastReferralAtMs -> stale,
+    // must not suppress the new episode's reminder.
+    const base = maint();
+    const lastReferralAtMs = base.nowMs - 150 * DAY_MS;
+    const r = maintenanceDecision(maint({
+      lastReferralAtMs, lastReminderSentMs: lastReferralAtMs - 5 * DAY_MS,
+    }));
+    expect(r.action).toBe('remind5mo');
+  });
+
+  it('drops one tier at the 6-month (180-day) mark — Silver -> Bronze lands standing at 5', () => {
+    const r = maintenanceDecision(maint({
+      tier: 2, lastReferralAtMs: maint().nowMs - 180 * DAY_MS,
+    }));
+    expect(r.action).toBe('dropInactivity');
+    expect(r.newTier).toBe(1);
+    expect(r.newStanding).toBe(5);
+  });
+
+  it('drops Gold -> Silver landing standing at 10', () => {
+    const r = maintenanceDecision(maint({
+      tier: 3, lastReferralAtMs: maint().nowMs - 200 * DAY_MS,
+    }));
+    expect(r.action).toBe('dropInactivity');
+    expect(r.newTier).toBe(2);
+    expect(r.newStanding).toBe(10);
+  });
+
+  it('drops Platinum -> Gold landing standing at 15', () => {
+    const r = maintenanceDecision(maint({
+      tier: 4, lastReferralAtMs: maint().nowMs - 180 * DAY_MS,
+    }));
+    expect(r.action).toBe('dropInactivity');
+    expect(r.newTier).toBe(3);
+    expect(r.newStanding).toBe(15);
+  });
+
+  it('the general 6-month inactivity rule also applies to Infinite -> Platinum', () => {
+    const r = maintenanceDecision(maint({
+      tier: 5, standing: 30, lastReferralAtMs: maint().nowMs - 180 * DAY_MS,
+    }));
+    expect(r.action).toBe('dropInactivity');
+    expect(r.newTier).toBe(4);
+    expect(r.newStanding).toBe(20);
+  });
+
+  it('treats a missing/zero LastReferralAt as insufficient data (does nothing)', () => {
+    const r = maintenanceDecision(maint({ lastReferralAtMs: 0 }));
+    expect(r.action).toBe('none');
+  });
+});
+
+describe('maintenanceDecision — Infinite annual maintenance (year-end window only)', () => {
+  it('does nothing outside the year-rollover window even if the year count is short', () => {
+    const r = maintenanceDecision(maint({
+      tier: 5, standing: 30, currentYearCount: 2, isYearRollover: false,
+    }));
+    expect(r.action).toBe('none');
+  });
+
+  it('drops Infinite -> Platinum (standing 20) on year-end when currentYearCount < 5', () => {
+    const r = maintenanceDecision(maint({
+      tier: 5, standing: 30, currentYearCount: 2, isYearRollover: true,
+    }));
+    expect(r.action).toBe('dropInfiniteAnnual');
+    expect(r.newTier).toBe(4);
+    expect(r.newStanding).toBe(20);
+  });
+
+  it('keeps Infinite when the year-end count meets the 5-referral quota', () => {
+    const r = maintenanceDecision(maint({
+      tier: 5, standing: 30, currentYearCount: 5, isYearRollover: true,
+    }));
+    expect(r.action).toBe('none');
+  });
+
+  it('never applies the annual rule to tiers below Infinite', () => {
+    const r = maintenanceDecision(maint({
+      tier: 4, standing: 22, currentYearCount: 0, isYearRollover: true,
+    }));
+    expect(r.action).toBe('none');
+  });
+
+  it('general 6-month inactivity takes precedence over the annual drop when both fire the same day', () => {
+    const r = maintenanceDecision(maint({
+      tier: 5, standing: 30, currentYearCount: 1, isYearRollover: true,
+      lastReferralAtMs: maint().nowMs - 200 * DAY_MS,
+    }));
+    expect(r.action).toBe('dropInactivity');
+    expect(r.newTier).toBe(4);
+    expect(r.newStanding).toBe(20);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// notificationFor — maintenance copy (Task X2)
+// ---------------------------------------------------------------------------
+
+describe('notificationFor — maintenance events', () => {
+  it('builds the 5-month inactivity reminder', () => {
+    const n = notificationFor({ type: 'maintenanceRemind' });
+    expect(n.body).toBe('Bring players to keep your tier! 5 months without a referral.');
+  });
+
+  it('builds the 2-week warning naming the tier at risk', () => {
+    const n = notificationFor({ type: 'maintenanceWarn', tier: 2 });
+    expect(n.body).toBe('2 weeks until your tier drops — refer a new player to keep Silver.');
+  });
+
+  it('builds the drop notice naming the tier landed on', () => {
+    const n = notificationFor({ type: 'maintenanceDropped', tier: 1 });
+    expect(n.body).toBe('Your tier dropped to Bronze. Bring new players to climb back up.');
+  });
+
+  it('builds the Infinite annual-maintenance drop notice', () => {
+    const n = notificationFor({ type: 'infiniteMaintenanceDropped', currentYearCount: 2 });
+    expect(n.title.length).toBeGreaterThan(0);
+    expect(n.body).toContain('Platinum');
+    expect(n.body).toContain('2');
   });
 });

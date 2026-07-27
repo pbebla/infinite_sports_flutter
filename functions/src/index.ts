@@ -13,6 +13,7 @@ import { computeLeaderboardV2, FinalMatch, PredQuestion, QAnswer }
   from './lib/predict';
 import { readUserName } from './lib/user_names';
 import { makeLeagueTriggers } from './league_watch';
+import { makeInsiderVerifyTrigger } from './insiders_verify';
 
 admin.initializeApp();
 
@@ -307,6 +308,20 @@ export { onCampaignCreated, processScheduledCampaigns } from './campaign_watch';
 // ---- Infinite Insiders P2: referral counting/voiding watcher (Task X1) ----
 
 export { onSubmissionPaidChange } from './insiders_watch';
+
+// ---- Infinite Insiders P3: daily tier maintenance + stat-verified watcher
+// (Task X2) ----
+
+export { insidersDailyMaintenance } from './insiders_maintenance';
+
+/** Grouped export -> deploys as insiderVerifyFutsal-onStatLogEntry, ...
+ *  (league_watch.ts makeLeagueTriggers convention: one factory call per
+ *  sport, sport baked into the path rather than a route wildcard). League
+ *  StatLog only — see insiders_verify.ts header comment for why the
+ *  tournament activity path was rejected. */
+export const insiderVerifyFutsal = makeInsiderVerifyTrigger('Futsal');
+export const insiderVerifyBasketball = makeInsiderVerifyTrigger('Basketball');
+export const insiderVerifyFlagFootball = makeInsiderVerifyTrigger('Flag Football');
 
 // ---- League Experience P3: league watcher + prediction scoring ----
 

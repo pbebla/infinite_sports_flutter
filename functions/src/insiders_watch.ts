@@ -32,8 +32,10 @@ function dbRoot(event: DatabaseEvent<Change<DataSnapshot>>): Reference {
  *  (campaign_watch.ts sendToUids' single-recipient twin — this is a private
  *  per-user event, not a topic broadcast). Errors are logged and swallowed:
  *  the referral ledger writes have already committed by the time this runs,
- *  so a push failure must never fail (and retry) the whole trigger. */
-async function sendToInsider(
+ *  so a push failure must never fail (and retry) the whole trigger.
+ *  Exported for reuse by insiders_maintenance.ts (Task X2) — same delivery
+ *  mechanism, different trigger. */
+export async function sendToInsider(
   root: Reference, uid: string, notification: InsiderNotification,
 ): Promise<void> {
   try {
