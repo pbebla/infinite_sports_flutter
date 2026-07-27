@@ -15,6 +15,7 @@ import 'package:infinite_sports_flutter/model/futsalplayerstats.dart';
 import 'package:infinite_sports_flutter/model/gameactivity.dart';
 import 'package:infinite_sports_flutter/model/playerstats.dart';
 import 'package:infinite_sports_flutter/misc/schedule_display.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
@@ -576,8 +577,8 @@ class _ScorePageState extends State<ScorePage> {
     // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: appBarBackground(context),
-        foregroundColor: appBarForeground(context),
+        backgroundColor: TournamentColors.headerBackground(context),
+        foregroundColor: TournamentColors.headerForeground(context),
         centerTitle: true,
         title: RichText(
           textAlign: TextAlign.center,
@@ -706,8 +707,8 @@ class _ScorePageState extends State<ScorePage> {
                             ..loadRequest(Uri.parse(game!.link));
                           return Scaffold(
                             appBar: AppBar(
-                              backgroundColor: appBarBackground(context),
-                              foregroundColor: appBarForeground(context),
+                              backgroundColor: TournamentColors.headerBackground(context),
+                              foregroundColor: TournamentColors.headerForeground(context),
                               title: const Text(""),
                               actions: [
                                 NavigationControls(controller: webController)

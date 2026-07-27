@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_form_builder/flutter_form_builder.dart';
 import 'package:form_builder_validators/form_builder_validators.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
@@ -471,8 +472,8 @@ class _LinkAcknowledgeFieldState extends State<_LinkAcknowledgeField> {
                         return Scaffold(
                           appBar: AppBar(
                             centerTitle: true,
-                            backgroundColor: appBarBackground(context),
-                            foregroundColor: appBarForeground(context),
+                            backgroundColor: TournamentColors.headerBackground(context),
+                            foregroundColor: TournamentColors.headerForeground(context),
                             title: Text(question.label),
                           ),
                           body: WebViewStack(controller: controller),

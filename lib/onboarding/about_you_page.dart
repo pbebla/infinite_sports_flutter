@@ -1,7 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/onboarding/profile_completion.dart';
 import 'package:infinite_sports_flutter/onboarding/signup_validation.dart';
 
@@ -142,8 +142,8 @@ class _AboutYouPageState extends State<AboutYouPage> {
       child: Scaffold(
         appBar: AppBar(
           centerTitle: true,
-          backgroundColor: appBarBackground(context),
-          foregroundColor: appBarForeground(context),
+          backgroundColor: TournamentColors.headerBackground(context),
+          foregroundColor: TournamentColors.headerForeground(context),
           title: Column(
             mainAxisSize: MainAxisSize.min,
             children: [

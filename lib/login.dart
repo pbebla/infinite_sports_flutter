@@ -3,6 +3,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/createaccountpage.dart';
 import 'package:infinite_sports_flutter/forgotpasswordpage.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 
 class LoginPage extends StatefulWidget {
@@ -49,8 +50,8 @@ class _LoginDemoState extends State<LoginPage> {
       appBar: AppBar(
         centerTitle: true,
         title: const Text("Login or Sign Up"),
-        backgroundColor: appBarBackground(context),
-        foregroundColor: appBarForeground(context),
+        backgroundColor: TournamentColors.headerBackground(context),
+        foregroundColor: TournamentColors.headerForeground(context),
       ),
       body: SingleChildScrollView(
         child: AutofillGroup(

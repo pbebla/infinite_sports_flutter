@@ -1,7 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:infinite_sports_flutter/registration/dynamic_form.dart';
 import 'package:infinite_sports_flutter/registration/insider_promo_field.dart';
@@ -296,8 +296,8 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
       appBar: AppBar(
         centerTitle: true,
         title: Text(widget.config.label),
-        backgroundColor: appBarBackground(context),
-        foregroundColor: appBarForeground(context),
+        backgroundColor: TournamentColors.headerBackground(context),
+        foregroundColor: TournamentColors.headerForeground(context),
         bottom: widget.path == 'individual'
             ? null
             : PreferredSize(
@@ -308,7 +308,7 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
                     widget.path == 'captain'
                         ? 'New team: ${widget.teamName}'
                         : 'Joining ${widget.team?.name ?? 'team'}',
-                    style: TextStyle(color: appBarForeground(context), fontSize: 14),
+                    style: TextStyle(color: TournamentColors.headerForeground(context), fontSize: 14),
                   ),
                 ),
               ),

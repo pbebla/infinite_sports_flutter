@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/leagueform.dart';
 import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/model/userinformation.dart';
@@ -58,8 +59,8 @@ class _SignupState extends State<Signup> {
                 return Scaffold(
                   appBar: AppBar(
                     centerTitle: true,
-                    backgroundColor: appBarBackground(context),
-                    foregroundColor: appBarForeground(context),
+                    backgroundColor: TournamentColors.headerBackground(context),
+                    foregroundColor: TournamentColors.headerForeground(context),
                     title: Text(v["Name"]),
                     actions: [
                       NavigationControls(controller: controller)
@@ -96,8 +97,8 @@ class _SignupState extends State<Signup> {
           appBar: AppBar(
             centerTitle: true,
             title: const Text("Sign Up List"),
-            backgroundColor: appBarBackground(context), 
-            foregroundColor: appBarForeground(context),
+            backgroundColor: TournamentColors.headerBackground(context),
+            foregroundColor: TournamentColors.headerForeground(context),
           ),
           body: ListView.separated(
             // Theme-staleness fix (F3.1): separatorBuilder's own `context`

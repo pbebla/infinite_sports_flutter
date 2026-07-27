@@ -35,20 +35,6 @@ Color brandAccent(BuildContext context) =>
         ? infiniteSportsGoldColor
         : infiniteSportsPrimaryColor;
 
-/// Header bar background: brand red in light mode, near-black surface in
-/// dark mode (black & gold treatment).
-Color appBarBackground(BuildContext context) =>
-    Theme.of(context).brightness == Brightness.dark
-        ? Theme.of(context).colorScheme.surfaceContainer
-        : infiniteSportsPrimaryColor;
-
-/// Foreground (title/icons) that pairs with [appBarBackground]:
-/// white on red in light mode, gold on black in dark mode.
-Color appBarForeground(BuildContext context) =>
-    Theme.of(context).brightness == Brightness.dark
-        ? infiniteSportsGoldColor
-        : Colors.white;
-
 /// Text/icon color for content sitting on a brand-accent fill (buttons,
 /// banners): white on red in light mode, near-black on gold in dark mode.
 Color onBrandAccent(BuildContext context) =>

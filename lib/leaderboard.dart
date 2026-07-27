@@ -1,6 +1,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/flagfootballplayer.dart';
@@ -317,8 +318,8 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
                 ]
             ),
           ),
-          backgroundColor: appBarBackground(context),
-          foregroundColor: appBarForeground(context),
+          backgroundColor: TournamentColors.headerBackground(context),
+          foregroundColor: TournamentColors.headerForeground(context),
         ),
         body: FutureBuilder(
             future: getPlayersList(),

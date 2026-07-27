@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/basketballteaminfo.dart';
 import 'package:infinite_sports_flutter/model/flagfootballteaminfo.dart';
@@ -400,8 +401,8 @@ class _TablePageState extends State<TablePage> {
                 ]
             ),
           ),
-          backgroundColor: appBarBackground(context),
-          foregroundColor: appBarForeground(context),
+          backgroundColor: TournamentColors.headerBackground(context),
+          foregroundColor: TournamentColors.headerForeground(context),
         ),
         body: FutureBuilder(
             future: getSeasonTable(),
