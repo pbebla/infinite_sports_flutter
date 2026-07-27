@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_stripe/flutter_stripe.dart' hide Card;
 import 'package:infinite_sports_flutter/misc/utility.dart';
-import 'package:infinite_sports_flutter/registration/payment_adjustment.dart';
+import 'package:infinite_sports_flutter/registration/promo_engine.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
@@ -117,14 +117,20 @@ class _PaymentScreenState extends State<PaymentScreen> {
   }
 
   /// The amount THIS registrant currently owes, combining the base
-  /// [PaymentScreen.amount] (unadjusted config fee) with any live manual
-  /// admin adjustment on [sub] (Infinite Insiders §6/Task F1) — an owner
-  /// edit made in the Manager shows up here instantly since [_submission]
-  /// is a live stream.
-  num _effectiveAmount(RegSubmission? sub) => adjustedOwed(
+  /// [PaymentScreen.amount] (unadjusted config fee) with whichever discount
+  /// is live on [sub] — a manual admin adjustment (Infinite Insiders
+  /// §6/Task F1, `DiscountSource == 'manual'`) OR an automatic first-timer
+  /// promo applied at registration time (§4/§5/Task F3,
+  /// `DiscountSource == 'first_timer_promo'`). [bestDiscountedTotal] picks
+  /// the larger discount if a future scenario ever has both signals present
+  /// at once (spec §5's best-discount-wins rule). An owner edit made in the
+  /// Manager shows up here instantly since [_submission] is a live stream.
+  num _effectiveAmount(RegSubmission? sub) => bestDiscountedTotal(
         baseFee: widget.amount.toDouble(),
+        eligibleFee: sub?.eligibleFee,
         adjustedFee: sub?.adjustedFee,
         discountPct: sub?.discountPct,
+        discountSource: sub?.discountSource ?? '',
       );
 
   void _exit() {
@@ -402,10 +408,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
   }
 
   /// The amount card: a plain total when unadjusted (unchanged from before
-  /// Infinite Insiders), or an itemized Registration fee / Adjusted by
-  /// Infinite Sports / Total due breakdown the instant an admin manually
-  /// adjusts this submission's payment in the Manager — [_submission] is a
-  /// live stream, so no refresh is needed to see it (spec §6).
+  /// Infinite Insiders), or an itemized Registration fee / discount line /
+  /// Total due breakdown the instant EITHER an admin manually adjusts this
+  /// submission's payment in the Manager (§6/Task M1) OR a first-timer
+  /// promo applied at registration time (§4/Task F3) — [_submission] is a
+  /// live stream, so no refresh is needed to see it. The discount line's
+  /// label/amount follow whichever source [sub.discountSource] carries:
+  /// 'first_timer_promo' -> "First-time player promo (−Y%)"; anything else
+  /// (today, only 'manual') -> the original "Adjusted by Infinite Sports".
   Widget _amountCard(
       BuildContext context, RegSubmission? sub, num effectiveAmount) {
     final mutedColor = Theme.of(context).textTheme.bodySmall?.color;
@@ -426,6 +436,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
     final baseFee = widget.amount;
     final discount = baseFee - effectiveAmount;
+    final isPromo = sub.discountSource == 'first_timer_promo';
+    final discountLabel = isPromo
+        ? 'First-time player promo (−${_pctLabel(sub.discountPct)}%)'
+        : 'Adjusted by Infinite Sports';
     return Card(
       elevation: 2,
       child: Padding(
@@ -440,8 +454,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
             const SizedBox(height: 12),
             _amountRow(context, 'Registration fee', _money(baseFee)),
             const SizedBox(height: 4),
-            _amountRow(
-                context, 'Adjusted by Infinite Sports', '−${_money(discount)}',
+            _amountRow(context, discountLabel, '−${_money(discount)}',
                 muted: true),
             const Divider(height: 20),
             _amountRow(context, 'Total due', _money(effectiveAmount),
@@ -450,6 +463,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
         ),
       ),
     );
+  }
+
+  /// Formats a discount percent without a trailing ".0" ('15' not '15.0').
+  String _pctLabel(double? pct) {
+    if (pct == null) return '';
+    return pct == pct.roundToDouble()
+        ? pct.toStringAsFixed(0)
+        : pct.toString();
   }
 
   Widget _amountRow(BuildContext context, String label, String value,

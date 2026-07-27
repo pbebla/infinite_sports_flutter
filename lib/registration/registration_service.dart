@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:infinite_sports_flutter/registration/promo_engine.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 
 /// Fan-side reads/writes for the new registration engine (L1a individual
@@ -126,6 +127,72 @@ class RegistrationService {
     }
   }
 
+  // -- Insider promo-code entry (Infinite Insiders P2, Task F3) ----------
+
+  /// The per-registration first-timer promo config at
+  /// Registrations/{regId}/Promo (spec §9). M3 (the Manager's config
+  /// editor) has not shipped yet — [RegPromo.fromFirebase] is defensive, so
+  /// a missing node (every registration today) parses to an all-defaults,
+  /// DISABLED promo rather than throwing/returning null.
+  static Future<RegPromo> getPromo(String regId) async {
+    try {
+      final snap = await FirebaseDatabase.instance
+          .ref('Registrations/$regId/Promo')
+          .get();
+      return RegPromo.fromFirebase(snap.value);
+    } catch (_) {
+      return const RegPromo();
+    }
+  }
+
+  /// Every prior submission's Answers map, across EVERY registration — the
+  /// data source for the first-timer email/phone match (promo_engine.dart's
+  /// [firstTimer], spec §4). Deliberately scoped to submissions only (not a
+  /// separate scan of every Users/{uid} account) per this task's explicit
+  /// direction; a paper-era or never-registered account simply can't be
+  /// matched this way (accepted — spec §4/§11 already treats a paper-era
+  /// pass-as-first-timer as by-design, not a bug).
+  ///
+  /// Cost/scaling choice: one read of /Registrations (already the entry
+  /// page's primary read) to get every regId, then one
+  /// /Registrations/{regId}/Submissions read PER registration. At this
+  /// league's real scale (a few dozen open+historical registrations, each
+  /// with at most a few hundred submissions) that's a handful of small
+  /// reads done ONCE per form session — a composite server-side index
+  /// keyed by email/phone would be premature engineering here. Callers
+  /// (RegistrationFormPage) fetch this once per session and hand the same
+  /// list to every InsiderPromoCodeField validation, so re-typing the code
+  /// never re-reads Firebase.
+  static Future<List<Map<String, dynamic>>>
+      getAllSubmissionAnswersForMatch() async {
+    final out = <Map<String, dynamic>>[];
+    try {
+      final regsSnap = await FirebaseDatabase.instance.ref('Registrations').get();
+      final regs = regsSnap.value;
+      if (regs is! Map) return out;
+      for (final regId in regs.keys) {
+        try {
+          final subsSnap = await FirebaseDatabase.instance
+              .ref('Registrations/$regId/Submissions')
+              .get();
+          final subs = subsSnap.value;
+          if (subs is! Map) continue;
+          subs.forEach((_, node) {
+            if (node is! Map) return;
+            final answers = node['Answers'];
+            if (answers is Map) {
+              out.add(answers.map((k, v) => MapEntry(k.toString(), v)));
+            }
+          });
+        } catch (_) {
+          // Skip one bad registration's Submissions node rather than
+          // failing the whole scan.
+        }
+      }
+    } catch (_) {}
+    return out;
+  }
+
   /// Individual-path submit:
   ///  1. writes Registrations/{regId}/Submissions/{uid}
   ///     {Path:'individual', Answers, Paid:false, DisplayName, SubmittedAt}
@@ -133,11 +200,21 @@ class RegistrationService {
   ///     displayName (same shape utility.dart's signUpToPlay writes, so the
   ///     Manager Sign Ups page + Add-from-signups picker keep working)
   ///  3. profile write-back for well-known keys.
+  ///
+  /// [insiderCode]/[firstTimer]/[discountSource]/[discountPct]/[eligibleFee]
+  /// are the Task F3 promo-code stamp — all optional, populated by
+  /// RegistrationFormPage from the InsiderPromoCodeField's validated
+  /// [InsiderPromoOutcome] (empty/null when no code was entered).
   /// Returns false when signed out or any write throws.
   static Future<bool> submitIndividual({
     required String regId,
     required RegistrationConfig config,
     required Map<String, dynamic> answers,
+    String insiderCode = '',
+    bool? firstTimer,
+    String discountSource = '',
+    double? discountPct,
+    double? eligibleFee,
   }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return false;
@@ -149,6 +226,11 @@ class RegistrationService {
         paid: false,
         displayName: displayName,
         submittedAt: DateTime.now().millisecondsSinceEpoch,
+        insiderCode: insiderCode,
+        firstTimer: firstTimer,
+        discountSource: discountSource,
+        discountPct: discountPct,
+        eligibleFee: eligibleFee,
       );
       await FirebaseDatabase.instance
           .ref('Registrations/$regId/Submissions/${user.uid}')
@@ -282,12 +364,22 @@ class RegistrationService {
   ///  2. writes Submission{Path:'captain', TeamId, Paid:false}
   ///  3. legacy dual-write Sign Ups NotPaid + profile write-back — exactly
   ///     like submitIndividual.
+  ///
+  /// [insiderCode]/[firstTimer]/[discountSource]/[discountPct]/[eligibleFee]:
+  /// same Task F3 promo-code stamp as submitIndividual — the code field is
+  /// offered on the captain path too (spec §7), discounting the team fee
+  /// when eligible.
   /// Returns false when signed out or any write throws.
   static Future<bool> submitCaptain({
     required String regId,
     required RegistrationConfig config,
     required String teamName,
     required Map<String, dynamic> answers,
+    String insiderCode = '',
+    bool? firstTimer,
+    String discountSource = '',
+    double? discountPct,
+    double? eligibleFee,
   }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return false;
@@ -311,6 +403,11 @@ class RegistrationService {
         paid: false,
         displayName: displayName,
         submittedAt: DateTime.now().millisecondsSinceEpoch,
+        insiderCode: insiderCode,
+        firstTimer: firstTimer,
+        discountSource: discountSource,
+        discountPct: discountPct,
+        eligibleFee: eligibleFee,
       );
       await FirebaseDatabase.instance
           .ref('Registrations/$regId/Submissions/${user.uid}')

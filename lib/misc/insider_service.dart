@@ -41,4 +41,64 @@ class InsiderService {
       'AppliedAt': ServerValue.timestamp,
     });
   }
+
+  // -- Registration promo-code entry (Infinite Insiders P2, Task F3) ----
+  // One-shot lookups InsiderPromoCodeField needs to run the evaluateCode
+  // chain (lib/registration/promo_engine.dart) against a freshly typed
+  // code — these are NOT streams (the field validates on blur/change, not
+  // continuously) and are deliberately separate O(1) single-field reads
+  // rather than one big Insider fetch, matching /InsiderCodes' spec §9
+  // "O(1) validation lookup" intent.
+
+  /// The uid owning [code] (normalized uppercase before lookup), or null
+  /// when the code is blank/unclaimed/on error — evaluateCode's `invalid`
+  /// branch for either case.
+  static Future<String?> lookupCode(String code) async {
+    final normalized = normalizeInsiderCode(code);
+    if (normalized.isEmpty) return null;
+    try {
+      final snap =
+          await FirebaseDatabase.instance.ref('InsiderCodes/$normalized').get();
+      final uid = snap.value;
+      return (uid is String && uid.isNotEmpty) ? uid : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Just the Status field for [uid] ('' when missing/error — evaluateCode
+  /// treats any non-'active' status, including '', as suspended).
+  static Future<String> insiderStatus(String uid) async {
+    try {
+      final snap =
+          await FirebaseDatabase.instance.ref('Insiders/$uid/Status').get();
+      return snap.value?.toString() ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// True when `/ReferredUsers/{uid}` exists — the global once-ever guard
+  /// (spec §3). False (never blocks) on error, matching this file's
+  /// existing silent-failure convention.
+  static Future<bool> alreadyReferred(String uid) async {
+    try {
+      final snap = await FirebaseDatabase.instance.ref('ReferredUsers/$uid').get();
+      return snap.exists;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// The code owner's display Name, for the "Code accepted — [Name]'s
+  /// referral" message ('' when missing/error — the UI falls back to a
+  /// generic phrasing in that case).
+  static Future<String> getInsiderName(String uid) async {
+    try {
+      final snap = await FirebaseDatabase.instance.ref('Insiders/$uid/Name').get();
+      return snap.value?.toString() ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
 }

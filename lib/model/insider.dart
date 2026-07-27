@@ -50,6 +50,13 @@ String tierName(int tier) =>
 int tierDiscountPct(int tier) =>
     (tier >= 0 && tier < _kTierDiscountPct.length) ? _kTierDiscountPct[tier] : 0;
 
+/// The trimmed/uppercased form every Insider code is stored and compared in
+/// (Task F3 — code entry on the registration form). Byte-identical rule to
+/// the Manager's normalizeInsiderCode (lib/models/insider_models.dart) —
+/// codes are generated/approved there and looked up here, so both sides
+/// must agree on canonical form.
+String normalizeInsiderCode(String input) => input.trim().toUpperCase();
+
 // ---------------------------------------------------------------------------
 // Insider (RTDB: /Insiders/<uid> — spec §9)
 // ---------------------------------------------------------------------------

@@ -18,12 +18,24 @@ class DynamicRegistrationForm extends StatefulWidget {
   final String submitLabel;
   final Future<void> Function(Map<String, dynamic> answers) onSubmit;
 
+  /// Optional Insider promo-code field (Task F3) — rendered above the
+  /// submit button when supplied (individual/captain paths only;
+  /// RegistrationFormPage leaves this null on the joiner path). It is a
+  /// FormBuilderField registered under kInsiderPromoAnswerKey
+  /// (lib/registration/insider_promo_field.dart), so its resolved value
+  /// flows through saveAndValidate()/cleanAnswers() and shows up in
+  /// [onSubmit]'s answers map like any other field — cleanAnswers's default
+  /// branch passes unknown keys through unchanged, so no change to
+  /// [onSubmit]'s signature or _submit() below was needed.
+  final Widget? promoField;
+
   const DynamicRegistrationForm({
     super.key,
     required this.questions,
     required this.initialValues,
     required this.submitLabel,
     required this.onSubmit,
+    this.promoField,
   });
 
   @override
@@ -211,6 +223,11 @@ class _DynamicRegistrationFormState extends State<DynamicRegistrationForm> {
             Padding(
               padding: const EdgeInsets.only(bottom: 15),
               child: _buildField(q),
+            ),
+          if (widget.promoField != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 15),
+              child: widget.promoField!,
             ),
           SizedBox(
             height: 50,

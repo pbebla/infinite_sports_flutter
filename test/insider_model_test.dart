@@ -136,4 +136,20 @@ void main() {
           Insider.fromFirebase('u', {'Status': 'pending'})!.isPending, isTrue);
     });
   });
+
+  group('normalizeInsiderCode (Task F3 — code entry on the registration form)',
+      () {
+    test('trims and uppercases', () {
+      expect(normalizeInsiderCode('  za4k9p2  '), 'ZA4K9P2');
+    });
+
+    test('already-normalized input is unchanged', () {
+      expect(normalizeInsiderCode('ZA4K9P2'), 'ZA4K9P2');
+    });
+
+    test('empty stays empty', () {
+      expect(normalizeInsiderCode(''), '');
+      expect(normalizeInsiderCode('   '), '');
+    });
+  });
 }

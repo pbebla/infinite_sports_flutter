@@ -366,6 +366,54 @@ void main() {
       expect(map.containsKey('DiscountSource'), isFalse);
       expect(map.containsKey('AdjustReason'), isFalse);
     });
+
+    test('round-trips InsiderCode/FirstTimer/EligibleFee (Infinite Insiders '
+        'F3 promo engine)', () {
+      const sub = RegSubmission(
+        path: 'individual',
+        answers: {},
+        insiderCode: 'ZA4K9P2',
+        firstTimer: true,
+        discountSource: 'first_timer_promo',
+        discountPct: 15.0,
+        eligibleFee: 60.0,
+      );
+      final map = sub.toFirebaseMap();
+      expect(map['InsiderCode'], 'ZA4K9P2');
+      expect(map['FirstTimer'], true);
+      expect(map['DiscountSource'], 'first_timer_promo');
+      expect(map['DiscountPct'], 15.0);
+      expect(map['EligibleFee'], 60.0);
+      final parsed = RegSubmission.fromFirebase(map);
+      expect(parsed!.insiderCode, 'ZA4K9P2');
+      expect(parsed.firstTimer, isTrue);
+      expect(parsed.discountSource, 'first_timer_promo');
+      expect(parsed.discountPct, 15.0);
+      expect(parsed.eligibleFee, 60.0);
+    });
+
+    test('toFirebaseMap omits InsiderCode/FirstTimer/EligibleFee when unset',
+        () {
+      const sub = RegSubmission(path: 'individual', answers: {});
+      final map = sub.toFirebaseMap();
+      expect(map.containsKey('InsiderCode'), isFalse);
+      expect(map.containsKey('FirstTimer'), isFalse);
+      expect(map.containsKey('EligibleFee'), isFalse);
+      final parsed = RegSubmission.fromFirebase(map);
+      expect(parsed!.insiderCode, '');
+      expect(parsed.firstTimer, isNull);
+      expect(parsed.eligibleFee, isNull);
+    });
+
+    test('FirstTimer false round-trips (not omitted like a null would be)',
+        () {
+      const sub = RegSubmission(
+          path: 'individual', answers: {}, insiderCode: 'ABCD1234', firstTimer: false);
+      final map = sub.toFirebaseMap();
+      expect(map['FirstTimer'], false);
+      final parsed = RegSubmission.fromFirebase(map);
+      expect(parsed!.firstTimer, isFalse);
+    });
   });
 
   group('paymentOwed', () {

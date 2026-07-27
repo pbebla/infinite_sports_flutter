@@ -408,8 +408,24 @@ class RegSubmission {
   // lib/models/registration_models.dart in the Manager repo.
   final double? adjustedFee; // absolute new total owed (wins over discountPct)
   final double? discountPct; // percent off the base fee
-  final String discountSource; // '' | 'manual' (future: 'promo', 'insider')
+  final String discountSource; // '' | 'manual' | 'first_timer_promo'
   final String adjustReason; // required reason for the most recent adjustment
+
+  // -- Insider promo-code entry (Infinite Insiders P2, Task F3) --------
+  // Stamped by RegistrationService.submitIndividual/submitCaptain when the
+  // registrant entered a code that passed evaluateCode (lib/registration/
+  // promo_engine.dart). InsiderCode/FirstTimer are written whenever the code
+  // validated, REGARDLESS of whether a discount applied (referral counting
+  // itself is payment-side, spec §10/Task X1 — not this task). DiscountPct/
+  // DiscountSource/EligibleFee above are additionally set only when the
+  // per-registration promo was active AND the registrant was a first-timer
+  // (spec §4/§5) — DiscountSource becomes 'first_timer_promo' rather than
+  // 'manual' in that case; see promo_engine.dart's bestDiscountedTotal for
+  // how the fan payment screen reconciles the two possible sources.
+  final String insiderCode; // normalized (uppercased); '' when none entered
+  final bool? firstTimer; // null until a code was validated
+
+  final double? eligibleFee; // the base fee the promo pct was computed against
 
   const RegSubmission({
     required this.path,
@@ -424,6 +440,9 @@ class RegSubmission {
     this.discountPct,
     this.discountSource = '',
     this.adjustReason = '',
+    this.insiderCode = '',
+    this.firstTimer,
+    this.eligibleFee,
   });
 
   /// True when an admin has manually adjusted this submission's fee.
@@ -442,6 +461,9 @@ class RegSubmission {
         if (discountPct != null) 'DiscountPct': discountPct,
         if (discountSource.isNotEmpty) 'DiscountSource': discountSource,
         if (adjustReason.isNotEmpty) 'AdjustReason': adjustReason,
+        if (insiderCode.isNotEmpty) 'InsiderCode': insiderCode,
+        if (firstTimer != null) 'FirstTimer': firstTimer,
+        if (eligibleFee != null) 'EligibleFee': eligibleFee,
       };
 
   /// Defensive parse; returns null for malformed nodes.
@@ -453,6 +475,8 @@ class RegSubmission {
     final rawPaidAmount = raw['PaidAmount'];
     final rawAdjustedFee = raw['AdjustedFee'];
     final rawDiscountPct = raw['DiscountPct'];
+    final rawEligibleFee = raw['EligibleFee'];
+    final rawFirstTimer = raw['FirstTimer'];
     return RegSubmission(
       path: path,
       answers: rawAnswers is Map
@@ -474,6 +498,11 @@ class RegSubmission {
           : double.tryParse(rawDiscountPct?.toString() ?? ''),
       discountSource: raw['DiscountSource']?.toString() ?? '',
       adjustReason: raw['AdjustReason']?.toString() ?? '',
+      insiderCode: raw['InsiderCode']?.toString() ?? '',
+      firstTimer: rawFirstTimer is bool ? rawFirstTimer : null,
+      eligibleFee: rawEligibleFee is num
+          ? rawEligibleFee.toDouble()
+          : double.tryParse(rawEligibleFee?.toString() ?? ''),
     );
   }
 }
