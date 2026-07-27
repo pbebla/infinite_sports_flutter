@@ -11,7 +11,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:infinite_sports_flutter/insiders/insiders_leaderboard_page.dart';
+import 'package:infinite_sports_flutter/misc/home_nav.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
+import 'package:infinite_sports_flutter/widgets/glass_nav_bar.dart';
 
 /// Finds text within a specific leaderboard row (by insider uid) — avoids
 /// ambiguity with the same digits appearing in the program-stats header.
@@ -59,12 +61,22 @@ Future<void> _pump(
   required Map<String, Insider> insiders,
   List<InsiderReferral> referrals = const [],
   int? nowMs,
+  String? viewerUid,
+  void Function(BuildContext context, HomeTab tab)? switchHomeTabOverride,
+  Widget Function()? searchHubPageBuilder,
+  Future<void> Function(BuildContext context,
+          {String? uid, required String name})?
+      openProfileOverride,
 }) async {
   await tester.pumpWidget(MaterialApp(
     home: InsidersLeaderboardPage(
       insidersStream: Stream<Map<String, Insider>>.value(insiders),
       referralsStream: Stream<List<InsiderReferral>>.value(referrals),
       nowMs: nowMs ?? _nowMs,
+      viewerUid: viewerUid,
+      switchHomeTabOverride: switchHomeTabOverride,
+      searchHubPageBuilder: searchHubPageBuilder,
+      openProfileOverride: openProfileOverride,
     ),
   ));
   // Two nested StreamBuilders each need a tick to consume the injected
@@ -207,8 +219,7 @@ void main() {
       'u1': _insider('u1', name: 'Alex', totalReferred: 99),
     }, referrals: [
       _referral(id: 'r1', insiderUid: 'u1', sport: 'Futsal', countedAt: 1),
-      _referral(
-          id: 'r2', insiderUid: 'u1', sport: 'Basketball', countedAt: 2),
+      _referral(id: 'r2', insiderUid: 'u1', sport: 'Basketball', countedAt: 2),
     ]);
 
     await tester.tap(
@@ -234,5 +245,97 @@ void main() {
 
     expect(find.text('GoldBeth'), findsOneWidget);
     expect(find.text('BronzeAlex'), findsNothing);
+  });
+
+  // -- Task F8: tapping a row opens the player's profile -------------------
+
+  testWidgets(
+      'tapping a leaderboard row opens that Insider\'s profile (Task F8)',
+      (tester) async {
+    String? openedUid;
+    String? openedName;
+    await _pump(tester, insiders: {
+      'u1': _insider('u1', name: 'Alex', tier: 2, totalReferred: 14),
+    }, openProfileOverride: (context, {uid, required name}) async {
+      openedUid = uid;
+      openedName = name;
+    });
+
+    await tester.tap(find.byKey(const ValueKey('insider_leaderboard_row_u1')));
+    await tester.pump();
+
+    expect(openedUid, 'u1');
+    expect(openedName, 'Alex');
+  });
+
+  // -- Task F8: bottom nav mirrors the viewer's own MyHomePage tab set -----
+
+  testWidgets(
+      'bottom nav omits the Insider tab for a viewer who is not an active Insider (Task F8)',
+      (tester) async {
+    await _pump(tester,
+        insiders: {
+          'u1': _insider('u1', name: 'Alex', totalReferred: 5),
+        },
+        viewerUid: 'viewer-not-an-insider');
+
+    final nav = find.byType(GlassNavBar);
+    expect(nav, findsOneWidget);
+    expect(find.descendant(of: nav, matching: find.text('Matches')),
+        findsOneWidget);
+    expect(find.descendant(of: nav, matching: find.text('Leagues')),
+        findsOneWidget);
+    expect(find.descendant(of: nav, matching: find.text('Tournaments')),
+        findsOneWidget);
+    expect(find.descendant(of: nav, matching: find.text('Calendar')),
+        findsOneWidget);
+    expect(
+        find.descendant(of: nav, matching: find.text('Insider')), findsNothing);
+  });
+
+  testWidgets(
+      'bottom nav includes the Insider tab when the viewer is an active Insider (Task F8)',
+      (tester) async {
+    await _pump(tester,
+        insiders: {
+          'viewer': _insider('viewer', name: 'Viewer', totalReferred: 3),
+          'u2': _insider('u2', name: 'Beth', totalReferred: 9),
+        },
+        viewerUid: 'viewer');
+
+    final nav = find.byType(GlassNavBar);
+    expect(find.descendant(of: nav, matching: find.text('Insider')),
+        findsOneWidget);
+  });
+
+  testWidgets('tapping a bottom nav item switches the MyHomePage tab (Task F8)',
+      (tester) async {
+    HomeTab? switchedTo;
+    await _pump(tester,
+        insiders: {
+          'u1': _insider('u1', name: 'Alex', totalReferred: 5),
+        },
+        switchHomeTabOverride: (context, tab) => switchedTo = tab);
+
+    await tester.tap(find.descendant(
+        of: find.byType(GlassNavBar), matching: find.text('Leagues')));
+    await tester.pump();
+
+    expect(switchedTo, HomeTab.leagues);
+  });
+
+  testWidgets('bottom nav search button opens the search hub (Task F8)',
+      (tester) async {
+    await _pump(tester,
+        insiders: {
+          'u1': _insider('u1', name: 'Alex', totalReferred: 5),
+        },
+        searchHubPageBuilder: () =>
+            const Scaffold(body: Center(child: Text('stub search hub'))));
+
+    await tester.tap(find.byIcon(Icons.search));
+    await tester.pumpAndSettle();
+
+    expect(find.text('stub search hub'), findsOneWidget);
   });
 }

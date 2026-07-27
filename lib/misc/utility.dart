@@ -4,6 +4,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
+import 'package:infinite_sports_flutter/misc/home_nav.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/business.dart';
@@ -79,6 +80,28 @@ BuildContext? mainScaffoldContext;
 bool onboardingFlowActive = false;
 
 ValueNotifier headerNotifier = ValueNotifier(["", ""]);
+
+/// Cross-navigator "jump to this MyHomePage tab" request (Task F8). There is
+/// no pre-existing mechanism for switching MyHomePage's bottom-nav tab from
+/// a page pushed on top of it — the push-notification deep-link router
+/// (lib/misc/notification_router.dart) only ever pushes detail routes on the
+/// root navigator, it never touches `_selectedIndex` — so this is the one
+/// shared mechanism for it, reused by every screen that needs it (currently
+/// InsidersLeaderboardPage's bottom nav, Task F8). `_MyHomePageState`
+/// (lib/main.dart) listens in initState and, on a non-null value, switches
+/// to that tab and resets this back to null so a repeat request of the same
+/// tab still notifies.
+final ValueNotifier<HomeTab?> requestedHomeTab = ValueNotifier<HomeTab?>(null);
+
+/// Pops every route back to the root (MyHomePage) and asks it, via
+/// [requestedHomeTab], to select [tab]. Setting the notifier before popping
+/// means MyHomePage (still mounted underneath, just not visible) has already
+/// switched tabs by the time the pop's transition reveals it — no flash of
+/// the previous tab.
+void switchHomeTab(BuildContext context, HomeTab tab) {
+  requestedHomeTab.value = tab;
+  Navigator.of(context).popUntil((route) => route.isFirst);
+}
 
 final List<String> months = [
   "January",

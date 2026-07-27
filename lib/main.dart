@@ -393,7 +393,32 @@ class _MyHomePageState extends State<MyHomePage> {
       }
       _setupNotificationPrefs();
     });
+    // Task F8: lets a page pushed on top of MyHomePage (e.g.
+    // InsidersLeaderboardPage's bottom nav) request a tab switch via the
+    // shared requestedHomeTab notifier (lib/misc/utility.dart) instead of
+    // inventing its own navigation.
+    requestedHomeTab.addListener(_onRequestedHomeTab);
     super.initState();
+  }
+
+  @override
+  void dispose() {
+    requestedHomeTab.removeListener(_onRequestedHomeTab);
+    super.dispose();
+  }
+
+  /// Consumes a pending [requestedHomeTab] request: switches to that tab
+  /// (reusing [_onItemTapped] so lazy Tournaments-tab build + title update
+  /// stay identical to a real nav-bar tap) then resets the notifier back to
+  /// null so a repeat request of the same tab still fires the listener.
+  void _onRequestedHomeTab() {
+    final tab = requestedHomeTab.value;
+    if (tab == null) return;
+    requestedHomeTab.value = null;
+    final tabs = navItemsFor(_isActiveInsider);
+    final idx = tabs.indexOf(tab);
+    if (idx == -1) return;
+    _onItemTapped(idx);
   }
 
   /// Every install joins the app-wide channel (for "Everyone" campaigns).

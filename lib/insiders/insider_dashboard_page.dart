@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 
 import 'package:infinite_sports_flutter/insiders/insiders_leaderboard_page.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
@@ -108,8 +109,8 @@ class _InsiderDashboardPageState extends State<InsiderDashboardPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Insider Dashboard'),
-        backgroundColor: appBarBackground(context),
-        foregroundColor: appBarForeground(context),
+        backgroundColor: TournamentColors.headerBackground(context),
+        foregroundColor: TournamentColors.headerForeground(context),
       ),
       body: StreamBuilder<Insider?>(
         stream: _insiderStream,

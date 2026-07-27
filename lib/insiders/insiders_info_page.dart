@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:infinite_sports_flutter/insiders/insider_dashboard_page.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -182,8 +182,8 @@ class _InsidersInfoPageState extends State<InsidersInfoPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Infinite Insiders'),
-        backgroundColor: appBarBackground(context),
-        foregroundColor: appBarForeground(context),
+        backgroundColor: TournamentColors.headerBackground(context),
+        foregroundColor: TournamentColors.headerForeground(context),
       ),
       body: StreamBuilder<Insider?>(
         stream: _insiderStream,
