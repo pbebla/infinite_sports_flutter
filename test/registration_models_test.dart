@@ -320,6 +320,52 @@ void main() {
       expect(RegSubmission.fromFirebase(null), isNull);
       expect(RegSubmission.fromFirebase({'Answers': {}}), isNull); // no Path
     });
+
+    test('isAdjusted is false with no manual adjustment fields', () {
+      const sub = RegSubmission(path: 'individual', answers: {});
+      expect(sub.isAdjusted, isFalse);
+    });
+
+    test('isAdjusted is true when AdjustedFee or DiscountPct is set', () {
+      const byAmount = RegSubmission(
+          path: 'individual', answers: {}, adjustedFee: 0);
+      const byPct = RegSubmission(
+          path: 'individual', answers: {}, discountPct: 10);
+      expect(byAmount.isAdjusted, isTrue);
+      expect(byPct.isAdjusted, isTrue);
+    });
+
+    test('round-trips AdjustedFee/DiscountPct/DiscountSource/AdjustReason '
+        '(Infinite Insiders M1/F1)', () {
+      const sub = RegSubmission(
+        path: 'individual',
+        answers: {},
+        adjustedFee: 144.0,
+        discountPct: 10.0,
+        discountSource: 'manual',
+        adjustReason: 'Hardship discount approved by owner',
+      );
+      final map = sub.toFirebaseMap();
+      expect(map['AdjustedFee'], 144.0);
+      expect(map['DiscountPct'], 10.0);
+      expect(map['DiscountSource'], 'manual');
+      expect(map['AdjustReason'], 'Hardship discount approved by owner');
+      final parsed = RegSubmission.fromFirebase(map);
+      expect(parsed!.adjustedFee, 144.0);
+      expect(parsed.discountPct, 10.0);
+      expect(parsed.discountSource, 'manual');
+      expect(parsed.adjustReason, 'Hardship discount approved by owner');
+      expect(parsed.isAdjusted, isTrue);
+    });
+
+    test('toFirebaseMap omits adjustment keys when unset', () {
+      const sub = RegSubmission(path: 'individual', answers: {});
+      final map = sub.toFirebaseMap();
+      expect(map.containsKey('AdjustedFee'), isFalse);
+      expect(map.containsKey('DiscountPct'), isFalse);
+      expect(map.containsKey('DiscountSource'), isFalse);
+      expect(map.containsKey('AdjustReason'), isFalse);
+    });
   });
 
   group('paymentOwed', () {

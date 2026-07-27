@@ -401,6 +401,16 @@ class RegSubmission {
   final String displayName; // account display name at submit time
   final int submittedAt; // millisecondsSinceEpoch
 
+  // -- Manual payment adjustment (Infinite Insiders P1, Task M1/F1) ----
+  // Written by the Manager's RegistrationService.adjustSubmissionAmount/
+  // clearAdjustment; read here so the fan payment/status screens can show
+  // the same adjusted amount live (Task F1). Keep this block in sync with
+  // lib/models/registration_models.dart in the Manager repo.
+  final double? adjustedFee; // absolute new total owed (wins over discountPct)
+  final double? discountPct; // percent off the base fee
+  final String discountSource; // '' | 'manual' (future: 'promo', 'insider')
+  final String adjustReason; // required reason for the most recent adjustment
+
   const RegSubmission({
     required this.path,
     required this.answers,
@@ -410,7 +420,14 @@ class RegSubmission {
     this.paidAmount,
     this.displayName = '',
     this.submittedAt = 0,
+    this.adjustedFee,
+    this.discountPct,
+    this.discountSource = '',
+    this.adjustReason = '',
   });
+
+  /// True when an admin has manually adjusted this submission's fee.
+  bool get isAdjusted => adjustedFee != null || discountPct != null;
 
   Map<String, dynamic> toFirebaseMap() => {
         'Path': path,
@@ -421,6 +438,10 @@ class RegSubmission {
         if (paidAmount != null) 'PaidAmount': paidAmount,
         'DisplayName': displayName,
         'SubmittedAt': submittedAt,
+        if (adjustedFee != null) 'AdjustedFee': adjustedFee,
+        if (discountPct != null) 'DiscountPct': discountPct,
+        if (discountSource.isNotEmpty) 'DiscountSource': discountSource,
+        if (adjustReason.isNotEmpty) 'AdjustReason': adjustReason,
       };
 
   /// Defensive parse; returns null for malformed nodes.
@@ -430,6 +451,8 @@ class RegSubmission {
     if (path.isEmpty) return null;
     final rawAnswers = raw['Answers'];
     final rawPaidAmount = raw['PaidAmount'];
+    final rawAdjustedFee = raw['AdjustedFee'];
+    final rawDiscountPct = raw['DiscountPct'];
     return RegSubmission(
       path: path,
       answers: rawAnswers is Map
@@ -443,6 +466,14 @@ class RegSubmission {
           : num.tryParse(rawPaidAmount?.toString() ?? ''),
       displayName: raw['DisplayName']?.toString() ?? '',
       submittedAt: int.tryParse(raw['SubmittedAt']?.toString() ?? '') ?? 0,
+      adjustedFee: rawAdjustedFee is num
+          ? rawAdjustedFee.toDouble()
+          : double.tryParse(rawAdjustedFee?.toString() ?? ''),
+      discountPct: rawDiscountPct is num
+          ? rawDiscountPct.toDouble()
+          : double.tryParse(rawDiscountPct?.toString() ?? ''),
+      discountSource: raw['DiscountSource']?.toString() ?? '',
+      adjustReason: raw['AdjustReason']?.toString() ?? '',
     );
   }
 }

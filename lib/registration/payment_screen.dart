@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_stripe/flutter_stripe.dart' hide Card;
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/registration/payment_adjustment.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
@@ -105,13 +106,26 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   /// venmo.com profile links open the Venmo app when it is installed
   /// (Android App Links / iOS Universal Links); otherwise the browser loads
-  /// the profile page. txn=pay + amount + note pre-fill the payment.
-  Uri get _venmoUri {
+  /// the profile page. txn=pay + amount + note pre-fill the payment. Takes
+  /// the live EFFECTIVE amount (after any manual admin adjustment) so the
+  /// pre-filled Venmo request never asks for more than is actually owed.
+  Uri _venmoUri(num amount) {
     final name = FirebaseAuth.instance.currentUser?.displayName ?? '';
     final note = Uri.encodeComponent('${widget.regId} - $name');
     return Uri.parse(
-        'https://venmo.com/$kVenmoHandle?txn=pay&amount=${widget.amount}&note=$note');
+        'https://venmo.com/$kVenmoHandle?txn=pay&amount=$amount&note=$note');
   }
+
+  /// The amount THIS registrant currently owes, combining the base
+  /// [PaymentScreen.amount] (unadjusted config fee) with any live manual
+  /// admin adjustment on [sub] (Infinite Insiders §6/Task F1) — an owner
+  /// edit made in the Manager shows up here instantly since [_submission]
+  /// is a live stream.
+  num _effectiveAmount(RegSubmission? sub) => adjustedOwed(
+        baseFee: widget.amount.toDouble(),
+        adjustedFee: sub?.adjustedFee,
+        discountPct: sub?.discountPct,
+      );
 
   void _exit() {
     if (widget.fromSubmission) {
@@ -212,7 +226,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           // _processing flag, killing the double-pay window for good.
           if (sub != null && sub.paid) return _paidBody(context);
           if (_processing) return _processingBody(context);
-          return _unpaidBody(context);
+          return _unpaidBody(context, sub);
         },
       ),
     );
@@ -270,31 +284,21 @@ class _PaymentScreenState extends State<PaymentScreen> {
     );
   }
 
-  Widget _unpaidBody(BuildContext context) {
+  Widget _unpaidBody(BuildContext context, RegSubmission? sub) {
+    final effectiveAmount = _effectiveAmount(sub);
     final showCardButton = widget.config.stripe &&
-        widget.amount > 0 &&
+        effectiveAmount > 0 &&
         _publishableKey != null &&
         _publishableKey!.isNotEmpty;
     final cardUnavailable = widget.config.stripe &&
-        widget.amount > 0 &&
+        effectiveAmount > 0 &&
         _publishableKey != null &&
         _publishableKey!.isEmpty;
 
     return ListView(
       padding: const EdgeInsets.all(15),
       children: [
-        Card(
-          elevation: 2,
-          child: ListTile(
-            leading: const Icon(Icons.attach_money),
-            title: Text('\$${widget.amount}',
-                style: Theme.of(context).textTheme.headlineSmall),
-            subtitle: Text([
-              widget.config.label,
-              if (widget.config.feeNote.isNotEmpty) widget.config.feeNote,
-            ].join(' — ')),
-          ),
-        ),
+        _amountCard(context, sub, effectiveAmount),
         const SizedBox(height: 15),
         if (showCardButton) ...[
           SizedBox(
@@ -342,7 +346,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
               label:
                   const Text('Pay with Venmo', style: TextStyle(fontSize: 18)),
               onPressed: () async {
-                await launchUrl(_venmoUri,
+                await launchUrl(_venmoUri(effectiveAmount),
                     mode: LaunchMode.externalApplication);
               },
             ),
@@ -396,4 +400,81 @@ class _PaymentScreenState extends State<PaymentScreen> {
       ],
     );
   }
+
+  /// The amount card: a plain total when unadjusted (unchanged from before
+  /// Infinite Insiders), or an itemized Registration fee / Adjusted by
+  /// Infinite Sports / Total due breakdown the instant an admin manually
+  /// adjusts this submission's payment in the Manager — [_submission] is a
+  /// live stream, so no refresh is needed to see it (spec §6).
+  Widget _amountCard(
+      BuildContext context, RegSubmission? sub, num effectiveAmount) {
+    final mutedColor = Theme.of(context).textTheme.bodySmall?.color;
+    if (sub == null || !sub.isAdjusted) {
+      return Card(
+        elevation: 2,
+        child: ListTile(
+          leading: const Icon(Icons.attach_money),
+          title: Text('\$${widget.amount}',
+              style: Theme.of(context).textTheme.headlineSmall),
+          subtitle: Text([
+            widget.config.label,
+            if (widget.config.feeNote.isNotEmpty) widget.config.feeNote,
+          ].join(' — ')),
+        ),
+      );
+    }
+
+    final baseFee = widget.amount;
+    final discount = baseFee - effectiveAmount;
+    return Card(
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text([
+              widget.config.label,
+              if (widget.config.feeNote.isNotEmpty) widget.config.feeNote,
+            ].join(' — '), style: TextStyle(color: mutedColor)),
+            const SizedBox(height: 12),
+            _amountRow(context, 'Registration fee', _money(baseFee)),
+            const SizedBox(height: 4),
+            _amountRow(
+                context, 'Adjusted by Infinite Sports', '−${_money(discount)}',
+                muted: true),
+            const Divider(height: 20),
+            _amountRow(context, 'Total due', _money(effectiveAmount),
+                bold: true),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _amountRow(BuildContext context, String label, String value,
+      {bool bold = false, bool muted = false}) {
+    final color =
+        muted ? Theme.of(context).textTheme.bodySmall?.color : null;
+    final style = (bold
+            ? Theme.of(context).textTheme.titleMedium
+            : Theme.of(context).textTheme.bodyLarge)
+        ?.copyWith(
+      fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+      color: color,
+    );
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: style),
+        Text(value, style: style),
+      ],
+    );
+  }
+
+  /// Two-decimal dollar formatting for the itemized breakdown only — the
+  /// plain (unadjusted) amount display above keeps its existing bare
+  /// '\$${widget.amount}' style so this change stays scoped to the new
+  /// adjustment UI.
+  String _money(num n) => '\$${n.toStringAsFixed(2)}';
 }
