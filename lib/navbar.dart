@@ -14,6 +14,7 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
 import 'package:infinite_sports_flutter/playerpage.dart';
+import 'package:infinite_sports_flutter/profile/profile_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
@@ -376,6 +377,7 @@ class _NavBarState extends State<NavBar> {
                             print(FirebaseAuth.instance.currentUser);
                             await auth.signOut();
                             print("Signed out");
+                            ProfilePage.clearCareerCache();
                             signedIn = false;
                             if (mounted) setState(() {});
                           },
