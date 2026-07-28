@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/profile_stat_priority.dart';
@@ -69,7 +71,14 @@ class ProfilePage extends StatefulWidget {
   /// defaults, so tests can pump the tab scaffold without Firebase.
   final Future<int> Function()? loadOverride;
 
-  const ProfilePage({super.key, required this.uid, this.loadOverride})
+  /// Test seam for phase 2 (career), mirroring [loadOverride]: when set, the
+  /// career-dependent sections stay in their loading state until this future
+  /// resolves. Only observed when [loadOverride] is also set; without it,
+  /// [loadOverride] alone resolves the full page (both phases at once).
+  final Future<void> Function()? careerLoadOverride;
+
+  const ProfilePage(
+      {super.key, required this.uid, this.loadOverride, this.careerLoadOverride})
       : _isLimited = false,
         _limitedName = '';
 
@@ -78,7 +87,8 @@ class ProfilePage extends StatefulWidget {
       : uid = '',
         _isLimited = true,
         _limitedName = name,
-        loadOverride = null;
+        loadOverride = null,
+        careerLoadOverride = null;
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -95,7 +105,12 @@ class _ProfilePageState extends State<ProfilePage>
   String _lastName = '';
   String _profileUrl = '';
   Map<dynamic, dynamic> _information = {};
+  Map<dynamic, dynamic> _rawPlayed = {};
   List<Award> _awards = [];
+
+  /// Phase 2 (career) done — career-dependent sections swap their skeletons
+  /// for real content once this flips.
+  bool _careerLoaded = false;
 
   // ── Share state ──────────────────────────────────────────────────────────
   /// Tracks which competition is currently selected in the Career tab, so the
@@ -230,7 +245,8 @@ class _ProfilePageState extends State<ProfilePage>
   Future<void> _extractAFCStats() async {
     try {
       final seasons = await getSoccerSeasons('AFC San Jose');
-      await Future.forEach(seasons, (season) async {
+      // Each season's roster read is independent — fetch them concurrently.
+      await Future.wait(seasons.map((season) async {
         final roster = await getSoccerRoster('AFC San Jose', season);
         roster.forEach((name, info) {
           if (info.uid == widget.uid) {
@@ -239,7 +255,7 @@ class _ProfilePageState extends State<ProfilePage>
                 (season, Colors.white, info);
           }
         });
-      });
+      }));
     } catch (_) {}
   }
 
@@ -549,17 +565,31 @@ class _ProfilePageState extends State<ProfilePage>
                       uid: widget.uid,
                       information: _information,
                       awards: _awards,
+                      careerLoading: !_careerLoaded,
                       current: _current,
                       currentTeamNumber: _currentTeamNumber,
                       currentStatsLabel: _currentStatsLabel,
                       currentStats: _headlineStats,
                     ),
-                    StatsTab(
-                      competitions: _competitions,
-                      initialIndex: _selectedStatsIndex,
-                      onCompetitionChanged: (i) =>
-                          setState(() => _selectedStatsIndex = i),
-                    ),
+                    _careerLoaded
+                        ? StatsTab(
+                            competitions: _competitions,
+                            initialIndex: _selectedStatsIndex,
+                            onCompetitionChanged: (i) =>
+                                setState(() => _selectedStatsIndex = i),
+                          )
+                        // Career data still loading — placeholders keep the
+                        // tab from flashing "No stats yet.".
+                        : ListView(
+                            padding: const EdgeInsets.all(16),
+                            children: const [
+                              SkeletonBox(width: 200, height: 20),
+                              SizedBox(height: 16),
+                              SkeletonBox(width: double.infinity, height: 110),
+                              SizedBox(height: 12),
+                              SkeletonBox(width: double.infinity, height: 110),
+                            ],
+                          ),
                   ],
                 ),
               ),
@@ -655,7 +685,9 @@ class _ProfilePageState extends State<ProfilePage>
     }
   }
 
-  // Ensure getProfileData runs only once even if FutureBuilder rebuilds.
+  // Ensure the profile load runs only once even if FutureBuilder rebuilds.
+  // The future gates ONLY phase 1 (identity) — phase 2 (career) runs behind
+  // it and fills the career-dependent sections in via setState when done.
   Future<int>? _loadFuture;
   Future<int> _loadOnce() {
     _loadFuture ??= _doLoad();
@@ -663,12 +695,34 @@ class _ProfilePageState extends State<ProfilePage>
   }
 
   Future<int> _doLoad() async {
-    if (widget.loadOverride != null) return widget.loadOverride!();
+    if (widget.loadOverride != null) {
+      final v = await widget.loadOverride!();
+      if (widget.careerLoadOverride != null) {
+        unawaited(_runCareerOverride());
+      } else {
+        // loadOverride alone resolves both phases at once — tests using only
+        // this seam expect the full page as soon as the future completes.
+        _careerLoaded = true;
+      }
+      return v;
+    }
     _tournamentAppearancesCache.clear();
-    return _getProfileDataWithCache();
+    // Phase 1 (fast): identity — the only thing gating first paint.
+    await _loadIdentity();
+    // Phase 2 (slow): career — deliberately not awaited.
+    unawaited(_loadCareer());
+    return 1;
   }
 
-  Future<int> _getProfileDataWithCache() async {
+  Future<void> _runCareerOverride() async {
+    await widget.careerLoadOverride!();
+    if (!mounted) return;
+    setState(() => _careerLoaded = true);
+  }
+
+  // ─── Phase 1: identity ────────────────────────────────────────────────────
+
+  Future<void> _loadIdentity() async {
     // ── 1. Load Users/{uid} ──────────────────────────────────────────────
     final ref = FirebaseDatabase.instance.ref();
     Map rawUser = {};
@@ -683,59 +737,15 @@ class _ProfilePageState extends State<ProfilePage>
     _information = (rawUser['Information'] is Map)
         ? rawUser['Information'] as Map
         : {};
+    // Kept for phase 2's league-appearance fetches.
+    _rawPlayed = (rawUser['Played'] is Map) ? rawUser['Played'] as Map : {};
 
-    // ── 2. Load league appearances ───────────────────────────────────────
+    // ── 2. Awards ────────────────────────────────────────────────────────
+    // Awards live inside the Users/{uid} node already fetched above, so the
+    // trophy cabinet renders with phase 1 at no extra read.
     try {
-      if (rawUser['Played'] is Map) {
-        await Future.forEach(
-            (rawUser['Played'] as Map).entries, (entry) async {
-          final sport = entry.key.toString();
-          final seasons = entry.value;
-          if (seasons is! Map) return;
-          await Future.forEach(seasons.entries, (entry2) async {
-            final seasonRaw = entry2.key.toString();
-            final team = entry2.value.toString();
-            final parts = seasonRaw.split(' ');
-            final seasonNum = parts.last;
-
-            if (sport == 'Futsal') {
-              _sportPositions[sport] =
-                  (_information['${sport}Position'] ?? '').toString();
-              await getAllFutsalLineUps(seasonNum);
-              _tableEntries['Futsal'] ??= {};
-              _tableEntries['Futsal']![seasonNum] =
-                  await _extractPlayerStats(sport, seasonNum, team);
-            } else if (sport == 'Basketball') {
-              _sportPositions[sport] =
-                  (_information['${sport}Position'] ?? '').toString();
-              await getAllBasketballLineUps(seasonNum);
-              _tableEntries['Basketball'] ??= {};
-              _tableEntries['Basketball']![seasonNum] =
-                  await _extractPlayerStats(sport, seasonNum, team);
-            } else if (sport == 'Flag Football') {
-              _sportPositions[sport] =
-                  (_information['${sport}Position'] ?? '').toString();
-              await getAllFlagFootballLineUps(seasonNum);
-              _tableEntries['Flag Football'] ??= {};
-              _tableEntries['Flag Football']![seasonNum] =
-                  await _extractPlayerStats(sport, seasonNum, team);
-            }
-          });
-        });
-      }
-    } catch (_) {}
-
-    // ── 3. AFC San Jose ──────────────────────────────────────────────────
-    try {
-      await _extractAFCStats();
-    } catch (_) {}
-
-    // ── 4. Awards ────────────────────────────────────────────────────────
-    try {
-      final awardsSnap =
-          await ref.child('Users/${widget.uid}/Awards').get();
-      if (awardsSnap.value is Map) {
-        _awards = (awardsSnap.value as Map)
+      if (rawUser['Awards'] is Map) {
+        _awards = (rawUser['Awards'] as Map)
             .entries
             .where((e) => e.value is Map)
             .map((e) => Award.fromMap(
@@ -747,13 +757,90 @@ class _ProfilePageState extends State<ProfilePage>
     } catch (_) {
       _awards = [];
     }
+  }
 
-    // ── 5. Tournament appearances ────────────────────────────────────────
+  // ─── Phase 2: career ──────────────────────────────────────────────────────
+
+  Future<void> _loadCareer() async {
     try {
-      final tournaments = await TournamentService.getAllTournaments();
-      // Run all tournament lookups concurrently for speed.
-      await Future.wait(tournaments.map((tournament) async {
+      // The three data groups are independent — run them concurrently.
+      await Future.wait([
+        _loadLeagueAppearances(),
+        _extractAFCStats(),
+        _loadTournamentAppearances(),
+      ]);
+      await _buildCareer();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _careerLoaded = true);
+    // Team-color extraction downloads + decodes a logo image; it must not
+    // hold up the career sections — the hero tint lands whenever it's ready.
+    unawaited(_resolveTeamColor());
+  }
+
+  Future<void> _loadLeagueAppearances() async {
+    try {
+      final tasks = <Future<void>>[];
+      for (final entry in _rawPlayed.entries) {
+        final sport = entry.key.toString();
+        final seasons = entry.value;
+        if (seasons is! Map) continue;
+        for (final entry2 in seasons.entries) {
+          final seasonRaw = entry2.key.toString();
+          final team = entry2.value.toString();
+          final parts = seasonRaw.split(' ');
+          final seasonNum = parts.last;
+          if (sport == 'Futsal' ||
+              sport == 'Basketball' ||
+              sport == 'Flag Football') {
+            _sportPositions[sport] =
+                (_information['${sport}Position'] ?? '').toString();
+            tasks.add(_loadLeagueSeason(sport, seasonNum, team));
+          }
+        }
+      }
+      // Distinct (sport, season) pairs write distinct lineup-cache keys
+      // (futsalLineups[season] etc. in utility.dart), so the fetches are
+      // safe to run in parallel instead of the old sequential forEach.
+      await Future.wait(tasks);
+    } catch (_) {}
+  }
+
+  Future<void> _loadLeagueSeason(
+      String sport, String seasonNum, String team) async {
+    try {
+      if (sport == 'Futsal') {
+        await getAllFutsalLineUps(seasonNum);
+      } else if (sport == 'Basketball') {
+        await getAllBasketballLineUps(seasonNum);
+      } else {
+        await getAllFlagFootballLineUps(seasonNum);
+      }
+      _tableEntries[sport] ??= {};
+      _tableEntries[sport]![seasonNum] =
+          await _extractPlayerStats(sport, seasonNum, team);
+    } catch (_) {}
+  }
+
+  Future<void> _loadTournamentAppearances() async {
+    try {
+      // TournamentsPlayed index (written by the Manager when a roster entry
+      // is linked): Users/<uid>/TournamentsPlayed/<tournamentId>: true.
+      // A missing/empty node means no appearances — roster entries without a
+      // linked UID never matched the old all-tournaments scan either — so
+      // nothing at all is fetched in that (common) case.
+      final idxSnap = await FirebaseDatabase.instance
+          .ref('Users/${widget.uid}/TournamentsPlayed')
+          .get();
+      final index = idxSnap.value;
+      if (index is! Map) return;
+      // Fetch only the indexed tournaments, concurrently. Ids that no longer
+      // resolve (deleted tournaments) are skipped.
+      await Future.wait(index.keys.map((id) async {
         try {
+          final tournament =
+              await TournamentService.getTournamentHeader(id.toString());
+          if (tournament == null) return;
           final teams = await TournamentService.getTeams(tournament.id);
           final rosters =
               await TournamentService.getRosters(tournament.id, teams);
@@ -780,7 +867,9 @@ class _ProfilePageState extends State<ProfilePage>
         } catch (_) {}
       }));
     } catch (_) {}
+  }
 
+  Future<void> _buildCareer() async {
     // ── 6. Build stints ──────────────────────────────────────────────────
     final stints = <ParticipationStint>[];
 
@@ -851,36 +940,6 @@ class _ProfilePageState extends State<ProfilePage>
 
     _stints = stints;
     _current = currentParticipation(_stints);
-
-    // ── 7. Team color ────────────────────────────────────────────────────
-    // Decode the logo image ONCE — only for the current stint.
-    // All _extractHelper calls above stored a placeholder color; we now
-    // replace it here with a single real ColorScheme decode.
-    if (_current != null && !_current!.isTournament) {
-      final entry = _tableEntries[_current!.sport]?[_current!.label];
-      if (entry != null && entry.$1.isNotEmpty) {
-        final logoUrl = entry.$3 is FutsalPlayer
-            ? (entry.$3 as FutsalPlayer).teamPath
-            : entry.$3 is BasketballPlayer
-                ? (entry.$3 as BasketballPlayer).teamPath
-                : entry.$3 is FlagFootballPlayer
-                    ? (entry.$3 as FlagFootballPlayer).teamPath
-                    : entry.$3 is SoccerPlayer
-                        ? (entry.$3 as SoccerPlayer).teamPath
-                        : '';
-        if (logoUrl.isNotEmpty) {
-          try {
-            final cs = await ColorScheme.fromImageProvider(
-                provider: NetworkImage(logoUrl));
-            _teamColor = cs.primary;
-          } catch (_) {
-            _teamColor = const Color(0xFFD00000);
-          }
-        } else {
-          _teamColor = const Color(0xFFD00000);
-        }
-      }
-    }
 
     // ── 8. Jersey number for current team ────────────────────────────────
     if (_current != null) {
@@ -985,8 +1044,39 @@ class _ProfilePageState extends State<ProfilePage>
       }
     }
     _headlineStats = _buildHeadlineStats();
+  }
 
-    return 1;
+  // ─── Team color (hero tint) ───────────────────────────────────────────────
+
+  // ── 7. Team color ──────────────────────────────────────────────────────
+  // Decode the logo image ONCE — only for the current stint. All the
+  // _extractHelper calls stored a placeholder color; this single real
+  // ColorScheme decode replaces it. Runs detached from phase 2 (network
+  // download + decode) and setStates the tint when it lands — the hero
+  // shows the brand color until then.
+  Future<void> _resolveTeamColor() async {
+    if (_current == null || _current!.isTournament) return;
+    final entry = _tableEntries[_current!.sport]?[_current!.label];
+    if (entry == null || entry.$1.isEmpty) return;
+    final logoUrl = entry.$3 is FutsalPlayer
+        ? (entry.$3 as FutsalPlayer).teamPath
+        : entry.$3 is BasketballPlayer
+            ? (entry.$3 as BasketballPlayer).teamPath
+            : entry.$3 is FlagFootballPlayer
+                ? (entry.$3 as FlagFootballPlayer).teamPath
+                : entry.$3 is SoccerPlayer
+                    ? (entry.$3 as SoccerPlayer).teamPath
+                    : '';
+    Color color = const Color(0xFFD00000);
+    if (logoUrl.isNotEmpty) {
+      try {
+        final cs = await ColorScheme.fromImageProvider(
+            provider: NetworkImage(logoUrl));
+        color = cs.primary;
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() => _teamColor = color);
   }
 }
 

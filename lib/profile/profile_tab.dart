@@ -4,6 +4,7 @@ import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/profile_stat_priority.dart';
 import 'package:infinite_sports_flutter/model/award.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:infinite_sports_flutter/widgets/trophy_cabinet.dart';
 
 /// The "Profile" tab of the tabbed player profile.
@@ -31,10 +32,14 @@ import 'package:infinite_sports_flutter/widgets/trophy_cabinet.dart';
 /// - [insiderStream] — test seam replacing the live `/Insiders/<uid>` stream
 ///   (mirrors the seam pattern in insider_dashboard_page.dart); defaults to
 ///   `InsiderService.watchMyInsider(uid)`.
+/// - [careerLoading] — the profile's slow career load (phase 2) is still in
+///   flight: the career-dependent sections render skeletons instead of
+///   claiming "not on a roster".
 class ProfileTab extends StatelessWidget {
   final String uid;
   final Map<dynamic, dynamic> information;
   final List<Award> awards;
+  final bool careerLoading;
   final ParticipationStint? current;
   final String? currentTeamNumber;
   final String? currentStatsLabel;
@@ -46,6 +51,7 @@ class ProfileTab extends StatelessWidget {
     required this.uid,
     required this.information,
     required this.awards,
+    this.careerLoading = false,
     this.current,
     this.currentTeamNumber,
     this.currentStatsLabel,
@@ -72,7 +78,8 @@ class ProfileTab extends StatelessWidget {
         if (_hasAnyInfo()) _infoCard(context),
         _insiderBox(context),
         _currentTeamCard(context),
-        if (current != null &&
+        if (!careerLoading &&
+            current != null &&
             currentStatsLabel != null &&
             currentStats.isNotEmpty)
           _currentSeasonStatsCard(context),
@@ -241,7 +248,7 @@ class ProfileTab extends StatelessWidget {
               // PR #10: only an ongoing (unfinished) competition earns
               // "Current Team" — a stint from a finished season/tournament
               // is shown as the player's last team instead.
-              (current == null || current!.isActive)
+              (careerLoading || current == null || current!.isActive)
                   ? 'Current Team'
                   : 'Last Team',
               style: Theme.of(context).textTheme.labelLarge?.copyWith(
@@ -254,7 +261,19 @@ class ProfileTab extends StatelessWidget {
                   ),
             ),
             const SizedBox(height: 10),
-            if (current == null)
+            if (careerLoading)
+              // Career load still in flight — a skeleton row in place of the
+              // team identity so the card never flashes "not on a roster".
+              const Row(
+                children: [
+                  SkeletonBox(width: 28, height: 28, radius: 14),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: SkeletonBox(width: double.infinity, height: 16),
+                  ),
+                ],
+              )
+            else if (current == null)
               Text(
                 'Not currently on a roster.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
