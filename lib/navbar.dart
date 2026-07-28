@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:infinite_sports_flutter/insiders/insiders_info_page.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
+import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -378,6 +379,7 @@ class _NavBarState extends State<NavBar> {
                             await auth.signOut();
                             print("Signed out");
                             ProfilePage.clearCareerCache();
+                            LeagueService.clearRostersSnapshotCache();
                             signedIn = false;
                             if (mounted) setState(() {});
                           },

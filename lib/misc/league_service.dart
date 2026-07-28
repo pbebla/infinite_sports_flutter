@@ -120,13 +120,75 @@ class LeagueService {
   /// Clears the in-memory ProfileUrl cache (rare — e.g. after sign-out).
   static void clearProfileUrlCache() => _profileUrlCache.clear();
 
+  /// Session-scoped last-known rosters per `sport/season` — seeds the
+  /// stream's first frame so a revisited season's Player Stats / Teams tabs
+  /// paint instantly while the live Line Ups snapshot loads behind it
+  /// (same stale-while-refresh idea as ProfilePage's career cache).
+  static final Map<String, Map<String, List<TournamentPlayer>>>
+      _rostersSnapshotCache = {};
+
+  /// Clears the roster snapshot cache (sign-out hygiene, tests).
+  static void clearRostersSnapshotCache() => _rostersSnapshotCache.clear();
+
   /// Live rosters (season-total player stats) from Line Ups, with each
   /// linked player's profile photo attached (P2.2: squad-row avatars).
+  ///
+  /// Emission order per Line Ups snapshot: stats FIRST (photos only from
+  /// the session cache), then — only when uncached ProfileUrls actually
+  /// needed fetching — a second emission with the freshly fetched photos.
+  /// Player stats must never wait on avatar round-trips.
   static Stream<Map<String, List<TournamentPlayer>>> watchRosters(
-      String sport, String season) {
-    return _ref('/$sport/$season/Line Ups').onValue.asyncMap((event) =>
-        _withProfileUrls(
-            leagueRostersFromLineupsNode(sport, event.snapshot.value)));
+      String sport, String season) async* {
+    final cacheKey = '$sport/$season';
+    final seed = _rostersSnapshotCache[cacheKey];
+    if (seed != null) yield seed;
+    await for (final event in _ref('/$sport/$season/Line Ups').onValue) {
+      final rosters =
+          leagueRostersFromLineupsNode(sport, event.snapshot.value);
+      final missing = _uncachedLinkedUids(rosters);
+      _substituteCachedPhotos(rosters);
+      _rostersSnapshotCache[cacheKey] = rosters;
+      yield rosters;
+      if (missing.isNotEmpty) {
+        final enriched = await _withProfileUrls(rosters);
+        _rostersSnapshotCache[cacheKey] = enriched;
+        yield enriched;
+      }
+    }
+  }
+
+  /// Linked uids whose ProfileUrl has never been resolved this session.
+  static Set<String> _uncachedLinkedUids(
+      Map<String, List<TournamentPlayer>> rosters) {
+    final uids = <String>{};
+    for (final players in rosters.values) {
+      for (final p in players) {
+        final uid = p.uid;
+        if (uid != null &&
+            uid.isNotEmpty &&
+            (p.photoUrl == null || p.photoUrl!.isEmpty) &&
+            !_profileUrlCache.containsKey(uid)) {
+          uids.add(uid);
+        }
+      }
+    }
+    return uids;
+  }
+
+  /// Applies already-cached ProfileUrls in place (no network).
+  static void _substituteCachedPhotos(
+      Map<String, List<TournamentPlayer>> rosters) {
+    rosters.forEach((team, players) {
+      for (var i = 0; i < players.length; i++) {
+        final p = players[i];
+        if (p.uid == null || p.uid!.isEmpty) continue;
+        if (p.photoUrl != null && p.photoUrl!.isNotEmpty) continue;
+        final cached = _profileUrlCache[p.uid!];
+        if (cached != null && cached.isNotEmpty) {
+          players[i] = p.copyWith(photoUrl: cached);
+        }
+      }
+    });
   }
 
   /// The exact photo-enrichment approach of TournamentService.getRosters
