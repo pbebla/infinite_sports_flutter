@@ -26,7 +26,10 @@ class ProfileHero extends StatelessWidget {
     final base = teamColor ?? brand;
     final darker = _darken(base, 0.35);
 
-    return Container(
+    // Animated so the team tint (which arrives with the profile's single
+    // career reveal) eases in instead of snapping.
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,

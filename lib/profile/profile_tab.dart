@@ -77,12 +77,22 @@ class ProfileTab extends StatelessWidget {
       children: [
         if (_hasAnyInfo()) _infoCard(context),
         _insiderBox(context),
-        _currentTeamCard(context),
-        if (!careerLoading &&
-            current != null &&
-            currentStatsLabel != null &&
-            currentStats.isNotEmpty)
-          _currentSeasonStatsCard(context),
+        // Career-dependent block: the skeleton→content swap fades (~250ms)
+        // so the reveal feels deliberate, not popped-in.
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 250),
+          child: Column(
+            key: ValueKey(careerLoading),
+            children: [
+              _currentTeamCard(context),
+              if (!careerLoading &&
+                  current != null &&
+                  currentStatsLabel != null &&
+                  currentStats.isNotEmpty)
+                _currentSeasonStatsCard(context),
+            ],
+          ),
+        ),
         TrophyCabinet(awards: awards),
       ],
     );

@@ -90,6 +90,11 @@ class ProfilePage extends StatefulWidget {
         loadOverride = null,
         careerLoadOverride = null;
 
+  /// Clears the session career cache (mirrors
+  /// TournamentService.clearProfileUrlCache). Call after a sign-out or when
+  /// profile data must be refetched; tests call it between cases.
+  static void clearCareerCache() => _careerCache.clear();
+
   @override
   State<ProfilePage> createState() => _ProfilePageState();
 }
@@ -571,25 +576,34 @@ class _ProfilePageState extends State<ProfilePage>
                       currentStatsLabel: _currentStatsLabel,
                       currentStats: _headlineStats,
                     ),
-                    _careerLoaded
-                        ? StatsTab(
-                            competitions: _competitions,
-                            initialIndex: _selectedStatsIndex,
-                            onCompetitionChanged: (i) =>
-                                setState(() => _selectedStatsIndex = i),
-                          )
-                        // Career data still loading — placeholders keep the
-                        // tab from flashing "No stats yet.".
-                        : ListView(
-                            padding: const EdgeInsets.all(16),
-                            children: const [
-                              SkeletonBox(width: 200, height: 20),
-                              SizedBox(height: 16),
-                              SkeletonBox(width: double.infinity, height: 110),
-                              SizedBox(height: 12),
-                              SkeletonBox(width: double.infinity, height: 110),
-                            ],
-                          ),
+                    // The skeleton→content swap fades (~250ms) so the reveal
+                    // feels deliberate, not popped-in.
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      child: _careerLoaded
+                          ? StatsTab(
+                              key: const ValueKey('career-content'),
+                              competitions: _competitions,
+                              initialIndex: _selectedStatsIndex,
+                              onCompetitionChanged: (i) =>
+                                  setState(() => _selectedStatsIndex = i),
+                            )
+                          // Career data still loading — placeholders keep the
+                          // tab from flashing "No stats yet.".
+                          : ListView(
+                              key: const ValueKey('career-skeleton'),
+                              padding: const EdgeInsets.all(16),
+                              children: const [
+                                SkeletonBox(width: 200, height: 20),
+                                SizedBox(height: 16),
+                                SkeletonBox(
+                                    width: double.infinity, height: 110),
+                                SizedBox(height: 12),
+                                SkeletonBox(
+                                    width: double.infinity, height: 110),
+                              ],
+                            ),
+                    ),
                   ],
                 ),
               ),
@@ -695,6 +709,17 @@ class _ProfilePageState extends State<ProfilePage>
   }
 
   Future<int> _doLoad() async {
+    // Session cache: a completed career load for this uid renders the FULL
+    // page from the first frame — no skeletons, no reveal needed. Phase 1's
+    // single cheap Users/{uid} read still refreshes identity behind it.
+    final cached = _careerCache[widget.uid];
+    if (cached != null) {
+      _restoreCareer(cached);
+      _careerLoaded = true;
+      if (widget.loadOverride != null) return widget.loadOverride!();
+      unawaited(_refreshIdentity());
+      return 1;
+    }
     if (widget.loadOverride != null) {
       final v = await widget.loadOverride!();
       if (widget.careerLoadOverride != null) {
@@ -716,9 +741,65 @@ class _ProfilePageState extends State<ProfilePage>
 
   Future<void> _runCareerOverride() async {
     await widget.careerLoadOverride!();
+    // Mirrors the real phase-2 completion, cache write included, so tests
+    // can exercise the cache-hit render path through the seams alone.
+    _careerCache[widget.uid] = _snapshotCareer();
     if (!mounted) return;
     setState(() => _careerLoaded = true);
   }
+
+  /// Cache-hit path only: refresh name/photo/info quietly and keep the
+  /// cached snapshot's identity fresh for the next visit.
+  Future<void> _refreshIdentity() async {
+    await _loadIdentity();
+    if (_careerCache.containsKey(widget.uid)) {
+      _careerCache[widget.uid] = _snapshotCareer();
+    }
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  void _restoreCareer(_CareerSnapshot snap) {
+    _firstName = snap.firstName;
+    _lastName = snap.lastName;
+    _profileUrl = snap.profileUrl;
+    _information = snap.information;
+    _awards = snap.awards;
+    _tableEntries
+      ..clear()
+      ..addAll(snap.tableEntries);
+    _sportPositions
+      ..clear()
+      ..addAll(snap.sportPositions);
+    _tournamentAppearancesCache
+      ..clear()
+      ..addAll(snap.tournamentAppearances);
+    _stints = snap.stints;
+    _competitions = snap.competitions;
+    _current = snap.current;
+    _teamColor = snap.teamColor;
+    _headlineStats = snap.headlineStats;
+    _currentTeamNumber = snap.currentTeamNumber;
+    _currentStatsLabel = snap.currentStatsLabel;
+  }
+
+  _CareerSnapshot _snapshotCareer() => _CareerSnapshot(
+        firstName: _firstName,
+        lastName: _lastName,
+        profileUrl: _profileUrl,
+        information: _information,
+        awards: List.of(_awards),
+        tableEntries: Map.of(_tableEntries),
+        sportPositions: Map.of(_sportPositions),
+        tournamentAppearances: List.of(_tournamentAppearancesCache),
+        stints: _stints,
+        competitions: _competitions,
+        current: _current,
+        teamColor: _teamColor,
+        headlineStats: _headlineStats,
+        currentTeamNumber: _currentTeamNumber,
+        currentStatsLabel: _currentStatsLabel,
+      );
 
   // ─── Phase 1: identity ────────────────────────────────────────────────────
 
@@ -762,6 +843,9 @@ class _ProfilePageState extends State<ProfilePage>
   // ─── Phase 2: career ──────────────────────────────────────────────────────
 
   Future<void> _loadCareer() async {
+    var ok = true;
+    Future<Color?>? colorFuture;
+    Color? color;
     try {
       // The three data groups are independent — run them concurrently.
       await Future.wait([
@@ -770,12 +854,34 @@ class _ProfilePageState extends State<ProfilePage>
         _loadTournamentAppearances(),
       ]);
       await _buildCareer();
-    } catch (_) {}
+      // Team color joins the same reveal: the logo decode gets a short grace
+      // window, then we reveal with the default tint and never flip it later
+      // — a late tint change is exactly the staged look the single reveal
+      // exists to avoid.
+      colorFuture = _resolveTeamColor();
+      color = await colorFuture.timeout(
+          const Duration(milliseconds: 300), onTimeout: () => null);
+      if (color != null) _teamColor = color;
+    } catch (_) {
+      // A failed load must not be cached — the next visit refetches.
+      ok = false;
+      _careerCache.remove(widget.uid);
+    }
+    if (ok) {
+      _careerCache[widget.uid] = _snapshotCareer();
+      if (color == null && colorFuture != null) {
+        // Too late for this visit's reveal, but cache hits render the tint
+        // from their first frame.
+        unawaited(colorFuture.then((c) {
+          final snap = _careerCache[widget.uid];
+          if (c != null && snap != null) snap.teamColor = c;
+        }));
+      }
+    }
     if (!mounted) return;
+    // Single reveal: career sections, hero stats and tint all land in this
+    // one setState.
     setState(() => _careerLoaded = true);
-    // Team-color extraction downloads + decodes a logo image; it must not
-    // hold up the career sections — the hero tint lands whenever it's ready.
-    unawaited(_resolveTeamColor());
   }
 
   Future<void> _loadLeagueAppearances() async {
@@ -809,6 +915,19 @@ class _ProfilePageState extends State<ProfilePage>
   Future<void> _loadLeagueSeason(
       String sport, String seasonNum, String team) async {
     try {
+      // Targeted read first: phase 1's Played map already names the player's
+      // team per (sport, season), so one team node is enough — the shared
+      // getAll* caches download the whole season's Line Ups (every team,
+      // every player) just to extract this one row.
+      final targeted = await _extractFromTeamNode(sport, seasonNum, team);
+      if (targeted != null) {
+        _tableEntries[sport] ??= {};
+        _tableEntries[sport]![seasonNum] = targeted;
+        return;
+      }
+      // Fallback (team renamed / legacy data / player transferred): the old
+      // whole-season fetch through the shared lineup caches, which also
+      // searches the season's other teams.
       if (sport == 'Futsal') {
         await getAllFutsalLineUps(seasonNum);
       } else if (sport == 'Basketball') {
@@ -820,6 +939,103 @@ class _ProfilePageState extends State<ProfilePage>
       _tableEntries[sport]![seasonNum] =
           await _extractPlayerStats(sport, seasonNum, team);
     } catch (_) {}
+  }
+
+  /// Reads `/<Sport>/<season>/Line Ups/<team>` (one team's node) and pulls
+  /// this player's row out of it. Returns null when the node is missing or
+  /// the player isn't on it — callers fall back to the whole-season path.
+  Future<(String, Color, Player)?> _extractFromTeamNode(
+      String sport, String season, String team) async {
+    try {
+      final snap = await FirebaseDatabase.instance
+          .ref('/$sport/$season/Line Ups/$team')
+          .get();
+      final node = snap.value;
+      if (node is! Map) return null;
+      for (final e in node.entries) {
+        final info = e.value;
+        if (info is! Map) continue;
+        if ((info['UID'] ?? '') != widget.uid) continue;
+        await getAllTeamLogo();
+        final logoUrl = (teamLogos[sport]?[season]?[team])?.toString() ?? '';
+        final player =
+            _parseLeaguePlayer(sport, e.key.toString(), info, logoUrl);
+        if (_firstName.isEmpty && player.name.contains(' ')) {
+          _firstName = player.name.split(' ')[0];
+          _lastName = player.name.split(' ').sublist(1).join(' ');
+        }
+        // Same placeholder color as _extractHelper — the real decode is the
+        // current stint's only, in _resolveTeamColor.
+        return (team, const Color(0xFFD00000), player);
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Profile-local player parsing for a targeted team read. Mirrors the
+  /// field mapping in utility.dart's `getAll<Sport>LineUps` parsers — those
+  /// stay untouched because other screens depend on their season caches.
+  Player _parseLeaguePlayer(
+      String sport, String name, Map info, String logoUrl) {
+    if (sport == 'Basketball') {
+      final p = BasketballPlayer();
+      p.number = (info['number'] ?? '0').toString();
+      p.uid = info['UID'] ?? '0';
+      p.name = name;
+      p.onePoint = info['OnePoint'] ?? 0;
+      p.twoPoints = info['TwoPoints'] ?? 0;
+      p.threePoints = info['ThreePoints'] ?? 0;
+      p.total = info['Total'] ??
+          p.onePoint + (p.twoPoints * 2) + (p.threePoints * 3);
+      p.misses = info['Misses'] ?? 0;
+      p.rebounds = info['Rebounds'] ?? 0;
+      p.getPercentage();
+      p.teamPath = logoUrl;
+      return p;
+    }
+    if (sport == 'Flag Football') {
+      final p = FlagFootballPlayer();
+      p.name = name;
+      p.number = info['number']?.toString() ?? '0';
+      p.uid = info['UID'] ?? '0';
+      // P4 FF stat-key fix (as in getAllFlagFootballLineUps): the Manager
+      // writes SHORT keys; the legacy long names still read for
+      // pre-Manager seasons.
+      p.receptions = info['REC'] ?? info['Receptions'] ?? 0;
+      p.receivingTouchdowns =
+          info['RECTD'] ?? info['Receiving Touchdowns'] ?? 0;
+      p.receptionMisses = info['RECMiss'] ?? info['Receiver Miss'] ?? 0;
+      p.passingTouchdowns =
+          info['PassTD'] ?? info['Passing Touchdowns'] ?? 0;
+      p.qbCompletions = info['QBComp'] ?? info['QB Completions'] ?? 0;
+      p.qbIncompletions = info['QBInc'] ?? info['QB Incomplete'] ?? 0;
+      p.interceptions = info['INT'] ?? info['Interceptions'] ?? 0;
+      p.flagPulls = info['FP'] ?? info['Flag Pulls'] ?? 0;
+      p.passBreakups = info['PBU'] ?? info['Pass Breakups'] ?? 0;
+      p.sacks = info['Sack'] ?? info['Sacks'] ?? 0;
+      p.passingInterceptions = info['PassINT'] ?? 0;
+      p.rushingTouchdowns = info['RushTD'] ?? 0;
+      p.interceptionTouchdowns = info['INTTD'] ?? 0;
+      p.pointAfterTouchdownMakes = info['PAT1'] ?? 0;
+      p.pointAfterTouchdownMisses = info['PAT1Miss'] ?? 0;
+      p.twoPointConversions = info['TwoPT'] ?? 0;
+      p.getCompletionPercentage();
+      p.getCatchRate();
+      p.teamPath = logoUrl;
+      return p;
+    }
+    // Futsal
+    final p = FutsalPlayer();
+    p.assists = info['Assists'] ?? 0;
+    p.goals = info['Goals'] ?? 0;
+    p.number = info['number'] ?? '0';
+    p.saves = info['Saves'] ?? 0;
+    p.uid = info['UID'] ?? '0';
+    p.name = name;
+    p.teamPath = logoUrl;
+    return p;
   }
 
   Future<void> _loadTournamentAppearances() async {
@@ -1051,13 +1267,12 @@ class _ProfilePageState extends State<ProfilePage>
   // ── 7. Team color ──────────────────────────────────────────────────────
   // Decode the logo image ONCE — only for the current stint. All the
   // _extractHelper calls stored a placeholder color; this single real
-  // ColorScheme decode replaces it. Runs detached from phase 2 (network
-  // download + decode) and setStates the tint when it lands — the hero
-  // shows the brand color until then.
-  Future<void> _resolveTeamColor() async {
-    if (_current == null || _current!.isTournament) return;
+  // ColorScheme decode replaces it. Never setStates on its own — _loadCareer
+  // races it against a grace window so the tint is part of the one reveal.
+  Future<Color?> _resolveTeamColor() async {
+    if (_current == null || _current!.isTournament) return null;
     final entry = _tableEntries[_current!.sport]?[_current!.label];
-    if (entry == null || entry.$1.isEmpty) return;
+    if (entry == null || entry.$1.isEmpty) return null;
     final logoUrl = entry.$3 is FutsalPlayer
         ? (entry.$3 as FutsalPlayer).teamPath
         : entry.$3 is BasketballPlayer
@@ -1075,9 +1290,55 @@ class _ProfilePageState extends State<ProfilePage>
         color = cs.primary;
       } catch (_) {}
     }
-    if (!mounted) return;
-    setState(() => _teamColor = color);
+    return color;
   }
+}
+
+// ─── Session career cache ─────────────────────────────────────────────────────
+// Mirrors TournamentService._profileUrlCache: in-memory, session-scoped,
+// keyed by uid. A completed career load is small, so revisiting a profile
+// renders the full page from the first frame while phase 1's single
+// Users/{uid} read refreshes identity behind it. Never persisted to disk.
+
+final Map<String, _CareerSnapshot> _careerCache = {};
+
+class _CareerSnapshot {
+  final String firstName;
+  final String lastName;
+  final String profileUrl;
+  final Map<dynamic, dynamic> information;
+  final List<Award> awards;
+  final Map<String, Map<String, (String, Color, Player)>> tableEntries;
+  final Map<String, String> sportPositions;
+  final List<_TournamentAppearance> tournamentAppearances;
+  final List<ParticipationStint> stints;
+  final List<CompetitionStats> competitions;
+  final ParticipationStint? current;
+
+  /// Mutable: a decode that missed the reveal's grace window still lands
+  /// here, so the NEXT visit renders the tint from its first frame.
+  Color? teamColor;
+  final List<({String label, String value})> headlineStats;
+  final String? currentTeamNumber;
+  final String? currentStatsLabel;
+
+  _CareerSnapshot({
+    required this.firstName,
+    required this.lastName,
+    required this.profileUrl,
+    required this.information,
+    required this.awards,
+    required this.tableEntries,
+    required this.sportPositions,
+    required this.tournamentAppearances,
+    required this.stints,
+    required this.competitions,
+    required this.current,
+    required this.teamColor,
+    required this.headlineStats,
+    required this.currentTeamNumber,
+    required this.currentStatsLabel,
+  });
 }
 
 // ─── Skeleton placeholder shown while the profile loads ──────────────────────
