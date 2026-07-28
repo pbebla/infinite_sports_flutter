@@ -239,86 +239,110 @@ class TournamentService {
   /// Also tries to load profileUrl from /Users/{uid}/ProfileUrl if uid exists
   /// and the player record doesn't already have a photoUrl.
   ///
-  /// Profile-photo URLs are fetched in PARALLEL via Future.wait and cached
-  /// in a session-scoped Map keyed by uid, so subsequent renders are instant.
-  /// Previously this was N+1 sequential per-player reads — ~120 round trips
-  /// for a 12-team x 10-player tournament before this page could render.
+  /// Composition of [getRostersNode] + [parseRosters] + [enrichRosterPhotos]
+  /// — callers that must not let avatar round-trips gate first paint (the
+  /// tournament detail page) use the pieces individually instead.
   static Future<Map<String, List<TournamentPlayer>>> getRosters(
     String tournamentId,
     Map<String, TournamentTeam> teams,
   ) async {
+    final rosters = parseRosters(await getRostersNode(tournamentId), teams);
+    return enrichRosterPhotos(rosters);
+  }
+
+  /// Raw /Rosters node fetch — split out so callers can run it in the same
+  /// Future.wait wave as the teams fetch its parsing depends on.
+  static Future<Object?> getRostersNode(String tournamentId) async {
     try {
-      final ref =
-          FirebaseDatabase.instance.ref('/Tournaments/$tournamentId/Rosters');
-      final snap = await ref.get();
-      if (snap.value == null) return {};
-      final data = snap.value as Map;
-
-      // First pass: build all TournamentPlayer instances and collect the
-      // set of uids whose ProfileUrl we still need to fetch.
-      final Map<String, List<TournamentPlayer>> result = {};
-      final Set<String> uidsToFetch = {};
-
-      data.forEach((teamKey, teamValue) {
-        if (teamValue is! Map) return;
-        final teamId = teamKey.toString();
-        final teamName = teams[teamId]?.name ?? teamId;
-        final List<TournamentPlayer> players = [];
-
-        teamValue.forEach((playerKey, playerValue) {
-          if (playerValue is! Map) return;
-          final player = TournamentPlayer.fromFirebase(
-            playerKey.toString(),
-            teamId,
-            teamName,
-            playerValue,
-          );
-          players.add(player);
-
-          final uid = player.uid;
-          if (uid != null &&
-              uid.isNotEmpty &&
-              (player.photoUrl == null || player.photoUrl!.isEmpty) &&
-              !_profileUrlCache.containsKey(uid)) {
-            uidsToFetch.add(uid);
-          }
-        });
-
-        result[teamId] = players;
-      });
-
-      // Second pass: fetch all missing ProfileUrls in parallel.
-      if (uidsToFetch.isNotEmpty) {
-        await Future.wait(uidsToFetch.map((uid) async {
-          try {
-            final urlSnap = await FirebaseDatabase.instance
-                .ref('/Users/$uid/ProfileUrl')
-                .get();
-            _profileUrlCache[uid] =
-                urlSnap.value?.toString() ?? '';
-          } catch (_) {
-            _profileUrlCache[uid] = '';
-          }
-        }));
-      }
-
-      // Third pass: substitute cached photoUrls into players where needed.
-      result.forEach((teamId, players) {
-        for (var i = 0; i < players.length; i++) {
-          final p = players[i];
-          if (p.uid == null || p.uid!.isEmpty) continue;
-          if (p.photoUrl != null && p.photoUrl!.isNotEmpty) continue;
-          final cached = _profileUrlCache[p.uid!];
-          if (cached != null && cached.isNotEmpty) {
-            players[i] = p.copyWith(photoUrl: cached);
-          }
-        }
-      });
-
-      return result;
+      final snap = await FirebaseDatabase.instance
+          .ref('/Tournaments/$tournamentId/Rosters')
+          .get();
+      return snap.value;
     } catch (_) {
-      return {};
+      return null;
     }
+  }
+
+  /// Pure parse + session-cached photo substitution — NO network. Photos
+  /// for linked players not yet in the session cache stay null here;
+  /// [enrichRosterPhotos] fills them behind the first paint (perceived-perf
+  /// rule: avatar fetches never gate stats).
+  static Map<String, List<TournamentPlayer>> parseRosters(
+    Object? raw,
+    Map<String, TournamentTeam> teams,
+  ) {
+    if (raw is! Map) return {};
+    final Map<String, List<TournamentPlayer>> result = {};
+    raw.forEach((teamKey, teamValue) {
+      if (teamValue is! Map) return;
+      final teamId = teamKey.toString();
+      final teamName = teams[teamId]?.name ?? teamId;
+      final List<TournamentPlayer> players = [];
+      teamValue.forEach((playerKey, playerValue) {
+        if (playerValue is! Map) return;
+        players.add(TournamentPlayer.fromFirebase(
+          playerKey.toString(),
+          teamId,
+          teamName,
+          playerValue,
+        ));
+      });
+      result[teamId] = players;
+    });
+    _substituteCachedRosterPhotos(result);
+    return result;
+  }
+
+  /// Fetches ProfileUrls for linked players still missing a photo — in
+  /// PARALLEL, session-cached, so subsequent renders are instant (before
+  /// the cache this was N+1 sequential reads, ~120 round trips for a
+  /// 12-team x 10-player tournament) — then substitutes them in.
+  static Future<Map<String, List<TournamentPlayer>>> enrichRosterPhotos(
+    Map<String, List<TournamentPlayer>> rosters,
+  ) async {
+    final Set<String> uidsToFetch = {};
+    for (final players in rosters.values) {
+      for (final p in players) {
+        final uid = p.uid;
+        if (uid != null &&
+            uid.isNotEmpty &&
+            (p.photoUrl == null || p.photoUrl!.isEmpty) &&
+            !_profileUrlCache.containsKey(uid)) {
+          uidsToFetch.add(uid);
+        }
+      }
+    }
+    if (uidsToFetch.isNotEmpty) {
+      await Future.wait(uidsToFetch.map((uid) async {
+        try {
+          final urlSnap = await FirebaseDatabase.instance
+              .ref('/Users/$uid/ProfileUrl')
+              .get();
+          _profileUrlCache[uid] = urlSnap.value?.toString() ?? '';
+        } catch (_) {
+          _profileUrlCache[uid] = '';
+        }
+      }));
+    }
+    _substituteCachedRosterPhotos(rosters);
+    return rosters;
+  }
+
+  /// Applies already-cached ProfileUrls in place (no network).
+  static void _substituteCachedRosterPhotos(
+    Map<String, List<TournamentPlayer>> rosters,
+  ) {
+    rosters.forEach((teamId, players) {
+      for (var i = 0; i < players.length; i++) {
+        final p = players[i];
+        if (p.uid == null || p.uid!.isEmpty) continue;
+        if (p.photoUrl != null && p.photoUrl!.isNotEmpty) continue;
+        final cached = _profileUrlCache[p.uid!];
+        if (cached != null && cached.isNotEmpty) {
+          players[i] = p.copyWith(photoUrl: cached);
+        }
+      }
+    });
   }
 
   /// Returns a flat list of all players across all teams for leaderboard use.

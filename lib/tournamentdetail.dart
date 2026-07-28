@@ -75,21 +75,23 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
 
   Future<void> _loadData() async {
     try {
+      // One parallel wave (was three sequential ones: header/teams/matches →
+      // rosters+avatars → config). The raw rosters node rides along and is
+      // parsed once teams land; avatar fetches never gate first paint.
       final results = await Future.wait([
         TournamentService.getTournamentHeader(widget.tournamentId),
         TournamentService.getTeams(widget.tournamentId),
         TournamentService.getMatches(widget.tournamentId),
+        TournamentService.getPredictionConfig(widget.tournamentId),
+        TournamentService.getRostersNode(widget.tournamentId),
       ]);
 
       final tournament = results[0] as Tournament?;
       final teams = results[1] as Map<String, TournamentTeam>;
       final matches = results[2] as List<TournamentMatch>;
+      final config = results[3] as PredictionConfig;
+      final rosters = TournamentService.parseRosters(results[4], teams);
 
-      final rosters =
-          await TournamentService.getRosters(widget.tournamentId, teams);
-
-      final config =
-          await TournamentService.getPredictionConfig(widget.tournamentId);
       final tabs = <Tab>[..._baseTabs];
       if (config.open) tabs.add(const Tab(text: 'Predict'));
 
@@ -105,6 +107,12 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
         _tabs = tabs;
         _predictIndex = config.open ? tabs.length - 1 : -1;
         _tabController = TabController(length: tabs.length, vsync: this);
+      });
+
+      // Avatars for linked players not yet in the session cache land in a
+      // single follow-up update behind the first paint.
+      TournamentService.enrichRosterPhotos(rosters).then((enriched) {
+        if (mounted) setState(() => _rosters = enriched);
       });
 
       // Keep matches live after the initial paint: scores, clock, standings and
