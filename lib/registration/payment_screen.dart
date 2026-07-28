@@ -176,9 +176,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
         paymentSheetParameters: SetupPaymentSheetParameters(
           paymentIntentClientSecret: clientSecret,
           merchantDisplayName: 'Infinite Sports',
-          googlePay: const PaymentSheetGooglePay(
+          googlePay: PaymentSheetGooglePay(
             merchantCountryCode: 'US',
-            testEnv: true, // flip to false for the production Stripe key
+            // Follows the configured key: test environment for pk_test,
+            // production for pk_live — no manual flip on go-live.
+            testEnv: publishableKey.startsWith('pk_test_'),
           ),
           // Apple Pay stays off until an Apple merchant identifier exists
           // (Stripe.merchantIdentifier) — passing applePay without one
