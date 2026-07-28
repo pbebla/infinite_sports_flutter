@@ -276,7 +276,8 @@ class _InsiderPromoCodeFieldState extends State<InsiderPromoCodeField> {
                   child: Text(
                     'Welcome back! This promo is for first-time players, so '
                     "the discount doesn't apply — but glad you're returning.",
-                    style: TextStyle(color: scheme.onSurfaceVariant),
+                    style: TextStyle(
+                        color: scheme.primary, fontWeight: FontWeight.bold),
                   ),
                 )
               else if (_outcome!.discountSource == 'first_timer_promo')
