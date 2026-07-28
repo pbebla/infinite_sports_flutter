@@ -435,7 +435,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
       return Card(
         elevation: 2,
         child: ListTile(
-          leading: const Icon(Icons.attach_money),
           title: Text('\$${widget.amount}',
               style: Theme.of(context).textTheme.headlineSmall),
           subtitle: Text([
