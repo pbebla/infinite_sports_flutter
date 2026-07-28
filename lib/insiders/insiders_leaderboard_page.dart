@@ -443,7 +443,11 @@ class _InsidersLeaderboardPageState extends State<InsidersLeaderboardPage> {
                   style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 18,
-                      color: scheme.primary)),
+                      // Zero referrals stays neutral; the brand color is
+                      // earned with the first counted referral.
+                      color: row.referralCount > 0
+                          ? scheme.primary
+                          : scheme.onSurface)),
             ],
           ),
         ),
