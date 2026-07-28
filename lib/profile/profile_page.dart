@@ -13,7 +13,6 @@ import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/player.dart';
 import 'package:infinite_sports_flutter/model/soccerplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
-import 'package:infinite_sports_flutter/profile/career_tab.dart';
 import 'package:infinite_sports_flutter/profile/profile_hero.dart';
 import 'package:infinite_sports_flutter/profile/profile_tab.dart';
 import 'package:infinite_sports_flutter/profile/stats_tab.dart';
@@ -65,7 +64,12 @@ class ProfilePage extends StatefulWidget {
   final bool _isLimited;
   final String _limitedName;
 
-  const ProfilePage({super.key, required this.uid})
+  /// Test seam: replaces the Firebase profile load when non-null (mirrors
+  /// the insiderStream seam on ProfileTab). Loaded fields keep their
+  /// defaults, so tests can pump the tab scaffold without Firebase.
+  final Future<int> Function()? loadOverride;
+
+  const ProfilePage({super.key, required this.uid, this.loadOverride})
       : _isLimited = false,
         _limitedName = '';
 
@@ -73,7 +77,8 @@ class ProfilePage extends StatefulWidget {
   const ProfilePage.limited({super.key, required String name})
       : uid = '',
         _isLimited = true,
-        _limitedName = name;
+        _limitedName = name,
+        loadOverride = null;
 
   @override
   State<ProfilePage> createState() => _ProfilePageState();
@@ -93,7 +98,7 @@ class _ProfilePageState extends State<ProfilePage>
   List<Award> _awards = [];
 
   // ── Share state ──────────────────────────────────────────────────────────
-  /// Tracks which competition is currently selected in the Stats tab, so the
+  /// Tracks which competition is currently selected in the Career tab, so the
   /// Share button on that tab knows which card to build.
   int _selectedStatsIndex = 0;
 
@@ -104,7 +109,6 @@ class _ProfilePageState extends State<ProfilePage>
   // ── Built data structures ───────────────────────────────────────────────
   List<ParticipationStint> _stints = [];
   List<CompetitionStats> _competitions = [];
-  List<CareerRow> _careerRows = [];
   ParticipationStint? _current;
   Color? _teamColor;
   List<({String label, String value})> _headlineStats = [];
@@ -114,7 +118,7 @@ class _ProfilePageState extends State<ProfilePage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
   }
 
   @override
@@ -327,63 +331,6 @@ class _ProfilePageState extends State<ProfilePage>
     return m;
   }
 
-  // ─── Career row summary strings ─────────────────────────────────────────
-
-  String _futsalSummary(Map<String, num> stats) {
-    final parts = <String>[];
-    if ((stats['goals'] ?? 0) > 0) parts.add('${stats['goals']}G');
-    if ((stats['assists'] ?? 0) > 0) parts.add('${stats['assists']}A');
-    if ((stats['saves'] ?? 0) > 0) parts.add('${stats['saves']} saves');
-    return parts.join(' · ');
-  }
-
-  String _basketballSummary(Map<String, num> stats) {
-    final pts = stats['points'] ?? 0;
-    final reb = stats['rebounds'] ?? 0;
-    final parts = <String>[];
-    if (pts > 0) parts.add('${pts}pts');
-    if (reb > 0) parts.add('${reb}reb');
-    return parts.join(' · ');
-  }
-
-  String _flagFootballSummary(Map<String, num> stats) {
-    final parts = <String>[];
-    final tds = (stats['receivingTouchdowns'] ?? 0) +
-        (stats['passTouchdowns'] ?? 0);
-    if (tds > 0) parts.add('${tds}TD');
-    if ((stats['receptions'] ?? 0) > 0) {
-      parts.add('${stats['receptions']}rec');
-    }
-    return parts.join(' · ');
-  }
-
-  String _soccerSummary(Map<String, num> stats) => _futsalSummary(stats);
-
-  String _tournamentSummary(Map<String, num> stats) {
-    final parts = <String>[];
-    if ((stats['goals'] ?? 0) > 0) parts.add('${stats['goals']}G');
-    if ((stats['assists'] ?? 0) > 0) parts.add('${stats['assists']}A');
-    if ((stats['saves'] ?? 0) > 0) parts.add('${stats['saves']} saves');
-    return parts.join(' · ');
-  }
-
-  // ─── Award matching ──────────────────────────────────────────────────────
-
-  bool _awardMatchesStint(Award award, ParticipationStint stint) {
-    if (stint.isTournament) {
-      return award.scopeType == 'tournament' &&
-          award.scopeId == stint.scopeId;
-    } else {
-      final sportKey = stint.sport.replaceAll(' ', '').toLowerCase();
-      final scopeMatch = award.scopeId.toLowerCase().contains(sportKey) ||
-          award.sport.toLowerCase().contains(stint.sport.toLowerCase()) ||
-          award.sport == stint.sport;
-      final seasonMatch = award.season == stint.label ||
-          award.season == 'Season ${stint.label}';
-      return award.scopeType == 'league' && scopeMatch && seasonMatch;
-    }
-  }
-
   // ─── Team logo URL helper ────────────────────────────────────────────────
 
   String _teamLogoUrl(String sport, String season, String team) {
@@ -505,75 +452,13 @@ class _ProfilePageState extends State<ProfilePage>
     }
   }
 
-  List<CareerRow> _buildCareerRows() {
-    final history = careerHistory(_stints);
-    final rows = <CareerRow>[];
-
-    for (final stint in history) {
-      if (stint.isTournament) {
-        final ta = _findTournamentAppearance(stint.scopeId);
-        final stats = ta != null ? _tournamentPlayerStatMap(ta.player) : {};
-        final stintTrophies = _awards
-            .where((a) => _awardMatchesStint(a, stint))
-            .map((a) => (name: a.name, icon: a.icon))
-            .toList();
-        rows.add(CareerRow(
-          teamLogoUrl: ta?.logoUrl ?? '',
-          title: '${stint.sport} · ${ta?.tournamentName ?? stint.label}',
-          summary: _tournamentSummary(Map<String, num>.from(stats)),
-          trophies: stintTrophies,
-          onTap: null,
-        ));
-      } else {
-        final sport = stint.sport;
-        final season = stint.label;
-        final team = stint.team;
-        final seasons = _tableEntries[sport];
-        // Per-season stats for THIS row (not the sport's career aggregate).
-        final seasonEntry = seasons?[season];
-        final Map<String, num> stats = seasonEntry != null
-            ? _buildStatMapForSingleEntry(sport, seasonEntry.$3)
-            : {};
-        final stintTrophies = _awards
-            .where((a) => _awardMatchesStint(a, stint))
-            .map((a) => (name: a.name, icon: a.icon))
-            .toList();
-        final logoUrl = _teamLogoUrl(sport, season, team);
-
-        String summary;
-        switch (sport) {
-          case 'Futsal':
-            summary = _futsalSummary(stats);
-          case 'Basketball':
-            summary = _basketballSummary(stats);
-          case 'Flag Football':
-            summary = _flagFootballSummary(stats);
-          case 'AFC San Jose':
-            summary = _soccerSummary(stats);
-          default:
-            summary = '';
-        }
-
-        rows.add(CareerRow(
-          teamLogoUrl: logoUrl,
-          title: '$sport · Season $season',
-          summary: summary,
-          trophies: stintTrophies,
-          onTap: null,
-        ));
-      }
-    }
-
-    return rows;
-  }
-
   _TournamentAppearance? _findTournamentAppearance(String tournamentId) {
     return _tournamentAppearancesCache
         .where((ta) => ta.tournamentId == tournamentId)
         .firstOrNull;
   }
 
-  // Cache set during getProfileData so _buildCareerRows can reference it.
+  // Cache set during getProfileData so later build steps can reference it.
   final List<_TournamentAppearance> _tournamentAppearancesCache = [];
 
   // ─── Build ────────────────────────────────────────────────────────────────
@@ -646,12 +531,12 @@ class _ProfilePageState extends State<ProfilePage>
                 fullName: fullName,
                 teamColor: _teamColor,
               ),
-              // Tab bar
+              // Tab bar — PR #10: Stats + Career merged into one Career tab
+              // (the enhanced StatsTab).
               TabBar(
                 controller: _tabController,
                 tabs: const [
                   Tab(text: 'Profile'),
-                  Tab(text: 'Stats'),
                   Tab(text: 'Career'),
                 ],
               ),
@@ -675,7 +560,6 @@ class _ProfilePageState extends State<ProfilePage>
                       onCompetitionChanged: (i) =>
                           setState(() => _selectedStatsIndex = i),
                     ),
-                    CareerTab(rows: _careerRows),
                   ],
                 ),
               ),
@@ -729,8 +613,8 @@ class _ProfilePageState extends State<ProfilePage>
             "$fullName's trophy cabinet — $n ${n == 1 ? 'trophy' : 'trophies'}"
             ' on Infinite Sports',
       );
-    } else if (tab == 1) {
-      // ── Stats tab → Stats card for currently selected competition ───────
+    } else {
+      // ── Career tab → Stats card for currently selected competition ──────
       if (_competitions.isEmpty) {
         ScaffoldMessenger.maybeOf(context)?.showSnackBar(
           const SnackBar(content: Text('No stats to share yet.')),
@@ -768,38 +652,6 @@ class _ProfilePageState extends State<ProfilePage>
         shareText:
             "$fullName · ${comp.label} — Infinite Sports",
       );
-    } else {
-      // ── Career tab → Career card ─────────────────────────────────────────
-      // Compute career headline totals.
-      final distinctSports = <String>{
-        for (final c in _competitions) c.sport,
-      };
-      final sportsPlayed = distinctSports.length;
-
-      // Total goals across all league/tournament stats.
-      int totalGoals = 0;
-      for (final c in _competitions) {
-        totalGoals += (c.stats['goals'] ?? 0).toInt();
-      }
-
-      final trophies = _awards.length;
-
-      final headlineTotals = <({String label, String value})>[
-        (label: 'Sports Played', value: '$sportsPlayed'),
-        if (totalGoals > 0) (label: 'Goals', value: '$totalGoals'),
-        (label: 'Trophies', value: '$trophies'),
-        (label: 'Seasons', value: '${_competitions.length}'),
-      ];
-
-      await shareProfileCard(
-        context,
-        ShareProfileCareerCard(
-          name: fullName,
-          photoUrl: _profileUrl,
-          headlineTotals: headlineTotals,
-        ),
-        shareText: "$fullName's career on Infinite Sports",
-      );
     }
   }
 
@@ -811,6 +663,7 @@ class _ProfilePageState extends State<ProfilePage>
   }
 
   Future<int> _doLoad() async {
+    if (widget.loadOverride != null) return widget.loadOverride!();
     _tournamentAppearancesCache.clear();
     return _getProfileDataWithCache();
   }
@@ -915,6 +768,7 @@ class _ProfilePageState extends State<ProfilePage>
                   finished: tournament.finished,
                   logoUrl: tournament.logoUrl ?? '',
                   teamName: player.teamName,
+                  teamLogoUrl: teams[entry.key]?.logoUrl ?? '',
                   position: player.position ?? '',
                   number: player.number ?? '',
                   player: player,
@@ -1079,10 +933,17 @@ class _ProfilePageState extends State<ProfilePage>
           label = '$sport · Season $seasonNum';
         }
 
+        // AFC entries store the season string in $1 (club, not a team map),
+        // so the club name itself is the team identity there.
+        final team =
+            sport == 'AFC San Jose' ? 'AFC San Jose' : seasonEntry.value.$1;
+
         competitions.add(CompetitionStats(
           label: label,
           sport: sport,
           position: position,
+          team: team,
+          teamLogoUrl: _teamLogoUrl(sport, seasonNum, team),
           stats: _buildStatMapForSingleEntry(sport, player),
           sortKey: sortKey,
         ));
@@ -1097,6 +958,8 @@ class _ProfilePageState extends State<ProfilePage>
         label: ta.tournamentName,
         sport: ta.sport,
         position: ta.position,
+        team: ta.teamName,
+        teamLogoUrl: ta.teamLogoUrl,
         stats: _tournamentPlayerStatMap(ta.player),
         sortKey: sortKey,
       ));
@@ -1122,9 +985,6 @@ class _ProfilePageState extends State<ProfilePage>
       }
     }
     _headlineStats = _buildHeadlineStats();
-
-    // ── 11. CareerRows ───────────────────────────────────────────────────
-    _careerRows = _buildCareerRows();
 
     return 1;
   }
@@ -1185,6 +1045,7 @@ class _TournamentAppearance {
   final bool finished;
   final String logoUrl;
   final String teamName;
+  final String teamLogoUrl;
   final String position;
   final String number;
   final TournamentPlayer player;
@@ -1197,6 +1058,7 @@ class _TournamentAppearance {
     required this.finished,
     required this.logoUrl,
     required this.teamName,
+    required this.teamLogoUrl,
     required this.position,
     required this.number,
     required this.player,

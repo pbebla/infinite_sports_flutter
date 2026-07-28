@@ -1,13 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/profile_stat_priority.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
-/// Data class representing a single competition entry in the Stats tab.
+/// Data class representing a single competition entry in the Career tab.
 /// Define here so Task 6 (ProfilePage) imports from this file.
 class CompetitionStats {
   final String label;    // e.g. "Futsal · Season 5" or "Summer Cup 2026"
   final String sport;    // e.g. "Futsal", "Basketball", "Flag Football"
   final String position; // raw position string (e.g. "GK", "Guard", "QB")
+  /// Team the player was on for this competition ('' when unknown).
+  final String team;
+  /// Resolved team logo URL ('' → no logo rendered, name only).
+  final String teamLogoUrl;
   final Map<String, num> stats; // statKey → value
   /// Higher = newer. Used by ProfilePage to sort competitions latest-first.
   final int sortKey;
@@ -16,6 +21,8 @@ class CompetitionStats {
     required this.label,
     required this.sport,
     required this.position,
+    this.team = '',
+    this.teamLogoUrl = '',
     required this.stats,
     this.sortKey = 0,
   });
@@ -34,10 +41,12 @@ IconData sportIcon(String sport) {
   return Icons.emoji_events;
 }
 
-/// The "Stats" tab of the tabbed player profile.
+/// The "Career" tab of the tabbed player profile (PR #10 — the former
+/// "Stats" tab, which absorbed the old career-history tab).
 ///
-/// A [DropdownButton] lets the user select a competition (default: index 0).
-/// The selected competition's stats are displayed ordered by
+/// A picker lets the user select a competition (default: index 0 = most
+/// recent) or "Show all", which stacks every competition on one page. The
+/// selected competition's stats are displayed ordered by
 /// [profileStatPriority], with human-readable labels.
 ///
 /// Empty [competitions] → "No stats yet." message.
@@ -50,7 +59,8 @@ class StatsTab extends StatefulWidget {
 
   /// Called whenever the user selects a different competition. The parent
   /// (ProfilePage) uses this to know which competition is active when the
-  /// user presses the Share button on the Stats tab.
+  /// user presses the Share button on the Career tab. Not called for
+  /// "Show all" — the share card keeps the last single selection.
   final ValueChanged<int>? onCompetitionChanged;
 
   const StatsTab({
@@ -66,6 +76,9 @@ class StatsTab extends StatefulWidget {
 
 class _StatsTabState extends State<StatsTab> {
   late int _selectedIndex;
+
+  /// "Show all" picker option: every competition stacked on one page.
+  bool _showAll = false;
 
   @override
   void initState() {
@@ -121,51 +134,85 @@ class _StatsTabState extends State<StatsTab> {
       );
     }
 
-    final comp = widget.competitions[_selectedIndex];
-
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
       children: [
         // Competition selector header
-        _competitionHeader(context, comp),
+        _competitionHeader(context),
         const SizedBox(height: 16),
-        // Stats card
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  comp.label,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  comp.position.isNotEmpty ? comp.position : comp.sport,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withValues(alpha: 0.55),
-                      ),
-                ),
-                const Divider(height: 20),
-                ..._buildStatRows(context, comp),
-              ],
+        if (_showAll)
+          // Every competition stacked — list order is the parent's
+          // newest-first sort, so the most recent card is on top.
+          for (var i = 0; i < widget.competitions.length; i++) ...[
+            if (i > 0) const SizedBox(height: 12),
+            _competitionCard(context, widget.competitions[i]),
+          ]
+        else
+          _competitionCard(context, widget.competitions[_selectedIndex]),
+      ],
+    );
+  }
+
+  /// One competition's stats card: label, team + position line, stat rows.
+  Widget _competitionCard(BuildContext context, CompetitionStats comp) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              comp.label,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
             ),
-          ),
+            const SizedBox(height: 4),
+            _teamPositionLine(context, comp),
+            const Divider(height: 20),
+            ..._buildStatRows(context, comp),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// "[logo] Lamassu · Defender" — team (with logo when one resolved) before
+  /// the position (PR #10). No team recorded → the old position/sport line.
+  /// A missing logo shows just the name — never a broken image or fallback.
+  Widget _teamPositionLine(BuildContext context, CompetitionStats comp) {
+    final style = Theme.of(context).textTheme.bodySmall?.copyWith(
+          color:
+              Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
+        );
+    if (comp.team.isEmpty) {
+      return Text(
+        comp.position.isNotEmpty ? comp.position : comp.sport,
+        style: style,
+      );
+    }
+    final text = comp.position.isNotEmpty
+        ? '${comp.team} · ${comp.position}'
+        : comp.team;
+    return Row(
+      children: [
+        if (comp.teamLogoUrl.isNotEmpty) ...[
+          TeamLogo(url: comp.teamLogoUrl, size: 18),
+          const SizedBox(width: 6),
+        ],
+        Flexible(
+          child: Text(text, style: style, overflow: TextOverflow.ellipsis),
         ),
       ],
     );
   }
 
-  /// Tappable header card that shows the selected competition and opens a
-  /// bottom-sheet picker when tapped.
-  Widget _competitionHeader(BuildContext context, CompetitionStats selected) {
+  /// Tappable header card that shows the current selection ("Show all" or a
+  /// single competition) and opens a bottom-sheet picker when tapped.
+  Widget _competitionHeader(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final selected =
+        _showAll ? null : widget.competitions[_selectedIndex];
     return InkWell(
       onTap: () => _openCompetitionPicker(context),
       borderRadius: BorderRadius.circular(12),
@@ -179,14 +226,14 @@ class _StatsTabState extends State<StatsTab> {
         child: Row(
           children: [
             Icon(
-              sportIcon(selected.sport),
+              selected != null ? sportIcon(selected.sport) : Icons.view_agenda,
               size: 22,
               color: colorScheme.primary,
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                selected.label,
+                selected?.label ?? 'All competitions',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
@@ -241,10 +288,38 @@ class _StatsTabState extends State<StatsTab> {
             Flexible(
               child: ListView.builder(
                 shrinkWrap: true,
-                itemCount: widget.competitions.length,
+                // +1 for the "Show all" entry at the top.
+                itemCount: widget.competitions.length + 1,
                 itemBuilder: (_, i) {
-                  final c = widget.competitions[i];
-                  final isSelected = i == _selectedIndex;
+                  if (i == 0) {
+                    final isSelected = _showAll;
+                    return ListTile(
+                      leading: Icon(
+                        Icons.view_agenda,
+                        color: isSelected
+                            ? Theme.of(sheetCtx).colorScheme.primary
+                            : null,
+                      ),
+                      title: Text(
+                        'Show all',
+                        style: TextStyle(
+                          fontWeight: isSelected
+                              ? FontWeight.w700
+                              : FontWeight.normal,
+                          color: isSelected
+                              ? Theme.of(sheetCtx).colorScheme.primary
+                              : null,
+                        ),
+                      ),
+                      selected: isSelected,
+                      onTap: () {
+                        setState(() => _showAll = true);
+                        Navigator.pop(sheetCtx);
+                      },
+                    );
+                  }
+                  final c = widget.competitions[i - 1];
+                  final isSelected = !_showAll && i - 1 == _selectedIndex;
                   return ListTile(
                     leading: Icon(
                       sportIcon(c.sport),
@@ -265,8 +340,11 @@ class _StatsTabState extends State<StatsTab> {
                     ),
                     selected: isSelected,
                     onTap: () {
-                      setState(() => _selectedIndex = i);
-                      widget.onCompetitionChanged?.call(i);
+                      setState(() {
+                        _showAll = false;
+                        _selectedIndex = i - 1;
+                      });
+                      widget.onCompetitionChanged?.call(i - 1);
                       Navigator.pop(sheetCtx);
                     },
                   );
