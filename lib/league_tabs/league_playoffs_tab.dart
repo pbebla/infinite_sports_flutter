@@ -16,6 +16,10 @@ class LeaguePlayoffsTab extends StatelessWidget {
   final String season;
   final void Function(TournamentMatch match) onMatchTap;
 
+  /// Team-tap audit (PR feedback): champion banner tap → the league team
+  /// page. The bracket boxes below stay match taps (owner-directed).
+  final void Function(String teamName)? onOpenTeam;
+
   const LeaguePlayoffsTab({
     super.key,
     required this.playoffs,
@@ -23,6 +27,7 @@ class LeaguePlayoffsTab extends StatelessWidget {
     required this.teams,
     required this.season,
     required this.onMatchTap,
+    this.onOpenTeam,
   });
 
   @override
@@ -48,9 +53,10 @@ class LeaguePlayoffsTab extends StatelessWidget {
 
   /// Fixed gold gradient + white text — reads identically in light and
   /// dark mode (dark-mode rule: fixed shades under white text).
+  /// Tapping it opens the champion's team page (team-tap audit).
   Widget _championBanner(BuildContext context, String champion) {
     final team = teams[champion];
-    return Container(
+    final banner = Container(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 4),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
@@ -92,6 +98,12 @@ class LeaguePlayoffsTab extends StatelessWidget {
           TeamLogo(url: team?.logoUrl, size: 38),
         ],
       ),
+    );
+    if (onOpenTeam == null) return banner;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => onOpenTeam!(champion),
+      child: banner,
     );
   }
 }

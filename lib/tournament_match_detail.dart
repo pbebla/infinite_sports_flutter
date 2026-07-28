@@ -15,6 +15,7 @@ import 'package:infinite_sports_flutter/tournament_tabs/match_facts_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_lineup_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart'
     show isBadgeLeagueSport;
+import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
 import 'package:infinite_sports_flutter/widgets/live_clock.dart';
 import 'package:infinite_sports_flutter/widgets/score_text.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
@@ -75,6 +76,23 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
     final dt = parseDatabaseDate(mmddyyyy);
     if (dt == null) return mmddyyyy;
     return DateFormat('EEEE, MMMM d, yyyy').format(dt);
+  }
+
+  /// Score-header team tap → that team's tournament page (team-tap audit,
+  /// PR feedback — league match page parity).
+  void _openTeam(String teamId) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TournamentTeamDetailPage(
+          teamId: teamId,
+          tournamentId: widget.tournamentId,
+          preloadedTeams: widget.teams,
+          preloadedRosters: widget.rosters,
+          sport: widget.sport,
+        ),
+      ),
+    );
   }
 
   Widget _buildScoreboardHeader(BuildContext context) {
@@ -159,6 +177,35 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
       return TeamLogo(url: team?.logoUrl, size: size);
     }
 
+    // Header team columns tap through to the team's tournament page
+    // (team-tap audit, PR feedback — league match page parity). Unresolved
+    // sides ('TBD'/bracket placeholders) stay untappable.
+    Widget teamColumn(TournamentTeam? team, String? fallbackId) {
+      final column = Column(
+        children: [
+          teamLogo(team),
+          const SizedBox(height: 6),
+          Text(
+            team?.name ?? fallbackId ?? 'TBD',
+            style: TextStyle(
+              color: fg,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+            maxLines: 2,
+          ),
+        ],
+      );
+      if (team == null) return column;
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _openTeam(team.id),
+        child: column,
+      );
+    }
+
     return Container(
       decoration: BoxDecoration(
         gradient: TournamentColors.headerGradient(context),
@@ -194,50 +241,14 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   // Team 1
-                  Expanded(
-                    child: Column(
-                      children: [
-                        teamLogo(team1),
-                        const SizedBox(height: 6),
-                        Text(
-                          team1?.name ?? _match.team1Id ?? 'TBD',
-                          style: TextStyle(
-                            color: fg,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                          ),
-                          textAlign: TextAlign.center,
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 2,
-                        ),
-                      ],
-                    ),
-                  ),
+                  Expanded(child: teamColumn(team1, _match.team1Id)),
                   // Score / VS
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     child: scoreWidget,
                   ),
                   // Team 2
-                  Expanded(
-                    child: Column(
-                      children: [
-                        teamLogo(team2),
-                        const SizedBox(height: 6),
-                        Text(
-                          team2?.name ?? _match.team2Id ?? 'TBD',
-                          style: TextStyle(
-                            color: fg,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                          ),
-                          textAlign: TextAlign.center,
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 2,
-                        ),
-                      ],
-                    ),
-                  ),
+                  Expanded(child: teamColumn(team2, _match.team2Id)),
                 ],
               ),
               // Date for non-live (scheduled/finished) matches. Location lives

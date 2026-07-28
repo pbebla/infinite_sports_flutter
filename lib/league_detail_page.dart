@@ -331,6 +331,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                     rosters: _rosters ?? const {},
                     sport: widget.sport,
                     onMatchTap: _openMatch,
+                    onTeamTap: (team) => _openTeam(team.id),
                     predictionsOpen: _predictionsOpen,
                     onOpenPredict: _predictionsOpen
                         ? () => _tabController.animateTo(_predictTabIndex)
@@ -351,6 +352,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                           teams: _teamsById,
                           season: widget.season,
                           onMatchTap: _openMatch,
+                          onOpenTeam: _openTeam,
                         ),
                   _rosters == null
                       ? _tabSkeleton()

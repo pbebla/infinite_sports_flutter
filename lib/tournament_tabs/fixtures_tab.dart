@@ -7,6 +7,7 @@ import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_match_detail.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
+import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
 import 'package:infinite_sports_flutter/widgets/live_clock.dart';
 import 'package:infinite_sports_flutter/widgets/score_text.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
@@ -39,6 +40,12 @@ class FixturesTab extends StatelessWidget {
   /// league match page). Default null keeps tournament behavior unchanged.
   final void Function(TournamentMatch match)? onMatchTap;
 
+  /// Team-tap audit (PR feedback): when set, tapping a team's name/logo on a
+  /// card calls this instead of pushing TournamentTeamDetailPage (league
+  /// hosts route to the league team page). Default null keeps tournament
+  /// behavior: resolvable teams open their tournament team page.
+  final void Function(TournamentTeam team)? onTeamTap;
+
   const FixturesTab({
     super.key,
     required this.matches,
@@ -49,6 +56,7 @@ class FixturesTab extends StatelessWidget {
     this.predictionsOpen = false,
     this.onOpenPredict,
     this.onMatchTap,
+    this.onTeamTap,
   });
 
   String _formatDate(String mmddyyyy) {
@@ -87,6 +95,31 @@ class FixturesTab extends StatelessWidget {
       case TournamentStage.unknown:
         return stage;
     }
+  }
+
+  /// Whether a team name/logo tap has somewhere to go: a host callback, or
+  /// a real tournament to push TournamentTeamDetailPage for. Hosts that pass
+  /// tournamentId '' without a callback (e.g. legacy-sport day views) keep
+  /// their team labels untappable.
+  bool get _canOpenTeam => onTeamTap != null || tournamentId.isNotEmpty;
+
+  void _openTeam(BuildContext context, TournamentTeam team) {
+    if (onTeamTap != null) {
+      onTeamTap!(team);
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TournamentTeamDetailPage(
+          teamId: team.id,
+          tournamentId: tournamentId,
+          preloadedTeams: teams,
+          preloadedRosters: rosters,
+          sport: sport,
+        ),
+      ),
+    );
   }
 
   Widget _buildMatchCard(
@@ -208,6 +241,24 @@ class FixturesTab extends StatelessWidget {
         ),
       ],
     );
+
+    // Team-tap audit (PR feedback): the name/logo is its own tap target
+    // opening the team page — the card tap still opens the match. Only real
+    // resolvable teams get one ('Seed #4'/'TBD' placeholders have no page).
+    if (team1 != null && _canOpenTeam) {
+      team1Widget = GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _openTeam(context, team1),
+        child: team1Widget,
+      );
+    }
+    if (team2 != null && _canOpenTeam) {
+      team2Widget = GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _openTeam(context, team2),
+        child: team2Widget,
+      );
+    }
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),

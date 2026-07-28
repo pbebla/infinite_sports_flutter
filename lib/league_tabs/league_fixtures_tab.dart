@@ -21,6 +21,10 @@ class LeagueFixturesTab extends StatefulWidget {
   final String sport;
   final void Function(TournamentMatch match)? onMatchTap;
 
+  /// Team-tap audit (PR feedback): forwarded to the shared [FixturesTab] so
+  /// a card's team name/logo tap opens the league team page.
+  final void Function(TournamentTeam team)? onTeamTap;
+
   /// Predict banner above the day's fixtures (tournament FixturesTab
   /// parity) — shown when the season's predictions are open.
   final bool predictionsOpen;
@@ -36,6 +40,7 @@ class LeagueFixturesTab extends StatefulWidget {
     required this.rosters,
     required this.sport,
     this.onMatchTap,
+    this.onTeamTap,
     this.predictionsOpen = false,
     this.onOpenPredict,
     this.now,
@@ -83,6 +88,7 @@ class _LeagueFixturesTabState extends State<LeagueFixturesTab> {
             tournamentId: '',
             sport: widget.sport,
             onMatchTap: widget.onMatchTap,
+            onTeamTap: widget.onTeamTap,
             predictionsOpen: widget.predictionsOpen,
             onOpenPredict: widget.onOpenPredict,
           ),

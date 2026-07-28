@@ -90,4 +90,20 @@ void main() {
     expect(find.text('Ashur'), findsOneWidget);
     expect(find.text('Babylon'), findsNothing);
   });
+
+  testWidgets('tapping a team name reports that team via onTeamTap',
+      (tester) async {
+    final tapped = <String>[];
+    await tester.pumpWidget(wrap(LeagueFixturesTab(
+      matches: twoDayMatches(),
+      teams: {'Ashur': leagueTeamStub('Ashur', null)},
+      rosters: const {},
+      sport: 'Futsal',
+      now: now,
+      onTeamTap: (team) => tapped.add(team.id),
+    )));
+    await tester.tap(find.text('Ashur'));
+    await tester.pump();
+    expect(tapped, ['Ashur']);
+  });
 }
