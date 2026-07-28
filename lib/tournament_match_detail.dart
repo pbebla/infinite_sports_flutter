@@ -317,7 +317,7 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                 ),
                 bottom: TabBar(
                   tabs: const [
-                    Tab(text: 'Facts'),
+                    Tab(text: 'Summary'),
                     Tab(text: 'Lineup')
                   ],
                   labelColor: TournamentColors.headerForeground(context),

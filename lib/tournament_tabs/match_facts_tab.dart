@@ -207,7 +207,8 @@ class MatchFactsTab extends StatelessWidget {
                         fontSize: 12,
                         color: Color(0xFF0A7D2C),
                         fontWeight: FontWeight.w600),
-                    overflow: TextOverflow.ellipsis),
+                    // PR #10: long names wrap instead of truncating.
+                    softWrap: true),
                 subOn,
                 isTeam1),
           if (subOff != null)
@@ -218,7 +219,7 @@ class MatchFactsTab extends StatelessWidget {
                         fontSize: 12,
                         color: Color(0xFFEF5350),
                         fontWeight: FontWeight.w600),
-                    overflow: TextOverflow.ellipsis),
+                    softWrap: true),
                 subOff,
                 isTeam1),
         ],
@@ -229,7 +230,7 @@ class MatchFactsTab extends StatelessWidget {
         Text(
           playerName,
           style: const TextStyle(fontSize: 12),
-          overflow: TextOverflow.ellipsis,
+          softWrap: true,
           textAlign: isTeam1 ? TextAlign.left : TextAlign.right,
         ),
         playerName,

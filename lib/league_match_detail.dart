@@ -421,7 +421,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
                 // Facts + Lineup tabs (parity with the tournament match page).
                 bottom: TabBar(
                   tabs: const [
-                    Tab(text: 'Facts'),
+                    Tab(text: 'Summary'),
                     Tab(text: 'Lineup'),
                   ],
                   labelColor: TournamentColors.headerForeground(context),

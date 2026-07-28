@@ -238,7 +238,12 @@ class ProfileTab extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Current Team',
+              // PR #10: only an ongoing (unfinished) competition earns
+              // "Current Team" — a stint from a finished season/tournament
+              // is shown as the player's last team instead.
+              (current == null || current!.isActive)
+                  ? 'Current Team'
+                  : 'Last Team',
               style: Theme.of(context).textTheme.labelLarge?.copyWith(
                     fontWeight: FontWeight.w800,
                     letterSpacing: 1.2,
