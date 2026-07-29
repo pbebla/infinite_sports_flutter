@@ -203,17 +203,20 @@ class FixturesTab extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Flexible(
-          child: Text(
-            name1,
-            style: TextStyle(
-              fontWeight: team1IsWinner ? FontWeight.bold : FontWeight.w600,
-              fontSize: 13,
-              color: Theme.of(context).colorScheme.onSurface,
+          // PR #10 round 2: long names scale the font down until they fit
+          // one line — no wrap, no ellipsis.
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight,
+            child: Text(
+              name1,
+              style: TextStyle(
+                fontWeight: team1IsWinner ? FontWeight.bold : FontWeight.w600,
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+              maxLines: 1,
             ),
-            textAlign: TextAlign.right,
-            // PR #10: never wrap to a second line on small screens.
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
           ),
         ),
         const SizedBox(width: 6),
@@ -227,16 +230,18 @@ class FixturesTab extends StatelessWidget {
         TeamLogo(url: team2?.logoUrl, size: 28),
         const SizedBox(width: 6),
         Flexible(
-          child: Text(
-            name2,
-            style: TextStyle(
-              fontWeight: team2IsWinner ? FontWeight.bold : FontWeight.w600,
-              fontSize: 13,
-              color: Theme.of(context).colorScheme.onSurface,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              name2,
+              style: TextStyle(
+                fontWeight: team2IsWinner ? FontWeight.bold : FontWeight.w600,
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+              maxLines: 1,
             ),
-            textAlign: TextAlign.left,
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
           ),
         ),
       ],

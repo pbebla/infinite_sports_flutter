@@ -73,7 +73,11 @@ class ProfileTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.only(bottom: 24),
+      // paddingOf().bottom carries the floating GlassNavBar's height when
+      // this page sits inside the extendBody home shell (PR #10 round 2:
+      // the bar was covering the last card).
+      padding:
+          EdgeInsets.only(bottom: 24 + MediaQuery.paddingOf(context).bottom),
       children: [
         if (_hasAnyInfo()) _infoCard(context),
         _insiderBox(context),

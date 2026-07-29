@@ -135,7 +135,9 @@ class _StatsTabState extends State<StatsTab> {
     }
 
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+      // Bottom inset clears the floating GlassNavBar (PR #10 round 2).
+      padding: EdgeInsets.fromLTRB(
+          16, 16, 16, 16 + MediaQuery.paddingOf(context).bottom),
       children: [
         // Competition selector header
         _competitionHeader(context),
