@@ -51,6 +51,12 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
   Map<String, List<TournamentPlayer>> _rosters = {};
   List<TournamentMatch> _matches = [];
   StreamSubscription<List<TournamentMatch>>? _matchesSub;
+  // Lag fix: the full-tournament aggregation used to run inside build (and
+  // per history row!) on every frame. Invalidated (_stats = null) only when
+  // matches/rosters change; computed at most once per data change.
+  ComputedTournamentStats? _stats;
+  ComputedTournamentStats get _computedStats => _stats ??=
+      computeTournamentStats(matches: _matches, rosters: _rosters);
   late TabController _tabController;
   late Future<List<Map<String, dynamic>>> _historyFuture;
   final Set<String> _expandedStats = {};
@@ -64,7 +70,10 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
     _loadData();
     _matchesSub = TournamentService.watchMatches(widget.tournamentId).listen((live) {
       if (!mounted) return;
-      setState(() => _matches = live);
+      setState(() {
+        _matches = live;
+        _stats = null;
+      });
     });
   }
 
@@ -89,6 +98,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
         _team = teams[widget.teamId];
         _players = players;
         _rosters = rosters;
+        _stats = null;
         _isLoading = false;
         _loadError = null;
       });
@@ -412,9 +422,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                           entry['tournamentId']?.toString() ==
                               widget.tournamentId;
                       final live = isCurrent
-                          ? computeTournamentStats(
-                                  matches: _matches, rosters: _rosters)
-                              .standingFor(widget.teamId)
+                          ? _computedStats.standingFor(widget.teamId)
                           : null;
                       final w = live?.w ?? (entry['wins'] as int? ?? 0);
                       final d = live?.d ?? (entry['draws'] as int? ?? 0);
@@ -671,7 +679,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
     ];
     final categories = categoriesBySport[widget.sport] ?? futsalCategories;
 
-    final stats = computeTournamentStats(matches: _matches, rosters: _rosters);
+    final stats = _computedStats;
     int getValue(TournamentPlayer p, String stat) =>
         stats.statByName(p.teamId, p.name, stat);
 
@@ -871,7 +879,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
   Widget _buildSeasonRecord(BuildContext context) {
     if (_team == null) return const SizedBox.shrink();
 
-    final computed = computeTournamentStats(matches: _matches, rosters: _rosters);
+    final computed = _computedStats;
     final s = computed.standingFor(widget.teamId);
 
     final stats = [

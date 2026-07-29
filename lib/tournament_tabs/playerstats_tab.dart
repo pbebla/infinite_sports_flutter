@@ -284,15 +284,14 @@ class _PlayerStatsTabState extends State<PlayerStatsTab> {
                       : null,
                   child: Text(
                     player.teamName,
+                    // Owner rule: tappable team names stay undecorated —
+                    // never underline (too busy).
                     style: TextStyle(
                       fontSize: 11,
                       color: Theme.of(context)
                           .colorScheme
                           .onSurface
                           .withValues(alpha: 0.55),
-                      decoration: (widget.tournamentId != null && team != null)
-                          ? TextDecoration.underline
-                          : null,
                     ),
                   ),
                 ),

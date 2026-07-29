@@ -33,6 +33,22 @@ class LeaguePlayerStatsTab extends StatefulWidget {
 class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
   final Set<String> _expanded = {};
 
+  // Lag fix: leaders were re-sorted per category on every rebuild (parent
+  // live streams + tab swipes). Cached until the rosters instance changes.
+  Map<String, List<TournamentPlayer>>? _leadersCache;
+  List<TournamentPlayer> _leaders(String stat) =>
+      (_leadersCache ??= {})[stat] ??=
+          sortedLeagueLeaders(widget.rosters, stat);
+
+  @override
+  void didUpdateWidget(LeaguePlayerStatsTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.rosters, widget.rosters) ||
+        oldWidget.sport != widget.sport) {
+      _leadersCache = null;
+    }
+  }
+
   /// label → statByName key → statIconAsset key ('' = no icon, matching
   /// the tournament tab's iconless Clean Sheets). Per-sport, fan-side by
   /// convention (see top_stats.dart header) — the config twin carries no
@@ -83,8 +99,8 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
 
   @override
   Widget build(BuildContext context) {
-    final anyStats = _categories.any(
-        (c) => sortedLeagueLeaders(widget.rosters, c['stat']!).isNotEmpty);
+    final anyStats =
+        _categories.any((c) => _leaders(c['stat']!).isNotEmpty);
     if (!anyStats) {
       return const Center(child: Text('No player stats yet'));
     }
@@ -97,7 +113,7 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
         final stat = cat['stat']!;
         final icon = cat['icon']!;
         final suffix = cat['suffix'] ?? '';
-        final leaders = sortedLeagueLeaders(widget.rosters, stat);
+        final leaders = _leaders(stat);
         if (leaders.isEmpty) return const SizedBox.shrink();
         final isExpanded = _expanded.contains(stat);
         final displayed = isExpanded ? leaders : leaders.take(3).toList();
@@ -242,14 +258,14 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
                       : null,
                   child: Text(
                     player.teamName,
+                    // Owner rule: tappable team names stay undecorated —
+                    // never underline (too busy).
                     style: TextStyle(
                       fontSize: 11,
                       color: Theme.of(context)
                           .colorScheme
                           .onSurface
                           .withValues(alpha: 0.55),
-                      decoration:
-                          canOpenTeam ? TextDecoration.underline : null,
                     ),
                   ),
                 ),

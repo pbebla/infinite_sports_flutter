@@ -45,6 +45,11 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
   StreamSubscription<List<TournamentMatch>>? _matchesSub;
   StreamSubscription<Tournament?>? _tournamentSub;
   Map<String, List<TournamentPlayer>> _rosters = {};
+  // Memoized full-tournament aggregation (lag fix): computed only when
+  // matches/rosters actually change (_recomputeStats), NEVER in build —
+  // recomputing per frame made tab swipes and live-score ticks visibly
+  // janky on device.
+  ComputedTournamentStats? _stats;
 
   static const List<Tab> _baseTabs = [
     Tab(text: 'Fixtures'),
@@ -101,6 +106,11 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
         _teams = teams;
         _matches = matches;
         _rosters = rosters;
+        _stats = computeTournamentStats(
+          matches: matches,
+          rosters: rosters,
+          sport: tournament?.sport ?? 'Soccer',
+        );
         _isLoading = false;
         _loadError = null;
         _predictionConfig = config;
@@ -112,7 +122,15 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
       // Avatars for linked players not yet in the session cache land in a
       // single follow-up update behind the first paint.
       TournamentService.enrichRosterPhotos(rosters).then((enriched) {
-        if (mounted) setState(() => _rosters = enriched);
+        if (!mounted) return;
+        setState(() {
+          _rosters = enriched;
+          _stats = computeTournamentStats(
+            matches: _matches,
+            rosters: enriched,
+            sport: _tournament?.sport ?? 'Soccer',
+          );
+        });
       });
 
       // Keep matches live after the initial paint: scores, clock, standings and
@@ -121,7 +139,14 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
       _matchesSub =
           TournamentService.watchMatches(widget.tournamentId).listen((live) {
         if (!mounted || live.isEmpty) return;
-        setState(() => _matches = live);
+        setState(() {
+          _matches = live;
+          _stats = computeTournamentStats(
+            matches: live,
+            rosters: _rosters,
+            sport: _tournament?.sport ?? 'Soccer',
+          );
+        });
       });
 
       // Keep the header live too: name/status/sport/champion update in place
@@ -249,11 +274,14 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                 ];
               },
               body: Builder(builder: (context) {
-                final stats = computeTournamentStats(
-                  matches: _matches,
-                  rosters: _rosters,
-                  sport: _tournament?.sport ?? 'Soccer',
-                );
+                // Memoized in state — recomputing here ran the full
+                // aggregation on every frame of a tab swipe (lag fix).
+                final stats = _stats ??
+                    computeTournamentStats(
+                      matches: _matches,
+                      rosters: _rosters,
+                      sport: _tournament?.sport ?? 'Soccer',
+                    );
                 return TabBarView(
                 controller: _tabController!,
                 children: [
