@@ -42,7 +42,8 @@ void main() {
     expect(t['Gary']!.dpl, 1);
   });
 
-  test('non-counter events ignored; empty when no activity', () {
+  test('unrelated events never leak into goals/saves; empty when no activity',
+      () {
     final t = singleMatchPlayerTallies(m({
       '1': [
         {'foul': 'Sam'},
@@ -194,6 +195,62 @@ void main() {
           .firstWhere((c) => c['stat'] == 'catchPercentage');
       expect(cat['label'], 'Catch %');
       expect(cat['suffix'], '%');
+    });
+  });
+
+  group('Box Score — cards / fouls / turnovers / made-shot buckets', () {
+    test('league spellings: Foul, Yellow, Red, SecondYellow', () {
+      final t = singleMatchPlayerTallies(matchWithActivities(team1Activity: {
+        "5'": [
+          {'Foul': 'Sam'},
+          {'Yellow': 'Sam'},
+          {'Red': 'Kai'},
+          {'SecondYellow': 'Ann'},
+        ],
+      }));
+      expect(t['Sam']!.counts['fouls'], 1);
+      expect(t['Sam']!.counts['yellowCards'], 1);
+      expect(t['Kai']!.counts['redCards'], 1);
+      // SecondYellow counts as a red, never a first yellow (stats-engine
+      // convention: statKeys ['SecondYellow', 'Red']).
+      expect(t['Ann']!.counts['redCards'], 1);
+      expect(t['Ann']!.counts['yellowCards'], isNull);
+    });
+
+    test('tournament spellings: foul, yellow card, red card, second yellow',
+        () {
+      final t = singleMatchPlayerTallies(matchWithActivities(team1Activity: {
+        '5': [
+          {'foul': 'Sam'},
+          {'yellow card': 'Sam'},
+          {'red card': 'Kai'},
+          {'second yellow': 'Ann'},
+        ],
+      }));
+      expect(t['Sam']!.counts['fouls'], 1);
+      expect(t['Sam']!.counts['yellowCards'], 1);
+      expect(t['Kai']!.counts['redCards'], 1);
+      expect(t['Ann']!.counts['redCards'], 1);
+    });
+
+    test('basketball made-shot buckets ride alongside weighted points; '
+        'Turnover and Foul count', () {
+      final t = singleMatchPlayerTallies(matchWithActivities(team1Activity: {
+        "3'": [
+          {'OnePointer': 'Sam'},
+          {'OnePointer': 'Sam'},
+          {'TwoPointer': 'Sam'},
+          {'ThreePointer': 'Sam'},
+          {'Turnover': 'Sam'},
+          {'Foul': 'Sam'},
+        ],
+      }));
+      expect(t['Sam']!.counts['freeThrows'], 2);
+      expect(t['Sam']!.counts['twoPointers'], 1);
+      expect(t['Sam']!.counts['threePointers'], 1);
+      expect(t['Sam']!.byStat('points'), 7); // 2 + 2 + 3 — Leaders unchanged
+      expect(t['Sam']!.counts['turnovers'], 1);
+      expect(t['Sam']!.counts['fouls'], 1);
     });
   });
 
