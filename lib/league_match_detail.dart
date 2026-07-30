@@ -433,14 +433,13 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
                 // Summary + per-team box score tabs (parity with the
                 // tournament match page).
                 bottom: TabBar(
-                  // Scrollable: team names can be long (spec — team tabs
-                  // rely on the scrollable TabBar).
-                  isScrollable: true,
-                  tabAlignment: TabAlignment.center,
+                  // Owner feedback: the three tabs spread evenly across the
+                  // full width (scrollable clustered them in the center);
+                  // long team names scale down to fit their third.
                   tabs: [
                     const Tab(text: 'Summary'),
-                    Tab(text: team1?.name ?? match.team1Id ?? 'Team 1'),
-                    Tab(text: team2?.name ?? match.team2Id ?? 'Team 2'),
+                    teamNameTab(team1?.name ?? match.team1Id ?? 'Team 1'),
+                    teamNameTab(team2?.name ?? match.team2Id ?? 'Team 2'),
                   ],
                   labelColor: TournamentColors.headerForeground(context),
                   unselectedLabelColor:

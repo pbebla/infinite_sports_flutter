@@ -368,3 +368,14 @@ class _TeamBoxScoreTabState extends State<TeamBoxScoreTab> {
     );
   }
 }
+
+/// Match-page tab for a team name: the TabBar gives each of the three tabs
+/// an equal share of the full width (owner feedback — no center-clustered
+/// scrollable strip), and long team names scale down to one fitting line
+/// rather than wrapping or truncating.
+Tab teamNameTab(String name) => Tab(
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(name, maxLines: 1),
+      ),
+    );
