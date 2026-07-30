@@ -115,6 +115,39 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
   @override
   void initState() {
     super.initState();
+    _subscribeAll();
+  }
+
+  /// Cross-competition bleed fix (owner bug report 2026-07-30, tournament
+  /// twin in tournamentdetail.dart): all streams here bake widget.sport +
+  /// widget.season in at subscribe time, so an element reused with a
+  /// DIFFERENT season kept rendering (and live-updating) the previous
+  /// season. On an identity change: drop every subscription and every piece
+  /// of loaded state back to the skeleton seeds, then resubscribe.
+  @override
+  void didUpdateWidget(covariant LeagueDetailPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sport == widget.sport && oldWidget.season == widget.season) {
+      return;
+    }
+    _gamesSub?.cancel();
+    _standingsSub?.cancel();
+    _rostersSub?.cancel();
+    _playoffsSub?.cancel();
+    _configSub?.cancel();
+    setState(() {
+      _matches = null;
+      _standings = null;
+      _rosters = null;
+      _playoffs = null;
+      _playoffsLoaded = false;
+      _logos = {};
+      _startHour = 0;
+    });
+    _subscribeAll();
+  }
+
+  void _subscribeAll() {
     // First paint speed (P2.1): the 4 streams subscribe IMMEDIATELY with
     // default display seeds (startHour 0, no logos) instead of waiting two
     // round trips; the seeds re-apply below when they arrive.
