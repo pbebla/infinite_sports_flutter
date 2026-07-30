@@ -16,6 +16,12 @@ class TournamentPlayer {
   final int yellowCards;
   final int redCards;
 
+  /// Additive per-sport stats (P4): basketball/flag-football keys that
+  /// have no dedicated field ('points', 'rebounds', 'touchdowns', ...).
+  /// Futsal/tournament players leave it empty — statByName falls through
+  /// to it only for keys the switch doesn't know.
+  final Map<String, int> extraStats;
+
   const TournamentPlayer({
     required this.name,
     required this.teamId,
@@ -31,6 +37,7 @@ class TournamentPlayer {
     required this.cleanSheets,
     required this.yellowCards,
     required this.redCards,
+    this.extraStats = const {},
   });
 
   int get goalsAndAssists => goals + assists;
@@ -58,7 +65,7 @@ class TournamentPlayer {
       case 'goalsAndAssists':
         return goalsAndAssists;
       default:
-        return 0;
+        return extraStats[stat] ?? 0;
     }
   }
 
@@ -102,6 +109,7 @@ class TournamentPlayer {
       cleanSheets: cleanSheets,
       yellowCards: yellowCards,
       redCards: redCards,
+      extraStats: extraStats,
     );
   }
 }

@@ -1,0 +1,11 @@
+{
+  "functions": {
+    "source": "functions",
+    "predeploy": ["npm --prefix functions run build"]
+  },
+  "emulators": {
+    "functions": { "port": 5001 },
+    "database": { "port": 9000 },
+    "ui": { "enabled": false }
+  }
+}

@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:flutter_sticky_header/flutter_sticky_header.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
+import 'package:infinite_sports_flutter/misc/follow_store.dart';
+import 'package:infinite_sports_flutter/misc/categories.dart';
+import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 
@@ -31,12 +34,40 @@ class Settings extends StatefulWidget {
 class _SettingsState extends State<Settings> {
   TextEditingController? _emailController;
   String? _emailErrorText;
-  
+  final FollowStore _followStore = FollowStore();
+  final NotificationPrefs _notifPrefs = NotificationPrefs();
+  List<FollowedChannel> _follows = [];
+  bool _masterEnabled = true;
+  Set<String> _categoriesOn = {};
+  List<String> _allCategories = kDefaultCategories;
+
   @override
   void initState() {
     super.initState();
     _emailController = TextEditingController();
     _emailErrorText = "";
+    _loadNotificationSettings();
+  }
+
+  Future<void> _loadNotificationSettings() async {
+    final follows = await _followStore.follows();
+    final master = await _followStore.masterEnabled();
+    final allCategories = await getCategories();
+    final categories = <String>{};
+    for (final c in allCategories) {
+      if (await _notifPrefs.isCategoryOn(c)) categories.add(c);
+    }
+    if (!mounted) return;
+    setState(() {
+      _allCategories = allCategories;
+      // 'sport' follows are shown as the category toggles below; 'event'
+      // reminders are managed on each event page. Keep both out of the
+      // generic team/tournament/league follows list.
+      _follows =
+          follows.where((c) => c.kind != 'sport' && c.kind != 'event').toList();
+      _masterEnabled = master;
+      _categoriesOn = categories;
+    });
   }
 
   @override
@@ -58,8 +89,8 @@ class _SettingsState extends State<Settings> {
       appBar: AppBar(
         centerTitle: true,
         title: const Text("Settings"),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
+        backgroundColor: TournamentColors.headerBackground(context),
+        foregroundColor: TournamentColors.headerForeground(context),
       ),
       body: Padding(padding: const EdgeInsetsDirectional.all(10.0),
       child: CustomScrollView(slivers: [
@@ -97,17 +128,84 @@ class _SettingsState extends State<Settings> {
                     );
                   },),
                   const Divider(color: Colors.grey),
-                  ListTile(title: const Text("Auto Log In"), minTileHeight: 40, trailing: Checkbox(value: autoSignIn, onChanged: (value) async {
-                    SharedPreferences prefs = await SharedPreferences.getInstance();
-                    await prefs.setBool('autoSignIn', value!);
-                    setState(() {
-                      autoSignIn = value;
-                    });
-                  },),),
-                  const Divider(color: Colors.grey),
                 ]
               ),
             ), 
+          ),
+        ),
+        SliverStickyHeader(
+          header: const Text("Notifications"),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate(
+              [
+                const Divider(color: Colors.grey),
+                ListTile(
+                  title: const Text("All notifications"),
+                  minTileHeight: 40,
+                  trailing: Switch(
+                    value: _masterEnabled,
+                    onChanged: (value) async {
+                      await _followStore.setMasterEnabled(value);
+                      setState(() => _masterEnabled = value);
+                    },
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 4, 16, 0),
+                  child: Text('Sports & events you follow',
+                      style: TextStyle(fontSize: 13, color: Colors.grey)),
+                ),
+                for (final category in _allCategories)
+                  ListTile(
+                    minTileHeight: 40,
+                    title: Text(category),
+                    trailing: Switch(
+                      value: _categoriesOn.contains(category),
+                      onChanged: (value) async {
+                        await _notifPrefs.setCategory(category, value,
+                            uid: FirebaseAuth.instance.currentUser?.uid);
+                        setState(() {
+                          if (value) {
+                            _categoriesOn.add(category);
+                          } else {
+                            _categoriesOn.remove(category);
+                          }
+                        });
+                      },
+                    ),
+                  ),
+                const Divider(color: Colors.grey),
+                if (_follows.isEmpty)
+                  const ListTile(
+                    minTileHeight: 40,
+                    title: Text(
+                      "Turn on the bell on any tournament, league or team page to follow it here.",
+                      style: TextStyle(fontSize: 13, color: Colors.grey),
+                    ),
+                  )
+                else
+                  for (final channel in _follows)
+                    ListTile(
+                      minTileHeight: 40,
+                      title: Text(channel.label),
+                      subtitle: Text(
+                        // 'tournament' and 'league' (P3.3 season bell) both
+                        // mean every match; only 'team' is a single team.
+                        channel.kind == 'team' ? 'Team' : 'All matches',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      trailing: IconButton(
+                        tooltip: 'Stop alerts',
+                        icon: const Icon(Icons.notifications_active),
+                        onPressed: () async {
+                          await _followStore.unfollow(channel.topic);
+                          await _loadNotificationSettings();
+                        },
+                      ),
+                    ),
+                const Divider(color: Colors.grey),
+              ],
+            ),
           ),
         ),
         SliverStickyHeader(
@@ -122,8 +220,8 @@ class _SettingsState extends State<Settings> {
                       appBar: AppBar(
                         centerTitle: true,
                         title: const Text("Futsal"),
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor: Colors.white,
+                        backgroundColor: TournamentColors.headerBackground(context),
+                        foregroundColor: TournamentColors.headerForeground(context),
                       ),
                       body: ListView(
                         children: [
@@ -157,8 +255,8 @@ class _SettingsState extends State<Settings> {
                       appBar: AppBar(
                         centerTitle: true,
                         title: const Text("Basketball"),
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor: Colors.white,
+                        backgroundColor: TournamentColors.headerBackground(context),
+                        foregroundColor: TournamentColors.headerForeground(context),
                       ),
                       body: ListView(
                         children: [
@@ -190,8 +288,8 @@ class _SettingsState extends State<Settings> {
                       appBar: AppBar(
                         centerTitle: true,
                         title: const Text("Tournaments"),
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor: Colors.white,
+                        backgroundColor: TournamentColors.headerBackground(context),
+                        foregroundColor: TournamentColors.headerForeground(context),
                       ),
                       body: _buildIconLegend(context)
                     );
@@ -213,11 +311,11 @@ class _SettingsState extends State<Settings> {
                       appBar: AppBar(
                         centerTitle: true,
                         title: const Text("About Infinite Sports Association", style: TextStyle(fontSize: 16),),
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor: Colors.white,
+                        backgroundColor: TournamentColors.headerBackground(context),
+                        foregroundColor: TournamentColors.headerForeground(context),
                       ),
                       body: Column(children: [
-                        Image.asset("assets/infinite.png"),
+                        Image.asset('assets/infinite_mark.png', height: 120),
                         const SingleChildScrollView(child: Padding(padding: EdgeInsets.all(15), child: Text("Infinite Sports Association is a San Jose-based non-profit Assyrian organization that runs Soccer, Basketball and Volleyball leagues, games, and tournaments for the Assyrian community")))],)
                     );
                   },)); 
@@ -229,8 +327,8 @@ class _SettingsState extends State<Settings> {
                       appBar: AppBar(
                         centerTitle: true,
                         title: const Text("About NinevehWare"),
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor: Colors.white,
+                        backgroundColor: TournamentColors.headerBackground(context),
+                        foregroundColor: TournamentColors.headerForeground(context),
                       ),
                       body: Column(children: [
                         Image.asset("assets/ninevehware.png"),
@@ -246,8 +344,8 @@ class _SettingsState extends State<Settings> {
                       appBar: AppBar(
                         centerTitle: true,
                         title: const Text("Terms and Conditions"),
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor: Colors.white,
+                        backgroundColor: TournamentColors.headerBackground(context),
+                        foregroundColor: TournamentColors.headerForeground(context),
                       ),
                       body: WebViewStack(controller: controller,)
                     );
@@ -261,8 +359,8 @@ class _SettingsState extends State<Settings> {
                       appBar: AppBar(
                         centerTitle: true,
                         title: const Text("Privacy Poilicy"),
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor: Colors.white,
+                        backgroundColor: TournamentColors.headerBackground(context),
+                        foregroundColor: TournamentColors.headerForeground(context),
                       ),
                       body: WebViewStack(controller: controller,)
                     );
@@ -275,8 +373,8 @@ class _SettingsState extends State<Settings> {
                       appBar: AppBar(
                         centerTitle: true,
                         title: const Text("End-User License Agreement"),
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        foregroundColor: Colors.white,
+                        backgroundColor: TournamentColors.headerBackground(context),
+                        foregroundColor: TournamentColors.headerForeground(context),
                       ),
                       body: const SingleChildScrollView(child: Text("End-User License Agreement (EULA) of Infinite Sports App \n \n This End-User License Agreement (\"EULA\") is a legal agreement between you, Infinite Sports Association and NinevehWare \n \n This EULA agreement governs your acquisition and use of our Infinite Sports App software (\"Software\") directly from Infinite Sports Association and NinevehWare or indirectly through a Infinite Sports Association and NinevehWare authorized reseller or distributor (a \"Reseller\"). \n \n Please read this EULA agreement carefully before completing the installation process and using the Infinite Sports App software. It provides a license to use the Infinite Sports App software and contains warranty information and liability disclaimers. \n \n If you register for a free trial of the Infinite Sports App software, this EULA agreement will also govern that trial. By clicking \"accept\" or installing and/or using the Infinite Sports App software, you are confirming your acceptance of the Software and agreeing to become bound by the terms of this EULA agreement. \n \n If you are entering into this EULA agreement on behalf of a company or other legal entity, you represent that you have the authority to bind such entity and its affiliates to these terms and conditions. If you do not have such authority or if you do not agree with the terms and conditions of this EULA agreement, do not install or use the Software, and you must not accept this EULA agreement. \n \n This EULA agreement shall apply only to the Software supplied by Infinite Sports Association and NinevehWare herewith regardless of whether other software is referred to or described herein. The terms also apply to any Infinite Sports Association and NinevehWare updates, supplements, Internet-based services, and support services for the Software, unless other terms accompany those items on delivery. If so, those terms apply. \n \n License Grant \n \n Infinite Sports Association and NinevehWare hereby grants you a personal, non-transferable, non-exclusive licence to use the Infinite Sports App software on your devices in accordance with the terms of this EULA agreement. \n \n You are permitted to load the Infinite Sports App software (for example a PC, laptop, mobile or tablet) under your control. You are responsible for ensuring your device meets the minimum requirements of the Infinite Sports App software. \n \n You are not permitted to: \n \n \n - Edit, alter, modify, adapt, translate or otherwise change the whole or any part of the Software nor permit the whole or any part of the Software to be combined with or become incorporated in any other software, nor decompile, disassemble or reverse engineer the Software or attempt to do any such things \n - Reproduce, copy, distribute, resell or otherwise use the Software for any commercial purpose \n - Allow any third party to use the Software on behalf of or for the benefit of any third party \n - Use the Software in any way which breaches any applicable local, national or international law \n - use the Software for any purpose that Infinite Sports Association and NinevehWare considers is a breach of this EULA agreement \n \n \n Intellectual Property and Ownership \n \n Infinite Sports Association and NinevehWare shall at all times retain ownership of the Software as originally downloaded by you and all subsequent downloads of the Software by you. The Software (and the copyright, and other intellectual property rights of whatever nature in the Software, including any modifications made thereto) are and shall remain the property of Infinite Sports Association and NinevehWare. \n \n Infinite Sports Association and NinevehWare reserves the right to grant licences to use the Software to third parties. \n \n Termination \n \n This EULA agreement is effective from the date you first use the Software and shall continue until terminated. You may terminate it at any time upon written notice to Infinite Sports Association and NinevehWare. \n \n This EULA was created by eulatemplate.com for Infinite Sports App \n \n It will also terminate immediately if you fail to comply with any term of this EULA agreement. Upon such termination, the licenses granted by this EULA agreement will immediately terminate and you agree to stop all access and use of the Software. The provisions that by their nature continue and survive will survive any termination of this EULA agreement. \n \n Governing Law \n \n This EULA agreement, and any dispute arising out of or in connection with this EULA agreement, shall be governed by and construed in accordance with the laws of United States of America."),)
                     );

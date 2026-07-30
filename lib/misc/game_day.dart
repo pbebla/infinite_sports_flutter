@@ -39,3 +39,24 @@ String? currentGameDay(Iterable<String> dates, {DateTime? now}) {
   }
   return earliestFutureKey;
 }
+
+/// Default day for the league Fixtures date strip (League Experience P2.1),
+/// from [sortedDays] (ascending MMDDYYYY keys, e.g. from sortedMatchDays)
+/// and [liveDays] (days that currently have a live game):
+/// - a day with a live game wins (the earliest such day);
+/// - otherwise today / the earliest future day ([currentGameDay]);
+/// - otherwise the LAST day, so finished seasons open on the final round;
+/// - null only when [sortedDays] is empty.
+///
+/// [now] defaults to DateTime.now(); inject it in tests.
+String? defaultFixturesDay(
+  List<String> sortedDays,
+  Set<String> liveDays, {
+  DateTime? now,
+}) {
+  if (sortedDays.isEmpty) return null;
+  for (final day in sortedDays) {
+    if (liveDays.contains(day)) return day;
+  }
+  return currentGameDay(sortedDays, now: now) ?? sortedDays.last;
+}

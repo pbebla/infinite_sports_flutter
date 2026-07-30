@@ -6,12 +6,22 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:infinite_sports_flutter/login.dart';
+import 'package:infinite_sports_flutter/insiders/insiders_info_page.dart';
+import 'package:infinite_sports_flutter/misc/insider_service.dart';
+import 'package:infinite_sports_flutter/misc/league_service.dart';
+import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/insider.dart';
+import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
 import 'package:infinite_sports_flutter/playerpage.dart';
+import 'package:infinite_sports_flutter/profile/profile_page.dart';
+import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
+import 'package:infinite_sports_flutter/registration/registration_models.dart';
+import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/settings.dart';
 import 'package:infinite_sports_flutter/signup.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:provider/provider.dart';
 
 
@@ -34,6 +44,7 @@ class NavBar extends StatefulWidget {
 class _NavBarState extends State<NavBar> {
   String nextleague = "";
   String season = "";
+  Map<String, RegistrationConfig> openRegistrations = {};
   bool signUpsOpen = false;
   bool signUpEnabled = false;
   String signUpDetail = "";
@@ -41,11 +52,34 @@ class _NavBarState extends State<NavBar> {
   Future<void>? _loadProfilePic;
   Future<void>? _getSignUpStatus;
 
+  // Infinite Insiders (Task F2): live /Insiders/<uid> so an approval/decline
+  // that happens elsewhere flips this row's subtitle instantly, no refresh.
+  late final Stream<Insider?> _insiderStream;
+
   @override
   void initState() {
     super.initState();
     _loadProfilePic = retrieveProfilePic();
     _getSignUpStatus = setUp();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    _insiderStream = (signedIn && uid != null)
+        ? InsiderService.watchMyInsider(uid)
+        : Stream<Insider?>.value(null);
+  }
+
+  /// Drawer-row subtitle per Insider state (Task F2): null (no subtitle) when
+  /// there's no application yet — the row is just an entry point in that
+  /// case.
+  String? _insiderSubtitle(Insider? insider) {
+    if (insider == null) return null;
+    if (insider.isPending) return 'Application pending';
+    if (insider.isDeclined) return 'Application declined — tap to reapply';
+    if (insider.isSuspended) return 'Account suspended';
+    if (insider.isActive) {
+      if (insider.tier == 0) return 'Insider';
+      return '${tierName(insider.tier)} — ${tierDiscountPct(insider.tier)}% off';
+    }
+    return null;
   }
 
   Future<void> retrieveProfilePic() async {
@@ -58,6 +92,16 @@ class _NavBarState extends State<NavBar> {
   }
 
   Future<void> setUp() async {
+    // New-style registrations (registration redesign L1a) win when any is
+    // open; the legacy Sign Up Status int stays as the fallback below.
+    openRegistrations = await RegistrationService.getOpenRegistrations();
+    if (openRegistrations.isNotEmpty) {
+      signUpDetail = openRegistrations.length == 1
+          ? "Sign Up for ${openRegistrations.values.first.label}"
+          : "Sign Ups Open";
+      signUpsOpen = true;
+      return;
+    }
     var status  = await getSignUpStatus();
     switch (status) {
       case 0:
@@ -178,14 +222,13 @@ class _NavBarState extends State<NavBar> {
                       ));
                   },
                   child: FutureBuilder(
-                    future: _loadProfilePic, 
+                    future: _loadProfilePic,
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
-                        return Center(
-                            child: CircularProgressIndicator(
-                              color: Theme.of(context).colorScheme.primary,
-                            )
-                          );
+                        // Skeleton sweep (F3 Fix 2): matches the 100x100
+                        // CircleAvatar this resolves into below.
+                        return const SkeletonBox(
+                            width: 100, height: 100, radius: 50);
                       }
                       if (signedIn) {
                         if (FirebaseAuth.instance.currentUser?.photoURL?.isNotEmpty ?? false) {
@@ -200,23 +243,16 @@ class _NavBarState extends State<NavBar> {
                 ),
                 Text(FirebaseAuth.instance.currentUser?.displayName ?? "", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: Theme.of(context).textTheme.headlineMedium!.fontSize)),
               ],)),
-          Visibility(
-            visible: !signedIn,
-            child: ListTile(
-            leading: const ImageIcon(AssetImage("assets/profile.png"), color: Colors.white,),
-            title: const Text("Login or Sign Up", style: TextStyle(fontWeight: FontWeight.bold),),
-            textColor: Colors.white,
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const LoginPage())).then((value) => setState(() {
-              if (signedIn) {
-                Navigator.pop(context);
-              }
-            })),
-          ),),
+          // No "Login or Sign Up" branch here anymore: the auth wall
+          // guarantees `signedIn` is true for every screen this drawer can
+          // possibly be shown on (WelcomePage/LoginPage/CreateAccountPage
+          // have no drawer). See lib/main.dart AuthGate + lib/onboarding/
+          // welcome_page.dart.
           Visibility(
             visible: signedIn,
             child: ListTile(
             leading: const ImageIcon(AssetImage("assets/playerstats.png"), color: Colors.white,),
-            title: const Text("Stats", style: TextStyle(fontWeight: FontWeight.bold),),
+            title: const Text("Profile", style: TextStyle(fontWeight: FontWeight.bold),),
             textColor: Colors.white,
             onTap: () {
               Navigator.push(context, MaterialPageRoute(builder:(context) {
@@ -224,15 +260,50 @@ class _NavBarState extends State<NavBar> {
               },));
             },
           ),),
+          Visibility(
+            visible: signedIn,
+            child: ListTile(
+            leading: const Icon(Icons.interests, color: Colors.white),
+            title: const Text("Your Interests", style: TextStyle(fontWeight: FontWeight.bold),),
+            textColor: Colors.white,
+            onTap: () async {
+              // Open the favorites picker pre-filled with current choices.
+              final current = await NotificationPrefs().currentCategories();
+              if (!context.mounted) return;
+              Navigator.push(context, MaterialPageRoute(builder:(context) {
+                return FavoriteSportsPage(initial: current);
+              },));
+            },
+          ),),
+          Visibility(
+            visible: signedIn,
+            child: StreamBuilder<Insider?>(
+              stream: _insiderStream,
+              builder: (context, snapshot) {
+                final subtitle = _insiderSubtitle(snapshot.data);
+                return ListTile(
+                  leading: const Icon(Icons.diamond, color: Colors.white),
+                  title: const Text("Infinite Insiders", style: TextStyle(fontWeight: FontWeight.bold),),
+                  subtitle: subtitle != null
+                      ? Text(subtitle, style: const TextStyle(color: Colors.white70))
+                      : null,
+                  textColor: Colors.white,
+                  onTap: () {
+                    Navigator.push(context, MaterialPageRoute(builder: (context) {
+                      return const InsidersInfoPage();
+                    },));
+                  },
+                );
+              },
+            ),
+          ),
           FutureBuilder(
-            future: _getSignUpStatus, 
+            future: _getSignUpStatus,
             builder: (context, snapshot) {
               if(snapshot.connectionState == ConnectionState.waiting) {
-                return Center(
-                    child: CircularProgressIndicator(
-                      color: Theme.of(context).colorScheme.primary,
-                    )
-                  );
+                // Skeleton sweep (F3 Fix 2): placeholder for the ListTile
+                // this resolves into below.
+                return const SkeletonListTile();
               }
               signUpEnabled = signUpsOpen && signedIn;
               return ListTile(
@@ -243,6 +314,9 @@ class _NavBarState extends State<NavBar> {
                 textColor: Colors.white,
                 onTap: () {
                   Navigator.push(context, MaterialPageRoute(builder:(context) {
+                    if (openRegistrations.isNotEmpty) {
+                      return const RegistrationEntryPage();
+                    }
                     return Signup(nextleague: nextleague, season: season);
                   },));
                 },
@@ -283,24 +357,36 @@ class _NavBarState extends State<NavBar> {
               textColor: Colors.white,
               onTap: () async {
                 showDialog(
-                  context: context, 
-                  builder: (context) {
+                  context: context,
+                  builder: (dialogCtx) {
                     return AlertDialog(
                       title: const Text("Are you sure you want to logout?"),
                       actions: [
                         TextButton(
                           onPressed: () async {
+                            // Pop the dialog FIRST (auth-wall F2 fix): before
+                            // the wall, signing out replaced the whole
+                            // navigation stack, which incidentally closed
+                            // this dialog too. Now AuthGate just swaps its
+                            // content in place, so the dialog has to be
+                            // dismissed explicitly — and before the
+                            // sign-out, since AuthGate can swap the content
+                            // underneath (disposing this dialog's ancestors)
+                            // the instant `auth.signOut()` flips
+                            // authStateChanges().
+                            Navigator.pop(dialogCtx);
                             print(FirebaseAuth.instance.currentUser);
                             await auth.signOut();
                             print("Signed out");
+                            ProfilePage.clearCareerCache();
+                            LeagueService.clearRostersSnapshotCache();
                             signedIn = false;
-                            setState(() {});
-                            Navigator.pop(context);
-                          }, 
+                            if (mounted) setState(() {});
+                          },
                           child: const Text("Yes")
                         ),
                         TextButton(
-                          onPressed: () {Navigator.pop(context);}, 
+                          onPressed: () {Navigator.pop(dialogCtx);},
                           child: const Text("No")
                         ),
                       ],

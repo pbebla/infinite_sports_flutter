@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/basketballteaminfo.dart';
 import 'package:infinite_sports_flutter/model/flagfootballteaminfo.dart';
 import 'package:infinite_sports_flutter/model/futsalteaminfo.dart';
 import 'package:infinite_sports_flutter/model/soccerteaminfo.dart';
 import 'package:infinite_sports_flutter/model/teaminfo.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 
@@ -118,13 +121,11 @@ class _TablePageState extends State<TablePage> {
     if (widget.sport == "Futsal") {
       List<DataRow> teamsList = teams.entries
           .map((key) => DataRow(cells: [
-        DataCell(Image.network(key.value.imagePath,
-            width: windowsDefaultIconSize.toDouble()/1.25,
-            height: windowsDefaultIconSize.toDouble()/1.25,
-            alignment: FractionalOffset.center,
-            errorBuilder: (context, error, stackTrace) {
-              return SizedBox(width: 0, height: 0);
-            })),
+        DataCell(TeamLogo(
+            url: (key.value.imagePath as String).isEmpty
+                ? null
+                : key.value.imagePath,
+            size: windowsDefaultIconSize.toDouble()/1.25)),
         DataCell(Text(key.key.toString())),
         DataCell(Text((key.value as FutsalTeamInfo).gp.toString())),
         DataCell(Text(key.value.wins.toString())),
@@ -202,10 +203,11 @@ class _TablePageState extends State<TablePage> {
     } else if (widget.sport == "Flag Football") {
       List<DataRow> teamsList = teams.entries
           .map((key) => DataRow(cells: [
-        DataCell(Image.network(key.value.imagePath,
-            width: windowsDefaultIconSize.toDouble()/1.25,
-            height: windowsDefaultIconSize.toDouble()/1.25,
-            alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => const Text(""))),
+        DataCell(TeamLogo(
+            url: (key.value.imagePath as String).isEmpty
+                ? null
+                : key.value.imagePath,
+            size: windowsDefaultIconSize.toDouble()/1.25)),
         DataCell(Text(key.key.toString())),
         DataCell(Text(key.value.wins.toString())),
         DataCell(Text(key.value.losses.toString())),
@@ -243,10 +245,11 @@ class _TablePageState extends State<TablePage> {
     } else {
       List<DataRow> teamsList = teams.entries
           .map((key) => DataRow(cells: [
-        DataCell(Image.network(key.value.imagePath,
-            width: windowsDefaultIconSize.toDouble()/1.25,
-            height: windowsDefaultIconSize.toDouble()/1.25,
-            alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => const Text(""))),
+        DataCell(TeamLogo(
+            url: (key.value.imagePath as String).isEmpty
+                ? null
+                : key.value.imagePath,
+            size: windowsDefaultIconSize.toDouble()/1.25)),
         DataCell(Text(key.key.toString())),
         DataCell(Text((key.value as BasketballTeamInfo).gp.toString())),
         DataCell(Text(key.value.wins.toString())),
@@ -398,17 +401,16 @@ class _TablePageState extends State<TablePage> {
                 ]
             ),
           ),
-          backgroundColor: Theme.of(context).colorScheme.primary,
-          foregroundColor: Colors.white,
+          backgroundColor: TournamentColors.headerBackground(context),
+          foregroundColor: TournamentColors.headerForeground(context),
         ),
         body: FutureBuilder(
             future: getSeasonTable(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return Center(
-                    child: CircularProgressIndicator(
-                  color: Theme.of(context).colorScheme.primary,
-                ));
+                // Skeleton sweep (F3 Fix 2): matches the standings rows
+                // this resolves into below.
+                return const SkeletonList(count: 8);
               }
               teams = snapshot.data as Map<String, TeamInfo>;
               return SizedBox(

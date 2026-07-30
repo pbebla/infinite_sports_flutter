@@ -3,8 +3,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/createaccountpage.dart';
 import 'package:infinite_sports_flutter/forgotpasswordpage.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -50,22 +50,24 @@ class _LoginDemoState extends State<LoginPage> {
       appBar: AppBar(
         centerTitle: true,
         title: const Text("Login or Sign Up"),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
+        backgroundColor: TournamentColors.headerBackground(context),
+        foregroundColor: TournamentColors.headerForeground(context),
       ),
       body: SingleChildScrollView(
-        child: Column(
+        child: AutofillGroup(
+          child: Column(
           children: <Widget>[
             Padding(
               padding: const EdgeInsets.only(top: 60.0),
               child: Center(
                 child: SizedBox(
-                    width: 200,
-                    height: 150,
+                    width: 230,
+                    height: 230,
                     /*decoration: BoxDecoration(
                         color: Colors.red,
                         borderRadius: BorderRadius.circular(50.0)),*/
-                    child: Image.asset('assets/infinite.png')),
+                    child: Image.asset('assets/welcome_logo.png',
+                        fit: BoxFit.contain)),
               ),
             ),
             Padding(
@@ -73,6 +75,8 @@ class _LoginDemoState extends State<LoginPage> {
               padding: const EdgeInsets.symmetric(horizontal: 15),
               child: TextField(
                 controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
+                autofillHints: const [AutofillHints.email],
                 decoration: const InputDecoration(
                     border: OutlineInputBorder(),
                     labelText: 'Email',
@@ -86,6 +90,7 @@ class _LoginDemoState extends State<LoginPage> {
               child: TextField(
                 controller: _passwordController,
                 obscureText: true,
+                autofillHints: const [AutofillHints.password],
                 decoration: InputDecoration(
                     border: const OutlineInputBorder(),
                     errorText: (_loginErrorText),
@@ -116,24 +121,14 @@ class _LoginDemoState extends State<LoginPage> {
                 onPressed: () async {
                   _processSignIn();
                 },
-                child: const Text(
+                child: Text(
                   'Login',
-                  style: TextStyle(color: Colors.white, fontSize: 25),
+                  style: TextStyle(color: Theme.of(context).colorScheme.onPrimary, fontSize: 25),
                 ),
               ),
             ),
-            Padding(padding: const EdgeInsets.only(
-                  left: 15.0, right: 15.0, top: 5, bottom: 0), child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [const Text("Auto Sign In"), Checkbox(value: autoSignIn, onChanged: (value) async {
-              SharedPreferences prefs = await SharedPreferences.getInstance();
-              await prefs.setBool('autoSignIn', value!);
-              setState(() {
-                autoSignIn = value;
-              });
-            })],),),
             const SizedBox(
-              height: 130,
+              height: 28,
             ),
             TextButton(
               onPressed: (){
@@ -151,6 +146,7 @@ class _LoginDemoState extends State<LoginPage> {
               ),
             ),
           ],
+          ),
         ),
       ),
     );

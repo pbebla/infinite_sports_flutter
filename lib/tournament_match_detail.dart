@@ -1,10 +1,23 @@
+import 'dart:async';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/share_match_card_service.dart';
+import 'package:infinite_sports_flutter/misc/single_match_tallies.dart'
+    show leagueMatchLeaderCategories;
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
+import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_facts_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_lineup_tab.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart'
+    show isBadgeLeagueSport;
+import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
+import 'package:infinite_sports_flutter/widgets/live_clock.dart';
+import 'package:infinite_sports_flutter/widgets/score_text.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:intl/intl.dart';
@@ -32,6 +45,32 @@ class TournamentMatchDetailPage extends StatefulWidget {
 }
 
 class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
+  late TournamentMatch _match = widget.match;
+  StreamSubscription<TournamentMatch?>? _sub;
+  PredictionConfig? _predictionConfig;
+  String _tournamentName = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = TournamentService
+        .watchMatch(widget.tournamentId, widget.match.id)
+        .listen((m) {
+      if (mounted && m != null) setState(() => _match = m);
+    });
+    TournamentService.getPredictionConfig(widget.tournamentId).then((cfg) {
+      if (mounted) setState(() => _predictionConfig = cfg);
+    });
+    TournamentService.getTournamentHeader(widget.tournamentId).then((t) {
+      if (mounted && t != null) setState(() => _tournamentName = t.name);
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
 
   String _formatDate(String mmddyyyy) {
     final dt = parseDatabaseDate(mmddyyyy);
@@ -39,24 +78,53 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
     return DateFormat('EEEE, MMMM d, yyyy').format(dt);
   }
 
+  /// Score-header team tap → that team's tournament page (team-tap audit,
+  /// PR feedback — league match page parity).
+  void _openTeam(String teamId) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TournamentTeamDetailPage(
+          teamId: teamId,
+          tournamentId: widget.tournamentId,
+          preloadedTeams: widget.teams,
+          preloadedRosters: widget.rosters,
+          sport: widget.sport,
+        ),
+      ),
+    );
+  }
+
   Widget _buildScoreboardHeader(BuildContext context) {
-    final team1 = widget.match.team1Id != null ? widget.teams[widget.match.team1Id] : null;
-    final team2 = widget.match.team2Id != null ? widget.teams[widget.match.team2Id] : null;
-    final isLive = widget.match.matchStatus.isLive;
-    final isFinished = widget.match.matchStatus.isFinished;
+    final team1 = _match.team1Id != null ? widget.teams[_match.team1Id] : null;
+    final team2 = _match.team2Id != null ? widget.teams[_match.team2Id] : null;
+    final isLive = _match.matchStatus.isLive;
+    final isFinished = _match.matchStatus.isFinished;
+    // Theme-aware header foreground (P4.1): dark text on the white
+    // light-mode header, white on the dark-mode grey.
+    final fg = TournamentColors.headerForeground(context);
+    final muted = TournamentColors.headerForegroundMuted(context);
 
     Widget scoreWidget;
     if (isLive) {
       scoreWidget = Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            '${widget.match.team1Score} - ${widget.match.team2Score}',
-            style: const TextStyle(
-              color: Colors.red,
-              fontWeight: FontWeight.bold,
-              fontSize: 28,
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ScoreText(
+                  value: _match.team1Score, fontSize: 28, baseColor: fg),
+              Text(' - ',
+                  style: TextStyle(
+                      color: fg,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 28)),
+              ScoreText(
+                  value: _match.team2Score, fontSize: 28, baseColor: fg),
+            ],
           ),
+          const SizedBox(height: 4),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
             decoration: BoxDecoration(
@@ -72,13 +140,15 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
               ),
             ),
           ),
+          const SizedBox(height: 4),
+          MatchClockText(clock: _match.clock),
         ],
       );
     } else if (isFinished) {
       scoreWidget = Text(
-        '${widget.match.team1Score} - ${widget.match.team2Score}',
-        style: const TextStyle(
-          color: Colors.white,
+        '${_match.team1Score} - ${_match.team2Score}',
+        style: TextStyle(
+          color: fg,
           fontWeight: FontWeight.bold,
           fontSize: 28,
         ),
@@ -86,18 +156,18 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
     } else {
       scoreWidget = Column(
         children: [
-          const Text(
+          Text(
             'VS',
             style: TextStyle(
-              color: Colors.white,
+              color: fg,
               fontWeight: FontWeight.bold,
               fontSize: 22,
             ),
           ),
-          if (widget.match.time != null)
+          if (_match.time != null)
             Text(
-              widget.match.time!,
-              style: const TextStyle(color: Colors.white70, fontSize: 13),
+              _match.time!,
+              style: TextStyle(color: muted, fontSize: 13),
             ),
         ],
       );
@@ -107,105 +177,87 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
       return TeamLogo(url: team?.logoUrl, size: size);
     }
 
+    // Header team columns tap through to the team's tournament page
+    // (team-tap audit, PR feedback — league match page parity). Unresolved
+    // sides ('TBD'/bracket placeholders) stay untappable.
+    Widget teamColumn(TournamentTeam? team, String? fallbackId) {
+      final column = Column(
+        children: [
+          teamLogo(team),
+          const SizedBox(height: 6),
+          Text(
+            team?.name ?? fallbackId ?? 'TBD',
+            style: TextStyle(
+              color: fg,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+            maxLines: 2,
+          ),
+        ],
+      );
+      if (team == null) return column;
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _openTeam(team.id),
+        child: column,
+      );
+    }
+
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF1A237E), Color(0xFF283593)],
-        ),
+      decoration: BoxDecoration(
+        gradient: TournamentColors.headerGradient(context),
       ),
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
           child: Column(
+            mainAxisSize: MainAxisSize.max,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               // Stage label chip centered above teams
               Center(
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.15),
+                    color: TournamentColors.headerChipFill(context),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    widget.match.label,
-                    style: const TextStyle(
-                      color: Colors.white70,
+                    _match.label,
+                    style: TextStyle(
+                      color: muted,
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 14),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   // Team 1
-                  Expanded(
-                    child: Column(
-                      children: [
-                        teamLogo(team1),
-                        const SizedBox(height: 6),
-                        Text(
-                          team1?.name ?? widget.match.team1Id ?? 'TBD',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                          ),
-                          textAlign: TextAlign.center,
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 2,
-                        ),
-                      ],
-                    ),
-                  ),
+                  Expanded(child: teamColumn(team1, _match.team1Id)),
                   // Score / VS
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     child: scoreWidget,
                   ),
                   // Team 2
-                  Expanded(
-                    child: Column(
-                      children: [
-                        teamLogo(team2),
-                        const SizedBox(height: 6),
-                        Text(
-                          team2?.name ?? widget.match.team2Id ?? 'TBD',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                          ),
-                          textAlign: TextAlign.center,
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 2,
-                        ),
-                      ],
-                    ),
-                  ),
+                  Expanded(child: teamColumn(team2, _match.team2Id)),
                 ],
               ),
-              const SizedBox(height: 10),
-              Text(
-                _formatDate(widget.match.date),
-                style: const TextStyle(color: Colors.white70, fontSize: 12),
-              ),
-              if (widget.match.matchLocation != null && widget.match.matchLocation!.isNotEmpty) ...[
-                const SizedBox(height: 2),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.location_on, size: 12, color: Colors.white54),
-                    const SizedBox(width: 3),
-                    Text(
-                      widget.match.matchLocation!,
-                      style: const TextStyle(color: Colors.white54, fontSize: 12),
-                    ),
-                  ],
+              // Date for non-live (scheduled/finished) matches. Location lives
+              // only in the Facts tab's Location card now (never the header).
+              if (!isLive) ...[
+                const SizedBox(height: 10),
+                Text(
+                  _formatDate(_match.date),
+                  style: TextStyle(color: muted, fontSize: 12),
                 ),
               ],
             ],
@@ -217,10 +269,10 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    final team1 = widget.match.team1Id != null ? widget.teams[widget.match.team1Id] : null;
-    final team2 = widget.match.team2Id != null ? widget.teams[widget.match.team2Id] : null;
-    final team1Players = widget.match.team1Id != null ? (widget.rosters[widget.match.team1Id] ?? []) : <TournamentPlayer>[];
-    final team2Players = widget.match.team2Id != null ? (widget.rosters[widget.match.team2Id] ?? []) : <TournamentPlayer>[];
+    final team1 = _match.team1Id != null ? widget.teams[_match.team1Id] : null;
+    final team2 = _match.team2Id != null ? widget.teams[_match.team2Id] : null;
+    final team1Players = _match.team1Id != null ? (widget.rosters[_match.team1Id] ?? []) : <TournamentPlayer>[];
+    final team2Players = _match.team2Id != null ? (widget.rosters[_match.team2Id] ?? []) : <TournamentPlayer>[];
 
     return DefaultTabController(
       length: 2,
@@ -230,33 +282,62 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
             return [
               SliverAppBar(
                 pinned: true,
-                backgroundColor: const Color(0xFF1A237E),
-                foregroundColor: Colors.white,
+                backgroundColor: TournamentColors.headerBackground(context),
+                foregroundColor: TournamentColors.headerForeground(context),
+                // Theme-aware back arrow + actions (P4.1): dark on the white
+                // light-mode header, white on the dark grey.
+                iconTheme: IconThemeData(
+                    color: TournamentColors.headerForeground(context)),
+                actionsIconTheme: IconThemeData(
+                    color: TournamentColors.headerForeground(context)),
                 actions: [
-                  if (widget.match.link != null && widget.match.link!.isNotEmpty)
+                  IconButton(
+                    icon: const Icon(Icons.ios_share),
+                    tooltip: 'Share match',
+                    onPressed: () => shareMatchCard(
+                      context,
+                      match: _match,
+                      team1: team1,
+                      team2: team2,
+                      tournamentName: _tournamentName,
+                      sport: widget.sport,
+                    ),
+                  ),
+                  if (_match.link != null && _match.link!.isNotEmpty)
                     IconButton(
-                      icon: const Icon(Icons.live_tv, color: Colors.red),
+                      // colorScheme.primary = brand red in light mode, gold
+                      // in dark mode (see theme_provider.dart) — matches the
+                      // Watch button on match cards.
+                      icon: Icon(Icons.live_tv,
+                          color: Theme.of(context).colorScheme.primary),
                       tooltip: 'Watch Stream',
                       onPressed: () async {
-                        final uri = Uri.tryParse(widget.match.link!);
+                        final uri = Uri.tryParse(_match.link!);
                         if (uri != null) {
                           await launchUrl(uri, mode: LaunchMode.externalApplication);
                         }
                       },
                     ),
                 ],
-                expandedHeight: 220,
+                // 240 (not 220) leaves headroom so the live header — score,
+                // LIVE badge, clock, date AND location — never clips on
+                // devices with a tall status bar.
+                expandedHeight: 196,
                 flexibleSpace: FlexibleSpaceBar(
                   background: _buildScoreboardHeader(context),
                 ),
-                bottom: const TabBar(
-                  tabs: [
-                    Tab(text: 'Facts'),
+                bottom: TabBar(
+                  tabs: const [
+                    Tab(text: 'Summary'),
                     Tab(text: 'Lineup')
                   ],
-                  labelColor: Colors.white,
-                  unselectedLabelColor: Colors.white70,
-                  indicatorColor: Colors.white,
+                  labelColor: TournamentColors.headerForeground(context),
+                  unselectedLabelColor:
+                      TournamentColors.headerForegroundMuted(context),
+                  // Was Colors.white — invisible on the white light-mode
+                  // header, so the indicator follows the foreground (still
+                  // white in dark mode).
+                  indicatorColor: TournamentColors.headerForeground(context),
                   indicatorWeight: 2,
                 ),
               ),
@@ -265,14 +346,26 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
           body: TabBarView(
             children: [
               MatchFactsTab(
-                match: widget.match,
+                match: _match,
                 team1: team1,
                 team2: team2,
                 team1Players: team1Players,
                 team2Players: team2Players,
+                tournamentId: widget.tournamentId,
+                predictionConfig: _predictionConfig,
+                currentUid: FirebaseAuth.instance.currentUser?.uid,
+                // Basketball/flag football tournaments get sport-correct
+                // timeline icons, Match Leaders, and icon legend via the
+                // SAME infrastructure league games already use. Soccer/
+                // futsal tournaments pass neither — unchanged behavior.
+                leaderCategories: isBadgeLeagueSport(widget.sport)
+                    ? leagueMatchLeaderCategories(widget.sport)
+                    : null,
+                leagueSportKey:
+                    isBadgeLeagueSport(widget.sport) ? widget.sport : null,
               ),
               MatchLineupTab(
-                match: widget.match,
+                match: _match,
                 team1: team1,
                 team2: team2,
                 team1Players: team1Players,

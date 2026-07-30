@@ -36,9 +36,14 @@ class TournamentTeam {
   final Color? awayColor;
   final Color? overrideColor;
   final String? coachName;
+  final String? captainName;
   final String? coachPhotoUrl;
   final String? cityState;
   final String? established;
+
+  /// Additive per-sport standings numbers (P4): basketball PPG/PCPG/PD,
+  /// flag football PF/PA/PD. Tournament/futsal rows leave it empty.
+  final Map<String, num> leagueStats;
 
   const TournamentTeam({
     required this.id,
@@ -59,9 +64,11 @@ class TournamentTeam {
     this.awayColor,
     this.overrideColor,
     this.coachName,
+    this.captainName,
     this.coachPhotoUrl,
     this.cityState,
     this.established,
+    this.leagueStats = const {},
   });
 
   factory TournamentTeam.fromFirebase(
@@ -92,6 +99,8 @@ class TournamentTeam {
       awayColor: _parseHexColor(firstNonNull(teamData, ['AwayColor', 'awayColor'])),
       overrideColor: _parseHexColor(firstNonNull(teamData, ['OverrideColor', 'overrideColor'])),
       coachName: firstNonNull(teamData, ['CoachName', 'coachName'])?.toString(),
+      captainName:
+          firstNonNull(teamData, ['CaptainName', 'captainName'])?.toString(),
       coachPhotoUrl: firstNonNull(teamData, ['CoachPhotoUrl', 'coachPhotoUrl'])?.toString(),
       cityState: firstNonNull(teamData, ['CityState', 'cityState'])?.toString(),
       established: firstNonNull(teamData, ['Established', 'established'])?.toString(),

@@ -1,10 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/team_leadership.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
+import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
-import 'package:infinite_sports_flutter/tournamentplayerprofile.dart';
+import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
+import 'package:infinite_sports_flutter/widgets/jersey_painter.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
+import 'package:infinite_sports_flutter/misc/notification_topics.dart';
+import 'package:infinite_sports_flutter/widgets/follow_bell.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 class TournamentTeamDetailPage extends StatefulWidget {
   final String teamId;
@@ -15,12 +24,17 @@ class TournamentTeamDetailPage extends StatefulWidget {
   final Map<String, TournamentTeam>? preloadedTeams;
   final Map<String, List<TournamentPlayer>>? preloadedRosters;
 
+  /// Defaults to 'Soccer' so any call site this plan didn't touch keeps
+  /// compiling with today's Goals/Assists/Saves/DPL categories.
+  final String sport;
+
   const TournamentTeamDetailPage({
     super.key,
     required this.teamId,
     required this.tournamentId,
     this.preloadedTeams,
     this.preloadedRosters,
+    this.sport = 'Soccer',
   });
 
   @override
@@ -34,6 +48,15 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
   String? _loadError;
   TournamentTeam? _team;
   List<TournamentPlayer> _players = [];
+  Map<String, List<TournamentPlayer>> _rosters = {};
+  List<TournamentMatch> _matches = [];
+  StreamSubscription<List<TournamentMatch>>? _matchesSub;
+  // Lag fix: the full-tournament aggregation used to run inside build (and
+  // per history row!) on every frame. Invalidated (_stats = null) only when
+  // matches/rosters change; computed at most once per data change.
+  ComputedTournamentStats? _stats;
+  ComputedTournamentStats get _computedStats => _stats ??=
+      computeTournamentStats(matches: _matches, rosters: _rosters);
   late TabController _tabController;
   late Future<List<Map<String, dynamic>>> _historyFuture;
   final Set<String> _expandedStats = {};
@@ -45,10 +68,18 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
     _historyFuture =
         TournamentService.getTeamTournamentHistory(widget.teamId);
     _loadData();
+    _matchesSub = TournamentService.watchMatches(widget.tournamentId).listen((live) {
+      if (!mounted) return;
+      setState(() {
+        _matches = live;
+        _stats = null;
+      });
+    });
   }
 
   @override
   void dispose() {
+    _matchesSub?.cancel();
     _tabController.dispose();
     super.dispose();
   }
@@ -66,6 +97,8 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       setState(() {
         _team = teams[widget.teamId];
         _players = players;
+        _rosters = rosters;
+        _stats = null;
         _isLoading = false;
         _loadError = null;
       });
@@ -130,23 +163,38 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
 
   Widget _buildHeader(BuildContext context) {
     final team = _team;
-    // Determine header color
-    Color headerColor = team?.overrideColor ?? const Color(0xFF1A237E);
+    // A team overrideColor always wins (both modes) and keeps its original
+    // white-on-color foreground + darkened gradient; only the DEFAULT header
+    // follows the white-light / grey-dark scheme (P4.1).
+    final overrideColor = team?.overrideColor;
 
-    final darkened = Color.fromARGB(
-      255,
-      ((headerColor.r * 255.0).round().clamp(0, 255) * 0.75).round(),
-      ((headerColor.g * 255.0).round().clamp(0, 255) * 0.75).round(),
-      ((headerColor.b * 255.0).round().clamp(0, 255) * 0.75).round(),
-    );
+    LinearGradient gradient;
+    if (overrideColor != null) {
+      final darkened = Color.fromARGB(
+        255,
+        ((overrideColor.r * 255.0).round().clamp(0, 255) * 0.75).round(),
+        ((overrideColor.g * 255.0).round().clamp(0, 255) * 0.75).round(),
+        ((overrideColor.b * 255.0).round().clamp(0, 255) * 0.75).round(),
+      );
+      gradient = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [overrideColor, darkened],
+      );
+    } else {
+      gradient = TournamentColors.headerGradient(context);
+    }
+
+    final fg = overrideColor != null
+        ? Colors.white
+        : TournamentColors.headerForeground(context);
+    final muted = overrideColor != null
+        ? Colors.white70
+        : TournamentColors.headerForegroundMuted(context);
 
     return Container(
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [headerColor, darkened],
-        ),
+        gradient: gradient,
       ),
       child: SafeArea(
         bottom: false,
@@ -160,7 +208,9 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                   TeamLogo(
                     url: team?.logoUrl,
                     size: 60,
-                    fallbackBackground: Colors.white.withValues(alpha: 0.2),
+                    fallbackBackground: overrideColor != null
+                        ? Colors.white.withValues(alpha: 0.2)
+                        : TournamentColors.headerChipFill(context),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -169,8 +219,8 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                       children: [
                         Text(
                           team?.name ?? widget.teamId,
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: fg,
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
                           ),
@@ -179,11 +229,11 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                           const SizedBox(height: 2),
                           Row(
                             children: [
-                              const Icon(Icons.location_on, size: 12, color: Colors.white70),
+                              Icon(Icons.location_on, size: 12, color: muted),
                               const SizedBox(width: 3),
                               Text(
                                 _getFullStateName(team.cityState),
-                                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                style: TextStyle(color: muted, fontSize: 12),
                               ),
                             ],
                           ),
@@ -206,7 +256,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       children: [
         CustomPaint(
           size: const Size(20, 22),
-          painter: _JerseyPainter(color: color),
+          painter: JerseyPainter(color: color),
         ),
         const SizedBox(width: 4),
         Text(label,
@@ -297,7 +347,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                           children: [
                             CustomPaint(
                               size: const Size(40, 44),
-                              painter: _JerseyPainter(
+                              painter: JerseyPainter(
                                   color: team.homeColor!),
                             ),
                             const SizedBox(height: 4),
@@ -312,7 +362,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                           children: [
                             CustomPaint(
                               size: const Size(40, 44),
-                              painter: _JerseyPainter(
+                              painter: JerseyPainter(
                                   color: team.awayColor!),
                             ),
                             const SizedBox(height: 4),
@@ -326,52 +376,9 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
               ),
             ),
           ),
-        // Coaching Staff card
-        if (team != null && team.coachName != null && team.coachName!.isNotEmpty)
-          Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Coaching Staff',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleSmall
-                          ?.copyWith(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      TeamLogo(
-                        url: team.coachPhotoUrl,
-                        size: 44,
-                        fallbackIcon: Icons.person,
-                      ),
-                      const SizedBox(width: 10),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(team.coachName!,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14)),
-                          Text('Head Coach',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurface
-                                    .withValues(alpha: 0.5),
-                              )),
-                        ],
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
+        // Team Leadership card (Coach / Captain, TAS.1): shows whichever of
+        // the two is set, both lines if both are set, hidden if neither is.
+        _buildLeadershipCard(context),
         // Tournament Record card
         _buildSeasonRecord(context),
         // Tournament History card
@@ -379,9 +386,11 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
           future: _historyFuture,
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
+              // Skeleton sweep (F3 Fix 2): a couple of placeholder lines for
+              // the History card body below.
               return const Padding(
                 padding: EdgeInsets.all(16),
-                child: Center(child: CircularProgressIndicator()),
+                child: SkeletonLines(),
               );
             }
             final history = snapshot.data ?? [];
@@ -409,9 +418,15 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                       final stage =
                           entry['furthestStage'] as String? ??
                               'Group Stage';
-                      final w = entry['wins'] as int? ?? 0;
-                      final d = entry['draws'] as int? ?? 0;
-                      final l = entry['losses'] as int? ?? 0;
+                      final isCurrent =
+                          entry['tournamentId']?.toString() ==
+                              widget.tournamentId;
+                      final live = isCurrent
+                          ? _computedStats.standingFor(widget.teamId)
+                          : null;
+                      final w = live?.w ?? (entry['wins'] as int? ?? 0);
+                      final d = live?.d ?? (entry['draws'] as int? ?? 0);
+                      final l = live?.l ?? (entry['losses'] as int? ?? 0);
                       String resultText;
                       String resultEmoji;
                       if (isChamp) {
@@ -484,42 +499,39 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
   Widget _buildSquadTab(BuildContext context) {
     final sorted = _sortedPlayers();
     final team = _team;
+    final leadershipLines = team == null
+        ? const <String>[]
+        : teamLeadershipLines(
+            coachName: team.coachName, captainName: team.captainName);
 
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
-        // Coach section
-        if (team?.coachName != null && team!.coachName!.isNotEmpty) ...[
-          _sectionHeader(context, 'COACHING STAFF'),
+        // Leadership section (Coach / Captain, TAS.1)
+        if (leadershipLines.isNotEmpty) ...[
+          _sectionHeader(context, 'TEAM LEADERSHIP'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: Row(
               children: [
                 TeamLogo(
-                  url: team.coachPhotoUrl,
+                  url: team!.coachPhotoUrl,
                   size: 44,
                   fallbackIcon: Icons.person,
                 ),
                 const SizedBox(width: 10),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      team.coachName!,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w600, fontSize: 14),
-                    ),
-                    Text(
-                      'Head Coach',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withValues(alpha: 0.5),
-                      ),
-                    ),
-                  ],
+                  children: leadershipLines
+                      .map((line) => Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Text(
+                              line,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600, fontSize: 14),
+                            ),
+                          ))
+                      .toList(),
                 ),
               ],
             ),
@@ -563,21 +575,8 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
   }
 
   Widget _buildPlayerRow(BuildContext context, TournamentPlayer p) {
-    final team = _team;
-    final tournamentName = team?.name ?? widget.tournamentId;
-
     return InkWell(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => TournamentPlayerProfilePage(
-              player: p,
-              tournamentName: tournamentName,
-            ),
-          ),
-        );
-      },
+      onTap: () => openPlayerProfileById(context, uid: p.uid, name: p.name),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         child: Row(
@@ -646,7 +645,30 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       return const Center(child: Text('No player data'));
     }
 
-    final categories = [
+    const categoriesBySport = {
+      'Basketball': [
+        {'label': 'Points', 'stat': 'points'},
+        {'label': '3-Pointers', 'stat': 'threePointers'},
+        {'label': '2-Pointers', 'stat': 'twoPointers'},
+        {'label': 'Free Throws Made', 'stat': 'freeThrows'},
+        {'label': 'Rebounds', 'stat': 'rebounds'},
+        {'label': 'Assists', 'stat': 'assists'},
+        {'label': 'Steals', 'stat': 'steals'},
+        {'label': 'Blocks', 'stat': 'blocks'},
+        {'label': 'Turnovers', 'stat': 'turnovers'},
+        {'label': 'Fouls', 'stat': 'fouls'},
+      ],
+      'Flag Football': [
+        {'label': 'Touchdowns', 'stat': 'touchdowns'},
+        {'label': 'Receptions', 'stat': 'receptions'},
+        {'label': 'Catch %', 'stat': 'catchPercentage', 'suffix': '%'},
+        {'label': 'Pass TDs', 'stat': 'passTouchdowns'},
+        {'label': 'Interceptions', 'stat': 'interceptions'},
+        {'label': 'Flag Pulls', 'stat': 'flagPulls'},
+        {'label': 'Sacks', 'stat': 'sacks'},
+      ],
+    };
+    const futsalCategories = [
       {'label': 'Goals', 'stat': 'goals'},
       {'label': 'Assists', 'stat': 'assists'},
       {'label': 'Saves', 'stat': 'saves'},
@@ -655,8 +677,11 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       {'label': 'Yellow Cards', 'stat': 'yellowCards'},
       {'label': 'Red Cards', 'stat': 'redCards'},
     ];
+    final categories = categoriesBySport[widget.sport] ?? futsalCategories;
 
-    int getValue(TournamentPlayer p, String stat) => p.statByName(stat);
+    final stats = _computedStats;
+    int getValue(TournamentPlayer p, String stat) =>
+        stats.statByName(p.teamId, p.name, stat);
 
     List<TournamentPlayer> getAllSorted(String stat) {
       final filtered = players.where((p) => getValue(p, stat) > 0).toList()
@@ -671,6 +696,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
         final cat = categories[idx];
         final label = cat['label']!;
         final stat = cat['stat']!;
+        final suffix = cat['suffix'] ?? '';
         final allSorted = getAllSorted(stat);
         if (allSorted.isEmpty) return const SizedBox.shrink();
 
@@ -678,6 +704,12 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
         final displayed =
             isExpanded ? allSorted : allSorted.take(3).toList();
 
+        // Theme-staleness fix (F3.1): itemBuilder's own `context` can go
+        // stale after a theme toggle (same SliverChildBuilderDelegate reuse
+        // quirk as fixtures_tab.dart, F3 Fix 1) — this card reads
+        // Theme.of(context) directly below, so wrap the row content in a
+        // Builder for a live, dependency-tracked context.
+        return Builder(builder: (context) {
         return GestureDetector(
           onTap: () {
             setState(() {
@@ -750,14 +782,14 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                                   width: 32,
                                   height: 32,
                                   decoration: BoxDecoration(
-                                    color: infiniteSportsPrimaryColor,
+                                    color: Theme.of(context).colorScheme.primary,
                                     shape: BoxShape.circle,
                                   ),
                                   child: Center(
                                     child: Text(
-                                      '$value',
-                                      style: const TextStyle(
-                                          color: Colors.white,
+                                      '$value$suffix',
+                                      style: TextStyle(
+                                          color: Theme.of(context).colorScheme.onPrimary,
                                           fontWeight: FontWeight.bold,
                                           fontSize: 13),
                                     ),
@@ -767,7 +799,7 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                                   width: 32,
                                   child: Center(
                                     child: Text(
-                                      '$value',
+                                      '$value$suffix',
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: Theme.of(context)
@@ -787,22 +819,77 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
             ),
           ),
         );
+        });
       },
     );
   }
 
-  Widget _buildSeasonRecord(BuildContext context) {
+  /// Team Leadership card (Coach / Captain, TAS.1 Task 3): shows "Coach: X"
+  /// when a coach is set, "Captain: Y" when a captain is set, both lines
+  /// when both are set, and hides the whole card when neither is set. Photo
+  /// slot (if any) always follows the coach — there's no separate captain
+  /// photo field.
+  Widget _buildLeadershipCard(BuildContext context) {
     final team = _team;
     if (team == null) return const SizedBox.shrink();
+    final lines = teamLeadershipLines(
+        coachName: team.coachName, captainName: team.captainName);
+    if (lines.isEmpty) return const SizedBox.shrink();
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Team Leadership',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                TeamLogo(
+                  url: team.coachPhotoUrl,
+                  size: 44,
+                  fallbackIcon: Icons.person,
+                ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: lines
+                      .map((line) => Padding(
+                            padding: const EdgeInsets.only(bottom: 2),
+                            child: Text(line,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14)),
+                          ))
+                      .toList(),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSeasonRecord(BuildContext context) {
+    if (_team == null) return const SizedBox.shrink();
+
+    final computed = _computedStats;
+    final s = computed.standingFor(widget.teamId);
 
     final stats = [
-      {'label': 'W', 'value': '${team.wins}'},
-      {'label': 'D', 'value': '${team.draws}'},
-      {'label': 'L', 'value': '${team.losses}'},
-      {'label': 'GF', 'value': '${team.gs}'},
-      {'label': 'GA', 'value': '${team.gc}'},
-      {'label': 'GD', 'value': team.gd >= 0 ? '+${team.gd}' : '${team.gd}'},
-      {'label': 'Pts', 'value': '${team.points}'},
+      {'label': 'W', 'value': '${s.w}'},
+      {'label': 'D', 'value': '${s.d}'},
+      {'label': 'L', 'value': '${s.l}'},
+      {'label': 'GF', 'value': '${s.gs}'},
+      {'label': 'GA', 'value': '${s.gc}'},
+      {'label': 'GD', 'value': s.gd >= 0 ? '+${s.gd}' : '${s.gd}'},
+      {'label': 'Pts', 'value': '${s.pts}'},
     ];
 
     return Card(
@@ -850,8 +937,8 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
     if (_loadError != null) {
       return Scaffold(
         appBar: AppBar(
-          backgroundColor: const Color(0xFF1A237E),
-          foregroundColor: Colors.white,
+          backgroundColor: TournamentColors.headerBackground(context),
+          foregroundColor: TournamentColors.headerForeground(context),
         ),
         body: Center(
           child: Padding(
@@ -885,14 +972,58 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       );
     }
     if (_isLoading) {
+      // Skeleton sweep (F3 Fix 2): a team-header block (logo + name/record
+      // bars) over a few placeholder rows, matching the page this resolves
+      // into below.
       return Scaffold(
         appBar: AppBar(
-          backgroundColor: const Color(0xFF1A237E),
-          foregroundColor: Colors.white,
+          backgroundColor: TournamentColors.headerBackground(context),
+          foregroundColor: TournamentColors.headerForeground(context),
         ),
-        body: const Center(child: CircularProgressIndicator()),
+        body: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+              child: const Row(
+                children: [
+                  SkeletonBox(width: 64, height: 64, radius: 32),
+                  SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SkeletonBox(width: 160, height: 18),
+                        SizedBox(height: 8),
+                        SkeletonBox(width: 100, height: 12),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Expanded(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: SkeletonList(count: 5),
+              ),
+            ),
+          ],
+        ),
       );
     }
+
+    // Collapsed-bar colors follow the header rule (P4.1): a team
+    // overrideColor keeps the colored bar with white foregrounds in BOTH
+    // modes; the default is white-with-dark-foreground in light mode, dark
+    // grey with white in dark mode.
+    final overrideColor = _team?.overrideColor;
+    final barFg = overrideColor != null
+        ? Colors.white
+        : TournamentColors.headerForeground(context);
+    final barFgMuted = overrideColor != null
+        ? Colors.white70
+        : TournamentColors.headerForegroundMuted(context);
 
     return Scaffold(
       body: NestedScrollView(
@@ -901,8 +1032,18 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
             SliverAppBar(
               expandedHeight: 160,
               pinned: true,
-              backgroundColor: const Color(0xFF1A237E),
-              foregroundColor: Colors.white,
+              backgroundColor:
+                  overrideColor ?? TournamentColors.headerBackground(context),
+              foregroundColor: barFg,
+              iconTheme: IconThemeData(color: barFg),
+              actionsIconTheme: IconThemeData(color: barFg),
+              actions: [
+                FollowBell(
+                  topic: teamTopic(widget.tournamentId, widget.teamId),
+                  label: _team?.name ?? 'this team',
+                  kind: 'team',
+                ),
+              ],
               flexibleSpace: FlexibleSpaceBar(
                 background: _buildHeader(context),
               ),
@@ -913,9 +1054,9 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
                   Tab(text: 'Squad'),
                   Tab(text: 'Stats'),
                 ],
-                labelColor: Colors.white,
-                unselectedLabelColor: Colors.white70,
-                indicatorColor: infiniteSportsPrimaryColor,
+                labelColor: barFg,
+                unselectedLabelColor: barFgMuted,
+                indicatorColor: Theme.of(context).colorScheme.primary,
                 indicatorWeight: 3,
               ),
             ),
@@ -932,43 +1073,4 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       ),
     );
   }
-}
-
-class _JerseyPainter extends CustomPainter {
-  final Color color;
-  const _JerseyPainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-    final borderPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.5)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-
-    final w = size.width;
-    final h = size.height;
-
-    final path = Path();
-    path.moveTo(0, h * 0.2);
-    path.lineTo(w * 0.25, h * 0.08);
-    path.lineTo(w * 0.35, 0);
-    path.lineTo(w * 0.5, h * 0.12);
-    path.lineTo(w * 0.65, 0);
-    path.lineTo(w * 0.75, h * 0.08);
-    path.lineTo(w, h * 0.2);
-    path.lineTo(w * 0.75, h * 0.38);
-    path.lineTo(w * 0.75, h);
-    path.lineTo(w * 0.25, h);
-    path.lineTo(w * 0.25, h * 0.38);
-    path.close();
-
-    canvas.drawPath(path, paint);
-    canvas.drawPath(path, borderPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _JerseyPainter old) => old.color != color;
 }

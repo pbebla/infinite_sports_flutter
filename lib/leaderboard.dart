@@ -1,12 +1,15 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/flagfootballplayer.dart';
 import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/player.dart';
-import 'package:infinite_sports_flutter/playerpage.dart';
+import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
+import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:data_table_2/data_table_2.dart';
 
 class LeaderboardPage extends StatefulWidget {
@@ -148,14 +151,9 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     if (widget.sport == "Futsal") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Center(child: Text(key.number),)),
-        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0),),)),
+        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: TeamLogo(url: key.teamPath.isEmpty ? null : key.teamPath, size: windowsDefaultIconSize.toDouble()/2),)),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-            initialEntries: [OverlayEntry(
-                builder: (context) {
-                  return PlayerPage(uid: key.uid);
-                })],
-          )));
+          openPlayerProfileById(context, uid: key.uid, name: key.name);
         },),
         DataCell(Text(key.goals.toString())),
         DataCell(Text(key.assists.toString())),
@@ -183,15 +181,10 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     } else if (widget.sport == "Basketball") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Center(child: Text(key.number),)),
-        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0),),)),
+        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: TeamLogo(url: key.teamPath.isEmpty ? null : key.teamPath, size: windowsDefaultIconSize.toDouble()/2),)),
         //DataCell(Row(children: [Text(key.number), Spacer(), ])),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-            initialEntries: [OverlayEntry(
-                builder: (context) {
-                  return PlayerPage(uid: key.uid);
-                })],
-          )));
+          openPlayerProfileById(context, uid: key.uid, name: key.name);
         },),
         DataCell(Text(key.total.toString())),
         DataCell(Text(key.rebounds.toString())),
@@ -225,14 +218,9 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       );
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Center(child: Text(key.number),)),
-        DataCell(Image.network(key.teamPath, width: windowsDefaultIconSize.toDouble()/2, height: windowsDefaultIconSize.toDouble()/2, alignment: FractionalOffset.center, errorBuilder:(context, error, stackTrace) => SizedBox(width: 0, height: 0),)),
+        DataCell(TeamLogo(url: key.teamPath.isEmpty ? null : key.teamPath, size: windowsDefaultIconSize.toDouble()/2)),
         DataCell(Container(decoration: verticalDividerRight, alignment: Alignment.centerLeft, child: Padding(padding: EdgeInsets.fromLTRB(0.0, 0, 0.0, 0), child: Text(key.name.toString(), softWrap: true,)),), onTap: () {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-            initialEntries: [OverlayEntry(
-                builder: (context) {
-                  return PlayerPage(uid: key.uid);
-                })],
-          )));
+          openPlayerProfileById(context, uid: key.uid, name: key.name);
         },),
         DataCell(Text(key.qbCompletionRate)),
         DataCell(Text(key.passingTouchdowns.toString())),
@@ -281,12 +269,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         DataCell(Text(key.position)),
         DataCell(Center(child: Text(key.number),)),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
-          Navigator.push(context, MaterialPageRoute(builder: (_) => Overlay(
-            initialEntries: [OverlayEntry(
-                builder: (context) {
-                  return PlayerPage(uid: key.uid);
-                })],
-          )));
+          openPlayerProfileById(context, uid: key.uid, name: key.name);
         },),
         DataCell(Text(key.goals.toString())),
         DataCell(Text(key.assists.toString())),
@@ -335,18 +318,16 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
                 ]
             ),
           ),
-          backgroundColor: Theme.of(context).colorScheme.primary,
-          foregroundColor: Colors.white,
+          backgroundColor: TournamentColors.headerBackground(context),
+          foregroundColor: TournamentColors.headerForeground(context),
         ),
         body: FutureBuilder(
             future: getPlayersList(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return Center(
-                    child: CircularProgressIndicator(
-                      color: Theme.of(context).colorScheme.primary,
-                    )
-                );
+                // Skeleton sweep (F3 Fix 2): matches the leaderboard rows
+                // this resolves into below.
+                return const SkeletonList(count: 8);
               }
               if (players.isEmpty) {
                 players = snapshot.data!;

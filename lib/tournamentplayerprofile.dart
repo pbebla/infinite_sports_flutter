@@ -1,16 +1,23 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
+import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 
 class TournamentPlayerProfilePage extends StatefulWidget {
   final TournamentPlayer player;
   final String tournamentName;
+  final String sport;
+  final ComputedTournamentStats stats;
 
   const TournamentPlayerProfilePage({
     super.key,
     required this.player,
     required this.tournamentName,
+    required this.sport,
+    required this.stats,
   });
 
   @override
@@ -43,8 +50,12 @@ class _TournamentPlayerProfilePageState
           SliverAppBar(
             expandedHeight: 160,
             pinned: true,
-            backgroundColor: const Color(0xFF1A237E),
-            foregroundColor: Colors.white,
+            backgroundColor: TournamentColors.headerBackground(context),
+            foregroundColor: TournamentColors.headerForeground(context),
+            // Theme-aware back arrow (P4.1): dark on the white light-mode
+            // header, white on the dark grey.
+            iconTheme: IconThemeData(
+                color: TournamentColors.headerForeground(context)),
             flexibleSpace: FlexibleSpaceBar(
               background: _buildHeader(context, player),
             ),
@@ -63,13 +74,11 @@ class _TournamentPlayerProfilePageState
   }
 
   Widget _buildHeader(BuildContext context, TournamentPlayer player) {
+    final fg = TournamentColors.headerForeground(context);
+    final muted = TournamentColors.headerForegroundMuted(context);
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF1A237E), Color(0xFF283593)],
-        ),
+      decoration: BoxDecoration(
+        gradient: TournamentColors.headerGradient(context),
       ),
       child: SafeArea(
         bottom: false,
@@ -81,7 +90,7 @@ class _TournamentPlayerProfilePageState
                 url: player.photoUrl,
                 size: 56,
                 fallbackIcon: Icons.person,
-                fallbackBackground: Colors.white.withValues(alpha: 0.2),
+                fallbackBackground: TournamentColors.headerChipFill(context),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -91,8 +100,8 @@ class _TournamentPlayerProfilePageState
                   children: [
                     Text(
                       player.name,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: fg,
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                       ),
@@ -100,8 +109,7 @@ class _TournamentPlayerProfilePageState
                     const SizedBox(height: 4),
                     Text(
                       player.teamName,
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 13),
+                      style: TextStyle(color: muted, fontSize: 13),
                     ),
                   ],
                 ),
@@ -160,13 +168,40 @@ class _TournamentPlayerProfilePageState
   }
 
   Widget _buildStatsCard(BuildContext context, TournamentPlayer player) {
+    const statsBySport = {
+      'Basketball': [
+        {'label': 'Points', 'stat': 'points'},
+        {'label': 'Rebounds', 'stat': 'rebounds'},
+        {'label': 'Assists', 'stat': 'assists'},
+        {'label': 'Steals', 'stat': 'steals'},
+        {'label': 'Blocks', 'stat': 'blocks'},
+        {'label': '3-Pointers', 'stat': 'threePointers'},
+      ],
+      'Flag Football': [
+        {'label': 'Touchdowns', 'stat': 'touchdowns'},
+        {'label': 'Receptions', 'stat': 'receptions'},
+        {'label': 'Catch %', 'stat': 'catchPercentage', 'suffix': '%'},
+        {'label': 'Interceptions', 'stat': 'interceptions'},
+        {'label': 'Sacks', 'stat': 'sacks'},
+        {'label': 'Flag Pulls', 'stat': 'flagPulls'},
+      ],
+    };
+    const futsalStats = [
+      {'label': 'Goals', 'stat': 'goals'},
+      {'label': 'Assists', 'stat': 'assists'},
+      {'label': 'G+A', 'stat': 'goalsAndAssists'},
+      {'label': 'Saves', 'stat': 'saves'},
+      {'label': 'DPL', 'stat': 'dpl'},
+      {'label': 'Clean Sheets', 'stat': 'cleanSheets'},
+    ];
+    final defs = statsBySport[widget.sport] ?? futsalStats;
     final stats = [
-      {'label': 'Goals', 'value': '${player.goals}'},
-      {'label': 'Assists', 'value': '${player.assists}'},
-      {'label': 'G+A', 'value': '${player.goalsAndAssists}'},
-      {'label': 'Saves', 'value': '${player.saves}'},
-      {'label': 'DPL', 'value': '${player.dpl}'},
-      {'label': 'Clean Sheets', 'value': '${player.cleanSheets}'},
+      for (final d in defs)
+        {
+          'label': d['label']!,
+          'value':
+              '${widget.stats.statByName(player.teamId, player.name, d['stat']!)}${d['suffix'] ?? ''}',
+        },
     ];
 
     return Card(
@@ -260,9 +295,11 @@ class _TournamentPlayerProfilePageState
               future: _historyFuture,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
+                  // Skeleton sweep (F3 Fix 2): a couple of placeholder lines
+                  // for the League History card body below.
                   return const Padding(
                     padding: EdgeInsets.all(16),
-                    child: Center(child: CircularProgressIndicator()),
+                    child: SkeletonLines(),
                   );
                 }
                 final history = snapshot.data ?? [];

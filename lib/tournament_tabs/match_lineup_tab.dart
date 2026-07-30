@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
-import 'package:infinite_sports_flutter/widgets/team_logo.dart';
+import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 
 class MatchLineupTab extends StatelessWidget {
   final TournamentMatch match;
@@ -69,10 +69,13 @@ class MatchLineupTab extends StatelessWidget {
         child: CustomPaint(painter: _BasketballCourtPainter()),
       );
     } else if (s == 'flag football') {
+      // Owner-supplied field art (assets/ff_field.png, horizontal yard-line
+      // field). Cover keeps yard lines straight — no stretching — cropping
+      // the excess length evenly on both sides.
       return SizedBox(
         height: 180,
         width: double.infinity,
-        child: CustomPaint(painter: _FlagFootballFieldPainter()),
+        child: Image.asset('assets/ff_field.png', fit: BoxFit.cover),
       );
     } else {
       return Container(
@@ -90,34 +93,37 @@ class MatchLineupTab extends StatelessWidget {
   }
 
   Widget _buildPlayerRow(BuildContext context, TournamentPlayer p) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
-      child: Row(
-        children: [
-          // Jersey number badge
-          Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              shape: BoxShape.circle,
-            ),
-            child: Center(
-              child: Text(
-                p.number ?? '-',
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+    return InkWell(
+      onTap: () => openPlayerProfileById(context, uid: p.uid, name: p.name),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
+        child: Row(
+          children: [
+            // Jersey number badge
+            Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Text(
+                  p.number ?? '-',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                ),
               ),
             ),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              p.name,
-              softWrap: true,
-              overflow: TextOverflow.fade,
-            ),
-          )
-        ],
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                p.name,
+                softWrap: true,
+                overflow: TextOverflow.fade,
+              ),
+            )
+          ],
+        ),
       ),
     );
   }
@@ -158,7 +164,7 @@ class MatchLineupTab extends StatelessWidget {
                 ],
               ),
             ),
-          const Divider(height: 1),
+          const Divider(height: 1, thickness: 1),
           if (sorted.isEmpty)
             Padding(
               padding: const EdgeInsets.all(12),
@@ -180,6 +186,7 @@ class MatchLineupTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
+      padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
       child: Column(
         children: [
           _buildFieldBackground(),
@@ -285,37 +292,3 @@ class _BasketballCourtPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-// Flag football field painter
-class _FlagFootballFieldPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = const Color(0xFF388E3C);
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
-
-    final linePaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.5)
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke;
-
-    final w = size.width;
-    final h = size.height;
-
-    // Yard lines every ~12.5% of width
-    for (int i = 1; i <= 7; i++) {
-      final x = w * i / 8;
-      canvas.drawLine(Offset(x, 0), Offset(x, h), linePaint);
-    }
-
-    // End zones (slightly darker)
-    final endZonePaint = Paint()..color = Colors.black.withValues(alpha: 0.1);
-    canvas.drawRect(Rect.fromLTWH(0, 0, w * 0.1, h), endZonePaint);
-    canvas.drawRect(Rect.fromLTWH(w * 0.9, 0, w * 0.1, h), endZonePaint);
-
-    // End zone borders
-    canvas.drawLine(Offset(w * 0.1, 0), Offset(w * 0.1, h), linePaint);
-    canvas.drawLine(Offset(w * 0.9, 0), Offset(w * 0.9, h), linePaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}

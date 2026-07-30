@@ -1,9 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/login.dart';
+import 'package:infinite_sports_flutter/misc/league_timeline_filter.dart';
+import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/icon_legend.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/prediction.dart';
+import 'package:infinite_sports_flutter/model/prediction_config.dart';
+import 'package:infinite_sports_flutter/model/prediction_question.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
+import 'package:infinite_sports_flutter/prediction_room_page.dart';
+import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:infinite_sports_flutter/misc/single_match_tallies.dart';
 
 class MatchFactsTab extends StatelessWidget {
   final TournamentMatch match;
@@ -12,6 +22,28 @@ class MatchFactsTab extends StatelessWidget {
   final List<TournamentPlayer> team1Players;
   final List<TournamentPlayer> team2Players;
 
+  // Optional prediction context — Task A6 will pass these from the match-detail
+  // page. Defaults to null so all existing call sites keep compiling unchanged.
+  final String? tournamentId;
+  final PredictionConfig? predictionConfig;
+  final String? currentUid;
+
+  /// Null = tournament behavior (built from [tournamentId] when present).
+  final PredictionScope? scope;
+
+  /// Match Leaders categories (P4). Null = the tournament default
+  /// (Goals/Assists/Saves/DPL) — every existing tournament call site
+  /// keeps compiling unchanged. League call sites pass
+  /// `leagueMatchLeaderCategories(sport)`.
+  final List<Map<String, String>>? leaderCategories;
+
+  /// Non-null for LEAGUE games — the sport's Firebase key ('Basketball',
+  /// 'Flag Football', 'Futsal'). Null = tournament (soccer) behavior, so
+  /// every existing tournament call site keeps compiling unchanged. When set
+  /// to a badge sport, timeline icons render the gold badge art (no white
+  /// chip) via [leagueStatIcon]. Also gates the Group E timeline filter.
+  final String? leagueSportKey;
+
   const MatchFactsTab({
     super.key,
     required this.match,
@@ -19,6 +51,12 @@ class MatchFactsTab extends StatelessWidget {
     required this.team2,
     required this.team1Players,
     required this.team2Players,
+    this.tournamentId,
+    this.predictionConfig,
+    this.currentUid,
+    this.scope,
+    this.leaderCategories,
+    this.leagueSportKey,
   });
 
   // Parse minute string to sortable double: "90+3'" -> 90.3, "45'" -> 45.0
@@ -34,7 +72,7 @@ class MatchFactsTab extends StatelessWidget {
   }
 
   /// Flattens an activity map into a list of events.
-  /// Each entry: {minute, eventType, playerName, isTeam1}
+  /// Each entry: {minute, eventType, playerName, subOn, subOff, isTeam1}
   List<Map<String, dynamic>> _parseActivity(
       Map<String, dynamic>? activity, bool isTeam1) {
     if (activity == null) return [];
@@ -43,23 +81,63 @@ class MatchFactsTab extends StatelessWidget {
       if (value is List) {
         for (final item in value) {
           if (item is Map) {
+            // Extract _t once per event map — it is a top-level metadata key,
+            // not an eventType, so we skip it in the forEach below.
+            final tStamp =
+                (item['_t'] is int) ? item['_t'] as int : null;
             item.forEach((eventType, playerName) {
+              if (eventType.toString() == '_t') return; // skip metadata key
+              final isSub = eventType.toString() == 'substitution';
+              String? subOn, subOff, displayName;
+              if (isSub && playerName is Map) {
+                subOn = (playerName['On'] ?? playerName['on'])?.toString();
+                subOff = (playerName['Off'] ?? playerName['off'])?.toString();
+                displayName = subOff;
+              } else if (isSub) {
+                // Legacy scalar substitution: treat the name as the OUT player.
+                subOff = playerName?.toString();
+                displayName = subOff ?? '';
+              } else {
+                displayName = playerName?.toString() ?? '';
+              }
               events.add({
                 'minute': minute.toString(),
                 'eventType': eventType.toString(),
-                'playerName': playerName?.toString() ?? '',
+                'playerName': displayName ?? '',
+                'subOn': subOn,
+                'subOff': subOff,
                 'isTeam1': isTeam1,
+                '_t': tStamp,
               });
             });
           }
         }
       } else if (value is Map) {
+        final tStamp =
+            (value['_t'] is int) ? value['_t'] as int : null;
         value.forEach((eventType, playerName) {
+          if (eventType.toString() == '_t') return; // skip metadata key
+          final isSub = eventType.toString() == 'substitution';
+          String? subOn, subOff, displayName;
+          if (isSub && playerName is Map) {
+            subOn = (playerName['On'] ?? playerName['on'])?.toString();
+            subOff = (playerName['Off'] ?? playerName['off'])?.toString();
+            displayName = subOff;
+          } else if (isSub) {
+            // Legacy scalar substitution: treat the name as the OUT player.
+            subOff = playerName?.toString();
+            displayName = subOff ?? '';
+          } else {
+            displayName = playerName?.toString() ?? '';
+          }
           events.add({
             'minute': minute.toString(),
             'eventType': eventType.toString(),
-            'playerName': playerName?.toString() ?? '',
+            'playerName': displayName ?? '',
+            'subOn': subOn,
+            'subOff': subOff,
             'isTeam1': isTeam1,
+            '_t': tStamp,
           });
         });
       }
@@ -68,7 +146,42 @@ class MatchFactsTab extends StatelessWidget {
   }
 
   Widget _eventIcon(String eventType) {
+    final sport = leagueSportKey;
+    if (sport != null && isBadgeLeagueSport(sport)) {
+      final ic = leagueStatIcon(sport, eventType);
+      return StatIcon(asset: ic.asset, size: 24, badge: ic.badge);
+    }
     return StatIcon(asset: statIconAsset(eventType), size: 24);
+  }
+
+  /// Resolves a timeline name against the threaded rosters (own team first)
+  /// so timeline taps open the right profile. Guests / unlinked players
+  /// resolve to null -> limited profile by name.
+  TournamentPlayer? _rosterPlayer(String name, bool isTeam1) {
+    final primary = isTeam1 ? team1Players : team2Players;
+    final secondary = isTeam1 ? team2Players : team1Players;
+    for (final p in primary) {
+      if (p.name == name) return p;
+    }
+    for (final p in secondary) {
+      if (p.name == name) return p;
+    }
+    return null;
+  }
+
+  /// Timeline player names open profiles, matching the Match Leaders rows
+  /// (P2.1 Task A3 tap-through audit).
+  Widget _tappableName(BuildContext context, Widget child, String? name,
+      bool isTeam1) {
+    if (name == null || name.trim().isEmpty) return child;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        final p = _rosterPlayer(name, isTeam1);
+        openPlayerProfileById(context, uid: p?.uid, name: name);
+      },
+      child: child,
+    );
   }
 
   Widget _buildEventRow(BuildContext context, Map<String, dynamic> event) {
@@ -76,6 +189,54 @@ class MatchFactsTab extends StatelessWidget {
     final minute = event['minute'] as String;
     final eventType = event['eventType'] as String;
     final playerName = event['playerName'] as String;
+    final subOn = event['subOn'] as String?;
+    final subOff = event['subOff'] as String?;
+
+    Widget nameWidget;
+    if (eventType == 'substitution' && (subOn != null || subOff != null)) {
+      nameWidget = Column(
+        crossAxisAlignment:
+            isTeam1 ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (subOn != null)
+            _tappableName(
+                context,
+                Text(subOn,
+                    style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF0A7D2C),
+                        fontWeight: FontWeight.w600),
+                    // PR #10: long names wrap instead of truncating.
+                    softWrap: true),
+                subOn,
+                isTeam1),
+          if (subOff != null)
+            _tappableName(
+                context,
+                Text(subOff,
+                    style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFFEF5350),
+                        fontWeight: FontWeight.w600),
+                    softWrap: true),
+                subOff,
+                isTeam1),
+        ],
+      );
+    } else {
+      nameWidget = _tappableName(
+        context,
+        Text(
+          playerName,
+          style: const TextStyle(fontSize: 12),
+          softWrap: true,
+          textAlign: isTeam1 ? TextAlign.left : TextAlign.right,
+        ),
+        playerName,
+        isTeam1,
+      );
+    }
 
     Widget eventContent = Row(
       mainAxisSize: MainAxisSize.min,
@@ -83,22 +244,9 @@ class MatchFactsTab extends StatelessWidget {
         if (isTeam1) ...[
           _eventIcon(eventType),
           const SizedBox(width: 4),
-          Flexible(
-            child: Text(
-              playerName,
-              style: const TextStyle(fontSize: 12),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
+          Flexible(child: nameWidget),
         ] else ...[
-          Flexible(
-            child: Text(
-              playerName,
-              style: const TextStyle(fontSize: 12),
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.right,
-            ),
-          ),
+          Flexible(child: nameWidget),
           const SizedBox(width: 4),
           _eventIcon(eventType),
         ],
@@ -134,23 +282,123 @@ class MatchFactsTab extends StatelessWidget {
     );
   }
 
+  Widget _buildLocationCard(BuildContext context) {
+    final info = match.locationInfo;
+    if (info == null) return const SizedBox.shrink();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final locationBlue =
+        isDark ? const Color(0xFF5B9BFF) : const Color(0xFF1A237E);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: Material(
+        color: Theme.of(context).colorScheme.surface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          side: BorderSide(color: Theme.of(context).dividerColor),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () async {
+            final messenger = ScaffoldMessenger.of(context);
+            try {
+              final ok = await launchUrl(Uri.parse(info.mapsUrl()),
+                  mode: LaunchMode.externalApplication);
+              if (!ok) {
+                messenger.showSnackBar(
+                    const SnackBar(content: Text("Couldn't open maps.")));
+              }
+            } catch (_) {
+              messenger.showSnackBar(
+                  const SnackBar(content: Text("Couldn't open maps.")));
+            }
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: locationBlue,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.location_on, color: Colors.white, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(info.venue,
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: Theme.of(context).colorScheme.onSurface)),
+                      if (info.field != null) ...[
+                        const SizedBox(height: 2),
+                        Text(info.field!,
+                            style: TextStyle(
+                                color: locationBlue, fontSize: 13)),
+                      ],
+                      if (info.address != null) ...[
+                        const SizedBox(height: 3),
+                        Text(info.address!,
+                            style: TextStyle(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurface
+                                    .withValues(alpha: 0.6),
+                                fontSize: 12)),
+                      ],
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.directions, size: 14, color: locationBlue),
+                          const SizedBox(width: 4),
+                          Text('Get directions',
+                              style: TextStyle(
+                                  color: locationBlue,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right,
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.3)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildMatchLeaders(BuildContext context) {
     final allPlayers = [...team1Players, ...team2Players];
+    final tallies = singleMatchPlayerTallies(match);
 
-    final categories = [
-      {'label': 'Goals', 'stat': 'goals'},
-      {'label': 'Assists', 'stat': 'assists'},
-      {'label': 'Saves', 'stat': 'saves'},
-      {'label': 'DPL', 'stat': 'dpl'},
-      {'label': 'Yellow Cards', 'stat': 'yellowCards'},
-    ];
+    final categories = leaderCategories ??
+        const [
+          {'label': 'Goals', 'stat': 'goals'},
+          {'label': 'Assists', 'stat': 'assists'},
+          {'label': 'Saves', 'stat': 'saves'},
+          {'label': 'DPL', 'stat': 'dpl'},
+        ];
 
-    int getValue(TournamentPlayer p, String stat) => p.statByName(stat);
+    int getValue(TournamentPlayer p, String stat) =>
+        tallies[p.name]?.byStat(stat) ?? 0;
 
     final List<Widget> rows = [];
     for (final cat in categories) {
       final label = cat['label']!;
       final stat = cat['stat']!;
+      // Optional value suffix ('%' for FF Catch %); absent = plain count.
+      final suffix = cat['suffix'] ?? '';
       final sorted = allPlayers
           .where((p) => getValue(p, stat) > 0)
           .toList()
@@ -173,28 +421,21 @@ class MatchFactsTab extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: Text(
-                '${top.name} (${top.teamName})',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-                overflow: TextOverflow.ellipsis,
+              child: GestureDetector(
+                onTap: () => openPlayerProfileById(context, uid: top.uid, name: top.name),
+                child: Text(
+                  '${top.name} (${top.teamName})',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
-            Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: infiniteSportsPrimaryColor,
-                shape: BoxShape.circle,
-              ),
-              child: Center(
-                child: Text(
-                  '$value',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+            Text(
+              '$value$suffix',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
               ),
             ),
           ],
@@ -207,7 +448,7 @@ class MatchFactsTab extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Divider(),
+        const Divider(thickness: 1),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
           child: Text(
@@ -228,23 +469,80 @@ class MatchFactsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Parse and merge all events
-    final List<Map<String, dynamic>> allEvents = [
+    // Parse and merge all events, attaching a stable merge-index so the sort
+    // is fully deterministic even when _t is absent (pre-fix events).
+    final rawEvents = [
       ..._parseActivity(match.team1Activity, true),
       ..._parseActivity(match.team2Activity, false),
     ];
+    // Tag each event with its position in the concatenated list. This index
+    // is the tertiary tiebreaker — it preserves the pre-fix behavior (team1
+    // events before team2 events within the same minute) for old data that
+    // has no _t stamp.
+    final List<Map<String, dynamic>> allEvents = [
+      for (var i = 0; i < rawEvents.length; i++)
+        {...rawEvents[i], '_mergeIdx': i},
+    ];
 
-    // Sort by minute
+    // Sort: primary = minute asc; secondary = _t asc (when both present);
+    // tertiary = _mergeIdx asc (stable, preserves old ordering for legacy data).
     allEvents.sort((a, b) {
-      return _parseMinute(a['minute'] as String)
+      final minCmp = _parseMinute(a['minute'] as String)
           .compareTo(_parseMinute(b['minute'] as String));
+      if (minCmp != 0) return minCmp;
+
+      final aT = a['_t'] as int?;
+      final bT = b['_t'] as int?;
+      if (aT != null && bT != null) {
+        final tCmp = aT.compareTo(bT);
+        if (tCmp != 0) return tCmp;
+      }
+
+      // Tertiary: merge-index (guarantees stability; also handles legacy events
+      // without _t by preserving their original team1-before-team2 order).
+      return (a['_mergeIdx'] as int).compareTo(b['_mergeIdx'] as int);
     });
 
-    if (allEvents.isEmpty && team1Players.isEmpty && team2Players.isEmpty) {
+    // L6: drop background-stat rows (basketball Miss; FF negatives later) for
+    // league games. Tournament (leagueSportKey == null) and futsal keep every
+    // event — the predicate returns false for them.
+    final sportKey = leagueSportKey;
+    final visibleEvents = sportKey == null
+        ? allEvents
+        : allEvents
+            .where((e) => !isHiddenLeagueTimelineActivity(
+                sportKey, e['eventType'] as String))
+            .toList();
+
+    // Teaser visibility: only when prediction context is fully provided and both
+    // teams are confirmed — rendered at the very top of either code path.
+    final PredictionScope? teaserScope = scope ??
+        (tournamentId != null ? TournamentPredictionScope(tournamentId!) : null);
+    final showTeaser = teaserScope != null &&
+        predictionConfig?.open == true &&
+        match.team1Id != null &&
+        match.team2Id != null;
+
+    final teaser = showTeaser
+        ? _WhoWillWinTeaser(
+            scope: teaserScope,
+            match: match,
+            team1: team1,
+            team2: team2,
+            predictionConfig: predictionConfig!,
+            currentUid: currentUid,
+            team1Players: team1Players,
+            team2Players: team2Players,
+          )
+        : const SizedBox.shrink();
+
+    if (visibleEvents.isEmpty && team1Players.isEmpty && team2Players.isEmpty) {
       return SingleChildScrollView(
+        padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            teaser,
             Padding(
               padding: const EdgeInsets.all(24),
               child: Center(
@@ -256,17 +554,23 @@ class MatchFactsTab extends StatelessWidget {
                 ),
               ),
             ),
+            _buildLocationCard(context),
+            // Icon legend (L6.2): always visible, even with no rosters/events
+            // at all — a fan opening a brand-new upcoming match still sees it.
+            IconLegend(leagueSportKey: leagueSportKey),
           ],
         ),
       );
     }
 
     return SingleChildScrollView(
+      padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Divider(height: 1),
-          if (allEvents.isEmpty)
+          teaser,
+          const Divider(height: 1, thickness: 1),
+          if (visibleEvents.isEmpty)
             Padding(
               padding: const EdgeInsets.all(24),
               child: Center(
@@ -279,9 +583,296 @@ class MatchFactsTab extends StatelessWidget {
               ),
             )
           else
-            ...allEvents.map((e) => _buildEventRow(context, e)),
-          _buildMatchLeaders(context)
+            ...visibleEvents.map((e) => _buildEventRow(context, e)),
+          _buildMatchLeaders(context),
+          _buildLocationCard(context),
+          // Icon legend (L6.2): rendered at the very bottom, in every match
+          // state (upcoming/live/finished) — same FotMob-style card either
+          // early-return path above also carries.
+          IconLegend(leagueSportKey: leagueSportKey),
         ],
+      ),
+    );
+  }
+}
+
+// ── Who Will Win Teaser ───────────────────────────────────────────────────────
+
+const _greenWin = Color(0xFF0A7D2C);
+
+class _WhoWillWinTeaser extends StatefulWidget {
+  final PredictionScope scope;
+  final TournamentMatch match;
+  final TournamentTeam? team1;
+  final TournamentTeam? team2;
+  final PredictionConfig predictionConfig;
+  final String? currentUid;
+  final List<TournamentPlayer> team1Players;
+  final List<TournamentPlayer> team2Players;
+
+  const _WhoWillWinTeaser({
+    required this.scope,
+    required this.match,
+    required this.team1,
+    required this.team2,
+    required this.predictionConfig,
+    required this.currentUid,
+    this.team1Players = const [],
+    this.team2Players = const [],
+  });
+
+  @override
+  State<_WhoWillWinTeaser> createState() => _WhoWillWinTeaserState();
+}
+
+class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
+  // Whether we are in the middle of submitting (prevents double-taps).
+  bool _submitting = false;
+
+  String get _team1Name => widget.team1?.name ?? widget.match.team1Id ?? 'Team 1';
+  String get _team2Name => widget.team2?.name ?? widget.match.team2Id ?? 'Team 2';
+
+  Future<void> _submit(String value, String qid) async {
+    final uid = widget.currentUid;
+    if (uid == null || _submitting) return;
+    setState(() => _submitting = true);
+    try {
+      await widget.scope.submitAnswer(
+          widget.match, uid, qid, value, DateTime.now().millisecondsSinceEpoch);
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  void _pushRoom(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PredictionRoomPage(
+          tournamentId: '',
+          scope: widget.scope,
+          match: widget.match,
+          team1: widget.team1,
+          team2: widget.team2,
+          config: widget.predictionConfig,
+          currentUid: widget.currentUid,
+          team1Players: widget.team1Players,
+          team2Players: widget.team2Players,
+        ),
+      ),
+    );
+  }
+
+  void _pushLogin(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Stream the tournament-wide questions and pick the first matchWinner.
+    return StreamBuilder<List<PredictionQuestion>>(
+      stream: widget.scope.watchDefaultQuestions(),
+      builder: (context, qSnap) {
+        final questions = qSnap.data ?? const [];
+        final PredictionQuestion? winnerQ = questions
+            .where((q) => q.type == QuestionType.matchWinner)
+            .cast<PredictionQuestion?>()
+            .firstOrNull;
+
+        if (winnerQ == null) return const SizedBox.shrink();
+
+        final uid = widget.currentUid;
+        final isPending = widget.match.matchStatus.isPending;
+
+        // When signed in, also stream the user's current answers for this match.
+        if (uid != null) {
+          return StreamBuilder<Map<String, QuestionAnswer>>(
+            stream: widget.scope.watchMyMatchAnswers(widget.match, uid),
+            builder: (context, ansSnap) {
+              final answers = ansSnap.data ?? const {};
+              final currentAnswer = answers[winnerQ.id]?.value;
+              return _buildCard(
+                  context, winnerQ, isPending, currentAnswer, hasAnswer: currentAnswer != null);
+            },
+          );
+        }
+
+        return _buildCard(context, winnerQ, isPending, null, hasAnswer: false);
+      },
+    );
+  }
+
+  Widget _buildCard(
+    BuildContext context,
+    PredictionQuestion q,
+    bool isPending,
+    String? currentAnswer, {
+    required bool hasAnswer,
+  }) {
+    final uid = widget.currentUid;
+    final signedIn = uid != null;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      child: Card(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header row: title + points badge
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Who will win?',
+                      style: TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: _greenWin.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '+${q.points} pt',
+                      style: const TextStyle(
+                          fontSize: 11,
+                          color: _greenWin,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // The three option buttons (team1 / Draw / team2)
+              _buildOptions(context, q, isPending, currentAnswer, signedIn),
+
+              const SizedBox(height: 10),
+
+              // Signed-out CTA
+              if (!signedIn) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => _pushLogin(context),
+                    child: const Text('Sign in to predict'),
+                  ),
+                ),
+              ]
+              // Signed in + has an answer OR the match is locked (live/finished):
+              // show the SAME green "Enter prediction room →" button in all states.
+              else if (hasAnswer || !isPending) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.tonal(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _greenWin.withValues(alpha: 0.12),
+                      foregroundColor: Theme.of(context).colorScheme.onSurface,
+                    ),
+                    onPressed: () => _pushRoom(context),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Image(
+                          image: AssetImage('assets/predict_symbolic_256.png'),
+                          width: 20,
+                          height: 20,
+                        ),
+                        SizedBox(width: 8),
+                        Text('Enter prediction room  →'),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOptions(
+    BuildContext context,
+    PredictionQuestion q,
+    bool isPending,
+    String? currentAnswer,
+    bool signedIn,
+  ) {
+    final canTap = signedIn && isPending && !_submitting;
+
+    return Row(
+      children: [
+        Expanded(
+          child: _optionButton(
+            label: _team1Name,
+            value: 'team1',
+            isSelected: currentAnswer == 'team1',
+            onTap: canTap ? () => _submit('team1', q.id) : null,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: _optionButton(
+            label: 'Draw',
+            value: 'draw',
+            isSelected: currentAnswer == 'draw',
+            onTap: canTap ? () => _submit('draw', q.id) : null,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: _optionButton(
+            label: _team2Name,
+            value: 'team2',
+            isSelected: currentAnswer == 'team2',
+            onTap: canTap ? () => _submit('team2', q.id) : null,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _optionButton({
+    required String label,
+    required String value,
+    required bool isSelected,
+    required VoidCallback? onTap,
+  }) {
+    final selected = isSelected;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+        decoration: BoxDecoration(
+          color: selected ? _greenWin : Colors.transparent,
+          border: Border.all(
+            color: selected ? _greenWin : Colors.grey.shade400,
+            width: selected ? 2 : 1,
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            color: selected ? Colors.white : null,
+          ),
+        ),
       ),
     );
   }

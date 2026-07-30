@@ -7,9 +7,24 @@ import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_match_detail.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
+import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
+import 'package:infinite_sports_flutter/widgets/live_clock.dart';
+import 'package:infinite_sports_flutter/widgets/score_text.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+/// Display priority: live first, then upcoming, then finished.
+int _statusRank(int status) {
+  switch (status) {
+    case 1: // live
+      return 0;
+    case 0: // upcoming
+      return 1;
+    default: // finished (2) and anything else
+      return 2;
+  }
+}
 
 class FixturesTab extends StatelessWidget {
   final List<TournamentMatch> matches;
@@ -17,6 +32,19 @@ class FixturesTab extends StatelessWidget {
   final Map<String, List<TournamentPlayer>> rosters;
   final String tournamentId;
   final String sport;
+  final bool predictionsOpen;
+  final VoidCallback? onOpenPredict;
+
+  /// League Experience P2: when set, card taps call this instead of pushing
+  /// TournamentMatchDetailPage (the league detail page routes taps to the
+  /// league match page). Default null keeps tournament behavior unchanged.
+  final void Function(TournamentMatch match)? onMatchTap;
+
+  /// Team-tap audit (PR feedback): when set, tapping a team's name/logo on a
+  /// card calls this instead of pushing TournamentTeamDetailPage (league
+  /// hosts route to the league team page). Default null keeps tournament
+  /// behavior: resolvable teams open their tournament team page.
+  final void Function(TournamentTeam team)? onTeamTap;
 
   const FixturesTab({
     super.key,
@@ -25,6 +53,10 @@ class FixturesTab extends StatelessWidget {
     required this.rosters,
     required this.tournamentId,
     required this.sport,
+    this.predictionsOpen = false,
+    this.onOpenPredict,
+    this.onMatchTap,
+    this.onTeamTap,
   });
 
   String _formatDate(String mmddyyyy) {
@@ -65,6 +97,31 @@ class FixturesTab extends StatelessWidget {
     }
   }
 
+  /// Whether a team name/logo tap has somewhere to go: a host callback, or
+  /// a real tournament to push TournamentTeamDetailPage for. Hosts that pass
+  /// tournamentId '' without a callback (e.g. legacy-sport day views) keep
+  /// their team labels untappable.
+  bool get _canOpenTeam => onTeamTap != null || tournamentId.isNotEmpty;
+
+  void _openTeam(BuildContext context, TournamentTeam team) {
+    if (onTeamTap != null) {
+      onTeamTap!(team);
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TournamentTeamDetailPage(
+          teamId: team.id,
+          tournamentId: tournamentId,
+          preloadedTeams: teams,
+          preloadedRosters: rosters,
+          sport: sport,
+        ),
+      ),
+    );
+  }
+
   Widget _buildMatchCard(
     BuildContext context,
     TournamentMatch match,
@@ -95,29 +152,35 @@ class FixturesTab extends StatelessWidget {
     final name1 = teamName(team1, match.team1Id, match.team1Seed);
     final name2 = teamName(team2, match.team2Id, match.team2Seed);
 
+    // Leading live indicator (MinuteBall) – shown only for live matches, placed
+    // at the far-left edge of the match row (FotMob style). Non-live rows get
+    // a SizedBox of matching width so team columns stay aligned.
+    const double minuteBallWidth = 28; // approximate rendered width of MinuteBall
+    Widget leadingWidget;
+    if (isLive && match.clock != null) {
+      leadingWidget = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          MinuteBall(clock: match.clock),
+          const SizedBox(width: 10),
+        ],
+      );
+    } else {
+      leadingWidget = const SizedBox(width: minuteBallWidth + 10);
+    }
+
     // Score / time widget in center
     Widget centerWidget;
     if (isLive) {
-      centerWidget = Column(
+      final scoreColor = Theme.of(context).colorScheme.onSurface;
+      centerWidget = Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: Colors.red,
-              borderRadius: BorderRadius.circular(3),
-            ),
-            child: const Text(
-              'LIVE',
+          ScoreText(value: match.team1Score, fontSize: 20, baseColor: scoreColor),
+          Text(' - ',
               style: TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${match.team1Score} - ${match.team2Score}',
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-          ),
+                  fontWeight: FontWeight.bold, fontSize: 20, color: scoreColor)),
+          ScoreText(value: match.team2Score, fontSize: 20, baseColor: scoreColor),
         ],
       );
     } else if (isFinal) {
@@ -130,8 +193,7 @@ class FixturesTab extends StatelessWidget {
         match.time ?? 'TBD',
         style: TextStyle(
           fontSize: 13,
-          color:
-              Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
       );
     }
@@ -141,15 +203,20 @@ class FixturesTab extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Flexible(
-          child: Text(
-            name1,
-            style: TextStyle(
-              fontWeight: team1IsWinner ? FontWeight.bold : FontWeight.normal,
-              fontSize: 13,
+          // PR #10 round 2: long names scale the font down until they fit
+          // one line — no wrap, no ellipsis.
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight,
+            child: Text(
+              name1,
+              style: TextStyle(
+                fontWeight: team1IsWinner ? FontWeight.bold : FontWeight.w600,
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+              maxLines: 1,
             ),
-            textAlign: TextAlign.right,
-            overflow: TextOverflow.ellipsis,
-            maxLines: 2,
           ),
         ),
         const SizedBox(width: 6),
@@ -163,19 +230,40 @@ class FixturesTab extends StatelessWidget {
         TeamLogo(url: team2?.logoUrl, size: 28),
         const SizedBox(width: 6),
         Flexible(
-          child: Text(
-            name2,
-            style: TextStyle(
-              fontWeight: team2IsWinner ? FontWeight.bold : FontWeight.normal,
-              fontSize: 13,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              name2,
+              style: TextStyle(
+                fontWeight: team2IsWinner ? FontWeight.bold : FontWeight.w600,
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+              maxLines: 1,
             ),
-            textAlign: TextAlign.left,
-            overflow: TextOverflow.ellipsis,
-            maxLines: 2,
           ),
         ),
       ],
     );
+
+    // Team-tap audit (PR feedback): the name/logo is its own tap target
+    // opening the team page — the card tap still opens the match. Only real
+    // resolvable teams get one ('Seed #4'/'TBD' placeholders have no page).
+    if (team1 != null && _canOpenTeam) {
+      team1Widget = GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _openTeam(context, team1),
+        child: team1Widget,
+      );
+    }
+    if (team2 != null && _canOpenTeam) {
+      team2Widget = GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _openTeam(context, team2),
+        child: team2Widget,
+      );
+    }
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
@@ -184,6 +272,10 @@ class FixturesTab extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
         onTap: () {
+          if (onMatchTap != null) {
+            onMatchTap!(match);
+            return;
+          }
           Navigator.push(
             context,
             MaterialPageRoute(
@@ -213,27 +305,37 @@ class FixturesTab extends StatelessWidget {
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      _stageLabelShort(match.label),
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                      _stageLabelShort(match.stage),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                   const Spacer(),
-                  if (!isLive && match.matchLocation != null)
-                    Text(
-                      match.matchLocation!,
-                      style: TextStyle(
-                          fontSize: 11,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withValues(alpha: 0.5)),
+                  if (isLive)
+                    Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                      child: const Text(
+                        'LIVE',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 10),
+                      ),
                     ),
                 ],
               ),
               const SizedBox(height: 10),
-              // FotMob-style: Team1 [right-aligned] | Score | Team2 [left-aligned]
+              // FotMob-style: [MinuteBall] Team1 [right-aligned] | Score | Team2 [left-aligned]
               Row(
                 children: [
+                  leadingWidget,
                   Expanded(
                     child: Align(
                       alignment: Alignment.centerRight,
@@ -250,6 +352,9 @@ class FixturesTab extends StatelessWidget {
                       child: team2Widget,
                     ),
                   ),
+                  // Trailing spacer mirrors the leading MinuteBall slot so the
+                  // score/time sits in the true horizontal center of the row.
+                  const SizedBox(width: minuteBallWidth + 10),
                 ],
               ),
               // Stream link
@@ -268,7 +373,7 @@ class FixturesTab extends StatelessWidget {
                     icon: const Icon(Icons.play_circle_outline, size: 16),
                     label: const Text('Watch', style: TextStyle(fontSize: 12)),
                     style: TextButton.styleFrom(
-                      foregroundColor: infiniteSportsPrimaryColor,
+                      foregroundColor: Theme.of(context).colorScheme.primary,
                       padding:
                           const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -291,15 +396,22 @@ class FixturesTab extends StatelessWidget {
 
     final eliminated = _getEliminatedTeams();
 
-    // Sort matches by stage progression, then by date, then by bracket position
+    // Sort matches: live first, then upcoming, then finished.
+    // Within each status group: date, then time, then stage progression, then bracket position.
     final sortedMatches = [...matches];
     sortedMatches.sort((a, b) {
-      final aStage = TournamentStage.fromString(a.stage).sortOrder;
-      final bStage = TournamentStage.fromString(b.stage).sortOrder;
-      if (aStage != bStage) return aStage.compareTo(bStage);
+      final ra = _statusRank(a.status);
+      final rb = _statusRank(b.status);
+      if (ra != rb) return ra.compareTo(rb);
       final aDate = int.tryParse(a.date) ?? 0;
       final bDate = int.tryParse(b.date) ?? 0;
       if (aDate != bDate) return aDate.compareTo(bDate);
+      final at = a.time ?? '';
+      final bt = b.time ?? '';
+      if (at != bt) return at.compareTo(bt);
+      final stageCmp = TournamentStage.fromString(a.stage).sortOrder
+          .compareTo(TournamentStage.fromString(b.stage).sortOrder);
+      if (stageCmp != 0) return stageCmp;
       return a.bracketPosition.compareTo(b.bracketPosition);
     });
 
@@ -311,27 +423,84 @@ class FixturesTab extends StatelessWidget {
 
     final sortedDates = byDate.keys.toList(); // already in stage order
 
+    final showBanner = predictionsOpen && onOpenPredict != null;
+
     return ListView.builder(
-      padding: const EdgeInsets.only(top: 8, bottom: 16),
-      itemCount: sortedDates.length,
-      itemBuilder: (context, dateIdx) {
+      padding: EdgeInsets.only(top: 8, bottom: 16 + MediaQuery.paddingOf(context).bottom),
+      itemCount: sortedDates.length + (showBanner ? 1 : 0),
+      itemBuilder: (context, index) {
+        if (showBanner && index == 0) return _predictBanner(context);
+        final dateIdx = showBanner ? index - 1 : index;
         final date = sortedDates[dateIdx];
         final dateMatches = byDate[date]!;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: Text(
-                _formatDate(date),
-                style: TextStyle(fontWeight: FontWeight.bold),
+        // Theme-staleness fix (F3 Fix 1): ListView.builder's own itemBuilder
+        // `context` can go stale after a theme toggle — Flutter's sliver
+        // list reuses this context's element across ancestor Theme.of()
+        // changes instead of remounting it, so Theme.of(context) calls made
+        // directly with it can silently keep returning the OLD ThemeData
+        // until something forces this row to remount (navigating away and
+        // back, etc. — the exact "self-heals on rebuild" symptom reported).
+        // Wrapping in a Builder gives every color lookup below a properly
+        // live, dependency-tracked context instead.
+        return Builder(builder: (context) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: Text(
+                  _formatDate(date),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
               ),
-            ),
-            ...dateMatches.map(
-                (m) => _buildMatchCard(context, m, eliminated)),
-          ],
-        );
+              ...dateMatches.map(
+                  (m) => _buildMatchCard(context, m, eliminated)),
+            ],
+          );
+        });
       },
     );
   }
+
+  Widget _predictBanner(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 2),
+        child: InkWell(
+          onTap: onOpenPredict,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                  colors: [Color(0xFF0A7D2C), Color(0xFF0C9636)]),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(children: const [
+              Image(
+                image: AssetImage('assets/predict_symbolic_256.png'),
+                width: 22,
+                height: 22,
+              ),
+              SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Predictions',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14)),
+                      Text('Predict every match · climb the leaderboard',
+                          style: TextStyle(
+                              color: Colors.white70, fontSize: 11)),
+                    ]),
+              ),
+              Icon(Icons.chevron_right, color: Colors.white),
+            ]),
+          ),
+        ),
+      );
 }

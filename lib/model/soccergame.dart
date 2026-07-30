@@ -17,6 +17,12 @@ class SoccerGame implements Game {
   @override
   late int Time;
 
+  @override
+  String storedTime = "";
+
+  @override
+  String stage = "";
+
   String startTime = "";
 
   String location = "";

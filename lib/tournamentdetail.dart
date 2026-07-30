@@ -1,6 +1,11 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:async';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
+import 'package:infinite_sports_flutter/model/prediction_config.dart';
 import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -8,9 +13,13 @@ import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/fixtures_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/knockout_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/playerstats_tab.dart';
+import 'package:infinite_sports_flutter/tournament_tabs/predict_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/table_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/teams_tab.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
+import 'package:infinite_sports_flutter/misc/notification_topics.dart';
+import 'package:infinite_sports_flutter/widgets/follow_bell.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 class TournamentDetailPage extends StatefulWidget {
   final String tournamentId;
@@ -33,10 +42,16 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
   Tournament? _tournament;
   Map<String, TournamentTeam> _teams = {};
   List<TournamentMatch> _matches = [];
+  StreamSubscription<List<TournamentMatch>>? _matchesSub;
+  StreamSubscription<Tournament?>? _tournamentSub;
   Map<String, List<TournamentPlayer>> _rosters = {};
-  late TabController _tabController;
+  // Memoized full-tournament aggregation (lag fix): computed only when
+  // matches/rosters actually change (_recomputeStats), NEVER in build —
+  // recomputing per frame made tab swipes and live-score ticks visibly
+  // janky on device.
+  ComputedTournamentStats? _stats;
 
-  static const List<Tab> _tabs = [
+  static const List<Tab> _baseTabs = [
     Tab(text: 'Fixtures'),
     Tab(text: 'Table'),
     Tab(text: 'Knockout'),
@@ -44,33 +59,46 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
     Tab(text: 'Teams'),
   ];
 
+  PredictionConfig? _predictionConfig;
+  List<Tab> _tabs = const [];
+  TabController? _tabController;
+  int _predictIndex = -1;
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: _tabs.length, vsync: this);
     _loadData();
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
+    _matchesSub?.cancel();
+    _tournamentSub?.cancel();
+    _tabController?.dispose();
     super.dispose();
   }
 
   Future<void> _loadData() async {
     try {
+      // One parallel wave (was three sequential ones: header/teams/matches →
+      // rosters+avatars → config). The raw rosters node rides along and is
+      // parsed once teams land; avatar fetches never gate first paint.
       final results = await Future.wait([
         TournamentService.getTournamentHeader(widget.tournamentId),
         TournamentService.getTeams(widget.tournamentId),
         TournamentService.getMatches(widget.tournamentId),
+        TournamentService.getPredictionConfig(widget.tournamentId),
+        TournamentService.getRostersNode(widget.tournamentId),
       ]);
 
       final tournament = results[0] as Tournament?;
       final teams = results[1] as Map<String, TournamentTeam>;
       final matches = results[2] as List<TournamentMatch>;
+      final config = results[3] as PredictionConfig;
+      final rosters = TournamentService.parseRosters(results[4], teams);
 
-      final rosters =
-          await TournamentService.getRosters(widget.tournamentId, teams);
+      final tabs = <Tab>[..._baseTabs];
+      if (config.open) tabs.add(const Tab(text: 'Predict'));
 
       if (!mounted) return;
       setState(() {
@@ -78,8 +106,59 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
         _teams = teams;
         _matches = matches;
         _rosters = rosters;
+        _stats = computeTournamentStats(
+          matches: matches,
+          rosters: rosters,
+          sport: tournament?.sport ?? 'Soccer',
+        );
         _isLoading = false;
         _loadError = null;
+        _predictionConfig = config;
+        _tabs = tabs;
+        _predictIndex = config.open ? tabs.length - 1 : -1;
+        _tabController = TabController(length: tabs.length, vsync: this);
+      });
+
+      // Avatars for linked players not yet in the session cache land in a
+      // single follow-up update behind the first paint.
+      TournamentService.enrichRosterPhotos(rosters).then((enriched) {
+        if (!mounted) return;
+        setState(() {
+          _rosters = enriched;
+          _stats = computeTournamentStats(
+            matches: _matches,
+            rosters: enriched,
+            sport: _tournament?.sport ?? 'Soccer',
+          );
+        });
+      });
+
+      // Keep matches live after the initial paint: scores, clock, standings and
+      // the bracket all update in place without a manual refresh.
+      _matchesSub?.cancel();
+      _matchesSub =
+          TournamentService.watchMatches(widget.tournamentId).listen((live) {
+        if (!mounted || live.isEmpty) return;
+        setState(() {
+          _matches = live;
+          _stats = computeTournamentStats(
+            matches: live,
+            rosters: _rosters,
+            sport: _tournament?.sport ?? 'Soccer',
+          );
+        });
+      });
+
+      // Keep the header live too: name/status/sport/champion update in place
+      // (e.g. the owner flips status or crowns a champion) without a manual
+      // refresh. Same mirrored one-shot-then-live shape as matches above; a
+      // null emission means the record is momentarily unparseable, so the
+      // last good header is kept rather than blanked.
+      _tournamentSub?.cancel();
+      _tournamentSub =
+          TournamentService.watchTournament(widget.tournamentId).listen((live) {
+        if (!mounted || live == null) return;
+        setState(() => _tournament = live);
       });
     } catch (e, st) {
       debugPrint('TournamentDetailPage._loadData error: $e\n$st');
@@ -132,11 +211,27 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
       return _buildErrorView(context);
     }
     return Scaffold(
-      body: _isLoading
-          ? Center(
-              child: CircularProgressIndicator(
-                color: Theme.of(context).colorScheme.primary,
-              ),
+      body: (_isLoading || _tabController == null)
+          ? Column(
+              children: [
+                // Placeholder for the scoreboard/header area (white in light
+                // mode, dark grey in dark mode — P4.1).
+                Container(
+                    height: 150,
+                    decoration: BoxDecoration(
+                      color: TournamentColors.headerBackground(context),
+                      border: TournamentColors.headerHairline(context),
+                    )),
+                const Expanded(
+                  child: SingleChildScrollView(
+                    physics: NeverScrollableScrollPhysics(),
+                    child: Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: SkeletonMatchList(count: 8),
+                    ),
+                  ),
+                ),
+              ],
             )
           : NestedScrollView(
               headerSliverBuilder: (context, innerBoxIsScrolled) {
@@ -144,26 +239,51 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                   SliverAppBar(
                     expandedHeight: 160,
                     pinned: true,
-                    backgroundColor: const Color(0xFF1A237E),
-                    foregroundColor: Colors.white,
+                    backgroundColor:
+                        TournamentColors.headerBackground(context),
+                    foregroundColor:
+                        TournamentColors.headerForeground(context),
+                    // Theme-aware back arrow + bell (P4.1): dark on the
+                    // white light-mode header, white on the dark grey.
+                    iconTheme: IconThemeData(
+                        color: TournamentColors.headerForeground(context)),
+                    actionsIconTheme: IconThemeData(
+                        color: TournamentColors.headerForeground(context)),
+                    actions: [
+                      FollowBell(
+                        topic: tournamentTopic(widget.tournamentId),
+                        label: _tournament?.name ?? widget.tournamentName,
+                        kind: 'tournament',
+                      ),
+                    ],
                     flexibleSpace: FlexibleSpaceBar(
                       background: _buildHeader(context),
                     ),
                     bottom: TabBar(
-                      controller: _tabController,
+                      controller: _tabController!,
                       tabs: _tabs,
                       isScrollable: true,
-                      labelColor: Colors.white,
-                      unselectedLabelColor: Colors.white70,
-                      indicatorColor: infiniteSportsPrimaryColor,
+                      labelColor: TournamentColors.headerForeground(context),
+                      unselectedLabelColor:
+                          TournamentColors.headerForegroundMuted(context),
+                      indicatorColor: Theme.of(context).colorScheme.primary,
                       indicatorWeight: 3,
                       tabAlignment: TabAlignment.start,
                     ),
                   ),
                 ];
               },
-              body: TabBarView(
-                controller: _tabController,
+              body: Builder(builder: (context) {
+                // Memoized in state — recomputing here ran the full
+                // aggregation on every frame of a tab swipe (lag fix).
+                final stats = _stats ??
+                    computeTournamentStats(
+                      matches: _matches,
+                      rosters: _rosters,
+                      sport: _tournament?.sport ?? 'Soccer',
+                    );
+                return TabBarView(
+                controller: _tabController!,
                 children: [
                   FixturesTab(
                     matches: _matches,
@@ -171,43 +291,63 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                     rosters: _rosters,
                     tournamentId: widget.tournamentId,
                     sport: _tournament?.sport ?? 'Soccer',
+                    predictionsOpen: _predictionConfig?.open ?? false,
+                    onOpenPredict: (_predictIndex >= 0)
+                        ? () => _tabController?.animateTo(_predictIndex)
+                        : null,
                   ),
                   TableTab(
                     teams: _teams,
                     matches: _matches,
                     tournamentId: widget.tournamentId,
+                    stats: stats,
+                    sport: _tournament?.sport ?? 'Soccer',
                   ),
                   KnockoutTab(
                     matches: _matches,
                     teams: _teams,
                     tournamentId: widget.tournamentId,
+                    rosters: _rosters,
+                    sport: _tournament?.sport ?? 'Soccer',
                   ),
                   PlayerStatsTab(
                     rosters: _rosters,
                     teams: _teams,
                     tournamentId: widget.tournamentId,
+                    stats: stats,
+                    sport: _tournament?.sport ?? 'Soccer',
                   ),
                   TeamsTab(
                     teams: _teams,
                     matches: _matches,
                     rosters: _rosters,
                     tournamentId: widget.tournamentId,
+                    stats: stats,
+                    sport: _tournament?.sport ?? 'Soccer',
                   ),
+                  if (_predictionConfig?.open ?? false)
+                    PredictTab(
+                      matches: _matches,
+                      teams: _teams,
+                      tournamentId: widget.tournamentId,
+                      config: _predictionConfig!,
+                      currentUid: FirebaseAuth.instance.currentUser?.uid,
+                      rosters: _rosters,
+                    ),
                 ],
-              ),
+              );
+              }),
             ),
     );
   }
 
   Widget _buildHeader(BuildContext context) {
     final tournament = _tournament;
+    final fg = TournamentColors.headerForeground(context);
+    final muted = TournamentColors.headerForegroundMuted(context);
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF1A237E), Color(0xFF283593)],
-        ),
+      decoration: BoxDecoration(
+        gradient: TournamentColors.headerGradient(context),
       ),
       child: SafeArea(
         bottom: false,
@@ -221,7 +361,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                 url: tournament?.logoUrl,
                 size: 54,
                 fallbackIcon: Icons.emoji_events,
-                fallbackBackground: Colors.white.withValues(alpha: 0.15),
+                fallbackBackground: TournamentColors.headerChipFill(context),
               ),
               const SizedBox(width: 14),
               // Info
@@ -232,8 +372,8 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                   children: [
                     Text(
                       tournament?.name ?? widget.tournamentName,
-                      style: const TextStyle(
-                        color: Colors.white,
+                      style: TextStyle(
+                        color: fg,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
@@ -247,8 +387,8 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                         if (tournament?.hostCity != null)
                           tournament!.hostCity!,
                       ].join(' · '),
-                      style: const TextStyle(
-                        color: Colors.white70,
+                      style: TextStyle(
+                        color: muted,
                         fontSize: 13,
                       ),
                     ),
@@ -257,13 +397,14 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          const Icon(Icons.emoji_events,
-                              size: 14, color: Color(0xFFFFD700)),
+                          Icon(Icons.emoji_events,
+                              size: 14,
+                              color: TournamentColors.championGold(context)),
                           const SizedBox(width: 4),
                           Text(
                             tournament!.champion!,
-                            style: const TextStyle(
-                              color: Colors.white,
+                            style: TextStyle(
+                              color: fg,
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                             ),
@@ -281,12 +422,12 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                       const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white60),
+                    border: Border.all(color: muted),
                   ),
                   child: Text(
                     tournament!.status,
-                    style: const TextStyle(
-                        color: Colors.white,
+                    style: TextStyle(
+                        color: fg,
                         fontSize: 11,
                         fontWeight: FontWeight.w600),
                   ),

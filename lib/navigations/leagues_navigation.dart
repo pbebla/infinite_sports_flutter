@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/leagues.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 class LeaguesNavigation extends StatefulWidget {
   const LeaguesNavigation({super.key});
@@ -25,23 +26,22 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                   future: getSeasonTiles("Futsal", context), 
                   builder:(context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
-                      return Center(
-                        child: CircularProgressIndicator(
-                          color: Theme.of(context).colorScheme.primary,
-                        )
+                      // Skeleton sweep (F3 Fix 2): matches the season-tile
+                      // list this resolves into below, app bar included so
+                      // it doesn't pop in once the data arrives.
+                      return Scaffold(
+                        appBar: AppBar(centerTitle: true, title: const Text("Futsal")),
+                        body: const SkeletonList(),
                       );
                     }
                     return Scaffold(
                       appBar: AppBar(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Theme.of(context).colorScheme.primary,
                         centerTitle: true,
                         title: Text("Futsal")
                       ),
-                      body: ListView.separated(
-                        separatorBuilder: (context, index) => Divider(
-                              color: Theme.of(context).dividerColor,
-                            ),
+                      // P2.1: SeasonCards need no dividers between rows.
+                      body: ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
                         itemCount: snapshot.data!.length,
                         itemBuilder: (context, index) => snapshot.data![index]
                       )
@@ -52,23 +52,22 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                   future: getSeasonTiles("Basketball", context), 
                   builder:(context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
-                      return Center(
-                        child: CircularProgressIndicator(
-                          color: Theme.of(context).colorScheme.primary,
-                        )
+                      // Skeleton sweep (F3 Fix 2): matches the season-tile
+                      // list this resolves into below, app bar included so
+                      // it doesn't pop in once the data arrives.
+                      return Scaffold(
+                        appBar: AppBar(centerTitle: true, title: const Text("Basketball")),
+                        body: const SkeletonList(),
                       );
                     }
                     return Scaffold(
                       appBar: AppBar(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Theme.of(context).colorScheme.primary,
                         centerTitle: true,
                         title: Text("Basketball")
                       ),
-                      body: ListView.separated(
-                        separatorBuilder: (context, index) => Divider(
-                              color: Theme.of(context).dividerColor,
-                            ),
+                      // P2.1: SeasonCards need no dividers between rows.
+                      body: ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
                         itemCount: snapshot.data!.length,
                         itemBuilder: (context, index) => snapshot.data![index]
                       )
@@ -79,23 +78,22 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                   future: getSeasonTiles("Flag Football", context), 
                   builder:(context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
-                      return Center(
-                        child: CircularProgressIndicator(
-                          color: Theme.of(context).colorScheme.primary,
-                        )
+                      // Skeleton sweep (F3 Fix 2): matches the season-tile
+                      // list this resolves into below, app bar included so
+                      // it doesn't pop in once the data arrives.
+                      return Scaffold(
+                        appBar: AppBar(centerTitle: true, title: const Text("Flag Football")),
+                        body: const SkeletonList(),
                       );
                     }
                     return Scaffold(
                       appBar: AppBar(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Theme.of(context).colorScheme.primary,
                         centerTitle: true,
                         title: Text("Flag Football")
                       ),
-                      body: ListView.separated(
-                        separatorBuilder: (context, index) => Divider(
-                              color: Theme.of(context).dividerColor,
-                            ),
+                      // P2.1: SeasonCards need no dividers between rows.
+                      body: ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
                         itemCount: snapshot.data!.length,
                         itemBuilder: (context, index) => snapshot.data![index]
                       )
@@ -108,23 +106,30 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                   future: getSeasonTiles("AFC San Jose", context), 
                   builder:(context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
-                      return Center(
-                        child: CircularProgressIndicator(
-                          color: Theme.of(context).colorScheme.primary,
-                        )
+                      // Skeleton sweep (F3 Fix 2): matches the season-tile
+                      // list this resolves into below, app bar included so
+                      // it doesn't pop in once the data arrives.
+                      return Scaffold(
+                        appBar: AppBar(centerTitle: true, title: const Text("AFC San Jose")),
+                        body: const SkeletonList(),
                       );
                     }
                     return Scaffold(
                       appBar: AppBar(
-                        foregroundColor: Colors.white,
-                        backgroundColor: Theme.of(context).colorScheme.primary,
                         centerTitle: true,
                         title: Text("AFC San Jose")
                       ),
                       body: ListView.separated(
-                        separatorBuilder: (context, index) => Divider(
-                              color: Theme.of(context).dividerColor,
-                            ),
+                        // Theme-staleness fix (F3.1): separatorBuilder's own
+                        // `context` can go stale after a theme toggle, same
+                        // as itemBuilder rows (see fixtures_tab.dart, F3 Fix
+                        // 1) — wrap in a Builder so this Divider's
+                        // Theme.of() lookup stays live/dependency-tracked.
+                        separatorBuilder: (context, index) => Builder(
+                          builder: (context) => Divider(
+                                color: Theme.of(context).dividerColor,
+                              ),
+                        ),
                         itemCount: snapshot.data!.length,
                         itemBuilder: (context, index) => snapshot.data![index]
                       )

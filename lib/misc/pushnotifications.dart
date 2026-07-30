@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:ui' show Color;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:infinite_sports_flutter/misc/notification_router.dart';
 
 class PushNotifications {
   static final FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
@@ -11,8 +13,18 @@ class PushNotifications {
     );
   }
 
+  /// Channel id shared with the Watcher's FCM sends (functions/src/lib/fcm.ts)
+  /// and the manifest's default_notification_channel_id. Max importance makes
+  /// alerts banner-pop instead of arriving silently in the tray.
+  static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
+    'infinite_sports_notifications',
+    'Infinite Sports App Notifications',
+    description: 'Incoming Infinite Sports notifications',
+    importance: Importance.max,
+  );
+
   static Future initLocalNotifications() async {
-    const AndroidInitializationSettings androidInitializationSettings = AndroidInitializationSettings('@mipmap/launcher_icon');
+    const AndroidInitializationSettings androidInitializationSettings = AndroidInitializationSettings('@drawable/ic_notification');
     final DarwinInitializationSettings iOSinitializationSettings = DarwinInitializationSettings();
     final InitializationSettings initializationSettings = InitializationSettings(
       android: androidInitializationSettings,
@@ -20,9 +32,10 @@ class PushNotifications {
     );
 
     if (Platform.isAndroid) {
-      await _flutterLocalNotificationsPlugin
-          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()!
-          .requestNotificationsPermission();
+      final androidPlugin = _flutterLocalNotificationsPlugin
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()!;
+      await androidPlugin.requestNotificationsPermission();
+      await androidPlugin.createNotificationChannel(_channel);
     }
 
     if (Platform.isIOS) {
@@ -40,7 +53,8 @@ class PushNotifications {
       onDidReceiveBackgroundNotificationResponse: onNotificationTap);
   }
 
-  static void onNotificationTap(notificationresponse) {
+  static void onNotificationTap(NotificationResponse notificationResponse) {
+    openMatchFromPayloadString(notificationResponse.payload);
   }
 
   //local notifications
@@ -49,19 +63,25 @@ class PushNotifications {
     required String body,
     required String payload,
   }) async {
-    const AndroidNotificationDetails androidNotificationDetails = 
+    // Black disc holding the white logo stencil as the small icon (owner
+    // choice). No large icon — the owner found the big square logo too
+    // prominent on the right of the notification.
+    const androidNotificationDetails =
       AndroidNotificationDetails('infinite_sports_notifications', 'Infinite Sports App Notifications',
         channelDescription: 'Incoming Infinite Sports notifications',
         importance: Importance.max,
         priority: Priority.high,
+        color: Color(0xFF000000),
         ticker: 'ticker');
     const iosNotificationDetails = DarwinNotificationDetails();
-    const NotificationDetails notificationDetails =
+    final NotificationDetails notificationDetails =
       NotificationDetails(
         android: androidNotificationDetails,
         iOS: iosNotificationDetails
       );
+    // Unique id per alert so a goal doesn't overwrite the kickoff in the tray.
+    final id = DateTime.now().millisecondsSinceEpoch & 0x7FFFFFFF;
     await _flutterLocalNotificationsPlugin
-      .show(0, title, body, notificationDetails, payload: payload);
+      .show(id, title, body, notificationDetails, payload: payload);
   }
 }

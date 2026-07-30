@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/tournament_stats_engine.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
@@ -8,11 +9,15 @@ class TableTab extends StatelessWidget {
   final Map<String, TournamentTeam> teams;
   final List<TournamentMatch> matches;
   final String? tournamentId;
+  final ComputedTournamentStats stats;
+  final String sport;
 
   const TableTab({
     super.key,
     required this.teams,
     required this.matches,
+    required this.stats,
+    required this.sport,
     this.tournamentId,
   });
 
@@ -30,11 +35,19 @@ class TableTab extends StatelessWidget {
   List<TournamentTeam> _sortGroup(List<TournamentTeam> group) {
     return group
       ..sort((a, b) {
-        if (b.points != a.points) return b.points.compareTo(a.points);
-        if (b.gd != a.gd) return b.gd.compareTo(a.gd);
-        return b.gs.compareTo(a.gs);
+        final sa = stats.standingFor(a.id);
+        final sb = stats.standingFor(b.id);
+        if (sb.pts != sa.pts) return sb.pts.compareTo(sa.pts);
+        if (sb.gd != sa.gd) return sb.gd.compareTo(sa.gd);
+        return sb.gs.compareTo(sa.gs);
       });
   }
+
+  Set<String> get _liveTeamIds => matches
+      .where((m) => m.status == 1)
+      .expand((m) => [m.team1Id, m.team2Id])
+      .whereType<String>()
+      .toSet();
 
   @override
   Widget build(BuildContext context) {
@@ -77,15 +90,19 @@ class TableTab extends StatelessWidget {
                 for (final gName in groupNames) ...[
                   _groupHeader(context, gName),
                   _tableHeader(context),
-                  ...(_sortGroup(grouped[gName]!)).map(
-                    (team) => _teamRow(context, team),
+                  ...(_sortGroup(grouped[gName]!)).asMap().entries.map(
+                    (e) => _teamRow(context, e.value, rank: e.key),
                   ),
                   const SizedBox(height: 12),
                 ],
               ],
             ),
           ),
-          _legend(context),
+          // Keep the legend visible above the floating glass nav bar.
+          Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
+            child: _legend(context),
+          ),
         ],
       );
     } else {
@@ -99,10 +116,25 @@ class TableTab extends StatelessWidget {
             child: ListView.builder(
               padding: EdgeInsetsGeometry.all(0),
               itemCount: sorted.length,
-              itemBuilder: (context, index) => _teamRow(context, sorted[index]),
+              // Theme-staleness fix (F3.1): itemBuilder's own `context` can
+              // go stale after a theme toggle (same
+              // SliverChildBuilderDelegate reuse quirk as
+              // fixtures_tab.dart, F3 Fix 1) — _teamRow reads Theme.of()
+              // via the context passed to it, so wrap in a Builder for a
+              // live, dependency-tracked context. (The other _teamRow call
+              // site above uses a plain ListView's stable context and
+              // doesn't need this.)
+              itemBuilder: (context, index) => Builder(
+                builder: (context) =>
+                    _teamRow(context, sorted[index], rank: index),
+              ),
             ),
           ),
-          _legend(context),
+          // Keep the legend visible above the floating glass nav bar.
+          Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
+            child: _legend(context),
+          ),
         ],
       );
     }
@@ -116,7 +148,7 @@ class TableTab extends StatelessWidget {
         style: Theme.of(context).textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.bold,
               letterSpacing: 0.8,
-              color: Theme.of(context).colorScheme.primary,
+              color: Theme.of(context).colorScheme.onSurface,
             ),
       ),
     );
@@ -128,6 +160,12 @@ class TableTab extends StatelessWidget {
       fontWeight: FontWeight.bold,
       color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
     );
+    final winsOnly = standingsModeFor(sport) == 'winsOnly';
+
+    Widget cell(String label) => Expanded(
+          flex: 1,
+          child: Center(child: Text(label, style: headerStyle)),
+        );
 
     return Container(
       color: Theme.of(context)
@@ -141,46 +179,30 @@ class TableTab extends StatelessWidget {
             flex: 7,
             child: Center(child: Text('Team', style: headerStyle)),
           ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('GP', style: headerStyle)),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('W', style: headerStyle)),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('D', style: headerStyle)),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('L', style: headerStyle)),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('GS', style: headerStyle)),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('GC', style: headerStyle)),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('GD', style: headerStyle)),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('Pts', style: headerStyle)),
-          ),
+          cell('GP'),
+          cell('W'),
+          if (!winsOnly) cell('D'),
+          cell('L'),
+          if (winsOnly) ...[
+            cell('PF'),
+            cell('PA'),
+            cell('Diff'),
+          ] else ...[
+            cell('GS'),
+            cell('GC'),
+            cell('GD'),
+            cell('Pts'),
+          ],
         ],
       ),
     );
   }
 
-  Widget _teamRow(BuildContext context, TournamentTeam team) {
+  Widget _teamRow(BuildContext context, TournamentTeam team, {int rank = 0}) {
     const cellStyle = TextStyle(fontSize: 12);
     final qualColor = _qualificationColor(team.qualification);
+    final s = stats.standingFor(team.id);
+    final isLive = _liveTeamIds.contains(team.id);
 
     return InkWell(
       onTap: tournamentId != null
@@ -192,6 +214,7 @@ class TableTab extends StatelessWidget {
                     teamId: team.id,
                     tournamentId: tournamentId!,
                     preloadedTeams: teams,
+                    sport: sport,
                   ),
                 ),
               );
@@ -199,10 +222,11 @@ class TableTab extends StatelessWidget {
           : null,
       child: Container(
         decoration: BoxDecoration(
+          color: isLive ? const Color(0x1A0A7D2C) : null,
           border: Border(
             bottom: BorderSide(
               color: Theme.of(context).dividerColor,
-              width: 0.5,
+              width: 1,
             ),
           ),
         ),
@@ -220,30 +244,42 @@ class TableTab extends StatelessWidget {
                 ),
                 SizedBox(
                   width: 18,
-                  child: team.seed != null
-                      ? Center(
-                          child: Text(
-                            '${team.seed}',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurface
-                                  .withValues(alpha: 0.5),
-                            ),
-                          ),
-                        )
-                      : null,
+                  child: Center(
+                    child: Text(
+                      '${rank + 1}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withValues(alpha: 0.5),
+                      ),
+                    ),
+                  ),
                 ),
                 // Team logo
                 TeamLogo(url: team.logoUrl, size: 24),
                 const SizedBox(width: 6),
                 Expanded(
                   flex: 5,
-                  child: Text(
-                    team.name,
-                    style: const TextStyle(fontSize: 13),
-                    softWrap: true,
+                  child: Row(
+                    children: [
+                      if (isLive) ...[
+                        const _LiveDot(),
+                        const SizedBox(width: 5),
+                      ],
+                      Expanded(
+                        child: Text(
+                          team.name,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                          softWrap: true,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                     ]
@@ -251,52 +287,57 @@ class TableTab extends StatelessWidget {
           ),
           Expanded(
             flex: 1,
-            child: Center(child: Text('${team.gp}', style: cellStyle)),
+            child: Center(child: Text('${s.gp}', style: cellStyle)),
           ),
           Expanded(
             flex: 1,
-            child: Center(child: Text('${team.wins}', style: cellStyle)),
+            child: Center(child: Text('${s.w}', style: cellStyle)),
+          ),
+          if (standingsModeFor(sport) != 'winsOnly')
+            Expanded(
+              flex: 1,
+              child: Center(child: Text('${s.d}', style: cellStyle)),
+            ),
+          Expanded(
+            flex: 1,
+            child: Center(child: Text('${s.l}', style: cellStyle)),
           ),
           Expanded(
             flex: 1,
-            child: Center(child: Text('${team.draws}', style: cellStyle)),
+            child: Center(child: Text('${s.gs}', style: cellStyle)),
           ),
           Expanded(
             flex: 1,
-            child: Center(child: Text('${team.losses}', style: cellStyle)),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('${team.gs}', style: cellStyle)),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: Text('${team.gc}', style: cellStyle)),
+            child: Center(child: Text('${s.gc}', style: cellStyle)),
           ),
           Expanded(
             flex: 1,
             child: Center(
               child: Text(
-                team.gd >= 0 ? '+${team.gd}' : '${team.gd}',
+                s.gd >= 0 ? '+${s.gd}' : '${s.gd}',
                 style: cellStyle.copyWith(
-                  color: team.gd > 0
+                  color: s.gd > 0
                       ? Colors.green
-                      : team.gd < 0
+                      : s.gd < 0
                           ? Colors.red
                           : null,
                 ),
               ),
             ),
           ),
-          Expanded(
-            flex: 1,
-            child: Center(
-              child: Text(
-                '${team.points}',
-                style: cellStyle.copyWith(fontWeight: FontWeight.bold),
+          if (standingsModeFor(sport) != 'winsOnly')
+            Expanded(
+              flex: 1,
+              child: Center(
+                child: Text(
+                  '${s.pts}',
+                  style: cellStyle.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
               ),
             ),
-          ),
         ],
         ),
       ),
@@ -332,6 +373,37 @@ class TableTab extends StatelessWidget {
         const SizedBox(width: 4),
         Text(label, style: const TextStyle(fontSize: 12)),
       ],
+    );
+  }
+}
+
+class _LiveDot extends StatefulWidget {
+  const _LiveDot();
+  @override
+  State<_LiveDot> createState() => _LiveDotState();
+}
+
+class _LiveDotState extends State<_LiveDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))
+        ..repeat(reverse: true);
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween(begin: 1.0, end: 0.35).animate(_c),
+      child: Container(
+        width: 8,
+        height: 8,
+        decoration: const BoxDecoration(
+            color: Color(0xFF0A7D2C), shape: BoxShape.circle),
+      ),
     );
   }
 }

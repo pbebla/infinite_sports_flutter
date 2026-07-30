@@ -4,6 +4,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
+import 'package:infinite_sports_flutter/misc/home_nav.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/business.dart';
@@ -22,6 +23,24 @@ import 'dart:async';
 
 
 var infiniteSportsPrimaryColor = const Color.fromARGB(255, 208, 0, 0);
+// Dark mode swaps red accents for gold (owner's black & gold dark theme).
+// Light mode keeps the brand red everywhere.
+var infiniteSportsGoldColor = const Color(0xFFE3B84C);
+
+/// Brand accent for the current brightness: red in light, gold in dark.
+/// Prefer Theme.of(context).colorScheme.primary (already brightness-aware);
+/// use this only where no ColorScheme is in play.
+Color brandAccent(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? infiniteSportsGoldColor
+        : infiniteSportsPrimaryColor;
+
+/// Text/icon color for content sitting on a brand-accent fill (buttons,
+/// banners): white on red in light mode, near-black on gold in dark mode.
+Color onBrandAccent(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFF1A1206)
+        : Colors.white;
 
 Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
 Map<String, Map<String, Map<String, BasketballPlayer>>> basketballLineups = {};
@@ -29,12 +48,46 @@ Map<String, Map<String, Map<String, FlagFootballPlayer>>> flagFootballLineups = 
 Map teamLogos = {};
 FirebaseAuthService auth = FirebaseAuthService();
 bool signedIn = false;
-bool autoSignIn = false;
 bool darkModeEnabled = false;
 BuildContext? mainContext;
 BuildContext? mainScaffoldContext;
 
+/// True for the duration of an in-flight signup flow (email, Google, or
+/// Apple) — from the moment the account is created/signed-in until the
+/// flow's own final step (About You, then favorites) finishes. While true,
+/// `MyHomePage._setupNotificationPrefs` (lib/main.dart) skips its one-time
+/// "complete your profile" gate entirely: that gate reads `Users/<uid>` the
+/// instant `authStateChanges()` flips to signed-in, which can race the
+/// signup flow's own writes to that same node (the flow hasn't written
+/// `ProfileCompleted`/`Phone Number` yet), causing the gate to push its own
+/// stale duplicate About You page on top of the flow's (auth-wall F2 fix).
+/// Returning users never set this flag, so the gate always runs normally
+/// for them.
+bool onboardingFlowActive = false;
+
 ValueNotifier headerNotifier = ValueNotifier(["", ""]);
+
+/// Cross-navigator "jump to this MyHomePage tab" request (Task F8). There is
+/// no pre-existing mechanism for switching MyHomePage's bottom-nav tab from
+/// a page pushed on top of it — the push-notification deep-link router
+/// (lib/misc/notification_router.dart) only ever pushes detail routes on the
+/// root navigator, it never touches `_selectedIndex` — so this is the one
+/// shared mechanism for it, reused by every screen that needs it (currently
+/// InsidersLeaderboardPage's bottom nav, Task F8). `_MyHomePageState`
+/// (lib/main.dart) listens in initState and, on a non-null value, switches
+/// to that tab and resets this back to null so a repeat request of the same
+/// tab still notifies.
+final ValueNotifier<HomeTab?> requestedHomeTab = ValueNotifier<HomeTab?>(null);
+
+/// Pops every route back to the root (MyHomePage) and asks it, via
+/// [requestedHomeTab], to select [tab]. Setting the notifier before popping
+/// means MyHomePage (still mounted underneath, just not visible) has already
+/// switched tabs by the time the pop's transition reveals it — no flash of
+/// the previous tab.
+void switchHomeTab(BuildContext context, HomeTab tab) {
+  requestedHomeTab.value = tab;
+  Navigator.of(context).popUntil((route) => route.isFirst);
+}
 
 final List<String> months = [
   "January",
@@ -88,6 +141,13 @@ DateTime? parseDatabaseDate(String databaseDate) {
   final y = int.tryParse(databaseDate.substring(4, 8));
   if (m == null || d == null || y == null) return null;
   return DateTime.utc(y, m, d);
+}
+
+/// "08272026" -> "Thursday, August 27". Falls back to the raw string.
+String formatDayHeading(String mmddyyyy) {
+  final dt = parseDatabaseDate(mmddyyyy);
+  if (dt == null) return mmddyyyy;
+  return DateFormat('EEEE, MMMM d').format(dt);
 }
 
 String convertDatabaseDateToFormatDate(String databaseDate) {
@@ -266,6 +326,7 @@ Future<List<String>> getSoccerSeasons(sport) async {
   if (sport == "AFC San Jose") {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/");
     var event = await newClient.child("Seasons").once();
+    if (event.snapshot.value == null) return [];
     var seasons = event.snapshot.value as Map<dynamic, dynamic>;
     return seasons.keys.toList().cast<String>();
   }
@@ -282,7 +343,7 @@ Future<Map<String, SoccerPlayer>> getSoccerRoster(sport, season) async {
       SoccerPlayer temp = SoccerPlayer();
       temp.assists = info["Assists"] ?? 0;
       temp.goals = info["Goals"] ?? 0;
-      temp.number = info["Number"].toString() ?? "";
+      temp.number = info["Number"]?.toString() ?? '';
       temp.saves = info["Saves"] ?? 0;
       temp.uid = info["UID"] ?? '0';
       temp.position = info["Position"] ?? "";
@@ -330,18 +391,30 @@ Future<void> getAllFlagFootballLineUps(String season) async
     (lineup as Map).forEach((name, info) {
       FlagFootballPlayer temp2 = FlagFootballPlayer();
       temp2.name = name;
-      temp2.number = info["number"].toString() ?? '0';
+      temp2.number = info["number"]?.toString() ?? '0';
       temp2.uid = info["UID"] ?? '0';
-      temp2.receptions = info["Receptions"] ?? 0;
-      temp2.receivingTouchdowns = info["Receiving Touchdowns"] ?? 0;
-      temp2.receptionMisses = info["Receiver Miss"] ?? 0;
-      temp2.passingTouchdowns = info["Passing Touchdowns"] ?? 0;
-      temp2.qbCompletions = info["QB Completions"] ?? 0;
-      temp2.qbIncompletions = info["QB Incomplete"] ?? 0;
-      temp2.interceptions = info["Interceptions"] ?? 0;
-      temp2.flagPulls = info["Flag Pulls"] ?? 0;
-      temp2.passBreakups = info["Pass Breakups"] ?? 0;
-      temp2.sacks = info["Sacks"] ?? 0;
+      // P4 FF stat-key fix: the Manager writes SHORT keys (REC, RECTD,
+      // QBComp, ...). Read those first; fall back to the legacy long
+      // names so pre-Manager seasons still render.
+      temp2.receptions = info["REC"] ?? info["Receptions"] ?? 0;
+      temp2.receivingTouchdowns =
+          info["RECTD"] ?? info["Receiving Touchdowns"] ?? 0;
+      temp2.receptionMisses = info["RECMiss"] ?? info["Receiver Miss"] ?? 0;
+      temp2.passingTouchdowns =
+          info["PassTD"] ?? info["Passing Touchdowns"] ?? 0;
+      temp2.qbCompletions = info["QBComp"] ?? info["QB Completions"] ?? 0;
+      temp2.qbIncompletions = info["QBInc"] ?? info["QB Incomplete"] ?? 0;
+      temp2.interceptions = info["INT"] ?? info["Interceptions"] ?? 0;
+      temp2.flagPulls = info["FP"] ?? info["Flag Pulls"] ?? 0;
+      temp2.passBreakups = info["PBU"] ?? info["Pass Breakups"] ?? 0;
+      temp2.sacks = info["Sack"] ?? info["Sacks"] ?? 0;
+      // Never parsed before P4 (model fields existed all along):
+      temp2.passingInterceptions = info["PassINT"] ?? 0;
+      temp2.rushingTouchdowns = info["RushTD"] ?? 0;
+      temp2.interceptionTouchdowns = info["INTTD"] ?? 0;
+      temp2.pointAfterTouchdownMakes = info["PAT1"] ?? 0;
+      temp2.pointAfterTouchdownMisses = info["PAT1Miss"] ?? 0;
+      temp2.twoPointConversions = info["TwoPT"] ?? 0;
       temp2.getCompletionPercentage();
       temp2.getCatchRate();
       temp[name] = temp2;
@@ -362,7 +435,7 @@ Future<void> getAllBasketballLineUps(String season) async
     Map<String, BasketballPlayer> temp = {};
     (lineup as Map).forEach((name, info) {
       BasketballPlayer temp2 = BasketballPlayer();
-      temp2.number = info["number"] ?? 0;
+      temp2.number = (info["number"] ?? '0').toString();
       temp2.uid = info["UID"] ?? '0';
       temp2.name = name;
       temp2.onePoint = info["OnePoint"] ?? 0;
@@ -532,6 +605,8 @@ Future<Map<String, List<FutsalGame>>> getAllFutsalGames(sport, season) async {
         game.team2score = (val["team2score"] ?? val["team2Score"]).toString();
         game.date = val["Date"] ?? val["date"];
         game.status = val["status"];
+        game.storedTime = (val["Time"] ?? "").toString();
+        game.stage = (val["Stage"] ?? "").toString();
         if(val.containsKey("link")) {
           game.link = val["link"];
         }
@@ -576,6 +651,8 @@ Future<Map<String, List<BasketballGame>>> getAllBasketballGames(sport, season) a
         game.team2score = val["team2score"].toString();
         game.date = val["Date"];
         game.status = val["status"] ?? 0;
+        game.storedTime = (val["Time"] ?? "").toString();
+        game.stage = (val["Stage"] ?? "").toString();
         if(val.containsKey("link")) {
           game.link = val["link"];
         }
@@ -620,6 +697,8 @@ Future<Map<String, List<FlagFootballGame>>> getAllFlagFootballGames(sport, seaso
         game.team2score = val["team2score"].toString();
         game.date = val["Date"];
         game.status = val["status"] ?? 0;
+        game.storedTime = (val["Time"] ?? "").toString();
+        game.stage = (val["Stage"] ?? "").toString();
         if(val.containsKey("link")) {
           game.link = val["link"];
         }
@@ -781,13 +860,17 @@ Future<Map<String, BasketballPlayer>> getBasketballLineUp(season, team) async {
 
 Future<void> getAllTeamLogo() async
 {
+  if (teamLogos.isNotEmpty) return;
+
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   var event = await newClient.child("Logo Urls").once();
-  teamLogos = event.snapshot.value as Map;
+  final raw = event.snapshot.value;
+  if (raw is Map) teamLogos = raw;
 
   newClient = FirebaseDatabase.instance.ref("AFC San Jose");
-  event = await newClient.child("Logo URL").once();
-  teamLogos["AFC San Jose"] = event.snapshot.value as String;
+  var afcEvent = await newClient.child("Logo URL").once();
+  final afcLogo = afcEvent.snapshot.value;
+  if (afcLogo != null) teamLogos["AFC San Jose"] = afcLogo.toString();
 }
 
 Future<Game> getGame(widget, sport, season, date, times, num) async {

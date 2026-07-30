@@ -2,9 +2,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/leagueform.dart';
 import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/model/userinformation.dart';
+import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 class Signup extends StatefulWidget {
@@ -57,8 +59,8 @@ class _SignupState extends State<Signup> {
                 return Scaffold(
                   appBar: AppBar(
                     centerTitle: true,
-                    backgroundColor: Theme.of(context).colorScheme.primary,
-                    foregroundColor: Colors.white,
+                    backgroundColor: TournamentColors.headerBackground(context),
+                    foregroundColor: TournamentColors.headerForeground(context),
                     title: Text(v["Name"]),
                     actions: [
                       NavigationControls(controller: controller)
@@ -88,22 +90,25 @@ class _SignupState extends State<Signup> {
       future: populateMenus(), 
       builder:(context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(
-              child: CircularProgressIndicator(
-                color: Theme.of(context).colorScheme.primary,
-              )
-            );
+          // Skeleton sweep (F3 Fix 2): matches the Sign Up List below.
+          return const SkeletonList();
         }
         return Scaffold(
           appBar: AppBar(
             centerTitle: true,
             title: const Text("Sign Up List"),
-            backgroundColor: Theme.of(context).colorScheme.primary, 
-            foregroundColor: Colors.white,
+            backgroundColor: TournamentColors.headerBackground(context),
+            foregroundColor: TournamentColors.headerForeground(context),
           ),
           body: ListView.separated(
-            separatorBuilder: (context, index) => Divider(
-              color: Theme.of(context).dividerColor,
+            // Theme-staleness fix (F3.1): separatorBuilder's own `context`
+            // can go stale after a theme toggle, same as itemBuilder rows
+            // (see fixtures_tab.dart, F3 Fix 1) — wrap in a Builder so this
+            // Divider's Theme.of() lookup stays live/dependency-tracked.
+            separatorBuilder: (context, index) => Builder(
+              builder: (context) => Divider(
+                color: Theme.of(context).dividerColor,
+              ),
             ),
             itemCount: snapshot.data!.length,
             itemBuilder: (context, index) => snapshot.data![index]
