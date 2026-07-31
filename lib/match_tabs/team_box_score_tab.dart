@@ -39,7 +39,10 @@ class TeamBoxScoreTab extends StatefulWidget {
 }
 
 class _TeamBoxScoreTabState extends State<TeamBoxScoreTab> {
-  static const double _rowHeight = 44;
+  // Tall enough for a two-line name (owner rule: long player names wrap,
+  // never ellipsize — all leagues + tournaments). Shared by the identity
+  // and stat panes so their rows stay aligned.
+  static const double _rowHeight = 52;
   static const double _headerHeight = 36;
   static const double _identityWidth = 168;
 
@@ -226,6 +229,9 @@ class _TeamBoxScoreTabState extends State<TeamBoxScoreTab> {
                   p.name,
                   style:
                       const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  // Wrap long names to a second line (owner rule); ellipsis
+                  // only guards truly pathological 3-line names.
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
