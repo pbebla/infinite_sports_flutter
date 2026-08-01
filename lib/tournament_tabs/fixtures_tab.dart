@@ -152,23 +152,6 @@ class FixturesTab extends StatelessWidget {
     final name1 = teamName(team1, match.team1Id, match.team1Seed);
     final name2 = teamName(team2, match.team2Id, match.team2Seed);
 
-    // Leading live indicator (MinuteBall) – shown only for live matches, placed
-    // at the far-left edge of the match row (FotMob style). Non-live rows get
-    // a SizedBox of matching width so team columns stay aligned.
-    const double minuteBallWidth = 28; // approximate rendered width of MinuteBall
-    Widget leadingWidget;
-    if (isLive && match.clock != null) {
-      leadingWidget = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          MinuteBall(clock: match.clock),
-          const SizedBox(width: 10),
-        ],
-      );
-    } else {
-      leadingWidget = const SizedBox(width: minuteBallWidth + 10);
-    }
-
     // Score / time widget in center
     Widget centerWidget;
     if (isLive) {
@@ -203,21 +186,15 @@ class FixturesTab extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Flexible(
-          // PR #10 round 2: long names scale the font down until they fit
-          // one line — no wrap, no ellipsis.
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerRight,
-            child: Text(
+          child: Text(
               name1,
               style: TextStyle(
                 fontWeight: team1IsWinner ? FontWeight.bold : FontWeight.w600,
                 fontSize: 13,
                 color: Theme.of(context).colorScheme.onSurface,
               ),
-              maxLines: 1,
+              textAlign: TextAlign.right,
             ),
-          ),
         ),
         const SizedBox(width: 6),
         TeamLogo(url: team1?.logoUrl, size: 28),
@@ -230,19 +207,15 @@ class FixturesTab extends StatelessWidget {
         TeamLogo(url: team2?.logoUrl, size: 28),
         const SizedBox(width: 6),
         Flexible(
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
+          child: Text(
               name2,
               style: TextStyle(
                 fontWeight: team2IsWinner ? FontWeight.bold : FontWeight.w600,
                 fontSize: 13,
                 color: Theme.of(context).colorScheme.onSurface,
               ),
-              maxLines: 1,
+              textAlign: TextAlign.left,
             ),
-          ),
         ),
       ],
     );
@@ -329,13 +302,18 @@ class FixturesTab extends StatelessWidget {
                             fontSize: 10),
                       ),
                     ),
+                    if (isLive && match.clock != null)
+                      Container(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        child: MinuteBall(clock: match.clock),
+                      ),
                 ],
               ),
               const SizedBox(height: 10),
               // FotMob-style: [MinuteBall] Team1 [right-aligned] | Score | Team2 [left-aligned]
               Row(
                 children: [
-                  leadingWidget,
                   Expanded(
                     child: Align(
                       alignment: Alignment.centerRight,
@@ -351,10 +329,7 @@ class FixturesTab extends StatelessWidget {
                       alignment: Alignment.centerLeft,
                       child: team2Widget,
                     ),
-                  ),
-                  // Trailing spacer mirrors the leading MinuteBall slot so the
-                  // score/time sits in the true horizontal center of the row.
-                  const SizedBox(width: minuteBallWidth + 10),
+                  )
                 ],
               ),
               // Stream link
