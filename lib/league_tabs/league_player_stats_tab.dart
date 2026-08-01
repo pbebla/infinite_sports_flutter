@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
+import 'package:infinite_sports_flutter/misc/league_stat_categories.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
@@ -49,53 +50,8 @@ class _LeaguePlayerStatsTabState extends State<LeaguePlayerStatsTab> {
     }
   }
 
-  /// label → statByName key → statIconAsset key ('' = no icon, matching
-  /// the tournament tab's iconless Clean Sheets). Per-sport, fan-side by
-  /// convention (see top_stats.dart header) — the config twin carries no
-  /// leaderboard defs. An optional 'suffix' renders after each value
-  /// ('%' for FF Catch %).
-  static const Map<String, List<Map<String, String>>> _categoriesBySport = {
-    'Futsal': [
-      {'label': 'Top Scorer', 'stat': 'goals', 'icon': 'goal'},
-      {'label': 'Assists', 'stat': 'assists', 'icon': 'assist'},
-      {'label': 'Saves', 'stat': 'saves', 'icon': 'save'},
-      {'label': 'Defensive Plays (DPL)', 'stat': 'dpl', 'icon': 'dpl'},
-      {'label': 'Clean Sheets', 'stat': 'cleanSheets', 'icon': ''},
-      {'label': 'Yellow Cards', 'stat': 'yellowCards', 'icon': 'yellow'},
-      {'label': 'Red Cards', 'stat': 'redCards', 'icon': 'red'},
-    ],
-    // L6.2 Task 4: the full individual-stat set, in the owner's order. Every
-    // category here is a badge sport (isBadgeLeagueSport('Basketball')), so
-    // _categoryIcon below resolves the gold bball_*.png badge via
-    // leagueStatIcon(stat) regardless of the 'icon' field — left blank.
-    'Basketball': [
-      {'label': 'Points', 'stat': 'points', 'icon': ''},
-      {'label': '3-Pointers', 'stat': 'threePointers', 'icon': ''},
-      {'label': '2-Pointers', 'stat': 'twoPointers', 'icon': ''},
-      {'label': 'Free Throws Made', 'stat': 'freeThrows', 'icon': ''},
-      {'label': 'Rebounds', 'stat': 'rebounds', 'icon': ''},
-      {'label': 'Assists', 'stat': 'assists', 'icon': ''},
-      {'label': 'Steals', 'stat': 'steals', 'icon': ''},
-      {'label': 'Blocks', 'stat': 'blocks', 'icon': ''},
-      {'label': 'Turnovers', 'stat': 'turnovers', 'icon': ''},
-      {'label': 'Fouls', 'stat': 'fouls', 'icon': ''},
-    ],
-    'Flag Football': [
-      {'label': 'Touchdowns', 'stat': 'touchdowns', 'icon': ''},
-      {'label': 'Receptions', 'stat': 'receptions', 'icon': ''},
-      // L6.1: derived REC/(REC+RECMiss), gated to >=3 targets in the
-      // adapter so tiny samples never reach the board.
-      {'label': 'Catch %', 'stat': 'catchPercentage', 'icon': '',
-        'suffix': '%'},
-      {'label': 'Pass TDs', 'stat': 'passTouchdowns', 'icon': ''},
-      {'label': 'Interceptions', 'stat': 'interceptions', 'icon': ''},
-      {'label': 'Flag Pulls', 'stat': 'flagPulls', 'icon': ''},
-      {'label': 'Sacks', 'stat': 'sacks', 'icon': ''},
-    ],
-  };
-
   List<Map<String, String>> get _categories =>
-      _categoriesBySport[widget.sport] ?? _categoriesBySport['Futsal']!;
+      leagueStatCategories(widget.sport);
 
   @override
   Widget build(BuildContext context) {

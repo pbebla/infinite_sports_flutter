@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/match_tabs/box_score_columns.dart';
+import 'package:infinite_sports_flutter/match_tabs/team_box_score_tab.dart';
 import 'package:infinite_sports_flutter/misc/share_match_card_service.dart';
 import 'package:infinite_sports_flutter/misc/single_match_tallies.dart'
-    show leagueMatchLeaderCategories;
+    show MatchPlayerTally, leagueMatchLeaderCategories, singleMatchPlayerTallies;
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
@@ -12,7 +14,6 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_facts_tab.dart';
-import 'package:infinite_sports_flutter/tournament_tabs/match_lineup_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart'
     show isBadgeLeagueSport;
 import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
@@ -50,13 +51,23 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
   PredictionConfig? _predictionConfig;
   String _tournamentName = '';
 
+  // Box-score tallies memoized off the live match (tournamentdetail.dart
+  // lag-fix rule): recomputed only when a stream event lands, never in build.
+  late Map<String, MatchPlayerTally> _matchTallies =
+      singleMatchPlayerTallies(_match);
+
   @override
   void initState() {
     super.initState();
     _sub = TournamentService
         .watchMatch(widget.tournamentId, widget.match.id)
         .listen((m) {
-      if (mounted && m != null) setState(() => _match = m);
+      if (mounted && m != null) {
+        setState(() {
+          _match = m;
+          _matchTallies = singleMatchPlayerTallies(m);
+        });
+      }
     });
     TournamentService.getPredictionConfig(widget.tournamentId).then((cfg) {
       if (mounted) setState(() => _predictionConfig = cfg);
@@ -273,9 +284,12 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
     final team2 = _match.team2Id != null ? widget.teams[_match.team2Id] : null;
     final team1Players = _match.team1Id != null ? (widget.rosters[_match.team1Id] ?? []) : <TournamentPlayer>[];
     final team2Players = _match.team2Id != null ? (widget.rosters[_match.team2Id] ?? []) : <TournamentPlayer>[];
+    // Per-team box score tabs (Match Box Score spec): the Lineup tab is
+    // hidden — match_lineup_tab.dart survives for the future on-field view.
+    final boxScoreColumns = boxScoreColumnsFor(widget.sport);
 
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         body: NestedScrollView(
           headerSliverBuilder: (context, innerBoxIsScrolled) {
@@ -327,9 +341,13 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                   background: _buildScoreboardHeader(context),
                 ),
                 bottom: TabBar(
-                  tabs: const [
-                    Tab(text: 'Summary'),
-                    Tab(text: 'Lineup')
+                  // Owner feedback: the three tabs spread evenly across the
+                  // full width (scrollable clustered them in the center);
+                  // long team names scale down to fit their third.
+                  tabs: [
+                    const Tab(text: 'Summary'),
+                    teamNameTab(team1?.name ?? _match.team1Id ?? 'Team 1'),
+                    teamNameTab(team2?.name ?? _match.team2Id ?? 'Team 2'),
                   ],
                   labelColor: TournamentColors.headerForeground(context),
                   unselectedLabelColor:
@@ -364,14 +382,16 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                 leagueSportKey:
                     isBadgeLeagueSport(widget.sport) ? widget.sport : null,
               ),
-              MatchLineupTab(
-                match: _match,
-                team1: team1,
-                team2: team2,
-                team1Players: team1Players,
-                team2Players: team2Players,
-                sport: widget.sport,
-              )
+              TeamBoxScoreTab(
+                roster: team1Players,
+                tallies: _matchTallies,
+                columns: boxScoreColumns,
+              ),
+              TeamBoxScoreTab(
+                roster: team2Players,
+                tallies: _matchTallies,
+                columns: boxScoreColumns,
+              ),
             ],
           ),
         ),

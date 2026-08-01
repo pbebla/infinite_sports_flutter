@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/league_team_detail.dart';
+import 'package:infinite_sports_flutter/match_tabs/box_score_columns.dart';
+import 'package:infinite_sports_flutter/match_tabs/team_box_score_tab.dart';
 import 'package:infinite_sports_flutter/misc/goal_toast.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
@@ -17,7 +19,6 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_facts_tab.dart';
-import 'package:infinite_sports_flutter/tournament_tabs/match_lineup_tab.dart';
 import 'package:infinite_sports_flutter/widgets/live_clock.dart';
 import 'package:infinite_sports_flutter/widgets/score_text.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
@@ -64,10 +65,15 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
   PredictionConfig? _predictionConfig;
   StreamSubscription<PredictionConfig>? _configSub;
 
+  // Box-score tallies memoized off the live match (tournamentdetail.dart
+  // lag-fix rule): recomputed only when a stream event lands, never in build.
+  Map<String, MatchPlayerTally> _matchTallies = const {};
+
   @override
   void initState() {
     super.initState();
     _match = widget.initialMatch;
+    if (_match != null) _matchTallies = singleMatchPlayerTallies(_match!);
     // First paint speed (P2.1): subscribe immediately with default seeds;
     // startHour (kick-off fallback text) re-applies via re-subscribe and
     // logos apply at build time when they arrive.
@@ -115,7 +121,10 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
         _showGoalToast(m, m.team2Id ?? '');
       }
     }
-    setState(() => _match = m);
+    setState(() {
+      _match = m;
+      _matchTallies = singleMatchPlayerTallies(m);
+    });
   }
 
   void _showGoalToast(TournamentMatch m, String teamName) {
@@ -366,9 +375,12 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
     final team2Players = match.team2Id != null
         ? (_rosters[match.team2Id] ?? <TournamentPlayer>[])
         : <TournamentPlayer>[];
+    // Per-team box score tabs (Match Box Score spec): the Lineup tab is
+    // hidden — match_lineup_tab.dart survives for the future on-field view.
+    final boxScoreColumns = boxScoreColumnsFor(widget.sport);
 
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         body: NestedScrollView(
           headerSliverBuilder: (context, innerBoxIsScrolled) {
@@ -418,11 +430,16 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
                   background:
                       _buildScoreboardHeader(context, match, team1, team2),
                 ),
-                // Facts + Lineup tabs (parity with the tournament match page).
+                // Summary + per-team box score tabs (parity with the
+                // tournament match page).
                 bottom: TabBar(
-                  tabs: const [
-                    Tab(text: 'Summary'),
-                    Tab(text: 'Lineup'),
+                  // Owner feedback: the three tabs spread evenly across the
+                  // full width (scrollable clustered them in the center);
+                  // long team names scale down to fit their third.
+                  tabs: [
+                    const Tab(text: 'Summary'),
+                    teamNameTab(team1?.name ?? match.team1Id ?? 'Team 1'),
+                    teamNameTab(team2?.name ?? match.team2Id ?? 'Team 2'),
                   ],
                   labelColor: TournamentColors.headerForeground(context),
                   unselectedLabelColor:
@@ -459,15 +476,18 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
                 leaderCategories: leagueMatchLeaderCategories(widget.sport),
                 leagueSportKey: widget.sport,
               ),
-              // Lineup tab (Task 1): the same rosters already streamed for
-              // the Facts tab's Match Leaders / timeline name resolution.
-              MatchLineupTab(
-                match: match,
-                team1: team1,
-                team2: team2,
-                team1Players: team1Players,
-                team2Players: team2Players,
-                sport: widget.sport,
+              // Per-team box scores: the same rosters already streamed for
+              // the Facts tab's Match Leaders / timeline name resolution,
+              // tallied from the same live match activity.
+              TeamBoxScoreTab(
+                roster: team1Players,
+                tallies: _matchTallies,
+                columns: boxScoreColumns,
+              ),
+              TeamBoxScoreTab(
+                roster: team2Players,
+                tallies: _matchTallies,
+                columns: boxScoreColumns,
               ),
             ],
           ),

@@ -55,8 +55,13 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
   // per history row!) on every frame. Invalidated (_stats = null) only when
   // matches/rosters change; computed at most once per data change.
   ComputedTournamentStats? _stats;
+  // `sport` is REQUIRED here (PR #11 review): the engine zero-inits a
+  // sport-specific counter set, so omitting it defaulted every tournament
+  // to Soccer keys — a basketball team's Stats tab found no points/rebounds
+  // and rendered completely blank.
   ComputedTournamentStats get _computedStats => _stats ??=
-      computeTournamentStats(matches: _matches, rosters: _rosters);
+      computeTournamentStats(
+          matches: _matches, rosters: _rosters, sport: widget.sport);
   late TabController _tabController;
   late Future<List<Map<String, dynamic>>> _historyFuture;
   final Set<String> _expandedStats = {};
@@ -687,6 +692,25 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
       final filtered = players.where((p) => getValue(p, stat) > 0).toList()
         ..sort((a, b) => getValue(b, stat).compareTo(getValue(a, stat)));
       return filtered;
+    }
+
+    // Every category empty (nothing recorded yet for this sport) — say so
+    // instead of rendering a blank tab (PR #11 review).
+    final hasAnyStat =
+        categories.any((c) => getAllSorted(c['stat']!).isNotEmpty);
+    if (!hasAnyStat) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            'No stats recorded yet',
+            style: TextStyle(
+              color:
+                  Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+            ),
+          ),
+        ),
+      );
     }
 
     return ListView.builder(

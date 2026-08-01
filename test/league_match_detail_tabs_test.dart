@@ -1,24 +1,27 @@
-// Widget test for the league match page's Facts/Lineup tab structure
-// (L6.2 Task 1: parity with TournamentMatchDetailPage).
+// Widget test for the league match page's tab structure (Match Box Score
+// spec, 2026-07-28: Summary | <Team 1> | <Team 2> — the Lineup tab is
+// hidden until the on-field lineup epic revives it).
 //
 // LeagueMatchDetailPage itself can't be pumped directly in a widget test:
 // its State subscribes to LeagueService Firebase streams with no injection
 // seam (the same constraint documented in league_team_detail_tabs_test.dart
 // and league_tab_swap_test.dart for the sibling league pages). So this
-// harness reproduces the exact DefaultTabController + TabBar([Facts,
-// Lineup]) + TabBarView([MatchFactsTab, MatchLineupTab]) the page's build
-// method wires, fed by the same Firebase-free adapters
-// (leagueMatchFromGameMap / leagueTeamStub / leagueRostersFromLineupsNode)
-// LeagueMatchDetailPage itself uses.
+// harness reproduces the exact DefaultTabController + TabBar([Summary,
+// team1, team2]) + TabBarView([MatchFactsTab, TeamBoxScoreTab x2]) the
+// page's build method wires, fed by the same Firebase-free adapters
+// (leagueMatchFromGameMap / leagueTeamStub / leagueRostersFromLineupsNode /
+// singleMatchPlayerTallies) LeagueMatchDetailPage itself uses.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/match_tabs/box_score_columns.dart';
+import 'package:infinite_sports_flutter/match_tabs/team_box_score_tab.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
+import 'package:infinite_sports_flutter/misc/single_match_tallies.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_facts_tab.dart';
-import 'package:infinite_sports_flutter/tournament_tabs/match_lineup_tab.dart';
 
 Widget _harness({
   required TournamentMatch match,
@@ -28,17 +31,25 @@ Widget _harness({
   required List<TournamentPlayer> team2Players,
   required String sport,
 }) {
+  final tallies = singleMatchPlayerTallies(match);
+  final columns = boxScoreColumnsFor(sport);
   return MaterialApp(
     home: DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         body: NestedScrollView(
           headerSliverBuilder: (context, innerBoxIsScrolled) => [
             SliverAppBar(
               pinned: true,
               expandedHeight: 196,
-              bottom: const TabBar(
-                tabs: [Tab(text: 'Facts'), Tab(text: 'Lineup')],
+              bottom: TabBar(
+                isScrollable: true,
+                tabAlignment: TabAlignment.center,
+                tabs: [
+                  const Tab(text: 'Summary'),
+                  Tab(text: team1?.name ?? match.team1Id ?? 'Team 1'),
+                  Tab(text: team2?.name ?? match.team2Id ?? 'Team 2'),
+                ],
               ),
             ),
           ],
@@ -52,13 +63,15 @@ Widget _harness({
                 team2Players: team2Players,
                 leagueSportKey: sport,
               ),
-              MatchLineupTab(
-                match: match,
-                team1: team1,
-                team2: team2,
-                team1Players: team1Players,
-                team2Players: team2Players,
-                sport: sport,
+              TeamBoxScoreTab(
+                roster: team1Players,
+                tallies: tallies,
+                columns: columns,
+              ),
+              TeamBoxScoreTab(
+                roster: team2Players,
+                tallies: tallies,
+                columns: columns,
               ),
             ],
           ),
@@ -69,8 +82,10 @@ Widget _harness({
 }
 
 void main() {
-  testWidgets('league match page shows both Facts and Lineup tabs; Lineup '
-      'renders the same rosters the Facts tab uses', (tester) async {
+  testWidgets(
+      'league match page shows Summary + one tab per team; a team tab '
+      'renders that team\'s box score from the same rosters/activity the '
+      'Summary tab uses', (tester) async {
     final match = leagueMatchFromGameMap(
       dateKey: '06152026',
       index: 0,
@@ -80,6 +95,11 @@ void main() {
         'team1score': 2,
         'team2score': 1,
         'status': 2,
+        'team1activity': {
+          "7'": [
+            {'Goal': 'Ashur'},
+          ],
+        },
       },
     );
     final rosters = leagueRostersFromLineupsNode('Futsal', {
@@ -100,17 +120,29 @@ void main() {
       sport: 'Futsal',
     ));
 
-    // Both tab labels present; Facts is the initial view (no roster names
-    // rendered directly there — just the timeline/leaders/location).
-    expect(find.text('Facts'), findsOneWidget);
-    expect(find.text('Lineup'), findsOneWidget);
-    expect(find.text('Ashur'), findsNothing);
+    // All three tab labels present; Summary is the initial view (no roster
+    // rows rendered there — just the timeline/leaders/location). 'Ashur'
+    // appears once in the Summary timeline for his goal.
+    expect(find.text('Summary'), findsOneWidget);
+    expect(find.text('Nineveh'), findsOneWidget);
+    expect(find.text('Babylon'), findsOneWidget);
+    expect(find.text('#10'), findsNothing);
 
-    await tester.tap(find.text('Lineup'));
+    await tester.tap(find.text('Nineveh'));
     await tester.pumpAndSettle();
 
-    // Lineup tab renders both team rosters (same players fed to Facts).
+    // Team tab renders the team's box score rows (name + number) with the
+    // Goals column visible (recorded) and all-zero columns hidden.
     expect(find.text('Ashur'), findsOneWidget);
+    expect(find.text('#10'), findsOneWidget);
+    expect(find.text('Goals'), findsOneWidget);
+    expect(find.text('Saves'), findsNothing);
+
+    // Other team's tab shows its own roster only.
+    await tester.tap(find.text('Babylon'));
+    await tester.pumpAndSettle();
     expect(find.text('Ninos'), findsOneWidget);
+    expect(find.text('#9'), findsOneWidget);
+    expect(find.text('Ashur'), findsNothing);
   });
 }

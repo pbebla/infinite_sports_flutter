@@ -36,7 +36,10 @@ class TournamentDetailPage extends StatefulWidget {
 }
 
 class _TournamentDetailPageState extends State<TournamentDetailPage>
-    with SingleTickerProviderStateMixin {
+    // TickerProviderStateMixin (not Single-): the bleed fix recreates the
+    // TabController when the tournament identity changes, so this State can
+    // legitimately own more than one ticker over its lifetime.
+    with TickerProviderStateMixin {
   bool _isLoading = true;
   String? _loadError;
   Tournament? _tournament;
@@ -70,6 +73,38 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
     _loadData();
   }
 
+  /// Cross-tournament bleed fix (owner bug report 2026-07-30): this State
+  /// only loaded in initState, so if Flutter reuses the element with a
+  /// DIFFERENT tournamentId (position-based reuse in tab/list structures —
+  /// reproduced in integration_test/tournament_bleed_test.dart) the page
+  /// kept rendering the previous tournament's teams/matches/stats. On an
+  /// identity change: drop every stream and every piece of loaded state,
+  /// show the skeleton, and reload as if freshly pushed.
+  @override
+  void didUpdateWidget(covariant TournamentDetailPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.tournamentId == widget.tournamentId) return;
+    _matchesSub?.cancel();
+    _matchesSub = null;
+    _tournamentSub?.cancel();
+    _tournamentSub = null;
+    _tabController?.dispose();
+    _tabController = null;
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+      _tournament = null;
+      _teams = {};
+      _matches = [];
+      _rosters = {};
+      _stats = null;
+      _predictionConfig = null;
+      _tabs = const [];
+      _predictIndex = -1;
+    });
+    _loadData();
+  }
+
   @override
   void dispose() {
     _matchesSub?.cancel();
@@ -79,16 +114,22 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
   }
 
   Future<void> _loadData() async {
+    // Identity guard (bleed fix): if didUpdateWidget swaps the tournament
+    // while this load is in flight, every continuation below must drop its
+    // results instead of writing tournament A's data into B's page (or
+    // re-binding A's live streams over B's).
+    final loadId = widget.tournamentId;
+    bool stale() => !mounted || loadId != widget.tournamentId;
     try {
       // One parallel wave (was three sequential ones: header/teams/matches →
       // rosters+avatars → config). The raw rosters node rides along and is
       // parsed once teams land; avatar fetches never gate first paint.
       final results = await Future.wait([
-        TournamentService.getTournamentHeader(widget.tournamentId),
-        TournamentService.getTeams(widget.tournamentId),
-        TournamentService.getMatches(widget.tournamentId),
-        TournamentService.getPredictionConfig(widget.tournamentId),
-        TournamentService.getRostersNode(widget.tournamentId),
+        TournamentService.getTournamentHeader(loadId),
+        TournamentService.getTeams(loadId),
+        TournamentService.getMatches(loadId),
+        TournamentService.getPredictionConfig(loadId),
+        TournamentService.getRostersNode(loadId),
       ]);
 
       final tournament = results[0] as Tournament?;
@@ -100,7 +141,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
       final tabs = <Tab>[..._baseTabs];
       if (config.open) tabs.add(const Tab(text: 'Predict'));
 
-      if (!mounted) return;
+      if (stale()) return;
       setState(() {
         _tournament = tournament;
         _teams = teams;
@@ -122,7 +163,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
       // Avatars for linked players not yet in the session cache land in a
       // single follow-up update behind the first paint.
       TournamentService.enrichRosterPhotos(rosters).then((enriched) {
-        if (!mounted) return;
+        if (stale()) return;
         setState(() {
           _rosters = enriched;
           _stats = computeTournamentStats(
@@ -135,10 +176,10 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
 
       // Keep matches live after the initial paint: scores, clock, standings and
       // the bracket all update in place without a manual refresh.
+      if (stale()) return;
       _matchesSub?.cancel();
-      _matchesSub =
-          TournamentService.watchMatches(widget.tournamentId).listen((live) {
-        if (!mounted || live.isEmpty) return;
+      _matchesSub = TournamentService.watchMatches(loadId).listen((live) {
+        if (stale() || live.isEmpty) return;
         setState(() {
           _matches = live;
           _stats = computeTournamentStats(
@@ -155,14 +196,13 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
       // null emission means the record is momentarily unparseable, so the
       // last good header is kept rather than blanked.
       _tournamentSub?.cancel();
-      _tournamentSub =
-          TournamentService.watchTournament(widget.tournamentId).listen((live) {
-        if (!mounted || live == null) return;
+      _tournamentSub = TournamentService.watchTournament(loadId).listen((live) {
+        if (stale() || live == null) return;
         setState(() => _tournament = live);
       });
     } catch (e, st) {
       debugPrint('TournamentDetailPage._loadData error: $e\n$st');
-      if (!mounted) return;
+      if (stale()) return;
       setState(() {
         _isLoading = false;
         _loadError = 'Could not load tournament. Tap retry.';

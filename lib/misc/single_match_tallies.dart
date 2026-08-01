@@ -75,15 +75,39 @@ void _applyEvent(Map<String, MatchPlayerTally> out, String type, String player) 
     case 'dpl':
       t.dpl++;
       break;
-    // Basketball (P4)
+    // Cards + fouls (Box Score): both the league spellings (Yellow/Red/
+    // SecondYellow/Foul) and the tournament ones (yellow card/...) land
+    // here. SecondYellow counts as a red, never a first yellow — the
+    // stats-engine convention (statKeys ['SecondYellow', 'Red']).
+    case 'foul':
+      t.counts['fouls'] = (t.counts['fouls'] ?? 0) + 1;
+      break;
+    case 'yellow':
+    case 'yellow card':
+      t.counts['yellowCards'] = (t.counts['yellowCards'] ?? 0) + 1;
+      break;
+    case 'red':
+    case 'red card':
+    case 'secondyellow':
+    case 'second yellow':
+      t.counts['redCards'] = (t.counts['redCards'] ?? 0) + 1;
+      break;
+    // Basketball (P4). Made-shot buckets (Box Score) ride alongside the
+    // weighted 'points' Match Leaders keep reading.
     case 'onepointer':
       t.counts['points'] = (t.counts['points'] ?? 0) + 1;
+      t.counts['freeThrows'] = (t.counts['freeThrows'] ?? 0) + 1;
       break;
     case 'twopointer':
       t.counts['points'] = (t.counts['points'] ?? 0) + 2;
+      t.counts['twoPointers'] = (t.counts['twoPointers'] ?? 0) + 1;
       break;
     case 'threepointer':
       t.counts['points'] = (t.counts['points'] ?? 0) + 3;
+      t.counts['threePointers'] = (t.counts['threePointers'] ?? 0) + 1;
+      break;
+    case 'turnover':
+      t.counts['turnovers'] = (t.counts['turnovers'] ?? 0) + 1;
       break;
     case 'rebound':
       t.counts['rebounds'] = (t.counts['rebounds'] ?? 0) + 1;

@@ -274,6 +274,7 @@ void main() {
         'season-total leader cards: zero counts excluded, leader circled',
         (tester) async {
       await tester.pumpWidget(_wrap(LeagueTeamStatsTab(
+          sport: 'Futsal',
         roster: _roster(),
         rosterLoaded: true,
         onPlayerTap: (_) {},
@@ -307,6 +308,7 @@ void main() {
     testWidgets('stat rows tap through to player profiles', (tester) async {
       TournamentPlayer? tapped;
       await tester.pumpWidget(_wrap(LeagueTeamStatsTab(
+          sport: 'Futsal',
         roster: _roster(),
         rosterLoaded: true,
         onPlayerTap: (p) => tapped = p,
@@ -317,6 +319,7 @@ void main() {
 
     testWidgets('empty roster shows the placeholder', (tester) async {
       await tester.pumpWidget(_wrap(LeagueTeamStatsTab(
+          sport: 'Futsal',
         roster: const [],
         rosterLoaded: true,
         onPlayerTap: (_) {},
