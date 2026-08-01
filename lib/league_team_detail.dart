@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/league_match_detail.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
+import 'package:infinite_sports_flutter/misc/league_stat_categories.dart';
 import 'package:infinite_sports_flutter/misc/league_form.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/notification_topics.dart';
@@ -217,6 +218,7 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage>
               onPlayerTap: _openPlayer,
             ),
             LeagueTeamStatsTab(
+              sport: widget.sport,
               roster: roster,
               rosterLoaded: _rosters != null,
               onPlayerTap: _openPlayer,
@@ -701,12 +703,17 @@ class LeagueTeamSquadTab extends StatelessWidget {
 /// Stats (tournament-team-page structure): expandable leader cards per stat
 /// category, computed from THIS season's roster totals (season-scoped).
 class LeagueTeamStatsTab extends StatefulWidget {
+  /// REQUIRED: the categories rendered are per-sport. A missing sport made
+  /// this tab hunt for futsal keys on every league (owner report, PR #11 —
+  /// basketball teams showed "No stats recorded yet" despite real stats).
+  final String sport;
   final List<TournamentPlayer> roster;
   final bool rosterLoaded;
   final void Function(TournamentPlayer) onPlayerTap;
 
   const LeagueTeamStatsTab({
     super.key,
+    required this.sport,
     required this.roster,
     required this.rosterLoaded,
     required this.onPlayerTap,
@@ -717,19 +724,6 @@ class LeagueTeamStatsTab extends StatefulWidget {
 }
 
 class _LeagueTeamStatsTabState extends State<LeagueTeamStatsTab> {
-  /// label → statByName key → statIconAsset key — the EXACT icon treatment
-  /// of the league Player Stats tab (league_player_stats_tab.dart, P2.2
-  /// owner item 3); '' = no icon, matching its iconless Clean Sheets.
-  static const _categories = [
-    {'label': 'Goals', 'stat': 'goals', 'icon': 'goal'},
-    {'label': 'Assists', 'stat': 'assists', 'icon': 'assist'},
-    {'label': 'Saves', 'stat': 'saves', 'icon': 'save'},
-    {'label': 'Defensive Plays (DPL)', 'stat': 'dpl', 'icon': 'dpl'},
-    {'label': 'Clean Sheets', 'stat': 'cleanSheets', 'icon': ''},
-    {'label': 'Yellow Cards', 'stat': 'yellowCards', 'icon': 'yellow'},
-    {'label': 'Red Cards', 'stat': 'redCards', 'icon': 'red'},
-  ];
-
   final Set<String> _expandedStats = {};
 
   @override
@@ -756,7 +750,8 @@ class _LeagueTeamStatsTabState extends State<LeagueTeamStatsTab> {
     }
 
     final cards = <Widget>[];
-    for (final cat in _categories) {
+    for (final cat in leagueStatCategories(widget.sport,
+        forTeamPage: true)) {
       final label = cat['label']!;
       final stat = cat['stat']!;
       final icon = cat['icon']!;
