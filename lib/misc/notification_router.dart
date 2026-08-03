@@ -93,17 +93,16 @@ Future<void> openMatchFromNotification(Map<String, dynamic> data) async {
   }
 
   try {
-    // Rosters depend on teams, so chain them off the teams future instead of
-    // waiting for everything else first — all four loads overlap.
-    final headerFuture = TournamentService.getTournamentHeader(tid);
-    final teamsFuture = TournamentService.getTeams(tid);
-    final matchesFuture = TournamentService.getMatches(tid);
-    final rostersFuture =
-        teamsFuture.then((teams) => TournamentService.getRosters(tid, teams));
-    final tournament = await headerFuture;
-    final teams = await teamsFuture;
-    final matches = await matchesFuture;
-    final rosters = await rostersFuture;
+    // One whole-node read — the header get here used to overlap its own
+    // Teams/Table/Matches child gets, the exact race firebase-ios-sdk
+    // mishandles (see TournamentService.getTournamentBundle). Avatar
+    // enrichment still rides behind the single fetch.
+    final bundle = await TournamentService.getTournamentBundle(tid);
+    final tournament = bundle.tournament;
+    final teams = bundle.teams;
+    final matches = bundle.matches;
+    final rosters = await TournamentService.enrichRosterPhotos(
+        TournamentService.parseRosters(bundle.rostersNode, teams));
     TournamentMatch? match;
     for (final m in matches) {
       if (m.id == mid) {

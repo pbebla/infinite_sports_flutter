@@ -174,22 +174,25 @@ class _FrontPageState extends State<FrontPage> {
   /// finished league season does.
   Future<void> _loadActiveTournaments() async {
     final tournaments = await TournamentService.getActiveTournaments();
-    final bundles = await Future.wait(tournaments.map((t) async {
-      final teams = await TournamentService.getTeams(t.id);
-      final matches = await TournamentService.getMatches(t.id);
-      final day = currentGameDay(matches.map((m) => m.date));
+    final tabs = await Future.wait(tournaments.map((t) async {
+      // One whole-node read per tournament (iOS overlapping-get() fix —
+      // see TournamentService.getTournamentBundle) — also drops two round
+      // trips per active tournament off the front-page load.
+      final bundle = await TournamentService.getTournamentBundle(t.id);
+      final day = currentGameDay(bundle.matches.map((m) => m.date));
       if (day == null) return null;
-      final rosters = await TournamentService.getRosters(t.id, teams);
+      final rosters = await TournamentService.enrichRosterPhotos(
+          TournamentService.parseRosters(bundle.rostersNode, bundle.teams));
       return _ActiveTournamentTab(
         tournament: t,
-        teams: teams,
-        matches: matches,
+        teams: bundle.teams,
+        matches: bundle.matches,
         rosters: rosters,
         initialDay: day,
       );
     }));
     activeTournaments = [
-      for (final b in bundles)
+      for (final b in tabs)
         if (b != null) b,
     ];
   }

@@ -1054,12 +1054,16 @@ class _ProfilePageState extends State<ProfilePage>
       // resolve (deleted tournaments) are skipped.
       await Future.wait(index.keys.map((id) async {
         try {
-          final tournament =
-              await TournamentService.getTournamentHeader(id.toString());
+          // One whole-node read per tournament (iOS overlapping-get() fix —
+          // see TournamentService.getTournamentBundle). Parallel ACROSS
+          // tournaments stays fine: different ids never overlap.
+          final bundle =
+              await TournamentService.getTournamentBundle(id.toString());
+          final tournament = bundle.tournament;
           if (tournament == null) return;
-          final teams = await TournamentService.getTeams(tournament.id);
-          final rosters =
-              await TournamentService.getRosters(tournament.id, teams);
+          final teams = bundle.teams;
+          final rosters = await TournamentService.enrichRosterPhotos(
+              TournamentService.parseRosters(bundle.rostersNode, teams));
           for (final entry in rosters.entries) {
             for (final player in entry.value) {
               if (player.uid == widget.uid) {

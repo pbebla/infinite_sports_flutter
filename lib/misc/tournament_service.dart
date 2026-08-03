@@ -107,9 +107,74 @@ class TournamentService {
       if (snap.value == null) return null;
       final data = snap.value as Map;
       return Tournament.fromFirebase(tournamentId, data);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('TournamentService.getTournamentHeader error: $e');
       return null;
     }
+  }
+
+  /// Pure parse of a whole `/Tournaments/<id>` snapshot into everything the
+  /// tournament detail page needs. Reuses the exact per-node parsers
+  /// ([Tournament.fromFirebase], [parseTeams], [parseMatches],
+  /// [PredictionConfig.fromFirebase]) so the bundle path can never drift
+  /// from what the separate per-node calls produce.
+  static TournamentBundle parseTournamentBundle(
+      String tournamentId, Object? raw) {
+    if (raw is! Map) return TournamentBundle.empty();
+    Tournament? tournament;
+    try {
+      tournament = Tournament.fromFirebase(tournamentId, raw);
+    } catch (_) {}
+    return TournamentBundle(
+      tournament: tournament,
+      teams: parseTeams(raw['Teams'], raw['Table']),
+      matches: parseMatches(raw['Matches']),
+      config: PredictionConfig.fromFirebase(raw['PredictionConfig']),
+      rostersNode: raw['Rosters'],
+    );
+  }
+
+  /// ONE read of `/Tournaments/<id>` + [parseTournamentBundle]. The detail
+  /// page used to fire five get()s in parallel — the whole node (header)
+  /// plus four of its children — and firebase-ios-sdk misbehaves when
+  /// concurrent get()s overlap the same path (errors or empty snapshots),
+  /// which silently blanked Teams/Table on iOS while Android was fine.
+  /// A single fetch has no overlap to race, and is fewer round trips.
+  static Future<TournamentBundle> getTournamentBundle(
+      String tournamentId) async {
+    try {
+      final snap = await FirebaseDatabase.instance
+          .ref('/Tournaments/$tournamentId')
+          .get();
+      return parseTournamentBundle(tournamentId, snap.value);
+    } catch (e) {
+      debugPrint('TournamentService.getTournamentBundle error: $e');
+      return TournamentBundle.empty();
+    }
+  }
+
+  /// Pure Teams+Table merge shared by [getTeams] and [parseTournamentBundle]
+  /// — one source of truth so both paths merge table rows identically.
+  static Map<String, TournamentTeam> parseTeams(
+      Object? teamsRaw, Object? tableRaw) {
+    if (teamsRaw is! Map) return {};
+    final tableData =
+        tableRaw is Map ? tableRaw : <dynamic, dynamic>{};
+
+    final Map<String, TournamentTeam> result = {};
+    teamsRaw.forEach((key, value) {
+      if (value is Map) {
+        final teamId = key.toString();
+        final Map<dynamic, dynamic> rowData =
+            tableData.containsKey(key) && tableData[key] is Map
+                ? tableData[key] as Map
+                : {};
+        try {
+          result[teamId] = TournamentTeam.fromFirebase(teamId, value, rowData);
+        } catch (_) {}
+      }
+    });
+    return result;
   }
 
   /// Returns map of teams keyed by team id, merged with table data.
@@ -121,34 +186,31 @@ class TournamentService {
         ref.child('Teams').get(),
         ref.child('Table').get(),
       ]);
-      final teamsSnap = snaps[0];
-      final tableSnap = snaps[1];
-
-      if (teamsSnap.value == null) return {};
-
-      final teamsData = teamsSnap.value as Map;
-      final tableData = tableSnap.value is Map
-          ? tableSnap.value as Map
-          : <dynamic, dynamic>{};
-
-      final Map<String, TournamentTeam> result = {};
-      teamsData.forEach((key, value) {
-        if (value is Map) {
-          final teamId = key.toString();
-          final Map<dynamic, dynamic> rowData =
-              tableData.containsKey(key) && tableData[key] is Map
-                  ? tableData[key] as Map
-                  : {};
-          try {
-            result[teamId] = TournamentTeam.fromFirebase(teamId, value, rowData);
-          } catch (_) {}
-        }
-      });
-      return result;
+      return parseTeams(snaps[0].value, snaps[1].value);
     } catch (e) {
       debugPrint('TournamentService.getTeams error: $e');
       return {};
     }
+  }
+
+  /// Pure per-child match parse + sort (date, then bracketPosition) shared
+  /// by [getMatches], [watchMatches] and [parseTournamentBundle].
+  static List<TournamentMatch> parseMatches(Object? raw) {
+    if (raw is! Map) return [];
+    final List<TournamentMatch> matches = [];
+    raw.forEach((key, value) {
+      if (value is Map) {
+        try {
+          matches.add(TournamentMatch.fromFirebase(key.toString(), value));
+        } catch (_) {}
+      }
+    });
+    matches.sort((a, b) {
+      final dateCompare = a.date.compareTo(b.date);
+      if (dateCompare != 0) return dateCompare;
+      return a.bracketPosition.compareTo(b.bracketPosition);
+    });
+    return matches;
   }
 
   /// Returns list of all matches sorted by date then bracketPosition.
@@ -157,23 +219,9 @@ class TournamentService {
       DatabaseReference ref =
           FirebaseDatabase.instance.ref('/Tournaments/$tournamentId/Matches');
       var snap = await ref.get();
-      if (snap.value == null) return [];
-      final data = snap.value as Map;
-      final List<TournamentMatch> matches = [];
-      data.forEach((key, value) {
-        if (value is Map) {
-          try {
-            matches.add(TournamentMatch.fromFirebase(key.toString(), value));
-          } catch (_) {}
-        }
-      });
-      matches.sort((a, b) {
-        final dateCompare = a.date.compareTo(b.date);
-        if (dateCompare != 0) return dateCompare;
-        return a.bracketPosition.compareTo(b.bracketPosition);
-      });
-      return matches;
-    } catch (_) {
+      return parseMatches(snap.value);
+    } catch (e) {
+      debugPrint('TournamentService.getMatches error: $e');
       return [];
     }
   }
@@ -184,24 +232,7 @@ class TournamentService {
   static Stream<List<TournamentMatch>> watchMatches(String tournamentId) {
     final ref = FirebaseDatabase.instance
         .ref('/Tournaments/$tournamentId/Matches');
-    return ref.onValue.map((event) {
-      final value = event.snapshot.value;
-      if (value is! Map) return <TournamentMatch>[];
-      final out = <TournamentMatch>[];
-      value.forEach((key, v) {
-        if (v is Map) {
-          try {
-            out.add(TournamentMatch.fromFirebase(key.toString(), v));
-          } catch (_) {}
-        }
-      });
-      out.sort((a, b) {
-        final dateCompare = a.date.compareTo(b.date);
-        if (dateCompare != 0) return dateCompare;
-        return a.bracketPosition.compareTo(b.bracketPosition);
-      });
-      return out;
-    });
+    return ref.onValue.map((event) => parseMatches(event.snapshot.value));
   }
 
   /// Live stream of one match.
@@ -258,7 +289,8 @@ class TournamentService {
           .ref('/Tournaments/$tournamentId/Rosters')
           .get();
       return snap.value;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('TournamentService.getRostersNode error: $e');
       return null;
     }
   }
@@ -408,7 +440,8 @@ class TournamentService {
           .ref('/Tournaments/$tournamentId/PredictionConfig')
           .get();
       return PredictionConfig.fromFirebase(snap.value);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('TournamentService.getPredictionConfig error: $e');
       return PredictionConfig.fromFirebase(const {});
     }
   }
@@ -623,4 +656,35 @@ class TournamentService {
       return [];
     }
   }
+}
+
+/// Everything one `/Tournaments/<id>` read yields, parsed — see
+/// [TournamentService.getTournamentBundle]. Rosters stay raw
+/// ([rostersNode]) because parsing them needs the teams map: callers run
+/// TournamentService.parseRosters(bundle.rostersNode, bundle.teams) so the
+/// existing photo-cache/enrichment flow keeps working unchanged.
+class TournamentBundle {
+  final Tournament? tournament;
+  final Map<String, TournamentTeam> teams;
+  final List<TournamentMatch> matches;
+  final PredictionConfig config;
+  final Object? rostersNode;
+
+  const TournamentBundle({
+    required this.tournament,
+    required this.teams,
+    required this.matches,
+    required this.config,
+    required this.rostersNode,
+  });
+
+  /// Missing/unreadable tournament: null header, empty collections, default
+  /// config — the same graceful defaults the separate per-node calls produce.
+  factory TournamentBundle.empty() => TournamentBundle(
+        tournament: null,
+        teams: {},
+        matches: [],
+        config: PredictionConfig.fromFirebase(const {}),
+        rostersNode: null,
+      );
 }

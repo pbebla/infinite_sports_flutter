@@ -121,22 +121,19 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
     final loadId = widget.tournamentId;
     bool stale() => !mounted || loadId != widget.tournamentId;
     try {
-      // One parallel wave (was three sequential ones: header/teams/matches →
-      // rosters+avatars → config). The raw rosters node rides along and is
-      // parsed once teams land; avatar fetches never gate first paint.
-      final results = await Future.wait([
-        TournamentService.getTournamentHeader(loadId),
-        TournamentService.getTeams(loadId),
-        TournamentService.getMatches(loadId),
-        TournamentService.getPredictionConfig(loadId),
-        TournamentService.getRostersNode(loadId),
-      ]);
+      // One read of the whole tournament node (was five parallel get()s:
+      // header + Teams/Table + Matches + PredictionConfig + Rosters). The
+      // whole-node header get overlapped its own children and firebase-ios-sdk
+      // races overlapping get()s — see TournamentService.getTournamentBundle.
+      // Everything parses out of the single snapshot; avatar fetches still
+      // never gate first paint.
+      final bundle = await TournamentService.getTournamentBundle(loadId);
 
-      final tournament = results[0] as Tournament?;
-      final teams = results[1] as Map<String, TournamentTeam>;
-      final matches = results[2] as List<TournamentMatch>;
-      final config = results[3] as PredictionConfig;
-      final rosters = TournamentService.parseRosters(results[4], teams);
+      final tournament = bundle.tournament;
+      final teams = bundle.teams;
+      final matches = bundle.matches;
+      final config = bundle.config;
+      final rosters = TournamentService.parseRosters(bundle.rostersNode, teams);
 
       final tabs = <Tab>[..._baseTabs];
       if (config.open) tabs.add(const Tab(text: 'Predict'));
