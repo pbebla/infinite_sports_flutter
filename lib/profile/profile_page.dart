@@ -1062,8 +1062,8 @@ class _ProfilePageState extends State<ProfilePage>
           final tournament = bundle.tournament;
           if (tournament == null) return;
           final teams = bundle.teams;
-          final rosters = await TournamentService.enrichRosterPhotos(
-              TournamentService.parseRosters(bundle.rostersNode, teams));
+          final rosters =
+              await TournamentService.enrichRosterPhotos(bundle.rosters);
           for (final entry in rosters.entries) {
             for (final player in entry.value) {
               if (player.uid == widget.uid) {

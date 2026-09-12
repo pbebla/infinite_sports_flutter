@@ -1,11 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 
-/// iOS single-fetch fix: [TournamentService.parseTournamentBundle] is the
-/// pure parse core behind getTournamentBundle — ONE `/Tournaments/<id>` read
-/// replacing the five overlapping parallel get()s that firebase-ios-sdk
-/// raced into empty Teams/Table. These tests pin that the bundle produces
-/// exactly what the five separate calls used to, off one realistic snapshot.
+/// iOS wrong-node fix: [TournamentService.parseTournamentBundle] is the pure
+/// parse core behind getTournamentBundle (one-shot, via once()) and
+/// watchTournamentBundle (the detail page's live stream). These tests pin
+/// that the bundle produces exactly what the separate per-node calls used
+/// to, off one realistic snapshot — and that the ROOT-shape guard refuses
+/// the exact payload firebase-ios-sdk handed back during the incident
+/// (get() under an active /Tournaments root listener returned the root map,
+/// whose tournament children rendered as "teams").
 void main() {
   /// Mirrors the live /Tournaments/<id> node shape.
   Map<String, dynamic> realisticTournament() => {
@@ -87,8 +90,8 @@ void main() {
 
   group('TournamentService.parseTournamentBundle', () {
     test('parses the header exactly like getTournamentHeader', () {
-      final bundle =
-          TournamentService.parseTournamentBundle('cup-a', realisticTournament());
+      final bundle = TournamentService.parseTournamentBundle(
+          'cup-a', realisticTournament())!;
       final t = bundle.tournament;
       expect(t, isNotNull);
       expect(t!.id, 'cup-a');
@@ -101,8 +104,8 @@ void main() {
     });
 
     test('merges Teams with Table numbers exactly like getTeams', () {
-      final bundle =
-          TournamentService.parseTournamentBundle('cup-a', realisticTournament());
+      final bundle = TournamentService.parseTournamentBundle(
+          'cup-a', realisticTournament())!;
       expect(bundle.teams.length, 2);
       final lions = bundle.teams['lions']!;
       expect(lions.name, 'Lions FC');
@@ -119,8 +122,8 @@ void main() {
     });
 
     test('parses matches with fields, sorted by date', () {
-      final bundle =
-          TournamentService.parseTournamentBundle('cup-a', realisticTournament());
+      final bundle = TournamentService.parseTournamentBundle(
+          'cup-a', realisticTournament())!;
       expect(bundle.matches.length, 2);
       // m1 (06012026) sorts before m2 (06082026)
       final first = bundle.matches.first;
@@ -134,18 +137,17 @@ void main() {
     });
 
     test('parses the prediction config open flag + scoring', () {
-      final bundle =
-          TournamentService.parseTournamentBundle('cup-a', realisticTournament());
+      final bundle = TournamentService.parseTournamentBundle(
+          'cup-a', realisticTournament())!;
       expect(bundle.config.open, isTrue);
       expect(bundle.config.matchWinnerPoints, 1);
       expect(bundle.config.exactScorePoints, 3);
     });
 
-    test('rostersNode passes through raw and parses via parseRosters', () {
-      final bundle =
-          TournamentService.parseTournamentBundle('cup-a', realisticTournament());
-      final rosters =
-          TournamentService.parseRosters(bundle.rostersNode, bundle.teams);
+    test('rosters parse inside the bundle via parseRosters', () {
+      final bundle = TournamentService.parseTournamentBundle(
+          'cup-a', realisticTournament())!;
+      final rosters = bundle.rosters;
       expect(rosters.length, 1);
       final players = rosters['lions']!;
       expect(players.length, 1);
@@ -161,7 +163,7 @@ void main() {
 
     test('missing Table node: teams still parse with zeroed table rows', () {
       final raw = realisticTournament()..remove('Table');
-      final bundle = TournamentService.parseTournamentBundle('cup-a', raw);
+      final bundle = TournamentService.parseTournamentBundle('cup-a', raw)!;
       expect(bundle.teams.length, 2);
       final lions = bundle.teams['lions']!;
       expect(lions.name, 'Lions FC');
@@ -202,7 +204,7 @@ void main() {
             'BracketPosition': 0.0,
           },
         },
-      });
+      })!;
       final lions = bundle.teams['lions']!;
       expect(lions.gp, 5);
       expect(lions.wins, 5);
@@ -214,19 +216,30 @@ void main() {
       expect(m.status, 2);
     });
 
-    test('null / non-map input yields the empty bundle with default config',
-        () {
-      for (final raw in [null, 'not-a-map']) {
-        final bundle = TournamentService.parseTournamentBundle('cup-a', raw);
-        expect(bundle.tournament, isNull);
-        expect(bundle.teams, isEmpty);
-        expect(bundle.matches, isEmpty);
-        expect(bundle.rostersNode, isNull);
-        // getPredictionConfig's graceful defaults
-        expect(bundle.config.open, isTrue);
-        expect(bundle.config.matchWinnerPoints, 1);
-        expect(bundle.config.exactScorePoints, 3);
+    test('null / garbage input returns null without throwing', () {
+      for (final raw in [
+        null,
+        'not-a-map',
+        42,
+        ['a', 'list'],
+      ]) {
+        expect(TournamentService.parseTournamentBundle('cup-a', raw), isNull);
       }
+    });
+
+    test('TournamentBundle.empty carries the graceful one-shot defaults', () {
+      // getTournamentBundle degrades an unusable snapshot to empty() so the
+      // one-shot callers (front page, profile, notification router) keep
+      // their existing behavior.
+      final bundle = TournamentBundle.empty();
+      expect(bundle.tournament, isNull);
+      expect(bundle.teams, isEmpty);
+      expect(bundle.matches, isEmpty);
+      expect(bundle.rosters, isEmpty);
+      // getPredictionConfig's graceful defaults
+      expect(bundle.config.open, isTrue);
+      expect(bundle.config.matchWinnerPoints, 1);
+      expect(bundle.config.exactScorePoints, 3);
     });
 
     test('missing child nodes yield empty collections, header still parses',
@@ -236,12 +249,43 @@ void main() {
         'Sport': 'Basketball',
         'Edition': '1',
         'Finished': true,
-      });
+      })!;
       expect(bundle.tournament!.name, 'Header Only Cup');
       expect(bundle.tournament!.finished, isTrue);
       expect(bundle.teams, isEmpty);
       expect(bundle.matches, isEmpty);
-      expect(bundle.rostersNode, isNull);
+      expect(bundle.rosters, isEmpty);
+    });
+
+    test(
+        'REGRESSION (iOS wrong-node get): a /Tournaments ROOT payload returns '
+        'null instead of parsing tournaments as teams', () {
+      // The exact shape firebase-ios-sdk handed back for
+      // get('/Tournaments/<id>/...') while the permanent /Tournaments root
+      // listener was live: the ROOT map — several tournament nodes plus the
+      // 'Current Tournament' string pointer. Parsing it as a tournament made
+      // the Teams tab list THE TOURNAMENTS THEMSELVES as 0-stat teams.
+      final root = {
+        'Current Tournament': 'test-tournament-2026',
+        'basket123': realisticTournament()..['Name'] = '3vs3 basketballl',
+        'ca_state_assyrian_2026': realisticTournament()
+          ..['Name'] = 'California State Assyrian Tournament 2026',
+        'test-tournament-2026': realisticTournament()
+          ..['Name'] = 'Test Tournament 2026',
+      };
+      expect(
+          TournamentService.parseTournamentBundle('basket123', root), isNull);
+    });
+
+    test(
+        'root shape without the Current Tournament pointer is still refused '
+        '(majority of values are tournament-shaped maps)', () {
+      final root = {
+        'a': realisticTournament(),
+        'b': realisticTournament(),
+        'c': realisticTournament(),
+      };
+      expect(TournamentService.parseTournamentBundle('a', root), isNull);
     });
   });
 }

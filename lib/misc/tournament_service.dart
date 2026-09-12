@@ -10,6 +10,17 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 
+/// ONE-SHOT READS UNDER /Tournaments USE once(), NEVER get() (iOS bug):
+/// FrontPage keeps a PERMANENT onValue listener on the whole /Tournaments
+/// node ([TournamentService.watchAllTournaments], for live tournament-tab
+/// discovery), and firebase-ios-sdk's one-shot get() returns the WRONG NODE
+/// (an ancestor's cached value) when a listener is active at an
+/// overlapping/ancestor path — every get('/Tournaments/...') came back with
+/// the /Tournaments ROOT map, whose tournament children (each carrying a
+/// 'Name') then parsed as "teams" on iOS. once() rides the listener
+/// mechanism (observeSingleEvent) and does not share the defect; onValue
+/// listeners are unaffected. Non-/Tournaments paths keep get(): no
+/// root-level listener exists for them, so the collision can't happen.
 class TournamentService {
   /// Session-scoped cache of /Users/{uid}/ProfileUrl values.
   /// Keyed by uid. Cleared by [clearProfileUrlCache] if needed.
@@ -49,8 +60,8 @@ class TournamentService {
   static Future<List<Tournament>> getAllTournaments() async {
     try {
       DatabaseReference ref = FirebaseDatabase.instance.ref('/Tournaments');
-      var snap = await ref.get();
-      return parseTournaments(snap.value);
+      final event = await ref.once();
+      return parseTournaments(event.snapshot.value);
     } catch (_) {
       return [];
     }
@@ -83,9 +94,10 @@ class TournamentService {
   static Future<String?> getCurrentTournamentId() async {
     try {
       DatabaseReference ref = FirebaseDatabase.instance.ref('/Tournaments');
-      var snap = await ref.child('Current Tournament').get();
-      if (snap.value == null) return null;
-      return snap.value.toString();
+      final event = await ref.child('Current Tournament').once();
+      final value = event.snapshot.value;
+      if (value == null) return null;
+      return value.toString();
     } catch (_) {
       return null;
     }
@@ -103,9 +115,10 @@ class TournamentService {
     try {
       DatabaseReference ref =
           FirebaseDatabase.instance.ref('/Tournaments/$tournamentId');
-      var snap = await ref.get();
-      if (snap.value == null) return null;
-      final data = snap.value as Map;
+      final event = await ref.once();
+      final value = event.snapshot.value;
+      if (value == null) return null;
+      final data = value as Map;
       return Tournament.fromFirebase(tournamentId, data);
     } catch (e) {
       debugPrint('TournamentService.getTournamentHeader error: $e');
@@ -116,41 +129,91 @@ class TournamentService {
   /// Pure parse of a whole `/Tournaments/<id>` snapshot into everything the
   /// tournament detail page needs. Reuses the exact per-node parsers
   /// ([Tournament.fromFirebase], [parseTeams], [parseMatches],
-  /// [PredictionConfig.fromFirebase]) so the bundle path can never drift
-  /// from what the separate per-node calls produce.
-  static TournamentBundle parseTournamentBundle(
+  /// [parseRosters], [PredictionConfig.fromFirebase]) so the bundle path can
+  /// never drift from what the separate per-node calls produce.
+  ///
+  /// Returns null when the snapshot is UNUSABLE — null/garbage input, or a
+  /// payload shaped like the /Tournaments ROOT instead of a single
+  /// tournament (the iOS wrong-node get() symptom, see the class comment).
+  /// Callers keep their previous state instead of rendering garbage.
+  static TournamentBundle? parseTournamentBundle(
       String tournamentId, Object? raw) {
-    if (raw is! Map) return TournamentBundle.empty();
+    if (raw is! Map) return null;
+    if (_looksLikeTournamentsRoot(raw)) {
+      debugPrint(
+          'TournamentService.parseTournamentBundle($tournamentId): snapshot '
+          'is shaped like the /Tournaments ROOT, not a single tournament '
+          '(keys: ${raw.keys.take(8).join(', ')}). Refusing to parse — '
+          'this is the iOS root-listener/get() wrong-node symptom; the '
+          'caller keeps its previous state instead of rendering '
+          'tournaments as teams.');
+      return null;
+    }
     Tournament? tournament;
     try {
       tournament = Tournament.fromFirebase(tournamentId, raw);
     } catch (_) {}
+    final teams = parseTeams(raw['Teams'], raw['Table']);
     return TournamentBundle(
       tournament: tournament,
-      teams: parseTeams(raw['Teams'], raw['Table']),
+      teams: teams,
       matches: parseMatches(raw['Matches']),
       config: PredictionConfig.fromFirebase(raw['PredictionConfig']),
-      rostersNode: raw['Rosters'],
+      rosters: parseRosters(raw['Rosters'], teams),
     );
   }
 
-  /// ONE read of `/Tournaments/<id>` + [parseTournamentBundle]. The detail
-  /// page used to fire five get()s in parallel — the whole node (header)
-  /// plus four of its children — and firebase-ios-sdk misbehaves when
-  /// concurrent get()s overlap the same path (errors or empty snapshots),
-  /// which silently blanked Teams/Table on iOS while Android was fine.
-  /// A single fetch has no overlap to race, and is fewer round trips.
+  /// Shape guard (defense in depth for the iOS wrong-node get() incident):
+  /// true when [raw] is the /Tournaments ROOT map rather than one tournament
+  /// node. The root carries the 'Current Tournament' string pointer, and its
+  /// map children are tournaments (each with a Teams/Matches child) — while
+  /// a single tournament's map children (Teams, Table, Matches, Rosters,
+  /// PredictionConfig) never themselves contain a Teams/Matches child.
+  /// Majority-of-values so one malformed sibling can't flip the verdict.
+  static bool _looksLikeTournamentsRoot(Map raw) {
+    if (raw.containsKey('Current Tournament')) return true;
+    var tournamentShaped = 0;
+    for (final v in raw.values) {
+      if (v is Map && (v.containsKey('Teams') || v.containsKey('Matches'))) {
+        tournamentShaped++;
+      }
+    }
+    return tournamentShaped > 0 && tournamentShaped * 2 > raw.length;
+  }
+
+  /// ONE once() read of `/Tournaments/<id>` + [parseTournamentBundle]. The
+  /// detail page used to fire five get()s in parallel; now nothing under
+  /// /Tournaments reads via get() at all (class comment: get() returns an
+  /// ancestor's cached value on iOS while the permanent /Tournaments root
+  /// listener is up). An unusable snapshot degrades to the empty bundle so
+  /// one-shot callers keep their existing graceful-defaults behavior.
   static Future<TournamentBundle> getTournamentBundle(
       String tournamentId) async {
     try {
-      final snap = await FirebaseDatabase.instance
+      final event = await FirebaseDatabase.instance
           .ref('/Tournaments/$tournamentId')
-          .get();
-      return parseTournamentBundle(tournamentId, snap.value);
+          .once();
+      return parseTournamentBundle(tournamentId, event.snapshot.value) ??
+          TournamentBundle.empty();
     } catch (e) {
       debugPrint('TournamentService.getTournamentBundle error: $e');
       return TournamentBundle.empty();
     }
+  }
+
+  /// Live stream of the whole `/Tournaments/<id>` node, parsed. The detail
+  /// page's single source of truth — the same one-listener architecture the
+  /// league pages use (listeners never hit the iOS wrong-node get() defect),
+  /// and everything (header, teams, table, matches, rosters, prediction
+  /// config) updates in place. A null emission means the snapshot was
+  /// unusable (missing node, or [parseTournamentBundle]'s root-shape guard
+  /// fired): subscribers keep their previous state rather than blanking.
+  static Stream<TournamentBundle?> watchTournamentBundle(String tournamentId) {
+    return FirebaseDatabase.instance
+        .ref('/Tournaments/$tournamentId')
+        .onValue
+        .map((event) =>
+            parseTournamentBundle(tournamentId, event.snapshot.value));
   }
 
   /// Pure Teams+Table merge shared by [getTeams] and [parseTournamentBundle]
@@ -182,11 +245,11 @@ class TournamentService {
   static Future<Map<String, TournamentTeam>> getTeams(String tournamentId) async {
     try {
       final ref = FirebaseDatabase.instance.ref('/Tournaments/$tournamentId');
-      final snaps = await Future.wait([
-        ref.child('Teams').get(),
-        ref.child('Table').get(),
+      final events = await Future.wait([
+        ref.child('Teams').once(),
+        ref.child('Table').once(),
       ]);
-      return parseTeams(snaps[0].value, snaps[1].value);
+      return parseTeams(events[0].snapshot.value, events[1].snapshot.value);
     } catch (e) {
       debugPrint('TournamentService.getTeams error: $e');
       return {};
@@ -218,8 +281,8 @@ class TournamentService {
     try {
       DatabaseReference ref =
           FirebaseDatabase.instance.ref('/Tournaments/$tournamentId/Matches');
-      var snap = await ref.get();
-      return parseMatches(snap.value);
+      final event = await ref.once();
+      return parseMatches(event.snapshot.value);
     } catch (e) {
       debugPrint('TournamentService.getMatches error: $e');
       return [];
@@ -285,10 +348,10 @@ class TournamentService {
   /// Future.wait wave as the teams fetch its parsing depends on.
   static Future<Object?> getRostersNode(String tournamentId) async {
     try {
-      final snap = await FirebaseDatabase.instance
+      final event = await FirebaseDatabase.instance
           .ref('/Tournaments/$tournamentId/Rosters')
-          .get();
-      return snap.value;
+          .once();
+      return event.snapshot.value;
     } catch (e) {
       debugPrint('TournamentService.getRostersNode error: $e');
       return null;
@@ -360,6 +423,28 @@ class TournamentService {
     return rosters;
   }
 
+  /// True when [enrichRosterPhotos] would actually do network work: some
+  /// linked player still lacks a photo AND its ProfileUrl is not in the
+  /// session cache. Lets the live bundle stream skip the follow-up
+  /// enrichment pass (and its setState) on the many events where nothing
+  /// is missing — e.g. every live score tick.
+  static bool rosterPhotosPending(
+    Map<String, List<TournamentPlayer>> rosters,
+  ) {
+    for (final players in rosters.values) {
+      for (final p in players) {
+        final uid = p.uid;
+        if (uid != null &&
+            uid.isNotEmpty &&
+            (p.photoUrl == null || p.photoUrl!.isEmpty) &&
+            !_profileUrlCache.containsKey(uid)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   /// Applies already-cached ProfileUrls in place (no network).
   static void _substituteCachedRosterPhotos(
     Map<String, List<TournamentPlayer>> rosters,
@@ -393,9 +478,10 @@ class TournamentService {
   static Future<List<Map<String, dynamic>>> getH2HMatches(String team1Id, String team2Id) async {
     try {
       final ref = FirebaseDatabase.instance.ref('/Tournaments');
-      final snap = await ref.get();
-      if (snap.value == null) return [];
-      final data = snap.value as Map;
+      final event = await ref.once();
+      final value = event.snapshot.value;
+      if (value == null) return [];
+      final data = value as Map;
       final List<Map<String, dynamic>> results = [];
 
       data.forEach((tourneyKey, tourneyValue) {
@@ -436,10 +522,10 @@ class TournamentService {
   /// Reads PredictionConfig once (defaults applied when absent).
   static Future<PredictionConfig> getPredictionConfig(String tournamentId) async {
     try {
-      final snap = await FirebaseDatabase.instance
+      final event = await FirebaseDatabase.instance
           .ref('/Tournaments/$tournamentId/PredictionConfig')
-          .get();
-      return PredictionConfig.fromFirebase(snap.value);
+          .once();
+      return PredictionConfig.fromFirebase(event.snapshot.value);
     } catch (e) {
       debugPrint('TournamentService.getPredictionConfig error: $e');
       return PredictionConfig.fromFirebase(const {});
@@ -579,9 +665,10 @@ class TournamentService {
   static Future<List<Map<String, dynamic>>> getTeamTournamentHistory(String teamId) async {
     try {
       final ref = FirebaseDatabase.instance.ref('/Tournaments');
-      final snap = await ref.get();
-      if (snap.value == null) return [];
-      final data = snap.value as Map;
+      final event = await ref.once();
+      final value = event.snapshot.value;
+      if (value == null) return [];
+      final data = value as Map;
       final List<Map<String, dynamic>> results = [];
 
       data.forEach((tourneyKey, tourneyValue) {
@@ -658,24 +745,24 @@ class TournamentService {
   }
 }
 
-/// Everything one `/Tournaments/<id>` read yields, parsed — see
-/// [TournamentService.getTournamentBundle]. Rosters stay raw
-/// ([rostersNode]) because parsing them needs the teams map: callers run
-/// TournamentService.parseRosters(bundle.rostersNode, bundle.teams) so the
-/// existing photo-cache/enrichment flow keeps working unchanged.
+/// Everything one `/Tournaments/<id>` snapshot yields, parsed — see
+/// [TournamentService.parseTournamentBundle]. [rosters] carries only
+/// session-cached photos (parseRosters does no network): callers run
+/// TournamentService.enrichRosterPhotos(bundle.rosters) behind the first
+/// paint so avatar round-trips never gate stats.
 class TournamentBundle {
   final Tournament? tournament;
   final Map<String, TournamentTeam> teams;
   final List<TournamentMatch> matches;
   final PredictionConfig config;
-  final Object? rostersNode;
+  final Map<String, List<TournamentPlayer>> rosters;
 
   const TournamentBundle({
     required this.tournament,
     required this.teams,
     required this.matches,
     required this.config,
-    required this.rostersNode,
+    required this.rosters,
   });
 
   /// Missing/unreadable tournament: null header, empty collections, default
@@ -685,6 +772,6 @@ class TournamentBundle {
         teams: {},
         matches: [],
         config: PredictionConfig.fromFirebase(const {}),
-        rostersNode: null,
+        rosters: {},
       );
 }

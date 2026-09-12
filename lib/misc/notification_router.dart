@@ -101,8 +101,8 @@ Future<void> openMatchFromNotification(Map<String, dynamic> data) async {
     final tournament = bundle.tournament;
     final teams = bundle.teams;
     final matches = bundle.matches;
-    final rosters = await TournamentService.enrichRosterPhotos(
-        TournamentService.parseRosters(bundle.rostersNode, teams));
+    final rosters =
+        await TournamentService.enrichRosterPhotos(bundle.rosters);
     TournamentMatch? match;
     for (final m in matches) {
       if (m.id == mid) {

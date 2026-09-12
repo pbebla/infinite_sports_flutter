@@ -181,8 +181,8 @@ class _FrontPageState extends State<FrontPage> {
       final bundle = await TournamentService.getTournamentBundle(t.id);
       final day = currentGameDay(bundle.matches.map((m) => m.date));
       if (day == null) return null;
-      final rosters = await TournamentService.enrichRosterPhotos(
-          TournamentService.parseRosters(bundle.rostersNode, bundle.teams));
+      final rosters =
+          await TournamentService.enrichRosterPhotos(bundle.rosters);
       return _ActiveTournamentTab(
         tournament: t,
         teams: bundle.teams,

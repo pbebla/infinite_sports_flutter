@@ -45,8 +45,7 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
   Tournament? _tournament;
   Map<String, TournamentTeam> _teams = {};
   List<TournamentMatch> _matches = [];
-  StreamSubscription<List<TournamentMatch>>? _matchesSub;
-  StreamSubscription<Tournament?>? _tournamentSub;
+  StreamSubscription<TournamentBundle?>? _bundleSub;
   Map<String, List<TournamentPlayer>> _rosters = {};
   // Memoized full-tournament aggregation (lag fix): computed only when
   // matches/rosters actually change (_recomputeStats), NEVER in build —
@@ -70,24 +69,22 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _subscribe();
   }
 
   /// Cross-tournament bleed fix (owner bug report 2026-07-30): this State
-  /// only loaded in initState, so if Flutter reuses the element with a
+  /// only subscribed in initState, so if Flutter reuses the element with a
   /// DIFFERENT tournamentId (position-based reuse in tab/list structures —
   /// reproduced in integration_test/tournament_bleed_test.dart) the page
   /// kept rendering the previous tournament's teams/matches/stats. On an
-  /// identity change: drop every stream and every piece of loaded state,
-  /// show the skeleton, and reload as if freshly pushed.
+  /// identity change: drop the bundle stream and every piece of loaded
+  /// state, show the skeleton, and re-subscribe as if freshly pushed.
   @override
   void didUpdateWidget(covariant TournamentDetailPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.tournamentId == widget.tournamentId) return;
-    _matchesSub?.cancel();
-    _matchesSub = null;
-    _tournamentSub?.cancel();
-    _tournamentSub = null;
+    _bundleSub?.cancel();
+    _bundleSub = null;
     _tabController?.dispose();
     _tabController = null;
     setState(() {
@@ -102,65 +99,99 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
       _tabs = const [];
       _predictIndex = -1;
     });
-    _loadData();
+    _subscribe();
   }
 
   @override
   void dispose() {
-    _matchesSub?.cancel();
-    _tournamentSub?.cancel();
+    _bundleSub?.cancel();
     _tabController?.dispose();
     super.dispose();
   }
 
-  Future<void> _loadData() async {
-    // Identity guard (bleed fix): if didUpdateWidget swaps the tournament
-    // while this load is in flight, every continuation below must drop its
-    // results instead of writing tournament A's data into B's page (or
-    // re-binding A's live streams over B's).
+  /// League-style live bundle (iOS wrong-node fix): ONE onValue listener on
+  /// the whole `/Tournaments/<id>` node feeds every tab — the architecture
+  /// the league pages use, which never exhibited the bug. The old shape
+  /// (one-shot bundle get() + two side streams) was poisoned on iOS: with
+  /// FrontPage's permanent /Tournaments root listener up, get() under that
+  /// path can return the ROOT map, whose tournament children then rendered
+  /// as this page's "teams". Listeners don't share the defect, and the
+  /// stream also keeps header/teams/table/rosters/config live in place.
+  void _subscribe() {
+    // Identity guard (bleed fix): the subscription is per-id — if
+    // didUpdateWidget swaps the tournament, late events from the old stream
+    // must drop instead of writing tournament A's data into B's page.
     final loadId = widget.tournamentId;
     bool stale() => !mounted || loadId != widget.tournamentId;
-    try {
-      // One read of the whole tournament node (was five parallel get()s:
-      // header + Teams/Table + Matches + PredictionConfig + Rosters). The
-      // whole-node header get overlapped its own children and firebase-ios-sdk
-      // races overlapping get()s — see TournamentService.getTournamentBundle.
-      // Everything parses out of the single snapshot; avatar fetches still
-      // never gate first paint.
-      final bundle = await TournamentService.getTournamentBundle(loadId);
-
-      final tournament = bundle.tournament;
-      final teams = bundle.teams;
-      final matches = bundle.matches;
-      final config = bundle.config;
-      final rosters = TournamentService.parseRosters(bundle.rostersNode, teams);
-
-      final tabs = <Tab>[..._baseTabs];
-      if (config.open) tabs.add(const Tab(text: 'Predict'));
-
+    _bundleSub?.cancel();
+    _bundleSub =
+        TournamentService.watchTournamentBundle(loadId).listen((bundle) {
+      if (stale()) return;
+      // null = unusable snapshot (missing node, or the root-shape guard in
+      // parseTournamentBundle refused a /Tournaments-root payload): keep the
+      // last good state — the skeleton on first load — never render garbage.
+      if (bundle == null) return;
+      _applyBundle(bundle);
+    }, onError: (Object e, StackTrace st) {
+      debugPrint('TournamentDetailPage bundle stream error: $e\n$st');
       if (stale()) return;
       setState(() {
-        _tournament = tournament;
-        _teams = teams;
-        _matches = matches;
-        _rosters = rosters;
-        _stats = computeTournamentStats(
-          matches: matches,
-          rosters: rosters,
-          sport: tournament?.sport ?? 'Soccer',
-        );
         _isLoading = false;
-        _loadError = null;
-        _predictionConfig = config;
-        _tabs = tabs;
-        _predictIndex = config.open ? tabs.length - 1 : -1;
-        _tabController = TabController(length: tabs.length, vsync: this);
+        _loadError = 'Could not load tournament. Tap retry.';
       });
+    });
+  }
 
-      // Avatars for linked players not yet in the session cache land in a
-      // single follow-up update behind the first paint.
+  void _applyBundle(TournamentBundle bundle) {
+    final loadId = widget.tournamentId;
+    final rosters = bundle.rosters;
+    final config = bundle.config;
+    final tabs = <Tab>[..._baseTabs];
+    if (config.open) tabs.add(const Tab(text: 'Predict'));
+
+    setState(() {
+      // A momentarily headerless snapshot keeps the last good header rather
+      // than blanking it (same rule the old watchTournament stream had).
+      _tournament = bundle.tournament ?? _tournament;
+      _teams = bundle.teams;
+      _matches = bundle.matches;
+      _rosters = rosters;
+      // Memoized (lag fix): recomputed once per stream event, NEVER in
+      // build — per-frame recomputes made tab swipes visibly janky.
+      _stats = computeTournamentStats(
+        matches: bundle.matches,
+        rosters: rosters,
+        sport: (bundle.tournament ?? _tournament)?.sport ?? 'Soccer',
+      );
+      _isLoading = false;
+      _loadError = null;
+      _predictionConfig = config;
+      _tabs = tabs;
+      _predictIndex = config.open ? tabs.length - 1 : -1;
+      // Predictions can open/close LIVE now: rebuild the controller only
+      // when the tab count actually changes, keeping the reader's place
+      // (clamped in case they were on the tab that just disappeared).
+      if (_tabController == null || _tabController!.length != tabs.length) {
+        final old = _tabController;
+        final keptIndex = old == null
+            ? 0
+            : (old.index < tabs.length ? old.index : tabs.length - 1);
+        old?.dispose();
+        _tabController = TabController(
+            length: tabs.length, vsync: this, initialIndex: keptIndex);
+      }
+    });
+
+    // Avatars for linked players never gate paint (perceived-perf rule) and
+    // land in a single follow-up update. Fetch only when some linked uid is
+    // missing from the session cache — otherwise every live score tick
+    // would spawn a redundant enrichment pass + setState.
+    if (TournamentService.rosterPhotosPending(rosters)) {
       TournamentService.enrichRosterPhotos(rosters).then((enriched) {
-        if (stale()) return;
+        if (!mounted || loadId != widget.tournamentId) return;
+        // A newer bundle event replaced the rosters while photos were in
+        // flight: its own pending-check covers it — don't stomp newer data.
+        if (!identical(_rosters, rosters)) return;
         setState(() {
           _rosters = enriched;
           _stats = computeTournamentStats(
@@ -169,40 +200,6 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
             sport: _tournament?.sport ?? 'Soccer',
           );
         });
-      });
-
-      // Keep matches live after the initial paint: scores, clock, standings and
-      // the bracket all update in place without a manual refresh.
-      if (stale()) return;
-      _matchesSub?.cancel();
-      _matchesSub = TournamentService.watchMatches(loadId).listen((live) {
-        if (stale() || live.isEmpty) return;
-        setState(() {
-          _matches = live;
-          _stats = computeTournamentStats(
-            matches: live,
-            rosters: _rosters,
-            sport: _tournament?.sport ?? 'Soccer',
-          );
-        });
-      });
-
-      // Keep the header live too: name/status/sport/champion update in place
-      // (e.g. the owner flips status or crowns a champion) without a manual
-      // refresh. Same mirrored one-shot-then-live shape as matches above; a
-      // null emission means the record is momentarily unparseable, so the
-      // last good header is kept rather than blanked.
-      _tournamentSub?.cancel();
-      _tournamentSub = TournamentService.watchTournament(loadId).listen((live) {
-        if (stale() || live == null) return;
-        setState(() => _tournament = live);
-      });
-    } catch (e, st) {
-      debugPrint('TournamentDetailPage._loadData error: $e\n$st');
-      if (stale()) return;
-      setState(() {
-        _isLoading = false;
-        _loadError = 'Could not load tournament. Tap retry.';
       });
     }
   }
@@ -232,7 +229,8 @@ class _TournamentDetailPageState extends State<TournamentDetailPage>
                     _isLoading = true;
                     _loadError = null;
                   });
-                  _loadData();
+                  // Re-subscribe from scratch: an errored RTDB stream is done.
+                  _subscribe();
                 },
               ),
             ],
