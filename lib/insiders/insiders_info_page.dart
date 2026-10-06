@@ -107,9 +107,10 @@ class _InsidersInfoPageState extends State<InsidersInfoPage> {
 
   Future<void> _loadPlaybookUrl() async {
     try {
-      final snap = await FirebaseDatabase.instance
-          .ref('AppConfig/InsidersPlaybookUrl')
-          .get();
+      final snap = (await FirebaseDatabase.instance
+              .ref('AppConfig/InsidersPlaybookUrl')
+              .once())
+          .snapshot;
       final url = snap.value?.toString() ?? '';
       if (url.isNotEmpty && mounted) setState(() => _playbookUrl = url);
     } catch (_) {
@@ -138,7 +139,8 @@ class _InsidersInfoPageState extends State<InsidersInfoPage> {
         final uid = _uid;
         if (uid.isNotEmpty) {
           final snap =
-              await FirebaseDatabase.instance.ref('Users/$uid').get();
+              (await FirebaseDatabase.instance.ref('Users/$uid').once())
+                  .snapshot;
           final raw = snap.value;
           if (raw is Map) {
             final first = raw['First Name']?.toString() ?? '';

@@ -13,7 +13,9 @@ class RegistrationService {
   /// {regId: config} for every registration whose Status is "open".
   static Future<Map<String, RegistrationConfig>> getOpenRegistrations() async {
     try {
-      final snap = await FirebaseDatabase.instance.ref('Registrations').get();
+      final snap =
+          (await FirebaseDatabase.instance.ref('Registrations').once())
+              .snapshot;
       if (snap.value is! Map) return {};
       final out = <String, RegistrationConfig>{};
       (snap.value as Map).forEach((regId, value) {
@@ -50,9 +52,11 @@ class RegistrationService {
   /// The ordered question list for a registration ([] on error).
   static Future<List<RegQuestion>> getForm(String regId) async {
     try {
-      final snap = await FirebaseDatabase.instance
-          .ref('Registrations/$regId/Form')
-          .get();
+      // once(), not get(): firebase-ios-sdk returns wrong/empty data for one-shot
+      final snap = (await FirebaseDatabase.instance
+              .ref('Registrations/$regId/Form')
+              .once())
+          .snapshot;
       return regQuestionsFromNode(snap.value);
     } catch (_) {
       return [];
@@ -64,9 +68,10 @@ class RegistrationService {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return null;
     try {
-      final snap = await FirebaseDatabase.instance
-          .ref('Registrations/$regId/Submissions/$uid')
-          .get();
+      final snap = (await FirebaseDatabase.instance
+              .ref('Registrations/$regId/Submissions/$uid')
+              .once())
+          .snapshot;
       return RegSubmission.fromFirebase(snap.value);
     } catch (_) {
       return null;
@@ -98,7 +103,8 @@ class RegistrationService {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return {};
     try {
-      final snap = await FirebaseDatabase.instance.ref('Users/$uid').get();
+      final snap =
+          (await FirebaseDatabase.instance.ref('Users/$uid').once()).snapshot;
       if (snap.value is! Map) return {};
       final user = snap.value as Map;
       final out = <String, dynamic>{};
@@ -136,9 +142,10 @@ class RegistrationService {
   /// DISABLED promo rather than throwing/returning null.
   static Future<RegPromo> getPromo(String regId) async {
     try {
-      final snap = await FirebaseDatabase.instance
-          .ref('Registrations/$regId/Promo')
-          .get();
+      final snap = (await FirebaseDatabase.instance
+              .ref('Registrations/$regId/Promo')
+              .once())
+          .snapshot;
       return RegPromo.fromFirebase(snap.value);
     } catch (_) {
       return const RegPromo();
@@ -167,14 +174,17 @@ class RegistrationService {
       getAllSubmissionAnswersForMatch() async {
     final out = <Map<String, dynamic>>[];
     try {
-      final regsSnap = await FirebaseDatabase.instance.ref('Registrations').get();
+      final regsSnap =
+          (await FirebaseDatabase.instance.ref('Registrations').once())
+              .snapshot;
       final regs = regsSnap.value;
       if (regs is! Map) return out;
       for (final regId in regs.keys) {
         try {
-          final subsSnap = await FirebaseDatabase.instance
-              .ref('Registrations/$regId/Submissions')
-              .get();
+          final subsSnap = (await FirebaseDatabase.instance
+                  .ref('Registrations/$regId/Submissions')
+                  .once())
+              .snapshot;
           final subs = subsSnap.value;
           if (subs is! Map) continue;
           subs.forEach((_, node) {
@@ -288,9 +298,10 @@ class RegistrationService {
   /// matches entered codes against this map (matchJoinCode).
   static Future<Map<String, RegTeam>> getTeams(String regId) async {
     try {
-      final snap = await FirebaseDatabase.instance
-          .ref('Registrations/$regId/Teams')
-          .get();
+      final snap = (await FirebaseDatabase.instance
+              .ref('Registrations/$regId/Teams')
+              .once())
+          .snapshot;
       return regTeamsFromNode(snap.value);
     } catch (_) {
       return {};
@@ -301,9 +312,10 @@ class RegistrationService {
   static Future<RegTeam?> getTeam(String regId, String teamId) async {
     if (teamId.isEmpty) return null;
     try {
-      final snap = await FirebaseDatabase.instance
-          .ref('Registrations/$regId/Teams/$teamId')
-          .get();
+      final snap = (await FirebaseDatabase.instance
+              .ref('Registrations/$regId/Teams/$teamId')
+              .once())
+          .snapshot;
       return RegTeam.fromNode(teamId, snap.value);
     } catch (_) {
       return null;

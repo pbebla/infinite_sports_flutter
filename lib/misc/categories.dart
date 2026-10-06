@@ -54,7 +54,8 @@ List<String> parseCategories(dynamic value) {
 /// One-shot read of the category list (falls back to defaults on any error).
 Future<List<String>> getCategories() async {
   try {
-    final snap = await FirebaseDatabase.instance.ref('Categories').get();
+    final snap =
+        (await FirebaseDatabase.instance.ref('Categories').once()).snapshot;
     return parseCategories(snap.value);
   } catch (_) {
     return List<String>.from(kDefaultCategories);

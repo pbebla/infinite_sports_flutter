@@ -410,9 +410,10 @@ class TournamentService {
     if (uidsToFetch.isNotEmpty) {
       await Future.wait(uidsToFetch.map((uid) async {
         try {
-          final urlSnap = await FirebaseDatabase.instance
-              .ref('/Users/$uid/ProfileUrl')
-              .get();
+          final urlSnap = (await FirebaseDatabase.instance
+                  .ref('/Users/$uid/ProfileUrl')
+                  .once())
+              .snapshot;
           _profileUrlCache[uid] = urlSnap.value?.toString() ?? '';
         } catch (_) {
           _profileUrlCache[uid] = '';

@@ -808,7 +808,8 @@ class _ProfilePageState extends State<ProfilePage>
     final ref = FirebaseDatabase.instance.ref();
     Map rawUser = {};
     try {
-      final userSnap = await ref.child('Users/${widget.uid}').get();
+      final userSnap =
+          (await ref.child('Users/${widget.uid}').once()).snapshot;
       rawUser = userSnap.value as Map? ?? {};
     } catch (_) {}
 
@@ -947,9 +948,10 @@ class _ProfilePageState extends State<ProfilePage>
   Future<(String, Color, Player)?> _extractFromTeamNode(
       String sport, String season, String team) async {
     try {
-      final snap = await FirebaseDatabase.instance
-          .ref('/$sport/$season/Line Ups/$team')
-          .get();
+      final snap = (await FirebaseDatabase.instance
+              .ref('/$sport/$season/Line Ups/$team')
+              .once())
+          .snapshot;
       final node = snap.value;
       if (node is! Map) return null;
       for (final e in node.entries) {
@@ -1045,9 +1047,10 @@ class _ProfilePageState extends State<ProfilePage>
       // A missing/empty node means no appearances — roster entries without a
       // linked UID never matched the old all-tournaments scan either — so
       // nothing at all is fetched in that (common) case.
-      final idxSnap = await FirebaseDatabase.instance
-          .ref('Users/${widget.uid}/TournamentsPlayed')
-          .get();
+      final idxSnap = (await FirebaseDatabase.instance
+              .ref('Users/${widget.uid}/TournamentsPlayed')
+              .once())
+          .snapshot;
       final index = idxSnap.value;
       if (index is! Map) return;
       // Fetch only the indexed tournaments, concurrently. Ids that no longer
