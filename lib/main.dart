@@ -191,7 +191,9 @@ Future<void> _handleGoogleSignIn(BuildContext context) async {
 
   var usersNodeExists = false;
   try {
-    final snap = await FirebaseDatabase.instance.ref('Users/${user.uid}').get();
+    final snap =
+        (await FirebaseDatabase.instance.ref('Users/${user.uid}').once())
+            .snapshot;
     usersNodeExists = snap.exists;
   } catch (_) {
     // Network hiccup reading the node: fall through with usersNodeExists
@@ -279,7 +281,9 @@ Future<void> _handleAppleSignIn(BuildContext context) async {
 
   var usersNodeExists = false;
   try {
-    final snap = await FirebaseDatabase.instance.ref('Users/${user.uid}').get();
+    final snap =
+        (await FirebaseDatabase.instance.ref('Users/${user.uid}').once())
+            .snapshot;
     usersNodeExists = snap.exists;
   } catch (_) {
     // Network hiccup reading the node: fall through with usersNodeExists
@@ -468,7 +472,8 @@ class _MyHomePageState extends State<MyHomePage> {
   Future<void> _showAboutYouIfIncomplete(String uid) async {
     dynamic usersNode;
     try {
-      final snap = await FirebaseDatabase.instance.ref('Users/$uid').get();
+      final snap =
+          (await FirebaseDatabase.instance.ref('Users/$uid').once()).snapshot;
       usersNode = snap.value;
     } catch (_) {
       return; // network hiccup: don't block app entry over this check

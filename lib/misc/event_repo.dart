@@ -87,12 +87,14 @@ List<Event> mergeEvents(Map<dynamic, dynamic> v2Records, List<Event> legacy) {
 Future<List<Event>> getAllEvents() async {
   Map<dynamic, dynamic> v2 = {};
   try {
-    final snapshot = await FirebaseDatabase.instance.ref('EventsV2').get();
+    final snapshot =
+        (await FirebaseDatabase.instance.ref('EventsV2').once()).snapshot;
     if (snapshot.value is Map) v2 = snapshot.value as Map;
   } catch (_) {}
   Map<int, Event> legacy = {};
   try {
-    final snapshot = await FirebaseDatabase.instance.ref('Events').get();
+    final snapshot =
+        (await FirebaseDatabase.instance.ref('Events').once()).snapshot;
     legacy = parseLegacyEvents(snapshot.value);
   } catch (_) {}
   return mergeEventsIndexed(v2, legacy);
@@ -136,7 +138,8 @@ Stream<List<Event>> watchAllEvents() {
 /// Single V2 event by id (fresh read so attendees are current).
 Future<Event?> getEventV2(String id) async {
   try {
-    final snapshot = await FirebaseDatabase.instance.ref('EventsV2/$id').get();
+    final snapshot =
+        (await FirebaseDatabase.instance.ref('EventsV2/$id').once()).snapshot;
     if (snapshot.value is! Map) return null;
     return Event.fromV2(id, snapshot.value as Map);
   } catch (_) {

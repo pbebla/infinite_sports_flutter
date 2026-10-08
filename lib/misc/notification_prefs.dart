@@ -70,8 +70,10 @@ class NotificationPrefs {
   /// whether the one-time onboarding prompt still needs to show).
   Future<Set<String>?> serverFavorites(String uid) async {
     try {
-      final snap =
-          await FirebaseDatabase.instance.ref('Users/$uid/FavoriteSports').get();
+      final snap = (await FirebaseDatabase.instance
+              .ref('Users/$uid/FavoriteSports')
+              .once())
+          .snapshot;
       if (snap.value is Map) {
         return (snap.value as Map)
             .entries
@@ -97,9 +99,10 @@ class NotificationPrefs {
 
   Future<bool> hasAnswered(String uid) async {
     try {
-      final snap = await FirebaseDatabase.instance
-          .ref('Users/$uid/FavoriteSportsAnswered')
-          .get();
+      final snap = (await FirebaseDatabase.instance
+              .ref('Users/$uid/FavoriteSportsAnswered')
+              .once())
+          .snapshot;
       return snap.value == true;
     } catch (_) {
       return false;

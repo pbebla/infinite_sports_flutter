@@ -23,7 +23,9 @@ Future<StoreLinks> getStoreLinks() async {
   String? android;
   String? ios;
   try {
-    final snap = await FirebaseDatabase.instance.ref('AppConfig/StoreLinks').get();
+    final snap =
+        (await FirebaseDatabase.instance.ref('AppConfig/StoreLinks').once())
+            .snapshot;
     if (snap.value is Map) {
       final map = snap.value as Map;
       final a = map['Android']?.toString().trim() ?? '';

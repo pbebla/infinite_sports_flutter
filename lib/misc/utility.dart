@@ -111,7 +111,7 @@ final List<String> months = [
 Future<List<Map<String, String>>> getUserPlayedHistory(String uid) async {
   try {
     final ref = FirebaseDatabase.instance.ref('/Users/$uid/Played');
-    final snap = await ref.get();
+    final snap = (await ref.once()).snapshot;
     if (snap.value == null) return [];
     if (snap.value is! Map) return [];
     final data = snap.value as Map;
@@ -208,7 +208,7 @@ Future<String> getCurrentSport() async {
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref();
-    var season = await newClient.child("Current League").get();
+    var season = (await newClient.child("Current League").once()).snapshot;
     return season.value.toString();
   }
   catch (e)
@@ -221,7 +221,7 @@ Future<String> getCurrentSeason(currentSport) async {
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref();
-    var seasonNum = await newClient.child(currentSport + " Season").get();
+    var seasonNum = (await newClient.child(currentSport + " Season").once()).snapshot;
     return seasonNum.value.toString();
   }
   catch (e)
@@ -234,7 +234,7 @@ Future<bool> isSeasonFinished(sport, season) async {
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-    var seasonFinished = await newClient.child("Finished").get();
+    var seasonFinished = (await newClient.child("Finished").once()).snapshot;
     return seasonFinished.value as bool;
   }
   catch (e)
@@ -247,7 +247,7 @@ Future<String> getAFCCurrentSeason() async {
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/AFC San Jose/");
-    var seasonNum = await newClient.child("Current Season").get();
+    var seasonNum = (await newClient.child("Current Season").once()).snapshot;
     return seasonNum.value.toString();
   }
   catch (e)
@@ -261,7 +261,7 @@ Future<bool> isAFCSeasonFinished(season) async {
   {
 
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/AFC San Jose/Seasons/$season");
-    var seasonFinished = await newClient.child("Finished").get();
+    var seasonFinished = (await newClient.child("Finished").once()).snapshot;
     return seasonFinished.value as bool;
   }
   catch (e)
@@ -313,7 +313,7 @@ Future<String> getMinSeason(sport) async {
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport");
-    var seasonNum = await newClient.child("Init Season").get();
+    var seasonNum = (await newClient.child("Init Season").once()).snapshot;
     return seasonNum.value.toString();
   }
   catch (e)
@@ -533,7 +533,7 @@ Future<Map<String, List<SoccerGame>>> getAllSoccerGames(sport, season) async {
     } else {
       newClient = FirebaseDatabase.instance.ref("/$sport/$season");
     }
-    var games = await newClient.child("Date").get();
+    var games = (await newClient.child("Date").once()).snapshot;
     dynamic data = games.value;
     var result = <String, List<SoccerGame>>{};
     data.forEach((key, value) {
@@ -580,7 +580,7 @@ Future<Map<String, List<FutsalGame>>> getAllFutsalGames(sport, season) async {
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-    var games = await newClient.child("Date").get();
+    var games = (await newClient.child("Date").once()).snapshot;
     dynamic data = games.value;
     var result = <String, List<FutsalGame>>{};
     data.forEach((key, value) {
@@ -626,7 +626,7 @@ Future<Map<String, List<BasketballGame>>> getAllBasketballGames(sport, season) a
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-    var games = await newClient.child("Date").get();
+    var games = (await newClient.child("Date").once()).snapshot;
     dynamic data = games.value;
     var result = <String, List<BasketballGame>>{};
     data.forEach((key, value) {
@@ -672,7 +672,7 @@ Future<Map<String, List<FlagFootballGame>>> getAllFlagFootballGames(sport, seaso
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-    var games = await newClient.child("Date").get();
+    var games = (await newClient.child("Date").once()).snapshot;
     dynamic data = games.value;
     var result = <String, List<FlagFootballGame>>{};
     data.forEach((key, value) {

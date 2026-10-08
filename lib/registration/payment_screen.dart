@@ -93,9 +93,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   Future<void> _loadPublishableKey() async {
     try {
-      final snap = await FirebaseDatabase.instance
-          .ref('AppConfig/StripePublishableKey')
-          .get();
+      final snap = (await FirebaseDatabase.instance
+              .ref('AppConfig/StripePublishableKey')
+              .once())
+          .snapshot;
       final key = snap.value;
       if (!mounted) return;
       setState(() => _publishableKey = key is String ? key : '');

@@ -85,7 +85,7 @@ class _NavBarState extends State<NavBar> {
   Future<void> retrieveProfilePic() async {
     DatabaseReference newClient = FirebaseDatabase.instance.ref();
     if (signedIn) {
-      var event = await newClient.child("Users/${FirebaseAuth.instance.currentUser?.uid}").get();
+      var event = (await newClient.child("Users/${FirebaseAuth.instance.currentUser?.uid}").once()).snapshot;
       var player = event.value as Map;
       profileImagePath = player["ProfileUrl"] ?? "";
     }

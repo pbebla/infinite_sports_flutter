@@ -808,7 +808,8 @@ class _ProfilePageState extends State<ProfilePage>
     final ref = FirebaseDatabase.instance.ref();
     Map rawUser = {};
     try {
-      final userSnap = await ref.child('Users/${widget.uid}').get();
+      final userSnap =
+          (await ref.child('Users/${widget.uid}').once()).snapshot;
       rawUser = userSnap.value as Map? ?? {};
     } catch (_) {}
 
@@ -947,9 +948,10 @@ class _ProfilePageState extends State<ProfilePage>
   Future<(String, Color, Player)?> _extractFromTeamNode(
       String sport, String season, String team) async {
     try {
-      final snap = await FirebaseDatabase.instance
-          .ref('/$sport/$season/Line Ups/$team')
-          .get();
+      final snap = (await FirebaseDatabase.instance
+              .ref('/$sport/$season/Line Ups/$team')
+              .once())
+          .snapshot;
       final node = snap.value;
       if (node is! Map) return null;
       for (final e in node.entries) {
@@ -1045,21 +1047,26 @@ class _ProfilePageState extends State<ProfilePage>
       // A missing/empty node means no appearances — roster entries without a
       // linked UID never matched the old all-tournaments scan either — so
       // nothing at all is fetched in that (common) case.
-      final idxSnap = await FirebaseDatabase.instance
-          .ref('Users/${widget.uid}/TournamentsPlayed')
-          .get();
+      final idxSnap = (await FirebaseDatabase.instance
+              .ref('Users/${widget.uid}/TournamentsPlayed')
+              .once())
+          .snapshot;
       final index = idxSnap.value;
       if (index is! Map) return;
       // Fetch only the indexed tournaments, concurrently. Ids that no longer
       // resolve (deleted tournaments) are skipped.
       await Future.wait(index.keys.map((id) async {
         try {
-          final tournament =
-              await TournamentService.getTournamentHeader(id.toString());
+          // One whole-node read per tournament (iOS overlapping-get() fix —
+          // see TournamentService.getTournamentBundle). Parallel ACROSS
+          // tournaments stays fine: different ids never overlap.
+          final bundle =
+              await TournamentService.getTournamentBundle(id.toString());
+          final tournament = bundle.tournament;
           if (tournament == null) return;
-          final teams = await TournamentService.getTeams(tournament.id);
+          final teams = bundle.teams;
           final rosters =
-              await TournamentService.getRosters(tournament.id, teams);
+              await TournamentService.enrichRosterPhotos(bundle.rosters);
           for (final entry in rosters.entries) {
             for (final player in entry.value) {
               if (player.uid == widget.uid) {

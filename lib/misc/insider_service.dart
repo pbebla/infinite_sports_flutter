@@ -31,7 +31,7 @@ class InsiderService {
     required String email,
   }) async {
     final nodeRef = _ref(uid);
-    final snapshot = await nodeRef.get();
+    final snapshot = (await nodeRef.once()).snapshot;
     final existing = Insider.fromFirebase(uid, snapshot.value);
     if (existing != null && !existing.isDeclined) return;
 
@@ -58,8 +58,10 @@ class InsiderService {
     final normalized = normalizeInsiderCode(code);
     if (normalized.isEmpty) return null;
     try {
-      final snap =
-          await FirebaseDatabase.instance.ref('InsiderCodes/$normalized').get();
+      final snap = (await FirebaseDatabase.instance
+              .ref('InsiderCodes/$normalized')
+              .once())
+          .snapshot;
       final uid = snap.value;
       return (uid is String && uid.isNotEmpty) ? uid : null;
     } catch (_) {
@@ -72,7 +74,8 @@ class InsiderService {
   static Future<String> insiderStatus(String uid) async {
     try {
       final snap =
-          await FirebaseDatabase.instance.ref('Insiders/$uid/Status').get();
+          (await FirebaseDatabase.instance.ref('Insiders/$uid/Status').once())
+              .snapshot;
       return snap.value?.toString() ?? '';
     } catch (_) {
       return '';
@@ -84,7 +87,9 @@ class InsiderService {
   /// existing silent-failure convention.
   static Future<bool> alreadyReferred(String uid) async {
     try {
-      final snap = await FirebaseDatabase.instance.ref('ReferredUsers/$uid').get();
+      final snap =
+          (await FirebaseDatabase.instance.ref('ReferredUsers/$uid').once())
+              .snapshot;
       return snap.exists;
     } catch (_) {
       return false;
@@ -96,7 +101,9 @@ class InsiderService {
   /// generic phrasing in that case).
   static Future<String> getInsiderName(String uid) async {
     try {
-      final snap = await FirebaseDatabase.instance.ref('Insiders/$uid/Name').get();
+      final snap =
+          (await FirebaseDatabase.instance.ref('Insiders/$uid/Name').once())
+              .snapshot;
       return snap.value?.toString() ?? '';
     } catch (_) {
       return '';

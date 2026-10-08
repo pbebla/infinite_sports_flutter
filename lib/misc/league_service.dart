@@ -26,7 +26,7 @@ class LeagueService {
   /// legacy rendering exactly.
   static Future<int> getStartHour(String sport, String season) async {
     try {
-      final snap = await _ref('/$sport/$season/Start Time').get();
+      final snap = (await _ref('/$sport/$season/Start Time').once()).snapshot;
       final v = snap.value;
       if (v is int) return v;
       return int.tryParse(v?.toString() ?? '') ?? 0;
@@ -214,7 +214,7 @@ class LeagueService {
     if (uidsToFetch.isNotEmpty) {
       await Future.wait(uidsToFetch.map((uid) async {
         try {
-          final snap = await _ref('/Users/$uid/ProfileUrl').get();
+          final snap = (await _ref('/Users/$uid/ProfileUrl').once()).snapshot;
           _profileUrlCache[uid] = snap.value?.toString() ?? '';
         } catch (_) {
           _profileUrlCache[uid] = '';

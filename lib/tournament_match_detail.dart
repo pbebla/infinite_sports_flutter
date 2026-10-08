@@ -69,11 +69,16 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
         });
       }
     });
-    TournamentService.getPredictionConfig(widget.tournamentId).then((cfg) {
-      if (mounted) setState(() => _predictionConfig = cfg);
-    });
-    TournamentService.getTournamentHeader(widget.tournamentId).then((t) {
-      if (mounted && t != null) setState(() => _tournamentName = t.name);
+    // One whole-node read (was two overlapping get()s: the parent header +
+    // its PredictionConfig child — the race firebase-ios-sdk mishandles,
+    // see TournamentService.getTournamentBundle).
+    TournamentService.getTournamentBundle(widget.tournamentId).then((bundle) {
+      if (!mounted) return;
+      setState(() {
+        _predictionConfig = bundle.config;
+        final t = bundle.tournament;
+        if (t != null) _tournamentName = t.name;
+      });
     });
   }
 
