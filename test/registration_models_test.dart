@@ -197,6 +197,37 @@ void main() {
       expect(parsed.label, 'Futsal Season 17');
     });
 
+    test('Paths: absent keeps all three; explicit false hides each path', () {
+      // Pre-switch registrations (no Paths node) keep all three paths.
+      final legacy = RegistrationConfig.fromFirebase({
+        'TargetType': 'league',
+        'Sport': 'Futsal',
+        'Season': '16',
+      });
+      expect(legacy!.enabledPaths, ['individual', 'joiner', 'captain']);
+
+      // Owner turns the team paths off (Futsal S16): individual-only.
+      final individualOnly = RegistrationConfig.fromFirebase({
+        'TargetType': 'league',
+        'Sport': 'Futsal',
+        'Season': '16',
+        'Paths': {'individual': true, 'joiner': false, 'captain': false},
+      });
+      expect(individualOnly!.enabledPaths, ['individual']);
+      expect(individualOnly.pathJoiner, isFalse);
+      expect(individualOnly.pathCaptain, isFalse);
+
+      // Any two-path combination round-trips through toFirebaseMap.
+      const config = RegistrationConfig(
+          targetType: 'league',
+          sport: 'Futsal',
+          pathIndividual: false,
+          pathJoiner: true,
+          pathCaptain: true);
+      final parsed = RegistrationConfig.fromFirebase(config.toFirebaseMap());
+      expect(parsed!.enabledPaths, ['joiner', 'captain']);
+    });
+
     test('round-trips teamFee and paymentMode "both"', () {
       const config = RegistrationConfig(
         targetType: 'league',

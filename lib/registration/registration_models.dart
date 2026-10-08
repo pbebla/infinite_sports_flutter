@@ -235,6 +235,15 @@ class RegistrationConfig {
   final bool venmo;
   final bool zelle;
   final bool stripe;
+
+  /// Per-registration sign-up path switches (owner ask, Futsal S16): the
+  /// wizard picks which of the three doors exist — all, any two, or one.
+  /// Stored under Config.Paths {individual, joiner, captain}; each defaults
+  /// TRUE so registrations created before the switches existed keep all
+  /// three paths.
+  final bool pathIndividual;
+  final bool pathJoiner;
+  final bool pathCaptain;
   final int createdAt; // millisecondsSinceEpoch
 
   const RegistrationConfig({
@@ -251,8 +260,18 @@ class RegistrationConfig {
     this.venmo = true,
     this.zelle = true,
     this.stripe = false,
+    this.pathIndividual = true,
+    this.pathJoiner = true,
+    this.pathCaptain = true,
     this.createdAt = 0,
   });
+
+  /// The enabled sign-up paths, in display order.
+  List<String> get enabledPaths => [
+        if (pathIndividual) 'individual',
+        if (pathJoiner) 'joiner',
+        if (pathCaptain) 'captain',
+      ];
 
   bool get isOpen => status == 'open';
 
@@ -273,6 +292,11 @@ class RegistrationConfig {
         'FeeNote': feeNote,
         'PaymentMode': paymentMode,
         'Methods': {'venmo': venmo, 'zelle': zelle, 'stripe': stripe},
+        'Paths': {
+          'individual': pathIndividual,
+          'joiner': pathJoiner,
+          'captain': pathCaptain,
+        },
         'CreatedAt': createdAt,
       };
 
@@ -284,6 +308,8 @@ class RegistrationConfig {
     final methods = raw['Methods'];
     bool method(String key, bool fallback) =>
         methods is Map ? methods[key] == true : fallback;
+    final paths = raw['Paths'];
+    bool path(String key) => paths is Map ? paths[key] != false : true;
     return RegistrationConfig(
       targetType: targetType,
       sport: raw['Sport']?.toString() ?? '',
@@ -304,6 +330,11 @@ class RegistrationConfig {
       venmo: method('venmo', true),
       zelle: method('zelle', true),
       stripe: method('stripe', false),
+      // Only an explicit false hides a path — absent (pre-switch
+      // registrations) keeps all three.
+      pathIndividual: path('individual'),
+      pathJoiner: path('joiner'),
+      pathCaptain: path('captain'),
       createdAt: int.tryParse(raw['CreatedAt']?.toString() ?? '') ?? 0,
     );
   }
