@@ -32,6 +32,10 @@ class _BusinessPageState extends State<BusinessPage> {
         title: Text(business.name ?? ""),
       ),
       body: SingleChildScrollView(
+        // Bottom inset lets the page content scroll clear of the bottom of
+        // the screen (PR #12 review).
+        padding:
+            EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
         child: Column(
           children: [
             Row(children: [

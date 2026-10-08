@@ -146,6 +146,10 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
         foregroundColor: TournamentColors.headerForeground(context),
       ),
       body: SingleChildScrollView(
+        // Bottom inset lets the form scroll clear of the bottom of the
+        // screen (PR #12 review).
+        padding:
+            EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
         child: AutofillGroup(
           child: Column(
           children: <Widget>[

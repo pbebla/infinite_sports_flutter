@@ -127,7 +127,9 @@ class _SearchHubPageState extends State<SearchHubPage> {
 
   Widget _hub() {
     return ListView(
-      padding: const EdgeInsets.all(16),
+      // Bottom inset clears the bottom of the screen (PR #12 review).
+      padding: EdgeInsets.fromLTRB(
+          16, 16, 16, 16 + MediaQuery.paddingOf(context).bottom),
       children: [
         Text('Explore', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),

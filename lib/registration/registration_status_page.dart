@@ -355,7 +355,12 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
       children: [
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.all(15),
+            // When nothing is owed the list reaches the screen bottom, so it
+            // needs the glass-nav-bar inset; when the Complete-payment button
+            // is pinned below (SafeArea'd), the list already ends above it
+            // (PR #12 review).
+            padding: EdgeInsets.fromLTRB(15, 15, 15,
+                15 + (owes ? 0.0 : MediaQuery.paddingOf(context).bottom)),
             children: [
               Card(
                 elevation: 2,

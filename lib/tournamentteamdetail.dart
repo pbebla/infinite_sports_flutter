@@ -273,7 +273,9 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
   Widget _buildOverviewTab(BuildContext context) {
     final team = _team;
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      // Bottom inset clears the floating glass nav bar (PR #12 review).
+      padding: EdgeInsets.fromLTRB(
+          12, 8, 12, 8 + MediaQuery.paddingOf(context).bottom),
       children: [
         // Team Info card
         Card(
@@ -510,7 +512,9 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
             coachName: team.coachName, captainName: team.captainName);
 
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      // Bottom inset clears the floating glass nav bar (PR #12 review).
+      padding: EdgeInsets.fromLTRB(
+          0, 8, 0, 8 + MediaQuery.paddingOf(context).bottom),
       children: [
         // Leadership section (Coach / Captain, TAS.1)
         if (leadershipLines.isNotEmpty) ...[
@@ -714,7 +718,9 @@ class _TournamentTeamDetailPageState extends State<TournamentTeamDetailPage>
     }
 
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      // Bottom inset clears the floating glass nav bar (PR #12 review).
+      padding: EdgeInsets.fromLTRB(
+          12, 8, 12, 8 + MediaQuery.paddingOf(context).bottom),
       itemCount: categories.length,
       itemBuilder: (context, idx) {
         final cat = categories[idx];

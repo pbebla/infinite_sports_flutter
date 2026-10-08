@@ -40,8 +40,11 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                         title: Text("Futsal")
                       ),
                       // P2.1: SeasonCards need no dividers between rows.
+                      // Bottom inset clears the floating glass nav bar
+                      // (PR #12 review).
                       body: ListView.builder(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        padding: EdgeInsets.fromLTRB(
+                            0, 8, 0, 8 + MediaQuery.paddingOf(context).bottom),
                         itemCount: snapshot.data!.length,
                         itemBuilder: (context, index) => snapshot.data![index]
                       )
@@ -66,8 +69,11 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                         title: Text("Basketball")
                       ),
                       // P2.1: SeasonCards need no dividers between rows.
+                      // Bottom inset clears the floating glass nav bar
+                      // (PR #12 review).
                       body: ListView.builder(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        padding: EdgeInsets.fromLTRB(
+                            0, 8, 0, 8 + MediaQuery.paddingOf(context).bottom),
                         itemCount: snapshot.data!.length,
                         itemBuilder: (context, index) => snapshot.data![index]
                       )
@@ -92,8 +98,11 @@ class LeaguesNavigationState extends State<LeaguesNavigation> {
                         title: Text("Flag Football")
                       ),
                       // P2.1: SeasonCards need no dividers between rows.
+                      // Bottom inset clears the floating glass nav bar
+                      // (PR #12 review).
                       body: ListView.builder(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        padding: EdgeInsets.fromLTRB(
+                            0, 8, 0, 8 + MediaQuery.paddingOf(context).bottom),
                         itemCount: snapshot.data!.length,
                         itemBuilder: (context, index) => snapshot.data![index]
                       )

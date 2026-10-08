@@ -87,6 +87,10 @@ class _LeagueFormState extends State<LeagueForm> {
         foregroundColor: TournamentColors.headerForeground(context),
       ),
       body: SingleChildScrollView(
+        // Bottom inset lets the submit button scroll clear of the bottom of
+        // the screen (PR #12 review).
+        padding:
+            EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom),
         child: Column(
           children: <Widget>[
             const Text("Please Add or Update the Following Information", style: TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.center,),

@@ -218,7 +218,10 @@ class _DynamicRegistrationFormState extends State<DynamicRegistrationForm> {
     return FormBuilder(
       key: _formKey,
       child: ListView(
-        padding: const EdgeInsets.all(15),
+        // Bottom inset lets the Register button scroll clear of the floating
+        // glass nav bar (PR #12 review).
+        padding: EdgeInsets.fromLTRB(
+            15, 15, 15, 15 + MediaQuery.paddingOf(context).bottom),
         children: [
           for (final q in widget.questions)
             Padding(

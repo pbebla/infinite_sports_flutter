@@ -339,6 +339,10 @@ class _EventPageState extends State<EventPage> {
               title: Text(event.title ?? "", style: const TextStyle(fontSize: 16),),
             ),
             body: SingleChildScrollView(
+              // Bottom inset lets the write-up/attendees scroll clear of the
+              // bottom of the screen (PR #12 review).
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.paddingOf(context).bottom),
               child: Column(
                 children: [
                   // Owner-approved order: flyer, Register, contact/socials,
