@@ -305,7 +305,10 @@ class _LiveScorePageState extends State<LiveScorePage> {
               child: ListView(
                 controller: _controller,
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(15),
+                // Bottom inset lets the last match card scroll clear of the
+                // floating glass nav bar (PR #12 review).
+                padding: EdgeInsets.fromLTRB(
+                    15, 15, 15, 15 + MediaQuery.paddingOf(context).bottom),
                 children: populateCardList(gamesList!, setState),
               )
             );

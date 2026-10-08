@@ -310,7 +310,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
         _publishableKey!.isEmpty;
 
     return ListView(
-      padding: const EdgeInsets.all(15),
+      // Bottom inset lets the pay buttons scroll clear of the floating glass
+      // nav bar (PR #12 review).
+      padding: EdgeInsets.fromLTRB(
+          15, 15, 15, 15 + MediaQuery.paddingOf(context).bottom),
       children: [
         _amountCard(context, sub, effectiveAmount),
         const SizedBox(height: 15),

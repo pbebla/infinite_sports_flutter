@@ -65,7 +65,9 @@ class _TournamentPlayerProfilePageState
               _buildProfileCard(context, player),
               _buildStatsCard(context, player),
               _buildLeagueHistory(context, player),
-              const SizedBox(height: 24),
+              // Bottom inset clears the floating glass nav bar (PR #12
+              // review).
+              SizedBox(height: 24 + MediaQuery.paddingOf(context).bottom),
             ]),
           ),
         ],

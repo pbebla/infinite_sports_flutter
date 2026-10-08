@@ -66,7 +66,9 @@ class RegistrationPathPage extends StatelessWidget {
         foregroundColor: TournamentColors.headerForeground(context),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(15),
+        // Bottom inset clears the floating glass nav bar (PR #12 review).
+        padding: EdgeInsets.fromLTRB(
+            15, 15, 15, 15 + MediaQuery.paddingOf(context).bottom),
         children: [
           const Padding(
             padding: EdgeInsets.only(bottom: 10),

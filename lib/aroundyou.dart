@@ -324,7 +324,11 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                       (_pastIdx.isEmpty ? 0 : _pastIdx.length + 1),
                                   //controller: scrollController,
                                   physics: const ClampingScrollPhysics(),
-                                  padding: EdgeInsets.zero,
+                                  // Bottom inset lets the last row scroll
+                                  // clear of the bottom of the screen
+                                  // (PR #12 review).
+                                  padding: EdgeInsets.only(
+                                      bottom: MediaQuery.paddingOf(context).bottom),
                                   itemBuilder: (context, position) {
                                     // Theme-staleness fix (F3.1): this
                                     // itemBuilder's own `context` can go
@@ -383,7 +387,11 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
                                   itemCount: businesses?.length ?? 0,
                                   //controller: scrollController,
                                   physics: const ClampingScrollPhysics(),
-                                  padding: EdgeInsets.zero,
+                                  // Bottom inset lets the last row scroll
+                                  // clear of the bottom of the screen
+                                  // (PR #12 review).
+                                  padding: EdgeInsets.only(
+                                      bottom: MediaQuery.paddingOf(context).bottom),
                                   itemBuilder: (context, index) => ListTile(
                                     leading: businesses![index].logo ?? SizedBox(width: 0, height: 0),
                                     title: Text('${businesses![index].name}'),

@@ -190,7 +190,11 @@ class PredictionRoomPage extends StatelessWidget {
           child: visibleQuestions.isEmpty
               ? _buildEmpty(context, questions.isEmpty)
               : ListView.builder(
-                  padding: const EdgeInsets.only(top: 8, bottom: 24),
+                  // Bottom inset clears the floating glass nav bar
+                  // (PR #12 review).
+                  padding: EdgeInsets.only(
+                      top: 8,
+                      bottom: 24 + MediaQuery.paddingOf(context).bottom),
                   itemCount: visibleQuestions.length + 1, // +1 for footer
                   itemBuilder: (context, index) {
                     if (index == visibleQuestions.length) {
