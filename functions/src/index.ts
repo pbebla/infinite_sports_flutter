@@ -323,6 +323,14 @@ export const insiderVerifyFutsal = makeInsiderVerifyTrigger('Futsal');
 export const insiderVerifyBasketball = makeInsiderVerifyTrigger('Basketball');
 export const insiderVerifyFlagFootball = makeInsiderVerifyTrigger('Flag Football');
 
+// ---- Support tickets (zaya-support): emails, admin notifications, joke
+// generator ----
+
+export {
+  onTicketCreated, onTicketThreadMessage, onTicketStatusChanged,
+} from './support_watch';
+export { generateTicketJoke } from './support_joke';
+
 // ---- League Experience P3: league watcher + prediction scoring ----
 
 /** Grouped export -> deploys as leagueFutsal-onTeam1Score, ... (P4 landed:
