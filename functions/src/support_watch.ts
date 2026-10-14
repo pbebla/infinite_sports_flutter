@@ -49,6 +49,9 @@ async function sendSupportPush(
     await admin.messaging().send({
       token,
       notification: { title, ...(body ? { body } : {}) },
+      // Routes the tap to My Tickets (fan notification_router 'support'
+      // payload branch).
+      data: { type: 'support' },
       android: {
         priority: 'high',
         notification: {
