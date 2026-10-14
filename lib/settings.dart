@@ -8,6 +8,7 @@ import 'package:infinite_sports_flutter/misc/categories.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/support/support_form_page.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -392,6 +393,17 @@ class _SettingsState extends State<Settings> {
           sliver: SliverList(
             delegate: SliverChildListDelegate(
               [
+                const Divider(color: Colors.grey),
+                ListTile(
+                  title: const Text("Help & Feedback"),
+                  subtitle: const Text("Questions, ideas, bugs — send us a ticket"),
+                  minTileHeight: 40,
+                  onTap: () {
+                    Navigator.push(context, MaterialPageRoute(builder: (context) {
+                      return const SupportFormPage(fromScreen: 'Settings');
+                    }));
+                  },
+                ),
                 const Divider(color: Colors.grey),
                 const ListTile(title: Text("Infinite Sports Association"), subtitle: Text("Email: InfiniteSportsAssociation@gmail.com\nIG/FB: Infinite Sports Association") , minTileHeight: 40),
                 const Divider(color: Colors.grey),

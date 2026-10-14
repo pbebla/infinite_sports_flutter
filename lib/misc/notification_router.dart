@@ -7,6 +7,7 @@ import 'package:infinite_sports_flutter/league_match_detail.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
+import 'package:infinite_sports_flutter/support/my_tickets_page.dart';
 import 'package:infinite_sports_flutter/tournament_match_detail.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
@@ -23,6 +24,17 @@ Future<void> openMatchFromNotification(Map<String, dynamic> data) async {
   // event reminder, deep-links to the event; a plain campaign just opened
   // the app (no navigation target).
   final type = data['type']?.toString() ?? '';
+  // Support-ticket pushes (admin replied / ticket closed) land on My
+  // Tickets — the live list streams the fresh status, so no preloading.
+  if (type == 'support') {
+    final ctx = mainContext;
+    if (ctx != null) {
+      Navigator.of(ctx, rootNavigator: true).push(
+        MaterialPageRoute(builder: (_) => const MyTicketsPage()),
+      );
+    }
+    return;
+  }
   if (type == 'event' || type == 'campaign') {
     final eventId = data['eventId']?.toString() ?? '';
     final ctx = mainContext;
