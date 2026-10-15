@@ -315,7 +315,7 @@ export function cannedJoke(category: string, rand: () => number = Math.random): 
 // without network or Firebase.
 // ---------------------------------------------------------------------------
 
-export const JOKE_MODEL = 'claude-haiku-4-5-20251001';
+export const JOKE_MODEL = 'claude-haiku-5-5';
 export const JOKE_TIMEOUT_MS = 8_000;
 
 /** Owner-picked comedy canon (2026-10-14): the model riffs in the voice of
