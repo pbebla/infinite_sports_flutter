@@ -266,36 +266,38 @@ export function closingEmailHtml(input: {
 // edits the box before sending anyway.
 // ---------------------------------------------------------------------------
 
+// Flavored on the owner's comedy canon (JOKE_FRANCHISES) — original lines
+// riffing on the shows, never verbatim quotes.
 export const JOKE_BANK: Record<CategoryKey, string[]> = {
   suggestion: [
-    "Great idea. We've added it to The Pile. The Pile is now self-aware and asking for a raise.",
-    "Your suggestion has been forwarded to the Department of Excellent Ideas We'll Pretend We Thought Of First.",
-    "As a wise tree-person once said: \"I am Groot.\" We're fairly sure that means \"ship it.\"",
+    "Your idea is going on the whiteboard, right next to Kevin's famous chili incident report. We believe in this one more.",
+    "Treat yo' self to some credit — this suggestion just made the board, and our resident Ron Swanson grunted approvingly. Highest honor we offer.",
+    "The committee has reviewed your idea and, unlike most things in Pawnee, it's actually getting built.",
   ],
   comment: [
-    'Comment received, framed, and hung in the lobby of our hearts.',
-    'We read it twice — once for the content, once for the vibes.',
-    'Your words have been etched into the sacred scrolls (a shared Google Doc).',
+    "Not that there's anything wrong with the app... but your point stands, and we're on it.",
+    "60% of the time, that part works every time. Your comment is helping us fix the other 40%.",
+    'Cool cool cool cool cool. Feedback logged — no doubt, no doubt, no doubt.',
   ],
   bug: [
-    "The bug has been captured and is being interrogated. It's not talking yet, but it will.",
-    'In our defense, it worked on our machine. The machine has since been placed on administrative leave.',
-    "We dispatched our finest developer and a can of digital Raid. The bug never saw it coming.",
+    'The bug has been escorted from the building, Dwight-style: badge revoked, farewell party canceled.',
+    'That bug had so much room for activities. It now has zero. Bunk beds were a bad idea anyway.',
+    "So you're telling us there's a chance it comes back? No. No there is not. We checked twice.",
   ],
   help: [
-    'Help is on the way — picture the Avengers assembling, but with more keyboards and worse posture.',
-    "You've summoned the support team: +10 charisma, questionable jokes included at no extra charge.",
-    "Rule one: don't panic. Rule two: see rule one. Rule three: we've got this.",
+    "We'll be there for you — clap, clap, clap, clap — your answer is waiting in the ticket thread.",
+    'DO YOU UNDERSTAND THE WORDS COMING OUT OF OUR APP? You will now — we cleared it up.',
+    'Allow ourselves to introduce... the answer. It was groovy, and it is in your thread, baby.',
   ],
   account: [
-    'Your login drama has been escalated to the High Council of Passwords. They convene at dawn.',
-    "Keys, badges, forgotten passwords — we're basically the locksmiths of the internet at this point.",
-    'We have summoned the Keymaster. The Gatekeeper is, unfortunately, on PTO.',
+    'Your account went undercover for a while, 21 Jump Street style. We pulled it out, debriefed it, and it is back on duty.',
+    "There's always money in the banana stand — and there's always a way back into your account. Access restored.",
+    'Identity crisis resolved: unlike certain undercover agents in white, your account is exactly who it says it is.',
   ],
   other: [
-    'Ah, the mystery category — our favorite. Sherlock mode: engaged.',
-    'Choosing "Something else" was bold. We respect it, and we are on it.',
-    'Filed under "¯\\_(ツ)_/¯", stamped, and resolved with honor.',
+    'GREAT SUCCESS! Your mysterious ticket has been dealt with. Very nice.',
+    'We retraced the app\'s steps from last night, found the problem on the roof, and handled it. Classic.',
+    'Thunder buddies for life — whatever that was, it is sorted now.',
   ],
 };
 
@@ -316,12 +318,28 @@ export function cannedJoke(category: string, rand: () => number = Math.random): 
 export const JOKE_MODEL = 'claude-haiku-4-5-20251001';
 export const JOKE_TIMEOUT_MS = 8_000;
 
+/** Owner-picked comedy canon (2026-10-14): the model riffs in the voice of
+ *  whichever of these fits the ticket best. */
+export const JOKE_FRANCHISES: string[] = [
+  'The Office', 'Friends', 'The Hangover', 'White Chicks', 'Austin Powers',
+  'The Big Bang Theory', 'Brooklyn Nine-Nine', 'Parks and Recreation',
+  'Superbad', 'Step Brothers', 'Seinfeld',
+  "It's Always Sunny in Philadelphia", 'Dumb and Dumber', 'Anchorman',
+  '21 Jump Street', 'Modern Family', 'Borat', 'Tropic Thunder',
+  'Arrested Development', 'Rush Hour', 'South Park', 'Family Guy',
+  'The Dictator', 'Ted', 'Silicon Valley',
+];
+
 export const JOKE_SYSTEM_PROMPT =
   'You write the single closing one-liner for a sports-league support ticket. ' +
-  'Style: snarky, sarcastic, pop-culture or movie-quote riff matched to the ' +
-  "ticket's category and content. One or two sentences max. Playful, never " +
-  'cruel or mocking of the user. No emoji spam (one at most). Reply with the ' +
-  'one-liner only — no preamble, no quotes around it.';
+  'Pick whichever ONE of these comedies fits the ticket best and write an ' +
+  'ORIGINAL line in its comedic voice (channel a signature character, ' +
+  'catchphrase-style, or running gag — do not copy long quotes verbatim): ' +
+  `${JOKE_FRANCHISES.join('; ')}. ` +
+  "Match the ticket's category and content. One or two sentences max. " +
+  'Snarky/sarcastic welcome; playful, never cruel or mocking of the user. ' +
+  'No emoji spam (one at most). Reply with the one-liner only — no preamble, ' +
+  'no quotes around it, no naming the show unless the line itself does.';
 
 const JOKE_MESSAGE_MAX_CHARS = 1_500;
 
