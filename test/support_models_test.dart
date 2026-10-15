@@ -122,6 +122,15 @@ void main() {
       expect(ticketNumsFromIndex(null), isEmpty);
       expect(ticketNumsFromIndex('nope'), isEmpty);
     });
+
+    test(
+        'REGRESSION: RTDB array coercion — {1:true,2:true} arrives as '
+        '[null,true,true]; indices are the ticket numbers (live bug, '
+        'tickets #1/#2 rendered "No tickets yet")', () {
+      expect(ticketNumsFromIndex([null, true, true]), [2, 1]);
+      expect(ticketNumsFromIndex([null, true, false, true]), [3, 1]);
+      expect(ticketNumsFromIndex(<Object?>[]), isEmpty);
+    });
   });
 
   group('parseScreenshotUrls (RTDB list/map duality)', () {

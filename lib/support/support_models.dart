@@ -261,6 +261,15 @@ List<int> ticketNumsFromIndex(Object? raw) {
       final n = int.tryParse(key.toString());
       if (n != null) out.add(n);
     });
+  } else if (raw is List) {
+    // RTDB array coercion: dense numeric keys ({1:true,2:true}) come back
+    // as [null,true,true] — the list INDEX is the ticket number (bug found
+    // live on ticket #1/#2: My Tickets rendered empty).
+    for (var i = 0; i < raw.length; i++) {
+      final value = raw[i];
+      if (value == null || value == false) continue;
+      out.add(i);
+    }
   }
   out.sort((a, b) => b.compareTo(a));
   return out;
