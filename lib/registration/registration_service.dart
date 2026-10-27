@@ -337,30 +337,26 @@ class RegistrationService {
     });
   }
 
-  /// Live roster of a team's joiners for the captain's status page — every
-  /// Submission with Path 'joiner' and this [teamId], sorted by display name
-  /// (case-insensitive). Defensive: junk children are skipped and a
-  /// missing/malformed Submissions node yields an empty list.
+  /// Live roster of a team's joiners for the captain's status page, sorted
+  /// by display name (case-insensitive). Defensive: junk children are
+  /// skipped and a missing/malformed node yields an empty list.
+  ///
+  /// DB lockdown B3: streams the trigger-maintained
+  /// Registrations/{regId}/Teams/{teamId}/Members mirror ({uid:
+  /// {DisplayName, Paid}}) instead of scanning the whole Submissions bucket
+  /// (owner-only under default-deny). The mirror also carries the CAPTAIN's
+  /// own submission — pass [captainUid] so it is filtered out, preserving
+  /// the pre-mirror roster shape (the old scan kept Path=='joiner' only).
   static Stream<List<RegSubmission>> watchTeamMembers(
-      String regId, String teamId) {
+      String regId, String teamId,
+      {String captainUid = ''}) {
     return FirebaseDatabase.instance
-        .ref('Registrations/$regId/Submissions')
+        .ref('Registrations/$regId/Teams/$teamId/Members')
         .onValue
         .map((event) {
       try {
-        final value = event.snapshot.value;
-        if (value is! Map) return <RegSubmission>[];
-        final out = <RegSubmission>[];
-        value.forEach((_, node) {
-          final sub = RegSubmission.fromFirebase(node);
-          if (sub != null && sub.path == 'joiner' && sub.teamId == teamId) {
-            out.add(sub);
-          }
-        });
-        out.sort((a, b) => a.displayName
-            .toLowerCase()
-            .compareTo(b.displayName.toLowerCase()));
-        return out;
+        return teamMembersFromNode(event.snapshot.value,
+            teamId: teamId, captainUid: captainUid);
       } catch (_) {
         return <RegSubmission>[];
       }
@@ -497,5 +493,40 @@ Map<String, RegistrationConfig> openRegistrationsFromNode(Object? raw) {
       add('$i', raw[i]);
     }
   }
+  return out;
+}
+
+/// Parses a Registrations/{regId}/Teams/{teamId}/Members mirror node
+/// ({uid: {DisplayName, Paid}}) into the joiner-roster shape the status
+/// page has always consumed: RegSubmissions with path 'joiner', this
+/// [teamId], the mirrored DisplayName/Paid, sorted by display name
+/// (case-insensitive). The entry whose uid equals [captainUid] is skipped
+/// (captains appear in Members too, but the roster lists joiners only).
+/// [] for null/junk; malformed children are skipped; an RTDB List
+/// coercion parses non-null entries under their index without crashing.
+List<RegSubmission> teamMembersFromNode(Object? raw,
+    {required String teamId, String captainUid = ''}) {
+  final out = <RegSubmission>[];
+  void add(String uid, Object? node) {
+    if (node is! Map) return;
+    if (captainUid.isNotEmpty && uid == captainUid) return;
+    out.add(RegSubmission(
+      path: 'joiner',
+      answers: const {},
+      teamId: teamId,
+      paid: node['Paid'] == true,
+      displayName: node['DisplayName']?.toString() ?? '',
+    ));
+  }
+
+  if (raw is Map) {
+    raw.forEach((uid, node) => add(uid.toString(), node));
+  } else if (raw is List) {
+    for (var i = 0; i < raw.length; i++) {
+      add('$i', raw[i]);
+    }
+  }
+  out.sort((a, b) =>
+      a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()));
   return out;
 }

@@ -55,11 +55,14 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
     return _teamStream!;
   }
 
-  Stream<List<RegSubmission>> _rosterStreamFor(String teamId) {
-    if (_rosterStream == null || _rosterStreamTeamId != teamId) {
-      _rosterStreamTeamId = teamId;
-      _rosterStream =
-          RegistrationService.watchTeamMembers(widget.regId, teamId);
+  Stream<List<RegSubmission>> _rosterStreamFor(RegTeam team) {
+    if (_rosterStream == null || _rosterStreamTeamId != team.id) {
+      _rosterStreamTeamId = team.id;
+      // Lockdown B3: the Members mirror also carries the captain's own
+      // entry — captainUid filters it out so the roster stays joiners-only.
+      _rosterStream = RegistrationService.watchTeamMembers(
+          widget.regId, team.id,
+          captainUid: team.captainUid);
     }
     return _rosterStream!;
   }
@@ -195,7 +198,7 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
 
   Widget _teamRoster(RegTeam team) {
     return StreamBuilder<List<RegSubmission>>(
-      stream: _rosterStreamFor(team.id),
+      stream: _rosterStreamFor(team),
       builder: (context, snapshot) {
         final members = snapshot.data ?? const <RegSubmission>[];
         return Padding(
