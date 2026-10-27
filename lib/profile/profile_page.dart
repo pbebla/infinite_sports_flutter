@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/profile_stat_priority.dart';
+import 'package:infinite_sports_flutter/misc/public_profiles.dart';
 import 'package:infinite_sports_flutter/misc/share_profile_service.dart';
 import 'package:infinite_sports_flutter/misc/single_match_tallies.dart'
     show catchPercentage;
@@ -804,12 +805,16 @@ class _ProfilePageState extends State<ProfilePage>
   // ─── Phase 1: identity ────────────────────────────────────────────────────
 
   Future<void> _loadIdentity() async {
-    // ── 1. Load Users/{uid} ──────────────────────────────────────────────
+    // ── 1. Load the profile node ─────────────────────────────────────────
+    // DB lockdown B1: Users/{uid} stays for the viewer's OWN profile (its
+    // owner may always read it); any other uid reads the PublicProfiles
+    // mirror, which carries the exact same keys this page uses (First/Last
+    // Name, ProfileUrl, Information, Played, Awards).
     final ref = FirebaseDatabase.instance.ref();
     Map rawUser = {};
     try {
       final userSnap =
-          (await ref.child('Users/${widget.uid}').once()).snapshot;
+          (await ref.child(profileNodePathFor(widget.uid)).once()).snapshot;
       rawUser = userSnap.value as Map? ?? {};
     } catch (_) {}
 
@@ -1047,8 +1052,10 @@ class _ProfilePageState extends State<ProfilePage>
       // A missing/empty node means no appearances — roster entries without a
       // linked UID never matched the old all-tournaments scan either — so
       // nothing at all is fetched in that (common) case.
+      // Lockdown B1: own profile reads Users, visited profiles read the
+      // PublicProfiles mirror (TournamentsPlayed is mirrored verbatim).
       final idxSnap = (await FirebaseDatabase.instance
-              .ref('Users/${widget.uid}/TournamentsPlayed')
+              .ref('${profileNodePathFor(widget.uid)}/TournamentsPlayed')
               .once())
           .snapshot;
       final index = idxSnap.value;

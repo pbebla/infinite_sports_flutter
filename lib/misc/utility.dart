@@ -5,6 +5,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
 import 'package:infinite_sports_flutter/misc/home_nav.dart';
+import 'package:infinite_sports_flutter/misc/public_profiles.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/business.dart';
@@ -103,34 +104,6 @@ final List<String> months = [
   "November",
   "December"
 ];
-
-/// Fetches the list of seasons / tournaments a user has played in.
-/// Reads from /Users/{uid}/Played. Returns an empty list on error or
-/// malformed data. Each entry is {'season': String, 'sport': String,
-/// 'team': String}.
-Future<List<Map<String, String>>> getUserPlayedHistory(String uid) async {
-  try {
-    final ref = FirebaseDatabase.instance.ref('/Users/$uid/Played');
-    final snap = (await ref.once()).snapshot;
-    if (snap.value == null) return [];
-    if (snap.value is! Map) return [];
-    final data = snap.value as Map;
-    final result = <Map<String, String>>[];
-    data.forEach((k, v) {
-      if (v is Map) {
-        result.add({
-          'season': k.toString(),
-          'sport': v['Sport']?.toString() ?? v['sport']?.toString() ?? '',
-          'team': v['Team']?.toString() ?? v['team']?.toString() ?? '',
-        });
-      }
-    });
-    return result;
-  } catch (e) {
-    debugPrint('getUserPlayedHistory error: $e');
-    return [];
-  }
-}
 
 /// Parses a Firebase MMDDYYYY string into a DateTime. Returns null
 /// when the input is not 8 digits or any segment is non-numeric.
@@ -1263,19 +1236,19 @@ Future<Event> getEvent(index) async {
   return events[index];
 }
 
+/// Every user's public identity, from the PublicProfiles mirror (DB
+/// lockdown B1 — the whole Users root is owner-only once the rules flip).
+/// Date Joined is deliberately NOT mirrored, so [MyUser.dateJoined] is
+/// always '' here; no consumer reads it (the search index and the event
+/// attendee list use name + photo only).
 Future<Map<String, MyUser>> getAllUsers() async {
-  DatabaseReference newClient = FirebaseDatabase.instance.ref();
   Map<String, MyUser> users = {};
   try
   {
-    var event = await newClient.child("Users").once();
-    var list = event.snapshot.value as Map;
-    list.forEach((uid, info) {
-      if(info.containsKey("ProfileUrl")) {
-        users[uid] = MyUser(info["First Name"] ?? "", info["Last Name"] ?? "", info["Date Joined"] ?? "", uid, info["ProfileUrl"]);
-      } else {
-        users[uid] = MyUser(info["First Name"] ?? "", info["Last Name"] ?? "", info["Date Joined"] ?? "", uid);
-      }
+    final profiles = await PublicProfiles.getAllOnce();
+    profiles.forEach((uid, profile) {
+      users[uid] = MyUser(profile.firstName, profile.lastName, "", uid,
+          profile.profileUrl.isEmpty ? null : profile.profileUrl);
     });
     return users;
   }

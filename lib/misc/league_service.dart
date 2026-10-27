@@ -214,7 +214,9 @@ class LeagueService {
     if (uidsToFetch.isNotEmpty) {
       await Future.wait(uidsToFetch.map((uid) async {
         try {
-          final snap = (await _ref('/Users/$uid/ProfileUrl').once()).snapshot;
+          // Lockdown B1: other-user photos come from the public mirror.
+          final snap =
+              (await _ref('/PublicProfiles/$uid/ProfileUrl').once()).snapshot;
           _profileUrlCache[uid] = snap.value?.toString() ?? '';
         } catch (_) {
           _profileUrlCache[uid] = '';

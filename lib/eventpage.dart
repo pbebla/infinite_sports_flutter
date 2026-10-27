@@ -326,7 +326,15 @@ class _EventPageState extends State<EventPage> {
         attending = false;
         event.attendees?.forEach((uid, val) {
           String name = '${users[uid]?.firstName ?? ""} ${users[uid]?.lastName ?? ""}';
-          attendees.add(Attendee(name, Image.network(users[uid]!.profileURL!, errorBuilder:(context, error, stackTrace) => Image.asset("assets/portraitplaceholder.png"))));
+          // Null-safe (lockdown B1): an attendee missing from the
+          // PublicProfiles mirror, or one without a photo, gets the
+          // placeholder instead of a null-assert crash.
+          final photoUrl = users[uid]?.profileURL ?? '';
+          attendees.add(Attendee(
+              name,
+              photoUrl.isEmpty
+                  ? Image.asset("assets/portraitplaceholder.png")
+                  : Image.network(photoUrl, errorBuilder:(context, error, stackTrace) => Image.asset("assets/portraitplaceholder.png"))));
           if (signedIn && uid == FirebaseAuth.instance.currentUser!.uid) {
             attending = true;
           }

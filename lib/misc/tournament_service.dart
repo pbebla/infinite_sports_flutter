@@ -410,8 +410,9 @@ class TournamentService {
     if (uidsToFetch.isNotEmpty) {
       await Future.wait(uidsToFetch.map((uid) async {
         try {
+          // Lockdown B1: other-user photos come from the public mirror.
           final urlSnap = (await FirebaseDatabase.instance
-                  .ref('/Users/$uid/ProfileUrl')
+                  .ref('/PublicProfiles/$uid/ProfileUrl')
                   .once())
               .snapshot;
           _profileUrlCache[uid] = urlSnap.value?.toString() ?? '';
