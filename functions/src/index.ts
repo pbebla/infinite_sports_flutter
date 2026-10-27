@@ -309,6 +309,12 @@ export { onCampaignCreated, processScheduledCampaigns } from './campaign_watch';
 
 export { onSubmissionPaidChange } from './insiders_watch';
 
+// ---- DB security lockdown Phase A: public mirrors (Task A2) ----
+
+export {
+  onRegistrationConfigWritten, onSubmissionWritten, onUserWritten,
+} from './public_mirrors_watch';
+
 // ---- Infinite Insiders P3: daily tier maintenance + stat-verified watcher
 // (Task X2) ----
 
