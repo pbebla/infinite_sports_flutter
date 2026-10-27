@@ -15,10 +15,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_prefs.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_walkthrough.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/rules_tab.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
@@ -42,6 +45,10 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   List<Gameweek> _gameweeks = const [];
   int? _gameweeksLockHour; // lockHour the gameweek stream was derived with
 
+  /// First-open walkthrough (spec §10a): null while the prefs flag loads,
+  /// false = show the intro, true = straight to the hub.
+  bool? _walkthroughSeen;
+
   StreamSubscription<FantasyConfigState?>? _configSub;
   StreamSubscription<List<FantasyPlayer>>? _playersSub;
   StreamSubscription<List<Gameweek>>? _gameweeksSub;
@@ -51,6 +58,9 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   @override
   void initState() {
     super.initState();
+    FantasyPrefs.hasSeenWalkthrough().then((seen) {
+      if (mounted) setState(() => _walkthroughSeen = seen);
+    });
     _configSub =
         FantasyService.watchConfig(widget.sport, widget.season).listen((s) {
       if (!mounted) return;
@@ -85,23 +95,41 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     super.dispose();
   }
 
+  void _finishWalkthrough() {
+    FantasyPrefs.markWalkthroughSeen();
+    setState(() => _walkthroughSeen = true);
+  }
+
   @override
   Widget build(BuildContext context) {
+    // The walkthrough needs no network: it shows immediately on first open
+    // (config numbers fall back to the launch defaults until the stream
+    // lands) and never again after Skip/finish.
+    final Widget body;
+    if (_walkthroughSeen == false) {
+      body = FantasyWalkthrough(
+        key: const ValueKey('walkthrough'),
+        config: _configState?.config ?? FantasyConfig.futsalDefault(),
+        onDone: _finishWalkthrough,
+      );
+    } else if (_ready && _walkthroughSeen != null) {
+      body = _HubBody(
+        key: const ValueKey('hub'),
+        sport: widget.sport,
+        season: widget.season,
+        configState: _configState!,
+        gameweeks: _gameweeks,
+      );
+    } else {
+      body = const _HubSkeleton(key: ValueKey('skeleton'));
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Infinite Fantasy')),
       // Single fade reveal: skeleton until config+players BOTH arrived,
       // then the whole hub fades in at once.
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 300),
-        child: _ready
-            ? _HubBody(
-                key: const ValueKey('hub'),
-                sport: widget.sport,
-                season: widget.season,
-                configState: _configState!,
-                gameweeks: _gameweeks,
-              )
-            : const _HubSkeleton(key: ValueKey('skeleton')),
+        child: body,
       ),
     );
   }
