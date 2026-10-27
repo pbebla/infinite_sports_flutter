@@ -11,19 +11,18 @@ import 'package:infinite_sports_flutter/registration/registration_models.dart';
 /// markPaid.
 class RegistrationService {
   /// {regId: config} for every registration whose Status is "open".
+  ///
+  /// DB lockdown B2: reads the RegistrationsPublic mirror (each child is
+  /// the registration's Config node verbatim, maintained by the
+  /// public-mirror trigger) instead of the Registrations root — that root
+  /// also holds Submissions, which go owner-only when the rules flip, and
+  /// RTDB denies a whole-node read unless the WHOLE subtree is readable.
   static Future<Map<String, RegistrationConfig>> getOpenRegistrations() async {
     try {
       final snap =
-          (await FirebaseDatabase.instance.ref('Registrations').once())
+          (await FirebaseDatabase.instance.ref('RegistrationsPublic').once())
               .snapshot;
-      if (snap.value is! Map) return {};
-      final out = <String, RegistrationConfig>{};
-      (snap.value as Map).forEach((regId, value) {
-        if (value is! Map) return;
-        final config = RegistrationConfig.fromFirebase(value['Config']);
-        if (config != null && config.isOpen) out[regId.toString()] = config;
-      });
-      return out;
+      return openRegistrationsFromNode(snap.value);
     } catch (_) {
       return {};
     }
@@ -33,19 +32,18 @@ class RegistrationService {
   /// immediately from RTDB's local cache (if any) then on every change, so
   /// registrations opening/closing appear on the entry page without a
   /// refresh. Same stream style as TournamentService.watchMatches.
+  /// Lockdown B2: rides the RegistrationsPublic mirror (see
+  /// [getOpenRegistrations]).
   static Stream<Map<String, RegistrationConfig>> watchOpenRegistrations() {
-    return FirebaseDatabase.instance.ref('Registrations').onValue.map((event) {
-      final value = event.snapshot.value;
-      if (value is! Map) return <String, RegistrationConfig>{};
-      final out = <String, RegistrationConfig>{};
-      value.forEach((regId, node) {
-        if (node is! Map) return;
-        try {
-          final config = RegistrationConfig.fromFirebase(node['Config']);
-          if (config != null && config.isOpen) out[regId.toString()] = config;
-        } catch (_) {}
-      });
-      return out;
+    return FirebaseDatabase.instance
+        .ref('RegistrationsPublic')
+        .onValue
+        .map((event) {
+      try {
+        return openRegistrationsFromNode(event.snapshot.value);
+      } catch (_) {
+        return <String, RegistrationConfig>{};
+      }
     });
   }
 
@@ -473,4 +471,31 @@ class RegistrationService {
       return false;
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Pure parsing for the lockdown mirrors (unit-tested without Firebase —
+// test/registration_callables_test.dart; activity_entry.dart-style).
+// ---------------------------------------------------------------------------
+
+/// Parses the RegistrationsPublic root ({regId: Config-verbatim}) into
+/// {regId: config}, keeping only OPEN registrations. {} for null/junk;
+/// malformed children are skipped. Defensive about RTDB's List coercion
+/// (regIds like "Futsal-17" are never dense ints, but a List must not
+/// crash — non-null entries parse under their index).
+Map<String, RegistrationConfig> openRegistrationsFromNode(Object? raw) {
+  final out = <String, RegistrationConfig>{};
+  void add(String regId, Object? node) {
+    final config = RegistrationConfig.fromFirebase(node);
+    if (config != null && config.isOpen) out[regId] = config;
+  }
+
+  if (raw is Map) {
+    raw.forEach((regId, node) => add(regId.toString(), node));
+  } else if (raw is List) {
+    for (var i = 0; i < raw.length; i++) {
+      add('$i', raw[i]);
+    }
+  }
+  return out;
 }
