@@ -123,8 +123,9 @@ fallers feed) · **Leaderboards** (overall / weekly / mini-leagues + join codes)
 · **News** · **Rules** (see §10a).
 Entry: the league page gains a **Fantasy tab** (alongside Fixtures / Table /
 Playoffs / Player Stats / Teams) whose content is the hub entry card; plus the
-Search hub and a home banner in season. **Dream Team of the Week** displayed in
-the hub.
+Search hub and a home banner in season. **Dream Team of the Week** (the
+gameweek's top-scoring 1 GK + 2 DEF + 2 ATT on a golden court) displayed in the
+hub — same data node as the weekly News post (§13), admin-overridable.
 
 UI decisions adopted from the design round (2026-10-27):
 - **My Team, editable vs locked = same layout.** When games go live, the
@@ -198,9 +199,23 @@ running "you're earning +N" chip, and a button to the Hub.
   streaks, cold streaks, price movers) — **tone: playful, never mean** (enforced
   in the generation prompt).
 - Drafts land in a **Manager approval queue**: publish / edit / discard. Nothing
-  auto-publishes.
+  auto-publishes (except the scheduled Dream Team post below, which the owner
+  explicitly opts into).
 - Owner can compose posts directly (injuries, rumors, announcements) with photo
   and optional "notify fans" push. Uses the existing ANTHROPIC_API_KEY secret.
+- **Dream Team of the Week post (owner add, 2026-10-27):** after each gameweek
+  finalizes, the system builds a **Team of the Week** post automatically — the
+  top fantasy scorers in formation (**1 GK + 2 DEF + 2 ATT**) on a **golden
+  court graphic**, with each player's week points. It is a structured post the
+  app renders natively (crisp in both themes), not a server-generated image.
+  - The post and the hub's Dream Team display read the **same stored node**,
+    so a correction fixes both.
+  - **Owner control:** the draft sits in the approval queue where the owner
+    can swap any player (error correction), edit the text, publish now, or
+    discard. Optionally, a **schedule** can be set (e.g. "auto-publish Tuesday
+    10 AM") — the post publishes itself at that time unless the owner already
+    acted on it; the schedule, like everything else, is owner-editable in the
+    Manager Fantasy section, and auto-publish can be turned off entirely.
 
 ## 14. Analytics (Manager dashboard card)
 
