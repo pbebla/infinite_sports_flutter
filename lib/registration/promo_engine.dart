@@ -233,6 +233,20 @@ FirstTimerResult firstTimer({
   );
 }
 
+/// Maps a checkFirstTimer callable result (DB lockdown B4 — the server-side
+/// port of [firstTimer] in functions/src/registration_lookups.ts) onto the
+/// same [FirstTimerResult] shape. A malformed payload degrades to
+/// "first-timer", exactly what the old client scan's silent-failure path
+/// produced (an empty prior-submissions list matches nothing).
+FirstTimerResult firstTimerResultFromCallable(Object? data) {
+  if (data is! Map) return const FirstTimerResult(isFirstTimer: true);
+  return FirstTimerResult(
+    isFirstTimer: data['isFirstTimer'] != false,
+    matchedByEmail: data['matchedByEmail'] == true,
+    matchedByPhone: data['matchedByPhone'] == true,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Stamped submission fields (spec §9 InsiderCode/FirstTimer/DiscountSource/
 // DiscountPct/EligibleFee)

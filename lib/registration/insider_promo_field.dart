@@ -45,17 +45,13 @@ class InsiderPromoCodeField extends StatefulWidget {
   /// default when the node doesn't exist, since M3 hasn't shipped it yet).
   final RegPromo promo;
 
-  /// Every prior submission's Answers map across all registrations
-  /// (RegistrationService.getAllSubmissionAnswersForMatch), fetched ONCE per
-  /// form session by the parent page and handed down here so re-validating
-  /// the code never re-reads Firebase.
-  final List<Map<String, dynamic>> priorSubmissions;
-
-  /// The signed-in account's email (FirebaseAuth currentUser.email) and
-  /// phone (Users/{uid}/Phone Number, already loaded as the form's prefill)
-  /// — the first-timer check's two signals (spec §4).
-  final String myEmail;
-  final String myPhone;
+  /// The signed-in registrant's first-timer verdict (spec §4), computed
+  /// ONCE per form session by RegistrationFormPage via the checkFirstTimer
+  /// callable (DB lockdown B4 — the client no longer downloads every
+  /// submission to match email/phone locally) and handed down here so
+  /// re-validating the code never re-runs the server match. Defaults to
+  /// first-timer, mirroring the old empty-prior-submissions default.
+  final FirstTimerResult firstTimerResult;
 
   // -- Test seams (default to the real InsiderService/FirebaseAuth calls) --
   final Future<String?> Function(String code)? lookupCodeOverride;
@@ -69,9 +65,7 @@ class InsiderPromoCodeField extends StatefulWidget {
     super.key,
     required this.eligibleFee,
     required this.promo,
-    this.priorSubmissions = const [],
-    this.myEmail = '',
-    this.myPhone = '',
+    this.firstTimerResult = const FirstTimerResult(isFirstTimer: true),
     this.lookupCodeOverride,
     this.insiderStatusOverride,
     this.alreadyReferredOverride,
@@ -187,11 +181,7 @@ class _InsiderPromoCodeFieldState extends State<InsiderPromoCodeField> {
     }
 
     final name = await insiderNameFn(ownerUid!);
-    final firstTimerResult = firstTimer(
-      email: widget.myEmail,
-      phone: widget.myPhone,
-      priorSubmissions: widget.priorSubmissions,
-    );
+    final firstTimerResult = widget.firstTimerResult;
     final now = widget.nowOverride ?? DateTime.now();
     final promoOn = widget.promo.activeAt(now);
     final applyDiscount = promoOn && firstTimerResult.isFirstTimer;

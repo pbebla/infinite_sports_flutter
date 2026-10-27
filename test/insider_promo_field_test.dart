@@ -145,9 +145,10 @@ void main() {
     await tester.pumpWidget(wrap(InsiderPromoCodeField(
       eligibleFee: 60,
       promo: const RegPromo(enabled: true, percent: 15),
-      priorSubmissions: const [],
-      myEmail: 'new@example.com',
-      myPhone: '4085551212',
+      // Lockdown B4: the page precomputes the first-timer verdict via the
+      // checkFirstTimer callable and hands it down — the field no longer
+      // matches email/phone locally.
+      firstTimerResult: const FirstTimerResult(isFirstTimer: true),
       lookupCodeOverride: (_) async => 'owner1',
       insiderStatusOverride: (_) async => 'active',
       alreadyReferredOverride: (_) async => false,
@@ -182,11 +183,8 @@ void main() {
     await tester.pumpWidget(wrap(InsiderPromoCodeField(
       eligibleFee: 60,
       promo: const RegPromo(enabled: true, percent: 15),
-      priorSubmissions: const [
-        {'email': 'old@example.com', 'phone': '4085551212'},
-      ],
-      myEmail: 'old@example.com',
-      myPhone: '4085551212',
+      firstTimerResult: const FirstTimerResult(
+          isFirstTimer: false, matchedByEmail: true, matchedByPhone: true),
       lookupCodeOverride: (_) async => 'owner1',
       insiderStatusOverride: (_) async => 'active',
       alreadyReferredOverride: (_) async => false,
@@ -220,9 +218,7 @@ void main() {
     await tester.pumpWidget(wrap(InsiderPromoCodeField(
       eligibleFee: 60,
       promo: const RegPromo(enabled: false, percent: 15),
-      priorSubmissions: const [],
-      myEmail: 'new@example.com',
-      myPhone: '4085551212',
+      firstTimerResult: const FirstTimerResult(isFirstTimer: true),
       lookupCodeOverride: (_) async => 'owner1',
       insiderStatusOverride: (_) async => 'active',
       alreadyReferredOverride: (_) async => false,

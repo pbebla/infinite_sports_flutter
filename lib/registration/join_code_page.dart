@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
@@ -6,17 +8,33 @@ import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:pin_code_fields/pin_code_fields.dart';
 
-/// Joiner-path code entry: 6 pin boxes, auto-uppercased, checked against
-/// this registration's teams on every keystroke (matchJoinCode). An approved
-/// match shows "Joining {team}" + Continue; a pending/rejected team's code
-/// and unknown codes get friendly errors (spec section 7). Admin-edited
-/// codes shorter than 6 characters still match because the check runs on
-/// every change, not only on completion.
+/// Joiner-path code entry: 6 pin boxes, auto-uppercased, resolved against
+/// this registration's teams as the user types. An approved match shows
+/// "Joining {team}" + Continue; a pending/rejected team's code and unknown
+/// codes get friendly errors (spec section 7).
+///
+/// DB lockdown B4: codes resolve SERVER-SIDE via the resolveJoinCode
+/// callable (RegistrationService.resolveJoinCode) — the old flow downloaded
+/// every team's join code (payment-waiving ones included) and matched
+/// locally, which is both a privacy bug and impossible once Teams go
+/// captain-only. Lookups are debounced per keystroke and start at 4 entered
+/// characters (validateJoinCode's minimum code length), so admin-edited
+/// codes shorter than 6 still match; a stale in-flight lookup can never
+/// clobber a newer one (generation guard).
 class JoinCodePage extends StatefulWidget {
   final String regId;
   final RegistrationConfig config;
 
-  const JoinCodePage({super.key, required this.regId, required this.config});
+  /// Test seam replacing the real callable round trip — mirrors the
+  /// injectable-override pattern in insider_promo_field.dart.
+  final Future<JoinCodeMatch> Function(
+      {required String regId, required String code})? resolveOverride;
+
+  const JoinCodePage(
+      {super.key,
+      required this.regId,
+      required this.config,
+      this.resolveOverride});
 
   @override
   State<JoinCodePage> createState() => _JoinCodePageState();
@@ -24,35 +42,60 @@ class JoinCodePage extends StatefulWidget {
 
 class _JoinCodePageState extends State<JoinCodePage> {
   final TextEditingController _controller = TextEditingController();
-  Map<String, RegTeam>? _teams; // null while loading
+  Timer? _debounce;
+
+  /// Bumped on every keystroke; a lookup only applies its result while it
+  /// is still the newest one.
+  int _generation = 0;
+
+  bool _checking = false;
   RegTeam? _match;
   String? _error;
 
   @override
-  void initState() {
-    super.initState();
-    _loadTeams();
-  }
-
-  Future<void> _loadTeams() async {
-    final teams = await RegistrationService.getTeams(widget.regId);
-    if (!mounted) return;
-    setState(() => _teams = teams);
-    _check();
-  }
-
-  @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
     super.dispose();
   }
 
-  void _check() {
-    final teams = _teams;
-    if (teams == null) return; // still loading
+  void _onChanged() {
+    _debounce?.cancel();
+    _generation++;
     final entered = _controller.text.trim();
-    final result = matchJoinCode(teams, entered);
+    // Below the 4-character code minimum nothing can match — partial input
+    // just clears the state (same quiet behavior as before).
+    if (entered.length < 4) {
+      setState(() {
+        _checking = false;
+        _match = null;
+        _error = null;
+      });
+      return;
+    }
     setState(() {
+      _checking = true;
+      _match = null;
+      _error = null;
+    });
+    _debounce = Timer(const Duration(milliseconds: 350), _check);
+  }
+
+  void _onCompleted() {
+    // All six boxes filled — resolve immediately, no debounce wait.
+    _debounce?.cancel();
+    _check();
+  }
+
+  Future<void> _check() async {
+    final entered = _controller.text.trim();
+    final gen = _generation;
+    final resolve =
+        widget.resolveOverride ?? RegistrationService.resolveJoinCode;
+    final result = await resolve(regId: widget.regId, code: entered);
+    if (!mounted || gen != _generation) return; // superseded by newer input
+    setState(() {
+      _checking = false;
       if (result.status == 'ok') {
         _match = result.team;
         _error = null;
@@ -62,8 +105,9 @@ class _JoinCodePageState extends State<JoinCodePage> {
             'That team is still awaiting approval — ask your captain to check back soon.';
       } else {
         _match = null;
-        // Only complain once all six boxes are filled; partial input just
-        // clears the state.
+        // Only complain once all six boxes are filled; shorter input that
+        // doesn't match just stays quiet (an admin-edited 4-5 char code
+        // that DOES match lands in the 'ok' branch above).
         _error = entered.length >= 6
             ? "That code doesn't match any team in this registration."
             : null;
@@ -85,7 +129,6 @@ class _JoinCodePageState extends State<JoinCodePage> {
 
   @override
   Widget build(BuildContext context) {
-    final loading = _teams == null;
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
@@ -115,7 +158,6 @@ class _JoinCodePageState extends State<JoinCodePage> {
             length: 6,
             controller: _controller,
             autoDisposeControllers: false,
-            enabled: !loading,
             keyboardType: TextInputType.visiblePassword,
             textCapitalization: TextCapitalization.characters,
             animationType: AnimationType.fade,
@@ -136,10 +178,10 @@ class _JoinCodePageState extends State<JoinCodePage> {
               selectedColor: Theme.of(context).colorScheme.primary,
               inactiveColor: Theme.of(context).dividerColor,
             ),
-            onChanged: (_) => _check(),
-            onCompleted: (_) => _check(),
+            onChanged: (_) => _onChanged(),
+            onCompleted: (_) => _onCompleted(),
           ),
-          if (loading)
+          if (_checking)
             Center(
                 child: CircularProgressIndicator(
                     color: Theme.of(context).colorScheme.primary)),
