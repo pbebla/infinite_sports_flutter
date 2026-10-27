@@ -1,0 +1,256 @@
+{
+  "_notes": [
+    "GOLDEN GAMEWEEK — cross-engine contract. Every expected number below was",
+    "computed BY HAND from FantasyConfig.futsalDefault() (spec §7) BEFORE the",
+    "Dart pipeline ran. A TypeScript finalizer (P4) must replay this file and",
+    "reproduce every value. Config is NOT serialized here: construct the",
+    "futsal default. All money/points-in-tenths are integers.",
+    "",
+    "SHAPES PINNED ON PURPOSE: game 1 team2activity is a List-coerced",
+    "activity (leading null padding, RTDB array coercion) and one Sharks",
+    "bucket (18') is an index-keyed Map; leaves carry _t metadata stamps that",
+    "must be skipped; scores mix int and String ('2').",
+    "",
+    "RAW STATS from the two games (mapper output):",
+    "g1 Sharks 3-1 Wolves: Sam GK saves4(3 Save + PenSaved pairs into saves)",
+    "penSaved1 conc1 | Dana DEF goal1 assist1 dpl1 conc1 (Foul ignored) |",
+    "Alex ATT goals2(Goal+PenGoal) conc1 | Wes GK saves2 conc3 | Will DEF",
+    "yellow1 red1(SecondYellow IS the red) conc3 | Wren ATT goal1 penMiss1",
+    "conc3.",
+    "g2 Eagles 0-2 Bulls: Eli GK saves1 conc2 | Eva DEF yellow1 ownGoal1",
+    "conc2 | Ezra ATT ABSENT (attendance false) | Bo GK saves4 conc0 | Bea",
+    "DEF assist1 dpl5 conc0 | Ben ATT goal1 conc0. Bulls' 2nd goal is Eva's",
+    "own goal (captured on the Eagles list, scores the opponent).",
+    "",
+    "BASE POINTS hand math (GK plays1 goal10 assist5 CS8 1per2saves penSave5",
+    "penMiss-2 -1per2conc y-1 r-3 og-2 | DEF plays1 goal6 assist4 CS5",
+    "-1per2conc dpl>=5->+2 | ATT plays1 goal4 assist3 CS2 conc0 dpl>=7->+2):",
+    "Sam  = 1 + floor(4/2)*1 + 5                      = 8   (conc1: no CS, no deduction)",
+    "Dana = 1 + 6 + 4                                 = 11  (dpl1<5, conc1 nothing)",
+    "Alex = 1 + 2*4                                   = 9",
+    "Wes  = 1 + floor(2/2)*1 - floor(3/2)*1           = 1",
+    "Will = 1 - 1 - 3 - floor(3/2)*1                  = -4",
+    "Wren = 1 + 4 - 2                                 = 3   (ATT never docked for conceding)",
+    "Eli  = 1 + 0(saves1<2) - floor(2/2)*1            = 0",
+    "Eva  = 1 - 1 - 2 - floor(2/2)*1                  = -3",
+    "Ezra = 0 (absent, played=false)",
+    "Bo   = 1 + 8 + floor(4/2)*1                      = 11",
+    "Bea  = 1 + 4 + 5 + 2(dpl5>=5)                    = 12",
+    "Ben  = 1 + 4 + 2                                 = 7",
+    "",
+    "BPS hand math (goal12 assist9 save2 dpl2 CS5 penSave8 penMiss-6 og-8",
+    "y-4 r-9; absent -> 0):",
+    "g1: Sam 4*2+8=16 | Dana 12+9+2=23 | Alex 2*12=24 | Wes 2*2=4 |",
+    "    Will -4-9=-13 | Wren 12-6=6.  Bonus 3/2/1: Alex3 Dana2 Sam1.",
+    "g2: Eli 2 | Eva -4-8=-12 | Ezra 0 | Bo 4*2+5=13 | Bea 9+5*2+5=24 |",
+    "    Ben 12+5=17.  Bonus: Bea3 Ben2 Bo1.",
+    "",
+    "WEEK POINTS = base + bonus (reprice input uses these too — a player's",
+    "gameweek fantasy points INCLUDE bonus; this file pins that choice):",
+    "Sam9 Dana13 Alex12 Wes1 Will-4 Wren3 Eli0 Eva-3 Ezra0 Bo12 Bea15 Ben9.",
+    "",
+    "SQUAD TOTALS (tenths; starters x10, bench x benchFactor 50% via",
+    "points*mult*50~/10, bench-boost/auto-sub bench x10, armband x2):",
+    "alpha (captain Ezra ABSENT -> vice Alex armband x2; Ezra auto-covered",
+    "by bench ATT Wren at FULL; bench DEF Will stays half):",
+    "  Eli 0 + Dana 130 + Eva -30 + Ezra 0 + Alex 12*2*10=240 +",
+    "  Will -4*50~/10=-20 + Wren 30 = 350. transfers used1 free2 -> cost 0.",
+    "boost (benchBoost: bench Eva FULL -30; absent bench Ezra still 0;",
+    "captain Bea x2):",
+    "  Sam 90 + Bea 15*2*10=300 + Will -40 + Ben 90 + Wren 30 + Eva -30 +",
+    "  Ezra 0 = 440. transfers used0 free1 -> cost 0.",
+    "churn (captain Ben x2; Ezra auto-covered by Wren FULL; bench Eva half",
+    "-3*50~/10=-15; 3 transfers with 2 free -> (3-2)*4 = 4 pts = 40 tenths):",
+    "  Bo 120 + Dana 130 + Bea 150 + Ezra 0 + Ben 9*2*10=180 + Eva -15 +",
+    "  Wren 30 = 595. net = 595 - 40 = 555.",
+    "",
+    "REPRICE (gap 4, step 5, per position, absent at real score):",
+    "GK  pts 9,1,0,12  sum22 mean5.50 rise>=9.50 fall<=1.50 ->",
+    "    Sam 0, Wes -5, Eli -5, Bo +5.",
+    "DEF pts 13,-4,-3,15 sum21 mean5.25 rise>=9.25 fall<=1.25 ->",
+    "    Dana +5, Will -5, Eva -5, Bea +5.",
+    "ATT pts 12,3,0,9  sum24 mean6.00 rise>=10 fall<=2 ->",
+    "    Alex +5, Wren 0, Ezra -5, Ben 0."
+  ],
+  "config": "futsalDefault",
+  "players": [
+    { "id": "Sam",  "team": "Sharks", "position": "GK",  "priceTenths": 85 },
+    { "id": "Wes",  "team": "Wolves", "position": "GK",  "priceTenths": 65 },
+    { "id": "Eli",  "team": "Eagles", "position": "GK",  "priceTenths": 55 },
+    { "id": "Bo",   "team": "Bulls",  "position": "GK",  "priceTenths": 75 },
+    { "id": "Dana", "team": "Sharks", "position": "DEF", "priceTenths": 80 },
+    { "id": "Will", "team": "Wolves", "position": "DEF", "priceTenths": 60 },
+    { "id": "Eva",  "team": "Eagles", "position": "DEF", "priceTenths": 50 },
+    { "id": "Bea",  "team": "Bulls",  "position": "DEF", "priceTenths": 70 },
+    { "id": "Alex", "team": "Sharks", "position": "ATT", "priceTenths": 95 },
+    { "id": "Wren", "team": "Wolves", "position": "ATT", "priceTenths": 75 },
+    { "id": "Ezra", "team": "Eagles", "position": "ATT", "priceTenths": 65 },
+    { "id": "Ben",  "team": "Bulls",  "position": "ATT", "priceTenths": 85 }
+  ],
+  "games": [
+    {
+      "node": {
+        "team1": "Sharks",
+        "team2": "Wolves",
+        "team1score": 3,
+        "team2score": 1,
+        "status": 2,
+        "team1activity": {
+          "5'":  [ { "Goal": "Alex", "_t": 1111 }, { "Assist": "Dana" } ],
+          "12'": [ { "PenGoal": "Alex" } ],
+          "18'": { "0": { "Save": "Sam" }, "1": { "Save": "Sam" } },
+          "27'": [ { "PenSaved": "Sam", "_t": 2222 } ],
+          "30'": [ { "Goal": "Dana" }, { "Foul": "Dana" }, { "DPL": "Dana" } ],
+          "35'": [ { "Save": "Sam" } ]
+        },
+        "team2activity": [
+          null,
+          [ { "Yellow": "Will" } ],
+          [ { "Save": "Wes" }, { "Goal": "Wren" } ],
+          [ { "SecondYellow": "Will", "_t": 3333 }, { "PenMissed": "Wren" }, { "Save": "Wes" } ]
+        ]
+      },
+      "attendance": { "Sharks": null, "Wolves": null }
+    },
+    {
+      "node": {
+        "team1": "Eagles",
+        "team2": "Bulls",
+        "team1score": 0,
+        "team2score": "2",
+        "status": 2,
+        "team1activity": {
+          "15'": [ { "Yellow": "Eva" } ],
+          "33'": [ { "Save": "Eli" } ],
+          "40'": [ { "OwnGoal": "Eva" } ]
+        },
+        "team2activity": {
+          "8'":  [ { "Save": "Bo" } ],
+          "10'": [ { "Goal": "Ben" }, { "Assist": "Bea" } ],
+          "19'": [ { "Save": "Bo" } ],
+          "22'": [ { "DPL": "Bea" } ],
+          "24'": [ { "DPL": "Bea" } ],
+          "26'": [ { "DPL": "Bea" } ],
+          "28'": [ { "DPL": "Bea" } ],
+          "31'": [ { "Save": "Bo" } ],
+          "33'": [ { "DPL": "Bea" } ],
+          "44'": [ { "Save": "Bo" } ]
+        }
+      },
+      "attendance": {
+        "Eagles": { "Eli": true, "Eva": true, "Ezra": false },
+        "Bulls": null
+      }
+    }
+  ],
+  "squads": [
+    {
+      "name": "alpha",
+      "squad": {
+        "picks": [
+          { "playerId": "Eli",  "position": "GK",  "priceTenths": 55, "bench": false },
+          { "playerId": "Dana", "position": "DEF", "priceTenths": 80, "bench": false },
+          { "playerId": "Eva",  "position": "DEF", "priceTenths": 50, "bench": false },
+          { "playerId": "Ezra", "position": "ATT", "priceTenths": 65, "bench": false },
+          { "playerId": "Alex", "position": "ATT", "priceTenths": 95, "bench": false },
+          { "playerId": "Will", "position": "DEF", "priceTenths": 60, "bench": true },
+          { "playerId": "Wren", "position": "ATT", "priceTenths": 75, "bench": true }
+        ],
+        "captainId": "Ezra",
+        "viceId": "Alex"
+      },
+      "transfers": { "used": 1, "free": 2 }
+    },
+    {
+      "name": "boost",
+      "squad": {
+        "picks": [
+          { "playerId": "Sam",  "position": "GK",  "priceTenths": 85, "bench": false },
+          { "playerId": "Bea",  "position": "DEF", "priceTenths": 70, "bench": false },
+          { "playerId": "Will", "position": "DEF", "priceTenths": 60, "bench": false },
+          { "playerId": "Ben",  "position": "ATT", "priceTenths": 85, "bench": false },
+          { "playerId": "Wren", "position": "ATT", "priceTenths": 75, "bench": false },
+          { "playerId": "Eva",  "position": "DEF", "priceTenths": 50, "bench": true },
+          { "playerId": "Ezra", "position": "ATT", "priceTenths": 65, "bench": true }
+        ],
+        "captainId": "Bea",
+        "viceId": "Ben",
+        "chip": "benchBoost"
+      },
+      "transfers": { "used": 0, "free": 1 }
+    },
+    {
+      "name": "churn",
+      "squad": {
+        "picks": [
+          { "playerId": "Bo",   "position": "GK",  "priceTenths": 75, "bench": false },
+          { "playerId": "Dana", "position": "DEF", "priceTenths": 80, "bench": false },
+          { "playerId": "Bea",  "position": "DEF", "priceTenths": 70, "bench": false },
+          { "playerId": "Ezra", "position": "ATT", "priceTenths": 65, "bench": false },
+          { "playerId": "Ben",  "position": "ATT", "priceTenths": 85, "bench": false },
+          { "playerId": "Eva",  "position": "DEF", "priceTenths": 50, "bench": true },
+          { "playerId": "Wren", "position": "ATT", "priceTenths": 75, "bench": true }
+        ],
+        "captainId": "Ben",
+        "viceId": "Dana"
+      },
+      "transfers": { "used": 3, "free": 2 }
+    }
+  ],
+  "expected": {
+    "basePointsByGame": [
+      { "Sam": 8, "Dana": 11, "Alex": 9, "Wes": 1, "Will": -4, "Wren": 3 },
+      { "Eli": 0, "Eva": -3, "Ezra": 0, "Bo": 11, "Bea": 12, "Ben": 7 }
+    ],
+    "bpsByGame": [
+      { "Sam": 16, "Dana": 23, "Alex": 24, "Wes": 4, "Will": -13, "Wren": 6 },
+      { "Eli": 2, "Eva": -12, "Ezra": 0, "Bo": 13, "Bea": 24, "Ben": 17 }
+    ],
+    "bonusByGame": [
+      { "Alex": 3, "Dana": 2, "Sam": 1 },
+      { "Bea": 3, "Ben": 2, "Bo": 1 }
+    ],
+    "playerWeeks": {
+      "Sam":  { "points": 9,  "played": true },
+      "Wes":  { "points": 1,  "played": true },
+      "Eli":  { "points": 0,  "played": true },
+      "Bo":   { "points": 12, "played": true },
+      "Dana": { "points": 13, "played": true },
+      "Will": { "points": -4, "played": true },
+      "Eva":  { "points": -3, "played": true },
+      "Bea":  { "points": 15, "played": true },
+      "Alex": { "points": 12, "played": true },
+      "Wren": { "points": 3,  "played": true },
+      "Ezra": { "points": 0,  "played": false },
+      "Ben":  { "points": 9,  "played": true }
+    },
+    "squads": {
+      "alpha": {
+        "totalTenths": 350,
+        "transferCostPoints": 0,
+        "netTenths": 350,
+        "armband": "Alex",
+        "autoSubbedIn": [ "Wren" ]
+      },
+      "boost": {
+        "totalTenths": 440,
+        "transferCostPoints": 0,
+        "netTenths": 440,
+        "armband": "Bea",
+        "autoSubbedIn": []
+      },
+      "churn": {
+        "totalTenths": 595,
+        "transferCostPoints": 4,
+        "netTenths": 555,
+        "armband": "Ben",
+        "autoSubbedIn": [ "Wren" ]
+      }
+    },
+    "repriceDeltas": {
+      "GK":  { "Sam": 0,  "Wes": -5, "Eli": -5, "Bo": 5 },
+      "DEF": { "Dana": 5, "Will": -5, "Eva": -5, "Bea": 5 },
+      "ATT": { "Alex": 5, "Wren": 0, "Ezra": -5, "Ben": 0 }
+    }
+  }
+}
