@@ -962,7 +962,8 @@ void main() {
   });
   test('bench boost: bench full, no auto-sub semantics change', () {
     final r = scoreSquadWeek(squad(chip: 'benchBoost'), allPlay, cfg);
-    expect(r.totalTenths, (28 + 10 + 7 + 2) * 10 + 100);
+    // starters 28 + captain extra 10 + bench full 7+2 = 47 pts = 470 tenths
+    expect(r.totalTenths, (28 + 10 + 7 + 2) * 10);
   });
   test('triple captain: x3', () {
     final r = scoreSquadWeek(squad(chip: 'tripleCaptain'), allPlay, cfg);
