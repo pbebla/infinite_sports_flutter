@@ -1,0 +1,531 @@
+// The Rules tab (P3a Task 3, spec §10a): the one obvious place players learn
+// and re-check how everything works. EVERY number here renders from the live
+// streamed FantasyConfig — the same object the engine scores with — so a
+// tuned value updates this page by itself; it can never drift from reality.
+// The worked transfer example literally calls the engine's transferCost().
+
+import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/transfers.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart';
+
+class FantasyRulesTab extends StatelessWidget {
+  const FantasyRulesTab({
+    super.key,
+    required this.configStates,
+    this.initialState,
+    this.gameweeks = const [],
+    this.nowUtc,
+  });
+
+  /// The live config stream (the hub hands FantasyService.watchConfig over);
+  /// a changed config re-renders the whole page.
+  final Stream<FantasyConfigState?> configStates;
+  final FantasyConfigState? initialState;
+  final List<Gameweek> gameweeks;
+  final DateTime Function()? nowUtc;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<FantasyConfigState?>(
+      initialData: initialState,
+      stream: configStates,
+      builder: (context, snapshot) {
+        final state = snapshot.data;
+        if (state == null) return const SizedBox.shrink();
+        return _RulesBody(
+            state: state, gameweeks: gameweeks, nowUtc: nowUtc);
+      },
+    );
+  }
+}
+
+class _RulesBody extends StatelessWidget {
+  const _RulesBody({
+    required this.state,
+    required this.gameweeks,
+    required this.nowUtc,
+  });
+
+  final FantasyConfigState state;
+  final List<Gameweek> gameweeks;
+  final DateTime Function()? nowUtc;
+
+  FantasyConfig get cfg => state.config;
+
+  @override
+  Widget build(BuildContext context) {
+    final extra1 = transferCost(
+        used: cfg.freeTransfersPerWeek + 1,
+        free: cfg.freeTransfersPerWeek,
+        cfg: cfg);
+    final extra2 = transferCost(
+        used: cfg.freeTransfersPerWeek + 2,
+        free: cfg.freeTransfersPerWeek,
+        cfg: cfg);
+    return ListView(
+      padding: EdgeInsets.fromLTRB(
+          12, 12, 12, 24 + MediaQuery.paddingOf(context).bottom),
+      children: [
+        _Section(
+          title: 'How to play',
+          child: _Body(
+            'Build a squad of ${cfg.squadSize} real league players within a '
+            '${formatMoneyTenths(cfg.budgetTenths)} budget. '
+            '${cfg.startersGk} goalkeeper, ${cfg.startersDef} defenders and '
+            '${cfg.startersAtt} attackers start; ${cfg.benchDef} defender and '
+            '${cfg.benchAtt} attacker sit on your bench and normally score '
+            '${cfg.benchFactorPercent}% of their points. Pick a captain — '
+            'their points count ×${cfg.captainMultiplier} — and a '
+            'vice-captain who wears the armband any week the captain does '
+            'not play. Points come from what really happens on court, live '
+            'during games.',
+          ),
+        ),
+        _Section(
+          title: 'Scoring',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _ScoringTable(cfg: cfg),
+              const SizedBox(height: 10),
+              const _Body(
+                'A clean sheet is earned by being present for a game your '
+                'team concedes 0 goals in — the same definition as the '
+                'league\'s Clean Sheets stat.',
+              ),
+            ],
+          ),
+        ),
+        _Section(
+          title: 'Bonus points — the published formula',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _Body(
+                'After every match the three best performers earn +3, +2 and '
+                '+1 bonus points, ranked by a published score — no black '
+                'box. Ties share the higher bonus. The weights:',
+              ),
+              const SizedBox(height: 10),
+              _BpsWeightsWrap(bps: cfg.bps),
+            ],
+          ),
+        ),
+        _Section(
+          title: 'Deadlines',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Body(
+                'Editing opens Monday and locks at '
+                '${formatLockHour(cfg.lockHour)} league time '
+                '(America/Los_Angeles) on match day, then reopens the '
+                'following Monday. One gameweek per real match day. Late '
+                'joiners start scoring from their first completed gameweek.',
+              ),
+              const SizedBox(height: 12),
+              FantasyDeadlineChip(
+                gameweeks: gameweeks,
+                lockOverride: state.lockOverride,
+                nowUtc: nowUtc,
+              ),
+            ],
+          ),
+        ),
+        _Section(
+          title: 'Transfers',
+          child: _Body(
+            'You get ${cfg.freeTransfersPerWeek} free transfers each '
+            'gameweek; unused ones bank up to ${cfg.maxBankedTransfers}. '
+            'Every transfer beyond your free ones costs '
+            '${cfg.extraTransferCost} points off that week\'s score.\n\n'
+            'Worked example: with ${cfg.freeTransfersPerWeek} free '
+            'transfers, making ${cfg.freeTransfersPerWeek + 1} costs '
+            '−$extra1 points and making '
+            '${cfg.freeTransfersPerWeek + 2} costs −$extra2.',
+          ),
+        ),
+        _Section(
+          title: 'Chips',
+          child: Column(
+            children: [
+              _ChipRow(
+                asset: 'assets/fantasy/chip_triple_captain.png',
+                name: 'Triple Captain',
+                effect:
+                    'Your captain scores ×${cfg.tripleCaptainMultiplier} '
+                    'that week instead of ×${cfg.captainMultiplier}.',
+              ),
+              _ChipRow(
+                asset: 'assets/fantasy/chip_bench_boost.png',
+                name: 'Bench Boost',
+                effect: 'Your bench earns FULL points that week instead of '
+                    '${cfg.benchFactorPercent}%.',
+              ),
+              const _ChipRow(
+                asset: 'assets/fantasy/chip_wildcard.png',
+                name: 'Wildcard',
+                effect: 'Unlimited free transfers for a permanent rebuild.',
+              ),
+              const _ChipRow(
+                asset: 'assets/fantasy/chip_free_hit.png',
+                name: 'Free Hit',
+                effect: 'Unlimited transfers for one week — your previous '
+                    'squad returns afterwards.',
+              ),
+              const SizedBox(height: 6),
+              const _Body(
+                'One chip per gameweek. You get two sets per season: set 1 '
+                'expires mid-season (unused chips do not carry over), set 2 '
+                'runs to the end.',
+              ),
+            ],
+          ),
+        ),
+        _Section(
+          title: 'Prices',
+          child: _Body(
+            'Prices run ${formatMoneyTenths(cfg.priceMinTenths)} to '
+            '${formatMoneyTenths(cfg.priceMaxTenths)} in '
+            '${formatMoneyTenths(cfg.priceStepTenths)} steps. Every Monday '
+            'prices move on performance: score well compared with other '
+            'players in YOUR position and your price rises one step; fall '
+            'behind and it drops one. You always buy and sell at the '
+            'current price, and brand-new players start around '
+            '${formatMoneyTenths(cfg.rookiePriceTenths)}.',
+          ),
+        ),
+        _Section(
+          title: 'Auto-subs, captain & bench',
+          child: _Body(
+            'If a starter does not appear, the bench player of the same '
+            'position automatically steps in and scores FULL points that '
+            'week. Otherwise the bench scores ${cfg.benchFactorPercent}% of '
+            'their points. If your captain does not appear, the '
+            'vice-captain\'s points count ×${cfg.captainMultiplier} instead.',
+          ),
+        ),
+        _Section(
+          title: 'Eligibility',
+          child: const _Body(
+            'Guest players play real games and their real stats count, but '
+            'they are not selectable in fantasy until the league promotes '
+            'them — promoted players enter the market the next gameweek. '
+            'Position reassignments by the league apply at the next unlock; '
+            'if a change makes your squad invalid, you\'ll be flagged to '
+            'fix it before the deadline.',
+          ),
+        ),
+        _Section(
+          title: 'FAQ',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              _Faq(
+                q: 'I joined mid-season — am I behind forever?',
+                a: 'Leaderboards also run per gameweek, so you can win any '
+                    'week outright. Your season total starts from your first '
+                    'completed gameweek.',
+              ),
+              _Faq(
+                q: 'What if one of my players misses the game?',
+                a: 'They score 0 and, if they started, your matching bench '
+                    'player is auto-subbed in at full points.',
+              ),
+              _Faq(
+                q: 'What if a match day is cancelled or voided?',
+                a: 'A voided gameweek scores nobody — no points gained or '
+                    'lost, and chips played that week are returned.',
+              ),
+              _Faq(
+                q: 'Can I play against just my friends?',
+                a: 'Yes — private mini-leagues with join codes are coming to '
+                    'the Leaderboards tab this season.',
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Section + text building blocks ─────────────────────────────────────────
+
+class _Section extends StatelessWidget {
+  const _Section({required this.title, required this.child});
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 0,
+      color: scheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: scheme.onSurface,
+              ),
+            ),
+            const SizedBox(height: 8),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Body extends StatelessWidget {
+  const _Body(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: 13.5,
+        height: 1.45,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+    );
+  }
+}
+
+// ── Scoring table (values straight from cfg.scoring) ───────────────────────
+
+class _ScoringTable extends StatelessWidget {
+  const _ScoringTable({required this.cfg});
+  final FantasyConfig cfg;
+
+  static String _signed(int v) {
+    if (v == 0) return '—'; // — not applicable
+    return v > 0 ? '+$v' : '−${-v}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    ScoringRow row(FantasyPosition p) => cfg.scoring[p]!;
+
+    final rows = <(String, String Function(ScoringRow))>[
+      ('Plays (appearance)', (r) => _signed(r.plays)),
+      ('Goal', (r) => _signed(r.goal)),
+      ('Assist', (r) => _signed(r.assist)),
+      ('Clean sheet', (r) => _signed(r.cleanSheet)),
+      ('Every 2 saves', (r) => _signed(r.per2Saves)),
+      ('Penalty save', (r) => _signed(r.penSave)),
+      ('Penalty miss', (r) => _signed(r.penMiss)),
+      ('Every 2 conceded', (r) => _signed(r.per2Conceded)),
+      ('Yellow card', (r) => _signed(r.yellow)),
+      ('Red card', (r) => _signed(r.red)),
+      ('Own goal', (r) => _signed(r.ownGoal)),
+      (
+        'Defensive plays',
+        (r) => r.dplThreshold == null || r.dplBonus == 0
+            ? '—'
+            : '${r.dplThreshold}+ → +${r.dplBonus}'
+      ),
+    ];
+
+    TextStyle head = TextStyle(
+      fontSize: 12.5,
+      fontWeight: FontWeight.w700,
+      color: scheme.onSurface,
+    );
+    TextStyle cell = TextStyle(
+      fontSize: 12.5,
+      color: scheme.onSurfaceVariant,
+    );
+
+    Widget valueCell(String s) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Text(s, textAlign: TextAlign.center, style: cell),
+        );
+
+    return Table(
+      columnWidths: const {
+        0: FlexColumnWidth(2.2),
+        1: FlexColumnWidth(1),
+        2: FlexColumnWidth(1),
+        3: FlexColumnWidth(1),
+      },
+      border: TableBorder(
+        horizontalInside: BorderSide(
+            color: scheme.outlineVariant.withValues(alpha: 0.4), width: 0.5),
+      ),
+      children: [
+        TableRow(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Text('Action', style: head),
+            ),
+            for (final p in FantasyPosition.values)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child:
+                    Text(p.db, textAlign: TextAlign.center, style: head),
+              ),
+          ],
+        ),
+        for (final (label, value) in rows)
+          TableRow(
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Text(label, style: cell),
+              ),
+              for (final p in FantasyPosition.values) valueCell(value(row(p))),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+// ── BPS weights (the published formula, spec §7) ───────────────────────────
+
+class _BpsWeightsWrap extends StatelessWidget {
+  const _BpsWeightsWrap({required this.bps});
+  final BpsWeights bps;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final entries = <(String, int)>[
+      ('Goal', bps.goal),
+      ('Assist', bps.assist),
+      ('Save', bps.save),
+      ('Defensive play', bps.dpl),
+      ('Clean sheet', bps.cleanSheet),
+      ('Penalty save', bps.penSave),
+      ('Penalty miss', bps.penMiss),
+      ('Own goal', bps.ownGoal),
+      ('Yellow', bps.yellow),
+      ('Red', bps.red),
+    ];
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (final (label, v) in entries)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              '$label ${v >= 0 ? '+$v' : '−${-v}'}',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+// ── Chips + FAQ rows ───────────────────────────────────────────────────────
+
+class _ChipRow extends StatelessWidget {
+  const _ChipRow(
+      {required this.asset, required this.name, required this.effect});
+  final String asset;
+  final String name;
+  final String effect;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Image.asset(asset, width: 36, height: 36, fit: BoxFit.contain),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  effect,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    height: 1.35,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Faq extends StatelessWidget {
+  const _Faq({required this.q, required this.a});
+  final String q;
+  final String a;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            q,
+            style: TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w600,
+              color: scheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            a,
+            style: TextStyle(
+              fontSize: 12.5,
+              height: 1.4,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

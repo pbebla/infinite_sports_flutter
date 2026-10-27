@@ -19,6 +19,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/rules_tab.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 class FantasyHubPage extends StatefulWidget {
@@ -198,12 +199,12 @@ class _HubBody extends StatelessWidget {
                   message: 'Gameweek stories, price movers and the Dream '
                       'Team of the Week are coming soon.',
                 ),
-                // Task 3 replaces this with the config-rendered Rules tab.
-                const _PlaceholderTab(
-                  icon: Icons.menu_book,
-                  title: 'Rules',
-                  message: 'How Infinite Fantasy works — scoring, deadlines, '
-                      'transfers and chips.',
+                // Rendered ENTIRELY from the live config (spec §10a): a
+                // tuned value re-renders this page by itself.
+                FantasyRulesTab(
+                  configStates: FantasyService.watchConfig(sport, season),
+                  initialState: configState,
+                  gameweeks: gameweeks,
                 ),
               ],
             ),
