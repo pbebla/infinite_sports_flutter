@@ -315,6 +315,10 @@ export {
   onRegistrationConfigWritten, onSubmissionWritten, onUserWritten,
 } from './public_mirrors_watch';
 
+// ---- DB security lockdown Phase A: registration lookup callables (A3) ----
+
+export { checkFirstTimer, resolveJoinCode } from './registration_lookups';
+
 // ---- Infinite Insiders P3: daily tier maintenance + stat-verified watcher
 // (Task X2) ----
 
