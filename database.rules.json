@@ -231,6 +231,9 @@
         "Form": {
           ".read": true
         },
+        "Promo": {
+          ".read": true
+        },
         "Submissions": {
           "$uid": {
             ".read": "auth != null && auth.uid == $uid",

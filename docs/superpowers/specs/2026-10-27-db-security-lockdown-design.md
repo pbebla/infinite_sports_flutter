@@ -133,6 +133,23 @@ its login account stays in `/Admins`.
 
 ## 8. Known-accepted gaps (documented, not blocking)
 
+Found during Phase B implementation (2026-10-27):
+- **Joiner's team card:** `Teams/$tid` is captain+admin read, so joiners can't
+  load the team node. Fix shipped app-side: the joiner's own submission stores
+  `TeamName` (from `resolveJoinCode`) and the status page prefers it. No team
+  submissions exist anywhere yet, so no migration.
+- **Insiders is dormant** (data wiped 2026-07-31) and its reads go
+  admin/owner-only: referral lists, cross-uid insider status, and promo-code
+  checks degrade to "inactive/empty" without crashing. The **Insiders rebuild
+  must move code validation + referral queries server-side** (callables or
+  mirrors) — recorded as a hard prerequisite in that epic.
+- `Registrations/$id/Promo` is public-read in the rules (promo config is not
+  sensitive) so future promos need no rules change.
+- **Support `Notes` caveat:** ticket owners technically could read
+  `Tickets/$n/Notes` by direct path (read cascade; UI never shows it).
+  Relocate notes to `Support/TicketNotes/<n>` (admin-only) when PR #16 merges
+  — Manager-side path change only.
+
 - Submissions carry client-set `DiscountPct/EligibleFee/FirstTimer` — the
   Manager verifies payment amounts by hand today; a validation pass can come
   with Stripe go-live work.
