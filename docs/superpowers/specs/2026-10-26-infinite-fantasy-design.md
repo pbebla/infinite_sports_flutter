@@ -112,9 +112,43 @@ carry over); set 2 runs to season end.
 Tabs: **My Team** (squad builder: formation slots, budget bar, captain/vice,
 chips, transfer state) · **Players** (market: prices, ownership %, risers &
 fallers feed) · **Leaderboards** (overall / weekly / mini-leagues + join codes)
-· **News** · **Rules** (scoring tables + BPS formula + chip rules).
+· **News** · **Rules** (see §10a).
 Entry: league page card, Search hub, home banner in season. **Dream Team of the
 Week** displayed in the hub.
+
+## 10a. Rules page & player education (owner requirement)
+
+Players must always have one obvious place to learn and re-check how everything
+works. The **Rules tab** is that place:
+
+- **Rendered from the live engine config, not hand-written text** — the scoring
+  tables, chip list, transfer allowance, budget, price range, and deadline time
+  shown to players come from the same config the engine scores with. If a value
+  is ever tuned, the Rules page updates itself; it can never drift from reality.
+- Contents, in plain language with examples:
+  - **How to play** — build 7 within $50M, 1 GK + 2 DEF + 2 ATT start,
+    DEF+ATT bench at half points, pick captain (×2) and vice.
+  - **Scoring** — the full per-position points table (§7), the BPS 3/2/1
+    formula spelled out, clean-sheet and conceded rules, DPL bonus thresholds.
+  - **Deadlines** — the weekly lock schedule (Mon open → Sun 3 PM lock), with
+    the **next deadline countdown** shown right on the page.
+  - **Transfers** — 2 free/week, bank to 7, −4 per extra, worked example.
+  - **Chips** — what each of the four does, one per week, two sets, set-1
+    expiry date shown once configured.
+  - **Prices** — how Monday repricing works in plain words ("play well versus
+    other players in your position and your price rises"), buy/sell at current
+    price.
+  - **Auto-subs, captain & vice, bench** — when the bench scores full vs half.
+  - **Eligibility** — guests aren't selectable until promoted; position
+    changes apply at the next unlock.
+  - **Short FAQ** — late joiners, absent players, voided weeks, mini-leagues.
+- **First-open walkthrough:** the first time a user enters the Fantasy Hub they
+  get a short swipeable intro (3–4 cards: build your 7 → captain ×2 → deadline
+  Sunday 3 PM → points come from real games), skippable, never shown again;
+  Rules tab is always a tap away afterward.
+- **Contextual help everywhere it matters:** deadline countdown pinned in My
+  Team; a "How scoring works" link next to points displays; the transfer
+  screen states remaining free transfers and the −4 cost before confirming.
 
 ## 11. Match-page Fantasy tab
 
@@ -170,7 +204,8 @@ analytics dashboard.
 - **P1** Pure engine: scoring, BPS, pricing, gameweek derivation, transfer/chip
   state machine — exhaustive tests.
 - **P2** Attendance capture in Manager Live Scoring (+ guard prompt).
-- **P3** Fan Hub: squad builder, market, leaderboards, history, profiles.
+- **P3** Fan Hub: squad builder, market, leaderboards, history, profiles,
+  config-rendered Rules page + first-open walkthrough (§10a).
 - **P4** Functions: lock/unlock jobs, weekly finalization, repricing, pushes,
   recaps, news drafting.
 - **P5** Manager Fantasy section (admin + news + analytics).
