@@ -1,6 +1,7 @@
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:infinite_sports_flutter/misc/stream_resilience.dart';
 import 'package:infinite_sports_flutter/registration/promo_engine.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 
@@ -313,18 +314,24 @@ class RegistrationService {
   /// Live stream of one team — the captain sees approval, the join code and
   /// waive changes the moment an admin writes them. Emits null while the
   /// node is missing/malformed; an empty [teamId] gets a single null.
+  /// Lockdown B8: a DENIED read (joiners can't read `Teams/<tid>` under
+  /// default-deny) also emits null instead of an error, so the status page
+  /// degrades to the submission-stamped team name rather than an error
+  /// state.
   static Stream<RegTeam?> watchTeam(String regId, String teamId) {
     if (teamId.isEmpty) return Stream.value(null);
-    return FirebaseDatabase.instance
-        .ref('Registrations/$regId/Teams/$teamId')
-        .onValue
-        .map((event) {
-      try {
-        return RegTeam.fromNode(teamId, event.snapshot.value);
-      } catch (_) {
-        return null;
-      }
-    });
+    return streamErrorsAs(
+        FirebaseDatabase.instance
+            .ref('Registrations/$regId/Teams/$teamId')
+            .onValue
+            .map<RegTeam?>((event) {
+          try {
+            return RegTeam.fromNode(teamId, event.snapshot.value);
+          } catch (_) {
+            return null;
+          }
+        }),
+        null);
   }
 
   /// Live roster of a team's joiners for the captain's status page, sorted
@@ -438,6 +445,9 @@ class RegistrationService {
         path: 'joiner',
         answers: answers,
         teamId: team.id,
+        // B8: stamped so the status page can render the team card without
+        // reading Teams/<tid> (captain+admin-only under default-deny).
+        teamName: team.name,
         paid: waived,
         paidVia: waived ? 'team code' : '',
         displayName: displayName,

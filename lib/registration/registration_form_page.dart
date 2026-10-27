@@ -260,6 +260,7 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
       path: widget.path,
       answers: answers,
       teamId: widget.team?.id ?? '',
+      teamName: widget.team?.name ?? '',
       paid: bornPaid,
       paidVia: bornPaid ? 'team code' : '',
       submittedAt: DateTime.now().millisecondsSinceEpoch,

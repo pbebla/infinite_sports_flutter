@@ -99,17 +99,28 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
 
   Widget? _teamCard(RegSubmission sub, RegTeam? team) {
     if (sub.teamId.isEmpty) return null;
-    if (team == null) {
-      return const Card(
+    if (sub.path != 'captain') {
+      // Joiner (lockdown B8): under default-deny the Teams/<tid> node is
+      // captain+admin-only, so the live team read is denied for joiners —
+      // the card renders from the TeamName stamped on their own submission
+      // (preferred even when the team read worked), and only falls back to
+      // the retry card when neither source has a name (pre-B8 submissions;
+      // none exist in the live DB).
+      final name = sub.teamName.isNotEmpty ? sub.teamName : (team?.name ?? '');
+      if (name.isEmpty) return _teamLoadFailedCard();
+      return Card(
         elevation: 2,
         child: ListTile(
-          leading: Icon(Icons.group),
-          title: Text('Team'),
-          subtitle:
-              Text("Couldn't load your team right now — go back and retry."),
+          leading: const Icon(Icons.group),
+          title:
+              Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+          subtitle: Text(sub.paidVia == 'team code'
+              ? "You're on the team — payment covered by your captain."
+              : "You're on the team."),
         ),
       );
     }
+    if (team == null) return _teamLoadFailedCard();
     if (sub.path == 'captain') {
       if (team.isPending) {
         return Card(
@@ -182,16 +193,22 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
         ),
       );
     }
-    // Joiner.
-    return Card(
+    // Unreachable: every non-captain path returned above; this satisfies
+    // the compiler's return requirement only.
+    return null;
+  }
+
+  /// Fallback card when no team identity is available at all (captain's
+  /// team node unreadable, or a pre-B8 joiner submission with no stamped
+  /// TeamName).
+  Widget _teamLoadFailedCard() {
+    return const Card(
       elevation: 2,
       child: ListTile(
-        leading: const Icon(Icons.group),
-        title: Text(team.name,
-            style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(sub.paidVia == 'team code'
-            ? "You're on the team — payment covered by your captain."
-            : "You're on the team."),
+        leading: Icon(Icons.group),
+        title: Text('Team'),
+        subtitle:
+            Text("Couldn't load your team right now — go back and retry."),
       ),
     );
   }

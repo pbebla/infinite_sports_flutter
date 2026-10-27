@@ -1,4 +1,5 @@
 import 'package:firebase_database/firebase_database.dart';
+import 'package:infinite_sports_flutter/misc/stream_resilience.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
 
 /// Live reads + the application write for the Infinite Insiders program
@@ -116,16 +117,22 @@ class InsiderService {
   /// `/Referrals` row with `InsiderUid == uid`, newest-counted first (spec
   /// §7). A missing/malformed node (or one still using the pre-index
   /// shape) degrades to an empty list rather than throwing.
+  /// Lockdown B8: a DENIED read also degrades to an empty list — RTDB
+  /// queries need read permission at `/Referrals` itself (admin-only under
+  /// default-deny), so the dashboard shows zero referrals instead of an
+  /// error state until the Insiders rebuild moves this server-side.
   static Stream<List<InsiderReferral>> watchMyReferrals(String uid) =>
-      FirebaseDatabase.instance
-          .ref('Referrals')
-          .orderByChild('InsiderUid')
-          .equalTo(uid)
-          .onValue
-          .map((event) => sortReferralsNewestFirst<InsiderReferral>(
-                referralsFromNode(event.snapshot.value),
-                (r) => r.countedAt,
-              ));
+      streamErrorsAs(
+          FirebaseDatabase.instance
+              .ref('Referrals')
+              .orderByChild('InsiderUid')
+              .equalTo(uid)
+              .onValue
+              .map((event) => sortReferralsNewestFirst<InsiderReferral>(
+                    referralsFromNode(event.snapshot.value),
+                    (r) => r.countedAt,
+                  )),
+          const <InsiderReferral>[]);
 
   /// Toggles the "Show me on the public leaderboard" opt-out (spec §7 —
   /// individually opt-out-able from the leaderboard row).

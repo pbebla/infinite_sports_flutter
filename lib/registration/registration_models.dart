@@ -426,6 +426,12 @@ class RegSubmission {
   final String path; // 'individual' | 'joiner' | 'captain'
   final Map<String, dynamic> answers;
   final String teamId; // '' until team paths land (L1b)
+
+  /// The joined team's display name, stamped at submit time (DB lockdown
+  /// B8; fan-side first — mirror into the Manager copy on its next sync).
+  /// Under default-deny a joiner cannot read `Teams/<tid>` (captain+admin
+  /// only), so the status page renders the team card from this field.
+  final String teamName; // '' on pre-B8 and non-team submissions
   final bool paid;
   final String paidVia; // '' | 'team code' | 'card' | 'manual'
   final num? paidAmount; // dollars actually charged/recorded; null if unknown
@@ -473,6 +479,7 @@ class RegSubmission {
     required this.path,
     required this.answers,
     this.teamId = '',
+    this.teamName = '',
     this.paid = false,
     this.paidVia = '',
     this.paidAmount,
@@ -494,6 +501,7 @@ class RegSubmission {
         'Path': path,
         'Answers': answers,
         if (teamId.isNotEmpty) 'TeamId': teamId,
+        if (teamName.isNotEmpty) 'TeamName': teamName,
         'Paid': paid,
         if (paidVia.isNotEmpty) 'PaidVia': paidVia,
         if (paidAmount != null) 'PaidAmount': paidAmount,
@@ -525,6 +533,7 @@ class RegSubmission {
           ? rawAnswers.map((k, v) => MapEntry(k.toString(), v))
           : <String, dynamic>{},
       teamId: raw['TeamId']?.toString() ?? '',
+      teamName: raw['TeamName']?.toString() ?? '',
       paid: raw['Paid'] == true,
       paidVia: raw['PaidVia']?.toString() ?? '',
       paidAmount: rawPaidAmount is num

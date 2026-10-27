@@ -160,7 +160,9 @@ class _SearchHubPageState extends State<SearchHubPage> {
             leading: Icon(Icons.diamond,
                 size: 32, color: Theme.of(context).colorScheme.primary),
             title: const Text('Infinite Insiders'),
-            subtitle: const Text('See the public referral leaderboard'),
+            // B8: the leaderboard page shows its dormant coming-soon state,
+            // so the card says so instead of promising rankings.
+            subtitle: const Text('Referral program — coming soon'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () {
               final builder = widget.insidersLeaderboardPageBuilder ??
