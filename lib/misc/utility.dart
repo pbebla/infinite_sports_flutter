@@ -481,8 +481,14 @@ Future<List<Game>> getGames(sport, season, date, times) async {
         break;
     }
 
+    // Vote-write ref (B5 bug fix): AFC games live under
+    // "AFC San Jose/Seasons/<season>" — the exact path getAllSoccerGames
+    // reads above — but this builder used to omit the "Seasons" segment
+    // for AFC, so AFC votes landed in a dead spot ("AFC San Jose/<season>/
+    // Date/...") that nothing ever read, and the default-deny rules only
+    // allow the real one. Non-AFC sports are unchanged.
     game.databaseReference = FirebaseDatabase.instance
-      .ref(sport)
+      .ref(sport == "AFC San Jose" ? "AFC San Jose/Seasons" : sport)
       .child(season)
       .child("Date")
       .child(date);
