@@ -434,8 +434,8 @@ void main() {
     expect(r.total, 0);
     expect(r.breakdown, isEmpty);
   });
-  test('appearance point', () {
-    expect(scorePlayerGame(s(), FantasyPosition.def, cfg).total, 1);
+  test('appearance point (CS suppressed by a conceded goal)', () {
+    expect(scorePlayerGame(s(conceded: 1), FantasyPosition.def, cfg).total, 1);
   });
   test('GK goal is +10 on top of plays', () {
     expect(scorePlayerGame(s(goals: 1, conceded: 1), FantasyPosition.gk, cfg)
@@ -454,11 +454,15 @@ void main() {
     expect(scorePlayerGame(s(conceded: 4), FantasyPosition.def, cfg).total, 1 - 2);
     expect(scorePlayerGame(s(conceded: 5), FantasyPosition.gk, cfg).total, 1 - 2);
   });
-  test('DPL threshold bonus', () {
-    expect(scorePlayerGame(s(dpl: 5), FantasyPosition.def, cfg).total, 1 + 2);
-    expect(scorePlayerGame(s(dpl: 4), FantasyPosition.def, cfg).total, 1);
-    expect(scorePlayerGame(s(dpl: 7), FantasyPosition.att, cfg).total, 1 + 2);
-    expect(scorePlayerGame(s(dpl: 99), FantasyPosition.gk, cfg).total, 1);
+  test('DPL threshold bonus (conceded: 1 suppresses CS, too few to deduct)', () {
+    expect(scorePlayerGame(s(dpl: 5, conceded: 1), FantasyPosition.def, cfg)
+        .total, 1 + 2);
+    expect(scorePlayerGame(s(dpl: 4, conceded: 1), FantasyPosition.def, cfg)
+        .total, 1);
+    expect(scorePlayerGame(s(dpl: 7, conceded: 1), FantasyPosition.att, cfg)
+        .total, 1 + 2);
+    expect(scorePlayerGame(s(dpl: 99, conceded: 1), FantasyPosition.gk, cfg)
+        .total, 1);
   });
   test('cards, own goals, pens', () {
     expect(scorePlayerGame(s(yellows: 1, reds: 1, conceded: 1),
@@ -483,7 +487,8 @@ void main() {
   });
   test('gameweek sum across multiple games', () {
     final wk = scorePlayerWeek(
-        [s(goals: 1), s(conceded: 2, yellows: 1)], FantasyPosition.att, cfg);
+        [s(goals: 1, conceded: 1), s(conceded: 2, yellows: 1)],
+        FantasyPosition.att, cfg);
     expect(wk.total, (1 + 4) + (1 - 1));
     expect(wk.played, isTrue);
   });
