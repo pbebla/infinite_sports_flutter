@@ -115,9 +115,18 @@ changed code. Server-side (functions) is unaffected by the iOS bug.
 - [ ] **C3.** Backfill mirrors via REST (PublicProfiles for all users,
   RegistrationsPublic for existing registrations, Members where teams
   exist); verify counts vs live data.
-- [ ] **C4.** Deploy functions (Phase A) + rules at a quiet hour, run the
-  matrix, owner smoke-tests both apps on devices. Rollback = redeploy of the
-  backup rules file.
+- [ ] **C4.** Two-stage flip (functions already deployed + mirrors backfilled
+  2026-10-27):
+  - **Stage 1 — writes locked, reads unchanged** (`database.rules.stage1.json`:
+    the full write matrix with root `.read: true`). Zero visible change for
+    current store users; kills world-writability (score wipes, data tampering)
+    immediately. Deploy at a quiet hour, run the write-side matrix, owner
+    smoke-tests writes (vote, profile edit, Manager save, support ticket).
+  - **Stage 2 — full default-deny** (`database.rules.json`) ships **with the
+    store release containing Phase B** (store users on older builds keep public
+    reads; their other-user profile reads degrade gracefully). Run the full
+    matrix + owner smoke test.
+  - Rollback either stage = redeploy `database.rules.backup.json`.
 - [ ] **C5.** Storage rules audit + deploy (same pattern).
 
 **Phase D (follow-up):** store release shipping the Phase B re-points must go
