@@ -54,6 +54,9 @@ Basketball and Flag Football are later scoring tables, not rebuilds.
 - Editing window **Monday → Sunday 3:00 PM** (configurable constant); locked
   through the games; reopens Monday. Late joiners start scoring from their first
   completed gameweek.
+- Deadline is anchored to the **league's timezone** (America/Los_Angeles,
+  stored in config) — never the phone's timezone. Countdowns everywhere also
+  show the absolute lock time ("Sun, Oct 19 · 3:00 PM").
 - **Transfers: 2 free per gameweek, bankable up to 7; −4 points per extra
   transfer** beyond the allowance (applied to that week's score).
 
@@ -85,6 +88,11 @@ carry over); set 2 runs to season end.
 | Own goal | −2 | −2 | −2 |
 | DPL threshold bonus | — | 5+ DPL → +2 | 7+ DPL → +2 |
 
+- **Clean sheet eligibility (explicit):** a player earns the clean sheet when
+  they are **present (Plays)** and their team concedes 0 in that game — same
+  definition the league's real Clean Sheets stat already uses. Futsal has no
+  per-minute tracking, so presence is the whole condition; the Rules page
+  states exactly this and nothing more.
 - **Bonus points 3/2/1** to the top three performers per match, ranked by a
   published deterministic formula (weighted goals/assists/saves/DPL/CS, cards
   negative). The formula appears on the Rules page — no black box.
@@ -113,8 +121,28 @@ Tabs: **My Team** (squad builder: formation slots, budget bar, captain/vice,
 chips, transfer state) · **Players** (market: prices, ownership %, risers &
 fallers feed) · **Leaderboards** (overall / weekly / mini-leagues + join codes)
 · **News** · **Rules** (see §10a).
-Entry: league page card, Search hub, home banner in season. **Dream Team of the
-Week** displayed in the hub.
+Entry: the league page gains a **Fantasy tab** (alongside Fixtures / Table /
+Playoffs / Player Stats / Teams) whose content is the hub entry card; plus the
+Search hub and a home banner in season. **Dream Team of the Week** displayed in
+the hub.
+
+UI decisions adopted from the design round (2026-10-27):
+- **My Team, editable vs locked = same layout.** When games go live, the
+  budget/transfer controls swap for a compact live strip (live points ·
+  overall rank · places gained) — players never learn two screens.
+- **Bench on its own surface** labeled "Bench · 50% points"; during a boosted
+  or auto-subbed week a bench player shows raw → counted ("7 → 3.5") so the
+  math is never mysterious.
+- Captain assignment via a bottom sheet on any player tile (Make Captain /
+  Make Vice / Swap / Details); captain gets a gold ring + ×2 badge.
+- **Market sort is persistent** across filter changes; player detail opens as
+  a large bottom sheet for quick compare-and-buy.
+- **Leaderboards top out with a gameweek podium** (top 3), current user's row
+  pinned/highlighted wherever they rank; join-code entry has a paste button
+  and shows a league preview before joining.
+- The futsal court is **drawn in code (theme-aware)**, dark subtly-lit court in
+  dark mode / light equivalent in light mode — never a baked image that only
+  works on one theme.
 
 ## 10a. Rules page & player education (owner requirement)
 
@@ -193,6 +221,9 @@ analytics dashboard.
 - iOS parity: streams/`once()` only, no RTDB `get()`; iOS-risky items get a
   "verify on simulator" PR line. Realtime-everywhere; light+dark; wrap-don't-
   ellipsize; navbar scroll clearance; dialog-controller rule.
+- Motion: celebrations/counters in the 150–350ms range, respect the OS
+  reduced-motion setting, and **never replay a celebration on stream reconnect
+  or widget rebuild** — animate only on a genuine value change.
 - **Ships alongside the database security lockdown** (separate workstream):
   fantasy data (squads, picks, history) is born under locked-down rules —
   per-user write, public read where the design says public, admin override.
