@@ -1,0 +1,177 @@
+# Infinite Fantasy — Design (owner-locked)
+
+**Date:** 2026-10-26 · All decisions made with the owner across planning sessions.
+FPL-style fantasy for the futsal league first; the engine is config-driven so
+Basketball and Flag Football are later scoring tables, not rebuilds.
+
+## 1. Format
+
+- Open to every signed-in user, free. Brand name: **Infinite Fantasy**.
+- Each fantasy manager builds a squad of **real futsal players across all teams**;
+  shared ownership (no draft). Points come from real per-game stats (the box-score
+  pipeline), **live during games**.
+- Season-long overall leaderboard + weekly leaderboards + **private mini-leagues**
+  with join codes.
+
+## 2. Squad & formation
+
+- **7 players**: starters = 1 GK + 2 DEF + 2 ATT; bench = **1 DEF + 1 ATT** (fixed).
+- **Captain ×2 points; Vice-captain** inherits the armband when the captain has no
+  appearance.
+- **Bench scores HALF points** normally. **Auto-substitution:** a starter with no
+  appearance is replaced by the matching-position bench player, who then scores
+  FULL that week (instead of half).
+- No bench GK by design — the keeper pick is a weekly bet.
+
+## 3. Fantasy positions
+
+- Every league player carries a fantasy position: **GK / DEF / ATT** (no midfield).
+- Defaults from registration position (GK→GK, Defender→DEF, Striker→ATT,
+  **Midfielder→ATT by default** — owner-overridable per player).
+- Manager can reassign any player pre-season or mid-season ("protest" flow); the
+  change applies **at the next unlock**. Squads invalidated by a reassignment are
+  flagged and their owners pushed to fix before lock.
+- **Guests:** eligibility flag per player. Guests play and their real stats count,
+  but they are **not selectable** in fantasy. A one-tap **Promote** makes them
+  permanent → they enter the market next gameweek with a starting price.
+
+## 4. Budget & prices
+
+- Budget **$50M** per manager. Prices **$4.0M–$15.0M** in **$0.5M** steps.
+- Opening prices computed from historical seasons' stats; true rookies ≈ **$6.0M**.
+  Tuned so $50M ≈ two stars + solid middle + one bargain — never five stars.
+- **Weekly repricing (Mondays), performance-based** — not transfer-demand-based:
+  movement derives from the player's fantasy points that week, weighted by where
+  the points came from for their position, and **relative to peers in the same
+  position** (an ATT's price move considers how other ATTs scored). ±$0.5M steps
+  within floor/ceiling.
+- Buying and selling always at **current price** (no FPL profit-split accounting).
+- **Owner override:** Manager can edit any price at any time; play continues.
+
+## 5. Gameweeks, lock, transfers
+
+- Gameweeks derive automatically from the real schedule (one per match day).
+- Editing window **Monday → Sunday 3:00 PM** (configurable constant); locked
+  through the games; reopens Monday. Late joiners start scoring from their first
+  completed gameweek.
+- **Transfers: 2 free per gameweek, bankable up to 7; −4 points per extra
+  transfer** beyond the allowance (applied to that week's score).
+
+## 6. Chips (one per gameweek; two sets per season)
+
+| Chip | Effect |
+|---|---|
+| Triple Captain | Captain ×3 that week |
+| Bench Boost | Bench earns FULL points (instead of half) that week |
+| Wildcard | Unlimited free transfers, permanent rebuild |
+| Free Hit | Unlimited transfers for one week; previous squad returns after |
+
+Set 1 expires at a configurable mid-season gameweek deadline (unused chips do not
+carry over); set 2 runs to season end.
+
+## 7. Scoring (futsal — FINAL, owner-approved)
+
+| Action | GK | DEF | ATT |
+|---|---|---|---|
+| Plays (appearance) | +1 | +1 | +1 |
+| Goal | **+10** | +6 | +4 |
+| Assist | +5 | +4 | +3 |
+| Clean sheet | +8 | +5 | +2 |
+| Every 2 saves | +1 | — | — |
+| Penalty save | +5 | — | — |
+| Penalty miss | −2 | −2 | −2 |
+| Every 2 goals conceded | −1 | −1 | — |
+| Yellow / Red | −1 / −3 | −1 / −3 | −1 / −3 |
+| Own goal | −2 | −2 | −2 |
+| DPL threshold bonus | — | 5+ DPL → +2 | 7+ DPL → +2 |
+
+- **Bonus points 3/2/1** to the top three performers per match, ranked by a
+  published deterministic formula (weighted goals/assists/saves/DPL/CS, cards
+  negative). The formula appears on the Rules page — no black box.
+- All scoring recomputes from match data (same self-correcting model as Clean
+  Sheets): score edits after a game automatically re-settle fantasy points.
+
+## 8. Attendance (new Live Scoring step — prerequisite for Plays/auto-sub/VC)
+
+- Live Scoring shows the game roster, **everyone defaulted to PRESENT**; the admin
+  taps who is absent. Players can be re-presented anytime ("arrived out of nowhere").
+- **Guard prompt:** recording a stat for a player marked absent asks:
+  *"<Name> is marked not present."* → **[He's here — mark present & record]** /
+  **[My mistake — cancel]** (cancel returns to the player picker).
+
+## 9. Transparency & social
+
+- Everyone's points and ranks are public.
+- A manager's **current-week picks are visible to others only after lock**
+  (anti-copying); before lock, visitors see the previous week.
+- **Full history:** every manager's week-by-week squads (GW1, GW2, …) browsable
+  from their profile, forever.
+
+## 10. Fantasy Hub (fan app)
+
+Tabs: **My Team** (squad builder: formation slots, budget bar, captain/vice,
+chips, transfer state) · **Players** (market: prices, ownership %, risers &
+fallers feed) · **Leaderboards** (overall / weekly / mini-leagues + join codes)
+· **News** · **Rules** (scoring tables + BPS formula + chip rules).
+Entry: league page card, Search hub, home banner in season. **Dream Team of the
+Week** displayed in the hub.
+
+## 11. Match-page Fantasy tab
+
+Live match pages gain a **Fantasy** tab: real-time fantasy points earned in that
+game ("+6 — player (D)"), the viewer's own squad members highlighted with a
+running "you're earning +N" chip, and a button to the Hub.
+
+## 12. Pushes & comms (all automated, all owner-controllable)
+
+- **Deadline reminder** (default Sunday noon to managers with unchanged squads):
+  time, message template, and on/off editable in Manager; **Send now** manual
+  push always available.
+- **Weekly recap** push + screen: "GW3: you scored 41, moved to #4, top score 52."
+- Lock/unlock + price-change notices as lightweight hub badges, not pushes.
+
+## 13. News feed (AI-drafted, owner-published)
+
+- After each gameweek the AI drafts 2–4 short stories from real stats (hot
+  streaks, cold streaks, price movers) — **tone: playful, never mean** (enforced
+  in the generation prompt).
+- Drafts land in a **Manager approval queue**: publish / edit / discard. Nothing
+  auto-publishes.
+- Owner can compose posts directly (injuries, rumors, announcements) with photo
+  and optional "notify fans" push. Uses the existing ANTHROPIC_API_KEY secret.
+
+## 14. Analytics (Manager dashboard card)
+
+Custom in-house counters (no external console): fantasy sign-ups, weekly active
+managers, squads set per week, edits per week, inactive-manager count. Live.
+
+## 15. Manager app — ONE Fantasy section
+
+Single drawer section containing: positions & eligibility editor (incl. guest
+Promote), price table with overrides, gameweek controls (lock status, finalize,
+void-a-week), reminder/push config + send-now, news composer + approval queue,
+analytics dashboard.
+
+## 16. Engineering ground rules
+
+- Engine is a pure, heavily-tested library; per-sport scoring/pricing config
+  (futsal ships; Basketball/FF = new tables later).
+- iOS parity: streams/`once()` only, no RTDB `get()`; iOS-risky items get a
+  "verify on simulator" PR line. Realtime-everywhere; light+dark; wrap-don't-
+  ellipsize; navbar scroll clearance; dialog-controller rule.
+- **Ships alongside the database security lockdown** (separate workstream):
+  fantasy data (squads, picks, history) is born under locked-down rules —
+  per-user write, public read where the design says public, admin override.
+- Prizes: nothing hardcoded; owner announces whatever, whenever.
+
+## 17. Build phases
+
+- **P0** Security rules lockdown (parallel epic, own spec).
+- **P1** Pure engine: scoring, BPS, pricing, gameweek derivation, transfer/chip
+  state machine — exhaustive tests.
+- **P2** Attendance capture in Manager Live Scoring (+ guard prompt).
+- **P3** Fan Hub: squad builder, market, leaderboards, history, profiles.
+- **P4** Functions: lock/unlock jobs, weekly finalization, repricing, pushes,
+  recaps, news drafting.
+- **P5** Manager Fantasy section (admin + news + analytics).
+- **P6** Match-page Fantasy tab, Dream Team, home banner, polish.
