@@ -49,6 +49,15 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   /// false = show the intro, true = straight to the hub.
   bool? _walkthroughSeen;
 
+  /// Re-listenable config feed for the Rules tab, fed from this page's own
+  /// subscription. A raw watchConfig() stream is single-subscription, and a
+  /// TabBarView unmounts/remounts its tabs on far swipes — a remounted
+  /// StreamBuilder re-listening to the same instance would throw. The
+  /// broadcast controller makes re-listening safe without a second RTDB
+  /// listener.
+  final StreamController<FantasyConfigState?> _configForRules =
+      StreamController<FantasyConfigState?>.broadcast();
+
   StreamSubscription<FantasyConfigState?>? _configSub;
   StreamSubscription<List<FantasyPlayer>>? _playersSub;
   StreamSubscription<List<Gameweek>>? _gameweeksSub;
@@ -65,6 +74,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         FantasyService.watchConfig(widget.sport, widget.season).listen((s) {
       if (!mounted) return;
       setState(() => _configState = s);
+      _configForRules.add(s);
       if (s != null) _subscribeGameweeks(s);
     });
     _playersSub =
@@ -92,6 +102,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _configSub?.cancel();
     _playersSub?.cancel();
     _gameweeksSub?.cancel();
+    _configForRules.close();
     super.dispose();
   }
 
@@ -118,6 +129,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         sport: widget.sport,
         season: widget.season,
         configState: _configState!,
+        configStates: _configForRules.stream,
         gameweeks: _gameweeks,
       );
     } else {
@@ -165,12 +177,14 @@ class _HubBody extends StatelessWidget {
     required this.sport,
     required this.season,
     required this.configState,
+    required this.configStates,
     required this.gameweeks,
   });
 
   final String sport;
   final String season;
   final FantasyConfigState configState;
+  final Stream<FantasyConfigState?> configStates;
   final List<Gameweek> gameweeks;
 
   @override
@@ -230,7 +244,7 @@ class _HubBody extends StatelessWidget {
                 // Rendered ENTIRELY from the live config (spec §10a): a
                 // tuned value re-renders this page by itself.
                 FantasyRulesTab(
-                  configStates: FantasyService.watchConfig(sport, season),
+                  configStates: configStates,
                   initialState: configState,
                   gameweeks: gameweeks,
                 ),
