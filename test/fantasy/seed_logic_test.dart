@@ -201,6 +201,27 @@ void main() {
       expect(node['Guest']!['eligible'], false);
       expect(node['Guest']!['priceTenths'], cfg.rookiePriceTenths);
       expect(node['Guest']!['position'], 'ATT');
+      // No photoUrlByName passed → no photoUrl keys at all.
+      expect(node['P1']!.containsKey('photoUrl'), isFalse);
+    });
+    test('photoUrl rides along when the UID link resolved one (P3b Task 3)',
+        () {
+      final node = buildPlayersNode(
+        lineups: const [
+          LineupEntry(name: 'P1', teamName: 'A', uid: 'u1'),
+          LineupEntry(name: 'Unlinked', teamName: 'A'),
+        ],
+        positionByName: {
+          'P1': FantasyPosition.def,
+          'Unlinked': FantasyPosition.att,
+        },
+        priceByName: {'P1': 85, 'Unlinked': 60},
+        cfg: cfg,
+        photoUrlByName: {'P1': 'https://example.com/p1.jpg', 'Unlinked': ' '},
+      );
+      expect(node['P1']!['photoUrl'], 'https://example.com/p1.jpg');
+      // Blank/missing URLs are omitted, never written as empty strings.
+      expect(node['Unlinked']!.containsKey('photoUrl'), isFalse);
     });
     test('Config node = futsalDefault + lockOverride', () {
       final node = buildConfigNode(lockOverride: 'open');

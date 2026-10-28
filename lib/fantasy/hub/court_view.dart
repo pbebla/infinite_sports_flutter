@@ -44,6 +44,7 @@ class FantasyCourtView extends StatelessWidget {
     this.viceId,
     this.onSlotTap,
     this.weekPointsFor,
+    this.photoUrlFor,
   });
 
   final FantasyConfig config;
@@ -60,6 +61,10 @@ class FantasyCourtView extends StatelessWidget {
 
   /// Week-points text per playerId — only rendered when provided (P4/P6).
   final String? Function(String playerId)? weekPointsFor;
+
+  /// Market photo per playerId (Task 3) — null/absent falls back to
+  /// initials (photos never gate content).
+  final String? Function(String playerId)? photoUrlFor;
 
   @override
   Widget build(BuildContext context) {
@@ -132,6 +137,7 @@ class FantasyCourtView extends StatelessWidget {
       return FantasyEmptySlot(
         key: ValueKey('empty_slot_$i'),
         position: slots[i].position,
+        onPitch: !slots[i].bench,
         onTap: onSlotTap == null ? null : () => onSlotTap!(i),
       );
     }
@@ -139,6 +145,7 @@ class FantasyCourtView extends StatelessWidget {
       key: ValueKey('squad_chip_${pick.playerId}'),
       name: pick.playerId,
       priceTenths: pick.priceTenths,
+      photoUrl: photoUrlFor?.call(pick.playerId),
       isCaptain: pick.playerId == captainId,
       isVice: pick.playerId == viceId,
       weekPoints: weekPointsFor?.call(pick.playerId),

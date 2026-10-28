@@ -169,20 +169,26 @@ Map<String, int> buildOpeningPrices({
 }
 
 /// The `Fantasy/<sport>/<season>/Players` node: {name: {position, priceTenths,
-/// eligible, teamName}} — the exact shape the fan app's market parses.
+/// eligible, teamName, photoUrl?}} — the exact shape the fan app's market
+/// parses. [photoUrlByName] (P3b Task 3) carries PublicProfiles ProfileUrls
+/// resolved through each lineup entry's UID link; players without a link (or
+/// without a public photo) simply omit the key and render initials.
 Map<String, Map<String, Object>> buildPlayersNode({
   required List<LineupEntry> lineups,
   required Map<String, FantasyPosition> positionByName,
   required Map<String, int> priceByName,
   required FantasyConfig cfg,
+  Map<String, String> photoUrlByName = const {},
 }) {
   final node = <String, Map<String, Object>>{};
   for (final entry in lineups) {
+    final photo = photoUrlByName[entry.name]?.trim();
     node[entry.name] = {
       'position': (positionByName[entry.name] ?? FantasyPosition.att).db,
       'priceTenths': priceByName[entry.name] ?? cfg.rookiePriceTenths,
       'eligible': !isGuestName(entry.name),
       'teamName': entry.teamName,
+      if (photo != null && photo.isNotEmpty) 'photoUrl': photo,
     };
   }
   return node;

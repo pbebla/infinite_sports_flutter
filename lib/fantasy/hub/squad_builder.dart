@@ -276,6 +276,10 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
   @override
   Widget build(BuildContext context) {
     final editable = _editable;
+    final photoByName = {
+      for (final p in widget.players)
+        if (p.photoUrl != null) p.name: p.photoUrl,
+    };
     final issues = issueSentences(
       slots: _slots,
       slotPicks: _picks,
@@ -306,6 +310,9 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
             captainId: _captainId,
             viceId: _viceId,
             onSlotTap: editable ? _onSlotTap : null,
+            // Big photo chips (Task 3): the market's photoUrl per pick;
+            // initials fall back instantly when a player has none.
+            photoUrlFor: (id) => photoByName[id],
           ),
           const SizedBox(height: 14),
           FantasyChipRow(

@@ -96,6 +96,39 @@ void main() {
       })!;
       expect(FantasyPlayer.fromNode('P1', p.toMap())!.toMap(), p.toMap());
     });
+    test('photoUrl parses when present, null when absent/blank (P3b Task 3)',
+        () {
+      final withPhoto = FantasyPlayer.fromNode('P1', {
+        'position': 'DEF',
+        'priceTenths': 70,
+        'eligible': true,
+        'teamName': 'Hakkari',
+        'photoUrl': 'https://example.com/p1.jpg',
+      })!;
+      expect(withPhoto.photoUrl, 'https://example.com/p1.jpg');
+      expect(withPhoto.toMap()['photoUrl'], 'https://example.com/p1.jpg');
+      // Round-trips with the photo intact.
+      expect(FantasyPlayer.fromNode('P1', withPhoto.toMap())!.photoUrl,
+          'https://example.com/p1.jpg');
+
+      final without = FantasyPlayer.fromNode('P2', {
+        'position': 'ATT',
+        'priceTenths': 60,
+        'eligible': true,
+        'teamName': 'B',
+      })!;
+      expect(without.photoUrl, isNull);
+      expect(without.toMap().containsKey('photoUrl'), isFalse);
+
+      final blank = FantasyPlayer.fromNode('P3', {
+        'position': 'ATT',
+        'priceTenths': 60,
+        'eligible': true,
+        'teamName': 'B',
+        'photoUrl': '  ',
+      })!;
+      expect(blank.photoUrl, isNull);
+    });
   });
 
   group('squadFromNode', () {

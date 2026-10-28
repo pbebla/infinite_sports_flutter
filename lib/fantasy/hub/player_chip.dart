@@ -1,14 +1,17 @@
-// The squad builder's player chip and empty-slot affordance (P3b): circular
-// initials avatar (photos never gate content — the fantasy market carries no
-// photo URLs, so initials are the whole story here), a compact nameplate that
+// The squad builder's player chip and empty-slot affordance (P3b; sized up
+// in the owner's feedback round, Task 3): a BIG photo avatar on top (the
+// market's photoUrl via cached_network_image — initials stay the instant
+// fallback, photos never gate content), a card-style nameplate below that
 // WRAPS (two lines max, soft wrap, never an ellipsis), the price in engine
 // tenths, and the armband states — captain = gold-accent ring + 'C' badge
 // (colorScheme-derived accent, NOT the chip asset), vice = 'V' badge. A
 // week-points line renders only when provided (live wiring lands in P4/P6).
 //
 // Theme: the fantasy accent pairing (gold in dark, primary red in light —
-// the deadline chip's rule); everything else from colorScheme.
+// the deadline chip's rule); everything else from colorScheme. Photo fade-in
+// is 200ms and collapses to zero under reduced motion.
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
@@ -24,15 +27,21 @@ class FantasyPlayerChip extends StatelessWidget {
     super.key,
     required this.name,
     required this.priceTenths,
+    this.photoUrl,
     this.isCaptain = false,
     this.isVice = false,
     this.weekPoints,
     this.onTap,
-    this.width = 84,
+    this.width = 96,
+    this.avatarSize = 58,
   });
 
   final String name;
   final int priceTenths;
+
+  /// Profile photo (Task 3) — null/empty renders the initials fallback
+  /// immediately (photos never gate content).
+  final String? photoUrl;
   final bool isCaptain;
   final bool isVice;
 
@@ -43,22 +52,50 @@ class FantasyPlayerChip extends StatelessWidget {
   final VoidCallback? onTap;
   final double width;
 
+  /// Photo avatar diameter — owner: "clear image, can't have them tiny".
+  final double avatarSize;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final accent = fantasyAccent(context);
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
 
-    final avatar = CircleAvatar(
-      radius: 20,
-      backgroundColor: scheme.surfaceContainerHighest,
+    final initials = Center(
       child: Text(
         initialsFor(name),
         style: TextStyle(
-          fontSize: 13,
+          fontSize: avatarSize * 0.30,
           fontWeight: FontWeight.w700,
           color: scheme.onSurfaceVariant,
         ),
       ),
+    );
+    final hasPhoto = photoUrl != null && photoUrl!.isNotEmpty;
+    final avatar = Container(
+      width: avatarSize,
+      height: avatarSize,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: scheme.surfaceContainerHighest,
+      ),
+      child: hasPhoto
+          ? CachedNetworkImage(
+              imageUrl: photoUrl!,
+              fit: BoxFit.cover,
+              width: avatarSize,
+              height: avatarSize,
+              fadeInDuration: reduceMotion
+                  ? Duration.zero
+                  : const Duration(milliseconds: 200),
+              placeholderFadeInDuration: Duration.zero,
+              // Initials render instantly under the photo load and stay on
+              // error — the photo never gates the chip.
+              placeholder: (_, __) => initials,
+              errorWidget: (_, __, ___) => initials,
+            )
+          : initials,
     );
 
     return InkWell(
@@ -102,10 +139,13 @@ class FantasyPlayerChip extends StatelessWidget {
             const SizedBox(height: 4),
             Container(
               width: width,
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(
+                    color: scheme.outlineVariant.withValues(alpha: 0.5),
+                    width: 0.7),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -119,7 +159,7 @@ class FantasyPlayerChip extends StatelessWidget {
                     softWrap: true,
                     overflow: TextOverflow.clip,
                     style: TextStyle(
-                      fontSize: 10.5,
+                      fontSize: 11.5,
                       height: 1.15,
                       fontWeight: FontWeight.w600,
                       color: scheme.onSurface,
@@ -131,7 +171,7 @@ class FantasyPlayerChip extends StatelessWidget {
                         ? '${formatMoneyTenths(priceTenths)} · ×2'
                         : formatMoneyTenths(priceTenths),
                     style: TextStyle(
-                      fontSize: 10,
+                      fontSize: 10.5,
                       fontWeight: FontWeight.w700,
                       color: isCaptain ? accent : scheme.onSurfaceVariant,
                     ),
@@ -202,7 +242,8 @@ class FantasyEmptySlot extends StatelessWidget {
     super.key,
     required this.position,
     this.onTap,
-    this.width = 84,
+    this.width = 96,
+    this.onPitch = false,
   });
 
   final FantasyPosition position;
@@ -211,13 +252,20 @@ class FantasyEmptySlot extends StatelessWidget {
   final VoidCallback? onTap;
   final double width;
 
+  /// true for starter slots sitting on the green grass (Task 2): white-on-
+  /// green styling reads in BOTH themes there, while bench slots keep the
+  /// colorScheme styling of their neutral surface.
+  final bool onPitch;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final enabled = onTap != null;
-    final tone = enabled
-        ? scheme.onSurfaceVariant
-        : scheme.onSurfaceVariant.withValues(alpha: 0.45);
+    final tone = onPitch
+        ? Colors.white.withValues(alpha: enabled ? 0.9 : 0.5)
+        : (enabled
+            ? scheme.onSurfaceVariant
+            : scheme.onSurfaceVariant.withValues(alpha: 0.45));
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -227,13 +275,18 @@ class FantasyEmptySlot extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 45,
-              height: 45,
+              width: 52,
+              height: 52,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+                color: onPitch
+                    ? Colors.black.withValues(alpha: 0.18)
+                    : scheme.surfaceContainerHighest.withValues(alpha: 0.55),
                 border: Border.all(
-                    color: scheme.outline.withValues(alpha: 0.6), width: 1.2),
+                    color: onPitch
+                        ? Colors.white.withValues(alpha: 0.65)
+                        : scheme.outline.withValues(alpha: 0.6),
+                    width: 1.2),
               ),
               child: Icon(Icons.add, size: 20, color: tone),
             ),

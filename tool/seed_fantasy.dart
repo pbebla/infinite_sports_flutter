@@ -94,6 +94,23 @@ Future<void> main(List<String> args) async {
       positionByName[entry.name] = mapRegistrationPosition(rawString);
     }
 
+    // Profile photos (P3b Task 3): the lineup UID link resolves each player
+    // to PublicProfiles/<uid>/ProfileUrl (the server-maintained public
+    // mirror — the same source the fan app's rosters read). No UID link or
+    // no public photo → photoUrl omitted, the chip renders initials.
+    final photoUrlByName = <String, String>{};
+    for (final entry in lineups) {
+      if (entry.uid == null) continue;
+      try {
+        final raw =
+            await _get(client, 'PublicProfiles/${entry.uid}/ProfileUrl');
+        final url = raw?.toString().trim() ?? '';
+        if (url.isNotEmpty) photoUrlByName[entry.name] = url;
+      } on HttpException {
+        // Unreadable profile node — photo simply omitted for this player.
+      }
+    }
+
     // ── Engine replay: season points → opening prices ────────────────────
     final rosterByTeam = <String, Set<String>>{};
     for (final entry in lineups) {
@@ -115,6 +132,7 @@ Future<void> main(List<String> args) async {
       positionByName: positionByName,
       priceByName: prices,
       cfg: cfg,
+      photoUrlByName: photoUrlByName,
     );
     final configNode = buildConfigNode(lockOverride: 'open');
 
@@ -157,6 +175,10 @@ Future<void> main(List<String> args) async {
         '${defaulted.isEmpty ? 'none' : defaulted.join(', ')}');
     stdout.writeln('Activity names with no lineup entry (NOT seeded): '
         '${aggregate.activityOnlyNames.isEmpty ? 'none' : aggregate.activityOnlyNames.join(', ')}');
+    final linked = lineups.where((e) => e.uid != null).length;
+    stdout.writeln('Photos: ${photoUrlByName.length} of ${lineups.length} '
+        'players got a photoUrl ($linked have a UID link; '
+        'PublicProfiles/<uid>/ProfileUrl)');
     stdout.writeln(
         'Config: futsalDefault + lockOverride=open (budget ${_money(cfg.budgetTenths)}, '
         'prices ${_money(cfg.priceMinTenths)}–${_money(cfg.priceMaxTenths)})');

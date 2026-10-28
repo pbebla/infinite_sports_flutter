@@ -12,6 +12,7 @@ class FantasyPlayer {
     required this.priceTenths,
     required this.eligible,
     required this.teamName,
+    this.photoUrl,
   });
 
   /// Identity: the league lineup player name.
@@ -26,6 +27,11 @@ class FantasyPlayer {
   final bool eligible;
   final String teamName;
 
+  /// Profile photo (P3b Task 3) — seeded from PublicProfiles/<uid>/ProfileUrl
+  /// via the lineup UID link. null/absent = no linked account photo; the UI
+  /// falls back to initials (photos never gate content).
+  final String? photoUrl;
+
   /// Tolerant RTDB parse; null when the entry isn't usable (bad position
   /// string, non-map node) so callers can skip it.
   static FantasyPlayer? fromNode(String name, Object? node) {
@@ -37,6 +43,7 @@ class FantasyPlayer {
       return null;
     }
     final rawPrice = node['priceTenths'];
+    final rawPhoto = node['photoUrl']?.toString().trim();
     return FantasyPlayer(
       name: name,
       position: position,
@@ -45,6 +52,7 @@ class FantasyPlayer {
           : int.tryParse(rawPrice?.toString() ?? '') ?? 0,
       eligible: node['eligible'] == true,
       teamName: node['teamName']?.toString() ?? '',
+      photoUrl: (rawPhoto == null || rawPhoto.isEmpty) ? null : rawPhoto,
     );
   }
 
@@ -53,5 +61,6 @@ class FantasyPlayer {
         'priceTenths': priceTenths,
         'eligible': eligible,
         'teamName': teamName,
+        if (photoUrl != null) 'photoUrl': photoUrl,
       };
 }
