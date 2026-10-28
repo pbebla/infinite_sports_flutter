@@ -1,0 +1,249 @@
+// P3d — pure logic behind the Leaderboards tab, mini-leagues and the squad
+// viewer: row composition with the Managers → PublicProfiles name fallback
+// (flagged names never shown), movement arrows, code generation/normalizing/
+// matching, member ranking with absent totals, and the published-vs-history
+// week fallback (spec §9).
+
+import 'dart:math' as math;
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
+import 'package:infinite_sports_flutter/misc/public_profiles.dart';
+
+FantasyLeaderboardEntry entry(String uid, int points,
+        {int? rank, int? movement}) =>
+    FantasyLeaderboardEntry(
+        uid: uid, points: points, rank: rank, movement: movement);
+
+FantasyManager manager(String name, {bool flagged = false}) =>
+    FantasyManager(teamName: name, nameFlagged: flagged);
+
+PublicProfile profile(String uid, String first, String last, {String url = ''}) =>
+    PublicProfile(uid: uid, firstName: first, lastName: last, profileUrl: url);
+
+FantasyMiniLeague league({
+  String id = 'L1',
+  String name = 'The League',
+  String code = 'ABC234',
+  String owner = 'u1',
+  Set<String> members = const {'u1'},
+}) =>
+    FantasyMiniLeague(
+        id: id, name: name, code: code, ownerUid: owner, memberUids: members);
+
+FantasySquad squad(String gk) => FantasySquad(
+      picks: [
+        SquadPick(playerId: gk, position: FantasyPosition.gk, priceTenths: 50),
+      ],
+      captainId: gk,
+      viceId: gk,
+    );
+
+void main() {
+  group('managerDisplayName', () {
+    final managers = {
+      'named': manager('Gold Rush'),
+      'flagged': manager('Rude FC', flagged: true),
+    };
+    final profiles = {
+      'flagged': profile('flagged', 'Pat', 'Lee'),
+      'profiled': profile('profiled', 'Sam', 'Cruz'),
+    };
+
+    test('team name wins when clean', () {
+      expect(
+          managerDisplayName(
+              uid: 'named', managers: managers, profiles: profiles),
+          'Gold Rush');
+    });
+
+    test('a FLAGGED name is never shown — profile name instead', () {
+      expect(
+          managerDisplayName(
+              uid: 'flagged', managers: managers, profiles: profiles),
+          'Pat Lee');
+    });
+
+    test('no manager entry falls back to the profile, then the neutral '
+        'label', () {
+      expect(
+          managerDisplayName(
+              uid: 'profiled', managers: managers, profiles: profiles),
+          'Sam Cruz');
+      expect(
+          managerDisplayName(uid: 'ghost', managers: managers, profiles: profiles),
+          'Unnamed manager');
+    });
+  });
+
+  group('composeLeaderboardRows', () {
+    test('resolves names/photos, marks self, keeps parser order', () {
+      final rows = composeLeaderboardRows(
+        entries: [
+          entry('u1', 40, rank: 1, movement: 2),
+          entry('u2', 30, rank: 2, movement: 0),
+          entry('u3', 20),
+        ],
+        managers: {'u1': manager('Top Team'), 'u2': manager('Chasers')},
+        profiles: {'u3': profile('u3', 'Ada', 'Ng', url: 'http://p/3.jpg')},
+        selfUid: 'u2',
+      );
+      expect(rows.map((r) => r.name), ['Top Team', 'Chasers', 'Ada Ng']);
+      expect(rows.map((r) => r.displayRank), [1, 2, 3]);
+      expect(rows[0].movement, 2);
+      expect(rows[1].isSelf, isTrue);
+      expect(rows[2].isSelf, isFalse);
+      expect(rows[2].photoUrl, 'http://p/3.jpg');
+      expect(rows[0].photoUrl, isNull);
+    });
+
+    test('showMovement false drops arrows (the Gameweek scope)', () {
+      final rows = composeLeaderboardRows(
+        entries: [entry('u1', 10, rank: 1, movement: 3)],
+        managers: const {},
+        profiles: const {},
+        selfUid: '',
+        showMovement: false,
+      );
+      expect(rows.single.movement, isNull);
+      expect(rows.single.isSelf, isFalse);
+    });
+  });
+
+  group('movement', () {
+    test('direction and glyphs', () {
+      expect(movementDirection(2), MovementDirection.up);
+      expect(movementDirection(-1), MovementDirection.down);
+      expect(movementDirection(0), MovementDirection.none);
+      expect(movementDirection(null), MovementDirection.none);
+      expect(movementGlyph(MovementDirection.up), '▲');
+      expect(movementGlyph(MovementDirection.down), '▼');
+      expect(movementGlyph(MovementDirection.none), '—');
+    });
+  });
+
+  group('mini-league codes', () {
+    test('generates 6 chars from the unambiguous A-Z0-9 subset', () {
+      final rng = math.Random(7);
+      for (var i = 0; i < 50; i++) {
+        final code = generateMiniLeagueCode(rng);
+        expect(code, hasLength(6));
+        expect(RegExp(r'^[A-Z0-9]{6}$').hasMatch(code), isTrue,
+            reason: '$code must satisfy the rules validation');
+        for (final c in code.split('')) {
+          expect(miniLeagueCodeAlphabet.contains(c), isTrue);
+        }
+      }
+    });
+
+    test('normalize uppercases and strips spaces/dashes', () {
+      expect(normalizeMiniLeagueCode(' ab c-23 4 '), 'ABC234');
+    });
+
+    test('completeness check', () {
+      expect(isCompleteMiniLeagueCode('abc234'), isTrue);
+      expect(isCompleteMiniLeagueCode('AB C-23 4'), isTrue);
+      expect(isCompleteMiniLeagueCode('abc23'), isFalse);
+      expect(isCompleteMiniLeagueCode('abc2345'), isFalse);
+      expect(isCompleteMiniLeagueCode('abc23!'), isFalse);
+    });
+
+    test('findMiniLeagueByCode matches case/format-insensitively', () {
+      final leagues = [
+        league(id: 'a', code: 'ABC234'),
+        league(id: 'b', code: 'XYZ789'),
+      ];
+      expect(findMiniLeagueByCode(leagues, 'xyz 789')!.id, 'b');
+      expect(findMiniLeagueByCode(leagues, 'abc-234')!.id, 'a');
+      expect(findMiniLeagueByCode(leagues, 'NOPE11'), isNull);
+      expect(findMiniLeagueByCode(leagues, ''), isNull);
+    });
+  });
+
+  group('leaguesForMember', () {
+    test('filters to membership, keeps order; empty uid gets none', () {
+      final leagues = [
+        league(id: 'a', members: {'me', 'u2'}),
+        league(id: 'b', members: {'u2'}),
+        league(id: 'c', members: {'me'}),
+      ];
+      expect(leaguesForMember(leagues, 'me').map((l) => l.id), ['a', 'c']);
+      expect(leaguesForMember(leagues, ''), isEmpty);
+    });
+  });
+
+  group('composeMiniLeagueRows', () {
+    test('members with totals rank first in Overall order; the rest by '
+        'name with 0 pts; local ranks renumber', () {
+      final rows = composeMiniLeagueRows(
+        league: league(members: {'u1', 'u3', 'zed', 'ann'}),
+        overall: [
+          entry('u2', 50, rank: 1), // not a member — skipped
+          entry('u3', 30, rank: 2, movement: 1),
+          entry('u1', 10, rank: 5),
+        ],
+        managers: {
+          'u1': manager('Alpha'),
+          'u3': manager('Bravo'),
+          'zed': manager('Zed FC'),
+          'ann': manager('Ann United'),
+        },
+        profiles: const {},
+        selfUid: 'u1',
+      );
+      expect(rows.map((r) => r.uid), ['u3', 'u1', 'ann', 'zed']);
+      expect(rows.map((r) => r.displayRank), [1, 2, 3, 4]);
+      expect(rows.map((r) => r.points), [30, 10, 0, 0]);
+      // Movement never shows inside a league.
+      expect(rows.map((r) => r.movement), everyElement(isNull));
+      expect(rows[1].isSelf, isTrue);
+      expect(miniLeagueRankOf('u1', rows), 2);
+      expect(miniLeagueRankOf('ghost', rows), isNull);
+    });
+
+    test('no Overall totals at all → everyone ranked by name with 0 pts', () {
+      final rows = composeMiniLeagueRows(
+        league: league(members: {'b', 'a'}),
+        overall: const [],
+        managers: {'a': manager('Aces'), 'b': manager('Bolts')},
+        profiles: const {},
+        selfUid: '',
+      );
+      expect(rows.map((r) => r.name), ['Aces', 'Bolts']);
+      expect(rows.map((r) => r.points), [0, 0]);
+      expect(rows.map((r) => r.displayRank), [1, 2]);
+    });
+  });
+
+  group('squad viewer weeks (spec §9)', () {
+    test('merge: published overrides history on the same week', () {
+      final merged = mergeManagerWeeks(
+        history: {1: squad('Hist1'), 2: squad('Hist2')},
+        published: {2: squad('Pub2'), 3: squad('Pub3')},
+      );
+      expect(merged.keys, unorderedEquals([1, 2, 3]));
+      expect(merged[2]!.picks.single.playerId, 'Pub2');
+    });
+
+    test('default week: current when available, else latest, else null', () {
+      expect(defaultViewerWeek(weeks: {1, 2, 3}, currentGw: 3), 3);
+      expect(defaultViewerWeek(weeks: {1, 2}, currentGw: 3), 2);
+      expect(defaultViewerWeek(weeks: {1, 2}, currentGw: null), 2);
+      expect(defaultViewerWeek(weeks: {}, currentGw: 3), isNull);
+    });
+  });
+
+  group('chipLabel', () {
+    test('maps engine ids, null for none/unknown', () {
+      expect(chipLabel('tripleCaptain'), 'Triple Captain');
+      expect(chipLabel('benchBoost'), 'Bench Boost');
+      expect(chipLabel('wildcard'), 'Wildcard');
+      expect(chipLabel('freeHit'), 'Free Hit');
+      expect(chipLabel(null), isNull);
+      expect(chipLabel('??'), isNull);
+    });
+  });
+}

@@ -391,6 +391,20 @@
           "PriceChanges": {
             ".read": true
           },
+          "MiniLeagues": {
+            ".read": true,
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$id": {
+              ".write": "auth != null && !data.exists() && newData.child('Owner').val() == auth.uid",
+              ".validate": "newData.child('Name').isString() && newData.child('Name').val().length >= 3 && newData.child('Name').val().length <= 30 && newData.child('Code').isString() && newData.child('Code').val().length == 6 && newData.child('Code').val().matches(/^[A-Z0-9]+$/) && newData.child('Owner').isString() && newData.hasChild('Members')",
+              "Members": {
+                "$uid": {
+                  ".write": "auth != null && auth.uid == $uid",
+                  ".validate": "newData.val() == true"
+                }
+              }
+            }
+          },
           "News": {
             ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
             "Published": {

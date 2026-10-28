@@ -28,6 +28,10 @@ class FantasyService {
   static final Map<String, List<FantasyPlayer>> _playersCache = {};
   static final Map<String, Map<String, FantasyPlayerTotals>> _totalsCache = {};
   static final Map<String, List<FantasyPriceChange>> _priceChangesCache = {};
+  static final Map<String, FantasyLeaderboards> _leaderboardsCache = {};
+  static final Map<String, Map<String, FantasyManager>> _managersCache = {};
+  static final Map<String, List<FantasyMiniLeague>> _miniLeaguesCache = {};
+  static final Map<String, List<FantasyNewsPost>> _newsCache = {};
 
   /// Clears the session caches (sign-out hygiene, tests).
   static void clearSessionCaches() {
@@ -35,6 +39,10 @@ class FantasyService {
     _playersCache.clear();
     _totalsCache.clear();
     _priceChangesCache.clear();
+    _leaderboardsCache.clear();
+    _managersCache.clear();
+    _miniLeaguesCache.clear();
+    _newsCache.clear();
   }
 
   /// Live `Fantasy/<sport>/<season>/Config` → engine FantasyConfig + lock
@@ -166,6 +174,112 @@ class FantasyService {
     }
     return _ref('${_root(sport, season)}/Managers/$uid')
         .set({'TeamName': name.trim(), 'NameFlagged': false});
+  }
+
+  // ── Leaderboards, transparency, mini-leagues, news (P3d) ──────────────
+
+  /// Live `Leaderboards` node (P4 functions-written; shape pinned in
+  /// fantasy_parsers.dart). Empty = absent (no finalized gameweek yet) —
+  /// the tab shows its friendly empty state.
+  static Stream<FantasyLeaderboards> watchLeaderboards(
+      String sport, String season) async* {
+    final key = _root(sport, season);
+    final seed = _leaderboardsCache[key];
+    if (seed != null) yield seed;
+    await for (final event in _ref('$key/Leaderboards').onValue) {
+      final boards = leaderboardsFromNode(event.snapshot.value);
+      _leaderboardsCache[key] = boards;
+      yield boards;
+    }
+  }
+
+  /// Live `Managers` node, whole (public read): {uid: team name + flag} —
+  /// the leaderboard rows' name source (spec §10b).
+  static Stream<Map<String, FantasyManager>> watchManagers(
+      String sport, String season) async* {
+    final key = _root(sport, season);
+    final seed = _managersCache[key];
+    if (seed != null) yield seed;
+    await for (final event in _ref('$key/Managers').onValue) {
+      final managers = managersFromNode(event.snapshot.value);
+      _managersCache[key] = managers;
+      yield managers;
+    }
+  }
+
+  /// Live `MiniLeagues` node, whole (public read by design — codes only gate
+  /// joining a social list). The My Leagues scope filters to membership and
+  /// the join flow matches codes client-side on this same stream.
+  static Stream<List<FantasyMiniLeague>> watchMiniLeagues(
+      String sport, String season) async* {
+    final key = _root(sport, season);
+    final seed = _miniLeaguesCache[key];
+    if (seed != null) yield seed;
+    await for (final event in _ref('$key/MiniLeagues').onValue) {
+      final leagues = miniLeaguesFromNode(event.snapshot.value);
+      _miniLeaguesCache[key] = leagues;
+      yield leagues;
+    }
+  }
+
+  /// Live published news feed (`News/Published`, owner-published in P4/P5),
+  /// newest first.
+  static Stream<List<FantasyNewsPost>> watchNews(
+      String sport, String season) async* {
+    final key = _root(sport, season);
+    final seed = _newsCache[key];
+    if (seed != null) yield seed;
+    await for (final event in _ref('$key/News/Published').onValue) {
+      final posts = newsPostsFromNode(event.snapshot.value);
+      _newsCache[key] = posts;
+      yield posts;
+    }
+  }
+
+  /// One manager's lock-published picks by week (`PublishedPicks/<gw>/<uid>`,
+  /// spec §9: visible to others only AFTER lock — the functions only write
+  /// here at lock, so everything readable is fair game).
+  static Stream<Map<int, FantasySquad>> watchPublishedPicksFor(
+      String sport, String season, String uid) {
+    return _ref('${_root(sport, season)}/PublishedPicks').onValue.map(
+        (event) => squadsByWeekForUid(event.snapshot.value, uid));
+  }
+
+  /// One manager's finalized week-by-week history (`History/<gw>/<uid>`,
+  /// spec §9: browsable forever).
+  static Stream<Map<int, FantasySquad>> watchHistoryFor(
+      String sport, String season, String uid) {
+    return _ref('${_root(sport, season)}/History').onValue.map(
+        (event) => squadsByWeekForUid(event.snapshot.value, uid));
+  }
+
+  /// Creates a mini-league under a fresh push id: the signed-in user as
+  /// Owner AND first member in one write (the shape the rules validate).
+  /// Returns the new league id.
+  static Future<String> createMiniLeague(
+      String sport, String season,
+      {required String name, required String code}) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) throw StateError('Not signed in');
+    final ref = _ref('${_root(sport, season)}/MiniLeagues').push();
+    await ref.set({
+      'Name': name.trim(),
+      'Code': code,
+      'Owner': uid,
+      'CreatedAt': ServerValue.timestamp,
+      'Members': {uid: true},
+    });
+    return ref.key!;
+  }
+
+  /// Joins a mini-league: writes ONLY the member's own
+  /// `Members/<uid>: true` (the rules' member-writes-own path).
+  static Future<void> joinMiniLeague(
+      String sport, String season, String leagueId) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Future.error(StateError('Not signed in'));
+    return _ref('${_root(sport, season)}/MiniLeagues/$leagueId/Members/$uid')
+        .set(true);
   }
 
   /// Live gameweeks derived from the REAL season schedule (one per match
