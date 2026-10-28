@@ -31,13 +31,24 @@ Basketball and Flag Football are later scoring tables, not rebuilds.
 - Manager can reassign any player pre-season or mid-season ("protest" flow); the
   change applies **at the next unlock**. Squads invalidated by a reassignment are
   flagged and their owners pushed to fix before lock.
-- **Price on reassignment (owner Q, 2026-10-28): unchanged at the switch.**
-  The position-relative Monday repricing then adjusts them against their NEW
-  position's peers automatically, and the owner can override instantly. The
-  Manager position editor (P5) shows a **suggested price** for the new
-  position (their stats re-scored and re-percentiled, same math as openers)
-  next to the current one — one tap to apply or keep. No automatic jumps:
-  predictability for the people already holding the player.
+- **Price on reassignment — REVISED by owner 2026-10-28: the price follows
+  the position.** Changing a player's position recalculates his price
+  automatically (his stats re-scored at the new position and re-percentiled
+  among its players — the same math as opening prices); the owner can still
+  override by hand afterwards. Buy/sell is always at current price, so this
+  is consistent for holders.
+- **Positions are locked per gameweek.** At each lock the server snapshots
+  every player's position with the squads; that gameweek is scored with its
+  snapshot forever (score-edit reruns of old weeks never use a later
+  position). A change made while a week is locked takes effect from the
+  next week.
+- **Holders are protected.** When a change applies, every squad holding the
+  player is re-labelled; if its formation becomes illegal the owner gets an
+  alert in the hub + a push ("<Name> moved to DEF — rearrange before
+  <deadline>"), and swapping that player out that week costs no transfer.
+- **New season:** opening prices are recomputed from scratch from each
+  player's registered position, so next-season position changes need no
+  manual step.
 - **Guests:** eligibility flag per player. Guests play and their real stats count,
   but they are **not selectable** in fantasy. A one-tap **Promote** makes them
   permanent → they enter the market next gameweek with a starting price.
