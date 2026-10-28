@@ -187,6 +187,46 @@ export function marketPlayersOf(
   return out;
 }
 
+/** The LockedPositions/<gw> snapshot value: every market player's usable
+ *  position, name -> 'GK'|'DEF'|'ATT' (eligible or not — a guest promoted
+ *  later still scores its locked weeks at the locked position). */
+export function positionsSnapshotOf(
+  players: Record<string, MarketPlayer>,
+): Record<string, FantasyPosition> {
+  const out: Record<string, FantasyPosition> = {};
+  for (const [name, p] of Object.entries(players)) out[name] = p.position;
+  return out;
+}
+
+/** Tolerant LockedPositions/<gw> parse: unusable entries skipped (they
+ *  then fall back to the live position, like a player added after lock). */
+export function lockedPositionsOf(node: unknown): Record<string, FantasyPosition> {
+  const out: Record<string, FantasyPosition> = {};
+  for (const [name, raw] of childEntries(node)) {
+    try {
+      out[name] = parsePosition(String(raw ?? ''));
+    } catch {
+      // skip
+    }
+  }
+  return out;
+}
+
+/** The market as a LOCKED gameweek saw it: live membership + eligibility,
+ *  positions overridden by that week's snapshot (spec §3: a week is scored
+ *  with its locked positions forever). Players missing from the snapshot
+ *  (added after lock) keep their live position. */
+export function withLockedPositions(
+  players: Record<string, MarketPlayer>,
+  locked: Record<string, FantasyPosition>,
+): Record<string, MarketPlayer> {
+  const out: Record<string, MarketPlayer> = {};
+  for (const [name, p] of Object.entries(players)) {
+    out[name] = { ...p, position: locked[name] ?? p.position };
+  }
+  return out;
+}
+
 /** Current price per market player (repricing input). Missing/unusable
  *  prices read 0 — applyDelta's clamp then floors them. */
 export function marketPricesOf(playersNode: unknown): Record<string, number> {

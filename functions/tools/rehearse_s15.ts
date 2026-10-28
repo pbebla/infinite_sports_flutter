@@ -1381,7 +1381,18 @@ async function main(): Promise<void> {
   for (const w of db.pipelineWrites) {
     if (/\/PublishedPicks\/\d+$/.test(w.path) && w.op === 'writeIfAbsent' && w.won) publishedClaims[w.path] = (publishedClaims[w.path] ?? 0) + 1;
   }
+  const positionClaims: Record<string, number> = {};
+  for (const w of db.pipelineWrites) {
+    if (/\/LockedPositions\/\d+$/.test(w.path) && w.op === 'writeIfAbsent' && w.won) positionClaims[w.path] = (positionClaims[w.path] ?? 0) + 1;
+    if (/\/LockedPositions\//.test(w.path) && w.op === 'write') fail('lock-positions-once', `${w.path} overwritten (plain write)`);
+  }
   for (const gw of gws) {
+    const lp = `${F}/LockedPositions/${gw.number}`;
+    if (positionClaims[lp] !== 1) fail('lock-positions-once', `${lp} claimed ${positionClaims[lp] ?? 0} times`);
+    // S15 positions never change during the replay: every snapshot = market.
+    for (const [n, m] of Object.entries(market)) {
+      if (childAt(db.get(lp), n) !== m.position) fail('lock-positions-once', `${lp}/${n} = ${childAt(db.get(lp), n)}, market ${m.position}`);
+    }
     const p = `${F}/PublishedPicks/${gw.number}`;
     if (publishedClaims[p] !== 1) fail('lock-snapshot-once', `${p} claimed ${publishedClaims[p] ?? 0} times`);
     const repWrites = db.pipelineWrites.filter((w) => w.path === `${F}/Repriced/${gw.number}`).length;
@@ -1443,7 +1454,7 @@ async function main(): Promise<void> {
   const checks = {
     invariants: Object.fromEntries([
       'history-total', 'gameweek-board', 'overall-sum', 'overall-movement', 'ranks', 'ownership', 'player-totals',
-      'dream-team', 'prices', 'price-changes', 'no-nan-undefined', 'lock-snapshot-once', 'reprice-once',
+      'dream-team', 'prices', 'price-changes', 'no-nan-undefined', 'lock-snapshot-once', 'lock-positions-once', 'reprice-once',
       'gwstate-sequence', 'finalize-source', 'no-crash', 'history-shape',
     ].map((k) => [k, { pass: !(invariantFailures[k]?.length), failures: invariantFailures[k] ?? [] }])),
     crossChecks: {

@@ -23,6 +23,15 @@
 //   first time the sweep sees the current gameweek locked — never
 //   overwritten, so late sweeps after downtime still snapshot exactly once.
 //
+// - LockedPositions/<gw> = { <name>: 'GK'|'DEF'|'ATT' } — every market
+//   player's position at the lock (spec §3 revision 2026-10-28: positions
+//   are locked per gameweek). Written ONCE alongside the PublishedPicks
+//   claim (set-if-absent; a FIRST finalize that outran every sweep claims
+//   it too, from the positions at that moment). Finalize and the Monday
+//   reprice of <gw> read positions from it, so a score-edit rerun of an old
+//   week never uses a later position; weeks locked before this snapshot
+//   existed fall back to the live Players positions. Public read.
+//
 // - Repriced/<gw> = { At:int, Manual?:true, Voided?:true } — the Monday
 //   job's done-flag. Manual:true records "admin had set
 //   PriceChanges/<gw>/Manual, the job stood down"; Voided:true records "the
@@ -87,7 +96,7 @@ import {
 } from './fantasy_config';
 import { FetchLike } from '../support';
 import {
-  computeGameweekFinalize, FinalizeGame,
+  computeGameweekFinalize, FinalizeGame, MarketPlayer,
 } from './finalize_core';
 import {
   currentGameweek, deriveGameweeks, Gameweek, gameweekStatusAt,
@@ -99,8 +108,9 @@ import {
 import {
   allGamesFinal, childEntries, dateKeysOf, FantasyDb, fantasyRoot,
   fantasySeasonsOf, fullAttendance, gamesOfDate, isPlainMap, isVoidFlag,
-  lockOverrideOf, marketPlayersOf, marketPricesOf, parseAbsentMap,
-  rosterNamesOf, toIntLoose, voidedWeeksOf,
+  lockedPositionsOf, lockOverrideOf, marketPlayersOf, marketPricesOf,
+  parseAbsentMap, positionsSnapshotOf, rosterNamesOf, toIntLoose,
+  voidedWeeksOf, withLockedPositions,
 } from './orchestration_db';
 import { applyDelta, repriceDeltas } from './pricing';
 import {
@@ -402,8 +412,6 @@ export async function finalizeGameweek(
     return { node, attendance };
   });
 
-  const players = marketPlayersOf(await db.read(`${root}/Players`));
-
   // Owner voids (spec §15): this week and every other voided week resum as
   // zero; chips from voided weeks are refunded in the lock accounting.
   const voidedWeeks = voidedWeeksOf(await db.read(`${root}/Voided`));
@@ -416,6 +424,10 @@ export async function finalizeGameweek(
   const historyThisGw = childEntries(historyRaw)
     .find(([w]) => Number(w) === gw.number)?.[1] ?? null;
   const firstRun = historyThisGw == null;
+
+  // The market at this week's LOCKED positions (LockedPositions/<gw>); a
+  // first run that outran every sweep claims the snapshot itself.
+  const players = await marketForGameweek(db, root, gw.number, firstRun, log, ctx);
   let source = 'publishedPicks';
   let squadsByUid = mapChildren(await db.read(`${root}/PublishedPicks/${gw.number}`));
   if (Object.keys(squadsByUid).length === 0) {
@@ -776,6 +788,43 @@ export async function resettleVoidToggle(
   });
 }
 
+// ── Positions locked per gameweek (spec §3 revision 2026-10-28) ────────────
+
+/** Claims LockedPositions/<gw> from the live market positions, exactly once
+ *  (set-if-absent, like PublishedPicks). Returns the snapshot now stored
+ *  (ours or a concurrent winner's), null when the market is empty. */
+async function snapshotLockedPositions(
+  db: FantasyDb, root: string, gw: number,
+  log: FantasyLogger, ctx: Record<string, unknown>,
+): Promise<unknown> {
+  const path = `${root}/LockedPositions/${gw}`;
+  const existing = await db.read(path);
+  if (existing != null) return existing;
+  const snap = positionsSnapshotOf(marketPlayersOf(await db.read(`${root}/Players`)));
+  if (Object.keys(snap).length === 0) return null;
+  if (await db.writeIfAbsent(path, snap)) {
+    log.info('fantasy lock: positions locked',
+      { ...ctx, gw, players: Object.keys(snap).length });
+    return snap;
+  }
+  return await db.read(path);
+}
+
+/** The market as gameweek [gw] is scored: live membership/eligibility with
+ *  positions from LockedPositions/<gw>. [claim] (a first finalize) takes
+ *  the snapshot when the lock sweep never did; otherwise a week without a
+ *  snapshot (locked before this existed) falls back to live positions. */
+async function marketForGameweek(
+  db: FantasyDb, root: string, gw: number, claim: boolean,
+  log: FantasyLogger, ctx: Record<string, unknown>,
+): Promise<Record<string, MarketPlayer>> {
+  const players = marketPlayersOf(await db.read(`${root}/Players`));
+  const locked = claim
+    ? await snapshotLockedPositions(db, root, gw, log, ctx)
+    : await db.read(`${root}/LockedPositions/${gw}`);
+  return withLockedPositions(players, lockedPositionsOf(locked));
+}
+
 // ── Phase B: lifecycle sweep ───────────────────────────────────────────────
 
 /** Snapshot every saved squad into PublishedPicks/<gw>, exactly once (spec
@@ -838,10 +887,12 @@ async function sweepSeason(
   const gws = deriveGameweeks(dates, cfg);
   const current = currentGameweek(gws, nowUtc);
 
-  // 1. Lock snapshot for the current gameweek, before any finalize can need
-  //    it. Existence-guarded rather than transition-edge-triggered, so a
-  //    sweep that was down at the lock instant still publishes exactly once.
+  // 1. Lock snapshots for the current gameweek (positions, then picks),
+  //    before any finalize can need them. Existence-guarded rather than
+  //    transition-edge-triggered, so a sweep that was down at the lock
+  //    instant still snapshots exactly once.
   if (current && gameweekStatusAt(current, nowUtc) === 'locked') {
+    await snapshotLockedPositions(db, root, current.number, log, ctx);
     await snapshotPublishedPicks(db, root, cfg, current.number, log, ctx);
   }
 
@@ -1067,7 +1118,11 @@ export async function runMondayReprice(
       }
 
       const playersNode = await db.read(`${root}/Players`);
-      const players = marketPlayersOf(playersNode);
+      // Peers are grouped at the week's LOCKED positions — the positions
+      // its PlayerWeeks were scored at (a change made after the lock moves
+      // the player's peer group from the next repriced week on).
+      const players = withLockedPositions(marketPlayersOf(playersNode),
+        lockedPositionsOf(await db.read(`${root}/LockedPositions/${gw}`)));
       const prices = marketPricesOf(playersNode);
 
       const weekPointsRaw = await db.read(`${root}/PlayerWeeks/${gw}`);

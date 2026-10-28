@@ -385,6 +385,9 @@
           "PublishedPicks": {
             ".read": true
           },
+          "LockedPositions": {
+            ".read": true
+          },
           "History": {
             ".read": true
           },
