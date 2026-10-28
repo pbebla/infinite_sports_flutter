@@ -361,3 +361,7 @@ export { fantasyLifecycleSweep, fantasyMondayReprice } from './fantasy_lifecycle
 export const fantasyFutsal = makeFantasyFinalizeTrigger('Futsal');
 export const fantasyBasketball = makeFantasyFinalizeTrigger('Basketball');
 export const fantasyFlagFootball = makeFantasyFinalizeTrigger('Flag Football');
+
+// ---- Infinite Fantasy P4 (E): transfer accounting on squad saves ----
+
+export { onFantasySquadWritten } from './fantasy_transfers';

@@ -368,6 +368,12 @@
               ".write": "auth != null && auth.uid == $uid"
             }
           },
+          "TransferState": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$uid": {
+              ".read": "auth != null && auth.uid == $uid"
+            }
+          },
           "Managers": {
             ".read": true,
             ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",

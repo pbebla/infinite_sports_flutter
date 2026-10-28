@@ -1,0 +1,198 @@
+// Phase E pure logic: TransferState parsing, used-transfer counting, chip
+// sets + voiding, lock accounting (cost freeze) and the rollover. Every
+// expected number is hand-computed from the futsal default config
+// (2 free/week, bank cap 7, -4 per extra transfer, chipSet1EndGw 6).
+
+import { describe, expect, it } from 'vitest';
+import { futsalDefault } from './fantasy_config';
+import { FantasySquad } from './squad';
+import {
+  chipSetOf, isUnlimitedChip, lockAccounting, parseTransferState,
+  priorChipsOfUid, rolloverState, shouldVoidChip, transferStateToNode,
+  usedTransfers,
+} from './transfer_state';
+
+const cfg = futsalDefault();
+
+function mkSquad(ids: string[], chip: string | null = null): FantasySquad {
+  return {
+    picks: ids.map((id, i) => ({
+      playerId: id, position: 'ATT', priceTenths: 50, bench: i >= 5,
+    })),
+    captainId: ids[0],
+    viceId: ids[1] ?? ids[0],
+    chip,
+  };
+}
+
+function mkSquadMap(ids: string[], chip?: string): Record<string, unknown> {
+  return {
+    picks: ids.map((id, i) => ({
+      playerId: id, position: 'ATT', priceTenths: 50, bench: i >= 5,
+    })),
+    captainId: ids[0],
+    viceId: ids[1] ?? ids[0],
+    ...(chip ? { chip } : {}),
+  };
+}
+
+describe('parseTransferState', () => {
+  it('absent node = full weekly allowance, nothing used', () => {
+    expect(parseTransferState(null, cfg)).toEqual({
+      free: 2, usedThisGw: 0, chipPlayed: null, savedGw: null, rolledGw: null,
+    });
+  });
+
+  it('round-trips through transferStateToNode (optional fields omitted when null)', () => {
+    const full = {
+      free: 4, usedThisGw: 3, chipPlayed: 'freeHit', savedGw: 5, rolledGw: 4,
+    };
+    expect(parseTransferState(transferStateToNode(full), cfg)).toEqual(full);
+    const bare = {
+      free: 2, usedThisGw: 0, chipPlayed: null, savedGw: null, rolledGw: null,
+    };
+    expect(transferStateToNode(bare)).toEqual({ Free: 2, UsedThisGw: 0 });
+  });
+});
+
+describe('usedTransfers', () => {
+  const prev = mkSquad(['A', 'B', 'C', 'D', 'E', 'F', 'G']);
+
+  it('same players = 0, however shuffled', () => {
+    const shuffled = mkSquad(['G', 'F', 'E', 'D', 'C', 'B', 'A']);
+    expect(usedTransfers(shuffled, prev)).toBe(0);
+  });
+
+  it('counts players not in the previous locked squad', () => {
+    const twoIn = mkSquad(['A', 'B', 'C', 'D', 'E', 'X', 'Y']);
+    expect(usedTransfers(twoIn, prev)).toBe(2);
+    const fullChurn = mkSquad(['P', 'Q', 'R', 'S', 'T', 'U', 'V']);
+    expect(usedTransfers(fullChurn, prev)).toBe(7);
+  });
+});
+
+describe('chip sets + voiding', () => {
+  it('set 1 runs through chipSet1EndGw, set 2 after', () => {
+    expect(chipSetOf(1, cfg)).toBe(1);
+    expect(chipSetOf(6, cfg)).toBe(1);
+    expect(chipSetOf(7, cfg)).toBe(2);
+  });
+
+  it('isUnlimitedChip: wildcard/freeHit only', () => {
+    expect(isUnlimitedChip('wildcard')).toBe(true);
+    expect(isUnlimitedChip('freeHit')).toBe(true);
+    expect(isUnlimitedChip('benchBoost')).toBe(false);
+    expect(isUnlimitedChip(null)).toBe(false);
+  });
+
+  it('priorChipsOfUid reads only this uid, weeks with a chip', () => {
+    const history = {
+      1: { me: { chip: 'wildcard' }, other: { chip: 'freeHit' } },
+      2: { me: { captainId: 'A' } },
+    };
+    expect(priorChipsOfUid(history, 'me')).toEqual({ 1: 'wildcard' });
+  });
+
+  it('same chip earlier in the same set voids; the other set does not', () => {
+    const prior = { 2: 'benchBoost' };
+    expect(shouldVoidChip({ chip: 'benchBoost', gw: 5, priorChips: prior, cfg }))
+      .toBe(true);
+    expect(shouldVoidChip({ chip: 'benchBoost', gw: 7, priorChips: prior, cfg }))
+      .toBe(false); // set 2 re-arms every chip
+    expect(shouldVoidChip({ chip: 'wildcard', gw: 5, priorChips: prior, cfg }))
+      .toBe(false); // a different chip
+    expect(shouldVoidChip({
+      chip: 'benchBoost', gw: 5, priorChips: { 5: 'benchBoost' }, cfg,
+    })).toBe(false); // only EARLIER weeks void (this week's own History rerun)
+  });
+});
+
+describe('lockAccounting', () => {
+  it('prices the week: used 3 vs free 2 at -4/extra = 4 points', () => {
+    const acc = lockAccounting({
+      squadsByUid: { churn: mkSquadMap(['A', 'B', 'C', 'D', 'E', 'F', 'G']) },
+      statesByUid: { churn: { Free: 2, UsedThisGw: 3 } },
+      historyRaw: null,
+      cfg,
+      gw: 2,
+    });
+    expect(acc.costPointsByUid).toEqual({ churn: 4 });
+    expect(acc.chipPlayedByUid).toEqual({ churn: null });
+    expect(acc.voided).toEqual([]);
+  });
+
+  it('wildcard/freeHit weeks are unlimited: Used stays recorded, nothing charged', () => {
+    const acc = lockAccounting({
+      squadsByUid: {
+        wc: mkSquadMap(['A', 'B', 'C', 'D', 'E', 'F', 'G'], 'wildcard'),
+      },
+      statesByUid: { wc: { Free: 2, UsedThisGw: 7 } },
+      historyRaw: null,
+      cfg,
+      gw: 2,
+    });
+    expect(acc.costPointsByUid).toEqual({});
+    expect(acc.chipPlayedByUid).toEqual({ wc: 'wildcard' });
+  });
+
+  it('voids a set-repeated chip: stripped from the snapshot, transfers charged for real', () => {
+    const squad = mkSquadMap(['A', 'B', 'C', 'D', 'E', 'F', 'G'], 'wildcard');
+    const acc = lockAccounting({
+      squadsByUid: { me: squad },
+      statesByUid: { me: { Free: 2, UsedThisGw: 3 } },
+      historyRaw: { 1: { me: { chip: 'wildcard' } } },
+      cfg,
+      gw: 3,
+    });
+    expect(acc.voided).toEqual([{ uid: 'me', chip: 'wildcard' }]);
+    expect(acc.chipPlayedByUid).toEqual({ me: null });
+    // Stripped chip only — every other squad field is the manager's verbatim.
+    expect(acc.cleanSquads['me']).toEqual(
+      mkSquadMap(['A', 'B', 'C', 'D', 'E', 'F', 'G']));
+    // The voided wildcard grants nothing: the 3 transfers cost 1 extra * 4.
+    expect(acc.costPointsByUid).toEqual({ me: 4 });
+  });
+
+  it('malformed squads pass through verbatim with no accounting', () => {
+    const acc = lockAccounting({
+      squadsByUid: { bad: { picks: 'nope' } },
+      statesByUid: { bad: { Free: 2, UsedThisGw: 9 } },
+      historyRaw: null,
+      cfg,
+      gw: 2,
+    });
+    expect(acc.cleanSquads).toEqual({ bad: { picks: 'nope' } });
+    expect(acc.costPointsByUid).toEqual({});
+    expect(acc.chipPlayedByUid).toEqual({});
+  });
+});
+
+describe('rolloverState', () => {
+  const base = {
+    free: 2, usedThisGw: 0, chipPlayed: null as string | null,
+    savedGw: null as number | null, rolledGw: null as number | null,
+  };
+
+  it('banks unused transfers (+2/week, cap 7), resets the counter, stamps RolledGw', () => {
+    expect(rolloverState(base, cfg, 3)).toEqual({
+      free: 4, usedThisGw: 0, chipPlayed: null, savedGw: null, rolledGw: 3,
+    });
+    expect(rolloverState({ ...base, free: 7 }, cfg, 3).free).toBe(7); // cap
+    expect(rolloverState({ ...base, free: 2, usedThisGw: 3 }, cfg, 3).free)
+      .toBe(2); // overspent week: remaining clamps to 0
+  });
+
+  it('a wildcard/freeHit week never consumes the bank, and ChipPlayed clears', () => {
+    const s = { ...base, free: 5, usedThisGw: 9, chipPlayed: 'freeHit' };
+    expect(rolloverState(s, cfg, 4)).toEqual({
+      free: 7, usedThisGw: 0, chipPlayed: null, savedGw: null, rolledGw: 4,
+    });
+  });
+
+  it('a save already made for a LATER gameweek survives a delayed finalize', () => {
+    const s = { ...base, usedThisGw: 2, savedGw: 4 };
+    expect(rolloverState(s, cfg, 3).usedThisGw).toBe(2);
+    expect(rolloverState({ ...base, usedThisGw: 2, savedGw: 3 }, cfg, 3)
+      .usedThisGw).toBe(0);
+  });
+});
