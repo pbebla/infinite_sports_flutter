@@ -14,6 +14,7 @@ import { computeLeaderboardV2, FinalMatch, PredQuestion, QAnswer }
 import { readUserName } from './lib/user_names';
 import { makeLeagueTriggers } from './league_watch';
 import { makeInsiderVerifyTrigger } from './insiders_verify';
+import { makeFantasyFinalizeTrigger } from './fantasy_finalize';
 
 admin.initializeApp();
 
@@ -348,3 +349,15 @@ export { generateTicketJoke } from './support_joke';
 export const leagueFutsal = makeLeagueTriggers('Futsal');
 export const leagueBasketball = makeLeagueTriggers('Basketball');
 export const leagueFlagFootball = makeLeagueTriggers('Flag Football');
+
+// ---- Infinite Fantasy P4 (B–D): gameweek lifecycle + lock snapshots,
+// match-day finalization, Monday repricing ----
+
+export { fantasyLifecycleSweep, fantasyMondayReprice } from './fantasy_lifecycle';
+
+/** Grouped export -> deploys as fantasyFutsal-onGameWritten, ...
+ *  (makeLeagueTriggers convention: sport baked into the path). The handler
+ *  no-ops instantly for seasons without a Fantasy/<sport>/<season>/Config. */
+export const fantasyFutsal = makeFantasyFinalizeTrigger('Futsal');
+export const fantasyBasketball = makeFantasyFinalizeTrigger('Basketball');
+export const fantasyFlagFootball = makeFantasyFinalizeTrigger('Flag Football');
