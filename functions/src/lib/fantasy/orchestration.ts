@@ -177,12 +177,72 @@ async function freezeChipPlayed(
   }
 }
 
+/** The squad a manager effectively HELD coming out of gameweek [week]: the
+ *  locked squad of [week] (PublishedPicks/<week>/<uid>, else
+ *  History/<week>/<uid>) — except after a Free Hit week, whose squad lasts
+ *  ONE week (spec §6): then it is the effective squad of the week before,
+ *  recursively (a set-2 Free Hit right after a set-1 Free Hit still returns
+ *  to the last real squad). A Free Hit with nothing before it (a GW1 Free
+ *  Hit) keeps its own squad — there was nothing to restore. null = no locked
+ *  squad for [week]. Voided chips were stripped from the snapshot at lock,
+ *  so only an HONORED Free Hit ever redirects.
+ *
+ *  The ONE baseline shared by the Free Hit restore (what goes back into
+ *  Squads/<uid>) and the transfer counter (what a save is compared
+ *  against), so the two can never disagree — the S15 rehearsal's Bug 1 was
+ *  exactly that disagreement (the counter compared against the Free Hit
+ *  squad while the restore had already put the old squad back). */
+async function effectiveSquadAfterWeek(
+  db: FantasyDb, root: string, uid: string, week: number,
+): Promise<Record<string, unknown> | null> {
+  if (week <= 0) return null;
+  const locked = (await db.read(`${root}/PublishedPicks/${week}/${uid}`)) ??
+    (await db.read(`${root}/History/${week}/${uid}`));
+  if (!isPlainMap(locked)) return null;
+  if (locked['chip'] === 'freeHit') {
+    return (await effectiveSquadAfterWeek(db, root, uid, week - 1)) ?? locked;
+  }
+  return locked;
+}
+
+/** Chips are ONE-WEEK (S15 rehearsal Bug 2, owner decision 2026-10-28):
+ *  once a gameweek settles, whatever chip the live squad still carries is
+ *  switched off (Squads/<uid>/chip removed), so next week starts chipless.
+ *  A chip may still be played again in set 2 — by a FRESH activation; a
+ *  forgotten chip can no longer sit armed and auto-fire at the first set-2
+ *  lock. Every chip type, honored or voided at lock.
+ *
+ *  One guard for a DELAYED finalize (the next window already open and the
+ *  manager already saved for it, SavedGw > gw): a live chip that differs
+ *  from the one locked this week is a deliberate activation for next week
+ *  and stays. (Documented limit: in that delayed case a chip that was
+ *  VOIDED at this week's lock stays too — it is voided again at the next
+ *  lock inside the same set.) */
+async function switchOffSpentChip(
+  db: FantasyDb, root: string, uid: string, gw: number,
+  savedGw: number | null, log: FantasyLogger, ctx: Record<string, unknown>,
+): Promise<void> {
+  const live = await db.read(`${root}/Squads/${uid}`);
+  if (!isPlainMap(live) || live['chip'] == null) return;
+  const chip = live['chip'];
+  if (savedGw !== null && savedGw > gw) {
+    const locked = (await db.read(`${root}/PublishedPicks/${gw}/${uid}`)) ??
+      (await db.read(`${root}/History/${gw}/${uid}`));
+    const lockedChip = isPlainMap(locked) ? (locked['chip'] ?? null) : null;
+    if (chip !== lockedChip) return; // a fresh activation for next week
+  }
+  await db.write(`${root}/Squads/${uid}/chip`, null);
+  log.info('fantasy chips: spent chip switched off', { ...ctx, gw, uid, chip });
+}
+
 /** Once per gameweek, right after a finalize wrote History/<gw> (RolledGw is
  *  the guard — reruns from score/attendance edits never re-settle): restore
- *  a Free Hit manager's previous locked squad, then roll free transfers for
- *  next week. The restored squad is the engine round-trip of
- *  PublishedPicks/<gw-1> (else History/<gw-1>) with NO chip — a restore
- *  never re-arms a chip. A GW1 Free Hit has nothing to restore (logged). */
+ *  a Free Hit manager's previous squad, switch off any chip still armed on
+ *  the live squad (chips are one-week), then roll free transfers for next
+ *  week. The restored squad is the engine round-trip of the manager's
+ *  effective squad before the Free Hit (effectiveSquadAfterWeek(gw-1)) with
+ *  NO chip — a restore never re-arms a chip. A GW1 Free Hit has nothing to
+ *  restore (logged); its chip is still switched off. */
 async function settleTransfersAfterFinalize(
   db: FantasyDb, root: string, cfg: FantasyConfig, gw: number,
   uids: string[], log: FantasyLogger, ctx: Record<string, unknown>,
@@ -192,9 +252,7 @@ async function settleTransfersAfterFinalize(
       await db.read(`${root}/TransferState/${uid}`), cfg);
     if (state.rolledGw !== null && state.rolledGw >= gw) continue;
     if (state.chipPlayed === 'freeHit') {
-      const prevRaw =
-        (await db.read(`${root}/PublishedPicks/${gw - 1}/${uid}`)) ??
-        (await db.read(`${root}/History/${gw - 1}/${uid}`));
+      const prevRaw = await effectiveSquadAfterWeek(db, root, uid, gw - 1);
       let restored: Record<string, unknown> | null = null;
       if (isPlainMap(prevRaw)) {
         try {
@@ -209,6 +267,7 @@ async function settleTransfersAfterFinalize(
           { ...ctx, gw, uid });
       }
     }
+    await switchOffSpentChip(db, root, uid, gw, state.savedGw, log, ctx);
     await db.write(`${root}/TransferState/${uid}`,
       transferStateToNode(rolloverState(state, cfg, gw)));
   }
@@ -222,9 +281,10 @@ export interface SquadSaveArgs {
 }
 
 /** The Squads/<uid> trigger entry (Phase E): while the current gameweek is
- *  open, recompute the manager's used-transfer count against their previous
- *  locked squad (PublishedPicks/<gw-1>, else History/<gw-1>) and stamp
- *  SavedGw. Counting needs a baseline, so a first-ever squad (GW1, or a
+ *  open, recompute the manager's used-transfer count against their
+ *  EFFECTIVE previous squad (effectiveSquadAfterWeek(gw-1): the squad locked
+ *  last week — or, after a Free Hit week, the squad the restore put back)
+ *  and stamp SavedGw. Counting needs a baseline, so a first-ever squad (GW1, or a
  *  mid-season joiner) records UsedThisGw 0 — the initial build is free —
  *  but still stamps SavedGw so the deadline reminder knows the manager
  *  acted this week. Recomputed (not incremented) on every save: undoing a
@@ -259,8 +319,7 @@ export async function recordSquadSave(
   }
 
   let used = 0;
-  const prevRaw = (await db.read(`${root}/PublishedPicks/${gw - 1}/${uid}`)) ??
-    (await db.read(`${root}/History/${gw - 1}/${uid}`));
+  const prevRaw = await effectiveSquadAfterWeek(db, root, uid, gw - 1);
   if (isPlainMap(prevRaw)) {
     try {
       used = usedTransfers(squad, squadFromMap(prevRaw));
@@ -420,6 +479,19 @@ export async function finalizeGameweek(
     historyTenthsByWeek[week] = m;
   }
 
+  // Ownership is a "right now" figure: a rerun of an OLDER week (a late
+  // score correction) keeps PlayerTotals ownership on the latest finalized
+  // week's squads (S15 rehearsal 2.5c) — History holds them squad-shaped.
+  let ownershipSquadsByUid: Record<string, unknown> | undefined;
+  const laterWeeks = childEntries(historyRaw)
+    .map(([w]) => Number(w))
+    .filter((w) => Number.isInteger(w) && w > gw.number);
+  if (laterWeeks.length > 0) {
+    const latest = Math.max(...laterWeeks);
+    ownershipSquadsByUid = mapChildren(childEntries(historyRaw)
+      .find(([w]) => Number(w) === latest)?.[1] ?? null);
+  }
+
   const dreamRaw = await db.read(`${root}/DreamTeam/${gw.number}`);
   const dreamTeamAuto = dreamRaw == null
     ? null
@@ -436,6 +508,7 @@ export async function finalizeGameweek(
     historyTenthsByWeek,
     dreamTeamAuto,
     voidedWeeks,
+    ownershipSquadsByUid,
     nowMs: args.nowUtc.getTime(),
   });
 

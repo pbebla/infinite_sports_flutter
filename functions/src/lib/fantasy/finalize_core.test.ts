@@ -149,9 +149,14 @@ describe('pickDreamTeam', () => {
     A3: { position: 'ATT', eligible: false }, // guest: never picked
   };
 
+  /** Everyone played unless listed in [absent]. */
+  const weekOf = (points: Record<string, number>, absent: string[] = []) =>
+    Object.fromEntries(Object.entries(points).map(([n, p]) =>
+      [n, { points: p, played: !absent.includes(n) }]));
+
   it('config formation, points desc, eligible only, name asc on ties', () => {
     const team = pickDreamTeam(
-      { G1: 5, G2: 8, D1: 7, D2: 7, D3: 9, A1: 4, A2: 4, A3: 99 },
+      weekOf({ G1: 5, G2: 8, D1: 7, D2: 7, D3: 9, A1: 4, A2: 4, A3: 99 }),
       players, cfg, 42);
     expect(team).toEqual({
       Players: [
@@ -167,9 +172,36 @@ describe('pickDreamTeam', () => {
   });
 
   it('short positions fill fewer slots', () => {
-    const team = pickDreamTeam({ G1: 1 },
+    const team = pickDreamTeam(weekOf({ G1: 1 }),
       { G1: { position: 'GK', eligible: true } }, cfg, 1);
     expect(team.Players).toEqual([{ name: 'G1', position: 'GK', points: 1 }]);
+  });
+
+  it('only players who PLAYED: a no-game 0 never beats a keeper who played', () => {
+    // S15 GW12: Brandon Zaya's team (Babylon) had no game, so his 0 was the
+    // "best" GK score while every keeper who played went negative. He must
+    // not appear; the best keeper who PLAYED does (even below zero).
+    // G1 no game (absent from the week map), G2 played -2. D1 played,
+    // D2 absent (played false, 0), D3 no entry. A1 played, A2 played.
+    const team = pickDreamTeam({
+      G2: { points: -2, played: true },
+      D1: { points: 3, played: true },
+      D2: { points: 0, played: false },
+      A1: { points: 6, played: true },
+      A2: { points: 1, played: true },
+    }, players, cfg, 7);
+    expect(team.Players).toEqual([
+      { name: 'G2', position: 'GK', points: -2 },
+      { name: 'D1', position: 'DEF', points: 3 }, // only 1 DEF played: 1 slot
+      { name: 'A1', position: 'ATT', points: 6 },
+      { name: 'A2', position: 'ATT', points: 1 },
+    ]);
+  });
+
+  it('a position nobody played leaves its slot empty', () => {
+    const team = pickDreamTeam(
+      weekOf({ G1: 0, D1: 5, D2: 4, A1: 2, A2: 1 }, ['G1']), players, cfg, 1);
+    expect(team.Players.map((r) => r.name)).toEqual(['D1', 'D2', 'A1', 'A2']);
   });
 });
 
@@ -439,6 +471,27 @@ describe('computeGameweekFinalize edges', () => {
     expect(out.playerTotals['Bo'].points).toBe(12);
     expect(out.playerTotals['Sam'].points).toBe(9);
     expect(out.dreamTeam).not.toBeNull();
+  });
+
+  it('a rerun of an OLDER week measures ownership over the latest week', () => {
+    // Golden week 1 re-scored after week 2 finalized. Week 2's squads (the
+    // latest): alpha + boost only (a malformed one is skipped, not counted).
+    // Hand count over those two: Bea boost only -> 50 (week 1 said 67), Bo
+    // nobody -> 0 (week 1: 33), Sam boost -> 50 (week 1: 33), Eva both ->
+    // 100. Points are untouched by this.
+    const input = baseInput();
+    const latest = fixtureSquads();
+    delete latest['churn'];
+    input.ownershipSquadsByUid = { ...latest, junk: { picks: 'nope' } };
+    const out = computeGameweekFinalize(input);
+    const plain = computeGameweekFinalize(baseInput());
+    expect(out.playerTotals['Bea']).toEqual({ points: 15, ownershipPct: 50 });
+    expect(out.playerTotals['Bo']).toEqual({ points: 12, ownershipPct: 0 });
+    expect(out.playerTotals['Sam']).toEqual({ points: 9, ownershipPct: 50 });
+    expect(out.playerTotals['Eva']).toEqual({ points: -3, ownershipPct: 100 });
+    // Everything except ownership is identical to a plain run.
+    expect(out.historyByUid).toEqual(plain.historyByUid);
+    expect(out.dreamTeam).toEqual(plain.dreamTeam);
   });
 
   it('zero managers: boards empty, player data still computed', () => {

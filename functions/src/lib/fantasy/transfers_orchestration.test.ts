@@ -206,6 +206,9 @@ describe('finalize: cost application + rollover (once only)', () => {
     const liveAlpha = clone(f.Squads.alpha);
     await runLifecycleSweep(db, new Date(Date.UTC(2026, 5, 21, 23)));
     expect(await db.read(`${fRoot}/History/1`)).not.toBeNull();
+    // The squad stays (nothing to restore) but the spent chip is switched
+    // off — chips are one-week.
+    delete liveAlpha['chip'];
     expect(await db.read(`${fRoot}/Squads/alpha`)).toEqual(liveAlpha);
     expect(await db.read(`${fRoot}/TransferState/alpha`)).toEqual({
       Free: 4, UsedThisGw: 0, RolledGw: 1,

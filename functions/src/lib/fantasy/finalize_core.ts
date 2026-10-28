@@ -32,15 +32,23 @@
 //
 // - PlayerTotals/<name> = { points:int, ownershipPct:int } — points = season
 //   sum of bonus-inclusive week points across finalized weeks; ownershipPct =
-//   round(100 * managers holding the player / managers scored this week).
+//   round(100 * managers holding the player / managers scored) measured over
+//   the LATEST finalized gameweek's squads — ownership is a "right now"
+//   figure, so a score-edit rerun of an OLDER week must not roll it back to
+//   that week's holdings (the caller passes ownershipSquadsByUid then; S15
+//   rehearsal finding 2.5c).
 //
 // - DreamTeam/<gw> = { Players:[{name, position, points}], ComputedAt:int,
 //   Auto:true } — the week's top scorers in the config formation
 //   (startersGk GK + startersDef DEF + startersAtt ATT), eligible market
-//   players only (guests are not fantasy-selectable, so they never appear),
-//   points desc / name asc per position, listed GK then DEF then ATT.
-//   An existing node whose Auto flag was removed or set false is an admin
-//   edit and is NEVER overwritten (dreamTeam comes back null).
+//   players WHO PLAYED that week only (guests are not fantasy-selectable, so
+//   they never appear; a player whose team had no game — or who was absent —
+//   never makes the Team of the Week, even when every keeper who did play
+//   scored below zero: S15 GW12), points desc / name asc per position,
+//   listed GK then DEF then ATT. A position with too few played players
+//   fills fewer slots. An existing node whose Auto flag was removed or set
+//   false is an admin edit and is NEVER overwritten (dreamTeam comes back
+//   null).
 //
 // - PlayerWeeks/<gw>/<name> = int — bonus-inclusive week points for every
 //   market player (functions-internal: feeds PlayerTotals resums and the
@@ -123,6 +131,11 @@ export interface FinalizeInput {
   /** Every owner-voided gameweek (Voided/<w> == true), possibly including
    *  [gw] itself. Absent = none. See VOIDED GAMEWEEKS above. */
   voidedWeeks?: number[];
+  /** uid -> raw squad of the LATEST finalized gameweek, when that is a
+   *  LATER week than [gw] (a rerun of an older week): PlayerTotals
+   *  ownershipPct is measured over these instead of this week's squads.
+   *  Absent = [gw] is the latest — ownership comes from squadsByUid. */
+  ownershipSquadsByUid?: Record<string, unknown>;
   nowMs: number;
 }
 
@@ -213,19 +226,23 @@ export function composeOverallBoard(
 }
 
 /** The week's Dream Team: top bonus-inclusive scorers among ELIGIBLE market
- *  players, in the config formation, points desc then name asc. Short
- *  positions (tiny market) simply fill fewer slots. */
+ *  players who PLAYED that week ([week] played flag — no game or absent =
+ *  never picked, however low the players who did play scored), in the
+ *  config formation, points desc then name asc. Short positions (tiny
+ *  market, or too few players of a position played) simply fill fewer
+ *  slots. */
 export function pickDreamTeam(
-  weekPoints: Record<string, number>,
+  week: Record<string, PlayerWeek>,
   players: Record<string, MarketPlayer>,
   cfg: FantasyConfig,
   nowMs: number,
 ): DreamTeamNode {
   const take = (position: FantasyPosition, count: number) =>
     Object.entries(players)
-      .filter(([, p]) => p.eligible && p.position === position)
+      .filter(([name, p]) => p.eligible && p.position === position &&
+        week[name]?.played === true)
       .map(([name]) => ({
-        name, position, points: weekPoints[name] ?? 0,
+        name, position, points: week[name].points,
       }))
       .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name))
       .slice(0, count);
@@ -359,12 +376,32 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
   const overallBoard = composeOverallBoard(historyTenths);
 
   // ── Stage 6: PlayerTotals (season sum incl. bonus over NON-voided weeks
-  // + this week's ownership) ──
+  // + the LATEST finalized week's ownership) ──
   const weeksAll: Record<number, Record<string, number>> = {
     ...input.playerWeeksByWeek,
     [gw]: playerWeeks,
   };
-  const managers = Object.keys(weekTenthsByUid).length;
+  let ownHolders = holders;
+  let managers = Object.keys(weekTenthsByUid).length;
+  if (input.ownershipSquadsByUid !== undefined) {
+    // An older week re-ran: ownership stays the latest week's holdings
+    // (malformed squads skipped exactly as that week's own finalize did).
+    ownHolders = {};
+    managers = 0;
+    for (const raw of Object.values(input.ownershipSquadsByUid)) {
+      if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      let squad;
+      try {
+        squad = squadFromMap(raw as Record<string, unknown>);
+      } catch {
+        continue;
+      }
+      managers++;
+      for (const pick of squad.picks) {
+        ownHolders[pick.playerId] = (ownHolders[pick.playerId] ?? 0) + 1;
+      }
+    }
+  }
   const playerTotals: Record<string, { points: number; ownershipPct: number }> = {};
   for (const name of Object.keys(input.players)) {
     let points = 0;
@@ -376,7 +413,7 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
       points,
       ownershipPct: managers === 0
         ? 0
-        : Math.round((100 * (holders[name] ?? 0)) / managers),
+        : Math.round((100 * (ownHolders[name] ?? 0)) / managers),
     };
   }
 
@@ -384,7 +421,7 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
   // only OUR earlier node is taken down) ──
   const dreamTeam = voided || input.dreamTeamAuto === false
     ? null
-    : pickDreamTeam(playerWeeks, input.players, cfg, nowMs);
+    : pickDreamTeam(week, input.players, cfg, nowMs);
 
   return {
     playerWeeks,

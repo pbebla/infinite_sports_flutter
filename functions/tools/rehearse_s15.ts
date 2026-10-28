@@ -566,8 +566,9 @@ interface WeekPlan {
   transfers?: number;
   rebuild?: 'freeHit' | 'wildcard';
   /** Present = the manager deliberately toggles the chip this week (intent).
-   *  Absent = the client keeps whatever chip the saved squad carries — the
-   *  current app never clears a played chip on its own. */
+   *  Absent = the client keeps whatever chip the saved squad carries — since
+   *  the one-week-chip fix that is always none after a played week (the
+   *  rollover switches it off server-side). */
   chip?: string | null;
   benchSwap?: [string, string];
   captain?: string;
@@ -608,7 +609,7 @@ const MANAGERS: ManagerDef[] = [
   },
   {
     uid: 'rh-m3-benchboost-bob', name: 'Bench Boost Bob',
-    persona: 'Plays Bench Boost in GW4 and never opens the app again (the chip stays on his saved squad, as the current app leaves it).',
+    persona: 'Plays Bench Boost in GW4 and never opens the app again (pre-fix the chip stayed armed and re-fired at the first set-2 lock, GW7; chips are now one-week).',
     initial: {
       picks: [['Christian Lachinpour', false], ['Raman Nissan', false], ['Wilbert Givargiz', false],
         ['Ramsin Nissan', false], ['Parlevino Tamraz', false], ['Matthew Shamshayoo', true],
@@ -757,6 +758,12 @@ async function main(): Promise<void> {
   const clientSaves: Json[] = [];
   const clientViewMismatches: Json[] = [];
 
+  // Independent per-week recount (pure: the ORIGINAL snapshot only, never
+  // pipeline output) — computed up front so the Dream Team audit can check
+  // "played" during the replay; F1 compares it against PlayerWeeks after.
+  const indep: Record<number, IndepWeek> = {};
+  for (const gw of gws) indep[gw.number] = independentWeek(gw, childAt(originalDate, gw.date), lineups, market, cfg);
+
   // ── state audit, run after every job that touched a scoring node ──
   function auditState(label: string): void {
     const hist = db.get(`${F}/History`);
@@ -817,25 +824,35 @@ async function main(): Promise<void> {
     }
   }
 
+  // Dream Team contract (finalize_core.ts pickDreamTeam): eligible market
+  // players who PLAYED that week only; per position min(formation count,
+  // eligible players of that position who played) slots; optimal among the
+  // players who played (points desc, name asc).
   function auditDreamTeam(label: string, w: number, dt: any, weekPts: any): void {
     if (!isMap(dt)) { fail('dream-team', `${label}: DreamTeam/${w} not a map`); return; }
+    const playedThisWeek = indep[w]?.played ?? {};
     const rows = entriesOf(dt['Players']).map(([, r]) => r);
-    const want: Record<string, number> = { GK: cfg.startersGk, DEF: cfg.startersDef, ATT: cfg.startersAtt };
+    const formation: Record<string, number> = { GK: cfg.startersGk, DEF: cfg.startersDef, ATT: cfg.startersAtt };
     const got: Record<string, number> = { GK: 0, DEF: 0, ATT: 0 };
     for (const r of rows) {
       const m = market[String(r?.name)];
       got[String(r?.position)] = (got[String(r?.position)] ?? 0) + 1;
       if (!m) { fail('dream-team', `${label}: DreamTeam/${w} ${r?.name} not a market player`); continue; }
       if (!m.eligible) fail('dream-team', `${label}: DreamTeam/${w} ${r?.name} not eligible`);
+      if (playedThisWeek[r.name] !== true) fail('dream-team', `${label}: DreamTeam/${w} ${r?.name} did not play`);
       if (m.position !== r?.position) fail('dream-team', `${label}: DreamTeam/${w} ${r?.name} position ${r?.position} != market ${m.position}`);
       if (intLoose(childAt(weekPts, r.name)) !== r?.points) fail('dream-team', `${label}: DreamTeam/${w} ${r?.name} ${r?.points} != PlayerWeeks ${childAt(weekPts, r.name)}`);
     }
     for (const pos of FANTASY_POSITIONS) {
-      if (got[pos] !== want[pos]) fail('dream-team', `${label}: DreamTeam/${w} has ${got[pos]} ${pos}, want ${want[pos]}`);
+      const playedOfPos = Object.entries(market)
+        .filter(([n, m]) => m.eligible && m.position === pos && playedThisWeek[n] === true).length;
+      const want = Math.min(formation[pos], playedOfPos);
+      if (got[pos] !== want) fail('dream-team', `${label}: DreamTeam/${w} has ${got[pos]} ${pos}, want ${want}`);
       const chosen = rows.filter((r) => r?.position === pos);
       const minChosen = Math.min(...chosen.map((r) => Number(r.points)));
       for (const [name, m] of Object.entries(market)) {
         if (!m.eligible || m.position !== pos || chosen.some((r) => r.name === name)) continue;
+        if (playedThisWeek[name] !== true) continue; // never a candidate
         const pts = intLoose(childAt(weekPts, name));
         const beats = pts > minChosen ||
           (pts === minChosen && chosen.some((r) => Number(r.points) === pts && name.localeCompare(r.name) < 0));
@@ -860,13 +877,19 @@ async function main(): Promise<void> {
     db.job = prevJob;
     const mine = db.pipelineWrites.slice(from);
     // onFantasySquadWritten fires for the Admin SDK's own Squads writes
-    // (the Free Hit restore) exactly as for client saves.
+    // exactly as for client saves — the whole-squad Free Hit restore AND
+    // descendant writes (the rollover's chip switch-off, a position
+    // relabel), since an RTDB trigger on Squads/{uid} sees any change
+    // under it. One firing per uid per job (the trigger debounces nothing,
+    // but recordSquadSave is a recompute, so once is equivalent).
+    const firedUids = new Set<string>();
     for (const w of mine) {
-      const m = /^Fantasy\/Futsal\/15\/Squads\/([^/]+)$/.exec(w.path);
-      if (m && w.value !== null) {
-        await runJob(`trigger:onFantasySquadWritten(${m[1]}, server write)`, t,
-          () => recordSquadSave(db, { sport: SPORT, season: SEASON, uid: m[1], log: logger }));
-      }
+      const m = /^Fantasy\/Futsal\/15\/Squads\/([^/]+)(\/|$)/.exec(w.path);
+      if (!m || firedUids.has(m[1])) continue;
+      if (!isMap(db.get(`${F}/Squads/${m[1]}`))) continue; // deletion: the trigger's payload gate
+      firedUids.add(m[1]);
+      await runJob(`trigger:onFantasySquadWritten(${m[1]}, server write)`, t,
+        () => recordSquadSave(db, { sport: SPORT, season: SEASON, uid: m[1], log: logger }));
     }
     if (mine.some((w) => /\/(History|Leaderboards|PlayerTotals|DreamTeam|PlayerWeeks)(\/|$)/.test(w.path))) {
       auditState(`${job} @ ${iso(t)}`);
@@ -1063,11 +1086,15 @@ async function main(): Promise<void> {
     e.free = Math.min(Math.max(remaining + cfg.freeTransfersPerWeek, 0), cfg.maxBankedTransfers);
     if (effective) e.honored[gw] = effective;
     const prevLocked = e.lastLocked;
-    e.lastLocked = row.locked;
-    // Spec §6: a Free Hit squad lasts one week, the previous squad returns.
+    // Spec §6: a Free Hit squad lasts one week, the previous squad returns —
+    // so the squad "last locked" for the next restore is the RETURNED one.
+    e.lastLocked = effective === 'freeHit' && prevLocked ? prevLocked : row.locked;
+    // Chips are one-week (owner decision 2026-10-28): whatever chip the
+    // squad carried is switched off after its week, so the squad the
+    // manager holds next week is chipless.
     e.held = effective === 'freeHit' && prevLocked
       ? { ...cloneSquad(prevLocked), chip: null }
-      : cloneSquad(lockedRaw);
+      : { ...cloneSquad(lockedRaw), chip: null };
     e.week = { saves: 0, lastSaved: null, intent: null };
   }
 
@@ -1172,9 +1199,8 @@ async function main(): Promise<void> {
   auditState('final state');
   const finalState = db.get(F);
 
-  // F1. Player weeks: pipeline vs independent recomputation
-  const indep: Record<number, IndepWeek> = {};
-  for (const gw of gws) indep[gw.number] = independentWeek(gw, childAt(originalDate, gw.date), lineups, market, cfg);
+  // F1. Player weeks: pipeline vs independent recomputation (indep was
+  // computed up front from the original snapshot)
   const pwMismatches: Json[] = [];
   let pwCompared = 0;
   for (const gw of gws) {
@@ -1480,6 +1506,12 @@ async function main(): Promise<void> {
   console.log(`  repricing cross-check: ${repriceMismatches.length} mismatches`);
   console.log(`  manager ledger cross-check: ${managerMismatches.length} mismatches; client-view mismatches ${clientViewMismatches.length}`);
   console.log(`  rerun idempotence: ${idempotence.length} divergent rewrites; late GW1 rerun ${stable(lateRerun).slice(0, 200)}`);
+  console.log(`  late GW1 rerun ownership changes: ${lateRerun.ownershipChanged.length}`);
+  const dreamTeamNonPlayers = dreamTeamOddities.filter((o) => o.played !== true);
+  console.log(`  Dream Team rows for players who did not play: ${dreamTeamNonPlayers.length}` +
+    `${dreamTeamNonPlayers.length ? ' ' + stable(dreamTeamNonPlayers) : ''}`);
+  const managerOverall = managerTable.map((m) => `${m.name} ${m.overall?.points}/${m.expectedOverall}`).join(', ');
+  console.log(`  manager Overall (pipeline/expected): ${managerOverall}`);
   console.log(`  outputs: ${OUT_DIR}`);
 }
 
