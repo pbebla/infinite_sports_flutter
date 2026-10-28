@@ -1,6 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/aroundyou.dart';
 import 'package:infinite_sports_flutter/eventpage.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
 import 'package:infinite_sports_flutter/insiders/insiders_leaderboard_page.dart';
 import 'package:infinite_sports_flutter/misc/event_repo.dart';
 import 'package:infinite_sports_flutter/misc/search_index.dart';
@@ -12,9 +17,15 @@ import 'package:infinite_sports_flutter/tournamentdetail.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 /// Search across the app plus the hub of extra sections (Around You,
-/// Infinite Insiders today; future sections each add one card here).
+/// Infinite Insiders, Infinite Fantasy today; future sections each add one
+/// card here).
 class SearchHubPage extends StatefulWidget {
-  const SearchHubPage({super.key, this.insidersLeaderboardPageBuilder});
+  const SearchHubPage({
+    super.key,
+    this.insidersLeaderboardPageBuilder,
+    this.fantasyGateOverride,
+    this.fantasyHubPageBuilder,
+  });
 
   /// Test seam replacing the real `Navigator.push(... InsidersLeaderboardPage
   /// ...)` the "Infinite Insiders" card makes (Task F6) — the real page
@@ -22,6 +33,14 @@ class SearchHubPage extends StatefulWidget {
   /// wiring, which isn't available in widget tests. Mirrors
   /// insiders_info_page.dart's `dashboardPageBuilder` seam.
   final Widget Function()? insidersLeaderboardPageBuilder;
+
+  /// Test seam replacing the live Fantasy gate (current league's
+  /// `Fantasy/<sport>/<season>/Config` existence): emits (sport, season)
+  /// while fantasy is open, null while it isn't.
+  final Stream<(String, String)?>? fantasyGateOverride;
+
+  /// Test seam replacing the real `Navigator.push(... FantasyHubPage ...)`.
+  final Widget Function(String sport, String season)? fantasyHubPageBuilder;
 
   @override
   State<SearchHubPage> createState() => _SearchHubPageState();
@@ -32,16 +51,59 @@ class _SearchHubPageState extends State<SearchHubPage> {
   Future<SearchIndex>? _indexFuture;
   String _query = '';
 
+  /// (sport, season) while the current league has a Fantasy Config node —
+  /// the card appears/disappears live with it (same stream gate as the
+  /// league page's Fantasy tab).
+  (String, String)? _fantasy;
+  StreamSubscription<Object?>? _fantasySub;
+
   @override
   void initState() {
     super.initState();
     _indexFuture = _buildIndex();
+    _subscribeFantasyGate();
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _fantasySub?.cancel();
     super.dispose();
+  }
+
+  void _subscribeFantasyGate() {
+    final override = widget.fantasyGateOverride;
+    if (override != null) {
+      _fantasySub = override.listen((v) {
+        if (mounted) setState(() => _fantasy = v);
+      });
+      return;
+    }
+    _watchCurrentLeagueFantasy();
+  }
+
+  Future<void> _watchCurrentLeagueFantasy() async {
+    // Current league pointer — the same utility.dart source main.dart and
+    // frontpage.dart resolve the live league from.
+    final sport = await getCurrentSport();
+    final season = await getCurrentSeason(sport);
+    if (!mounted) return;
+    _fantasySub =
+        FantasyService.watchConfig(sport, season).listen((state) {
+      if (mounted) {
+        setState(() => _fantasy = state != null ? (sport, season) : null);
+      }
+    }, onError: (Object _) {
+      // Offline/unreachable: the card simply stays hidden.
+      if (mounted) setState(() => _fantasy = null);
+    });
+  }
+
+  void _openFantasy(String sport, String season) {
+    final builder = widget.fantasyHubPageBuilder ??
+        (String s, String n) => FantasyHubPage(sport: s, season: n);
+    Navigator.push(context,
+        MaterialPageRoute(builder: (context) => builder(sport, season)));
   }
 
   Future<SearchIndex> _buildIndex() async {
@@ -133,6 +195,54 @@ class _SearchHubPageState extends State<SearchHubPage> {
       children: [
         Text('Explore', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
+        // Infinite Fantasy entry (P3a feedback): present exactly while the
+        // current league's Fantasy Config node exists — the same dark
+        // gradient + gold logo language as the league page's entry card.
+        if (_fantasy != null) ...[
+          Card(
+            clipBehavior: Clip.antiAlias,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
+            child: Ink(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    FantasyBanner.gradientTop,
+                    FantasyBanner.gradientBottom,
+                  ],
+                ),
+              ),
+              child: ListTile(
+                key: const ValueKey('search_hub_fantasy_card'),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                leading: Image.asset(
+                  'assets/fantasy/fantasy_logo.png',
+                  width: 44,
+                  height: 36,
+                  fit: BoxFit.contain,
+                ),
+                title: const Text(
+                  'Infinite Fantasy',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w700),
+                ),
+                subtitle: Text(
+                  'Pick your seven — ${_fantasy!.$1} Season ${_fantasy!.$2} '
+                  'is live',
+                  style: const TextStyle(color: Colors.white70),
+                ),
+                trailing:
+                    const Icon(Icons.chevron_right, color: Colors.white70),
+                onTap: () => _openFantasy(_fantasy!.$1, _fantasy!.$2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
         Card(
           clipBehavior: Clip.antiAlias,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
