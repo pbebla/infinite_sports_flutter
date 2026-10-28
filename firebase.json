@@ -2,6 +2,9 @@
   "database": {
     "rules": "database.rules.stage1.json"
   },
+  "storage": {
+    "rules": "storage.rules"
+  },
   "functions": {
     "source": "functions",
     "predeploy": ["npm --prefix functions run build"]

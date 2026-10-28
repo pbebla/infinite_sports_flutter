@@ -74,8 +74,13 @@ class SupportService {
     for (var i = 0; i < screenshots.length; i++) {
       try {
         final ref = FirebaseStorage.instance.ref('support/$n/img_$i.jpg');
+        // The uid tag is what storage.rules checks: the path carries no
+        // owner, so create requires it to match the uploader and get is
+        // limited to that uploader (plus admins).
         await ref.putFile(
-            screenshots[i], SettableMetadata(contentType: 'image/jpeg'));
+            screenshots[i],
+            SettableMetadata(
+                contentType: 'image/jpeg', customMetadata: {'uid': uid}));
         urls.add(await ref.getDownloadURL());
       } catch (_) {
         // Best-effort (spec: "skip failed uploads gracefully") — a broken
