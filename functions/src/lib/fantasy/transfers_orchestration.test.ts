@@ -177,9 +177,11 @@ describe('finalize: cost application + rollover (once only)', () => {
 
     // Unlimited week: nothing charged.
     expect(await db.read(`${fRoot}/TransferCosts/2`)).toBeNull();
-    // The GW1 locked squad came back, chip-free (fixture churn has none).
-    expect(await db.read(`${fRoot}/Squads/churn`))
-      .toEqual(fixtureSquad('churn'));
+    // The GW1 locked squad came back, chip-free (fixture churn has none),
+    // stamped as a SERVER write (never mistaken for the manager saving).
+    expect(await db.read(`${fRoot}/Squads/churn`)).toEqual({
+      ...fixtureSquad('churn'), ServerWriteAt: AFTER_LOCK2.getTime(),
+    });
     // Rollover never consumed the bank on a freeHit week.
     expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
       Free: 4, UsedThisGw: 0, SavedGw: 2, RolledGw: 2,
@@ -204,12 +206,14 @@ describe('finalize: cost application + rollover (once only)', () => {
     delete db.data.Futsal['15'].Date[GW2_DATE];
     f.Squads.alpha.chip = 'freeHit';
     const liveAlpha = clone(f.Squads.alpha);
-    await runLifecycleSweep(db, new Date(Date.UTC(2026, 5, 21, 23)));
+    const now = new Date(Date.UTC(2026, 5, 21, 23));
+    await runLifecycleSweep(db, now);
     expect(await db.read(`${fRoot}/History/1`)).not.toBeNull();
     // The squad stays (nothing to restore) but the spent chip is switched
-    // off — chips are one-week.
+    // off — chips are one-week — by a write stamped as the server's.
     delete liveAlpha['chip'];
-    expect(await db.read(`${fRoot}/Squads/alpha`)).toEqual(liveAlpha);
+    expect(await db.read(`${fRoot}/Squads/alpha`))
+      .toEqual({ ...liveAlpha, ServerWriteAt: now.getTime() });
     expect(await db.read(`${fRoot}/TransferState/alpha`)).toEqual({
       Free: 4, UsedThisGw: 0, RolledGw: 1,
     });

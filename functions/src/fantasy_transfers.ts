@@ -28,6 +28,9 @@ export const onFantasySquadWritten = onValueWritten(
       season: String(event.params['season']),
       uid: String(event.params['uid']),
       log: fantasyLogger,
+      // Who wrote is judged on THIS event's value: a server write
+      // (ServerWriteAt) never stamps SavedGw, a manager save always does.
+      after: event.data.after.val(),
     });
   },
 );

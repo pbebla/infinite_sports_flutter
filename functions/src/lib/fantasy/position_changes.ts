@@ -37,7 +37,10 @@
 // Relabel writes are child writes (Squads/<uid>/picks/<k>/position) so a
 // concurrent client edit of any other field is never clobbered; they fire
 // the Squads/<uid> trigger like any save (recordSquadSave recounts — the
-// player ids did not change, so nothing is charged).
+// player ids did not change, so nothing is charged). They are stamped as
+// SERVER writes first (orchestration_db.ts SERVER_WRITE_KEY), so that
+// re-run never stamps SavedGw: a re-label is not the manager acting and
+// must not silence their deadline reminder.
 
 import {
   configFromMap, FantasyConfig, FantasyPosition, parsePosition,
@@ -46,7 +49,7 @@ import { currentGameweek, deriveGameweeks } from './gameweeks';
 import type { FantasyLogger } from './orchestration';
 import {
   childEntries, dateKeysOf, FantasyDb, fantasyRoot, isPlainMap,
-  lockOverrideOf, toIntLoose,
+  lockOverrideOf, markServerSquadWrite, toIntLoose,
 } from './orchestration_db';
 import {
   FantasyPusher, FantasyUserPush, fantasyPushData, formatDeadline,
@@ -178,6 +181,7 @@ export async function applyPositionChanges(
     // This manager's view of each change: `from` is the label the pick
     // actually carried (falls back to the change's own when already moved).
     const mine: PositionChange[] = [];
+    let marked = false;
     for (const [k, pick] of childEntries(raw['picks'])) {
       if (!isPlainMap(pick)) continue;
       const change = byPlayer.get(String(pick['playerId'] ?? ''));
@@ -189,6 +193,13 @@ export async function applyPositionChanges(
         to: change.to,
       });
       if (pick['position'] !== change.to) {
+        // A server write, not a manager save: the marker lands first so
+        // the Squads trigger never stamps SavedGw (orchestration_db.ts
+        // SERVER_WRITE_KEY) — a re-label must not silence the reminder.
+        if (!marked) {
+          await markServerSquadWrite(db, root, uid, args.nowUtc.getTime());
+          marked = true;
+        }
         await db.write(`${root}/Squads/${uid}/picks/${k}/position`, change.to);
       }
     }

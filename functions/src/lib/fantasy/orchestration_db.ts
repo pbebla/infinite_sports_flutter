@@ -52,6 +52,43 @@ export function childEntries(node: unknown): Array<[string, unknown]> {
   return [];
 }
 
+// ── Server-originated Squads/<uid> writes ──────────────────────────────────
+//
+// The Squads/<uid> trigger (recordSquadSave) fires for the server's OWN
+// writes too — the post-finalize chip switch-off, the Free Hit restore,
+// position re-labels — and must not stamp TransferState.SavedGw for them:
+// SavedGw is the deadline reminder's "the manager acted this week" marker
+// (pushes.ts reminderAudience), and a server write is not the manager
+// acting. DOCUMENTED CHOICE — a marker IN the squad node, not a comparison
+// against a remembered server copy: every server write to Squads/<uid>
+// carries `ServerWriteAt: <epoch ms>` (the whole-node restore includes it;
+// child writes stamp it FIRST, before the change, so every event of that
+// write already carries it). Clients always save with ONE whole-node set()
+// of FantasySquad.toMap (FantasyService.saveMySquad, every app version),
+// which wipes the marker — so "the node carries ServerWriteAt" means
+// exactly "the last whole-squad author was the server". The trigger judges
+// the EVENT's after-value (not a later re-read), so a manager save racing a
+// server write is still counted. The marker is ignored by every squad
+// parser (squadFromMap / FantasySquad.fromMap read named keys only); the
+// lock snapshot copies it verbatim like any other key. Admin SDK writes
+// bypass the rules, and no client ever writes it.
+
+/** Squads/<uid> field stamped by every server-originated squad write. */
+export const SERVER_WRITE_KEY = 'ServerWriteAt';
+
+/** Whether a Squads/<uid> value was written by the server (see above). */
+export function isServerSquadWrite(squadNode: unknown): boolean {
+  return isPlainMap(squadNode) && squadNode[SERVER_WRITE_KEY] != null;
+}
+
+/** Stamps the server marker on Squads/<uid> — call it BEFORE a server
+ *  child write to the same squad (chip clear, re-label). */
+export async function markServerSquadWrite(
+  db: FantasyDb, root: string, uid: string, nowMs: number,
+): Promise<void> {
+  await db.write(`${root}/Squads/${uid}/${SERVER_WRITE_KEY}`, nowMs);
+}
+
 /** Config.lockOverride (fantasy_parsers.dart FantasyLockOverride.parse):
  *  absent/unknown = 'auto' (production). Anything but 'auto' freezes the
  *  whole machine — lifecycle, finalize and repricing all stand down. */

@@ -104,8 +104,9 @@ export function fillReminderTemplate(
 /** The measurable "unchanged squad" audience rule (spec §12): a signed-up
  *  manager — any Managers/<uid> or Squads/<uid> key — is reminded unless
  *  TransferState says they saved a squad THIS gameweek (SavedGw == gw;
- *  recordSquadSave stamps it on every save while the week is open,
- *  transfers or not, so UsedThisGw > 0 always implies it). Passing
+ *  recordSquadSave stamps it on every MANAGER save while the week is open,
+ *  transfers or not — never on the server's own Squads writes like the
+ *  chip switch-off, Free Hit restore or a position re-label). Passing
  *  transferStateRaw null disables the filter — that is the send-now
  *  callable's 'all' audience. Sorted for deterministic sends. */
 export function reminderAudience(args: {

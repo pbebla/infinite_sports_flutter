@@ -107,9 +107,10 @@ import {
 } from './news';
 import {
   allGamesFinal, childEntries, dateKeysOf, FantasyDb, fantasyRoot,
-  fantasySeasonsOf, fullAttendance, gamesOfDate, isPlainMap, isVoidFlag,
-  lockedPositionsOf, lockOverrideOf, marketPlayersOf, marketPricesOf,
-  parseAbsentMap, positionsSnapshotOf, rosterNamesOf, toIntLoose,
+  fantasySeasonsOf, fullAttendance, gamesOfDate, isPlainMap,
+  isServerSquadWrite, isVoidFlag, lockedPositionsOf, lockOverrideOf,
+  marketPlayersOf, marketPricesOf, markServerSquadWrite, parseAbsentMap,
+  positionsSnapshotOf, rosterNamesOf, SERVER_WRITE_KEY, toIntLoose,
   voidedWeeksOf, withLockedPositions,
 } from './orchestration_db';
 import { applyDelta, repriceDeltas } from './pricing';
@@ -236,7 +237,8 @@ async function effectiveSquadAfterWeek(
  *  lock inside the same set.) */
 async function switchOffSpentChip(
   db: FantasyDb, root: string, uid: string, gw: number,
-  savedGw: number | null, log: FantasyLogger, ctx: Record<string, unknown>,
+  savedGw: number | null, nowMs: number,
+  log: FantasyLogger, ctx: Record<string, unknown>,
 ): Promise<void> {
   const live = await db.read(`${root}/Squads/${uid}`);
   if (!isPlainMap(live) || live['chip'] == null) return;
@@ -247,6 +249,9 @@ async function switchOffSpentChip(
     const lockedChip = isPlainMap(locked) ? (locked['chip'] ?? null) : null;
     if (chip !== lockedChip) return; // a fresh activation for next week
   }
+  // A server write, not a manager save (orchestration_db.ts SERVER_WRITE_KEY):
+  // the marker lands first so the Squads trigger never stamps SavedGw.
+  await markServerSquadWrite(db, root, uid, nowMs);
   await db.write(`${root}/Squads/${uid}/chip`, null);
   log.info('fantasy chips: spent chip switched off', { ...ctx, gw, uid, chip });
 }
@@ -261,7 +266,8 @@ async function switchOffSpentChip(
  *  restore (logged); its chip is still switched off. */
 async function settleTransfersAfterFinalize(
   db: FantasyDb, root: string, cfg: FantasyConfig, gw: number,
-  uids: string[], log: FantasyLogger, ctx: Record<string, unknown>,
+  uids: string[], nowMs: number,
+  log: FantasyLogger, ctx: Record<string, unknown>,
 ): Promise<void> {
   for (const uid of uids) {
     const state = parseTransferState(
@@ -276,14 +282,17 @@ async function settleTransfersAfterFinalize(
         } catch { /* unreadable previous squad — warn below */ }
       }
       if (restored !== null) {
-        await db.write(`${root}/Squads/${uid}`, restored);
+        // Server-originated (SERVER_WRITE_KEY): the restore is not the
+        // manager saving, so it must not satisfy the deadline reminder.
+        await db.write(`${root}/Squads/${uid}`,
+          { ...restored, [SERVER_WRITE_KEY]: nowMs });
         log.info('fantasy freeHit: previous squad restored', { ...ctx, gw, uid });
       } else {
         log.warn('fantasy freeHit: no previous locked squad to restore',
           { ...ctx, gw, uid });
       }
     }
-    await switchOffSpentChip(db, root, uid, gw, state.savedGw, log, ctx);
+    await switchOffSpentChip(db, root, uid, gw, state.savedGw, nowMs, log, ctx);
     await db.write(`${root}/TransferState/${uid}`,
       transferStateToNode(rolloverState(state, cfg, gw)));
   }
@@ -296,6 +305,11 @@ export interface SquadSaveArgs {
   log?: FantasyLogger;
   /** Clock for the position-window check (default: real now). */
   nowUtc?: Date;
+  /** The triggering write's after-value (event.data.after.val()) — WHO
+   *  wrote is judged on it (SERVER_WRITE_KEY), so a manager save that races
+   *  a server write is still counted. Absent (tests, the rehearsal's
+   *  replay) = judged on the node as read now. */
+  after?: unknown;
 }
 
 /** The Squads/<uid> trigger entry (Phase E + spec §3 holder protection).
@@ -318,7 +332,12 @@ export interface SquadSaveArgs {
  *     free — but still stamps SavedGw so the deadline reminder knows the
  *     manager acted this week. Recomputed (not incremented) on every save:
  *     undoing a transfer before the deadline un-counts it. Saves while
- *     locked/frozen and squad deletions are never counted. */
+ *     locked/frozen and squad deletions are never counted.
+ *     SERVER-ORIGINATED writes (the node carries SERVER_WRITE_KEY — chip
+ *     switch-off, Free Hit restore, position re-labels, incl. this
+ *     function's own) are recounted the same way but NEVER stamp SavedGw:
+ *     only the manager's own save means "acted this week" for the deadline
+ *     reminder. A SavedGw from an earlier manager save is kept as is. */
 export async function recordSquadSave(
   db: FantasyDb, args: SquadSaveArgs,
 ): Promise<void> {
@@ -336,6 +355,8 @@ export async function recordSquadSave(
   const gwState = await db.read(`${root}/GwState`);
   const raw = await db.read(`${root}/Squads/${uid}`);
   if (!isPlainMap(raw)) return; // deletion: nothing to count
+  const serverWrite =
+    isServerSquadWrite(args.after !== undefined ? args.after : raw);
   let squad: FantasySquad;
   try {
     squad = squadFromMap(raw);
@@ -352,6 +373,9 @@ export async function recordSquadSave(
       if (!isPlainMap(pick)) continue;
       const live = market[String(pick['playerId'] ?? '')]?.position;
       if (live !== undefined && pick['position'] !== live) {
+        // Our own re-label is a server write: mark first (once), so its
+        // trigger re-run never counts as a manager save.
+        if (relabels === 0) await markServerSquadWrite(db, root, uid, nowMs);
         await db.write(`${root}/Squads/${uid}/picks/${k}/position`, live);
         relabels++;
       }
@@ -391,9 +415,11 @@ export async function recordSquadSave(
   }
 
   await db.write(`${root}/TransferState/${uid}`, transferStateToNode({
-    ...state, usedThisGw: used, savedGw: gw,
+    ...state, usedThisGw: used, savedGw: serverWrite ? state.savedGw : gw,
   }));
-  log.info('fantasy transfers: squad save counted', { ...ctx, gw, used });
+  log.info(serverWrite
+    ? 'fantasy transfers: server squad write recounted (not a manager save)'
+    : 'fantasy transfers: squad save counted', { ...ctx, gw, used });
 }
 
 // ── Phase C: finalization ──────────────────────────────────────────────────
@@ -607,7 +633,8 @@ export async function finalizeGameweek(
   // once per gameweek (RolledGw-guarded — score-edit reruns skip it).
   if (Object.keys(out.historyByUid).length > 0) {
     await settleTransfersAfterFinalize(
-      db, root, cfg, gw.number, Object.keys(out.historyByUid), log, ctx);
+      db, root, cfg, gw.number, Object.keys(out.historyByUid),
+      args.nowUtc.getTime(), log, ctx);
   }
 
   // Owner-voided week: claim both once-only guards WITHOUT pushing or

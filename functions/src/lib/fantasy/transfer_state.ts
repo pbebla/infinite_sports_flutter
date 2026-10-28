@@ -13,7 +13,9 @@
 //     ChipPlayed?:string, // frozen at lock from the locked squad's chip
 //                       //   (post-void); cleared again at rollover
 //     SavedGw?:int,     // gameweek of the manager's latest squad save —
-//                       //   the reminder audience's "changed" marker
+//                       //   the reminder audience's "changed" marker;
+//                       //   server writes to Squads (ServerWriteAt —
+//                       //   orchestration_db.ts) never stamp it
 //     RolledGw?:int,    // last gameweek whose post-finalize rollover ran
 //                       //   (once-only guard for rollover + freeHit restore)
 //     FreeSwaps?:[name], // holder protection (spec §3): players whose

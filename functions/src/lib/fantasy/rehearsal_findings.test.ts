@@ -57,16 +57,27 @@ async function afterFreeHitRestore(): Promise<FakeDb> {
 describe('S15 rehearsal finding: transfer count after a Free Hit restore', () => {
   it('setup holds: the GW1 squad was restored and GW3 is open', async () => {
     const db = await afterFreeHitRestore();
-    expect(await db.read(`${F_ROOT}/Squads/churn`)).toEqual(fixtureSquad('churn'));
+    // The restore is a server write: stamped, so it never counts as a save.
+    expect(await db.read(`${F_ROOT}/Squads/churn`))
+      .toEqual({ ...fixtureSquad('churn'), ServerWriteAt: AFTER_LOCK2.getTime() });
     expect(await db.read(`${F_ROOT}/GwState`)).toMatchObject({ current: 3, status: 'open' });
     expect(await db.read(`${F_ROOT}/TransferState/churn`)).toMatchObject({ Free: 4, UsedThisGw: 0 });
   });
 
+  /** The manager's save: the client writes the WHOLE node (one set() of
+   *  FantasySquad.toMap), so the server marker never survives it. */
+  function clientSave(db: FakeDb, edit: (squad: Json) => void): void {
+    const squad = db.data.Fantasy.Futsal['15'].Squads.churn;
+    delete squad['ServerWriteAt'];
+    edit(squad);
+  }
+
   it('an armband-only save after the restore counts 0 transfers', async () => {
     const db = await afterFreeHitRestore();
-    const squad = db.data.Fantasy.Futsal['15'].Squads.churn;
-    squad.captainId = 'Dana';
-    squad.viceId = 'Ben';
+    clientSave(db, (squad) => {
+      squad.captainId = 'Dana';
+      squad.viceId = 'Ben';
+    });
     await recordSquadSave(db, saveArgs);
     // Was 2 (Bo and Ben, the RESTORED players, counted as bought).
     expect((await db.read(`${F_ROOT}/TransferState/churn`) as Json)['UsedThisGw']).toBe(0);
@@ -74,8 +85,9 @@ describe('S15 rehearsal finding: transfer count after a Free Hit restore', () =>
 
   it('one transfer from the restored squad counts 1', async () => {
     const db = await afterFreeHitRestore();
-    const squad = db.data.Fantasy.Futsal['15'].Squads.churn;
-    squad.picks[5].playerId = 'Will'; // Eva -> Will on the bench
+    clientSave(db, (squad) => {
+      squad.picks[5].playerId = 'Will'; // Eva -> Will on the bench
+    });
     await recordSquadSave(db, saveArgs);
     // Was 3 (Bo, Ben restored + Will).
     expect((await db.read(`${F_ROOT}/TransferState/churn`) as Json)['UsedThisGw']).toBe(1);
