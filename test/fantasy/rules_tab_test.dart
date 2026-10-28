@@ -21,6 +21,7 @@ void main() {
   Future<StreamController<FantasyConfigState?>> pumpRules(
     WidgetTester tester, {
     List<Gameweek> gameweeks = const [],
+    Widget Function()? supportPageBuilder,
   }) async {
     // Tall viewport so the lazy ListView builds every rules section.
     tester.view.physicalSize = const Size(800, 6000);
@@ -34,6 +35,7 @@ void main() {
           initialState: _state(defaultMap),
           gameweeks: gameweeks,
           nowUtc: () => DateTime.utc(2026, 7, 3, 12),
+          supportPageBuilder: supportPageBuilder,
         ),
       ),
     ));
@@ -98,6 +100,24 @@ void main() {
     expect(find.text('+10'), findsNothing);
     expect(find.textContaining('\$60.0M budget'), findsOneWidget);
     expect(find.textContaining('\$50.0M budget'), findsNothing);
+
+    await controller.close();
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('feedback card at the bottom opens the support form',
+      (tester) async {
+    final controller = await pumpRules(
+      tester,
+      supportPageBuilder: () =>
+          const Scaffold(body: Center(child: Text('stub support form'))),
+    );
+
+    expect(find.text('Spotted an issue or have feedback? Tell us'),
+        findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('fantasy_rules_feedback')));
+    await tester.pumpAndSettle();
+    expect(find.text('stub support form'), findsOneWidget);
 
     await controller.close();
     await tester.pumpWidget(const SizedBox());

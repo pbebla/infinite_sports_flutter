@@ -11,6 +11,7 @@ import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/transfers.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart';
+import 'package:infinite_sports_flutter/support/support_form_page.dart';
 
 class FantasyRulesTab extends StatelessWidget {
   const FantasyRulesTab({
@@ -19,6 +20,7 @@ class FantasyRulesTab extends StatelessWidget {
     this.initialState,
     this.gameweeks = const [],
     this.nowUtc,
+    this.supportPageBuilder,
   });
 
   /// The live config stream (the hub hands FantasyService.watchConfig over);
@@ -27,6 +29,11 @@ class FantasyRulesTab extends StatelessWidget {
   final FantasyConfigState? initialState;
   final List<Gameweek> gameweeks;
   final DateTime Function()? nowUtc;
+
+  /// Test seam replacing the real SupportFormPage push (whose default wiring
+  /// reaches for FirebaseAuth/package_info) — mirrors
+  /// `myTicketsPageBuilder` in support_form_page.dart.
+  final Widget Function()? supportPageBuilder;
 
   @override
   Widget build(BuildContext context) {
@@ -37,7 +44,10 @@ class FantasyRulesTab extends StatelessWidget {
         final state = snapshot.data;
         if (state == null) return const SizedBox.shrink();
         return _RulesBody(
-            state: state, gameweeks: gameweeks, nowUtc: nowUtc);
+            state: state,
+            gameweeks: gameweeks,
+            nowUtc: nowUtc,
+            supportPageBuilder: supportPageBuilder);
       },
     );
   }
@@ -48,11 +58,13 @@ class _RulesBody extends StatelessWidget {
     required this.state,
     required this.gameweeks,
     required this.nowUtc,
+    required this.supportPageBuilder,
   });
 
   final FantasyConfigState state;
   final List<Gameweek> gameweeks;
   final DateTime Function()? nowUtc;
+  final Widget Function()? supportPageBuilder;
 
   FantasyConfig get cfg => state.config;
 
@@ -249,7 +261,63 @@ class _RulesBody extends StatelessWidget {
             ],
           ),
         ),
+        _FeedbackCard(supportPageBuilder: supportPageBuilder),
       ],
+    );
+  }
+}
+
+/// P3a feedback — the Rules tab's door into the in-app support form (spec
+/// §10b): "Spotted an issue or have feedback? Tell us". Pushes the real
+/// Help & Feedback form tagged with the Fantasy Hub as the origin screen.
+class _FeedbackCard extends StatelessWidget {
+  const _FeedbackCard({required this.supportPageBuilder});
+
+  final Widget Function()? supportPageBuilder;
+
+  void _open(BuildContext context) {
+    final builder = supportPageBuilder ??
+        () => const SupportFormPage(fromScreen: 'Fantasy Hub');
+    Navigator.push(
+        context, MaterialPageRoute(builder: (context) => builder()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 0,
+      color: scheme.surfaceContainerLow,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+      ),
+      child: InkWell(
+        key: const ValueKey('fantasy_rules_feedback'),
+        onTap: () => _open(context),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+          child: Row(
+            children: [
+              Icon(Icons.support_agent, size: 22, color: scheme.primary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Spotted an issue or have feedback? Tell us',
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurface,
+                  ),
+                ),
+              ),
+              Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
