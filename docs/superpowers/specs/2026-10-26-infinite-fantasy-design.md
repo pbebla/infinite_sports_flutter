@@ -31,6 +31,13 @@ Basketball and Flag Football are later scoring tables, not rebuilds.
 - Manager can reassign any player pre-season or mid-season ("protest" flow); the
   change applies **at the next unlock**. Squads invalidated by a reassignment are
   flagged and their owners pushed to fix before lock.
+- **Price on reassignment (owner Q, 2026-10-28): unchanged at the switch.**
+  The position-relative Monday repricing then adjusts them against their NEW
+  position's peers automatically, and the owner can override instantly. The
+  Manager position editor (P5) shows a **suggested price** for the new
+  position (their stats re-scored and re-percentiled, same math as openers)
+  next to the current one — one tap to apply or keep. No automatic jumps:
+  predictability for the people already holding the player.
 - **Guests:** eligibility flag per player. Guests play and their real stats count,
   but they are **not selectable** in fantasy. A one-tap **Promote** makes them
   permanent → they enter the market next gameweek with a starting price.
