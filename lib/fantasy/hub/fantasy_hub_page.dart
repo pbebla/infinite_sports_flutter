@@ -23,7 +23,9 @@ import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_walkthrough.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/my_team_tab.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/news_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/players_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/rules_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
@@ -361,18 +363,20 @@ class _HubBody extends StatelessWidget {
                   lockOverride: configState.lockOverride,
                   gameweeks: gameweeks,
                 ),
-                const _PlaceholderTab(
-                  icon: Icons.emoji_events_outlined,
-                  title: 'Leaderboards',
-                  message: 'Season and weekly standings plus private '
-                      'mini-leagues will live here.',
+                // Overall/gameweek standings, mini-leagues and the manager
+                // squad viewer (P3d, spec §9/§10).
+                FantasyLeaderboardsTab(
+                  sport: sport,
+                  season: season,
+                  configState: configState,
+                  players: players,
+                  gameweeks: gameweeks,
+                  squadStates: squadStates,
+                  initialSquad: squad,
                 ),
-                const _PlaceholderTab(
-                  icon: Icons.newspaper,
-                  title: 'News',
-                  message: 'Gameweek stories, price movers and the Dream '
-                      'Team of the Week are coming soon.',
-                ),
+                // Published league news (P3d; the composer/AI pipeline is
+                // P4/P5).
+                FantasyNewsTab(sport: sport, season: season),
                 // Rendered ENTIRELY from the live config (spec §10a): a
                 // tuned value re-renders this page by itself.
                 FantasyRulesTab(
@@ -389,58 +393,3 @@ class _HubBody extends StatelessWidget {
   }
 }
 
-/// Theme-safe placeholder body for a tab whose slice hasn't shipped yet —
-/// short copy + icon, scrolling clear of the glass navbar.
-class _PlaceholderTab extends StatelessWidget {
-  const _PlaceholderTab({
-    required this.icon,
-    required this.title,
-    required this.message,
-  });
-
-  final IconData icon;
-  final String title;
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(
-          24, 48, 24, 24 + MediaQuery.paddingOf(context).bottom),
-      child: Column(
-        children: [
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, size: 34, color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: scheme.onSurface,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 13.5,
-              height: 1.4,
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
