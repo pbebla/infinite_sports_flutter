@@ -43,6 +43,11 @@
 //   transferCostPointsByUid seam's source on every finalize (re)run, so a
 //   score-edit rerun recharges exactly what was charged the first time.
 //
+// - ReminderSent/<gw> = { At:int } and RecapSent/<gw> = { At:int }
+//   (functions-internal): once-only claims for the Phase F pushes. Claimed
+//   via writeIfAbsent BEFORE sending, and only when a pusher was injected —
+//   a sweep without one (tests) leaves them unclaimed.
+//
 // Finalize manager-source precedence (documented contract): the lock
 // snapshot PublishedPicks/<gw> is the law; a rerun without one re-reads the
 // squads stored in History/<gw> (deterministic reruns); only a FIRST run of
@@ -68,6 +73,11 @@ import {
   marketPlayersOf, marketPricesOf, parseAbsentMap, rosterNamesOf, toIntLoose,
 } from './orchestration_db';
 import { applyDelta, repriceDeltas } from './pricing';
+import {
+  FantasyPusher, fantasyPushData, fillReminderTemplate, formatDeadline,
+  RECAP_TITLE, recapBody, REMINDER_TITLE, reminderAudience,
+  reminderConfigFrom, reminderInstantMs,
+} from './pushes';
 import { FantasySquad, squadFromMap, squadToMap } from './squad';
 import {
   lockAccounting, parseTransferState, rolloverState, transferStateToNode,
@@ -82,6 +92,15 @@ export interface FantasyLogger {
 }
 
 const silent: FantasyLogger = { info: () => undefined, warn: () => undefined };
+
+/** Impure capabilities injected into the jobs. Everything is optional: a
+ *  caller without one (tests, a misconfigured deploy) skips that side
+ *  effect — and its once-only guard stays unclaimed, so a later properly
+ *  equipped run still delivers. */
+export interface FantasyJobDeps {
+  /** FCM (Phase F): deadline reminders + weekly recaps. */
+  pusher?: FantasyPusher;
+}
 
 export interface GwStateNode {
   current: number;
@@ -234,6 +253,7 @@ export interface FinalizeArgs {
   gw: Gameweek;
   nowUtc: Date;
   log?: FantasyLogger;
+  deps?: FantasyJobDeps;
 }
 
 /** Loads one gameweek's inputs, runs the pure pipeline, writes every output
@@ -394,6 +414,34 @@ export async function finalizeGameweek(
       db, root, cfg, gw.number, Object.keys(out.historyByUid), log, ctx);
   }
 
+  // Phase F: weekly recap push, once per gameweek (RecapSent-guarded — the
+  // recap tells the FIRST settle's story; score-edit reruns never re-push).
+  const pusher = args.deps?.pusher;
+  if (pusher && Object.keys(out.historyByUid).length > 0 &&
+    (await db.read(`${root}/RecapSent/${gw.number}`)) == null) {
+    const won = await db.writeIfAbsent(`${root}/RecapSent/${gw.number}`,
+      { At: args.nowUtc.getTime() });
+    if (won) {
+      const topScore = Math.max(
+        ...Object.values(out.gameweekBoard).map((r) => r.points));
+      const data = fantasyPushData(sport, season, gw.number);
+      const messages = Object.keys(out.historyByUid).sort().map((uid) => ({
+        uid,
+        title: RECAP_TITLE,
+        body: recapBody({
+          gw: gw.number,
+          points: out.gameweekBoard[uid]?.points ?? 0,
+          rank: out.overallBoard[uid]?.rank ?? 0,
+          topScore,
+        }),
+        data,
+      }));
+      const sent = await pusher.sendToUsers(messages);
+      log.info('fantasy recap pushed',
+        { ...ctx, managers: messages.length, sent });
+    }
+  }
+
   const managers = Object.keys(out.historyByUid).length;
   log.info('fantasy gameweek finalized', {
     ...ctx, source, managers, games: gameNodes.length,
@@ -422,6 +470,7 @@ export interface MaybeFinalizeArgs {
   dateKey: string;
   nowUtc: Date;
   log?: FantasyLogger;
+  deps?: FantasyJobDeps;
 }
 
 /** The trigger entry: a game under <sport>/<season>/Date/<dateKey> was
@@ -463,7 +512,9 @@ export async function maybeFinalizeGame(
       'skipped (no fabricated history)', { ...ctx, gw: gw.number });
     return;
   }
-  await finalizeGameweek(db, { sport, season, cfg, gw, nowUtc: args.nowUtc, log });
+  await finalizeGameweek(db, {
+    sport, season, cfg, gw, nowUtc: args.nowUtc, log, deps: args.deps,
+  });
 }
 
 // ── Phase B: lifecycle sweep ───────────────────────────────────────────────
@@ -511,7 +562,7 @@ async function snapshotPublishedPicks(
 async function sweepSeason(
   db: FantasyDb,
   ref: { sport: string; season: string; configNode: Record<string, unknown> },
-  nowUtc: Date, log: FantasyLogger,
+  nowUtc: Date, log: FantasyLogger, deps?: FantasyJobDeps,
 ): Promise<void> {
   const { sport, season } = ref;
   const ctx = { sport, season };
@@ -542,7 +593,7 @@ async function sweepSeason(
     const games = gamesOfDate(await db.read(`${sport}/${season}/Date/${gw.date}`));
     if (!allGamesFinal(games)) continue;
     log.info('fantasy sweep: backstop finalize', { ...ctx, gw: gw.number });
-    await finalizeGameweek(db, { sport, season, cfg, gw, nowUtc, log });
+    await finalizeGameweek(db, { sport, season, cfg, gw, nowUtc, log, deps });
   }
 
   // 3. GwState upsert, after the backstop so a finalize lands as 'finalized'
@@ -570,23 +621,116 @@ async function sweepSeason(
     await db.write(`${root}/GwState`, desired);
     log.info('fantasy sweep: GwState updated', { ...ctx, ...desired });
   }
+
+  // 4. Deadline reminder (Phase F): fires once per gameweek when a sweep
+  //    first crosses the reminder instant while the week is still open.
+  //    Audience = signed-up managers with UNCHANGED squads (spec §12; the
+  //    measurable rule is pushes.ts reminderAudience). The ReminderSent
+  //    claim lands BEFORE the send so concurrent sweeps can never
+  //    double-push; a sweep without a pusher claims nothing.
+  const pusher = deps?.pusher;
+  if (pusher && status === 'open') {
+    const rCfg = reminderConfigFrom(ref.configNode['Reminder']);
+    if (rCfg.enabled &&
+      nowUtc.getTime() >= reminderInstantMs(current.lockUtc.getTime(), rCfg) &&
+      (await db.read(`${root}/ReminderSent/${current.number}`)) == null) {
+      const won = await db.writeIfAbsent(
+        `${root}/ReminderSent/${current.number}`, { At: nowUtc.getTime() });
+      if (won) {
+        const audience = reminderAudience({
+          managersRaw: await db.read(`${root}/Managers`),
+          squadsRaw: await db.read(`${root}/Squads`),
+          transferStateRaw: await db.read(`${root}/TransferState`),
+          gw: current.number,
+        });
+        const body = fillReminderTemplate(
+          rCfg.template, formatDeadline(current.date, cfg.lockHour));
+        const data = fantasyPushData(sport, season, current.number);
+        const sent = await pusher.sendToUsers(audience.map((uid) => ({
+          uid, title: REMINDER_TITLE, body, data,
+        })));
+        log.info('fantasy reminder pushed',
+          { ...ctx, gw: current.number, audience: audience.length, sent });
+      }
+    }
+  }
 }
 
 /** The 15-minute scheduled sweep over every fantasy-enabled season. One
  *  season's failure never starves the others. */
 export async function runLifecycleSweep(
   db: FantasyDb, nowUtc: Date, log: FantasyLogger = silent,
+  deps?: FantasyJobDeps,
 ): Promise<void> {
   const seasons = fantasySeasonsOf(await db.read('Fantasy'));
   for (const ref of seasons) {
     try {
-      await sweepSeason(db, ref, nowUtc, log);
+      await sweepSeason(db, ref, nowUtc, log, deps);
     } catch (err) {
       log.warn('fantasy sweep: season failed', {
         sport: ref.sport, season: ref.season, error: String(err),
       });
     }
   }
+}
+
+// ── Phase F: send-now callable core ────────────────────────────────────────
+
+export interface ReminderNowArgs {
+  sport: string;
+  season: string;
+  /** 'unchanged' (default) = the scheduled reminder's audience;
+   *  'all' = every signed-up manager. */
+  audience?: 'all' | 'unchanged';
+  nowUtc: Date;
+  log?: FantasyLogger;
+}
+
+/** The sendFantasyReminderNow callable's core: an admin's manual push to
+ *  the reminder audience. A deliberate action, so it ignores
+ *  Reminder.Enabled, the frozen-machine lockOverride and the ReminderSent
+ *  guard, and it marks nothing — the scheduled reminder still fires on its
+ *  own clock. Throws when the season is not fantasy-enabled or has no
+ *  current gameweek (the callable maps that to failed-precondition). */
+export async function sendReminderNow(
+  db: FantasyDb, pusher: FantasyPusher, args: ReminderNowArgs,
+): Promise<{ gw: number; audience: number; sent: number }> {
+  const { sport, season } = args;
+  const log = args.log ?? silent;
+  const root = fantasyRoot(sport, season);
+
+  const configNode = await db.read(`${root}/Config`);
+  if (!isPlainMap(configNode)) {
+    throw new Error(`No fantasy Config for ${sport}/${season}`);
+  }
+  const cfg = configFromMap(configNode);
+  const dates = dateKeysOf(await db.read(`${sport}/${season}/Date`));
+  const current = currentGameweek(deriveGameweeks(dates, cfg), args.nowUtc);
+  if (!current) {
+    throw new Error(`No current gameweek for ${sport}/${season}`);
+  }
+
+  const uids = reminderAudience({
+    managersRaw: await db.read(`${root}/Managers`),
+    squadsRaw: await db.read(`${root}/Squads`),
+    // null state disables the unchanged filter = everyone (see pushes.ts).
+    transferStateRaw: args.audience === 'all'
+      ? null
+      : await db.read(`${root}/TransferState`),
+    gw: current.number,
+  });
+  const rCfg = reminderConfigFrom(configNode['Reminder']);
+  const body = fillReminderTemplate(
+    rCfg.template, formatDeadline(current.date, cfg.lockHour));
+  const data = fantasyPushData(sport, season, current.number);
+  const sent = await pusher.sendToUsers(uids.map((uid) => ({
+    uid, title: REMINDER_TITLE, body, data,
+  })));
+  log.info('fantasy reminder sent now', {
+    sport, season, gw: current.number,
+    audience: uids.length, sent, mode: args.audience ?? 'unchanged',
+  });
+  return { gw: current.number, audience: uids.length, sent };
 }
 
 // ── Phase D: Monday repricing ──────────────────────────────────────────────

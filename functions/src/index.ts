@@ -365,3 +365,7 @@ export const fantasyFlagFootball = makeFantasyFinalizeTrigger('Flag Football');
 // ---- Infinite Fantasy P4 (E): transfer accounting on squad saves ----
 
 export { onFantasySquadWritten } from './fantasy_transfers';
+
+// ---- Infinite Fantasy P4 (F): admin send-now reminder push ----
+
+export { sendFantasyReminderNow } from './fantasy_push';
