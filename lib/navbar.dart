@@ -21,6 +21,7 @@ import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/settings.dart';
 import 'package:infinite_sports_flutter/signup.dart';
+import 'package:infinite_sports_flutter/support/support_form_page.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:provider/provider.dart';
 
@@ -322,6 +323,16 @@ class _NavBarState extends State<NavBar> {
                 },
               );
             } 
+          ),
+          ListTile(
+            leading: const Icon(Icons.support_agent, color: Colors.white),
+            title: const Text("Help & Feedback", style: TextStyle(fontWeight: FontWeight.bold),),
+            textColor: Colors.white,
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(builder:(context) {
+                return const SupportFormPage(fromScreen: 'Drawer');
+              },));
+            },
           ),
           ListTile(
             leading: const ImageIcon(AssetImage("assets/settings.png"), color: Colors.white,),
