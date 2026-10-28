@@ -14,6 +14,17 @@ void main() {
   test('absent player has no bps', () {
     expect(bpsScore(const PlayerGameStats(goals: 2, present: false), cfg), 0);
   });
+  test('a forfeited game puts 0 into BPS for BOTH sides (spec §8a) — so it '
+      'awards no bonus', () {
+    // Showing-up side at 0 conceded would otherwise carry the CS weight.
+    const won = PlayerGameStats(goals: 1, forfeit: GameForfeit.won);
+    const lost =
+        PlayerGameStats(saves: 4, teamConceded: 5, forfeit: GameForfeit.lost);
+    expect(bpsScore(won, cfg), 0);
+    expect(bpsScore(lost, cfg), 0);
+    expect(awardBonus({'w': bpsScore(won, cfg), 'l': bpsScore(lost, cfg)}),
+        isEmpty);
+  });
   test('top three get 3/2/1', () {
     final b = awardBonus({'a': 50, 'b': 40, 'c': 30, 'd': 20});
     expect(b, {'a': 3, 'b': 2, 'c': 1});

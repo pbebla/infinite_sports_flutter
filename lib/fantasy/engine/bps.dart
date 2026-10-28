@@ -2,9 +2,11 @@ import 'fantasy_config.dart';
 import 'player_game_stats.dart';
 
 /// Raw bonus-points-system score for one player in one game (published
-/// formula, spec §7 — shown verbatim on the Rules page).
+/// formula, spec §7 — shown verbatim on the Rules page). A forfeited game
+/// (either side, spec §8a) scores 0 for everyone, so [awardBonus] — which
+/// only rewards positive BPS — hands out no bonus from it.
 int bpsScore(PlayerGameStats s, FantasyConfig cfg) {
-  if (!s.present) return 0;
+  if (!s.present || s.forfeit != GameForfeit.none) return 0;
   final w = cfg.bps;
   return s.goals * w.goal +
       s.assists * w.assist +

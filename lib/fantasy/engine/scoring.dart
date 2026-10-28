@@ -22,8 +22,15 @@ class WeekScore {
 
 GameScore scorePlayerGame(
     PlayerGameStats s, FantasyPosition pos, FantasyConfig cfg) {
-  if (!s.present) return const GameScore(0, []);
+  // Absent, or on the team that forfeited (spec §8a): nothing at all — no
+  // appearance, no goals-conceded penalty.
+  if (!s.played) return const GameScore(0, []);
   final r = cfg.scoring[pos]!;
+  // The team that showed up to a forfeit: the appearance point ONLY — no
+  // clean sheet, and any stray recorded stats never count.
+  if (s.forfeit == GameForfeit.won) {
+    return GameScore(r.plays, [ScoreLine('Plays', r.plays)]);
+  }
   final lines = <ScoreLine>[
     ScoreLine('Plays', r.plays),
     if (s.goals > 0) ScoreLine('Goals ×${s.goals}', s.goals * r.goal),
@@ -54,7 +61,9 @@ WeekScore scorePlayerWeek(
   final scored = [for (final g in games) scorePlayerGame(g, pos, cfg)];
   return WeekScore(
     scored.fold(0, (a, g) => a + g.total),
-    games.any((g) => g.present),
+    // A forfeiting team's players did not play (spec §8a) — exactly like
+    // absent players for auto-subs and the vice-captain armband.
+    games.any((g) => g.played),
     scored,
   );
 }

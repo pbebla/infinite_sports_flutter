@@ -26,19 +26,34 @@
 /// - teamConceded = the opposing team's final score.
 /// - present comes from the attendance map (spec §8): a missing map or a
 ///   missing player entry defaults to present.
+/// - forfeit comes from the game's `forfeitedBy` marker (see FORFEITS).
 /// - Foul, Substitution and unknown/legacy types (e.g. 'Blue') carry no
 ///   fantasy counter and are skipped — same as the tally engines.
+///
+/// FORFEITS (spec §8a, owner Option B): a game carrying `forfeitedBy: 1|2`
+/// (misc/forfeit.dart parseForfeitedBy — the Manager's Forfeit button) maps
+/// every entry with [GameForfeit.won] (this team showed up) or
+/// [GameForfeit.lost] (this team forfeited), and its activity events are
+/// IGNORED ENTIRELY — stray stats recorded on a forfeited game never count,
+/// and a player known only from such an event is not in the result at all.
+/// The player set is then exactly the [attendance] keys, so CALLERS MUST
+/// PASS THE FULL ROSTER-COMPOSED ATTENDANCE (every rostered player → true,
+/// absentees → false: the finalizer's fullAttendance, the match tab's
+/// composeAttendance) — with no attendance map a forfeit yields no players
+/// and nobody gets the appearance point.
 library;
 
 import 'package:infinite_sports_flutter/misc/activity_entry.dart';
+import 'package:infinite_sports_flutter/misc/forfeit.dart';
 
 import 'player_game_stats.dart';
 
 /// Per-player stats for [teamName]'s side of [gameNode]. The player set is
 /// everyone who has an activity event PLUS everyone keyed in [attendance]
 /// (so a present player with zero events still earns the appearance point,
-/// and the attendance step can list the full roster). Throws [ArgumentError]
-/// when [teamName] is neither team1 nor team2.
+/// and the attendance step can list the full roster) — on a FORFEITED game
+/// only the [attendance] keys (see the library doc). Throws
+/// [ArgumentError] when [teamName] is neither team1 nor team2.
 Map<String, PlayerGameStats> mapGameToStats(
   Map gameNode, {
   required String teamName,
@@ -46,15 +61,31 @@ Map<String, PlayerGameStats> mapGameToStats(
 }) {
   final Object? ownActivity;
   final int conceded;
+  final int side;
   if (teamName == gameNode['team1']?.toString()) {
     ownActivity = gameNode['team1activity'];
     conceded = _score(gameNode['team2score'] ?? gameNode['team2Score']);
+    side = 1;
   } else if (teamName == gameNode['team2']?.toString()) {
     ownActivity = gameNode['team2activity'];
     conceded = _score(gameNode['team1score'] ?? gameNode['team1Score']);
+    side = 2;
   } else {
     throw ArgumentError.value(
         teamName, 'teamName', 'is neither team1 nor team2 of this game node');
+  }
+
+  final forfeitedBy = parseForfeitedBy(gameNode[kForfeitedByKey]);
+  if (forfeitedBy != null) {
+    final forfeit = forfeitedBy == side ? GameForfeit.lost : GameForfeit.won;
+    return {
+      for (final name in attendance?.keys ?? const <String>[])
+        name: PlayerGameStats(
+          teamConceded: conceded,
+          present: attendance![name] ?? true,
+          forfeit: forfeit,
+        ),
+    };
   }
 
   final tallies = <String, _Tally>{};

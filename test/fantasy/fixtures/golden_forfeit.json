@@ -1,0 +1,227 @@
+{
+  "_notes": [
+    "GOLDEN FORFEIT GAMEWEEK — cross-engine contract for spec §8a (owner",
+    "Option B). Every expected number below was computed BY HAND from",
+    "FantasyConfig.futsalDefault() (spec §7) BEFORE either pipeline ran.",
+    "Replayed by test/fantasy/golden_forfeit_test.dart (Dart, the reference)",
+    "and functions/src/lib/fantasy/golden_forfeit_replay.test.ts (TS port).",
+    "Never copy actual values in here — if an engine disagrees, it is wrong.",
+    "",
+    "RULE: forfeitedBy 1|2 on the game node. The team that SHOWED UP: each",
+    "PRESENT player gets ONLY the +1 appearance (no clean sheet, no stat",
+    "points, no bonus); absent players 0. The FORFEITING team: 0, no",
+    "appearance, no goals-conceded penalty, and they did NOT play (played =",
+    "false -> auto-subs cover them, the vice takes the armband). Events",
+    "recorded on a forfeited game are ignored entirely, and a forfeited game",
+    "puts 0 into BPS for EVERYONE, so it awards no 3/2/1 bonus.",
+    "",
+    "GAME 0 — Lions 5-0 Tigers, forfeitedBy 2 (Tigers forfeited). Stray",
+    "events recorded anyway: Lions Goal Leo + Assist Lara + Goal Gus (Gus is",
+    "on no roster), Tigers Save Tom x2 + Yellow Theo — ALL ignored. The",
+    "attendance field is the finalizer's roster-composed map: Lena absent.",
+    "Mapper: Lions (won) Luca/Lara/Leo present, Lena absent; Tigers (lost)",
+    "Tom/Tess/Theo present. Gus is NOT in the output (activity is never read",
+    "on a forfeit; the player set is the attendance keys).",
+    "Base: Luca 1, Lara 1, Leo 1 (stray goal ignored; without the rule he'd",
+    "have 1+4+CS2 = 7), Lena 0 (absent), Tom 0, Tess 0, Theo 0 (no -1",
+    "conceded, no appearance). BPS all 0 (without the rule Luca would carry",
+    "CS 5, Leo 12+5 ...) -> bonus {}.",
+    "",
+    "GAME 1 — Hawks 2-1 Foxes, normal (no marker).",
+    "Hal  GK  saves2 conc1:     1 + floor(2/2)*1                = 2   BPS 2*2 = 4",
+    "Hana DEF goal1 assist1 c1: 1 + 6 + 4                       = 11  BPS 12+9 = 21",
+    "Hugo ATT goal1 c1:         1 + 4                           = 5   BPS 12",
+    "Finn GK  saves3 conc2:     1 + floor(3/2)*1 - floor(2/2)*1 = 1   BPS 3*2 = 6",
+    "Faye DEF assist1 yellow1 c2: 1 + 4 - 1 - floor(2/2)*1      = 3   BPS 9-4 = 5",
+    "Fred ATT goal1 c2:         1 + 4 (ATT never docked)        = 5   BPS 12",
+    "Bonus: Hana 21 -> 3; Hugo 12 = Fred 12 tie -> both 2, the tie consumes",
+    "slots 2 AND 3, so nobody gets 1.",
+    "",
+    "WEEK POINTS (base + bonus), played flag:",
+    "Luca 1 T, Lara 1 T, Leo 1 T, Lena 0 F (absent), Tom 0 F, Tess 0 F, Theo",
+    "0 F (forfeiting team = did not play), Hal 2 T, Hana 14 T, Hugo 7 T,",
+    "Finn 1 T, Faye 3 T, Fred 7 T.",
+    "",
+    "SQUAD split (tripleCaptain; captain Theo on the FORFEITING team, vice",
+    "Leo on the team that showed up). Auto-subs (starters in pick order):",
+    "Tess (forfeit, not played) -> bench DEF Lara (played) promoted FULL;",
+    "Theo (not played) -> bench ATT Lena absent -> uncovered. Armband: Theo",
+    "did not play -> vice Leo inherits it at the chip's x3.",
+    "  Luca 1*10=10 + Tess 0 + Faye 3*10=30 + Theo 0 + Leo 1*3*10=30 +",
+    "  Lara 1*10=10 (promoted, full) + Lena 0 = 80 tenths.",
+    "SQUAD noband (no chip; captain Tom AND vice Tess both on the forfeiting",
+    "team -> NO armband this week). Tom (GK) uncovered (no bench GK by",
+    "design); Tess -> bench DEF Faye promoted FULL; bench ATT Leo stays half.",
+    "  Tom 0 + Tess 0 + Hana 140 + Hugo 70 + Fred 70 + Faye 3*10=30 +",
+    "  Leo 1*1*50~/10=5 = 315 tenths.",
+    "",
+    "DREAM TEAM (checked by the TS finalize replay only — pickDreamTeam is",
+    "server-side): played players only, points desc then name asc. GK: Hal 2",
+    "(Luca 1, Finn 1; Tom did not play). DEF: Hana 14, Faye 3. ATT: Fred 7,",
+    "Hugo 7 (name order). Nobody from the forfeiting team can appear."
+  ],
+  "config": "futsalDefault",
+  "players": [
+    { "id": "Luca", "team": "Lions",  "position": "GK",  "priceTenths": 50 },
+    { "id": "Lara", "team": "Lions",  "position": "DEF", "priceTenths": 45 },
+    { "id": "Leo",  "team": "Lions",  "position": "ATT", "priceTenths": 60 },
+    { "id": "Lena", "team": "Lions",  "position": "ATT", "priceTenths": 40 },
+    { "id": "Tom",  "team": "Tigers", "position": "GK",  "priceTenths": 55 },
+    { "id": "Tess", "team": "Tigers", "position": "DEF", "priceTenths": 50 },
+    { "id": "Theo", "team": "Tigers", "position": "ATT", "priceTenths": 70 },
+    { "id": "Hal",  "team": "Hawks",  "position": "GK",  "priceTenths": 60 },
+    { "id": "Hana", "team": "Hawks",  "position": "DEF", "priceTenths": 75 },
+    { "id": "Hugo", "team": "Hawks",  "position": "ATT", "priceTenths": 80 },
+    { "id": "Finn", "team": "Foxes",  "position": "GK",  "priceTenths": 50 },
+    { "id": "Faye", "team": "Foxes",  "position": "DEF", "priceTenths": 55 },
+    { "id": "Fred", "team": "Foxes",  "position": "ATT", "priceTenths": 65 }
+  ],
+  "games": [
+    {
+      "node": {
+        "team1": "Lions",
+        "team2": "Tigers",
+        "team1score": 5,
+        "team2score": 0,
+        "status": 2,
+        "forfeitedBy": 2,
+        "team1attendance": { "Lena": false },
+        "team1activity": {
+          "12'": [ { "Goal": "Leo", "_t": 4444 }, { "Assist": "Lara" } ],
+          "20'": [ { "Goal": "Gus" } ]
+        },
+        "team2activity": [
+          null,
+          [ { "Save": "Tom" } ],
+          [ { "Save": "Tom" }, { "Yellow": "Theo" } ]
+        ]
+      },
+      "attendance": {
+        "Lions": { "Luca": true, "Lara": true, "Leo": true, "Lena": false },
+        "Tigers": { "Tom": true, "Tess": true, "Theo": true }
+      }
+    },
+    {
+      "node": {
+        "team1": "Hawks",
+        "team2": "Foxes",
+        "team1score": 2,
+        "team2score": 1,
+        "status": 2,
+        "team1activity": {
+          "10'": [ { "Goal": "Hugo" }, { "Assist": "Hana" } ],
+          "25'": [ { "Goal": "Hana" } ],
+          "30'": [ { "Save": "Hal" } ],
+          "33'": [ { "Save": "Hal" } ]
+        },
+        "team2activity": {
+          "20'": [ { "Goal": "Fred" }, { "Assist": "Faye" } ],
+          "28'": [ { "Save": "Finn" } ],
+          "35'": [ { "Save": "Finn" } ],
+          "38'": [ { "Save": "Finn" } ],
+          "40'": [ { "Yellow": "Faye" } ]
+        }
+      },
+      "attendance": { "Hawks": null, "Foxes": null }
+    }
+  ],
+  "squads": [
+    {
+      "name": "split",
+      "squad": {
+        "picks": [
+          { "playerId": "Luca", "position": "GK",  "priceTenths": 50, "bench": false },
+          { "playerId": "Tess", "position": "DEF", "priceTenths": 50, "bench": false },
+          { "playerId": "Faye", "position": "DEF", "priceTenths": 55, "bench": false },
+          { "playerId": "Theo", "position": "ATT", "priceTenths": 70, "bench": false },
+          { "playerId": "Leo",  "position": "ATT", "priceTenths": 60, "bench": false },
+          { "playerId": "Lara", "position": "DEF", "priceTenths": 45, "bench": true },
+          { "playerId": "Lena", "position": "ATT", "priceTenths": 40, "bench": true }
+        ],
+        "captainId": "Theo",
+        "viceId": "Leo",
+        "chip": "tripleCaptain"
+      }
+    },
+    {
+      "name": "noband",
+      "squad": {
+        "picks": [
+          { "playerId": "Tom",  "position": "GK",  "priceTenths": 55, "bench": false },
+          { "playerId": "Tess", "position": "DEF", "priceTenths": 50, "bench": false },
+          { "playerId": "Hana", "position": "DEF", "priceTenths": 75, "bench": false },
+          { "playerId": "Hugo", "position": "ATT", "priceTenths": 80, "bench": false },
+          { "playerId": "Fred", "position": "ATT", "priceTenths": 65, "bench": false },
+          { "playerId": "Faye", "position": "DEF", "priceTenths": 55, "bench": true },
+          { "playerId": "Leo",  "position": "ATT", "priceTenths": 60, "bench": true }
+        ],
+        "captainId": "Tom",
+        "viceId": "Tess"
+      }
+    }
+  ],
+  "expected": {
+    "forfeitByGame": [
+      { "Luca": "won", "Lara": "won", "Leo": "won", "Lena": "won",
+        "Tom": "lost", "Tess": "lost", "Theo": "lost" },
+      { "Hal": "none", "Hana": "none", "Hugo": "none",
+        "Finn": "none", "Faye": "none", "Fred": "none" }
+    ],
+    "basePointsByGame": [
+      { "Luca": 1, "Lara": 1, "Leo": 1, "Lena": 0, "Tom": 0, "Tess": 0, "Theo": 0 },
+      { "Hal": 2, "Hana": 11, "Hugo": 5, "Finn": 1, "Faye": 3, "Fred": 5 }
+    ],
+    "bpsByGame": [
+      { "Luca": 0, "Lara": 0, "Leo": 0, "Lena": 0, "Tom": 0, "Tess": 0, "Theo": 0 },
+      { "Hal": 4, "Hana": 21, "Hugo": 12, "Finn": 6, "Faye": 5, "Fred": 12 }
+    ],
+    "bonusByGame": [
+      {},
+      { "Hana": 3, "Hugo": 2, "Fred": 2 }
+    ],
+    "playerWeeks": {
+      "Luca": { "points": 1,  "played": true },
+      "Lara": { "points": 1,  "played": true },
+      "Leo":  { "points": 1,  "played": true },
+      "Lena": { "points": 0,  "played": false },
+      "Tom":  { "points": 0,  "played": false },
+      "Tess": { "points": 0,  "played": false },
+      "Theo": { "points": 0,  "played": false },
+      "Hal":  { "points": 2,  "played": true },
+      "Hana": { "points": 14, "played": true },
+      "Hugo": { "points": 7,  "played": true },
+      "Finn": { "points": 1,  "played": true },
+      "Faye": { "points": 3,  "played": true },
+      "Fred": { "points": 7,  "played": true }
+    },
+    "squads": {
+      "split": {
+        "totalTenths": 80,
+        "armband": "Leo",
+        "armbandMultiplier": 3,
+        "autoSubbedIn": [ "Lara" ],
+        "countedTenths": {
+          "Luca": 10, "Tess": 0, "Faye": 30, "Theo": 0, "Leo": 30,
+          "Lara": 10, "Lena": 0
+        }
+      },
+      "noband": {
+        "totalTenths": 315,
+        "armband": null,
+        "armbandMultiplier": 1,
+        "autoSubbedIn": [ "Faye" ],
+        "countedTenths": {
+          "Tom": 0, "Tess": 0, "Hana": 140, "Hugo": 70, "Fred": 70,
+          "Faye": 30, "Leo": 5
+        }
+      }
+    },
+    "dreamTeam": [
+      { "name": "Hal",  "position": "GK",  "points": 2 },
+      { "name": "Hana", "position": "DEF", "points": 14 },
+      { "name": "Faye", "position": "DEF", "points": 3 },
+      { "name": "Fred", "position": "ATT", "points": 7 },
+      { "name": "Hugo", "position": "ATT", "points": 7 }
+    ]
+  }
+}

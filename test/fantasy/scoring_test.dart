@@ -83,4 +83,59 @@ void main() {
     expect(wk.total, 0);
     expect(wk.played, isFalse);
   });
+
+  group('forfeits (spec §8a, Option B)', () {
+    PlayerGameStats f(GameForfeit forfeit,
+            {bool present = true, int goals = 0, int conceded = 0}) =>
+        PlayerGameStats(
+            goals: goals,
+            teamConceded: conceded,
+            present: present,
+            forfeit: forfeit);
+
+    test('team that showed up: ONLY the Plays line, every position — no '
+        'clean sheet even at 0 conceded, stray stats ignored', () {
+      for (final pos in FantasyPosition.values) {
+        final r = scorePlayerGame(f(GameForfeit.won, goals: 2), pos, cfg);
+        expect(r.total, 1, reason: pos.db);
+        expect([for (final l in r.breakdown) l.label], ['Plays'],
+            reason: pos.db);
+      }
+    });
+
+    test('team that showed up: an absent player still gets 0', () {
+      final r = scorePlayerGame(
+          f(GameForfeit.won, present: false), FantasyPosition.def, cfg);
+      expect(r.total, 0);
+      expect(r.breakdown, isEmpty);
+    });
+
+    test('forfeiting team: 0, no appearance, no goals-conceded penalty', () {
+      for (final pos in FantasyPosition.values) {
+        final r =
+            scorePlayerGame(f(GameForfeit.lost, conceded: 5), pos, cfg);
+        expect(r.total, 0, reason: pos.db);
+        expect(r.breakdown, isEmpty, reason: pos.db);
+      }
+    });
+
+    test('played: showing-up present = played; forfeiting team = NOT played',
+        () {
+      expect(f(GameForfeit.won).played, isTrue);
+      expect(f(GameForfeit.won, present: false).played, isFalse);
+      expect(f(GameForfeit.lost).played, isFalse);
+      expect(f(GameForfeit.none).played, isTrue);
+
+      final forfeitOnly =
+          scorePlayerWeek([f(GameForfeit.lost)], FantasyPosition.gk, cfg);
+      expect(forfeitOnly.total, 0);
+      expect(forfeitOnly.played, isFalse);
+
+      // A second, normal game the same week still counts as playing.
+      final twoGames = scorePlayerWeek(
+          [f(GameForfeit.lost), s(conceded: 1)], FantasyPosition.att, cfg);
+      expect(twoGames.total, 1);
+      expect(twoGames.played, isTrue);
+    });
+  });
 }
