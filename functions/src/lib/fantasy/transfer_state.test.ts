@@ -53,6 +53,22 @@ describe('parseTransferState', () => {
     };
     expect(transferStateToNode(bare)).toEqual({ Free: 2, UsedThisGw: 0 });
   });
+
+  it('holder-protection free swaps round-trip; half-written or empty ones read as none', () => {
+    const s = {
+      free: 2, usedThisGw: 1, chipPlayed: null, savedGw: 3, rolledGw: 2,
+      freeSwaps: { gw: 3, players: ['Bea', 'Ezra'] },
+    };
+    const node = transferStateToNode(s);
+    expect(node).toMatchObject({ FreeSwaps: ['Bea', 'Ezra'], FreeSwapsGw: 3 });
+    expect(parseTransferState(node, cfg)).toEqual(s);
+    expect(parseTransferState({ FreeSwaps: ['Bea'] }, cfg).freeSwaps).toBeUndefined();
+    expect(parseTransferState({ FreeSwaps: [], FreeSwapsGw: 3 }, cfg).freeSwaps)
+      .toBeUndefined();
+    // Rollover keeps swaps only when granted for a LATER gameweek.
+    expect(rolloverState(s, cfg, 3).freeSwaps).toBeUndefined();
+    expect(rolloverState(s, cfg, 2).freeSwaps).toEqual(s.freeSwaps);
+  });
 });
 
 describe('usedTransfers', () => {

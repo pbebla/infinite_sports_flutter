@@ -118,10 +118,15 @@ import {
   RECAP_TITLE, recapBody, REMINDER_TITLE, reminderAudience,
   reminderConfigFrom, reminderInstantMs,
 } from './pushes';
-import { FantasySquad, squadFromMap, squadToMap } from './squad';
+import {
+  applyPendingPositionChanges, positionWindowOf,
+} from './position_changes';
+import {
+  FantasySquad, squadFromMap, squadToMap, validateSquad,
+} from './squad';
 import {
   lockAccounting, parseTransferState, rolloverState, transferStateToNode,
-  usedTransfers,
+  usedAfterFreeSwaps,
 } from './transfer_state';
 
 /** Injected logging seam (firebase-functions/logger in production, a spy or
@@ -288,18 +293,31 @@ export interface SquadSaveArgs {
   season: string;
   uid: string;
   log?: FantasyLogger;
+  /** Clock for the position-window check (default: real now). */
+  nowUtc?: Date;
 }
 
-/** The Squads/<uid> trigger entry (Phase E): while the current gameweek is
- *  open, recompute the manager's used-transfer count against their
- *  EFFECTIVE previous squad (effectiveSquadAfterWeek(gw-1): the squad locked
- *  last week — or, after a Free Hit week, the squad the restore put back)
- *  and stamp SavedGw. Counting needs a baseline, so a first-ever squad (GW1, or a
- *  mid-season joiner) records UsedThisGw 0 — the initial build is free —
- *  but still stamps SavedGw so the deadline reminder knows the manager
- *  acted this week. Recomputed (not incremented) on every save: undoing a
- *  transfer before the deadline un-counts it. Saves while locked/frozen and
- *  squad deletions change nothing. */
+/** The Squads/<uid> trigger entry (Phase E + spec §3 holder protection).
+ *
+ *  1. Holder protection, on every save of a fantasy-enabled 'auto' season:
+ *     - while position changes apply live (positionWindowOf 'open'), any
+ *       pick whose label differs from the player's LIVE market position is
+ *       re-labelled (child write) — so a save from a stale draft (an old
+ *       app, or a draft dirty since before the change) can never quietly
+ *       revert a position change or dodge its alert;
+ *     - a standing SquadAlerts/<uid> is cleared once the (re-labelled)
+ *       squad's formation is legal.
+ *  2. Transfer counting, while the current gameweek is open: recompute the
+ *     used-transfer count against the manager's EFFECTIVE previous squad
+ *     (effectiveSquadAfterWeek(gw-1): the squad locked last week — or,
+ *     after a Free Hit week, the squad the restore put back), minus any
+ *     alerted player sold this week (FreeSwaps — free by spec §3), and
+ *     stamp SavedGw. Counting needs a baseline, so a first-ever squad (GW1,
+ *     or a mid-season joiner) records UsedThisGw 0 — the initial build is
+ *     free — but still stamps SavedGw so the deadline reminder knows the
+ *     manager acted this week. Recomputed (not incremented) on every save:
+ *     undoing a transfer before the deadline un-counts it. Saves while
+ *     locked/frozen and squad deletions are never counted. */
 export async function recordSquadSave(
   db: FantasyDb, args: SquadSaveArgs,
 ): Promise<void> {
@@ -307,6 +325,7 @@ export async function recordSquadSave(
   const log = args.log ?? silent;
   const root = fantasyRoot(sport, season);
   const ctx = { sport, season, uid };
+  const nowMs = (args.nowUtc ?? new Date()).getTime();
 
   const configNode = await db.read(`${root}/Config`);
   if (!isPlainMap(configNode)) return; // not fantasy-enabled: stay silent
@@ -314,10 +333,6 @@ export async function recordSquadSave(
   const cfg = configFromMap(configNode);
 
   const gwState = await db.read(`${root}/GwState`);
-  if (!isPlainMap(gwState) || String(gwState['status'] ?? '') !== 'open') return;
-  const gw = toIntLoose(gwState['current']);
-  if (gw <= 0) return;
-
   const raw = await db.read(`${root}/Squads/${uid}`);
   if (!isPlainMap(raw)) return; // deletion: nothing to count
   let squad: FantasySquad;
@@ -328,19 +343,52 @@ export async function recordSquadSave(
     return;
   }
 
+  // ── 1. Holder protection ──
+  if (positionWindowOf(gwState, nowMs) === 'open') {
+    const market = marketPlayersOf(await db.read(`${root}/Players`));
+    let relabels = 0;
+    for (const [k, pick] of childEntries(raw['picks'])) {
+      if (!isPlainMap(pick)) continue;
+      const live = market[String(pick['playerId'] ?? '')]?.position;
+      if (live !== undefined && pick['position'] !== live) {
+        await db.write(`${root}/Squads/${uid}/picks/${k}/position`, live);
+        relabels++;
+      }
+    }
+    if (relabels > 0) {
+      squad = {
+        ...squad,
+        picks: squad.picks.map((p) =>
+          ({ ...p, position: market[p.playerId]?.position ?? p.position })),
+      };
+      log.info('fantasy positions: stale labels on a save re-labelled',
+        { ...ctx, relabels });
+    }
+  }
+  if ((await db.read(`${root}/SquadAlerts/${uid}`)) != null &&
+    !validateSquad(squad, cfg).includes('formation')) {
+    await db.write(`${root}/SquadAlerts/${uid}`, null);
+    log.info('fantasy positions: formation legal — squad alert cleared', ctx);
+  }
+
+  // ── 2. Transfer counting (open gameweek only) ──
+  if (!isPlainMap(gwState) || String(gwState['status'] ?? '') !== 'open') return;
+  const gw = toIntLoose(gwState['current']);
+  if (gw <= 0) return;
+
+  const state = parseTransferState(
+    await db.read(`${root}/TransferState/${uid}`), cfg);
   let used = 0;
   const prevRaw = await effectiveSquadAfterWeek(db, root, uid, gw - 1);
   if (isPlainMap(prevRaw)) {
     try {
-      used = usedTransfers(squad, squadFromMap(prevRaw));
+      used = usedAfterFreeSwaps(squad, squadFromMap(prevRaw), state, gw);
     } catch {
       log.warn('fantasy transfers: unreadable previous squad — counted 0',
         { ...ctx, gw });
     }
   }
 
-  const state = parseTransferState(
-    await db.read(`${root}/TransferState/${uid}`), cfg);
   await db.write(`${root}/TransferState/${uid}`, transferStateToNode({
     ...state, usedThisGw: used, savedGw: gw,
   }));
@@ -954,6 +1002,22 @@ async function sweepSeason(
   if (!gwStateEquals(existing, desired)) {
     await db.write(`${root}/GwState`, desired);
     log.info('fantasy sweep: GwState updated', { ...ctx, ...desired });
+  }
+
+  // 3b. Position changes deferred while the window was locked (spec §3
+  //     holder protection) apply the moment it reopens: relabel holders,
+  //     alert + push the ones left with an illegal formation (free swap
+  //     this gameweek). position_changes.ts owns the nodes.
+  if (status === 'open') {
+    const applied = await applyPendingPositionChanges(db, {
+      sport, season, cfg,
+      target: { gw: current.number, date: current.date },
+      nowUtc, log, pusher: deps?.pusher,
+    });
+    if (applied > 0) {
+      log.info('fantasy sweep: deferred position changes applied',
+        { ...ctx, gw: current.number, applied });
+    }
   }
 
   // 4. Deadline reminder (Phase F): fires once per gameweek when a sweep

@@ -889,7 +889,7 @@ async function main(): Promise<void> {
       if (!isMap(db.get(`${F}/Squads/${m[1]}`))) continue; // deletion: the trigger's payload gate
       firedUids.add(m[1]);
       await runJob(`trigger:onFantasySquadWritten(${m[1]}, server write)`, t,
-        () => recordSquadSave(db, { sport: SPORT, season: SEASON, uid: m[1], log: logger }));
+        () => recordSquadSave(db, { sport: SPORT, season: SEASON, uid: m[1], log: logger, nowUtc: new Date(t) }));
     }
     if (mine.some((w) => /\/(History|Leaderboards|PlayerTotals|DreamTeam|PlayerWeeks)(\/|$)/.test(w.path))) {
       auditState(`${job} @ ${iso(t)}`);
@@ -982,7 +982,7 @@ async function main(): Promise<void> {
     e.week.saves++;
     e.week.lastSaved = cloneSquad(squad);
     await runJob(`trigger:onFantasySquadWritten(${m.uid})`, t,
-      () => recordSquadSave(db, { sport: SPORT, season: SEASON, uid: m.uid, log: logger }));
+      () => recordSquadSave(db, { sport: SPORT, season: SEASON, uid: m.uid, log: logger, nowUtc: new Date(t) }));
   }
 
   async function clientWeek(m: ManagerDef, gw: number, t: number): Promise<void> {

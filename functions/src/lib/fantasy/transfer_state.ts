@@ -14,8 +14,14 @@
 //                       //   (post-void); cleared again at rollover
 //     SavedGw?:int,     // gameweek of the manager's latest squad save —
 //                       //   the reminder audience's "changed" marker
-//     RolledGw?:int }   // last gameweek whose post-finalize rollover ran
+//     RolledGw?:int,    // last gameweek whose post-finalize rollover ran
 //                       //   (once-only guard for rollover + freeHit restore)
+//     FreeSwaps?:[name], // holder protection (spec §3): players whose
+//     FreeSwapsGw?:int }  //   position change broke this squad's formation
+//                       //   — selling one of them in gameweek FreeSwapsGw
+//                       //   costs no transfer (recordSquadSave discounts
+//                       //   it); dropped at that week's rollover. Both
+//                       //   present or both absent.
 //
 // SavedGw and RolledGw extend the spec'd {Free, UsedThisGw, ChipPlayed}
 // shape: SavedGw is the measurable "squad save this gw" rule the deadline
@@ -34,6 +40,8 @@ export interface TransferState {
   chipPlayed: string | null;
   savedGw: number | null;
   rolledGw: number | null;
+  /** Holder-protection free swaps (FreeSwaps + FreeSwapsGw); absent = none. */
+  freeSwaps?: { gw: number; players: string[] };
 }
 
 /** Tolerant node parse. An absent node is a manager who never transferred:
@@ -45,6 +53,10 @@ export function parseTransferState(
   const chip = m['ChipPlayed'];
   const savedGw = toIntLoose(m['SavedGw']);
   const rolledGw = toIntLoose(m['RolledGw']);
+  const swapsGw = toIntLoose(m['FreeSwapsGw']);
+  const swaps = childEntries(m['FreeSwaps'])
+    .map(([, v]) => v)
+    .filter((v): v is string => typeof v === 'string' && v.length > 0);
   return {
     free: typeof m['Free'] === 'number'
       ? Math.trunc(m['Free']) : cfg.freeTransfersPerWeek,
@@ -52,6 +64,8 @@ export function parseTransferState(
     chipPlayed: typeof chip === 'string' && chip.length > 0 ? chip : null,
     savedGw: savedGw > 0 ? savedGw : null,
     rolledGw: rolledGw > 0 ? rolledGw : null,
+    ...(swapsGw > 0 && swaps.length > 0
+      ? { freeSwaps: { gw: swapsGw, players: swaps } } : {}),
   };
 }
 
@@ -62,7 +76,29 @@ export function transferStateToNode(s: TransferState): Record<string, unknown> {
   if (s.chipPlayed !== null) out['ChipPlayed'] = s.chipPlayed;
   if (s.savedGw !== null) out['SavedGw'] = s.savedGw;
   if (s.rolledGw !== null) out['RolledGw'] = s.rolledGw;
+  if (s.freeSwaps && s.freeSwaps.players.length > 0) {
+    out['FreeSwaps'] = [...s.freeSwaps.players];
+    out['FreeSwapsGw'] = s.freeSwaps.gw;
+  }
   return out;
+}
+
+/** Used transfers after holder protection: each FREE-SWAP player (spec §3 —
+ *  his position change broke the squad's formation) who was in the
+ *  baseline and is no longer in the saved squad pays for one incoming
+ *  player, so swapping him out costs nothing. Only for the swaps' own
+ *  gameweek. */
+export function usedAfterFreeSwaps(
+  newSquad: FantasySquad, prevSquad: FantasySquad,
+  state: TransferState, gw: number,
+): number {
+  const used = usedTransfers(newSquad, prevSquad);
+  if (!state.freeSwaps || state.freeSwaps.gw !== gw) return used;
+  const before = new Set(prevSquad.picks.map((p) => p.playerId));
+  const now = new Set(newSquad.picks.map((p) => p.playerId));
+  const sold = state.freeSwaps.players
+    .filter((p) => before.has(p) && !now.has(p)).length;
+  return Math.max(0, used - sold);
 }
 
 /** Wildcard / Free Hit weeks are unlimited (the engine's `unlimited` flag). */
@@ -207,7 +243,8 @@ export function lockAccounting(args: {
  *  the engine (a wildcard/freeHit week doesn't consume the bank), counter
  *  reset, ChipPlayed cleared, RolledGw stamped. UsedThisGw survives only
  *  when the manager already saved for a LATER gameweek (a delayed finalize
- *  must not erase next week's running count). */
+ *  must not erase next week's running count); free swaps likewise survive
+ *  only when granted for a LATER gameweek. */
 export function rolloverState(
   state: TransferState, cfg: FantasyConfig, gw: number,
 ): TransferState {
@@ -223,5 +260,7 @@ export function rolloverState(
     chipPlayed: null,
     savedGw: state.savedGw,
     rolledGw: gw,
+    ...(state.freeSwaps && state.freeSwaps.gw > gw
+      ? { freeSwaps: state.freeSwaps } : {}),
   };
 }

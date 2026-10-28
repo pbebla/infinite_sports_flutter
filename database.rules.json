@@ -374,6 +374,15 @@
               ".read": "auth != null && auth.uid == $uid"
             }
           },
+          "SquadAlerts": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$uid": {
+              ".read": "auth != null && auth.uid == $uid"
+            }
+          },
+          "PendingPositionChanges": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()"
+          },
           "Managers": {
             ".read": true,
             ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",

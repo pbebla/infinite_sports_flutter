@@ -373,3 +373,7 @@ export { sendFantasyReminderNow } from './fantasy_push';
 // ---- Infinite Fantasy (spec §15): owner void-a-week re-settle ----
 
 export { onFantasyVoidWritten } from './fantasy_void';
+
+// ---- Infinite Fantasy (spec §3): holder protection on position changes ----
+
+export { onFantasyPositionWritten } from './fantasy_positions';
