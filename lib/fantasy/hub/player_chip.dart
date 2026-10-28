@@ -11,15 +11,13 @@
 
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
-import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 
-/// The fantasy accent for this theme: gold on dark, primary red on light.
-Color fantasyAccent(BuildContext context) =>
-    Theme.of(context).brightness == Brightness.dark
-        ? TournamentColors.gold
-        : Theme.of(context).colorScheme.primary;
+/// The fantasy accent for this theme: gold on dark, primary red on light —
+/// single-sourced on the shared brand surface (FantasyBanner).
+Color fantasyAccent(BuildContext context) => FantasyBanner.accent(context);
 
 class FantasyPlayerChip extends StatelessWidget {
   const FantasyPlayerChip({

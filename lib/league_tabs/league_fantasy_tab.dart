@@ -6,7 +6,6 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
-import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 
 class LeagueFantasyTab extends StatelessWidget {
   const LeagueFantasyTab({
@@ -34,6 +33,7 @@ class LeagueFantasyTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return ListView(
       padding: EdgeInsets.fromLTRB(
           12, 12, 12, 24 + MediaQuery.paddingOf(context).bottom),
@@ -46,8 +46,10 @@ class LeagueFantasyTab extends StatelessWidget {
             child: FilledButton(
               onPressed: onEnter ?? () => _openHub(context),
               style: FilledButton.styleFrom(
-                backgroundColor: TournamentColors.gold,
-                foregroundColor: Colors.black,
+                // Theme-following accent (Task 1): gold on the dark card,
+                // primary red on the light one.
+                backgroundColor: FantasyBanner.accent(context),
+                foregroundColor: isDark ? Colors.black : scheme.onPrimary,
                 padding: const EdgeInsets.symmetric(vertical: 13),
                 textStyle: const TextStyle(
                     fontSize: 15, fontWeight: FontWeight.w700),

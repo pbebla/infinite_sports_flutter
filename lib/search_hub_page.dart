@@ -195,9 +195,11 @@ class _SearchHubPageState extends State<SearchHubPage> {
       children: [
         Text('Explore', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
-        // Infinite Fantasy entry (P3a feedback): present exactly while the
-        // current league's Fantasy Config node exists — the same dark
-        // gradient + gold logo language as the league page's entry card.
+        // Infinite Fantasy entry (P3a feedback; rethemed P3b Task 1):
+        // present exactly while the current league's Fantasy Config node
+        // exists — the shared FantasyBanner surface (dark gradient + gold in
+        // dark mode, light card + primary accents in light; the logo gets
+        // its dark backdrop pill from FantasyBanner.logo).
         if (_fantasy != null) ...[
           Card(
             clipBehavior: Clip.antiAlias,
@@ -205,38 +207,32 @@ class _SearchHubPageState extends State<SearchHubPage> {
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16)),
             child: Ink(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    FantasyBanner.gradientTop,
-                    FantasyBanner.gradientBottom,
-                  ],
-                ),
-              ),
+              decoration: FantasyBanner.cardDecoration(context, radius: 16),
               child: ListTile(
                 key: const ValueKey('search_hub_fantasy_card'),
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                leading: Image.asset(
-                  'assets/fantasy/fantasy_logo.png',
+                leading: FantasyBanner.logo(
+                  context,
                   width: 44,
                   height: 36,
-                  fit: BoxFit.contain,
+                  backdropPadding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                 ),
-                title: const Text(
+                title: Text(
                   'Infinite Fantasy',
                   style: TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.w700),
+                      color: FantasyBanner.foreground(context),
+                      fontWeight: FontWeight.w700),
                 ),
                 subtitle: Text(
                   'Pick your seven — ${_fantasy!.$1} Season ${_fantasy!.$2} '
                   'is live',
-                  style: const TextStyle(color: Colors.white70),
+                  style:
+                      TextStyle(color: FantasyBanner.foregroundMuted(context)),
                 ),
-                trailing:
-                    const Icon(Icons.chevron_right, color: Colors.white70),
+                trailing: Icon(Icons.chevron_right,
+                    color: FantasyBanner.foregroundMuted(context)),
                 onTap: () => _openFantasy(_fantasy!.$1, _fantasy!.$2),
               ),
             ),
