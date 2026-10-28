@@ -4,8 +4,8 @@
 // Rules tab renders live from the streamed config (Task 3).
 //
 // House rules honored here: streams only; SINGLE fade reveal once
-// config+players first arrive (no piecemeal pops — a skeleton holds the
-// layout until both streams have emitted); light+dark via colorScheme with
+// config+players+manager first arrive (no piecemeal pops — a skeleton holds
+// the layout until all three streams have emitted); light+dark via colorScheme with
 // the fantasy banner staying a dark gradient in both themes; scrollables
 // clear the floating glass navbar (base + MediaQuery.paddingOf(context)
 // .bottom).
@@ -22,7 +22,9 @@ import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_walkthrough.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/my_team_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/rules_tab.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/team_name_dialog.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 class FantasyHubPage extends StatefulWidget {
@@ -45,6 +47,12 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   List<Gameweek> _gameweeks = const [];
   int? _gameweeksLockHour; // lockHour the gameweek stream was derived with
 
+  /// The signed-in user's Managers entry (spec §10b): null until named.
+  /// [_managerLoaded] joins the single-reveal gate so the banner never pops
+  /// a team name in after the hub has already faded in.
+  FantasyManager? _manager;
+  bool _managerLoaded = false;
+
   /// First-open walkthrough (spec §10a): null while the prefs flag loads,
   /// false = show the intro, true = straight to the hub.
   bool? _walkthroughSeen;
@@ -58,11 +66,17 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   final StreamController<FantasyConfigState?> _configForRules =
       StreamController<FantasyConfigState?>.broadcast();
 
+  /// Same re-listen-safe pattern for the My Team tab's manager stream.
+  final StreamController<FantasyManager?> _managerForTabs =
+      StreamController<FantasyManager?>.broadcast();
+
   StreamSubscription<FantasyConfigState?>? _configSub;
   StreamSubscription<List<FantasyPlayer>>? _playersSub;
   StreamSubscription<List<Gameweek>>? _gameweeksSub;
+  StreamSubscription<FantasyManager?>? _managerSub;
 
-  bool get _ready => _configState != null && _players != null;
+  bool get _ready =>
+      _configState != null && _players != null && _managerLoaded;
 
   @override
   void initState() {
@@ -80,6 +94,19 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _playersSub =
         FantasyService.watchPlayers(widget.sport, widget.season).listen((p) {
       if (mounted) setState(() => _players = p);
+    });
+    _managerSub = FantasyService.watchMyManager(widget.sport, widget.season)
+        .listen((m) {
+      if (!mounted) return;
+      setState(() {
+        _manager = m;
+        _managerLoaded = true;
+      });
+      _managerForTabs.add(m);
+    }, onError: (Object _) {
+      // A permissions/auth hiccup must never hold the whole hub on the
+      // skeleton — the tab just shows the name prompt until a re-emit.
+      if (mounted) setState(() => _managerLoaded = true);
     });
   }
 
@@ -102,7 +129,9 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _configSub?.cancel();
     _playersSub?.cancel();
     _gameweeksSub?.cancel();
+    _managerSub?.cancel();
     _configForRules.close();
+    _managerForTabs.close();
     super.dispose();
   }
 
@@ -131,14 +160,18 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         configState: _configState!,
         configStates: _configForRules.stream,
         gameweeks: _gameweeks,
+        manager: _manager,
+        managerStates: _managerForTabs.stream,
+        saveTeamName: (name) =>
+            FantasyService.saveTeamName(widget.sport, widget.season, name),
       );
     } else {
       body = const _HubSkeleton(key: ValueKey('skeleton'));
     }
     return Scaffold(
       appBar: AppBar(title: const Text('Infinite Fantasy')),
-      // Single fade reveal: skeleton until config+players BOTH arrived,
-      // then the whole hub fades in at once.
+      // Single fade reveal: skeleton until config+players+manager have ALL
+      // arrived, then the whole hub fades in at once.
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 300),
         child: body,
@@ -179,6 +212,9 @@ class _HubBody extends StatelessWidget {
     required this.configState,
     required this.configStates,
     required this.gameweeks,
+    required this.manager,
+    required this.managerStates,
+    required this.saveTeamName,
   });
 
   final String sport;
@@ -186,6 +222,9 @@ class _HubBody extends StatelessWidget {
   final FantasyConfigState configState;
   final Stream<FantasyConfigState?> configStates;
   final List<Gameweek> gameweeks;
+  final FantasyManager? manager;
+  final Stream<FantasyManager?> managerStates;
+  final Future<void> Function(String name) saveTeamName;
 
   @override
   Widget build(BuildContext context) {
@@ -197,6 +236,14 @@ class _HubBody extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
             child: FantasyBanner(
               subtitle: '$sport · Season $season',
+              teamName: manager?.teamName,
+              onEditTeamName: manager == null
+                  ? null
+                  : () => showTeamNameDialog(
+                        context,
+                        initialName: manager!.teamName,
+                        onSave: saveTeamName,
+                      ),
               bottom: FantasyDeadlineChip(
                 gameweeks: gameweeks,
                 lockOverride: configState.lockOverride,
@@ -217,11 +264,12 @@ class _HubBody extends StatelessWidget {
           Expanded(
             child: TabBarView(
               children: [
-                const _PlaceholderTab(
-                  icon: Icons.sports_soccer,
-                  title: 'My Team',
-                  message: 'The squad builder lands here next — pick your '
-                      'seven, set the armband, beat the deadline.',
+                // Name prompt / moderation gate / squad placeholder — all
+                // stream-driven (spec §10b).
+                FantasyMyTeamTab(
+                  managerStates: managerStates,
+                  initialManager: manager,
+                  onSaveName: saveTeamName,
                 ),
                 const _PlaceholderTab(
                   icon: Icons.storefront,

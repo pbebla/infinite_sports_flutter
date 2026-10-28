@@ -40,6 +40,28 @@ FantasyConfigState? configStateFromNode(Object? node) {
   );
 }
 
+/// One `Fantasy/<sport>/<season>/Managers/<uid>` entry (spec §10b): the
+/// manager's fantasy team name plus the owner's moderation flag. A true
+/// [nameFlagged] freezes that user's fantasy until they rename (the rules
+/// enforce the rename server-side).
+class FantasyManager {
+  const FantasyManager({required this.teamName, required this.nameFlagged});
+  final String teamName;
+  final bool nameFlagged;
+}
+
+/// null when the node is absent/malformed — meaningful: no entry yet means
+/// "prompt this manager to name their team".
+FantasyManager? managerFromNode(Object? node) {
+  if (node is! Map) return null;
+  final name = node['TeamName']?.toString().trim() ?? '';
+  if (name.isEmpty) return null;
+  return FantasyManager(
+    teamName: name,
+    nameFlagged: node['NameFlagged'] == true,
+  );
+}
+
 /// Market players from the Players node, unusable entries skipped, sorted by
 /// name for a stable render order (tabs re-sort as they need).
 List<FantasyPlayer> playersFromNode(Object? node) {

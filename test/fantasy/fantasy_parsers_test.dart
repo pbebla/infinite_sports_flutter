@@ -31,6 +31,29 @@ void main() {
     });
   });
 
+  group('managerFromNode', () {
+    test('absent/malformed/empty-name node → null (prompt to name)', () {
+      expect(managerFromNode(null), isNull);
+      expect(managerFromNode('nope'), isNull);
+      expect(managerFromNode({'NameFlagged': true}), isNull);
+      expect(managerFromNode({'TeamName': '   '}), isNull);
+    });
+    test('parses TeamName + NameFlagged, flag defaults false', () {
+      final m = managerFromNode({'TeamName': 'Golden Boots'})!;
+      expect(m.teamName, 'Golden Boots');
+      expect(m.nameFlagged, isFalse);
+
+      final flagged = managerFromNode(
+          {'TeamName': 'Bad Name', 'NameFlagged': true})!;
+      expect(flagged.nameFlagged, isTrue);
+      // Non-bool junk never counts as flagged.
+      expect(
+          managerFromNode({'TeamName': 'X Y Z', 'NameFlagged': 'yes'})!
+              .nameFlagged,
+          isFalse);
+    });
+  });
+
   group('playersFromNode', () {
     test('parses entries, skips unusable ones, sorts by name', () {
       final players = playersFromNode({

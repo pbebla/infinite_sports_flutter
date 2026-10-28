@@ -8,6 +8,7 @@
 // snapshot loads behind it (same stale-while-refresh idea as
 // LeagueService.watchRosters).
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
@@ -80,6 +81,38 @@ class FantasyService {
   static Future<void> saveMySquad(
           String sport, String season, String uid, FantasySquad squad) =>
       _ref('${_root(sport, season)}/Squads/$uid').set(squad.toMap());
+
+  /// Live `Managers/<uid>` entry (spec §10b): team name + moderation flag.
+  /// null until the manager names their team.
+  static Stream<FantasyManager?> watchManager(
+      String sport, String season, String uid) {
+    return _ref('${_root(sport, season)}/Managers/$uid')
+        .onValue
+        .map((event) => managerFromNode(event.snapshot.value));
+  }
+
+  /// [watchManager] for the signed-in user; a signed-out session streams a
+  /// single null (the hub then shows the name prompt's signed-out face).
+  static Stream<FantasyManager?> watchMyManager(String sport, String season) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream<FantasyManager?>.value(null);
+    return watchManager(sport, season, uid);
+  }
+
+  /// Saves the signed-in manager's team name. ONE set of the whole node with
+  /// `NameFlagged: false` — the live rules only accept a write on a flagged
+  /// entry when it changes TeamName AND clears the flag in the same write,
+  /// so rename-is-unlock is enforced server-side and this single shape
+  /// covers first naming, plain renames and flag-clearing renames alike.
+  static Future<void> saveTeamName(
+      String sport, String season, String name) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      return Future.error(StateError('Not signed in'));
+    }
+    return _ref('${_root(sport, season)}/Managers/$uid')
+        .set({'TeamName': name.trim(), 'NameFlagged': false});
+  }
 
   /// Live gameweeks derived from the REAL season schedule (one per match
   /// day, spec §5): streams `/<sport>/<season>/Date` keys through the
