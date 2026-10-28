@@ -48,6 +48,11 @@
 //   via writeIfAbsent BEFORE sending, and only when a pusher was injected —
 //   a sweep without one (tests) leaves them unclaimed.
 //
+// - NewsDrafted/<gw> = { At:int } (functions-internal): once-only claim for
+//   the Phase G news step (the Dream Team post + the AI drafts). The
+//   News/Drafts, News/Published and Config/DreamTeamPost shapes live in
+//   news.ts.
+//
 // Finalize manager-source precedence (documented contract): the lock
 // snapshot PublishedPicks/<gw> is the law; a rerun without one re-reads the
 // squads stored in History/<gw> (deterministic reruns); only a FIRST run of
@@ -61,12 +66,17 @@
 import {
   configFromMap, FANTASY_POSITIONS, FantasyConfig,
 } from './fantasy_config';
+import { FetchLike } from '../support';
 import {
   computeGameweekFinalize, FinalizeGame,
 } from './finalize_core';
 import {
   currentGameweek, deriveGameweeks, Gameweek, gameweekStatusAt,
 } from './gameweeks';
+import {
+  buildDreamTeamDraft, buildNewsStats, dreamTeamPostConfigFrom,
+  generateNewsDrafts, nextLeagueWeekdayInstantUtc, shouldAutoPublish,
+} from './news';
 import {
   allGamesFinal, childEntries, dateKeysOf, FantasyDb, fantasyRoot,
   fantasySeasonsOf, fullAttendance, gamesOfDate, isPlainMap, lockOverrideOf,
@@ -100,6 +110,10 @@ const silent: FantasyLogger = { info: () => undefined, warn: () => undefined };
 export interface FantasyJobDeps {
   /** FCM (Phase F): deadline reminders + weekly recaps. */
   pusher?: FantasyPusher;
+  /** Anthropic (Phase G): AI news drafting after finalize. A blank apiKey
+   *  (or an API failure) skips the AI drafts with a log — the deterministic
+   *  Dream Team post still builds, and finalize never blocks. */
+  news?: { apiKey: string; fetchImpl?: FetchLike; timeoutMs?: number };
 }
 
 export interface GwStateNode {
@@ -245,6 +259,20 @@ export async function recordSquadSave(
 }
 
 // ── Phase C: finalization ──────────────────────────────────────────────────
+
+/** The most recent PriceChanges rows at or before [gw] — the risers/fallers
+ *  the managers are currently looking at (the news inputs; null = the
+ *  season has not repriced yet). */
+async function latestPriceChanges(
+  db: FantasyDb, root: string, gw: number,
+): Promise<unknown> {
+  let best = -1;
+  for (const [w] of childEntries(await db.read(`${root}/PriceChanges`))) {
+    const week = Number(w);
+    if (Number.isInteger(week) && week <= gw && week > best) best = week;
+  }
+  return best < 0 ? null : await db.read(`${root}/PriceChanges/${best}`);
+}
 
 export interface FinalizeArgs {
   sport: string;
@@ -442,6 +470,70 @@ export async function finalizeGameweek(
     }
   }
 
+  // Phase G: news drafts, once per gameweek (NewsDrafted-guarded). The
+  // Dream Team post always builds — deterministic, from the SAME stored
+  // DreamTeam node the hub reads — while the 2–4 AI drafts land only when
+  // the Anthropic call succeeds: an API failure or blank key writes NOTHING
+  // (logged) and never blocks the finalize (spec §13).
+  if ((await db.read(`${root}/NewsDrafted/${gw.number}`)) == null) {
+    const wonNews = await db.writeIfAbsent(`${root}/NewsDrafted/${gw.number}`,
+      { At: args.nowUtc.getTime() });
+    if (wonNews) {
+      const dreamTeamRaw =
+        out.dreamTeam ?? await db.read(`${root}/DreamTeam/${gw.number}`);
+      const dtCfg = dreamTeamPostConfigFrom(
+        await db.read(`${root}/Config/DreamTeamPost`));
+      const dtDraft = buildDreamTeamDraft({
+        gw: gw.number,
+        dreamTeamRaw,
+        nowMs: args.nowUtc.getTime(),
+        autoPublishAtMs: dtCfg.autoPublish
+          ? nextLeagueWeekdayInstantUtc(
+            args.nowUtc, dtCfg.weekday, dtCfg.hour).getTime()
+          : null,
+      });
+      if (dtDraft !== null) {
+        await db.write(`${root}/News/Drafts/gw${gw.number}dreamteam`, dtDraft);
+        log.info('fantasy news: dream team post drafted', ctx);
+      }
+
+      const news = args.deps?.news;
+      if (news?.apiKey) {
+        const drafts = await generateNewsDrafts({
+          stats: buildNewsStats({
+            gw: gw.number,
+            playerWeeksThisGw: out.playerWeeks,
+            playerWeeksPrevGw: playerWeeksByWeek[gw.number - 1] ?? null,
+            players,
+            dreamTeamRaw,
+            priceChangesRaw: await latestPriceChanges(db, root, gw.number),
+          }),
+          apiKey: news.apiKey,
+          fetchImpl: news.fetchImpl,
+          timeoutMs: news.timeoutMs,
+        });
+        if (drafts === null) {
+          log.info('fantasy news: AI drafting skipped — API failure or ' +
+            'unusable reply', ctx);
+        } else {
+          for (let i = 0; i < drafts.length; i++) {
+            await db.write(`${root}/News/Drafts/gw${gw.number}ai${i + 1}`, {
+              Title: drafts[i].title,
+              Body: drafts[i].body,
+              Gw: gw.number,
+              CreatedAt: args.nowUtc.getTime(),
+              Source: 'ai',
+            });
+          }
+          log.info('fantasy news: AI drafts queued',
+            { ...ctx, drafts: drafts.length });
+        }
+      } else {
+        log.info('fantasy news: no Anthropic key — AI drafting skipped', ctx);
+      }
+    }
+  }
+
   const managers = Object.keys(out.historyByUid).length;
   log.info('fantasy gameweek finalized', {
     ...ctx, source, managers, games: gameNodes.length,
@@ -594,6 +686,24 @@ async function sweepSeason(
     if (!allGamesFinal(games)) continue;
     log.info('fantasy sweep: backstop finalize', { ...ctx, gw: gw.number });
     await finalizeGameweek(db, { sport, season, cfg, gw, nowUtc, log, deps });
+  }
+
+  // 2b. Dream Team post auto-publish (Phase G, spec §13): a draft the owner
+  //     scheduled (Source 'dreamteam', AutoPublishAt due) publishes itself
+  //     to News/Published and leaves the queue — unless the owner already
+  //     acted on it (an edit cleared AutoPublishAt, a discard deleted the
+  //     draft; see news.ts shouldAutoPublish). Before the season-over
+  //     return, so the last gameweek's post still ships.
+  for (const [key, draft] of childEntries(await db.read(`${root}/News/Drafts`))) {
+    if (!shouldAutoPublish(draft, nowUtc.getTime())) continue;
+    const d = draft as Record<string, unknown>;
+    await db.write(`${root}/News/Published/${key}`, {
+      Title: String(d['Title'] ?? ''),
+      Body: String(d['Body'] ?? ''),
+      At: nowUtc.getTime(),
+    });
+    await db.write(`${root}/News/Drafts/${key}`, null);
+    log.info('fantasy news: dream team post auto-published', { ...ctx, key });
   }
 
   // 3. GwState upsert, after the backstop so a finalize lands as 'finalized'

@@ -10,6 +10,19 @@ import { chunk } from './lib/campaigns';
 import { FantasyDb } from './lib/fantasy/orchestration_db';
 import { FantasyLogger } from './lib/fantasy/orchestration';
 import { FantasyPusher, FantasyUserPush } from './lib/fantasy/pushes';
+import { anthropicApiKey } from './support_joke';
+
+/** The shared ANTHROPIC_API_KEY (support_joke.ts defineSecret), read the
+ *  way generateTicketJoke reads it: unbound/absent -> '' -> the news
+ *  drafting skips itself (never a crash). The calling function must list
+ *  the secret in its own options. */
+export function readAnthropicKey(): string {
+  try {
+    return (anthropicApiKey.value() ?? '').trim();
+  } catch {
+    return '';
+  }
+}
 
 export function rtdbFantasyDb(root: Reference): FantasyDb {
   return {

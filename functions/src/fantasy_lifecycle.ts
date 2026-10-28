@@ -24,16 +24,18 @@
 import * as admin from 'firebase-admin';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import {
-  fantasyLogger, rtdbFantasyDb, rtdbFantasyPusher,
+  fantasyLogger, readAnthropicKey, rtdbFantasyDb, rtdbFantasyPusher,
 } from './fantasy_adapter';
 import { runLifecycleSweep, runMondayReprice } from './lib/fantasy/orchestration';
+import { anthropicApiKey } from './support_joke';
 
 export const fantasyLifecycleSweep = onSchedule(
-  'every 15 minutes',
+  { schedule: 'every 15 minutes', secrets: [anthropicApiKey] },
   async () => {
     const root = admin.database().ref();
     await runLifecycleSweep(rtdbFantasyDb(root), new Date(), fantasyLogger, {
       pusher: rtdbFantasyPusher(root),
+      news: { apiKey: readAnthropicKey() }, // backstop finalizes draft news
     });
   },
 );

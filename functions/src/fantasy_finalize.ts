@@ -20,10 +20,11 @@ import type { DatabaseEvent, DataSnapshot } from 'firebase-functions/v2/database
 import type { Change } from 'firebase-functions/v2';
 import type { Reference } from 'firebase-admin/database';
 import {
-  fantasyLogger, rtdbFantasyDb, rtdbFantasyPusher,
+  fantasyLogger, readAnthropicKey, rtdbFantasyDb, rtdbFantasyPusher,
 } from './fantasy_adapter';
 import { maybeFinalizeGame } from './lib/fantasy/orchestration';
 import { isPlainMap, toIntLoose } from './lib/fantasy/orchestration_db';
+import { anthropicApiKey } from './support_joke';
 
 /** Same-instance root (matters in the emulator) — index.ts dbRoot parity. */
 function dbRoot(event: DatabaseEvent<Change<DataSnapshot>>): Reference {
@@ -35,7 +36,10 @@ function dbRoot(event: DatabaseEvent<Change<DataSnapshot>>): Reference {
 export function makeFantasyFinalizeTrigger(sport: string) {
   return {
     onGameWritten: onValueWritten(
-      `/${sport}/{season}/Date/{dateKey}/{gameIndex}`,
+      {
+        ref: `/${sport}/{season}/Date/{dateKey}/{gameIndex}`,
+        secrets: [anthropicApiKey], // Phase G news drafting after finalize
+      },
       async (event) => {
         const after = event.data.after.val();
         // Payload-only gate: nothing to settle unless the written game is
@@ -48,7 +52,10 @@ export function makeFantasyFinalizeTrigger(sport: string) {
           dateKey: String(event.params['dateKey']),
           nowUtc: new Date(),
           log: fantasyLogger,
-          deps: { pusher: rtdbFantasyPusher(root) },
+          deps: {
+            pusher: rtdbFantasyPusher(root),
+            news: { apiKey: readAnthropicKey() },
+          },
         });
       },
     ),
