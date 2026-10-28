@@ -117,6 +117,7 @@ class FantasyConfig {
     required this.benchFactorPercent,
     required this.captainMultiplier,
     required this.tripleCaptainMultiplier,
+    required this.chipSet1EndGw,
     required this.startersGk,
     required this.startersDef,
     required this.startersAtt,
@@ -134,6 +135,10 @@ class FantasyConfig {
   final int lockHour; // league-local (Task 1)
   final int benchFactorPercent; // 50 = half points
   final int captainMultiplier, tripleCaptainMultiplier;
+
+  /// Last gameweek of chip set 1 (owner decision: GW1–6, then set 2 runs
+  /// GW7 through the playoffs). Set 1's unused chips do not carry over.
+  final int chipSet1EndGw;
   final int startersGk, startersDef, startersAtt, benchDef, benchAtt;
 
   int get squadSize =>
@@ -168,6 +173,7 @@ class FantasyConfig {
         benchFactorPercent: 50,
         captainMultiplier: 2,
         tripleCaptainMultiplier: 3,
+        chipSet1EndGw: 6,
         startersGk: 1,
         startersDef: 2,
         startersAtt: 2,
@@ -191,6 +197,7 @@ class FantasyConfig {
         'benchFactorPercent': benchFactorPercent,
         'captainMultiplier': captainMultiplier,
         'tripleCaptainMultiplier': tripleCaptainMultiplier,
+        'chipSet1EndGw': chipSet1EndGw,
         'startersGk': startersGk,
         'startersDef': startersDef,
         'startersAtt': startersAtt,
@@ -224,6 +231,7 @@ class FantasyConfig {
       captainMultiplier: _i(m['captainMultiplier'], d.captainMultiplier),
       tripleCaptainMultiplier:
           _i(m['tripleCaptainMultiplier'], d.tripleCaptainMultiplier),
+      chipSet1EndGw: _i(m['chipSet1EndGw'], d.chipSet1EndGw),
       startersGk: _i(m['startersGk'], d.startersGk),
       startersDef: _i(m['startersDef'], d.startersDef),
       startersAtt: _i(m['startersAtt'], d.startersAtt),

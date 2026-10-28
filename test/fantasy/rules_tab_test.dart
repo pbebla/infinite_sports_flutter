@@ -71,9 +71,12 @@ void main() {
     // Prices from config.
     expect(find.textContaining('\$4.0M to \$15.0M'), findsOneWidget);
 
-    // Chips, eligibility, FAQ present.
+    // Chips, eligibility, FAQ present — with the set windows rendered from
+    // the config (chipSet1EndGw = 6 → GW1–6 / GW7, P3b Task 6).
     expect(find.text('Triple Captain'), findsOneWidget);
     expect(find.text('Free Hit'), findsOneWidget);
+    expect(find.textContaining('Set 1 covers GW1–6'), findsOneWidget);
+    expect(find.textContaining('Set 2 covers GW7'), findsOneWidget);
     expect(find.text('Eligibility'), findsOneWidget);
     expect(find.text('FAQ'), findsOneWidget);
 
@@ -86,10 +89,12 @@ void main() {
     final controller = await pumpRules(tester);
     expect(find.text('+10'), findsOneWidget); // GK goal, default
 
-    // The owner tunes GK goal to 99 and the budget to $60.0M.
+    // The owner tunes GK goal to 99, the budget to $60.0M and the chip-set
+    // split to GW8.
     final tuned = FantasyConfig.futsalDefault().toMap()
       ..['lockOverride'] = 'open'
-      ..['budgetTenths'] = 600;
+      ..['budgetTenths'] = 600
+      ..['chipSet1EndGw'] = 8;
     (tuned['scoring'] as Map)['GK'] =
         Map<String, dynamic>.from((tuned['scoring'] as Map)['GK'] as Map)
           ..['goal'] = 99;
@@ -100,6 +105,8 @@ void main() {
     expect(find.text('+10'), findsNothing);
     expect(find.textContaining('\$60.0M budget'), findsOneWidget);
     expect(find.textContaining('\$50.0M budget'), findsNothing);
+    expect(find.textContaining('Set 1 covers GW1–8'), findsOneWidget);
+    expect(find.textContaining('Set 2 covers GW9'), findsOneWidget);
 
     await controller.close();
     await tester.pumpWidget(const SizedBox());

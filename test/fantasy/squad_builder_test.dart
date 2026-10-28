@@ -322,6 +322,16 @@ void main() {
       (tester) async {
     await pumpBuilder(tester);
 
+    // P3b Task 6: the heading carries the set windows from the config
+    // (futsal default chipSet1EndGw = 6) and every chip shows its count
+    // badge ("1 left" per active set until P4 wires real usage).
+    expect(
+        find.text('One chip may be active per gameweek · Set 1: GW1–6 · '
+            'Set 2: GW7–final'),
+        findsOneWidget);
+    expect(find.text('1 left'), findsNWidgets(4));
+    expect(find.text('0 left'), findsNothing);
+
     await tester.tap(find.byKey(const ValueKey('fantasy_chip_tripleCaptain')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('chip_active_tripleCaptain')),

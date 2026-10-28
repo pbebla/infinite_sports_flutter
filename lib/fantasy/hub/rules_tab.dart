@@ -190,10 +190,14 @@ class _RulesBody extends StatelessWidget {
                     'squad returns afterwards.',
               ),
               const SizedBox(height: 6),
-              const _Body(
-                'One chip per gameweek. You get two sets per season: set 1 '
-                'expires mid-season (unused chips do not carry over), set 2 '
-                'runs to the end.',
+              // Set windows from the live config (P3b Task 6) — the same
+              // values the chips row renders, never hard-coded.
+              _Body(
+                'One chip may be active per gameweek. You get two sets per '
+                'season: Set 1 covers GW1–${cfg.chipSet1EndGw} and expires '
+                'after GW${cfg.chipSet1EndGw} (unused chips do not carry '
+                'over); Set 2 covers GW${cfg.chipSet1EndGw + 1} through the '
+                'end of the season, playoffs included.',
               ),
             ],
           ),

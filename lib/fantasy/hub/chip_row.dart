@@ -1,9 +1,16 @@
-// The chips row (P3b, spec §6): the four medallion assets as cards. Triple
-// Captain and Bench Boost toggle FantasySquad.chip (one per week — selecting
-// one deselects the other) with an accent glow when active; Wildcard and
-// Free Hit render with a "Coming with transfers" caption and stay untappable
-// until the transfer flows land (P3c). Effect lines read from the live
-// config, never hard-coded.
+// The chips row (P3b, spec §6; v2 in the owner's feedback round, Task 6):
+// the four medallion assets as cards with a per-set count badge. Triple
+// Captain and Bench Boost toggle FantasySquad.chip (one active per gameweek
+// — selecting one deselects the other) with an accent glow when active;
+// Wildcard and Free Hit render with a "Coming with transfers" caption and
+// stay untappable until the transfer flows land (P3c). Effect lines, the
+// set windows in the heading and the counts all read from the live config,
+// never hard-coded.
+//
+// Counts: until per-manager chip-usage tracking lands (P4), each chip shows
+// "1 left" for the active set; [usedChips] is the nullable seam P4 wires
+// real usage through (ids used in the ACTIVE set → "0 left") with no UI
+// rework.
 //
 // Motion: the active glow animates in 200ms and collapses to zero duration
 // under the OS reduced-motion setting; state only changes on a tap, so a
@@ -20,6 +27,7 @@ class FantasyChipRow extends StatelessWidget {
     required this.activeChip,
     required this.enabled,
     required this.onChipChanged,
+    this.usedChips,
   });
 
   final FantasyConfig config;
@@ -31,6 +39,12 @@ class FantasyChipRow extends StatelessWidget {
   final bool enabled;
   final ValueChanged<String?> onChipChanged;
 
+  /// Chip ids already SPENT in the active set (P4 wires real per-manager
+  /// usage here). null/absent = none used: every chip shows "1 left".
+  final Set<String>? usedChips;
+
+  bool _used(String id) => usedChips?.contains(id) ?? false;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -40,7 +54,11 @@ class FantasyChipRow extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.only(left: 4, bottom: 8),
           child: Text(
-            'Chips · one per gameweek',
+            // Set windows straight from the live config (Task 6 copy fix).
+            'One chip may be active per gameweek · '
+            'Set 1: GW1–${config.chipSet1EndGw} · '
+            'Set 2: GW${config.chipSet1EndGw + 1}–final',
+            softWrap: true,
             style: TextStyle(
               fontSize: 11.5,
               fontWeight: FontWeight.w700,
@@ -60,6 +78,7 @@ class FantasyChipRow extends StatelessWidget {
                 label: 'Triple Captain',
                 effect: 'Captain ×${config.tripleCaptainMultiplier} this week',
                 active: activeChip == 'tripleCaptain',
+                used: _used('tripleCaptain'),
                 onTap: enabled ? () => _toggle('tripleCaptain') : null,
               ),
               const SizedBox(width: 10),
@@ -69,6 +88,7 @@ class FantasyChipRow extends StatelessWidget {
                 label: 'Bench Boost',
                 effect: 'Bench scores full points this week',
                 active: activeChip == 'benchBoost',
+                used: _used('benchBoost'),
                 onTap: enabled ? () => _toggle('benchBoost') : null,
               ),
               const SizedBox(width: 10),
@@ -79,6 +99,7 @@ class FantasyChipRow extends StatelessWidget {
                 effect: 'Unlimited transfers, permanent rebuild',
                 caption: 'Coming with transfers',
                 active: false,
+                used: _used('wildcard'),
                 onTap: null,
               ),
               const SizedBox(width: 10),
@@ -89,6 +110,7 @@ class FantasyChipRow extends StatelessWidget {
                 effect: 'One-week rebuild — squad returns after',
                 caption: 'Coming with transfers',
                 active: false,
+                used: _used('freeHit'),
                 onTap: null,
               ),
             ],
@@ -110,6 +132,7 @@ class _ChipCard extends StatelessWidget {
     required this.label,
     required this.effect,
     required this.active,
+    required this.used,
     required this.onTap,
     this.caption,
   });
@@ -120,6 +143,9 @@ class _ChipCard extends StatelessWidget {
   final String effect;
   final String? caption;
   final bool active;
+
+  /// Spent in the active set → the badge reads "0 left".
+  final bool used;
   final VoidCallback? onTap;
 
   @override
@@ -174,6 +200,33 @@ class _ChipCard extends StatelessWidget {
                   fontSize: 12.5,
                   fontWeight: FontWeight.w700,
                   color: scheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Container(
+                key: ValueKey('chip_count_$id'),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
+                decoration: BoxDecoration(
+                  color: used
+                      ? scheme.surfaceContainerHighest
+                      : accent.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: used
+                        ? scheme.outlineVariant
+                        : accent.withValues(alpha: 0.5),
+                    width: 0.8,
+                  ),
+                ),
+                child: Text(
+                  used ? '0 left' : '1 left',
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.2,
+                    color: used ? scheme.onSurfaceVariant : accent,
+                  ),
                 ),
               ),
               const SizedBox(height: 3),

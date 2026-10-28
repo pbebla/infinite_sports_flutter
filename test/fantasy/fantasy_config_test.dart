@@ -26,6 +26,8 @@ void main() {
     expect(c.captainMultiplier, 2);
     expect(c.tripleCaptainMultiplier, 3);
     expect(c.rookiePriceTenths, 60);
+    // Chip windows (owner decision): set 1 = GW1–6, set 2 = GW7–playoffs.
+    expect(c.chipSet1EndGw, 6);
   });
   test('round-trips through RTDB-safe map', () {
     final c = FantasyConfig.futsalDefault();
@@ -36,6 +38,14 @@ void main() {
     final c = FantasyConfig.fromMap({'budgetTenths': 400});
     expect(c.budgetTenths, 400);
     expect(c.scoring[FantasyPosition.gk]!.goal, 10);
+    // Pre-chipSet1EndGw config nodes fall back to the default window.
+    expect(c.chipSet1EndGw, 6);
+  });
+  test('chipSet1EndGw round-trips and accepts a tuned value', () {
+    final tuned = FantasyConfig.fromMap(
+        FantasyConfig.futsalDefault().toMap()..['chipSet1EndGw'] = 8);
+    expect(tuned.chipSet1EndGw, 8);
+    expect(tuned.toMap()['chipSet1EndGw'], 8);
   });
   test('position parsing', () {
     expect(FantasyPosition.parse('GK'), FantasyPosition.gk);
