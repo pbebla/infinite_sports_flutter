@@ -15,6 +15,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/team_name_dialog.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 
@@ -30,6 +31,7 @@ class FantasyMyTeamTab extends StatelessWidget {
     required this.squadStates,
     this.initialSquad,
     required this.onSaveSquad,
+    this.draft,
     this.nowUtc,
   });
 
@@ -53,6 +55,10 @@ class FantasyMyTeamTab extends StatelessWidget {
 
   /// FantasyService.saveMySquad in production.
   final Future<void> Function(FantasySquad squad) onSaveSquad;
+
+  /// The hub's shared draft (P3c) — the Players market edits the same one.
+  /// null (standalone/tests): the builder owns a private draft.
+  final SquadDraftController? draft;
 
   /// Test seam: injected clock for the builder's lock computation.
   final DateTime Function()? nowUtc;
@@ -101,6 +107,7 @@ class FantasyMyTeamTab extends StatelessWidget {
           squadStates: squadStates,
           initialSquad: initialSquad,
           onSaveSquad: onSaveSquad,
+          draft: draft,
           nowUtc: nowUtc,
         );
       },

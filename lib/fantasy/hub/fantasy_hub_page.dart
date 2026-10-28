@@ -24,7 +24,9 @@ import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_walkthrough.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/my_team_tab.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/players_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/rules_tab.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/team_name_dialog.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
@@ -64,6 +66,12 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   /// false = show the intro, true = straight to the hub.
   bool? _walkthroughSeen;
 
+  /// The ONE shared squad draft (P3c): created on the first config emit,
+  /// fed by this page's squad subscription (dirty drafts never overwritten),
+  /// edited by BOTH the My Team court and the Players market. It lives here
+  /// so an unsaved draft survives tab swipes; saving stays on My Team.
+  SquadDraftController? _draft;
+
   /// Re-listenable config feed for the Rules tab, fed from this page's own
   /// subscription. A raw watchConfig() stream is single-subscription, and a
   /// TabBarView unmounts/remounts its tabs on far swipes — a remounted
@@ -102,7 +110,17 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _configSub =
         FantasyService.watchConfig(widget.sport, widget.season).listen((s) {
       if (!mounted) return;
-      setState(() => _configState = s);
+      setState(() {
+        _configState = s;
+        if (s != null) {
+          if (_draft == null) {
+            _draft = SquadDraftController(
+                config: s.config, initial: _squadLoaded ? _squad : null);
+          } else {
+            _draft!.syncConfig(s.config);
+          }
+        }
+      });
       _configForRules.add(s);
       if (s != null) _subscribeGameweeks(s);
     });
@@ -130,6 +148,9 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         _squad = s;
         _squadLoaded = true;
       });
+      // The shared draft follows the saved squad while clean; a dirty draft
+      // (unsaved edits from either tab) always wins until saved.
+      _draft?.adoptFromStream(s);
       _squadForTabs.add(s);
     }, onError: (Object _) {
       // Same escape hatch: a squad-read hiccup renders an empty court, not
@@ -162,6 +183,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _configForRules.close();
     _managerForTabs.close();
     _squadForTabs.close();
+    _draft?.dispose();
     super.dispose();
   }
 
@@ -195,6 +217,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         managerStates: _managerForTabs.stream,
         squad: _squad,
         squadStates: _squadForTabs.stream,
+        draft: _draft!,
         saveTeamName: (name) =>
             FantasyService.saveTeamName(widget.sport, widget.season, name),
         saveSquad: (squad) =>
@@ -252,6 +275,7 @@ class _HubBody extends StatelessWidget {
     required this.managerStates,
     required this.squad,
     required this.squadStates,
+    required this.draft,
     required this.saveTeamName,
     required this.saveSquad,
   });
@@ -266,6 +290,9 @@ class _HubBody extends StatelessWidget {
   final Stream<FantasyManager?> managerStates;
   final FantasySquad? squad;
   final Stream<FantasySquad?> squadStates;
+
+  /// The hub-owned shared draft both the court and the market edit (P3c).
+  final SquadDraftController draft;
   final Future<void> Function(String name) saveTeamName;
   final Future<void> Function(FantasySquad squad) saveSquad;
 
@@ -322,12 +349,17 @@ class _HubBody extends StatelessWidget {
                   squadStates: squadStates,
                   initialSquad: squad,
                   onSaveSquad: saveSquad,
+                  draft: draft,
                 ),
-                const _PlaceholderTab(
-                  icon: Icons.storefront,
-                  title: 'Players',
-                  message: 'The player market is on its way — prices, form '
-                      'and transfers for every player in the league.',
+                // The market (P3c) — edits the SAME shared draft as above;
+                // saving stays on My Team.
+                FantasyPlayersTab(
+                  sport: sport,
+                  season: season,
+                  players: players,
+                  draft: draft,
+                  lockOverride: configState.lockOverride,
+                  gameweeks: gameweeks,
                 ),
                 const _PlaceholderTab(
                   icon: Icons.emoji_events_outlined,
