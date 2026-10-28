@@ -21,6 +21,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
@@ -47,7 +48,14 @@ class FantasySquadBuilder extends StatefulWidget {
     this.draft,
     this.nowUtc,
     this.alert,
+    this.chipHistory,
   });
+
+  /// The manager's finalized chips by gameweek (`History/<gw>/<uid>`, via
+  /// FantasyService.watchChipHistoryFor) — drives the chip row's real
+  /// "1 left" / "Used" / "Active" badges (chip_usage.dart). null = unknown
+  /// (signed out / not loaded): nothing counts as spent.
+  final Map<int, ChipHistoryEntry>? chipHistory;
 
   /// The manager's live squad alert (spec §3 holder protection,
   /// FantasyService.watchMySquadAlert): shown as a banner at the top while
@@ -370,6 +378,14 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
             activeChip: _draft.chip,
             enabled: editable,
             onChipChanged: _draft.setChip,
+            // Real usage: spent-in-this-set from History, the armed chip on
+            // the squad on screen (the live squad, or its unsaved edit).
+            availability: chipAvailability(
+              historyByWeek: widget.chipHistory ?? const {},
+              editingGw: chipEditingGameweek(widget.gameweeks, _now),
+              armedChip: _draft.chip,
+              config: widget.config,
+            ),
           ),
           if (editable && issues.isNotEmpty) ...[
             const SizedBox(height: 14),

@@ -7,16 +7,19 @@
 // set windows in the heading and the counts all read from the live config,
 // never hard-coded.
 //
-// Counts: until per-manager chip-usage tracking lands (P4), each chip shows
-// "1 left" for the active set; [usedChips] is the nullable seam P4 wires
-// real usage through (ids used in the ACTIVE set → "0 left") with no UI
-// rework.
+// Counts (owner feedback round): each badge reads the manager's REAL usage
+// (chip_usage.dart chipAvailability over their History): "1 left" while
+// unspent in the active set, "Used" once spent in it (a set-1 chip is fresh
+// again in set 2; a voided week refunds), "Active" while armed on the squad
+// on screen. A spent chip can't be armed again (the server would void the
+// replay at lock) — tapping it does nothing unless it is the one armed.
 //
 // Motion: the active glow animates in 200ms and collapses to zero duration
 // under the OS reduced-motion setting; state only changes on a tap, so a
 // stream reconnect can never replay it.
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 
@@ -27,7 +30,7 @@ class FantasyChipRow extends StatelessWidget {
     required this.activeChip,
     required this.enabled,
     required this.onChipChanged,
-    this.usedChips,
+    this.availability,
   });
 
   final FantasyConfig config;
@@ -39,11 +42,24 @@ class FantasyChipRow extends StatelessWidget {
   final bool enabled;
   final ValueChanged<String?> onChipChanged;
 
-  /// Chip ids already SPENT in the active set (P4 wires real per-manager
-  /// usage here). null/absent = none used: every chip shows "1 left".
-  final Set<String>? usedChips;
+  /// Per-chip availability (chip_usage.dart chipAvailability). null = no
+  /// usage known (signed out / no history yet): every chip "1 left", the
+  /// armed one "Active".
+  final Map<String, ChipAvailability>? availability;
 
-  bool _used(String id) => usedChips?.contains(id) ?? false;
+  ChipAvailability _availability(String id) =>
+      availability?[id] ??
+      (id == activeChip ? ChipAvailability.active : ChipAvailability.available);
+
+  /// A spent chip only taps to DISARM (it was armed anyway); otherwise the
+  /// usual toggle while editable.
+  VoidCallback? _tap(String id) {
+    if (!enabled) return null;
+    if (_availability(id) == ChipAvailability.used && activeChip != id) {
+      return null;
+    }
+    return () => _toggle(id);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -78,8 +94,8 @@ class FantasyChipRow extends StatelessWidget {
                 label: 'Triple Captain',
                 effect: 'Captain ×${config.tripleCaptainMultiplier} this week',
                 active: activeChip == 'tripleCaptain',
-                used: _used('tripleCaptain'),
-                onTap: enabled ? () => _toggle('tripleCaptain') : null,
+                availability: _availability('tripleCaptain'),
+                onTap: _tap('tripleCaptain'),
               ),
               const SizedBox(width: 10),
               _ChipCard(
@@ -88,8 +104,8 @@ class FantasyChipRow extends StatelessWidget {
                 label: 'Bench Boost',
                 effect: 'Bench scores full points this week',
                 active: activeChip == 'benchBoost',
-                used: _used('benchBoost'),
-                onTap: enabled ? () => _toggle('benchBoost') : null,
+                availability: _availability('benchBoost'),
+                onTap: _tap('benchBoost'),
               ),
               const SizedBox(width: 10),
               _ChipCard(
@@ -99,7 +115,7 @@ class FantasyChipRow extends StatelessWidget {
                 effect: 'Unlimited transfers, permanent rebuild',
                 caption: 'Coming with transfers',
                 active: false,
-                used: _used('wildcard'),
+                availability: _availability('wildcard'),
                 onTap: null,
               ),
               const SizedBox(width: 10),
@@ -110,7 +126,7 @@ class FantasyChipRow extends StatelessWidget {
                 effect: 'One-week rebuild — squad returns after',
                 caption: 'Coming with transfers',
                 active: false,
-                used: _used('freeHit'),
+                availability: _availability('freeHit'),
                 onTap: null,
               ),
             ],
@@ -132,7 +148,7 @@ class _ChipCard extends StatelessWidget {
     required this.label,
     required this.effect,
     required this.active,
-    required this.used,
+    required this.availability,
     required this.onTap,
     this.caption,
   });
@@ -142,10 +158,12 @@ class _ChipCard extends StatelessWidget {
   final String label;
   final String effect;
   final String? caption;
+
+  /// Armed on the squad on screen — the accent glow.
   final bool active;
 
-  /// Spent in the active set → the badge reads "0 left".
-  final bool used;
+  /// The badge: "1 left" / "Used" / "Active".
+  final ChipAvailability availability;
   final VoidCallback? onTap;
 
   @override
@@ -154,6 +172,30 @@ class _ChipCard extends StatelessWidget {
     final accent = fantasyAccent(context);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final comingSoon = caption != null;
+    final used = availability == ChipAvailability.used;
+    final badge = Container(
+      key: ValueKey('chip_count_$id'),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
+      decoration: BoxDecoration(
+        color: used
+            ? scheme.surfaceContainerHighest
+            : accent.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: used ? scheme.outlineVariant : accent.withValues(alpha: 0.5),
+          width: 0.8,
+        ),
+      ),
+      child: Text(
+        chipAvailabilityLabel(availability),
+        style: TextStyle(
+          fontSize: 9.5,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.2,
+          color: used ? scheme.onSurfaceVariant : accent,
+        ),
+      ),
+    );
 
     return InkWell(
       key: ValueKey('fantasy_chip_$id'),
@@ -203,32 +245,11 @@ class _ChipCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 4),
-              Container(
-                key: ValueKey('chip_count_$id'),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
-                decoration: BoxDecoration(
-                  color: used
-                      ? scheme.surfaceContainerHighest
-                      : accent.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: used
-                        ? scheme.outlineVariant
-                        : accent.withValues(alpha: 0.5),
-                    width: 0.8,
-                  ),
-                ),
-                child: Text(
-                  used ? '0 left' : '1 left',
-                  style: TextStyle(
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.2,
-                    color: used ? scheme.onSurfaceVariant : accent,
-                  ),
-                ),
-              ),
+              // The armed chip's badge reads "Active" (it replaces the old
+              // separate pill — one status per card, never two).
+              availability == ChipAvailability.active
+                  ? KeyedSubtree(key: ValueKey('chip_active_$id'), child: badge)
+                  : badge,
               const SizedBox(height: 3),
               Text(
                 effect,
@@ -240,26 +261,6 @@ class _ChipCard extends StatelessWidget {
                   color: scheme.onSurfaceVariant,
                 ),
               ),
-              if (active) ...[
-                const SizedBox(height: 5),
-                Container(
-                  key: ValueKey('chip_active_$id'),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.16),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    'Active',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                      color: accent,
-                    ),
-                  ),
-                ),
-              ],
               if (comingSoon) ...[
                 const SizedBox(height: 5),
                 Text(

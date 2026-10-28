@@ -13,6 +13,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_prefs.dart';
@@ -70,6 +71,15 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   FantasySquadAlert? _alert;
   bool _alertLoaded = false;
 
+  /// The signed-in manager's finalized chips by gameweek
+  /// (`History/<gw>/<uid>`, one small listener per schedule gameweek) — the
+  /// chip row's real "1 left" / "Used" counts. Joins the reveal gate (no
+  /// badge pops after the fade); it can only load once the schedule's
+  /// gameweeks are known.
+  Map<int, ChipHistoryEntry> _chipHistory = const {};
+  bool _chipsLoaded = false;
+  List<int>? _chipWeeks; // gameweek numbers the chip feed listens to
+
   /// First-open walkthrough (spec §10a): null while the prefs flag loads,
   /// false = show the intro, true = straight to the hub.
   bool? _walkthroughSeen;
@@ -107,13 +117,15 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   StreamSubscription<FantasyManager?>? _managerSub;
   StreamSubscription<FantasySquad?>? _squadSub;
   StreamSubscription<FantasySquadAlert?>? _alertSub;
+  StreamSubscription<Map<int, ChipHistoryEntry>>? _chipSub;
 
   bool get _ready =>
       _configState != null &&
       _players != null &&
       _managerLoaded &&
       _squadLoaded &&
-      _alertLoaded;
+      _alertLoaded &&
+      _chipsLoaded;
 
   @override
   void initState() {
@@ -197,7 +209,40 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _gameweeksSub = FantasyService.watchGameweeks(
             widget.sport, widget.season, s.config)
         .listen((gws) {
-      if (mounted) setState(() => _gameweeks = gws);
+      if (!mounted) return;
+      setState(() => _gameweeks = gws);
+      _subscribeChips(gws);
+    }, onError: (Object _) {
+      // No schedule → no chip feed: never hold the hub on the skeleton.
+      if (mounted) setState(() => _chipsLoaded = true);
+    });
+  }
+
+  /// (Re)subscribes the chip-usage feed when the schedule's gameweek list
+  /// changes — the same numbers keep the running listeners (and the badges)
+  /// untouched, so a config/schedule re-emit never flickers them.
+  void _subscribeChips(List<Gameweek> gws) {
+    final weeks = [for (final g in gws) g.number];
+    final known = _chipWeeks;
+    if (known != null &&
+        known.length == weeks.length &&
+        Iterable<int>.generate(weeks.length)
+            .every((i) => known[i] == weeks[i])) {
+      return;
+    }
+    _chipWeeks = weeks;
+    _chipSub?.cancel();
+    _chipSub = FantasyService.watchMyChipHistoryAuto(
+            widget.sport, widget.season, weeks)
+        .listen((history) {
+      if (!mounted) return;
+      setState(() {
+        _chipHistory = history;
+        _chipsLoaded = true;
+      });
+    }, onError: (Object _) {
+      // A failed History read just means no usage shown ("1 left").
+      if (mounted) setState(() => _chipsLoaded = true);
     });
   }
 
@@ -209,6 +254,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _managerSub?.cancel();
     _squadSub?.cancel();
     _alertSub?.cancel();
+    _chipSub?.cancel();
     _configForRules.close();
     _managerForTabs.close();
     _squadForTabs.close();
@@ -249,6 +295,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         squadStates: _squadForTabs.stream,
         alert: _alert,
         alertStates: _alertForTabs.stream,
+        chipHistory: _chipHistory,
         draft: _draft!,
         saveTeamName: (name) =>
             FantasyService.saveTeamName(widget.sport, widget.season, name),
@@ -309,6 +356,7 @@ class _HubBody extends StatelessWidget {
     required this.squadStates,
     required this.alert,
     required this.alertStates,
+    required this.chipHistory,
     required this.draft,
     required this.saveTeamName,
     required this.saveSquad,
@@ -328,6 +376,9 @@ class _HubBody extends StatelessWidget {
   /// The live squad alert (spec §3) + its re-listen-safe feed.
   final FantasySquadAlert? alert;
   final Stream<FantasySquadAlert?> alertStates;
+
+  /// The manager's finalized chips by gameweek — the chip row's counts.
+  final Map<int, ChipHistoryEntry> chipHistory;
 
   /// The hub-owned shared draft both the court and the market edit (P3c).
   final SquadDraftController draft;
@@ -390,6 +441,7 @@ class _HubBody extends StatelessWidget {
                   draft: draft,
                   alertStates: alertStates,
                   initialAlert: alert,
+                  chipHistory: chipHistory,
                 ),
                 // The market (P3c) — edits the SAME shared draft as above;
                 // saving stays on My Team.

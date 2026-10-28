@@ -9,9 +9,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder.dart';
 
@@ -115,6 +117,9 @@ void main() {
     FantasySquad? initialSquad,
     Future<void> Function(FantasySquad)? onSave,
     FantasySquadAlert? alert,
+    List<Gameweek> gameweeks = const [],
+    Map<int, ChipHistoryEntry>? chipHistory,
+    DateTime Function()? nowUtc,
   }) async {
     // Tall, phone-wide surface so the whole column (budget bar, court,
     // bench, chips, save) is on screen and tappable without scrolling.
@@ -126,7 +131,7 @@ void main() {
         body: FantasySquadBuilder(
           config: FantasyConfig.futsalDefault(),
           lockOverride: lockOverride,
-          gameweeks: const [],
+          gameweeks: gameweeks,
           players: players,
           squadStates: squads.stream,
           initialSquad: initialSquad,
@@ -135,6 +140,8 @@ void main() {
                 savedSquads.add(squad);
               },
           alert: alert,
+          chipHistory: chipHistory,
+          nowUtc: nowUtc,
         ),
       ),
     ));
@@ -326,7 +333,8 @@ void main() {
 
     // P3b Task 6: the heading carries the set windows from the config
     // (futsal default chipSet1EndGw = 6) and every chip shows its count
-    // badge ("1 left" per active set until P4 wires real usage).
+    // badge ("1 left" with no chip history — real usage is covered by the
+    // 'chip availability counts' group below).
     expect(
         find.text('One chip may be active per gameweek · Set 1: GW1–6 · '
             'Set 2: GW7–final'),
@@ -354,6 +362,79 @@ void main() {
 
     // Wildcard / Free Hit are visual-only until transfers (P3c).
     expect(find.text('Coming with transfers'), findsNWidgets(2));
+  });
+
+  group('chip availability counts (real usage)', () {
+    // Ten weekly gameweeks locking Jan 1..10 22:00Z; chipSet1EndGw = 6.
+    final gws = [
+      for (var n = 1; n <= 10; n++)
+        Gameweek(
+          number: n,
+          date: '01${n.toString().padLeft(2, '0')}2026',
+          lockUtc: DateTime.utc(2026, 1, n, 22),
+          opensUtc: null,
+        ),
+    ];
+    String badge(WidgetTester tester, String id) => tester
+        .widget<Text>(find.descendant(
+            of: find.byKey(ValueKey('chip_count_$id')),
+            matching: find.byType(Text)))
+        .data!;
+
+    testWidgets('set 1: a chip spent in an earlier week reads Used and can '
+        'not be armed; the others still 1 left', (tester) async {
+      await pumpBuilder(
+        tester,
+        gameweeks: gws,
+        nowUtc: () => DateTime.utc(2026, 1, 3, 23), // editing GW4
+        chipHistory: {2: const ChipHistoryEntry(chip: 'tripleCaptain')},
+      );
+      expect(badge(tester, 'tripleCaptain'), 'Used');
+      expect(badge(tester, 'benchBoost'), '1 left');
+      expect(badge(tester, 'wildcard'), '1 left');
+      expect(badge(tester, 'freeHit'), '1 left');
+
+      await tester.tap(find.byKey(const ValueKey('fantasy_chip_tripleCaptain')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('chip_active_tripleCaptain')),
+          findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('fantasy_chip_benchBoost')));
+      await tester.pumpAndSettle();
+      expect(badge(tester, 'benchBoost'), 'Active');
+      expect(find.byKey(const ValueKey('chip_active_benchBoost')),
+          findsOneWidget);
+    });
+
+    testWidgets('set 2: set-1 chips are fresh again; a voided week refunds',
+        (tester) async {
+      await pumpBuilder(
+        tester,
+        gameweeks: gws,
+        nowUtc: () => DateTime.utc(2026, 1, 8, 23), // editing GW9 (set 2)
+        chipHistory: {
+          2: const ChipHistoryEntry(chip: 'tripleCaptain'),
+          7: const ChipHistoryEntry(chip: 'benchBoost'),
+          8: const ChipHistoryEntry(chip: 'wildcard', voided: true),
+        },
+      );
+      expect(badge(tester, 'tripleCaptain'), '1 left');
+      expect(badge(tester, 'benchBoost'), 'Used');
+      expect(badge(tester, 'wildcard'), '1 left');
+    });
+
+    testWidgets('the chip armed on the live squad reads Active',
+        (tester) async {
+      await pumpBuilder(
+        tester,
+        gameweeks: gws,
+        nowUtc: () => DateTime.utc(2026, 1, 3, 23),
+        initialSquad: fullSquad(chip: 'benchBoost'),
+        chipHistory: const {},
+      );
+      expect(badge(tester, 'benchBoost'), 'Active');
+      expect(badge(tester, 'tripleCaptain'), '1 left');
+    });
   });
 
   testWidgets('no underlined text anywhere on the builder (house rule)',

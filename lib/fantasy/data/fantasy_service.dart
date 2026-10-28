@@ -8,8 +8,11 @@
 // snapshot loads behind it (same stale-while-refresh idea as
 // LeagueService.watchRosters).
 
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
@@ -272,6 +275,57 @@ class FantasyService {
       String sport, String season, String uid) {
     return _ref('${_root(sport, season)}/History').onValue.map(
         (event) => squadsByWeekForUid(event.snapshot.value, uid));
+  }
+
+  /// One manager's finalized chips by gameweek for the chip row's real
+  /// counts (chip_usage.dart): one onValue listener per gameweek on the
+  /// small `History/<gw>/<uid>` entry (public read) — never the whole
+  /// season's History of every manager. Emits only once EVERY week has
+  /// answered (no piecemeal "1 left" → "Used" pops), then on every change.
+  /// Weeks without an entry are simply absent from the map. Callers
+  /// resubscribe when the schedule's gameweek list changes.
+  static Stream<Map<int, ChipHistoryEntry>> watchChipHistoryFor(
+      String sport, String season, String uid, List<int> weeks) {
+    if (weeks.isEmpty) {
+      return Stream<Map<int, ChipHistoryEntry>>.value(const {});
+    }
+    final subs = <StreamSubscription<DatabaseEvent>>[];
+    final latest = <int, ChipHistoryEntry?>{};
+    late final StreamController<Map<int, ChipHistoryEntry>> controller;
+    controller = StreamController<Map<int, ChipHistoryEntry>>(
+      onListen: () {
+        for (final w in weeks) {
+          subs.add(_ref('${_root(sport, season)}/History/$w/$uid')
+              .onValue
+              .listen((event) {
+            latest[w] = chipHistoryEntryFromNode(event.snapshot.value);
+            if (latest.length < weeks.length) return; // not all answered yet
+            controller.add({
+              for (final e in latest.entries)
+                if (e.value != null) e.key: e.value!,
+            });
+          }, onError: controller.addError));
+        }
+      },
+      onCancel: () async {
+        for (final s in subs) {
+          await s.cancel();
+        }
+        subs.clear();
+      },
+    );
+    return controller.stream;
+  }
+
+  /// [watchChipHistoryFor] for the signed-in user; a signed-out session
+  /// streams a single empty map (nothing spent).
+  static Stream<Map<int, ChipHistoryEntry>> watchMyChipHistoryAuto(
+      String sport, String season, List<int> weeks) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      return Stream<Map<int, ChipHistoryEntry>>.value(const {});
+    }
+    return watchChipHistoryFor(sport, season, uid, weeks);
   }
 
   /// Creates a mini-league under a fresh push id: the signed-in user as

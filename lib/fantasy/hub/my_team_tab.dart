@@ -10,6 +10,7 @@
 // stream-driven (no one-shot reads), names wrap.
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
@@ -35,7 +36,12 @@ class FantasyMyTeamTab extends StatelessWidget {
     this.nowUtc,
     this.alertStates,
     this.initialAlert,
+    this.chipHistory,
   });
+
+  /// The manager's finalized chips by gameweek (the hub's
+  /// FantasyService.watchChipHistoryFor feed) — the chip row's real counts.
+  final Map<int, ChipHistoryEntry>? chipHistory;
 
   /// Re-listen-safe broadcast of FantasyService.watchMySquadAlert (spec §3
   /// holder protection) + its latest value: drives the "your team needs
@@ -118,6 +124,7 @@ class FantasyMyTeamTab extends StatelessWidget {
               draft: draft,
               nowUtc: nowUtc,
               alert: alert,
+              chipHistory: chipHistory,
             );
         final alerts = alertStates;
         if (alerts == null) return builder(initialAlert);
