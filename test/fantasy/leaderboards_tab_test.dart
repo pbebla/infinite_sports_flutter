@@ -14,6 +14,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
@@ -41,16 +42,19 @@ void main() {
   late StreamController<Map<String, FantasyManager>> managers;
   late StreamController<List<FantasyMiniLeague>> leagues;
   late StreamController<FantasySquad?> squads;
+  late StreamController<Map<int, FantasyDreamTeam>> dreams;
   late List<LeaderboardRowData> openedRows;
 
   setUp(() {
     FantasyLeaderboardsTab.sessionScope = LeaderboardScope.overall;
     FantasyLeaderboardsTab.sessionWeek = null;
     FantasyLeaderboardsTab.profilesSession = null;
+    DreamTeamCard.sessionWeek = null;
     boards = StreamController<FantasyLeaderboards>.broadcast();
     managers = StreamController<Map<String, FantasyManager>>.broadcast();
     leagues = StreamController<List<FantasyMiniLeague>>.broadcast();
     squads = StreamController<FantasySquad?>.broadcast();
+    dreams = StreamController<Map<int, FantasyDreamTeam>>.broadcast();
     openedRows = [];
   });
 
@@ -59,6 +63,7 @@ void main() {
     managers.close();
     leagues.close();
     squads.close();
+    dreams.close();
   });
 
   Future<void> pumpTab(
@@ -85,6 +90,7 @@ void main() {
           leaderboardsStates: boards.stream,
           managersStates: managers.stream,
           miniLeaguesStates: leagues.stream,
+          dreamTeamsStates: dreams.stream,
           loadProfiles: () async => {
             'u9': const PublicProfile(
                 uid: 'u9', firstName: 'Fallback', lastName: 'Fran'),
@@ -105,10 +111,12 @@ void main() {
     FantasyLeaderboards data = FantasyLeaderboards.empty,
     Map<String, FantasyManager> names = const {},
     List<FantasyMiniLeague> miniLeagues = const [],
+    Map<int, FantasyDreamTeam> dreamTeams = const {},
   }) async {
     boards.add(data);
     managers.add(names);
     leagues.add(miniLeagues);
+    dreams.add(dreamTeams);
     await tester.pumpAndSettle();
   }
 
@@ -122,14 +130,79 @@ void main() {
       boards.add(FantasyLeaderboards.empty);
       managers.add(const {});
       await tester.pump();
-      // Leagues + profiles haven't landed: still the skeleton.
+      // Leagues + dream teams + profiles haven't landed: still the skeleton.
       expect(find.byKey(const ValueKey('leaderboards_skeleton')),
           findsOneWidget);
 
       leagues.add(const []);
+      dreams.add(const {});
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('leaderboards_ready')), findsOneWidget);
       expect(find.byKey(const ValueKey('leaderboards_empty')), findsOneWidget);
+      expect(find.text('Leaderboards light up after the first gameweek.'),
+          findsOneWidget);
+      // No DreamTeam node: the Team of the Week card is hidden entirely.
+      expect(find.byKey(const ValueKey('dream_team_card')), findsNothing);
+    });
+  });
+
+  group('dream team of the week (P6)', () {
+    Map<int, FantasyDreamTeam> twoWeeks() => dreamTeamsFromNode({
+          '1': {
+            'Players': [
+              {'name': 'Gale', 'position': 'GK', 'points': 9},
+              {'name': 'Dana', 'position': 'DEF', 'points': 7},
+              {'name': 'Yara', 'position': 'DEF', 'points': 6},
+              {'name': 'Alex', 'position': 'ATT', 'points': 8},
+              {'name': 'Wren', 'position': 'ATT', 'points': 5},
+            ],
+          },
+          '2': {
+            'Players': [
+              {'name': 'Kit', 'position': 'GK', 'points': 14},
+              {'name': 'Dana', 'position': 'DEF', 'points': 12},
+              {'name': 'Yara', 'position': 'DEF', 'points': 9},
+              {'name': 'Alex', 'position': 'ATT', 'points': 11},
+              {'name': 'Bo', 'position': 'ATT', 'points': 8},
+            ],
+          },
+        });
+
+    testWidgets('card tops the Overall scroll on the latest week; the week '
+        'chips step back through prior weeks', (tester) async {
+      await pumpTab(tester, size: const Size(420, 1400));
+      await emitAll(
+        tester,
+        data: leaderboardsFromNode({
+          'Overall': {
+            'u1': {'points': 50, 'rank': 1},
+          },
+        }),
+        names: {'u1': manager('Top Cats')},
+        dreamTeams: twoWeeks(),
+      );
+
+      // Latest week (GW2) by default, above the board rows.
+      expect(find.byKey(const ValueKey('dream_team_card')), findsOneWidget);
+      expect(find.text('Team of the Week · GW2'), findsOneWidget);
+      expect(find.text('Kit'), findsOneWidget);
+      expect(find.text('14 pts'), findsOneWidget);
+      expect(find.byKey(const ValueKey('leaderboard_row_u1')), findsOneWidget);
+
+      // Step back to GW1.
+      await tester.tap(find.byKey(const ValueKey('dream_week_1')));
+      await tester.pumpAndSettle();
+      expect(find.text('Team of the Week · GW1'), findsOneWidget);
+      expect(find.text('Gale'), findsOneWidget);
+      expect(find.text('9 pts'), findsOneWidget);
+      expect(find.text('Kit'), findsNothing);
+    });
+
+    testWidgets('card shows above the friendly empty state when a DreamTeam '
+        'exists before any board does', (tester) async {
+      await pumpTab(tester, size: const Size(420, 1400));
+      await emitAll(tester, dreamTeams: twoWeeks());
+      expect(find.byKey(const ValueKey('dream_team_card')), findsOneWidget);
       expect(find.text('Leaderboards light up after the first gameweek.'),
           findsOneWidget);
     });

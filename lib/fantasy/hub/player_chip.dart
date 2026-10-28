@@ -82,7 +82,7 @@ class FantasyPlayerChip extends StatelessWidget {
   const FantasyPlayerChip({
     super.key,
     required this.name,
-    required this.priceTenths,
+    this.priceTenths,
     this.position,
     this.photoUrl,
     this.isCaptain = false,
@@ -94,7 +94,10 @@ class FantasyPlayerChip extends StatelessWidget {
   });
 
   final String name;
-  final int priceTenths;
+
+  /// null hides the price from the nameplate (the Dream Team's read-only
+  /// mini mode shows position + points only).
+  final int? priceTenths;
 
   /// Shown on the nameplate ("DEF · $5.5M") when provided — owner feedback.
   final FantasyPosition? position;
@@ -194,7 +197,8 @@ class FantasyPlayerChip extends StatelessWidget {
                   Text(
                     [
                       if (position != null) position!.db,
-                      formatMoneyTenths(priceTenths),
+                      if (priceTenths != null)
+                        formatMoneyTenths(priceTenths!),
                       if (isCaptain) '×2',
                     ].join(' · '),
                     style: TextStyle(

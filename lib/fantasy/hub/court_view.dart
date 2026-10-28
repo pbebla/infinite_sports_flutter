@@ -50,6 +50,9 @@ class FantasyCourtView extends StatelessWidget {
     this.onSlotTap,
     this.weekPointsFor,
     this.photoUrlFor,
+    this.chipWidth = 96,
+    this.chipAvatarSize = 58,
+    this.showPrices = true,
   });
 
   final FantasyConfig config;
@@ -70,6 +73,15 @@ class FantasyCourtView extends StatelessWidget {
   /// Market photo per playerId (Task 3) — null/absent falls back to
   /// initials (photos never gate content).
   final String? Function(String playerId)? photoUrlFor;
+
+  /// Chip sizing (P6): the Dream Team's read-only mini mode renders smaller
+  /// chips than the full squad builder.
+  final double chipWidth;
+  final double chipAvatarSize;
+
+  /// false hides prices on the nameplates (the Dream Team shows position +
+  /// week points, not market prices).
+  final bool showPrices;
 
   @override
   Widget build(BuildContext context) {
@@ -146,13 +158,18 @@ class FantasyCourtView extends StatelessWidget {
                   ),
           ),
         ),
-        const SizedBox(height: 10),
-        _BenchSurface(
-          label: 'Bench · ${config.benchFactorPercent}% points',
-          children: [
-            for (var i = starterCount; i < slots.length; i++) _slotWidget(i),
-          ],
-        ),
+        // No bench slots (the Dream Team's 5-starter mini mode) = no bench
+        // surface at all — an empty labelled shelf would just be noise.
+        if (slots.length > starterCount) ...[
+          const SizedBox(height: 10),
+          _BenchSurface(
+            label: 'Bench · ${config.benchFactorPercent}% points',
+            children: [
+              for (var i = starterCount; i < slots.length; i++)
+                _slotWidget(i),
+            ],
+          ),
+        ],
       ],
     );
   }
@@ -164,19 +181,22 @@ class FantasyCourtView extends StatelessWidget {
         key: ValueKey('empty_slot_$i'),
         position: slots[i].position,
         onPitch: !slots[i].bench,
+        width: chipWidth,
         onTap: onSlotTap == null ? null : () => onSlotTap!(i),
       );
     }
     return FantasyPlayerChip(
       key: ValueKey('squad_chip_${pick.playerId}'),
       name: pick.playerId,
-      priceTenths: pick.priceTenths,
+      priceTenths: showPrices ? pick.priceTenths : null,
       position: slots[i].position,
       photoUrl: photoUrlFor?.call(pick.playerId),
       isCaptain: pick.playerId == captainId,
       isVice: pick.playerId == viceId,
       weekPoints: weekPointsFor?.call(pick.playerId),
       onTap: onSlotTap == null ? null : () => onSlotTap!(i),
+      width: chipWidth,
+      avatarSize: chipAvatarSize,
     );
   }
 }

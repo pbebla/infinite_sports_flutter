@@ -26,6 +26,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/manager_squad_viewer.dart';
@@ -48,6 +49,7 @@ class FantasyLeaderboardsTab extends StatefulWidget {
     this.leaderboardsStates,
     this.managersStates,
     this.miniLeaguesStates,
+    this.dreamTeamsStates,
     this.loadProfiles,
     this.selfUidOverride,
     this.createLeague,
@@ -77,6 +79,7 @@ class FantasyLeaderboardsTab extends StatefulWidget {
   final Stream<FantasyLeaderboards>? leaderboardsStates;
   final Stream<Map<String, FantasyManager>>? managersStates;
   final Stream<List<FantasyMiniLeague>>? miniLeaguesStates;
+  final Stream<Map<int, FantasyDreamTeam>>? dreamTeamsStates;
   final Future<Map<String, PublicProfile>> Function()? loadProfiles;
   final String? selfUidOverride;
   final Future<void> Function(String name, String code)? createLeague;
@@ -106,10 +109,12 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
   Map<String, FantasyManager>? _managers;
   List<FantasyMiniLeague>? _leagues;
   Map<String, PublicProfile>? _profiles;
+  Map<int, FantasyDreamTeam>? _dreamTeams;
 
   StreamSubscription<FantasyLeaderboards>? _boardsSub;
   StreamSubscription<Map<String, FantasyManager>>? _managersSub;
   StreamSubscription<List<FantasyMiniLeague>>? _leaguesSub;
+  StreamSubscription<Map<int, FantasyDreamTeam>>? _dreamTeamsSub;
 
   // Best-effort (utility.dart convention): widget tests never touch
   // FirebaseAuth — a missing seam degrades to "signed out", not a throw.
@@ -141,6 +146,11 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
         .listen((leagues) {
       if (mounted) setState(() => _leagues = leagues);
     });
+    _dreamTeamsSub = (widget.dreamTeamsStates ??
+            FantasyService.watchDreamTeams(widget.sport, widget.season))
+        .listen((teams) {
+      if (mounted) setState(() => _dreamTeams = teams);
+    });
     _loadProfiles();
   }
 
@@ -165,6 +175,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
     _boardsSub?.cancel();
     _managersSub?.cancel();
     _leaguesSub?.cancel();
+    _dreamTeamsSub?.cancel();
     super.dispose();
   }
 
@@ -172,7 +183,24 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
       _boards != null &&
       _managers != null &&
       _leagues != null &&
-      _profiles != null;
+      _profiles != null &&
+      _dreamTeams != null;
+
+  /// Dream Team of the Week (P6): the top of the Overall and Gameweek
+  /// scrolls — see dream_team_card.dart's header for why it lives here and
+  /// not on My Team. null while no DreamTeam node exists (hidden entirely).
+  Widget? _dreamTeamCard() {
+    final teams = _dreamTeams;
+    if (teams == null || teams.isEmpty) return null;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+      child: DreamTeamCard(
+        teams: teams,
+        config: widget.configState.config,
+        players: widget.players,
+      ),
+    );
+  }
 
   void _openManager(LeaderboardRowData row) {
     final builder = widget.squadViewerBuilder ??
@@ -265,10 +293,13 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
 
   Widget _overallBody() {
     final entries = _boards!.overall;
+    final dreamTeam = _dreamTeamCard();
     if (entries.isEmpty) {
-      return const _LeaderboardsEmpty(key: ValueKey('leaderboards_empty'));
+      return _LeaderboardsEmpty(
+          key: const ValueKey('leaderboards_empty'), header: dreamTeam);
     }
     return RankedLeaderboardList(
+      header: dreamTeam,
       rows: composeLeaderboardRows(
         entries: entries,
         managers: _managers!,
@@ -282,8 +313,10 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
 
   Widget _gameweekBody() {
     final byWeek = _boards!.byWeek;
+    final dreamTeam = _dreamTeamCard();
     if (byWeek.isEmpty) {
-      return const _LeaderboardsEmpty(key: ValueKey('leaderboards_empty'));
+      return _LeaderboardsEmpty(
+          key: const ValueKey('leaderboards_empty'), header: dreamTeam);
     }
 
     // Chips 1..N from the real schedule's gameweeks (falling back to the
@@ -322,6 +355,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (dreamTeam != null) Flexible(child: dreamTeam),
           chips,
           Expanded(
             child: Center(
@@ -343,7 +377,12 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
       );
     }
     return RankedLeaderboardList(
-      header: chips,
+      header: dreamTeam == null
+          ? chips
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [dreamTeam, chips],
+            ),
       rows: composeLeaderboardRows(
         entries: entries,
         managers: _managers!,
@@ -361,7 +400,11 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
 /// The friendly empty state while the Leaderboards node is absent (nothing
 /// finalized yet — P4's functions write it after the first gameweek).
 class _LeaderboardsEmpty extends StatelessWidget {
-  const _LeaderboardsEmpty({super.key});
+  const _LeaderboardsEmpty({super.key, this.header});
+
+  /// Scrolled above the empty copy (the Dream Team card can exist before a
+  /// board does, e.g. an admin-seeded week).
+  final Widget? header;
 
   @override
   Widget build(BuildContext context) {
@@ -371,6 +414,10 @@ class _LeaderboardsEmpty extends StatelessWidget {
           24, 48, 24, 24 + MediaQuery.paddingOf(context).bottom),
       child: Column(
         children: [
+          if (header != null) ...[
+            header!,
+            const SizedBox(height: 24),
+          ],
           Container(
             width: 72,
             height: 72,
