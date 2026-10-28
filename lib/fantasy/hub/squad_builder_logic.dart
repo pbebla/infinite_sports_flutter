@@ -53,9 +53,12 @@ List<({double x, double y})> starterOffsets(FantasyConfig cfg) {
     }
   }
 
-  row(cfg.startersGk, 0.12, 0);
-  row(cfg.startersDef, 0.46, 0.24);
-  row(cfg.startersAtt, 0.78, 0.26);
+  // Rows spaced so a full chip (avatar + 2-line nameplate) can never touch
+  // the next row at phone widths (owner feedback): ≥0.42 flat-y between rows
+  // keeps ≥ a chip-height of separation after the asset perspective mapping.
+  row(cfg.startersGk, 0.05, 0);
+  row(cfg.startersDef, 0.47, 0.24);
+  row(cfg.startersAtt, 0.90, 0.26);
   return out;
 }
 

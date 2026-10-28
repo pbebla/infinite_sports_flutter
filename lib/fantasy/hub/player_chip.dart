@@ -116,7 +116,7 @@ class FantasyPlayerChip extends StatelessWidget {
                 // Captain: gold-accent ring around the avatar.
                 Container(
                   key: isCaptain ? ValueKey('captain_ring_$name') : null,
-                  padding: const EdgeInsets.all(2.5),
+                  padding: const EdgeInsets.all(2),
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(
@@ -140,10 +140,10 @@ class FantasyPlayerChip extends StatelessWidget {
                   ),
               ],
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 3),
             Container(
               width: width,
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHigh,
                 borderRadius: BorderRadius.circular(9),
