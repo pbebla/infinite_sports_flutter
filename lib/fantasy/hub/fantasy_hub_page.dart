@@ -287,7 +287,10 @@ class _HubBody extends StatelessWidget {
                         initialName: manager!.teamName,
                         onSave: saveTeamName,
                       ),
-              bottom: FantasyDeadlineChip(
+              // FPL-style live countdown (P3b Task 4): ticking D/H/M/S boxes
+              // while the gameweek is open under the auto lock; the override
+              // and locked states keep their chips.
+              bottom: FantasyDeadlineCountdown(
                 gameweeks: gameweeks,
                 lockOverride: configState.lockOverride,
               ),

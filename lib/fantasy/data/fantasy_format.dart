@@ -40,3 +40,20 @@ String formatCountdown(Duration d) {
   if (d.inDays < 1) return '${d.inHours}h ${d.inMinutes % 60}m';
   return '${d.inDays}d ${d.inHours % 24}h';
 }
+
+/// The live countdown's Days/Hours/Min/Sec breakdown (P3b feedback Task 4).
+/// Zero or negative (the lock has passed — the widget flips to its locked
+/// face) clamps to all zeros, never negative digits.
+({int days, int hours, int minutes, int seconds}) countdownParts(Duration d) {
+  if (d <= Duration.zero) return (days: 0, hours: 0, minutes: 0, seconds: 0);
+  return (
+    days: d.inDays,
+    hours: d.inHours % 24,
+    minutes: d.inMinutes % 60,
+    seconds: d.inSeconds % 60,
+  );
+}
+
+/// Two-digit box text for the countdown ("04", "59"; 3-digit days pass
+/// through unpadded).
+String countdownDigits(int v) => v.toString().padLeft(2, '0');
