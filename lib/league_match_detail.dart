@@ -2,6 +2,10 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
+import 'package:infinite_sports_flutter/fantasy/match/match_fantasy_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/match/match_fantasy_tab.dart';
 import 'package:infinite_sports_flutter/league_team_detail.dart';
 import 'package:infinite_sports_flutter/match_tabs/box_score_columns.dart';
 import 'package:infinite_sports_flutter/match_tabs/team_box_score_tab.dart';
@@ -65,6 +69,12 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
   PredictionConfig? _predictionConfig;
   StreamSubscription<PredictionConfig>? _configSub;
 
+  /// Fantasy tab gate (P6, spec §11): non-null while the season's
+  /// `Fantasy/<sport>/<season>/Config` node exists — the same live stream
+  /// gate as the league page's Fantasy tab, so the tab pops in/out with it.
+  FantasyConfigState? _fantasyConfig;
+  StreamSubscription<FantasyConfigState?>? _fantasyConfigSub;
+
   // Box-score tallies memoized off the live match (tournamentdetail.dart
   // lag-fix rule): recomputed only when a stream event lands, never in build.
   Map<String, MatchPlayerTally> _matchTallies = const {};
@@ -85,6 +95,13 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
     _configSub = LeagueService.watchPredictionConfig(widget.sport, widget.season)
         .listen((config) {
       if (mounted) setState(() => _predictionConfig = config);
+    });
+    _fantasyConfigSub =
+        FantasyService.watchConfig(widget.sport, widget.season).listen((s) {
+      if (mounted) setState(() => _fantasyConfig = s);
+    }, onError: (Object _) {
+      // Offline/unreachable: the tab simply stays hidden.
+      if (mounted) setState(() => _fantasyConfig = null);
     });
     LeagueService.getStartHour(widget.sport, widget.season).then((h) {
       if (!mounted || h == _startHour) return;
@@ -141,6 +158,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
     _matchSub?.cancel();
     _rosterSub?.cancel();
     _configSub?.cancel();
+    _fantasyConfigSub?.cancel();
     super.dispose();
   }
 
@@ -379,10 +397,21 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
     // hidden — match_lineup_tab.dart survives for the future on-field view.
     final boxScoreColumns = boxScoreColumnsFor(widget.sport);
 
+    // Fantasy tab (P6, spec §11): appended AFTER the stable Summary/team
+    // tabs while the season's Fantasy Config exists and the game isn't a
+    // friendly (friendlies never settle fantasy points).
+    final fantasyOpen = showMatchFantasyTab(
+        configExists: _fantasyConfig != null, stage: match.stage);
+    final tabCount = fantasyOpen ? 4 : 3;
+
     return DefaultTabController(
-      length: 3,
+      length: tabCount,
       child: Scaffold(
         body: NestedScrollView(
+          // Remount the tabbed subtree when the tab count changes live
+          // (league_detail_page.dart's P3.2 rule) so TabBar/TabBarView
+          // re-attach to the re-created controller cleanly.
+          key: ValueKey(tabCount),
           headerSliverBuilder: (context, innerBoxIsScrolled) {
             return [
               SliverAppBar(
@@ -440,6 +469,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
                     const Tab(text: 'Summary'),
                     teamNameTab(team1?.name ?? match.team1Id ?? 'Team 1'),
                     teamNameTab(team2?.name ?? match.team2Id ?? 'Team 2'),
+                    if (fantasyOpen) const Tab(text: 'Fantasy'),
                   ],
                   labelColor: TournamentColors.headerForeground(context),
                   unselectedLabelColor:
@@ -489,6 +519,21 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
                 tallies: _matchTallies,
                 columns: boxScoreColumns,
               ),
+              // Live per-game fantasy points (P6, spec §11): the tab owns
+              // its game/players/squad streams; config + rosters feed down
+              // from this page's existing subscriptions.
+              if (fantasyOpen)
+                MatchFantasyTab(
+                  sport: widget.sport,
+                  season: widget.season,
+                  dateKey: widget.dateKey,
+                  gameIndex: widget.gameIndex,
+                  configState: _fantasyConfig!,
+                  rosterNamesByTeam: {
+                    for (final e in _rosters.entries)
+                      e.key: [for (final p in e.value) p.name],
+                  },
+                ),
             ],
           ),
         ),
