@@ -41,15 +41,21 @@ List<SquadSlot> buildSlots(FantasyConfig cfg) => [
 /// spreads its slots evenly.
 List<({double x, double y})> starterOffsets(FantasyConfig cfg) {
   final out = <({double x, double y})>[];
-  void row(int count, double y) {
+  // [spread] = half the row's total x-width (owner feedback: defenders and
+  // attackers were huddled too close; GK sat too far off the goal).
+  void row(int count, double y, double spread) {
+    if (count == 1) {
+      out.add((x: 0.5, y: y));
+      return;
+    }
     for (var i = 0; i < count; i++) {
-      out.add((x: (i + 1) / (count + 1), y: y));
+      out.add((x: 0.5 - spread + (2 * spread) * i / (count - 1), y: y));
     }
   }
 
-  row(cfg.startersGk, 0.16);
-  row(cfg.startersDef, 0.48);
-  row(cfg.startersAtt, 0.80);
+  row(cfg.startersGk, 0.12, 0);
+  row(cfg.startersDef, 0.46, 0.24);
+  row(cfg.startersAtt, 0.78, 0.26);
   return out;
 }
 
@@ -71,6 +77,28 @@ double pitchWidthFactor(double y) => pitchTopScale + (1 - pitchTopScale) * y;
 /// the drawn grass at every row.
 ({double x, double y}) pitchPerspective(({double x, double y}) o) =>
     (x: 0.5 + (o.x - 0.5) * pitchWidthFactor(o.y), y: o.y);
+
+// ── Owner's "Neon Gold Isometric Soccer Pitch" asset geometry ──────────────
+// The image (assets/fantasy/pitch_neon_gold.jpg, 1024×1536) bakes its own
+// perspective; these fractions were measured off the artwork so slots land on
+// its drawn grass. The pitch surface spans y 0.12–0.84 of the image; its
+// half-width grows from 0.335 (far/top) to 0.474 (near/bottom) of the image
+// width.
+const double pitchAssetTopY = 0.12;
+const double pitchAssetBottomY = 0.84;
+const double pitchAssetHalfTop = 0.335;
+const double pitchAssetHalfBottom = 0.474;
+
+/// Maps a flat starter offset (pitch-relative 0..1, as [starterOffsets]
+/// produces) onto the asset image's own perspective: y lands between the
+/// image's far and near edges, x squeezes by the image's half-width at that
+/// row. Output is in image fractions, ready for an [Alignment].
+({double x, double y}) pitchAssetPerspective(({double x, double y}) o) {
+  final y = pitchAssetTopY + (pitchAssetBottomY - pitchAssetTopY) * o.y;
+  final half =
+      pitchAssetHalfTop + (pitchAssetHalfBottom - pitchAssetHalfTop) * o.y;
+  return (x: 0.5 + (o.x - 0.5) * (half / 0.5), y: y);
+}
 
 /// Lays a saved squad into the fixed slots: each pick lands in the first
 /// empty slot matching its (position, bench). Picks that fit no slot (a

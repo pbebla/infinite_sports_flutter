@@ -54,10 +54,31 @@ void main() {
       expect(offsets[0].x, 0.5); // GK centered
       expect(offsets[0].y, lessThan(offsets[1].y)); // GK above DEF
       expect(offsets[1].y, lessThan(offsets[3].y)); // DEF above ATT
-      expect(offsets[1].x, closeTo(1 / 3, 1e-9));
-      expect(offsets[2].x, closeTo(2 / 3, 1e-9));
-      expect(offsets[3].x, closeTo(1 / 3, 1e-9));
-      expect(offsets[4].x, closeTo(2 / 3, 1e-9));
+      // Owner feedback round: wider spreads — DEF ±0.24, ATT ±0.26.
+      expect(offsets[1].x, closeTo(0.26, 1e-9));
+      expect(offsets[2].x, closeTo(0.74, 1e-9));
+      expect(offsets[3].x, closeTo(0.24, 1e-9));
+      expect(offsets[4].x, closeTo(0.76, 1e-9));
+      // Rows keep symmetric pairs.
+      expect(offsets[1].x + offsets[2].x, closeTo(1, 1e-9));
+      expect(offsets[3].x + offsets[4].x, closeTo(1, 1e-9));
+    });
+
+    test('pitchAssetPerspective lands rows on the artwork grass', () {
+      // Center column stays centered at every depth.
+      expect(pitchAssetPerspective((x: 0.5, y: 0.0)).x, 0.5);
+      expect(pitchAssetPerspective((x: 0.5, y: 1.0)).x, 0.5);
+      // y maps into the image's pitch span.
+      expect(pitchAssetPerspective((x: 0.5, y: 0.0)).y,
+          closeTo(pitchAssetTopY, 1e-9));
+      expect(pitchAssetPerspective((x: 0.5, y: 1.0)).y,
+          closeTo(pitchAssetBottomY, 1e-9));
+      // x squeezes to the image's half-width: far edge tighter than near.
+      final far = pitchAssetPerspective((x: 1.0, y: 0.0)).x;
+      final near = pitchAssetPerspective((x: 1.0, y: 1.0)).x;
+      expect(far, closeTo(0.5 + pitchAssetHalfTop, 1e-9));
+      expect(near, closeTo(0.5 + pitchAssetHalfBottom, 1e-9));
+      expect(far, lessThan(near));
     });
   });
 

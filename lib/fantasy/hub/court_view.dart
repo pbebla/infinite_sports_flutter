@@ -34,6 +34,11 @@ Color fantasyPitchGreen(BuildContext context) =>
         ? const Color(0xFF2E8B57)
         : const Color(0xFF2FA05A);
 
+/// Owner's pick: render his "Neon Gold Isometric Soccer Pitch" artwork as the
+/// pitch instead of the code-drawn trapezoid. Flip to false to fall back to
+/// the painter (kept intact below).
+const bool useNeonPitchAsset = true;
+
 class FantasyCourtView extends StatelessWidget {
   const FantasyCourtView({
     super.key,
@@ -84,40 +89,55 @@ class FantasyCourtView extends StatelessWidget {
     // The trapezoid's surround (the sliver outside the pitch edges).
     final surround = scheme.surfaceContainerLow;
 
-    // Perspective-mapped slot rows: same constants the painter draws with,
-    // so hit zones match the drawn grass exactly.
-    final offsets =
-        starterOffsets(config).map(pitchPerspective).toList(growable: false);
+    // Perspective-mapped slot rows: the mapping matches whichever pitch is
+    // rendered (the asset's measured geometry, or the painter's trapezoid),
+    // so hit zones always match the drawn grass.
+    final offsets = starterOffsets(config)
+        .map(useNeonPitchAsset ? pitchAssetPerspective : pitchPerspective)
+        .toList(growable: false);
     final starterCount = offsets.length;
+
+    final slotStack = Stack(
+      children: [
+        for (var i = 0; i < starterCount; i++)
+          Align(
+            alignment: Alignment(offsets[i].x * 2 - 1, offsets[i].y * 2 - 1),
+            child: _slotWidget(i),
+          ),
+      ],
+    );
 
     return Column(
       children: [
         AspectRatio(
-          // Taller than wide: room for the big photo chips (Task 3) while
-          // 5 starters + pitch still fit a phone width (the page scrolls).
-          aspectRatio: 0.78,
+          // The asset renders at its own 2:3; the painter keeps its 0.78
+          // (taller than wide — room for the big photo chips either way; the
+          // page scrolls).
+          aspectRatio: useNeonPitchAsset ? 1024 / 1536 : 0.78,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(18),
-            child: CustomPaint(
-              painter: _PitchPainter(
-                surround: surround,
-                grassFar: grassFar,
-                grassNear: grassNear,
-                stripe: stripe,
-                lines: lines,
-                glow: glow,
-              ),
-              child: Stack(
-                children: [
-                  for (var i = 0; i < starterCount; i++)
-                    Align(
-                      alignment: Alignment(
-                          offsets[i].x * 2 - 1, offsets[i].y * 2 - 1),
-                      child: _slotWidget(i),
+            child: useNeonPitchAsset
+                ? Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.asset(
+                        'assets/fantasy/pitch_neon_gold.jpg',
+                        fit: BoxFit.fill,
+                      ),
+                      slotStack,
+                    ],
+                  )
+                : CustomPaint(
+                    painter: _PitchPainter(
+                      surround: surround,
+                      grassFar: grassFar,
+                      grassNear: grassNear,
+                      stripe: stripe,
+                      lines: lines,
+                      glow: glow,
                     ),
-                ],
-              ),
-            ),
+                    child: slotStack,
+                  ),
           ),
         ),
         const SizedBox(height: 10),
@@ -145,6 +165,7 @@ class FantasyCourtView extends StatelessWidget {
       key: ValueKey('squad_chip_${pick.playerId}'),
       name: pick.playerId,
       priceTenths: pick.priceTenths,
+      position: slots[i].position,
       photoUrl: photoUrlFor?.call(pick.playerId),
       isCaptain: pick.playerId == captainId,
       isVice: pick.playerId == viceId,

@@ -27,6 +27,7 @@ class FantasyPlayerChip extends StatelessWidget {
     super.key,
     required this.name,
     required this.priceTenths,
+    this.position,
     this.photoUrl,
     this.isCaptain = false,
     this.isVice = false,
@@ -38,6 +39,9 @@ class FantasyPlayerChip extends StatelessWidget {
 
   final String name;
   final int priceTenths;
+
+  /// Shown on the nameplate ("DEF · $5.5M") when provided — owner feedback.
+  final FantasyPosition? position;
 
   /// Profile photo (Task 3) — null/empty renders the initials fallback
   /// immediately (photos never gate content).
@@ -167,9 +171,11 @@ class FantasyPlayerChip extends StatelessWidget {
                   ),
                   const SizedBox(height: 1),
                   Text(
-                    isCaptain
-                        ? '${formatMoneyTenths(priceTenths)} · ×2'
-                        : formatMoneyTenths(priceTenths),
+                    [
+                      if (position != null) position!.db,
+                      formatMoneyTenths(priceTenths),
+                      if (isCaptain) '×2',
+                    ].join(' · '),
                     style: TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.w700,
