@@ -29,6 +29,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/match/match_fantasy_logic.dart';
+import 'package:infinite_sports_flutter/widgets/forfeit_chip.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 class MatchFantasyTab extends StatefulWidget {
@@ -94,6 +95,7 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
   // Memoized off the streams (the tournamentdetail.dart lag-fix rule:
   // recompute on stream events / input changes, never in build).
   MatchFantasyPoints _rows = MatchFantasyPoints.empty;
+  String? _forfeitNote; // spec §8a header note; null = a normal game
   int _earning = 0;
   int? _animateFrom; // non-null exactly when a genuine increase just landed
   bool _showScoreless = false;
@@ -197,8 +199,10 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
       animateFrom =
           (previous != null && earning > previous) ? previous : null;
     }
+    final forfeitNote = matchForfeitNote(node);
     setState(() {
       _rows = rows;
+      _forfeitNote = forfeitNote;
       _earning = earning;
       _animateFrom = animateFrom;
     });
@@ -254,6 +258,11 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
       padding: EdgeInsets.fromLTRB(
           12, 12, 12, 24 + MediaQuery.paddingOf(context).bottom),
       children: [
+        // Forfeit (spec §8a): say so up top, before any "+1" row.
+        if (_forfeitNote != null) ...[
+          _ForfeitNote(text: _forfeitNote!),
+          const SizedBox(height: 12),
+        ],
         if (hasChip) ...[
           _EarningChip(
             value: _earning,
@@ -304,6 +313,48 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
         const SizedBox(height: 12),
         _OpenHubButton(onPressed: _openHub),
       ],
+    );
+  }
+}
+
+/// The forfeit header note (spec §8a): the shared "Forfeit" pill + one
+/// wrapping sentence on a neutral surface — colorScheme only, both themes.
+class _ForfeitNote extends StatelessWidget {
+  const _ForfeitNote({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const ValueKey('match_fantasy_forfeit_note'),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 1),
+            child: ForfeitChip(),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              softWrap: true,
+              style: TextStyle(
+                fontSize: 12.5,
+                height: 1.35,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

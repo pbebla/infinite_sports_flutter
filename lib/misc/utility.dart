@@ -4,6 +4,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
+import 'package:infinite_sports_flutter/misc/forfeit.dart';
 import 'package:infinite_sports_flutter/misc/home_nav.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
@@ -586,6 +587,7 @@ Future<Map<String, List<FutsalGame>>> getAllFutsalGames(sport, season) async {
         game.status = val["status"];
         game.storedTime = (val["Time"] ?? "").toString();
         game.stage = (val["Stage"] ?? "").toString();
+        game.forfeitedBy = parseForfeitedBy(val[kForfeitedByKey]);
         if(val.containsKey("link")) {
           game.link = val["link"];
         }
@@ -632,6 +634,7 @@ Future<Map<String, List<BasketballGame>>> getAllBasketballGames(sport, season) a
         game.status = val["status"] ?? 0;
         game.storedTime = (val["Time"] ?? "").toString();
         game.stage = (val["Stage"] ?? "").toString();
+        game.forfeitedBy = parseForfeitedBy(val[kForfeitedByKey]);
         if(val.containsKey("link")) {
           game.link = val["link"];
         }
@@ -678,6 +681,7 @@ Future<Map<String, List<FlagFootballGame>>> getAllFlagFootballGames(sport, seaso
         game.status = val["status"] ?? 0;
         game.storedTime = (val["Time"] ?? "").toString();
         game.stage = (val["Stage"] ?? "").toString();
+        game.forfeitedBy = parseForfeitedBy(val[kForfeitedByKey]);
         if(val.containsKey("link")) {
           game.link = val["link"];
         }

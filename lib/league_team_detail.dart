@@ -16,6 +16,7 @@ import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:infinite_sports_flutter/widgets/follow_bell.dart';
+import 'package:infinite_sports_flutter/widgets/forfeit_chip.dart';
 import 'package:infinite_sports_flutter/widgets/form_chips.dart';
 import 'package:infinite_sports_flutter/widgets/jersey_painter.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
@@ -954,6 +955,7 @@ class LeagueTeamMatchRow extends StatelessWidget {
     final subtitleBits = [
       _shortDate(m.date),
       if (m.label != 'League') m.label, // Friendly / Semifinal / ...
+      if (m.isForfeit) ForfeitChip.label, // spec §8a "5–0 · Forfeit"
     ];
 
     return ListTile(

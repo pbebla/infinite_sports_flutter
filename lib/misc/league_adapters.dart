@@ -17,6 +17,7 @@
 
 import 'dart:ui' show Color;
 
+import 'package:infinite_sports_flutter/misc/forfeit.dart';
 import 'package:infinite_sports_flutter/misc/match_clock.dart';
 import 'package:infinite_sports_flutter/misc/match_location.dart';
 import 'package:infinite_sports_flutter/misc/parse_helpers.dart';
@@ -69,6 +70,8 @@ String leaguePredictionMatchKey(String dateKey, int index) =>
 ///   stage (so TournamentStage bracket grouping works) and label via
 ///   [stageDisplayName] ('Semifinal', 'Championship', 'Friendly', ...).
 /// - `Clock` (P1) and `Location` (spec §6, render side) parse when present.
+/// - `forfeitedBy` (fantasy spec §8a, the Manager's Forfeit button) lands on
+///   [TournamentMatch.forfeitedBy] so match displays can say "Forfeit".
 TournamentMatch leagueMatchFromGameMap({
   required String dateKey,
   required int index,
@@ -120,6 +123,8 @@ TournamentMatch leagueMatchFromGameMap({
     team1Keeper: str(raw['team1keeper']),
     team2Keeper: str(raw['team2keeper']),
     bracketPosition: index,
+    // Spec §8a: the Manager's explicit Forfeit mark (1 | 2), never inferred.
+    forfeitedBy: parseForfeitedBy(raw[kForfeitedByKey]),
   );
 }
 

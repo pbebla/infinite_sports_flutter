@@ -10,6 +10,7 @@ import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/scorepage.dart';
 import 'package:infinite_sports_flutter/misc/schedule_display.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/widgets/forfeit_chip.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:percent_indicator/percent_indicator.dart';
@@ -65,7 +66,11 @@ class _LiveScorePageState extends State<LiveScorePage> {
       List<Widget> informationRows = [
         Row(
           children: <Widget>[
-            Expanded(child:Text(game.stringStatus,textAlign: TextAlign.left, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: game.statusColor))),
+            Expanded(child: Row(children: [
+              Flexible(child: Text(game.stringStatus,textAlign: TextAlign.left, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: game.statusColor))),
+              // League forfeit (spec §8a): "Final · Forfeit".
+              if (game.forfeitedBy != null) ...[const SizedBox(width: 6), const ForfeitChip()],
+            ])),
             Expanded(child:Text(game is SoccerGame && game.startTime != "" ? game.startTime : gameTimeText(game.storedTime, game.Time),textAlign: TextAlign.right, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
           ],
         ),

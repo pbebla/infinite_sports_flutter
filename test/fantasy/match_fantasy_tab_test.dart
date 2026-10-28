@@ -233,6 +233,40 @@ void main() {
     expect(find.text('+42'), findsOneWidget);
   });
 
+  testWidgets('forfeit (spec §8a): header note, the team that showed up as '
+      '"+1" rows, the forfeiting team omitted', (tester) async {
+    await pumpTab(tester);
+    final node = gameNode(status: 2)
+      ..['team1score'] = 5
+      ..['team2score'] = 0
+      ..['forfeitedBy'] = 2;
+    await emitAll(tester, node: node, viewerSquad: squad());
+
+    expect(find.byKey(const ValueKey('match_fantasy_forfeit_note')),
+        findsOneWidget);
+    expect(find.text('Forfeit'), findsOneWidget);
+    expect(find.textContaining('Wolves forfeited.'), findsOneWidget);
+    // Sharks: four present rostered players, +1 each, stray stats ignored.
+    expect(find.text('+1'), findsNWidgets(4));
+    for (final name in ['Alex (ATT)', 'Gale (GK)', 'Dana (DEF)', 'Yara (DEF)']) {
+      expect(find.text(name), findsOneWidget);
+    }
+    // Wolves forfeited: no rows, no "No returns yet" for Zed.
+    expect(find.textContaining('Zed'), findsNothing);
+    expect(find.textContaining('Wren'), findsNothing);
+    expect(find.byKey(const ValueKey('match_fantasy_scoreless_toggle')),
+        findsNothing);
+    // Viewer: Gale 1 + Dana 1 + Alex 1×2 = 4.
+    expect(find.text('+4'), findsOneWidget);
+  });
+
+  testWidgets('no forfeit note on a normal game', (tester) async {
+    await pumpTab(tester);
+    await emitAll(tester);
+    expect(find.byKey(const ValueKey('match_fantasy_forfeit_note')),
+        findsNothing);
+  });
+
   testWidgets('earning counter tweens on a genuine increase only: live goal '
       'animates; a re-mount with the session store repaints statically',
       (tester) async {

@@ -14,6 +14,12 @@
 // The one multiplier this tab DOES apply is the viewer's captain (×2, ×3
 // while their saved chip is tripleCaptain) — as a labelled callout, never
 // silently.
+//
+// FORFEITS (spec §8a) flow through the SAME engine path (stats_mapper →
+// scorePlayerGame) with the roster-composed attendance: the team that
+// showed up lists "+1" per present player, the forfeiting team is omitted
+// (it did not play), stray recorded events are ignored, and the header
+// carries a short note (matchForfeitNote).
 
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
@@ -21,6 +27,7 @@ import 'package:infinite_sports_flutter/fantasy/engine/player_game_stats.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/scoring.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/stats_mapper.dart';
+import 'package:infinite_sports_flutter/misc/forfeit.dart';
 
 /// Whether the match page shows its Fantasy tab: the season's Fantasy Config
 /// node exists (stream-gated, like the league page's tab) AND the game isn't
@@ -127,8 +134,10 @@ class MatchFantasyPoints {
 /// activities mapped through the engine's stats_mapper with the composed
 /// attendance applied, then scorePlayerGame per player. Players outside the
 /// market carry no fantasy position and are skipped; absent players are
-/// omitted (spec §11). [rosterNamesByTeam] feeds the default-present roster
-/// union (a missing roster degrades to activity-event players only).
+/// omitted (spec §11), and so is a forfeiting team (spec §8a — it did not
+/// play; the team that showed up scores +1 each). [rosterNamesByTeam] feeds
+/// the default-present roster union (a missing roster degrades to
+/// activity-event players only — and, on a forfeit, to nobody).
 Map<String, int> matchGamePoints({
   required Map gameNode,
   required Map<String, List<String>> rosterNamesByTeam,
@@ -153,7 +162,8 @@ Map<String, int> matchGamePoints({
       continue; // defensive: a degenerate node never crashes the tab
     }
     stats.forEach((name, s) {
-      if (!s.present) return; // absent: omitted entirely
+      // Absent, or on a team that forfeited: omitted entirely.
+      if (!s.played) return;
       final position = positions[name];
       if (position == null) return; // not a market player: no fantasy points
       out[name] = scorePlayerGame(s, position, config).total;
@@ -206,6 +216,22 @@ MatchFantasyPoints buildMatchFantasyRows({
   });
   scoreless.sort((a, b) => a.name.compareTo(b.name));
   return MatchFantasyPoints(scored: scored, scoreless: scoreless);
+}
+
+/// The Fantasy tab's header note for a forfeited game (spec §8a), null for
+/// a normal one: who forfeited and what that means for points — the team
+/// that showed up gets the appearance point only, nothing else counts.
+String? matchForfeitNote(Map gameNode) {
+  final by = parseForfeitedBy(gameNode[kForfeitedByKey]);
+  if (by == null) return null;
+  String name(String key) => gameNode[key]?.toString().trim() ?? '';
+  final forfeiter = name('team$by');
+  final showedUp = name('team${3 - by}');
+  final who = forfeiter.isEmpty ? 'A team' : forfeiter;
+  final players =
+      showedUp.isEmpty ? 'Players who showed up' : '$showedUp players present';
+  return '$who forfeited. $players get +1 for the appearance — no other '
+      'points or bonus from this game.';
 }
 
 /// The viewer's captain multiplier: the config's ×3 while their saved chip

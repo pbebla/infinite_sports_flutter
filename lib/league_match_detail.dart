@@ -23,6 +23,7 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_facts_tab.dart';
+import 'package:infinite_sports_flutter/widgets/forfeit_chip.dart';
 import 'package:infinite_sports_flutter/widgets/live_clock.dart';
 import 'package:infinite_sports_flutter/widgets/score_text.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
@@ -242,7 +243,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
         ],
       );
     } else if (isFinished) {
-      scoreWidget = Text(
+      final score = Text(
         '${match.team1Score} - ${match.team2Score}',
         style: TextStyle(
           color: fg,
@@ -250,6 +251,18 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
           fontSize: 28,
         ),
       );
+      // Spec §8a: a forfeited game reads "5 - 0 · Forfeit" in the header.
+      scoreWidget = match.isForfeit
+          ? Column(
+              key: const ValueKey('league_match_forfeit'),
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                score,
+                const SizedBox(height: 4),
+                const ForfeitChip(fontSize: 11.5),
+              ],
+            )
+          : score;
     } else {
       scoreWidget = Column(
         children: [

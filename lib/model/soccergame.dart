@@ -23,6 +23,9 @@ class SoccerGame implements Game {
   @override
   String stage = "";
 
+  @override
+  int? forfeitedBy;
+
   String startTime = "";
 
   String location = "";

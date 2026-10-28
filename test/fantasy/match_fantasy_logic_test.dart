@@ -260,6 +260,92 @@ void main() {
     });
   });
 
+  group('forfeits (spec §8a) — same engine path', () {
+    /// Wolves forfeited after the timeline above was captured: 5–0 Sharks,
+    /// status Final, forfeitedBy 2. Every recorded event is now stray.
+    Map forfeitNode() => gameNode()
+      ..['team1score'] = 5
+      ..['team2score'] = 0
+      ..['status'] = 2
+      ..['forfeitedBy'] = 2;
+
+    test('team that showed up: +1 per present rostered player (stray goals '
+        'ignored, no clean sheet); forfeiting team omitted entirely', () {
+      final points = matchGamePoints(
+        gameNode: forfeitNode(),
+        rosterNamesByTeam: rosters(),
+        players: market(),
+        config: cfg,
+      );
+      // Sharks: Alex/Gale/Dana/Yara each +1 only. Wolves (Wren absent, Zed
+      // present) forfeited: nobody listed.
+      expect(points, {'Alex': 1, 'Gale': 1, 'Dana': 1, 'Yara': 1});
+    });
+
+    test('an absentee on the team that showed up gets nothing (omitted)', () {
+      final node = forfeitNode()..['team1attendance'] = {'Yara': false};
+      final points = matchGamePoints(
+        gameNode: node,
+        rosterNamesByTeam: rosters(),
+        players: market(),
+        config: cfg,
+      );
+      expect(points, {'Alex': 1, 'Gale': 1, 'Dana': 1});
+    });
+
+    test('rows: "+1" scored rows, nothing scoreless; a forfeiting captain '
+        'earns 0 for the viewer', () {
+      final rows = buildMatchFantasyRows(
+        gameNode: forfeitNode(),
+        rosterNamesByTeam: rosters(),
+        players: market(),
+        config: cfg,
+        squad: squad(captain: 'Wren'),
+      );
+      expect([for (final r in rows.scored) r.name],
+          ['Alex', 'Dana', 'Gale', 'Yara']);
+      expect(rows.scored.every((r) => r.points == 1), isTrue);
+      expect(rows.scoreless, isEmpty);
+
+      final points = matchGamePoints(
+        gameNode: forfeitNode(),
+        rosterNamesByTeam: rosters(),
+        players: market(),
+        config: cfg,
+      );
+      // squad(captain: 'Wren') picks Gale, Dana, Wren (captain) and the
+      // Zed bench: Gale 1 + Dana 1 + Wren (forfeiting team, omitted) 0 +
+      // Zed (forfeiting team) 0 = 2 — the ×2 lands on nobody.
+      expect(
+        viewerEarningPoints(
+            gamePointsByName: points,
+            squad: squad(captain: 'Wren'),
+            config: cfg),
+        2,
+      );
+      // Captain Alex (showed up): Gale 1 + Dana 1 + Wren 0 + Alex 1×2 = 4.
+      expect(
+        viewerEarningPoints(
+            gamePointsByName: points, squad: squad(), config: cfg),
+        4,
+      );
+    });
+
+    test('matchForfeitNote names who forfeited; null on a normal game', () {
+      expect(matchForfeitNote(gameNode()), isNull);
+      expect(
+        matchForfeitNote(forfeitNode()),
+        'Wolves forfeited. Sharks players present get +1 for the appearance '
+        '— no other points or bonus from this game.',
+      );
+      expect(
+        matchForfeitNote({'forfeitedBy': '1'}),
+        'A team forfeited. Players who showed up get +1 for the appearance '
+        '— no other points or bonus from this game.',
+      );
+    });
+  });
+
   group('recordEarningValue (animate on genuine increase only)', () {
     test('first sight returns null; re-delivery of the same value returns it '
         'unchanged; an increase returns the lower previous value', () {

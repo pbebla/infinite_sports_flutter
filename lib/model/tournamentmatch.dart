@@ -30,6 +30,12 @@ class TournamentMatch {
   /// Feeder-source expression for team 2 slot.
   final String? team2Source;
 
+  /// League games only (spec §8a): which team forfeited, 1 | 2 — set by the
+  /// league adapter from the Manager's `forfeitedBy` marker (the score is
+  /// then 5–0 for the other team). Always null for tournament matches
+  /// (fromFirebase never reads it — tournaments have no forfeits).
+  final int? forfeitedBy;
+
   const TournamentMatch({
     required this.id,
     required this.stage,
@@ -54,7 +60,11 @@ class TournamentMatch {
     this.team2Seed,
     this.team1Source,
     this.team2Source,
+    this.forfeitedBy,
   });
+
+  /// A league game decided by forfeit — displays label it "5–0 · Forfeit".
+  bool get isForfeit => forfeitedBy != null;
 
   factory TournamentMatch.fromFirebase(String id, Map<dynamic, dynamic> data) {
     Map<String, dynamic>? parseActivity(dynamic raw) {

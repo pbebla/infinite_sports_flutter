@@ -26,6 +26,9 @@ class FlagFootballGame implements Game {
   String stage = "";
 
   @override
+  int? forfeitedBy;
+
+  @override
   String UrlPath = "";
 
   @override
