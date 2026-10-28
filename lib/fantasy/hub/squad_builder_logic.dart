@@ -53,6 +53,25 @@ List<({double x, double y})> starterOffsets(FantasyConfig cfg) {
   return out;
 }
 
+// ── Tilted pitch geometry (P3b feedback Task 2) ────────────────────────────
+// The court paints a TRAPEZOID pitch (narrow at the far/top end, full width
+// at the near/bottom end) — perspective drawn directly in the painter rather
+// than a Matrix4 transform, so the slot widgets stay ordinary Aligns whose
+// hit zones always match the visuals.
+
+/// Width of the pitch's far (top) edge as a fraction of its near (bottom)
+/// edge — shared by the painter's trapezoid and the slot mapping below.
+const double pitchTopScale = 0.74;
+
+/// The pitch's drawable width fraction at row [y] (0 = far/top, 1 = near).
+double pitchWidthFactor(double y) => pitchTopScale + (1 - pitchTopScale) * y;
+
+/// Maps a flat starter offset into the trapezoid: x squeezes toward the
+/// center the farther (higher) the row sits; y is unchanged. Keeps slots on
+/// the drawn grass at every row.
+({double x, double y}) pitchPerspective(({double x, double y}) o) =>
+    (x: 0.5 + (o.x - 0.5) * pitchWidthFactor(o.y), y: o.y);
+
 /// Lays a saved squad into the fixed slots: each pick lands in the first
 /// empty slot matching its (position, bench). Picks that fit no slot (a
 /// malformed node, or a config shrink) are dropped — the resulting draft

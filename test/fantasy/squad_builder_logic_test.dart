@@ -348,6 +348,28 @@ void main() {
       expect(pickerTitle(FantasyPosition.att), 'Pick an attacker');
     });
 
+    test('pitchPerspective squeezes far rows toward the center, keeps the '
+        'center and the near edge fixed (Task 2 trapezoid)', () {
+      // Center column never moves.
+      expect(pitchPerspective((x: 0.5, y: 0.0)).x, 0.5);
+      expect(pitchPerspective((x: 0.5, y: 1.0)).x, 0.5);
+      // The near (bottom) edge keeps its full spread…
+      expect(pitchPerspective((x: 0.0, y: 1.0)).x, 0.0);
+      expect(pitchPerspective((x: 1.0, y: 1.0)).x, 1.0);
+      // …while the far (top) edge squeezes to pitchTopScale of it.
+      expect(pitchPerspective((x: 0.0, y: 0.0)).x,
+          closeTo(0.5 - 0.5 * pitchTopScale, 1e-9));
+      expect(pitchPerspective((x: 1.0, y: 0.0)).x,
+          closeTo(0.5 + 0.5 * pitchTopScale, 1e-9));
+      // Rows squeeze monotonically: the same left-of-center fraction sits
+      // wider (farther from center) on a nearer row.
+      final gkRow = pitchPerspective((x: 1 / 3, y: 0.16)).x;
+      final defRow = pitchPerspective((x: 1 / 3, y: 0.48)).x;
+      expect(defRow, lessThan(gkRow));
+      // y never changes — rows stay rows.
+      expect(pitchPerspective((x: 0.2, y: 0.48)).y, 0.48);
+    });
+
     test('initialsFor', () {
       expect(initialsFor('Dana Wall'), 'DW');
       expect(initialsFor('Pelé'), 'P');
