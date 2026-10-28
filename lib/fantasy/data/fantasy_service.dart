@@ -32,6 +32,7 @@ class FantasyService {
   static final Map<String, Map<String, FantasyManager>> _managersCache = {};
   static final Map<String, List<FantasyMiniLeague>> _miniLeaguesCache = {};
   static final Map<String, List<FantasyNewsPost>> _newsCache = {};
+  static final Map<String, Map<int, FantasyDreamTeam>> _dreamTeamsCache = {};
 
   /// Clears the session caches (sign-out hygiene, tests).
   static void clearSessionCaches() {
@@ -43,6 +44,7 @@ class FantasyService {
     _managersCache.clear();
     _miniLeaguesCache.clear();
     _newsCache.clear();
+    _dreamTeamsCache.clear();
   }
 
   /// Live `Fantasy/<sport>/<season>/Config` → engine FantasyConfig + lock
@@ -280,6 +282,34 @@ class FantasyService {
     if (uid == null) return Future.error(StateError('Not signed in'));
     return _ref('${_root(sport, season)}/MiniLeagues/$leagueId/Members/$uid')
         .set(true);
+  }
+
+  /// Live `DreamTeam` node, whole (P6, spec §10/§13): {gameweek: Team of the
+  /// Week}, functions-written at finalize and admin-overridable. Empty =
+  /// node absent (no finalized gameweek yet) — the hub hides the card.
+  static Stream<Map<int, FantasyDreamTeam>> watchDreamTeams(
+      String sport, String season) async* {
+    final key = _root(sport, season);
+    final seed = _dreamTeamsCache[key];
+    if (seed != null) yield seed;
+    await for (final event in _ref('$key/DreamTeam').onValue) {
+      final teams = dreamTeamsFromNode(event.snapshot.value);
+      _dreamTeamsCache[key] = teams;
+      yield teams;
+    }
+  }
+
+  /// Live RAW game node (P6 match-page Fantasy tab): the undecoded
+  /// `/<sport>/<season>/Date/<dateKey>/<gameIndex>` value the stats mapper
+  /// replays (activities + attendance + scores). null while absent. The
+  /// match page already holds an adapted watchGame listener on this same
+  /// path — the SDK dedupes listeners per path, so this costs no extra
+  /// server subscription.
+  static Stream<Object?> watchGameNode(
+      String sport, String season, String dateKey, int gameIndex) {
+    return _ref('/$sport/$season/Date/$dateKey/$gameIndex')
+        .onValue
+        .map((event) => event.snapshot.value);
   }
 
   /// Live gameweeks derived from the REAL season schedule (one per match

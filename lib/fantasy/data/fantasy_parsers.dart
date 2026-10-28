@@ -454,6 +454,107 @@ List<FantasyNewsPost> newsPostsFromNode(Object? node) {
   return out;
 }
 
+// ── Dream Team of the Week (P6, spec §10/§13) ──────────────────────────────
+// `DreamTeam/<gw>` is functions-written at gameweek finalize (admin-editable
+// in the Manager approval flow) to EXACTLY this shape (finalize_core.ts):
+//
+//   DreamTeam/<gw> = { Players: [ {name, position, points}, ... ],
+//                      ComputedAt: int, Auto: true? }
+//
+// Players come listed GK then DEF then ATT (the config formation), points
+// desc per position. `Auto` absent/false = admin-edited (display-identical —
+// the flag only matters to the finalizer's overwrite rule). <gw> keys are
+// small ints, so RTDB WILL list-coerce the whole node.
+
+/// One Dream Team slot: a market player's name, fantasy position and
+/// bonus-inclusive week points.
+class FantasyDreamTeamPlayer {
+  const FantasyDreamTeamPlayer({
+    required this.name,
+    required this.position,
+    required this.points,
+  });
+
+  final String name;
+  final FantasyPosition position;
+  final int points;
+}
+
+/// One gameweek's Team of the Week.
+class FantasyDreamTeam {
+  const FantasyDreamTeam({
+    required this.players,
+    this.computedAtMs,
+  });
+
+  /// GK first, then DEF, then ATT (the functions' write order is preserved).
+  final List<FantasyDreamTeamPlayer> players;
+  final int? computedAtMs;
+}
+
+/// One `DreamTeam/<gw>` child → team; null when unusable (no parsable
+/// players — the week then simply doesn't render). The Players list
+/// tolerates the index-keyed Map shape RTDB hands back after a hole.
+FantasyDreamTeam? dreamTeamFromNode(Object? node) {
+  if (node is! Map) return null;
+  final rawPlayers = node['Players'];
+  final children = <Object?>[];
+  if (rawPlayers is List) {
+    children.addAll(rawPlayers);
+  } else if (rawPlayers is Map) {
+    // Index-keyed map: keep the functions' write order by index.
+    final entries = rawPlayers.entries
+        .map((e) => (index: int.tryParse(e.key.toString()), value: e.value))
+        .where((e) => e.index != null)
+        .toList()
+      ..sort((a, b) => a.index!.compareTo(b.index!));
+    children.addAll([for (final e in entries) e.value]);
+  }
+  final players = <FantasyDreamTeamPlayer>[];
+  for (final raw in children) {
+    if (raw is! Map) continue;
+    final name = raw['name']?.toString().trim() ?? '';
+    if (name.isEmpty) continue;
+    final FantasyPosition position;
+    try {
+      position = FantasyPosition.parse(raw['position']?.toString() ?? '');
+    } on ArgumentError {
+      continue; // malformed slot: skip, never crash
+    }
+    players.add(FantasyDreamTeamPlayer(
+      name: name,
+      position: position,
+      points: _optInt(raw['points']) ?? 0,
+    ));
+  }
+  if (players.isEmpty) return null;
+  return FantasyDreamTeam(
+    players: players,
+    computedAtMs: _optInt(node['ComputedAt']),
+  );
+}
+
+/// The whole `DreamTeam` node → {gameweek: team}. Tolerates the List shape
+/// (small-int gw keys coerce: index = gameweek number). Empty = node absent
+/// (no finalized gameweek yet) — the hub hides the card entirely.
+Map<int, FantasyDreamTeam> dreamTeamsFromNode(Object? node) {
+  final out = <int, FantasyDreamTeam>{};
+  if (node is Map) {
+    node.forEach((gw, raw) {
+      final week = int.tryParse(gw.toString());
+      if (week == null) return;
+      final team = dreamTeamFromNode(raw);
+      if (team != null) out[week] = team;
+    });
+  } else if (node is List) {
+    for (var i = 0; i < node.length; i++) {
+      final team = dreamTeamFromNode(node[i]);
+      if (team != null) out[i] = team;
+    }
+  }
+  return out;
+}
+
 /// The lock state the hub actually enforces: the owner's override wins,
 /// otherwise the engine's gameweek status. No current gameweek (season over)
 /// counts as locked in auto.
