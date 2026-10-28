@@ -369,3 +369,7 @@ export { onFantasySquadWritten } from './fantasy_transfers';
 // ---- Infinite Fantasy P4 (F): admin send-now reminder push ----
 
 export { sendFantasyReminderNow } from './fantasy_push';
+
+// ---- Infinite Fantasy (spec §15): owner void-a-week re-settle ----
+
+export { onFantasyVoidWritten } from './fantasy_void';

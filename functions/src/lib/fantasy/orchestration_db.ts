@@ -61,6 +61,24 @@ export function lockOverrideOf(configNode: unknown): 'open' | 'locked' | 'auto' 
   return s === 'open' || s === 'locked' ? s : 'auto';
 }
 
+/** One `Voided/<gw>` leaf: ONLY a literal boolean true voids the week (the
+ *  Manager writes true or removes the node — fantasy_admin_models.dart
+ *  voidedGwsFromNode `raw == true` parity); absent/false/junk = counts. */
+export function isVoidFlag(v: unknown): boolean {
+  return v === true;
+}
+
+/** The owner-voided gameweeks (spec §15) out of the `Voided` node, sorted
+ *  ascending. Gameweek keys are small ints, so the node WILL list-coerce —
+ *  childEntries handles both shapes. */
+export function voidedWeeksOf(voidedNode: unknown): number[] {
+  return childEntries(voidedNode)
+    .filter(([, v]) => isVoidFlag(v))
+    .map(([k]) => Number(k))
+    .filter((w) => Number.isInteger(w) && w > 0)
+    .sort((a, b) => a - b);
+}
+
 export interface FantasySeasonRef {
   sport: string;
   season: string;

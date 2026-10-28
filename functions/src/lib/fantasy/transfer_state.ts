@@ -87,15 +87,21 @@ export function chipSetOf(gw: number, cfg: FantasyConfig): number {
 }
 
 /** One manager's honored chip history ({week: chip}) out of the raw History
- *  node — voided chips were stripped before the snapshot, so every chip in
- *  History was really consumed. */
+ *  node — set-repeated chips were stripped before the snapshot, so every
+ *  chip in History was really consumed. EXCEPT in owner-voided gameweeks
+ *  ([voidedWeeks], Voided/<gw> == true, spec §15): a chip played in a week
+ *  that counted zero is REFUNDED, so those weeks are skipped and the chip
+ *  can be played again inside the same set. (The History entry itself keeps
+ *  the chip — it is what the manager locked; un-voiding re-consumes it.) */
 export function priorChipsOfUid(
-  historyRaw: unknown, uid: string,
+  historyRaw: unknown, uid: string, voidedWeeks: readonly number[] = [],
 ): Record<number, string> {
   const out: Record<number, string> = {};
   for (const [w, byUid] of childEntries(historyRaw)) {
     const week = Number(w);
     if (!Number.isInteger(week) || !isPlainMap(byUid)) continue;
+    if (voidedWeeks.includes(week)) continue; // refunded
+
     const entry = byUid[uid];
     if (!isPlainMap(entry)) continue;
     const chip = entry['chip'];
@@ -141,13 +147,18 @@ export interface LockAccounting {
  *  reused within its set, freeze the effective chip, and price the week's
  *  transfers (used vs Free; wildcard/freeHit = unlimited = free — Used stays
  *  recorded, nothing is charged). Malformed squads pass through verbatim
- *  with no accounting (finalize skips them the same way). */
+ *  with no accounting (finalize skips them the same way). Chips from
+ *  owner-voided weeks ([voidedWeeks]) never count as used (refund — see
+ *  priorChipsOfUid). The cost is still frozen for a voided week: finalize
+ *  waives it while the week stays voided, and an un-void re-settle charges
+ *  exactly what the lock froze. */
 export function lockAccounting(args: {
   squadsByUid: Record<string, unknown>;
   statesByUid: Record<string, unknown>;
   historyRaw: unknown;
   cfg: FantasyConfig;
   gw: number;
+  voidedWeeks?: readonly number[];
 }): LockAccounting {
   const { cfg, gw } = args;
   const cleanSquads: Record<string, unknown> = {};
@@ -167,7 +178,10 @@ export function lockAccounting(args: {
 
     let chip = squad.chip;
     if (chip !== null && shouldVoidChip({
-      chip, gw, priorChips: priorChipsOfUid(args.historyRaw, uid), cfg,
+      chip,
+      gw,
+      priorChips: priorChipsOfUid(args.historyRaw, uid, args.voidedWeeks),
+      cfg,
     })) {
       voided.push({ uid, chip });
       chip = null;

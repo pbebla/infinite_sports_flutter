@@ -105,6 +105,15 @@ describe('chip sets + voiding', () => {
       chip: 'benchBoost', gw: 5, priorChips: { 5: 'benchBoost' }, cfg,
     })).toBe(false); // only EARLIER weeks void (this week's own History rerun)
   });
+
+  it('priorChipsOfUid skips owner-voided weeks (the chip is refunded)', () => {
+    const history = {
+      1: { me: { chip: 'wildcard' } },
+      2: { me: { chip: 'freeHit' } },
+    };
+    expect(priorChipsOfUid(history, 'me', [1])).toEqual({ 2: 'freeHit' });
+    expect(priorChipsOfUid(history, 'me', [1, 2])).toEqual({});
+  });
 });
 
 describe('lockAccounting', () => {
@@ -151,6 +160,25 @@ describe('lockAccounting', () => {
       mkSquadMap(['A', 'B', 'C', 'D', 'E', 'F', 'G']));
     // The voided wildcard grants nothing: the 3 transfers cost 1 extra * 4.
     expect(acc.costPointsByUid).toEqual({ me: 4 });
+  });
+
+  it('a chip first played in a VOIDED week is honored again in the same set', () => {
+    // Same squad/history as the void case above, but GW1 was owner-voided:
+    // the wildcard was refunded, so GW3's wildcard stands (unlimited week:
+    // used 3 vs free 2 charges nothing).
+    const squad = mkSquadMap(['A', 'B', 'C', 'D', 'E', 'F', 'G'], 'wildcard');
+    const acc = lockAccounting({
+      squadsByUid: { me: squad },
+      statesByUid: { me: { Free: 2, UsedThisGw: 3 } },
+      historyRaw: { 1: { me: { chip: 'wildcard' } } },
+      cfg,
+      gw: 3,
+      voidedWeeks: [1],
+    });
+    expect(acc.voided).toEqual([]);
+    expect(acc.chipPlayedByUid).toEqual({ me: 'wildcard' });
+    expect(acc.cleanSquads['me']).toEqual(squad); // chip kept
+    expect(acc.costPointsByUid).toEqual({});
   });
 
   it('malformed squads pass through verbatim with no accounting', () => {

@@ -23,11 +23,14 @@
 //   first time the sweep sees the current gameweek locked — never
 //   overwritten, so late sweeps after downtime still snapshot exactly once.
 //
-// - Repriced/<gw> = { At:int, Manual?:true } — the Monday job's done-flag.
-//   Manual:true records "admin had set PriceChanges/<gw>/Manual, the job
-//   stood down". PriceChanges/<gw> itself holds only the client contract
-//   rows: <name>: { delta:int EFFECTIVE tenths } (post-clamp; zero moves
-//   omitted — a ceiling-clamped riser is not a riser).
+// - Repriced/<gw> = { At:int, Manual?:true, Voided?:true } — the Monday
+//   job's done-flag. Manual:true records "admin had set
+//   PriceChanges/<gw>/Manual, the job stood down"; Voided:true records "the
+//   week was owner-voided, the job skipped it" (un-voiding later does NOT
+//   reprice retroactively — prices have moved on). PriceChanges/<gw> itself
+//   holds only the client contract rows: <name>: { delta:int EFFECTIVE
+//   tenths } (post-clamp; zero moves omitted — a ceiling-clamped riser is
+//   not a riser).
 //
 // - PlayerWeeks/<gw>/<name> = int (functions-internal; see finalize_core.ts).
 //
@@ -52,6 +55,22 @@
 //   the Phase G news step (the Dream Team post + the AI drafts). The
 //   News/Drafts, News/Published and Config/DreamTeamPost shapes live in
 //   news.ts.
+//
+// - Voided/<gw> = true (READ-only here; the Manager's "VOID week" toggle
+//   writes true or removes it — spec §15). A voided week settles to zero
+//   (finalize_core.ts VOIDED GAMEWEEKS), its transfer cost is waived (the
+//   lock still freezes TransferCosts/<gw> so an un-void recharges exactly
+//   that), chips played in it are refunded at later locks, the Free Hit
+//   restore + rollover run as normal, the Monday job skips it, and its
+//   Dream Team draft never auto-publishes while the flag stands. Its settle
+//   claims RecapSent/<gw> and NewsDrafted/<gw> as { At, Voided:true }
+//   WITHOUT sending or drafting — regardless of whether a pusher/news dep
+//   was injected, since there is nothing to deliver. Toggling the flag
+//   re-runs the finalize entry (resettleVoidToggle, fantasy_void.ts
+//   trigger). DOCUMENTED CHOICE: un-voiding a week whose guards the void
+//   path already claimed re-settles every score but sends NO late recap and
+//   drafts NO late news — days-late "GW n" pushes after an owner flip-flop
+//   are noise, and the guards are once-only by design.
 //
 // Finalize manager-source precedence (documented contract): the lock
 // snapshot PublishedPicks/<gw> is the law; a rerun without one re-reads the
@@ -79,8 +98,9 @@ import {
 } from './news';
 import {
   allGamesFinal, childEntries, dateKeysOf, FantasyDb, fantasyRoot,
-  fantasySeasonsOf, fullAttendance, gamesOfDate, isPlainMap, lockOverrideOf,
-  marketPlayersOf, marketPricesOf, parseAbsentMap, rosterNamesOf, toIntLoose,
+  fantasySeasonsOf, fullAttendance, gamesOfDate, isPlainMap, isVoidFlag,
+  lockOverrideOf, marketPlayersOf, marketPricesOf, parseAbsentMap,
+  rosterNamesOf, toIntLoose, voidedWeeksOf,
 } from './orchestration_db';
 import { applyDelta, repriceDeltas } from './pricing';
 import {
@@ -325,6 +345,11 @@ export async function finalizeGameweek(
 
   const players = marketPlayersOf(await db.read(`${root}/Players`));
 
+  // Owner voids (spec §15): this week and every other voided week resum as
+  // zero; chips from voided weeks are refunded in the lock accounting.
+  const voidedWeeks = voidedWeeksOf(await db.read(`${root}/Voided`));
+  const voided = voidedWeeks.includes(gw.number);
+
   // Manager squads: PublishedPicks (the lock snapshot) -> History (squad
   // part, for deterministic reruns) -> live Squads (first-run fallback; the
   // callers gate WHICH gameweeks may use it).
@@ -357,6 +382,7 @@ export async function finalizeGameweek(
       historyRaw,
       cfg,
       gw: gw.number,
+      voidedWeeks,
     });
     squadsByUid = acc.cleanSquads;
     for (const v of acc.voided) {
@@ -409,6 +435,7 @@ export async function finalizeGameweek(
     playerWeeksByWeek,
     historyTenthsByWeek,
     dreamTeamAuto,
+    voidedWeeks,
     nowMs: args.nowUtc.getTime(),
   });
 
@@ -431,7 +458,10 @@ export async function finalizeGameweek(
   }
   if (out.dreamTeam !== null) {
     await db.write(`${root}/DreamTeam/${gw.number}`, out.dreamTeam);
-  } else {
+  } else if (out.removeAutoDreamTeam) {
+    await db.write(`${root}/DreamTeam/${gw.number}`, null);
+    log.info('fantasy finalize: voided week — auto DreamTeam removed', ctx);
+  } else if (dreamTeamAuto === false) {
     log.info('fantasy finalize: DreamTeam admin-edited — preserved', ctx);
   }
 
@@ -442,10 +472,25 @@ export async function finalizeGameweek(
       db, root, cfg, gw.number, Object.keys(out.historyByUid), log, ctx);
   }
 
+  // Owner-voided week: claim both once-only guards WITHOUT pushing or
+  // drafting (pusher or not — nothing to deliver), so neither fires later,
+  // not even after an un-void (documented choice; see header).
+  if (voided) {
+    for (const guard of ['RecapSent', 'NewsDrafted']) {
+      const path = `${root}/${guard}/${gw.number}`;
+      if ((await db.read(path)) != null) continue;
+      if (await db.writeIfAbsent(path,
+        { At: args.nowUtc.getTime(), Voided: true })) {
+        log.info('fantasy finalize: voided week — guard claimed, nothing sent',
+          { ...ctx, guard });
+      }
+    }
+  }
+
   // Phase F: weekly recap push, once per gameweek (RecapSent-guarded — the
   // recap tells the FIRST settle's story; score-edit reruns never re-push).
   const pusher = args.deps?.pusher;
-  if (pusher && Object.keys(out.historyByUid).length > 0 &&
+  if (!voided && pusher && Object.keys(out.historyByUid).length > 0 &&
     (await db.read(`${root}/RecapSent/${gw.number}`)) == null) {
     const won = await db.writeIfAbsent(`${root}/RecapSent/${gw.number}`,
       { At: args.nowUtc.getTime() });
@@ -475,7 +520,7 @@ export async function finalizeGameweek(
   // DreamTeam node the hub reads — while the 2–4 AI drafts land only when
   // the Anthropic call succeeds: an API failure or blank key writes NOTHING
   // (logged) and never blocks the finalize (spec §13).
-  if ((await db.read(`${root}/NewsDrafted/${gw.number}`)) == null) {
+  if (!voided && (await db.read(`${root}/NewsDrafted/${gw.number}`)) == null) {
     const wonNews = await db.writeIfAbsent(`${root}/NewsDrafted/${gw.number}`,
       { At: args.nowUtc.getTime() });
     if (wonNews) {
@@ -537,7 +582,7 @@ export async function finalizeGameweek(
   const managers = Object.keys(out.historyByUid).length;
   log.info('fantasy gameweek finalized', {
     ...ctx, source, managers, games: gameNodes.length,
-    skipped: out.skippedSquadUids.length,
+    skipped: out.skippedSquadUids.length, voided,
   });
   return { managers, source };
 }
@@ -609,6 +654,55 @@ export async function maybeFinalizeGame(
   });
 }
 
+export interface VoidToggleArgs {
+  sport: string;
+  season: string;
+  /** The gameweek number whose Voided/<gw> flag flipped. */
+  gw: number;
+  nowUtc: Date;
+  log?: FantasyLogger;
+  deps?: FantasyJobDeps;
+}
+
+/** The Voided/<gw> trigger entry (spec §15 owner void): the flag flipped
+ *  (voided <-> counts), so re-settle that gameweek through the SAME
+ *  match-day finalize entry — every gate applies unchanged (frozen
+ *  lockOverride stands down, pre-lock waits, an incomplete match day waits,
+ *  the first-run guard holds). finalize re-reads the flag itself, so voiding
+ *  and un-voiding are both just a deterministic rerun. A flip on a week that
+ *  has not settled yet changes nothing now: its eventual finalize reads the
+ *  flag. Rollover/Free Hit restore stay RolledGw-guarded (never re-run). */
+export async function resettleVoidToggle(
+  db: FantasyDb, args: VoidToggleArgs,
+): Promise<void> {
+  const { sport, season } = args;
+  const log = args.log ?? silent;
+  const root = fantasyRoot(sport, season);
+  const ctx = { sport, season, gw: args.gw };
+
+  const configNode = await db.read(`${root}/Config`);
+  if (!isPlainMap(configNode)) return; // not fantasy-enabled: stay silent
+  if (lockOverrideOf(configNode) !== 'auto') {
+    log.info('fantasy void: lockOverride frozen — standing down', ctx);
+    return;
+  }
+  // The finalize entry is keyed by match date; map the gameweek onto it.
+  const dates = dateKeysOf(await db.read(`${sport}/${season}/Date`));
+  const gw = deriveGameweeks(dates, configFromMap(configNode))
+    .find((g) => g.number === args.gw);
+  if (!gw) {
+    log.warn('fantasy void: gameweek not in the schedule — nothing to settle',
+      ctx);
+    return;
+  }
+  const voided = isVoidFlag(await db.read(`${root}/Voided/${args.gw}`));
+  log.info('fantasy void: flag flipped — re-settling',
+    { ...ctx, date: gw.date, voided });
+  await maybeFinalizeGame(db, {
+    sport, season, dateKey: gw.date, nowUtc: args.nowUtc, log, deps: args.deps,
+  });
+}
+
 // ── Phase B: lifecycle sweep ───────────────────────────────────────────────
 
 /** Snapshot every saved squad into PublishedPicks/<gw>, exactly once (spec
@@ -635,6 +729,8 @@ async function snapshotPublishedPicks(
     historyRaw: await db.read(`${root}/History`),
     cfg,
     gw,
+    // Chips from owner-voided weeks are refunded (spec §15).
+    voidedWeeks: voidedWeeksOf(await db.read(`${root}/Voided`)),
   });
   const won = await db.writeIfAbsent(`${root}/PublishedPicks/${gw}`, acc.cleanSquads);
   if (!won) return; // a concurrent sweep won the claim and did the rest
@@ -693,10 +789,14 @@ async function sweepSeason(
   //     to News/Published and leaves the queue — unless the owner already
   //     acted on it (an edit cleared AutoPublishAt, a discard deleted the
   //     draft; see news.ts shouldAutoPublish). Before the season-over
-  //     return, so the last gameweek's post still ships.
+  //     return, so the last gameweek's post still ships. A draft for an
+  //     owner-VOIDED week is held (never deleted — it is the owner's queue):
+  //     its Dream Team no longer exists; an un-void releases it.
+  const voidedNow = voidedWeeksOf(await db.read(`${root}/Voided`));
   for (const [key, draft] of childEntries(await db.read(`${root}/News/Drafts`))) {
     if (!shouldAutoPublish(draft, nowUtc.getTime())) continue;
     const d = draft as Record<string, unknown>;
+    if (voidedNow.includes(toIntLoose(d['Gw']))) continue;
     await db.write(`${root}/News/Published/${key}`, {
       Title: String(d['Title'] ?? ''),
       Body: String(d['Body'] ?? ''),
@@ -852,7 +952,9 @@ export async function sendReminderNow(
  *  Players/<name>/priceTenths, PriceChanges/<gw> rows for the client's
  *  risers & fallers strip, then the Repriced/<gw> done-flag. An admin
  *  PriceChanges/<gw>/Manual == true makes the job stand down for that week
- *  (flagged done with Manual:true so it never re-evaluates). */
+ *  (flagged done with Manual:true so it never re-evaluates); an
+ *  owner-voided week (Voided/<gw> == true) is skipped the same way
+ *  (flagged Voided:true). */
 export async function runMondayReprice(
   db: FantasyDb, nowUtc: Date, log: FantasyLogger = silent,
 ): Promise<void> {
@@ -875,6 +977,14 @@ export async function runMondayReprice(
       const gw = Math.max(...weeks);
 
       if (await db.read(`${root}/Repriced/${gw}`) != null) continue; // done
+      if (isVoidFlag(await db.read(`${root}/Voided/${gw}`))) {
+        // An owner-voided week moves no prices (spec §15); flagged done so
+        // it never re-evaluates.
+        await db.write(`${root}/Repriced/${gw}`,
+          { At: nowUtc.getTime(), Voided: true });
+        log.info('fantasy reprice: voided week — skipped', { ...ctx, gw });
+        continue;
+      }
       if (await db.read(`${root}/PriceChanges/${gw}/Manual`) === true) {
         await db.write(`${root}/Repriced/${gw}`,
           { At: nowUtc.getTime(), Manual: true });

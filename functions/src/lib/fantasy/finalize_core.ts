@@ -48,6 +48,27 @@
 //
 // Transfer costs: Phase E records transfer usage; until it lands the callers
 // pass no costs (zero for everyone). transferCostPointsByUid is the seam.
+//
+// VOIDED GAMEWEEKS (owner control, spec §15: Voided/<gw> == true; the
+// voidedWeeks input). A voided week counts ZERO for every manager:
+//
+// - History/<gw>/<uid> is still written (squad viewer + history browsing
+//   keep working) with TotalTenths: 0 and Voided: true. Breakdown keeps the
+//   would-have-counted slots (audit: what happened on court, none of which
+//   counted). The transfer cost is waived (net is 0, not -cost).
+// - Leaderboards/Gameweek/<gw> rows are written with points 0 (so rank 1,
+//   everyone tied) — NOT omitted: the client's Gameweek scope renders an
+//   omitted week as "Gameweek N hasn't been scored yet", which is false for
+//   a settled-but-void week; zeros render the week as played-and-voided.
+// - Overall and PlayerTotals resums treat EVERY voided week (this one or
+//   any other) as zero, whatever its stored History/PlayerWeeks say — so a
+//   stale entry from before a void can never leak into the totals.
+// - PlayerWeeks/<gw> keeps the REAL week points (functions-internal: the
+//   games happened; the next week's news form-comparison reads them, and the
+//   Monday job skips voided weeks anyway).
+// - DreamTeam/<gw> is not computed; an existing Auto:true node is removed
+//   (removeAutoDreamTeam), an admin-edited one (Auto not true) is left alone.
+// Un-voiding is just a rerun without the flag: everything re-settles back.
 
 import { awardBonus, bpsScore } from './bps';
 import { FantasyConfig, FantasyPosition } from './fantasy_config';
@@ -99,6 +120,9 @@ export interface FinalizeInput {
   /** Existing DreamTeam/<gw> Auto flag: null = node absent (write ours),
    *  true = ours (overwrite on rerun), false = admin-edited (preserve). */
   dreamTeamAuto: boolean | null;
+  /** Every owner-voided gameweek (Voided/<w> == true), possibly including
+   *  [gw] itself. Absent = none. See VOIDED GAMEWEEKS above. */
+  voidedWeeks?: number[];
   nowMs: number;
 }
 
@@ -119,8 +143,14 @@ export interface FinalizeOutput {
   overallBoard: Record<string, { points: number; rank: number; movement?: number }>;
   /** PlayerTotals */
   playerTotals: Record<string, { points: number; ownershipPct: number }>;
-  /** DreamTeam/<gw>; null = leave the admin-edited node alone. */
+  /** DreamTeam/<gw>; null = not ours to write (admin-edited, or a voided
+   *  week — see removeAutoDreamTeam). */
   dreamTeam: DreamTeamNode | null;
+  /** True only for a voided week whose existing DreamTeam/<gw> is ours
+   *  (Auto:true): the caller removes it. An admin node is never removed. */
+  removeAutoDreamTeam: boolean;
+  /** This gameweek is voided (it scored zero). */
+  voided: boolean;
   /** Squads that failed squadFromMap (malformed) — callers log these. */
   skippedSquadUids: string[];
 }
@@ -218,6 +248,8 @@ export function pickDreamTeam(
 export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
   const { cfg, gw, nowMs } = input;
   const costs = input.transferCostPointsByUid ?? {};
+  const voidedWeeks = new Set(input.voidedWeeks ?? []);
+  const voided = voidedWeeks.has(gw);
 
   // ── Stage 1: mapper — both teams of every game (golden replay parity) ──
   const statsByGame: Record<string, PlayerGameStats>[] = [];
@@ -280,11 +312,13 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
     const result = scoreSquadWeek(squad, week, cfg);
     const gross = totalTenths(result);
     const cost = costs[uid] ?? 0;
-    const net = gross - cost * 10;
+    // A voided week counts zero — the transfer cost is waived with it.
+    const net = voided ? 0 : gross - cost * 10;
     weekTenthsByUid[uid] = net;
     historyByUid[uid] = {
       ...squadToMap(squad),
       TotalTenths: net,
+      ...(voided ? { Voided: true } : {}),
       Breakdown: result.slots.map((s) => ({
         playerId: s.playerId,
         countedTenths: s.countedTenths,
@@ -309,15 +343,23 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
 
   // ── Stage 5: Overall = resum across History weeks with this week swapped
   // in (rerun-idempotent: the stored TotalTenths of other weeks are already
-  // net). ──
-  const historyTenths: Record<number, Record<string, number>> = {
+  // net). Every voided week resums as zero for its managers (they still
+  // appear — a voided week is played, just not counted). ──
+  const historyTenths: Record<number, Record<string, number>> = {};
+  const historyAll: Record<number, Record<string, number>> = {
     ...input.historyTenthsByWeek,
     [gw]: weekTenthsByUid,
   };
+  for (const [w, byUid] of Object.entries(historyAll)) {
+    const week = Number(w);
+    historyTenths[week] = voidedWeeks.has(week)
+      ? Object.fromEntries(Object.keys(byUid).map((uid) => [uid, 0]))
+      : byUid;
+  }
   const overallBoard = composeOverallBoard(historyTenths);
 
-  // ── Stage 6: PlayerTotals (season sum incl. bonus + this week's
-  // ownership) ──
+  // ── Stage 6: PlayerTotals (season sum incl. bonus over NON-voided weeks
+  // + this week's ownership) ──
   const weeksAll: Record<number, Record<string, number>> = {
     ...input.playerWeeksByWeek,
     [gw]: playerWeeks,
@@ -326,7 +368,8 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
   const playerTotals: Record<string, { points: number; ownershipPct: number }> = {};
   for (const name of Object.keys(input.players)) {
     let points = 0;
-    for (const byName of Object.values(weeksAll)) {
+    for (const [w, byName] of Object.entries(weeksAll)) {
+      if (voidedWeeks.has(Number(w))) continue;
       points += byName[name] ?? 0;
     }
     playerTotals[name] = {
@@ -337,8 +380,9 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
     };
   }
 
-  // ── Stage 7: Dream Team (admin edits win) ──
-  const dreamTeam = input.dreamTeamAuto === false
+  // ── Stage 7: Dream Team (admin edits win; a voided week has none, and
+  // only OUR earlier node is taken down) ──
+  const dreamTeam = voided || input.dreamTeamAuto === false
     ? null
     : pickDreamTeam(playerWeeks, input.players, cfg, nowMs);
 
@@ -349,6 +393,8 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
     overallBoard,
     playerTotals,
     dreamTeam,
+    removeAutoDreamTeam: voided && input.dreamTeamAuto === true,
+    voided,
     skippedSquadUids,
   };
 }

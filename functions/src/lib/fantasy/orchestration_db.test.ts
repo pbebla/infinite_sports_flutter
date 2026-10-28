@@ -5,8 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   allGamesFinal, childEntries, dateKeysOf, fantasySeasonsOf, fullAttendance,
-  gamesOfDate, lockOverrideOf, marketPlayersOf, marketPricesOf,
-  parseAbsentMap, rosterNamesOf, toIntLoose,
+  gamesOfDate, isVoidFlag, lockOverrideOf, marketPlayersOf, marketPricesOf,
+  parseAbsentMap, rosterNamesOf, toIntLoose, voidedWeeksOf,
 } from './orchestration_db';
 
 describe('toIntLoose', () => {
@@ -61,6 +61,23 @@ describe('lockOverrideOf', () => {
     expect(lockOverrideOf({ lockOverride: 'open' })).toBe('open');
     expect(lockOverrideOf({ lockOverride: 'locked' })).toBe('locked');
     expect(lockOverrideOf(null)).toBe('auto');
+  });
+});
+
+describe('owner void flags (Voided/<gw> = true)', () => {
+  it('isVoidFlag: only a literal boolean true voids', () => {
+    expect(isVoidFlag(true)).toBe(true);
+    expect(isVoidFlag(false)).toBe(false);
+    expect(isVoidFlag('true')).toBe(false);
+    expect(isVoidFlag(1)).toBe(false);
+    expect(isVoidFlag(null)).toBe(false);
+  });
+  it('voidedWeeksOf: true leaves only, sorted, list coercion tolerated', () => {
+    expect(voidedWeeksOf({ 4: true, 2: true, 3: false, 5: 'true', x: true }))
+      .toEqual([2, 4]);
+    // Small-int gameweek keys list-coerce: index = gameweek.
+    expect(voidedWeeksOf([null, true, false, true])).toEqual([1, 3]);
+    expect(voidedWeeksOf(null)).toEqual([]);
   });
 });
 

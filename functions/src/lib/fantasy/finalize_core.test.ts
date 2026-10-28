@@ -347,6 +347,100 @@ describe('computeGameweekFinalize edges', () => {
     expect('Gus' in out.playerTotals).toBe(false);
   });
 
+  it('a VOIDED week: zero for everyone (cost waived), marker, real Breakdown', () => {
+    // Golden week 1 with churn's 4-point cost, voided. Hand math: every net
+    // is 0 (churn NOT -40: the cost is waived with the week) -> weekly
+    // whole points 0, all tied at rank 1; Overall = this lone zero week
+    // (no earlier week -> movement omitted). PlayerTotals skip the week:
+    // every points 0, ownership still this week's real holdings (Bea 2/3
+    // = 67, Bo 1/3 = 33, Eva 3/3 = 100). PlayerWeeks keep the real points.
+    const input = baseInput();
+    input.voidedWeeks = [1];
+    const out = computeGameweekFinalize(input);
+    expect(out.voided).toBe(true);
+    for (const uid of ['alpha', 'boost', 'churn']) {
+      expect(out.historyByUid[uid]['TotalTenths']).toBe(0);
+      expect(out.historyByUid[uid]['Voided']).toBe(true);
+    }
+    // The squad viewer still has the squad + the would-have-counted slots.
+    expect(out.historyByUid['alpha']['captainId']).toBe('Ezra');
+    expect(out.historyByUid['alpha']['Breakdown']).toEqual([
+      { playerId: 'Eli', countedTenths: 0, multiplier: 1, autoSubbedIn: false },
+      { playerId: 'Dana', countedTenths: 130, multiplier: 1, autoSubbedIn: false },
+      { playerId: 'Eva', countedTenths: -30, multiplier: 1, autoSubbedIn: false },
+      { playerId: 'Ezra', countedTenths: 0, multiplier: 1, autoSubbedIn: false },
+      { playerId: 'Alex', countedTenths: 240, multiplier: 2, autoSubbedIn: false },
+      { playerId: 'Will', countedTenths: -20, multiplier: 1, autoSubbedIn: false },
+      { playerId: 'Wren', countedTenths: 30, multiplier: 1, autoSubbedIn: true },
+    ]);
+    expect(out.gameweekBoard).toEqual({
+      alpha: { points: 0, rank: 1 },
+      boost: { points: 0, rank: 1 },
+      churn: { points: 0, rank: 1 },
+    });
+    expect(out.overallBoard).toEqual({
+      alpha: { points: 0, rank: 1 },
+      boost: { points: 0, rank: 1 },
+      churn: { points: 0, rank: 1 },
+    });
+    expect(out.playerWeeks).toEqual(WEEK_POINTS);
+    expect(out.playerTotals['Bea']).toEqual({ points: 0, ownershipPct: 67 });
+    expect(out.playerTotals['Bo']).toEqual({ points: 0, ownershipPct: 33 });
+    expect(out.playerTotals['Eva']).toEqual({ points: 0, ownershipPct: 100 });
+    expect(out.dreamTeam).toBeNull();
+    expect(out.removeAutoDreamTeam).toBe(false); // nothing of ours existed
+  });
+
+  it('voided week Dream Team: ours is taken down, an admin edit is not', () => {
+    const ours = baseInput();
+    ours.voidedWeeks = [1];
+    ours.dreamTeamAuto = true;
+    const a = computeGameweekFinalize(ours);
+    expect(a.dreamTeam).toBeNull();
+    expect(a.removeAutoDreamTeam).toBe(true);
+
+    const admin = baseInput();
+    admin.voidedWeeks = [1];
+    admin.dreamTeamAuto = false;
+    const b = computeGameweekFinalize(admin);
+    expect(b.dreamTeam).toBeNull();
+    expect(b.removeAutoDreamTeam).toBe(false);
+
+    // A normal week never removes anything.
+    const normal = baseInput();
+    normal.dreamTeamAuto = true;
+    expect(computeGameweekFinalize(normal).removeAutoDreamTeam).toBe(false);
+  });
+
+  it('an EARLIER voided week resums as zero even if its stored values are not', () => {
+    // Week 1 stored nets 350/440/555 and player weeks Bea 15 / Bo 12, but
+    // week 1 is voided. Week 2 replays the golden games with no costs:
+    // nets 350/440/595 -> 35/44/59. Overall = 0 + week 2 = 35/44/59 ->
+    // ranks alpha 3, boost 2, churn 1. Standings before week 2 = the voided
+    // week, all 0 -> everyone rank 1 -> movement = 1 - rank: alpha -2,
+    // boost -1, churn 0. (Without the void: 70/88/114, movement 0.)
+    // PlayerTotals = week 2 only: Bea 15, Bo 12, Sam 9.
+    const input = baseInput();
+    input.gw = 2;
+    input.transferCostPointsByUid = {};
+    input.historyTenthsByWeek = { 1: { alpha: 350, boost: 440, churn: 555 } };
+    input.playerWeeksByWeek = { 1: { Bea: 15, Bo: 12 } };
+    input.voidedWeeks = [1];
+    const out = computeGameweekFinalize(input);
+    expect(out.voided).toBe(false);
+    expect('Voided' in out.historyByUid['alpha']).toBe(false);
+    expect(out.historyByUid['churn']['TotalTenths']).toBe(595);
+    expect(out.overallBoard).toEqual({
+      alpha: { points: 35, rank: 3, movement: -2 },
+      boost: { points: 44, rank: 2, movement: -1 },
+      churn: { points: 59, rank: 1, movement: 0 },
+    });
+    expect(out.playerTotals['Bea'].points).toBe(15);
+    expect(out.playerTotals['Bo'].points).toBe(12);
+    expect(out.playerTotals['Sam'].points).toBe(9);
+    expect(out.dreamTeam).not.toBeNull();
+  });
+
   it('zero managers: boards empty, player data still computed', () => {
     const input = baseInput();
     input.squadsByUid = {};
