@@ -69,8 +69,11 @@ Basketball and Flag Football are later scoring tables, not rebuilds.
 | Wildcard | Unlimited free transfers, permanent rebuild |
 | Free Hit | Unlimited transfers for one week; previous squad returns after |
 
-Set 1 expires at a configurable mid-season gameweek deadline (unused chips do not
-carry over); set 2 runs to season end.
+Set 1 is usable **GW1 through a configurable gameweek (default GW6)**; unused
+set-1 chips expire. Set 2 runs **from the next gameweek through the end of the
+season INCLUDING playoffs** (quarterfinals/semis/final count as gameweeks) —
+owner decision 2026-10-27. UI shows per-chip availability counts ("1 left")
+rather than only the one-active-per-gameweek rule, to avoid confusion.
 
 ## 7. Scoring (futsal — FINAL, owner-approved)
 
