@@ -22,6 +22,62 @@ import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 /// single-sourced on the shared brand surface (FantasyBanner).
 Color fantasyAccent(BuildContext context) => FantasyBanner.accent(context);
 
+/// The fantasy photo-or-initials avatar (house rule: photos never gate
+/// content — initials render instantly under the load and stay on error).
+/// Shared by the squad chip, the market rows and the player detail sheet.
+class FantasyAvatar extends StatelessWidget {
+  const FantasyAvatar({
+    super.key,
+    required this.name,
+    this.photoUrl,
+    this.size = 44,
+  });
+
+  final String name;
+  final String? photoUrl;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final initials = Center(
+      child: Text(
+        initialsFor(name),
+        style: TextStyle(
+          fontSize: size * 0.30,
+          fontWeight: FontWeight.w700,
+          color: scheme.onSurfaceVariant,
+        ),
+      ),
+    );
+    final hasPhoto = photoUrl != null && photoUrl!.isNotEmpty;
+    return Container(
+      width: size,
+      height: size,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: scheme.surfaceContainerHighest,
+      ),
+      child: hasPhoto
+          ? CachedNetworkImage(
+              imageUrl: photoUrl!,
+              fit: BoxFit.cover,
+              width: size,
+              height: size,
+              fadeInDuration: reduceMotion
+                  ? Duration.zero
+                  : const Duration(milliseconds: 200),
+              placeholderFadeInDuration: Duration.zero,
+              placeholder: (_, __) => initials,
+              errorWidget: (_, __, ___) => initials,
+            )
+          : initials,
+    );
+  }
+}
+
 class FantasyPlayerChip extends StatelessWidget {
   const FantasyPlayerChip({
     super.key,
@@ -63,44 +119,9 @@ class FantasyPlayerChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final accent = fantasyAccent(context);
-    final reduceMotion = MediaQuery.disableAnimationsOf(context);
 
-    final initials = Center(
-      child: Text(
-        initialsFor(name),
-        style: TextStyle(
-          fontSize: avatarSize * 0.30,
-          fontWeight: FontWeight.w700,
-          color: scheme.onSurfaceVariant,
-        ),
-      ),
-    );
-    final hasPhoto = photoUrl != null && photoUrl!.isNotEmpty;
-    final avatar = Container(
-      width: avatarSize,
-      height: avatarSize,
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: scheme.surfaceContainerHighest,
-      ),
-      child: hasPhoto
-          ? CachedNetworkImage(
-              imageUrl: photoUrl!,
-              fit: BoxFit.cover,
-              width: avatarSize,
-              height: avatarSize,
-              fadeInDuration: reduceMotion
-                  ? Duration.zero
-                  : const Duration(milliseconds: 200),
-              placeholderFadeInDuration: Duration.zero,
-              // Initials render instantly under the photo load and stay on
-              // error — the photo never gates the chip.
-              placeholder: (_, __) => initials,
-              errorWidget: (_, __, ___) => initials,
-            )
-          : initials,
-    );
+    final avatar =
+        FantasyAvatar(name: name, photoUrl: photoUrl, size: avatarSize);
 
     return InkWell(
       onTap: onTap,

@@ -4,12 +4,15 @@
 // when the gameweek locks the SAME layout stays and only the header swaps to
 // the compact live-strip placeholder while every edit affordance disables.
 //
-// Draft model: fixed slots from the live config (a GK slot only ever holds a
-// GK), the engine's validateSquad running live on every change, human
-// sentences inline, Save enabled only when the draft is valid AND changed.
-// Self-echo safety: a successful save marks the draft clean; the write then
-// echoes back on the squad stream and is adopted as-is (identical content —
-// no double-apply, no flicker).
+// Draft model (P3c: lifted into the shared SquadDraftController so the
+// Players market edits the same draft): fixed slots from the live config (a
+// GK slot only ever holds a GK), the engine's validateSquad running live on
+// every change, human sentences inline, Save enabled only when the draft is
+// valid AND changed. Self-echo safety: a successful save marks the draft
+// clean; the write then echoes back on the squad stream and is adopted as-is
+// (identical content — no double-apply, no flicker). When the hub passes a
+// shared [draft] it also feeds the squad stream into it; standalone (tests),
+// the builder owns a private controller and subscribes itself.
 //
 // House rules: streams only; colorScheme + the gold/primary fantasy accent
 // pairing; scrollable clears the glass navbar; snackbars surface every
@@ -28,6 +31,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/chip_row.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_picker_sheet.dart';
 
 class FantasySquadBuilder extends StatefulWidget {
@@ -40,6 +44,7 @@ class FantasySquadBuilder extends StatefulWidget {
     required this.squadStates,
     this.initialSquad,
     required this.onSaveSquad,
+    this.draft,
     this.nowUtc,
   });
 
@@ -59,6 +64,12 @@ class FantasySquadBuilder extends StatefulWidget {
   /// FantasyService.saveMySquad in production.
   final Future<void> Function(FantasySquad squad) onSaveSquad;
 
+  /// The shared draft (P3c): the hub passes its sport/season-scoped
+  /// controller so the Players tab edits the same draft and an unsaved draft
+  /// survives tab swipes. null (standalone/tests) = the builder owns a
+  /// private one and subscribes to [squadStates] itself.
+  final SquadDraftController? draft;
+
   /// Test seam: injected clock (lock computation). null = real UTC now.
   final DateTime Function()? nowUtc;
 
@@ -67,16 +78,8 @@ class FantasySquadBuilder extends StatefulWidget {
 }
 
 class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
-  late List<SquadSlot> _slots;
-  late List<SquadPick?> _picks;
-  String? _captainId;
-  String? _viceId;
-  String? _chip;
-
-  /// True once the user edits; the stream only overwrites a CLEAN draft, so
-  /// in-progress edits survive remote emits and our own save echo (which
-  /// arrives after save marks the draft clean again) applies a no-op.
-  bool _dirty = false;
+  late SquadDraftController _draft;
+  bool _ownsDraft = false;
   bool _saving = false;
 
   StreamSubscription<FantasySquad?>? _squadSub;
@@ -93,9 +96,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
   @override
   void initState() {
     super.initState();
-    _slots = buildSlots(widget.config);
-    _adopt(widget.initialSquad);
-    _subscribe();
+    _attachDraft();
     // 30s tick keeps the editable/locked flip honest around the deadline
     // (same cadence as the deadline chip); cancelled in dispose.
     _lockTicker = Timer.periodic(const Duration(seconds: 30), (_) {
@@ -103,64 +104,61 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
     });
   }
 
+  /// Shared draft: use the hub's controller as-is (the hub feeds it the
+  /// squad stream and config). Own draft: create, adopt the initial squad
+  /// and subscribe to the stream ourselves.
+  void _attachDraft() {
+    final shared = widget.draft;
+    _ownsDraft = shared == null;
+    _draft = shared ??
+        SquadDraftController(
+            config: widget.config, initial: widget.initialSquad);
+    _draft.addListener(_onDraftChanged);
+    _squadSub?.cancel();
+    if (_ownsDraft) {
+      _squadSub = widget.squadStates.listen((squad) {
+        if (mounted) _draft.adoptFromStream(squad);
+      });
+    }
+  }
+
+  void _onDraftChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void didUpdateWidget(FantasySquadBuilder old) {
     super.didUpdateWidget(old);
-    if (old.squadStates != widget.squadStates) {
-      _subscribe();
+    if (old.draft != widget.draft) {
+      _draft.removeListener(_onDraftChanged);
+      if (_ownsDraft) _draft.dispose();
+      _attachDraft();
+    } else if (_ownsDraft && old.squadStates != widget.squadStates) {
+      _squadSub?.cancel();
+      _squadSub = widget.squadStates.listen((squad) {
+        if (mounted) _draft.adoptFromStream(squad);
+      });
     }
-    // A formation change in the live config re-shapes the slots; the current
-    // picks re-map into whatever still fits.
-    if (old.config.squadSize != widget.config.squadSize ||
-        old.config.startersDef != widget.config.startersDef ||
-        old.config.startersAtt != widget.config.startersAtt ||
-        old.config.startersGk != widget.config.startersGk ||
-        old.config.benchDef != widget.config.benchDef ||
-        old.config.benchAtt != widget.config.benchAtt) {
-      final current = draftToSquad(
-          slotPicks: _picks,
-          captainId: _captainId,
-          viceId: _viceId,
-          chip: _chip);
-      _slots = buildSlots(widget.config);
-      _picks = picksToSlots(current, _slots);
-    }
-  }
-
-  void _subscribe() {
-    _squadSub?.cancel();
-    _squadSub = widget.squadStates.listen((squad) {
-      if (!mounted || _dirty) return;
-      setState(() => _adopt(squad));
-    });
-  }
-
-  void _adopt(FantasySquad? squad) {
-    _picks = picksToSlots(squad, _slots);
-    _captainId =
-        (squad?.captainId.isNotEmpty ?? false) ? squad!.captainId : null;
-    _viceId = (squad?.viceId.isNotEmpty ?? false) ? squad!.viceId : null;
-    _chip = squad?.chip;
-    _dirty = false;
+    // A formation change in the live config re-shapes the slots; the
+    // controller re-maps the current picks into whatever still fits. (The
+    // hub syncs its shared controller too — syncConfig is idempotent.)
+    _draft.syncConfig(widget.config);
   }
 
   @override
   void dispose() {
     _squadSub?.cancel();
     _lockTicker?.cancel();
+    _draft.removeListener(_onDraftChanged);
+    if (_ownsDraft) _draft.dispose();
     super.dispose();
   }
 
   // ── Edit actions ───────────────────────────────────────────────────────
 
-  Set<String> get _squadIds =>
-      {for (final p in _picks) if (p != null) p.playerId};
-
-  int get _spent => draftSpentTenths(_picks);
-
   Future<void> _onSlotTap(int i) async {
     if (!_editable) return;
-    final pick = _picks[i];
+    final pick = _draft.picks[i];
     if (pick == null) {
       await _pickInto(i, remainingExtraTenths: 0);
     } else {
@@ -172,91 +170,65 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
   /// player's price on a swap (their money comes back for this pick).
   Future<void> _pickInto(int i, {required int remainingExtraTenths}) async {
     final remaining =
-        widget.config.budgetTenths - _spent + remainingExtraTenths;
+        widget.config.budgetTenths - _draft.spentTenths + remainingExtraTenths;
     final player = await showSquadPickerSheet(
       context,
-      position: _slots[i].position,
+      position: _draft.slots[i].position,
       players: widget.players,
-      excludeIds: _squadIds,
+      excludeIds: _draft.playerIds,
       remainingTenths: remaining,
     );
     if (player == null || !mounted) return;
-    final outgoing = _picks[i];
-    setState(() {
-      _picks[i] = SquadPick(
-        playerId: player.name,
-        position: player.position,
-        priceTenths: player.priceTenths,
-        bench: _slots[i].bench,
-      );
-      _dirty = true;
-      if (outgoing != null) _clearArmbandFor(outgoing.playerId);
-    });
+    final message = _draft.setPickAt(
+        i,
+        SquadPick(
+          playerId: player.name,
+          position: player.position,
+          priceTenths: player.priceTenths,
+          bench: _draft.slots[i].bench,
+        ));
+    _announceArmbandLoss(message);
   }
 
   Future<void> _chipActions(int i, SquadPick pick) async {
     final action = await showSquadChipActions(
       context,
       playerName: pick.playerId,
-      bench: _slots[i].bench,
-      isCaptain: pick.playerId == _captainId,
-      isVice: pick.playerId == _viceId,
+      bench: _draft.slots[i].bench,
+      isCaptain: pick.playerId == _draft.captainId,
+      isVice: pick.playerId == _draft.viceId,
     );
     if (action == null || !mounted) return;
     switch (action) {
       case SquadChipAction.makeCaptain:
-        setState(() {
-          final bands = assignCaptain(
-              id: pick.playerId, captainId: _captainId, viceId: _viceId);
-          _captainId = bands.captainId;
-          _viceId = bands.viceId;
-          _dirty = true;
-        });
+        _draft.makeCaptain(pick.playerId);
       case SquadChipAction.makeVice:
-        setState(() {
-          final bands = assignVice(
-              id: pick.playerId, captainId: _captainId, viceId: _viceId);
-          _captainId = bands.captainId;
-          _viceId = bands.viceId;
-          _dirty = true;
-        });
+        _draft.makeVice(pick.playerId);
       case SquadChipAction.swap:
         await _pickInto(i, remainingExtraTenths: pick.priceTenths);
       case SquadChipAction.remove:
-        setState(() {
-          _picks[i] = null;
-          _dirty = true;
-          _clearArmbandFor(pick.playerId);
-        });
+        _announceArmbandLoss(_draft.removeAt(i));
     }
   }
 
-  /// Clears a removed player's armband and SAYS SO — nothing happens
-  /// silently (spec §2 kindness rule).
-  void _clearArmbandFor(String playerId) {
-    final message = armbandLossMessage(
-        removedId: playerId, captainId: _captainId, viceId: _viceId);
-    if (playerId == _captainId) _captainId = null;
-    if (playerId == _viceId) _viceId = null;
-    if (message != null) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(message)));
-    }
+  /// A removed/swapped-out captain or vice is SAID out loud — nothing
+  /// happens silently (spec §2 kindness rule).
+  void _announceArmbandLoss(String? message) {
+    if (message == null || !mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _save() async {
-    final squad = draftToSquad(
-        slotPicks: _picks, captainId: _captainId, viceId: _viceId, chip: _chip);
+    final squad = _draft.squad;
     setState(() => _saving = true);
     try {
       await widget.onSaveSquad(squad);
       if (!mounted) return;
-      setState(() {
-        // Clean: the stream echo of this very write adopts as a no-op.
-        _dirty = false;
-        _saving = false;
-      });
+      setState(() => _saving = false);
+      // Clean: the stream echo of this very write adopts as a no-op.
+      _draft.markSaved();
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
@@ -281,11 +253,11 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
         if (p.photoUrl != null) p.name: p.photoUrl,
     };
     final issues = issueSentences(
-      slots: _slots,
-      slotPicks: _picks,
-      captainId: _captainId,
-      viceId: _viceId,
-      chip: _chip,
+      slots: _draft.slots,
+      slotPicks: _draft.picks,
+      captainId: _draft.captainId,
+      viceId: _draft.viceId,
+      chip: _draft.chip,
       cfg: widget.config,
     );
     final valid = issues.isEmpty;
@@ -299,16 +271,17 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
         children: [
           // Same layout both states: only this header swaps (spec §10).
           if (editable)
-            _BudgetBar(spent: _spent, budget: widget.config.budgetTenths)
+            _BudgetBar(
+                spent: _draft.spentTenths, budget: widget.config.budgetTenths)
           else
             const _LockedLiveStrip(),
           const SizedBox(height: 12),
           FantasyCourtView(
             config: widget.config,
-            slots: _slots,
-            slotPicks: _picks,
-            captainId: _captainId,
-            viceId: _viceId,
+            slots: _draft.slots,
+            slotPicks: _draft.picks,
+            captainId: _draft.captainId,
+            viceId: _draft.viceId,
             onSlotTap: editable ? _onSlotTap : null,
             // Big photo chips (Task 3): the market's photoUrl per pick;
             // initials fall back instantly when a player has none.
@@ -317,12 +290,9 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
           const SizedBox(height: 14),
           FantasyChipRow(
             config: widget.config,
-            activeChip: _chip,
+            activeChip: _draft.chip,
             enabled: editable,
-            onChipChanged: (chip) => setState(() {
-              _chip = chip;
-              _dirty = true;
-            }),
+            onChipChanged: _draft.setChip,
           ),
           if (editable && issues.isNotEmpty) ...[
             const SizedBox(height: 14),
@@ -333,7 +303,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
             FilledButton(
               key: const ValueKey('squad_save'),
               onPressed:
-                  valid && _dirty && !_saving ? _save : null,
+                  valid && _draft.dirty && !_saving ? _save : null,
               style: FilledButton.styleFrom(
                 backgroundColor: fantasyAccent(context),
                 foregroundColor:
