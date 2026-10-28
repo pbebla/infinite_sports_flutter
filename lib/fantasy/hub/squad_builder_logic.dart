@@ -106,23 +106,73 @@ const double pitchAssetHalfBottom = 0.474;
 }
 
 /// Lays a saved squad into the fixed slots: each pick lands in the first
-/// empty slot matching its (position, bench). Picks that fit no slot (a
-/// malformed node, or a config shrink) are dropped — the resulting draft
-/// simply shows them missing.
-List<SquadPick?> picksToSlots(FantasySquad? squad, List<SquadSlot> slots) {
+/// empty slot matching its (position, bench). Picks that fit NO slot come
+/// back in [unplaced] instead of vanishing — typically a player whose
+/// fantasy position changed (spec §3: the server re-labels holders, so a
+/// GK who became a DEF no longer fits the GK slot and the DEF slots are
+/// full), or a config shrink. The builder shows them in its "Needs a new
+/// spot" strip with Swap/Remove.
+///
+/// Two passes so the MOVED player is the one left over: drafts save picks
+/// in slot order and the server re-labels a pick in place, so a pick that
+/// still fits the slot at its own index keeps it first; the rest then take
+/// the first empty matching slot. (One pass would let a GK re-labelled DEF
+/// at index 0 grab the first DEF slot and strand a defender who never
+/// moved.)
+({List<SquadPick?> slotPicks, List<SquadPick> unplaced}) placePicks(
+    FantasySquad? squad, List<SquadSlot> slots) {
   final out = List<SquadPick?>.filled(slots.length, null);
-  if (squad == null) return out;
-  for (final pick in squad.picks) {
-    for (var i = 0; i < slots.length; i++) {
-      if (out[i] == null &&
-          slots[i].position == pick.position &&
-          slots[i].bench == pick.bench) {
-        out[i] = pick;
-        break;
-      }
+  final unplaced = <SquadPick>[];
+  if (squad == null) return (slotPicks: out, unplaced: unplaced);
+  bool fits(SquadSlot s, SquadPick p) =>
+      s.position == p.position && s.bench == p.bench;
+  final rest = <SquadPick>[];
+  for (var i = 0; i < squad.picks.length; i++) {
+    final pick = squad.picks[i];
+    if (i < slots.length && fits(slots[i], pick)) {
+      out[i] = pick;
+    } else {
+      rest.add(pick);
     }
   }
-  return out;
+  for (final pick in rest) {
+    final i = List.generate(slots.length, (k) => k)
+        .firstWhere((k) => out[k] == null && fits(slots[k], pick),
+            orElse: () => -1);
+    if (i < 0) {
+      unplaced.add(pick);
+    } else {
+      out[i] = pick;
+    }
+  }
+  return (slotPicks: out, unplaced: unplaced);
+}
+
+/// [placePicks]' slot half — read-only viewers (history, other managers)
+/// that just render the court.
+List<SquadPick?> picksToSlots(FantasySquad? squad, List<SquadSlot> slots) =>
+    placePicks(squad, slots).slotPicks;
+
+/// The My Team alert banner sentence (spec §3 holder protection):
+/// "Ann moved to DEF — your team needs rearranging before Sun, Oct 19 ·
+/// 3:00 PM. Swapping him out is free this week." Several changes join with
+/// commas/"and" and the last sentence says "them". [freeThisWeek] false
+/// (the alert's gameweek has passed — its free swap expired) drops the
+/// free-swap sentence.
+String squadAlertText({
+  required List<({String player, FantasyPosition to})> changes,
+  required String deadline,
+  required bool freeThisWeek,
+}) {
+  final parts = [for (final c in changes) '${c.player} moved to ${c.to.db}'];
+  final head = parts.length <= 1
+      ? parts.join()
+      : '${parts.sublist(0, parts.length - 1).join(', ')} and ${parts.last}';
+  final free = freeThisWeek
+      ? ' Swapping ${changes.length == 1 ? 'him' : 'them'} out is free this '
+          'week.'
+      : '';
+  return '$head — your team needs rearranging before $deadline.$free';
 }
 
 /// The engine squad a draft saves as — empty slots skipped, a missing
@@ -245,11 +295,17 @@ List<String> issueSentences({
   required String? viceId,
   String? chip,
   required FantasyConfig cfg,
+  List<SquadPick> unplaced = const [],
 }) {
   final squad = draftToSquad(
       slotPicks: slotPicks, captainId: captainId, viceId: viceId, chip: chip);
   final issues = validateSquad(squad, cfg);
-  final out = <String>[];
+  final out = <String>[
+    // A pick with no fitting slot blocks Save until it's swapped or removed
+    // (it would otherwise save in an illegal formation, or vanish).
+    for (final p in unplaced)
+      'Find ${p.playerId} a new spot — swap him out or remove him.',
+  ];
 
   if (issues.contains(SquadIssue.formation)) {
     int have(FantasyPosition pos, bool bench) => List.generate(slots.length,

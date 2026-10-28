@@ -555,6 +555,71 @@ Map<int, FantasyDreamTeam> dreamTeamsFromNode(Object? node) {
   return out;
 }
 
+// ── Squad alerts (spec §3 holder protection) ─────────────────────────────
+//
+// Functions-written (functions/src/lib/fantasy/position_changes.ts), read
+// own uid only:
+//
+//   SquadAlerts/<uid> = { Gw: int, Changes: [ {player, from, to}, ... ],
+//                         CreatedAt: int }
+//
+// Present while a position change has left this manager's formation
+// illegal; the server clears it on the next save whose formation is legal.
+
+/// One position change behind a squad alert.
+class FantasyPositionChange {
+  const FantasyPositionChange({
+    required this.player,
+    required this.from,
+    required this.to,
+  });
+
+  final String player;
+  final FantasyPosition from;
+  final FantasyPosition to;
+}
+
+/// "Your team needs rearranging" — the hub banner's source.
+class FantasySquadAlert {
+  const FantasySquadAlert({required this.gameweek, required this.changes});
+
+  /// The gameweek the alert (and its free swap) is for.
+  final int gameweek;
+  final List<FantasyPositionChange> changes;
+}
+
+/// `SquadAlerts/<uid>` → alert; null when absent or carrying no usable
+/// change (an empty alert renders nothing). Tolerates the index-keyed Map
+/// shape RTDB hands back for a holed Changes list.
+FantasySquadAlert? squadAlertFromNode(Object? node) {
+  if (node is! Map) return null;
+  final raw = node['Changes'];
+  final children = <Object?>[
+    if (raw is List) ...raw,
+    if (raw is Map) ...raw.values,
+  ];
+  final changes = <FantasyPositionChange>[];
+  for (final c in children) {
+    if (c is! Map) continue;
+    final player = c['player']?.toString().trim() ?? '';
+    if (player.isEmpty) continue;
+    try {
+      changes.add(FantasyPositionChange(
+        player: player,
+        from: FantasyPosition.parse(c['from']?.toString() ?? ''),
+        to: FantasyPosition.parse(c['to']?.toString() ?? ''),
+      ));
+    } on ArgumentError {
+      continue; // malformed change: skip, never crash
+    }
+  }
+  if (changes.isEmpty) return null;
+  return FantasySquadAlert(
+    gameweek: _optInt(node['Gw']) ?? 0,
+    changes: changes,
+  );
+}
+
 /// The lock state the hub actually enforces: the owner's override wins,
 /// otherwise the engine's gameweek status. No current gameweek (season over)
 /// counts as locked in auto.

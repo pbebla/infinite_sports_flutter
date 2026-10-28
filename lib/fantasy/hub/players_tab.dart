@@ -376,6 +376,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
       slotPicks: widget.draft.picks,
       budgetTenths: widget.draft.config.budgetTenths,
       editable: editable,
+      unplaced: widget.draft.unplaced,
     );
     final totals = _totals?[p.name];
     final unaffordable = availability == MarketAddAvailability.unaffordable;

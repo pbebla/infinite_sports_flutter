@@ -46,7 +46,13 @@ class FantasySquadBuilder extends StatefulWidget {
     required this.onSaveSquad,
     this.draft,
     this.nowUtc,
+    this.alert,
   });
+
+  /// The manager's live squad alert (spec §3 holder protection,
+  /// FantasyService.watchMySquadAlert): shown as a banner at the top while
+  /// it exists. null = no banner.
+  final FantasySquadAlert? alert;
 
   final FantasyConfig config;
   final FantasyLockOverride lockOverride;
@@ -211,6 +217,59 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
     }
   }
 
+  /// "Swap" on the Needs-a-new-spot strip: pick a replacement for the hole
+  /// the moved player left (the first empty slot), his money back.
+  Future<void> _swapUnplaced(SquadPick pick) async {
+    if (!_editable) return;
+    final slot = _draft.firstEmptySlot;
+    if (slot == null) {
+      // Unreachable for a position change (the move always leaves a hole);
+      // removing is the honest fallback.
+      _announceArmbandLoss(_draft.removeUnplaced(pick.playerId));
+      return;
+    }
+    final remaining = widget.config.budgetTenths -
+        _draft.spentTenths +
+        pick.priceTenths;
+    final player = await showSquadPickerSheet(
+      context,
+      position: _draft.slots[slot].position,
+      players: widget.players,
+      excludeIds: _draft.playerIds,
+      remainingTenths: remaining,
+    );
+    if (player == null || !mounted) return;
+    _announceArmbandLoss(_draft.swapUnplaced(
+        pick.playerId,
+        slot,
+        SquadPick(
+          playerId: player.name,
+          position: player.position,
+          priceTenths: player.priceTenths,
+          bench: _draft.slots[slot].bench,
+        )));
+  }
+
+  /// The alert banner sentence: the deadline the manager is editing for
+  /// (the current gameweek; the alert's own when none is current), and the
+  /// free-swap promise only while it still holds (the alert's gameweek).
+  String _alertText(FantasySquadAlert alert) {
+    final current = currentGameweek(widget.gameweeks, _now);
+    Gameweek? target = current;
+    if (target == null) {
+      for (final g in widget.gameweeks) {
+        if (g.number == alert.gameweek) target = g;
+      }
+    }
+    return squadAlertText(
+      changes: [
+        for (final c in alert.changes) (player: c.player, to: c.to),
+      ],
+      deadline: target == null ? 'the deadline' : formatAbsoluteLock(target),
+      freeThisWeek: current == null || current.number == alert.gameweek,
+    );
+  }
+
   /// A removed/swapped-out captain or vice is SAID out loud — nothing
   /// happens silently (spec §2 kindness rule).
   void _announceArmbandLoss(String? message) {
@@ -259,8 +318,10 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       viceId: _draft.viceId,
       chip: _draft.chip,
       cfg: widget.config,
+      unplaced: _draft.unplaced,
     );
     final valid = issues.isEmpty;
+    final alert = widget.alert;
 
     return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(
@@ -269,6 +330,12 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
         key: const ValueKey('my_team_ready'),
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Holder protection (spec §3): a position change broke this
+          // squad's formation — say so first, until the server clears it.
+          if (alert != null) ...[
+            _SquadAlertBanner(text: _alertText(alert)),
+            const SizedBox(height: 12),
+          ],
           // Same layout both states: only this header swaps (spec §10).
           if (editable)
             _BudgetBar(
@@ -287,6 +354,16 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
             // initials fall back instantly when a player has none.
             photoUrlFor: (id) => photoByName[id],
           ),
+          if (_draft.unplaced.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _NeedsNewSpotStrip(
+              picks: _draft.unplaced,
+              enabled: editable,
+              onSwap: _swapUnplaced,
+              onRemove: (pick) =>
+                  _announceArmbandLoss(_draft.removeUnplaced(pick.playerId)),
+            ),
+          ],
           const SizedBox(height: 14),
           FantasyChipRow(
             config: widget.config,
@@ -431,6 +508,156 @@ class _LockedLiveStrip extends StatelessWidget {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The holder-protection alert (spec §3): "Ann moved to DEF — your team
+/// needs rearranging before Sun, Oct 19 · 3:00 PM. Swapping him out is
+/// free this week." The error-container pair is a Material 3 scheme role, so it reads
+/// correctly in both light and dark mode.
+class _SquadAlertBanner extends StatelessWidget {
+  const _SquadAlertBanner({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const ValueKey('squad_alert_banner'),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.swap_horiz_rounded,
+              size: 20, color: scheme.onErrorContainer),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              softWrap: true,
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.35,
+                fontWeight: FontWeight.w600,
+                color: scheme.onErrorContainer,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Picks that fit no slot any more (a position change moved them) — shown
+/// instead of silently dropped, each with Swap (pick a replacement for the
+/// hole) and Remove. Disabled while the gameweek is locked.
+class _NeedsNewSpotStrip extends StatelessWidget {
+  const _NeedsNewSpotStrip({
+    required this.picks,
+    required this.enabled,
+    required this.onSwap,
+    required this.onRemove,
+  });
+
+  final List<SquadPick> picks;
+  final bool enabled;
+  final void Function(SquadPick pick) onSwap;
+  final void Function(SquadPick pick) onRemove;
+
+  static String _nowA(FantasyPosition p) => switch (p) {
+        FantasyPosition.gk => 'Now a goalkeeper',
+        FantasyPosition.def => 'Now a defender',
+        FantasyPosition.att => 'Now an attacker',
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final accent = fantasyAccent(context);
+    return Container(
+      key: const ValueKey('unplaced_strip'),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withValues(alpha: 0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Needs a new spot',
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.3,
+              color: scheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 4),
+          for (final pick in picks)
+            Padding(
+              key: ValueKey('unplaced_${pick.playerId}'),
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          pick.playerId,
+                          softWrap: true,
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: scheme.onSurface,
+                          ),
+                        ),
+                        Text(
+                          '${_nowA(pick.position)} · '
+                          '${formatMoneyTenths(pick.priceTenths)}',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton(
+                    key: ValueKey('unplaced_swap_${pick.playerId}'),
+                    onPressed: enabled ? () => onSwap(pick) : null,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: accent,
+                      side: BorderSide(color: accent.withValues(alpha: 0.7)),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: const Text('Swap'),
+                  ),
+                  const SizedBox(width: 4),
+                  TextButton(
+                    key: ValueKey('unplaced_remove_${pick.playerId}'),
+                    onPressed: enabled ? () => onRemove(pick) : null,
+                    style: TextButton.styleFrom(
+                      foregroundColor: scheme.onSurfaceVariant,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: const Text('Remove'),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );

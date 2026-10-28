@@ -114,6 +114,7 @@ void main() {
     FantasyLockOverride lockOverride = FantasyLockOverride.open,
     FantasySquad? initialSquad,
     Future<void> Function(FantasySquad)? onSave,
+    FantasySquadAlert? alert,
   }) async {
     // Tall, phone-wide surface so the whole column (budget bar, court,
     // bench, chips, save) is on screen and tappable without scrolling.
@@ -133,6 +134,7 @@ void main() {
               (squad) async {
                 savedSquads.add(squad);
               },
+          alert: alert,
         ),
       ),
     ));
@@ -361,5 +363,108 @@ void main() {
       expect(t.style?.decoration ?? TextDecoration.none, TextDecoration.none,
           reason: '"${t.data}" must not be underlined');
     }
+  });
+
+  group('holder protection (spec §3)', () {
+    /// The server re-labelled GK One as a DEF: no slot fits him, the GK
+    /// slot is the hole his move left.
+    FantasySquad relabelled() => FantasySquad(
+          picks: [
+            pick('GK One', FantasyPosition.def),
+            pick('Def One', FantasyPosition.def),
+            pick('Def Two', FantasyPosition.def),
+            pick('Att One', FantasyPosition.att),
+            pick('Att Two', FantasyPosition.att),
+            pick('Bench Def', FantasyPosition.def, bench: true),
+            pick('Bench Att', FantasyPosition.att, bench: true),
+          ],
+          captainId: 'Att One',
+          viceId: 'Def One',
+        );
+
+    const alert = FantasySquadAlert(gameweek: 4, changes: [
+      FantasyPositionChange(
+          player: 'GK One', from: FantasyPosition.gk, to: FantasyPosition.def),
+    ]);
+
+    testWidgets('the alert banner sits at the top while the alert exists',
+        (tester) async {
+      await pumpBuilder(tester, initialSquad: relabelled(), alert: alert);
+      expect(find.byKey(const ValueKey('squad_alert_banner')), findsOneWidget);
+      expect(
+          find.text('GK One moved to DEF — your team needs rearranging '
+              'before the deadline. Swapping him out is free this week.'),
+          findsOneWidget);
+      // Banner above the budget bar.
+      expect(
+          tester.getTopLeft(find.byKey(const ValueKey('squad_alert_banner'))).dy,
+          lessThan(tester.getTopLeft(find.byKey(const ValueKey('budget_bar'))).dy));
+
+      await pumpBuilder(tester, initialSquad: relabelled());
+      expect(find.byKey(const ValueKey('squad_alert_banner')), findsNothing);
+    });
+
+    testWidgets('an unplaceable pick shows in "Needs a new spot", never dropped',
+        (tester) async {
+      await pumpBuilder(tester, initialSquad: relabelled());
+      expect(find.byKey(const ValueKey('unplaced_strip')), findsOneWidget);
+      expect(find.text('Needs a new spot'), findsOneWidget);
+      expect(find.text('Now a defender · \$5.0M'), findsOneWidget);
+      expect(find.byKey(const ValueKey('empty_slot_0')), findsOneWidget);
+      expect(
+          find.text('Find GK One a new spot — swap him out or remove him.'),
+          findsOneWidget);
+      expect(saveEnabled(tester), isFalse);
+    });
+
+    testWidgets('Swap picks a replacement for the hole and unlocks Save',
+        (tester) async {
+      await pumpBuilder(tester, initialSquad: relabelled());
+      await tester.tap(find.byKey(const ValueKey('unplaced_swap_GK One')));
+      await tester.pumpAndSettle();
+      expect(find.text('Pick a goalkeeper'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('picker_row_Alan Keeper')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('unplaced_strip')), findsNothing);
+      expect(find.byKey(const ValueKey('squad_chip_Alan Keeper')),
+          findsOneWidget);
+      expect(saveEnabled(tester), isTrue);
+      await tester.tap(find.byKey(const ValueKey('squad_save')));
+      await tester.pumpAndSettle();
+      expect(savedSquads.single.picks.map((p) => p.playerId),
+          isNot(contains('GK One')));
+      expect(savedSquads.single.picks, hasLength(7));
+    });
+
+    testWidgets('Remove drops him and leaves the hole to fill',
+        (tester) async {
+      await pumpBuilder(tester, initialSquad: relabelled());
+      await tester.tap(find.byKey(const ValueKey('unplaced_remove_GK One')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('unplaced_strip')), findsNothing);
+      expect(find.text('Pick a goalkeeper.'), findsOneWidget);
+      expect(saveEnabled(tester), isFalse);
+    });
+
+    testWidgets('locked: the strip shows but Swap/Remove are disabled',
+        (tester) async {
+      await pumpBuilder(tester,
+          initialSquad: relabelled(),
+          lockOverride: FantasyLockOverride.locked);
+      expect(find.byKey(const ValueKey('unplaced_strip')), findsOneWidget);
+      expect(
+          tester
+              .widget<OutlinedButton>(
+                  find.byKey(const ValueKey('unplaced_swap_GK One')))
+              .onPressed,
+          isNull);
+      expect(
+          tester
+              .widget<TextButton>(
+                  find.byKey(const ValueKey('unplaced_remove_GK One')))
+              .onPressed,
+          isNull);
+    });
   });
 }

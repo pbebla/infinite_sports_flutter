@@ -312,6 +312,7 @@ class _SheetAction extends StatelessWidget {
       slotPicks: draft.picks,
       budgetTenths: draft.config.budgetTenths,
       editable: editable,
+      unplaced: draft.unplaced,
     );
     final inSquad = availability == MarketAddAvailability.inSquad;
     final addable = availability == MarketAddAvailability.addable;

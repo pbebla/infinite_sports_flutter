@@ -64,6 +64,12 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   FantasySquad? _squad;
   bool _squadLoaded = false;
 
+  /// The signed-in user's squad alert (spec §3 holder protection): non-null
+  /// while a position change has left their formation illegal. Joins the
+  /// reveal gate so the banner never pops in after the fade.
+  FantasySquadAlert? _alert;
+  bool _alertLoaded = false;
+
   /// First-open walkthrough (spec §10a): null while the prefs flag loads,
   /// false = show the intro, true = straight to the hub.
   bool? _walkthroughSeen;
@@ -91,17 +97,23 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   final StreamController<FantasySquad?> _squadForTabs =
       StreamController<FantasySquad?>.broadcast();
 
+  /// And for the My Team alert banner (spec §3).
+  final StreamController<FantasySquadAlert?> _alertForTabs =
+      StreamController<FantasySquadAlert?>.broadcast();
+
   StreamSubscription<FantasyConfigState?>? _configSub;
   StreamSubscription<List<FantasyPlayer>>? _playersSub;
   StreamSubscription<List<Gameweek>>? _gameweeksSub;
   StreamSubscription<FantasyManager?>? _managerSub;
   StreamSubscription<FantasySquad?>? _squadSub;
+  StreamSubscription<FantasySquadAlert?>? _alertSub;
 
   bool get _ready =>
       _configState != null &&
       _players != null &&
       _managerLoaded &&
-      _squadLoaded;
+      _squadLoaded &&
+      _alertLoaded;
 
   @override
   void initState() {
@@ -159,6 +171,20 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
       // an eternal skeleton.
       if (mounted) setState(() => _squadLoaded = true);
     });
+    _alertSub =
+        FantasyService.watchMySquadAlertAuto(widget.sport, widget.season)
+            .listen((a) {
+      if (!mounted) return;
+      setState(() {
+        _alert = a;
+        _alertLoaded = true;
+      });
+      _alertForTabs.add(a);
+    }, onError: (Object _) {
+      // A denied/failed alert read (e.g. rules not deployed yet) just means
+      // no banner — never an eternal skeleton.
+      if (mounted) setState(() => _alertLoaded = true);
+    });
   }
 
   /// Gameweeks derive from the real schedule WITH the config's lock hour —
@@ -182,9 +208,11 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _gameweeksSub?.cancel();
     _managerSub?.cancel();
     _squadSub?.cancel();
+    _alertSub?.cancel();
     _configForRules.close();
     _managerForTabs.close();
     _squadForTabs.close();
+    _alertForTabs.close();
     _draft?.dispose();
     super.dispose();
   }
@@ -219,6 +247,8 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         managerStates: _managerForTabs.stream,
         squad: _squad,
         squadStates: _squadForTabs.stream,
+        alert: _alert,
+        alertStates: _alertForTabs.stream,
         draft: _draft!,
         saveTeamName: (name) =>
             FantasyService.saveTeamName(widget.sport, widget.season, name),
@@ -277,6 +307,8 @@ class _HubBody extends StatelessWidget {
     required this.managerStates,
     required this.squad,
     required this.squadStates,
+    required this.alert,
+    required this.alertStates,
     required this.draft,
     required this.saveTeamName,
     required this.saveSquad,
@@ -292,6 +324,10 @@ class _HubBody extends StatelessWidget {
   final Stream<FantasyManager?> managerStates;
   final FantasySquad? squad;
   final Stream<FantasySquad?> squadStates;
+
+  /// The live squad alert (spec §3) + its re-listen-safe feed.
+  final FantasySquadAlert? alert;
+  final Stream<FantasySquadAlert?> alertStates;
 
   /// The hub-owned shared draft both the court and the market edit (P3c).
   final SquadDraftController draft;
@@ -352,6 +388,8 @@ class _HubBody extends StatelessWidget {
                   initialSquad: squad,
                   onSaveSquad: saveSquad,
                   draft: draft,
+                  alertStates: alertStates,
+                  initialAlert: alert,
                 ),
                 // The market (P3c) — edits the SAME shared draft as above;
                 // saving stays on My Team.

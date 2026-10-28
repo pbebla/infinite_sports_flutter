@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/my_team_tab.dart';
 
@@ -169,6 +170,73 @@ void main() {
           const FantasyManager(teamName: 'Still Bad', nameFlagged: true));
       await tester.pump();
       expect(find.byKey(const ValueKey('my_team_flag_gate')), findsOneWidget);
+    });
+  });
+
+  group('squad alert banner (spec §3 holder protection)', () {
+    testWidgets('follows the alert stream: appears with the deadline, clears '
+        'when the server removes it', (tester) async {
+      final alerts = StreamController<FantasySquadAlert?>.broadcast();
+      addTearDown(alerts.close);
+      final cfg = FantasyConfig.futsalDefault();
+      // GW1 Sun Oct 12, GW2 Sun Oct 19 (2025); "now" = Wed Oct 15, so the
+      // GW2 window is open and its deadline is the one to beat.
+      final gameweeks = deriveGameweeks(['10122025', '10192025'], cfg);
+      tester.view.physicalSize = const Size(420, 1900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: FantasyMyTeamTab(
+            managerStates: managers.stream,
+            initialManager: const FantasyManager(
+                teamName: 'Golden Boots', nameFlagged: false),
+            onSaveName: (_) async {},
+            configState: FantasyConfigState(
+              config: cfg,
+              lockOverride: FantasyLockOverride.auto,
+            ),
+            players: const [],
+            gameweeks: gameweeks,
+            squadStates: squads.stream,
+            onSaveSquad: (_) async {},
+            alertStates: alerts.stream,
+            nowUtc: () => DateTime.utc(2025, 10, 15, 18),
+          ),
+        ),
+      ));
+      expect(find.byKey(const ValueKey('squad_alert_banner')), findsNothing);
+
+      alerts.add(const FantasySquadAlert(gameweek: 2, changes: [
+        FantasyPositionChange(
+            player: 'Ann Keeper',
+            from: FantasyPosition.gk,
+            to: FantasyPosition.def),
+      ]));
+      await tester.pump();
+      expect(
+          find.text('Ann Keeper moved to DEF — your team needs rearranging '
+              'before Sun, Oct 19 · 3:00 PM. Swapping him out is free this '
+              'week.'),
+          findsOneWidget);
+
+      // A stale alert from an earlier week keeps the banner but drops the
+      // expired free-swap promise.
+      alerts.add(const FantasySquadAlert(gameweek: 1, changes: [
+        FantasyPositionChange(
+            player: 'Ann Keeper',
+            from: FantasyPosition.gk,
+            to: FantasyPosition.def),
+      ]));
+      await tester.pump();
+      expect(
+          find.text('Ann Keeper moved to DEF — your team needs rearranging '
+              'before Sun, Oct 19 · 3:00 PM.'),
+          findsOneWidget);
+
+      alerts.add(null); // a legal save: the server cleared it
+      await tester.pump();
+      expect(find.byKey(const ValueKey('squad_alert_banner')), findsNothing);
     });
   });
 

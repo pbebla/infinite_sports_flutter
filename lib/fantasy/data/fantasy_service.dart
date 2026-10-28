@@ -146,6 +146,25 @@ class FantasyService {
     return saveMySquad(sport, season, uid, squad);
   }
 
+  /// Live own squad alert (`SquadAlerts/<uid>`, spec §3 holder protection,
+  /// functions-written): non-null while a player's position change has
+  /// left this manager's formation illegal. Rules: read own uid only.
+  static Stream<FantasySquadAlert?> watchMySquadAlert(
+      String sport, String season, String uid) {
+    return _ref('${_root(sport, season)}/SquadAlerts/$uid')
+        .onValue
+        .map((event) => squadAlertFromNode(event.snapshot.value));
+  }
+
+  /// [watchMySquadAlert] for the signed-in user; a signed-out session
+  /// streams a single null (same convention as [watchMySquadAuto]).
+  static Stream<FantasySquadAlert?> watchMySquadAlertAuto(
+      String sport, String season) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream<FantasySquadAlert?>.value(null);
+    return watchMySquadAlert(sport, season, uid);
+  }
+
   /// Live `Managers/<uid>` entry (spec §10b): team name + moderation flag.
   /// null until the manager names their team.
   static Stream<FantasyManager?> watchManager(

@@ -33,7 +33,15 @@ class FantasyMyTeamTab extends StatelessWidget {
     required this.onSaveSquad,
     this.draft,
     this.nowUtc,
+    this.alertStates,
+    this.initialAlert,
   });
+
+  /// Re-listen-safe broadcast of FantasyService.watchMySquadAlert (spec §3
+  /// holder protection) + its latest value: drives the "your team needs
+  /// rearranging" banner at the top of the builder. null = no alerts feed.
+  final Stream<FantasySquadAlert?>? alertStates;
+  final FantasySquadAlert? initialAlert;
 
   /// The hub's re-listen-safe broadcast of FantasyService.watchMyManager —
   /// a TabBarView remounts far tabs, so this must tolerate re-listening.
@@ -98,17 +106,25 @@ class FantasyMyTeamTab extends StatelessWidget {
           );
         }
         // Named and clean: the P3b court squad builder (it carries the
-        // 'my_team_ready' key on its root).
-        return FantasySquadBuilder(
-          config: configState.config,
-          lockOverride: configState.lockOverride,
-          gameweeks: gameweeks,
-          players: players,
-          squadStates: squadStates,
-          initialSquad: initialSquad,
-          onSaveSquad: onSaveSquad,
-          draft: draft,
-          nowUtc: nowUtc,
+        // 'my_team_ready' key on its root), with the live squad alert.
+        Widget builder(FantasySquadAlert? alert) => FantasySquadBuilder(
+              config: configState.config,
+              lockOverride: configState.lockOverride,
+              gameweeks: gameweeks,
+              players: players,
+              squadStates: squadStates,
+              initialSquad: initialSquad,
+              onSaveSquad: onSaveSquad,
+              draft: draft,
+              nowUtc: nowUtc,
+              alert: alert,
+            );
+        final alerts = alertStates;
+        if (alerts == null) return builder(initialAlert);
+        return StreamBuilder<FantasySquadAlert?>(
+          initialData: initialAlert,
+          stream: alerts,
+          builder: (context, alertSnap) => builder(alertSnap.data),
         );
       },
     );

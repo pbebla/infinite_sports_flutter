@@ -131,13 +131,109 @@ void main() {
     expect(notified, 0);
     expect(draft.config.budgetTenths, 600);
 
-    // Formation shrink: slots rebuild, overflow picks drop.
+    // Formation shrink: slots rebuild; the overflow pick no longer fits a
+    // slot and moves to the "Needs a new spot" list — never silently lost.
     final shrunk = FantasyConfig.fromMap(
         FantasyConfig.futsalDefault().toMap()..['startersAtt'] = 1);
     draft.syncConfig(shrunk);
     expect(notified, 1);
     expect(draft.slots, hasLength(6));
-    expect(draft.playerIds, isNot(contains('Att Two')));
+    expect(draft.picks.map((p) => p?.playerId), isNot(contains('Att Two')));
+    expect(draft.unplaced.map((p) => p.playerId), ['Att Two']);
+  });
+
+  group('holder protection (spec §3): a pick whose position changed', () {
+    /// The server re-labelled GK One as a DEF (position change): no slot
+    /// fits him any more and the GK slot is empty.
+    FantasySquad relabelled() => FantasySquad(
+          picks: [
+            pick('GK One', FantasyPosition.def, price: 80),
+            pick('Def One', FantasyPosition.def),
+            pick('Def Two', FantasyPosition.def),
+            pick('Att One', FantasyPosition.att),
+            pick('Att Two', FantasyPosition.att),
+            pick('Bench Def', FantasyPosition.def, bench: true),
+            pick('Bench Att', FantasyPosition.att, bench: true),
+          ],
+          captainId: 'GK One',
+          viceId: 'Def One',
+        );
+
+    test('lands in unplaced (still owned, still paid for), not dropped', () {
+      final draft = SquadDraftController(config: cfg);
+      draft.adoptFromStream(relabelled());
+      expect(draft.unplaced.map((p) => p.playerId), ['GK One']);
+      expect(draft.picks[0], isNull);
+      expect(draft.firstEmptySlot, 0);
+      expect(draft.playerIds, contains('GK One'));
+      expect(draft.spentTenths, 80 + 6 * 50);
+      expect(draft.squad.picks, hasLength(7)); // nothing vanishes on save
+      expect(draft.dirty, isFalse);
+    });
+
+    test('Remove drops him, says the armband went, marks the draft dirty',
+        () {
+      final draft = SquadDraftController(config: cfg, initial: relabelled());
+      expect(draft.removeUnplaced('GK One'),
+          'Your captain left the squad — choose a new captain.');
+      expect(draft.unplaced, isEmpty);
+      expect(draft.captainId, isNull);
+      expect(draft.dirty, isTrue);
+      expect(draft.removeUnplaced('Nobody'), isNull);
+    });
+
+    test('Swap fills the hole with the replacement; removePlayer finds him too',
+        () {
+      final draft = SquadDraftController(config: cfg, initial: relabelled());
+      draft.swapUnplaced('GK One', draft.firstEmptySlot!,
+          pick('GK New', FantasyPosition.gk, price: 45));
+      expect(draft.unplaced, isEmpty);
+      expect(draft.picks[0]!.playerId, 'GK New');
+      expect(draft.squad.picks, hasLength(7));
+
+      final other = SquadDraftController(config: cfg, initial: relabelled());
+      other.removePlayer('GK One'); // the market's Remove
+      expect(other.unplaced, isEmpty);
+    });
+  });
+
+  group('one-week chips (S15 rehearsal Bug 2): the server switches it off',
+      () {
+    test('a clean draft adopts the cleared chip — no active chip shown', () {
+      final draft = SquadDraftController(
+          config: cfg,
+          initial: FantasySquad(
+              picks: fullSquad().picks,
+              captainId: 'GK One',
+              viceId: 'Def One',
+              chip: 'benchBoost'));
+      expect(draft.chip, 'benchBoost');
+      draft.adoptFromStream(fullSquad()); // rollover removed Squads/<uid>/chip
+      expect(draft.chip, isNull);
+      expect(draft.squad.chip, isNull);
+    });
+
+    test('a dirty draft still takes the switch-off unless the user toggled '
+        'the chip', () {
+      final armed = FantasySquad(
+          picks: fullSquad().picks,
+          captainId: 'GK One',
+          viceId: 'Def One',
+          chip: 'benchBoost');
+      // Dirty since before the lock (an armband edit), chip untouched.
+      final stale = SquadDraftController(config: cfg, initial: armed);
+      stale.makeCaptain('Att One');
+      stale.adoptFromStream(fullSquad());
+      expect(stale.chip, isNull); // the next save can't re-arm it
+      expect(stale.captainId, 'Att One'); // the edit itself survives
+      expect(stale.dirty, isTrue);
+
+      // The user deliberately picked a chip in this draft: that intent wins.
+      final chosen = SquadDraftController(config: cfg, initial: armed);
+      chosen.setChip('tripleCaptain');
+      chosen.adoptFromStream(fullSquad());
+      expect(chosen.chip, 'tripleCaptain');
+    });
   });
 
   test('setPickAt swaps and reports a lost armband', () {

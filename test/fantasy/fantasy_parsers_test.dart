@@ -229,6 +229,39 @@ void main() {
     });
   });
 
+  group('squadAlertFromNode (spec §3 holder protection)', () {
+    test('functions shape → alert; junk changes skipped', () {
+      final alert = squadAlertFromNode({
+        'Gw': 4,
+        'Changes': [
+          {'player': 'Ann Keeper', 'from': 'GK', 'to': 'DEF'},
+          {'player': '', 'from': 'GK', 'to': 'DEF'},
+          {'player': 'Bad', 'from': 'MID', 'to': 'DEF'},
+          'nope',
+        ],
+        'CreatedAt': 1761660000000,
+      })!;
+      expect(alert.gameweek, 4);
+      expect(alert.changes, hasLength(1));
+      expect(alert.changes.single.player, 'Ann Keeper');
+      expect(alert.changes.single.from, FantasyPosition.gk);
+      expect(alert.changes.single.to, FantasyPosition.def);
+    });
+
+    test('index-keyed Changes map tolerated; absent/empty → null', () {
+      final alert = squadAlertFromNode({
+        'Gw': '2',
+        'Changes': {
+          '0': {'player': 'A', 'from': 'DEF', 'to': 'ATT'},
+        },
+      })!;
+      expect(alert.gameweek, 2);
+      expect(alert.changes.single.to, FantasyPosition.att);
+      expect(squadAlertFromNode(null), isNull);
+      expect(squadAlertFromNode({'Gw': 2, 'Changes': []}), isNull);
+    });
+  });
+
   group('dateKeysFromNode', () {
     test('map keys with non-null values', () {
       expect(

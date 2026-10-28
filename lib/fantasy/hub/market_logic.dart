@@ -84,15 +84,18 @@ enum MarketAddAvailability {
 }
 
 /// The add/remove state for one market row against the current draft.
+/// [unplaced] = the draft's "Needs a new spot" picks (still owned, still
+/// paid for — a position change left them without a fitting slot).
 MarketAddAvailability marketAddState({
   required FantasyPlayer player,
   required List<SquadSlot> slots,
   required List<SquadPick?> slotPicks,
   required int budgetTenths,
   required bool editable,
+  List<SquadPick> unplaced = const [],
 }) {
   if (!editable) return MarketAddAvailability.locked;
-  for (final pick in slotPicks) {
+  for (final pick in [...slotPicks, ...unplaced]) {
     if (pick?.playerId == player.name) return MarketAddAvailability.inSquad;
   }
   if (!player.eligible) return MarketAddAvailability.ineligible;
@@ -104,7 +107,9 @@ MarketAddAvailability marketAddState({
     }
   }
   if (!hasEmptySlot) return MarketAddAvailability.positionFull;
-  final remaining = budgetTenths - draftSpentTenths(slotPicks);
+  final remaining = budgetTenths -
+      draftSpentTenths(slotPicks) -
+      unplaced.fold<int>(0, (a, p) => a + p.priceTenths);
   if (player.priceTenths > remaining) {
     return MarketAddAvailability.unaffordable;
   }

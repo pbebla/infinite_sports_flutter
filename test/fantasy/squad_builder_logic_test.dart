@@ -132,6 +132,33 @@ void main() {
       expect(slotPicks[0]!.playerId, 'GK One');
     });
 
+    test('placePicks keeps a pick whose position no longer fits (spec §3)',
+        () {
+      // The server re-labelled the GK as a DEF: both starter DEF slots and
+      // the bench DEF slot are taken, so he has no slot — and the GK slot is
+      // the hole his move left.
+      final relabelled = FantasySquad(
+        picks: [
+          pick('Moved Keeper', FantasyPosition.def, price: 80),
+          pick('Def One', FantasyPosition.def),
+          pick('Def Two', FantasyPosition.def),
+          pick('Att One', FantasyPosition.att),
+          pick('Att Two', FantasyPosition.att),
+          pick('Bench Def', FantasyPosition.def, bench: true),
+          pick('Bench Att', FantasyPosition.att, bench: true),
+        ],
+        captainId: 'Att One',
+        viceId: 'Def One',
+      );
+      final slots = buildSlots(cfg);
+      final placed = placePicks(relabelled, slots);
+      expect(placed.slotPicks[0], isNull); // GK hole
+      expect(placed.unplaced.map((p) => p.playerId), ['Moved Keeper']);
+      expect(placed.unplaced.single.position, FantasyPosition.def);
+      // picksToSlots is the slot half (read-only viewers).
+      expect(picksToSlots(relabelled, slots), placed.slotPicks);
+    });
+
     test('draftToSquad writes missing armbands as empty strings', () {
       final squad =
           draftToSquad(slotPicks: List.filled(7, null), captainId: null);
@@ -148,6 +175,63 @@ void main() {
             pick('B', FantasyPosition.def, price: 60),
           ]),
           105);
+    });
+  });
+
+  group('holder protection copy', () {
+    test('squadAlertText: spec sentence, free-swap promise only this week',
+        () {
+      expect(
+          squadAlertText(
+            changes: [(player: 'Ann Keeper', to: FantasyPosition.def)],
+            deadline: 'Sun, Oct 19 · 3:00 PM',
+            freeThisWeek: true,
+          ),
+          'Ann Keeper moved to DEF — your team needs rearranging before '
+          'Sun, Oct 19 · 3:00 PM. Swapping him out is free this week.');
+      expect(
+          squadAlertText(
+            changes: [
+              (player: 'A', to: FantasyPosition.def),
+              (player: 'B', to: FantasyPosition.att),
+              (player: 'C', to: FantasyPosition.gk),
+            ],
+            deadline: 'x',
+            freeThisWeek: true,
+          ),
+          'A moved to DEF, B moved to ATT and C moved to GK — your team needs '
+          'rearranging before x. Swapping them out is free this week.');
+      expect(
+          squadAlertText(
+            changes: [(player: 'A', to: FantasyPosition.att)],
+            deadline: 'x',
+            freeThisWeek: false,
+          ),
+          'A moved to ATT — your team needs rearranging before x.');
+    });
+
+    test('issueSentences blocks Save while a pick needs a new spot', () {
+      final slots = buildSlots(cfg);
+      final slotPicks = <SquadPick?>[
+        null,
+        pick('Def One', FantasyPosition.def),
+        pick('Def Two', FantasyPosition.def),
+        pick('Att One', FantasyPosition.att),
+        pick('Att Two', FantasyPosition.att),
+        pick('Bench Def', FantasyPosition.def, bench: true),
+        pick('Bench Att', FantasyPosition.att, bench: true),
+      ];
+      final out = issueSentences(
+        slots: slots,
+        slotPicks: slotPicks,
+        captainId: 'Att One',
+        viceId: 'Def One',
+        cfg: cfg,
+        unplaced: [pick('Moved Keeper', FantasyPosition.def)],
+      );
+      expect(out.first,
+          'Find Moved Keeper a new spot — swap him out or remove him.');
+      expect(out, contains('Pick a goalkeeper.'));
     });
   });
 
