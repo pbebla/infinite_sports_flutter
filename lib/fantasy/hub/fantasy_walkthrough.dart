@@ -43,25 +43,25 @@ class _FantasyWalkthroughState extends State<FantasyWalkthrough> {
       _WalkthroughCard(
         image: 'assets/fantasy/fantasy_logo_regal.png',
         title: 'Build your seven',
-        body: 'Pick ${cfg.squadSize} real players from around the league '
-            'within a ${formatMoneyTenths(cfg.budgetTenths)} budget — '
+        body: "Pick ${cfg.squadSize} of the league's real players within a "
+            '${formatMoneyTenths(cfg.budgetTenths)} budget — '
             '${cfg.startersGk} keeper, ${cfg.startersDef} defenders and '
-            '${cfg.startersAtt} attackers start, '
-            '${cfg.benchDef + cfg.benchAtt} ride the bench.',
+            '${cfg.startersAtt} attackers start, plus a '
+            '${cfg.benchDef + cfg.benchAtt}-player bench.',
       ),
       _WalkthroughCard(
         icon: Icons.military_tech,
         title: 'Captain for double',
-        body: 'Give one starter the armband: every point they score counts '
-            '×${cfg.captainMultiplier}. Your vice-captain takes over any '
-            'week the captain misses the game.',
+        body: 'Make one starter your captain: every point they score counts '
+            '×${cfg.captainMultiplier}. If the captain misses the game, '
+            'your vice-captain scores the double instead.',
       ),
       _WalkthroughCard(
         icon: Icons.timer_outlined,
         title: 'Beat the deadline',
-        body: 'Squads lock at ${formatLockHour(cfg.lockHour)} league time on '
-            'match day — usually Sunday — and reopen Monday. Make your '
-            'moves before the whistle.',
+        body: 'Your squad locks at ${formatLockHour(cfg.lockHour)} league '
+            'time on match day — usually Sunday — and reopens for changes '
+            'on Monday. Make your moves before the whistle.',
       ),
       const _WalkthroughCard(
         icon: Icons.sports_soccer,

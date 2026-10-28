@@ -20,9 +20,12 @@ void main() {
       ),
     ));
 
-    // Card 1: build your 7 with the config budget.
+    // Card 1: build your 7 with the config budget, in plain language —
+    // the owner-confusing "from around the league" phrasing stays gone.
     expect(find.text('Build your seven'), findsOneWidget);
     expect(find.textContaining('\$50.0M budget'), findsOneWidget);
+    expect(find.textContaining("the league's real players"), findsOneWidget);
+    expect(find.textContaining('from around the league'), findsNothing);
 
     await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
@@ -42,6 +45,25 @@ void main() {
     expect(done, 0);
     await tester.tap(find.text("Let's play"));
     expect(done, 1);
+  });
+
+  testWidgets('deadline card renders the lock time from the config, not a '
+      'hard-coded 3:00 PM', (tester) async {
+    // Owner tunes lockHour to 18 → the card must say 6:00 PM.
+    final tuned = FantasyConfig.fromMap(
+        FantasyConfig.futsalDefault().toMap()..['lockHour'] = 18);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: FantasyWalkthrough(config: tuned, onDone: () {}),
+      ),
+    ));
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(find.text('Beat the deadline'), findsOneWidget);
+    expect(find.textContaining('6:00 PM league time'), findsOneWidget);
+    expect(find.textContaining('3:00 PM'), findsNothing);
   });
 
   testWidgets('Skip finishes immediately from the first card',
