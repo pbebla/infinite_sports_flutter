@@ -1,8 +1,9 @@
-// The hub's My Team tab (P3a feedback, spec §10b). Three stream-driven faces:
-// no Managers entry → name-your-team prompt; NameFlagged → the moderation
-// gate (rename is the ONLY action, and renaming unlocks immediately because
-// the same stream feeds this widget); named + clean → the squad-builder
-// placeholder until P3b lands.
+// The hub's My Team tab (P3a feedback, spec §10b; P3b). Three stream-driven
+// faces: no Managers entry → name-your-team prompt; NameFlagged → the
+// moderation gate (rename is the ONLY action, and renaming unlocks
+// immediately because the same stream feeds this widget); named + clean →
+// the court squad builder (P3b). The gate wraps WHATEVER the ready face is —
+// a flagged manager never reaches the builder.
 //
 // House rules: theme-safe via colorScheme (gold accent in dark, primary red
 // in light — the deadline chip's pairing), glass-navbar bottom clearance,
@@ -10,6 +11,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/squad_builder.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/team_name_dialog.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 
@@ -19,6 +24,13 @@ class FantasyMyTeamTab extends StatelessWidget {
     required this.managerStates,
     this.initialManager,
     required this.onSaveName,
+    required this.configState,
+    required this.players,
+    required this.gameweeks,
+    required this.squadStates,
+    this.initialSquad,
+    required this.onSaveSquad,
+    this.nowUtc,
   });
 
   /// The hub's re-listen-safe broadcast of FantasyService.watchMyManager —
@@ -28,6 +40,22 @@ class FantasyMyTeamTab extends StatelessWidget {
 
   /// Performs the name write (FantasyService.saveTeamName in production).
   final Future<void> Function(String name) onSaveName;
+
+  /// Current config (the hub rebuilds this tab when it changes).
+  final FantasyConfigState configState;
+  final List<FantasyPlayer> players;
+  final List<Gameweek> gameweeks;
+
+  /// Re-listen-safe squad stream (hub broadcast of watchMySquad) + its
+  /// latest value, so a tab remount paints without waiting for an emit.
+  final Stream<FantasySquad?> squadStates;
+  final FantasySquad? initialSquad;
+
+  /// FantasyService.saveMySquad in production.
+  final Future<void> Function(FantasySquad squad) onSaveSquad;
+
+  /// Test seam: injected clock for the builder's lock computation.
+  final DateTime Function()? nowUtc;
 
   void _openNameDialog(BuildContext context, {String initialName = ''}) {
     showTeamNameDialog(context, initialName: initialName, onSave: onSaveName);
@@ -63,9 +91,17 @@ class FantasyMyTeamTab extends StatelessWidget {
                 _openNameDialog(context, initialName: manager.teamName),
           );
         }
-        return _ComingSoonBody(
-          key: const ValueKey('my_team_ready'),
-          teamName: manager.teamName,
+        // Named and clean: the P3b court squad builder (it carries the
+        // 'my_team_ready' key on its root).
+        return FantasySquadBuilder(
+          config: configState.config,
+          lockOverride: configState.lockOverride,
+          gameweeks: gameweeks,
+          players: players,
+          squadStates: squadStates,
+          initialSquad: initialSquad,
+          onSaveSquad: onSaveSquad,
+          nowUtc: nowUtc,
         );
       },
     );
@@ -148,53 +184,3 @@ class _MessageCard extends StatelessWidget {
   }
 }
 
-/// The named-and-clean face: squad builder placeholder until P3b.
-class _ComingSoonBody extends StatelessWidget {
-  const _ComingSoonBody({super.key, required this.teamName});
-
-  final String teamName;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(
-          24, 48, 24, 24 + MediaQuery.paddingOf(context).bottom),
-      child: Column(
-        children: [
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(Icons.sports_soccer,
-                size: 34, color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            teamName,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: scheme.onSurface,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'The squad builder lands here next — pick your seven, set the '
-            'armband, beat the deadline.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 13.5,
-              height: 1.4,
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

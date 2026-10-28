@@ -82,6 +82,22 @@ class FantasyService {
           String sport, String season, String uid, FantasySquad squad) =>
       _ref('${_root(sport, season)}/Squads/$uid').set(squad.toMap());
 
+  /// [watchMySquad] for the signed-in user; a signed-out session streams a
+  /// single null (same convention as [watchMyManager]).
+  static Stream<FantasySquad?> watchMySquadAuto(String sport, String season) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream<FantasySquad?>.value(null);
+    return watchMySquad(sport, season, uid);
+  }
+
+  /// [saveMySquad] for the signed-in user (the squad builder's save path).
+  static Future<void> saveMySquadAuto(
+      String sport, String season, FantasySquad squad) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Future.error(StateError('Not signed in'));
+    return saveMySquad(sport, season, uid, squad);
+  }
+
   /// Live `Managers/<uid>` entry (spec §10b): team name + moderation flag.
   /// null until the manager names their team.
   static Stream<FantasyManager?> watchManager(

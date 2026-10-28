@@ -19,6 +19,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_prefs.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_walkthrough.dart';
@@ -53,6 +54,12 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   FantasyManager? _manager;
   bool _managerLoaded = false;
 
+  /// The signed-in user's squad (P3b): null until their first save.
+  /// [_squadLoaded] joins the reveal gate so the court never pops from
+  /// empty to filled after the fade.
+  FantasySquad? _squad;
+  bool _squadLoaded = false;
+
   /// First-open walkthrough (spec §10a): null while the prefs flag loads,
   /// false = show the intro, true = straight to the hub.
   bool? _walkthroughSeen;
@@ -70,13 +77,21 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   final StreamController<FantasyManager?> _managerForTabs =
       StreamController<FantasyManager?>.broadcast();
 
+  /// And for the squad builder's squad stream (P3b).
+  final StreamController<FantasySquad?> _squadForTabs =
+      StreamController<FantasySquad?>.broadcast();
+
   StreamSubscription<FantasyConfigState?>? _configSub;
   StreamSubscription<List<FantasyPlayer>>? _playersSub;
   StreamSubscription<List<Gameweek>>? _gameweeksSub;
   StreamSubscription<FantasyManager?>? _managerSub;
+  StreamSubscription<FantasySquad?>? _squadSub;
 
   bool get _ready =>
-      _configState != null && _players != null && _managerLoaded;
+      _configState != null &&
+      _players != null &&
+      _managerLoaded &&
+      _squadLoaded;
 
   @override
   void initState() {
@@ -108,6 +123,19 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
       // skeleton — the tab just shows the name prompt until a re-emit.
       if (mounted) setState(() => _managerLoaded = true);
     });
+    _squadSub = FantasyService.watchMySquadAuto(widget.sport, widget.season)
+        .listen((s) {
+      if (!mounted) return;
+      setState(() {
+        _squad = s;
+        _squadLoaded = true;
+      });
+      _squadForTabs.add(s);
+    }, onError: (Object _) {
+      // Same escape hatch: a squad-read hiccup renders an empty court, not
+      // an eternal skeleton.
+      if (mounted) setState(() => _squadLoaded = true);
+    });
   }
 
   /// Gameweeks derive from the real schedule WITH the config's lock hour —
@@ -130,8 +158,10 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _playersSub?.cancel();
     _gameweeksSub?.cancel();
     _managerSub?.cancel();
+    _squadSub?.cancel();
     _configForRules.close();
     _managerForTabs.close();
+    _squadForTabs.close();
     super.dispose();
   }
 
@@ -160,10 +190,15 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         configState: _configState!,
         configStates: _configForRules.stream,
         gameweeks: _gameweeks,
+        players: _players!,
         manager: _manager,
         managerStates: _managerForTabs.stream,
+        squad: _squad,
+        squadStates: _squadForTabs.stream,
         saveTeamName: (name) =>
             FantasyService.saveTeamName(widget.sport, widget.season, name),
+        saveSquad: (squad) =>
+            FantasyService.saveMySquadAuto(widget.sport, widget.season, squad),
       );
     } else {
       body = const _HubSkeleton(key: ValueKey('skeleton'));
@@ -212,9 +247,13 @@ class _HubBody extends StatelessWidget {
     required this.configState,
     required this.configStates,
     required this.gameweeks,
+    required this.players,
     required this.manager,
     required this.managerStates,
+    required this.squad,
+    required this.squadStates,
     required this.saveTeamName,
+    required this.saveSquad,
   });
 
   final String sport;
@@ -222,9 +261,13 @@ class _HubBody extends StatelessWidget {
   final FantasyConfigState configState;
   final Stream<FantasyConfigState?> configStates;
   final List<Gameweek> gameweeks;
+  final List<FantasyPlayer> players;
   final FantasyManager? manager;
   final Stream<FantasyManager?> managerStates;
+  final FantasySquad? squad;
+  final Stream<FantasySquad?> squadStates;
   final Future<void> Function(String name) saveTeamName;
+  final Future<void> Function(FantasySquad squad) saveSquad;
 
   @override
   Widget build(BuildContext context) {
@@ -264,12 +307,18 @@ class _HubBody extends StatelessWidget {
           Expanded(
             child: TabBarView(
               children: [
-                // Name prompt / moderation gate / squad placeholder — all
-                // stream-driven (spec §10b).
+                // Name prompt / moderation gate / court squad builder — all
+                // stream-driven (spec §10b, P3b).
                 FantasyMyTeamTab(
                   managerStates: managerStates,
                   initialManager: manager,
                   onSaveName: saveTeamName,
+                  configState: configState,
+                  players: players,
+                  gameweeks: gameweeks,
+                  squadStates: squadStates,
+                  initialSquad: squad,
+                  onSaveSquad: saveSquad,
                 ),
                 const _PlaceholderTab(
                   icon: Icons.storefront,

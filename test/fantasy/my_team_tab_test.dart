@@ -8,18 +8,25 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/my_team_tab.dart';
 
 void main() {
   late StreamController<FantasyManager?> managers;
+  late StreamController<FantasySquad?> squads;
   late List<String> saved;
 
   setUp(() {
     managers = StreamController<FantasyManager?>.broadcast();
+    squads = StreamController<FantasySquad?>.broadcast();
     saved = [];
   });
 
-  tearDown(() => managers.close());
+  tearDown(() {
+    managers.close();
+    squads.close();
+  });
 
   Future<void> pumpTab(
     WidgetTester tester, {
@@ -35,6 +42,14 @@ void main() {
               (name) async {
                 saved.add(name);
               },
+          configState: FantasyConfigState(
+            config: FantasyConfig.futsalDefault(),
+            lockOverride: FantasyLockOverride.open,
+          ),
+          players: const [],
+          gameweeks: const [],
+          squadStates: squads.stream,
+          onSaveSquad: (_) async {},
         ),
       ),
     ));
@@ -77,12 +92,12 @@ void main() {
       expect(saved, ['Golden Boots']);
       expect(find.byKey(const ValueKey('team_name_field')), findsNothing);
 
-      // The write echoes back on the stream → the ready face shows the name.
+      // The write echoes back on the stream → the ready face (the P3b squad
+      // builder) replaces the prompt.
       managers.add(
           const FantasyManager(teamName: 'Golden Boots', nameFlagged: false));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('my_team_ready')), findsOneWidget);
-      expect(find.text('Golden Boots'), findsOneWidget);
     });
 
     testWidgets('a failed save keeps the dialog open with an error',
@@ -135,13 +150,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(saved, ['Fresh Start']);
 
-      // The rules-accepted write echoes back unflagged → gate clears.
+      // The rules-accepted write echoes back unflagged → gate clears to the
+      // squad builder.
       managers.add(
           const FantasyManager(teamName: 'Fresh Start', nameFlagged: false));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('my_team_flag_gate')), findsNothing);
       expect(find.byKey(const ValueKey('my_team_ready')), findsOneWidget);
-      expect(find.text('Fresh Start'), findsOneWidget);
     });
 
     testWidgets('a re-flag by the league gates again live', (tester) async {
