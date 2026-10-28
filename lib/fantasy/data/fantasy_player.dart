@@ -27,9 +27,10 @@ class FantasyPlayer {
   final bool eligible;
   final String teamName;
 
-  /// Profile photo (P3b Task 3) — seeded from PublicProfiles/<uid>/ProfileUrl
-  /// via the lineup UID link. null/absent = no linked account photo; the UI
-  /// falls back to initials (photos never gate content).
+  /// Profile photo (P3b Task 3) — seeded from
+  /// `PublicProfiles/<uid>/ProfileUrl` via the lineup UID link. null/absent =
+  /// no linked account photo; the UI falls back to initials (photos never
+  /// gate content).
   final String? photoUrl;
 
   /// Tolerant RTDB parse; null when the entry isn't usable (bad position
