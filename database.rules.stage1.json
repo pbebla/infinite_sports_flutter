@@ -368,6 +368,14 @@
               ".write": "auth != null && auth.uid == $uid"
             }
           },
+          "Managers": {
+            ".read": true,
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$uid": {
+              ".write": "auth != null && auth.uid == $uid",
+              ".validate": "newData.child('TeamName').isString() && newData.child('TeamName').val().length >= 3 && newData.child('TeamName').val().length <= 30 && (root.child('Admins').child(auth.uid).exists() || !newData.child('NameFlagged').exists() || newData.child('NameFlagged').val() == false && (!data.child('NameFlagged').exists() || data.child('NameFlagged').val() != true || newData.child('TeamName').val() != data.child('TeamName').val()))"
+            }
+          },
           "PublishedPicks": {
             ".read": true
           },

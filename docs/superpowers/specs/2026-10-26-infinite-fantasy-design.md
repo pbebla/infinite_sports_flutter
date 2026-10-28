@@ -145,6 +145,20 @@ UI decisions adopted from the design round (2026-10-27):
   dark mode / light equivalent in light mode — never a baked image that only
   works on one theme.
 
+## 10b. Fantasy team names & moderation (owner add, 2026-10-27)
+
+- Every manager names their fantasy team (3–30 chars, stored at
+  `Fantasy/<sport>/<season>/Managers/<uid>` with `NameFlagged`); shown on
+  leaderboards and profiles. A basic bad-word check runs at save.
+- **Owner moderation:** flagging a name (Manager section, P5) **freezes that
+  user's fantasy** — the hub gates My Team behind "your team name was flagged;
+  choose a new name." Renaming (an actual change, enforced by rules) clears
+  the flag and unlocks; the owner can re-flag if the new name is still bad.
+- Rules tab carries a **"Spotted an issue? Send feedback"** button into the
+  existing support-ticket form.
+- Hub entries: league-page Fantasy tab (home) + Search hub card + in-season
+  home banner.
+
 ## 10a. Rules page & player education (owner requirement)
 
 Players must always have one obvious place to learn and re-check how everything
