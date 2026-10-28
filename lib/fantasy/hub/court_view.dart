@@ -120,9 +120,15 @@ class FantasyCourtView extends StatelessWidget {
                 ? Stack(
                     fit: StackFit.expand,
                     children: [
-                      Image.asset(
-                        'assets/fantasy/pitch_neon_gold.jpg',
-                        fit: BoxFit.fill,
+                      // Transparent outside the pitch's gold boundary (the
+                      // artwork's glow halo is masked out) — the surround is
+                      // the theme's own card surface.
+                      ColoredBox(
+                        color: surround,
+                        child: Image.asset(
+                          'assets/fantasy/pitch_neon_gold.webp',
+                          fit: BoxFit.fill,
+                        ),
                       ),
                       slotStack,
                     ],
