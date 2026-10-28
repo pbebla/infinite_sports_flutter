@@ -17,6 +17,15 @@ describe('bps', () => {
   it('absent player has no bps', () => {
     expect(bpsScore(playerGameStats({ goals: 2, present: false }), cfg)).toBe(0);
   });
+  it('a forfeited game puts 0 into BPS for BOTH sides (spec §8a) — so it ' +
+    'awards no bonus', () => {
+    const won = playerGameStats({ goals: 1, forfeit: 'won' });
+    const lost = playerGameStats({ saves: 4, teamConceded: 5, forfeit: 'lost' });
+    expect(bpsScore(won, cfg)).toBe(0);
+    expect(bpsScore(lost, cfg)).toBe(0);
+    expect(awardBonus({ w: bpsScore(won, cfg), l: bpsScore(lost, cfg) }))
+      .toEqual({});
+  });
   it('top three get 3/2/1', () => {
     expect(awardBonus({ a: 50, b: 40, c: 30, d: 20 }))
       .toEqual({ a: 3, b: 2, c: 1 });

@@ -1,7 +1,9 @@
 // Port of test/fantasy/scoring_test.dart.
 import { describe, expect, it } from 'vitest';
-import { futsalDefault } from './fantasy_config';
-import { PlayerGameStats, playerGameStats } from './player_game_stats';
+import { FANTASY_POSITIONS, futsalDefault } from './fantasy_config';
+import {
+  PlayerGameStats, playedGame, playerGameStats,
+} from './player_game_stats';
 import { scorePlayerGame, scorePlayerWeek } from './scoring';
 
 const cfg = futsalDefault();
@@ -78,5 +80,44 @@ describe('scoring', () => {
     const wk = scorePlayerWeek([s({ present: false })], 'ATT', cfg);
     expect(wk.total).toBe(0);
     expect(wk.played).toBe(false);
+  });
+});
+
+describe('scoring — forfeits (spec §8a, Option B)', () => {
+  it('team that showed up: ONLY the Plays line, every position — no clean ' +
+    'sheet even at 0 conceded, stray stats ignored', () => {
+    for (const pos of FANTASY_POSITIONS) {
+      const r = scorePlayerGame(s({ forfeit: 'won', goals: 2 }), pos, cfg);
+      expect(r.total, pos).toBe(1);
+      expect(r.breakdown.map((l) => l.label), pos).toEqual(['Plays']);
+    }
+  });
+  it('team that showed up: an absent player still gets 0', () => {
+    const r = scorePlayerGame(s({ forfeit: 'won', present: false }), 'DEF', cfg);
+    expect(r.total).toBe(0);
+    expect(r.breakdown).toEqual([]);
+  });
+  it('forfeiting team: 0, no appearance, no goals-conceded penalty', () => {
+    for (const pos of FANTASY_POSITIONS) {
+      const r = scorePlayerGame(s({ forfeit: 'lost', conceded: 5 }), pos, cfg);
+      expect(r.total, pos).toBe(0);
+      expect(r.breakdown, pos).toEqual([]);
+    }
+  });
+  it('played: showing-up present = played; forfeiting team = NOT played', () => {
+    expect(playedGame(s({ forfeit: 'won' }))).toBe(true);
+    expect(playedGame(s({ forfeit: 'won', present: false }))).toBe(false);
+    expect(playedGame(s({ forfeit: 'lost' }))).toBe(false);
+    expect(playedGame(s({ forfeit: 'none' }))).toBe(true);
+    expect(playedGame({ ...s(), forfeit: undefined })).toBe(true);
+
+    const forfeitOnly = scorePlayerWeek([s({ forfeit: 'lost' })], 'GK', cfg);
+    expect(forfeitOnly.total).toBe(0);
+    expect(forfeitOnly.played).toBe(false);
+
+    const twoGames = scorePlayerWeek(
+      [s({ forfeit: 'lost' }), s({ conceded: 1 })], 'ATT', cfg);
+    expect(twoGames.total).toBe(1);
+    expect(twoGames.played).toBe(true);
   });
 });

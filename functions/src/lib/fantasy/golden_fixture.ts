@@ -9,11 +9,17 @@ import * as path from 'path';
 export type Json = Record<string, any>;
 
 export function loadGoldenFixture(): Json {
+  return loadFantasyFixture('golden_gameweek.json');
+}
+
+/** Any test/fantasy/fixtures/<file> from the Flutter repo root (e.g. the
+ *  golden_forfeit.json cross-engine contract). */
+export function loadFantasyFixture(file: string): Json {
   let dir = process.cwd();
   for (; ;) {
     if (fs.existsSync(path.join(dir, 'pubspec.yaml'))) {
       return JSON.parse(fs.readFileSync(path.join(
-        dir, 'test', 'fantasy', 'fixtures', 'golden_gameweek.json'), 'utf8'));
+        dir, 'test', 'fantasy', 'fixtures', file), 'utf8'));
     }
     const parent = path.dirname(dir);
     if (parent === dir) {

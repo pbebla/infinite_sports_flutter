@@ -124,6 +124,7 @@ import {
 import {
   FantasySquad, squadFromMap, squadToMap, validateSquad,
 } from './squad';
+import { parseForfeitedBy } from './stats_mapper';
 import {
   lockAccounting, parseTransferState, rolloverState, transferStateToNode,
   usedAfterFreeSwaps,
@@ -451,8 +452,12 @@ export async function finalizeGameweek(
       if (typeof team !== 'string' || team.length === 0) return;
       const roster = rosterNamesOf(lineups, team);
       if (roster.length === 0) {
+        // On a forfeit (spec §8a) events are ignored, so a missing roster
+        // means nobody on this team gets the appearance point — say so.
         log.warn('fantasy finalize: no roster for team — scoring activity ' +
-          'players only', { ...ctx, team });
+          'players only', {
+          ...ctx, team, forfeit: parseForfeitedBy(node['forfeitedBy']) !== null,
+        });
       }
       attendance[team] =
         fullAttendance(roster, parseAbsentMap(node[`team${i + 1}attendance`]));

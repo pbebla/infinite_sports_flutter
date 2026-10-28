@@ -9,6 +9,14 @@
 // per-game 3/2/1 bonus awards (awardBonus over bpsScore). Repricing and the
 // Dream Team read these same bonus-inclusive week points.
 //
+// Forfeits (spec §8a; golden_forfeit.json + golden_forfeit_replay.test.ts)
+// need nothing extra here: the mapper tags each player won/lost, scoring
+// gives the team that showed up its appearance point only, bpsScore is 0
+// for the whole game (no bonus), and a forfeiting player's week is NOT
+// played — so auto-subs, the vice armband and the Dream Team treat him
+// like an absent player. Marking or undoing a forfeit is a write to a
+// Final game node, which re-runs this pipeline like any score edit.
+//
 // WRITE SHAPES (client contracts read from lib/fantasy/data/fantasy_parsers.dart
 // and lib/fantasy/hub/*; every number crosses the write boundary per these):
 //
@@ -99,7 +107,10 @@ export interface MarketPlayer {
 export interface FinalizeGame {
   node: Record<string, unknown>;
   /** team name -> full attendance map; null team entry / null map = everyone
-   *  with an activity event counts, default present. */
+   *  with an activity event counts, default present. On a FORFEITED game
+   *  (node forfeitedBy 1|2, spec §8a) these maps are the ONLY player source
+   *  — its events are ignored — so the roster composition is what gives
+   *  the team that showed up its +1 (stats_mapper.ts FORFEITS). */
   attendance: Record<string, Record<string, boolean> | null> | null;
 }
 

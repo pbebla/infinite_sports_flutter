@@ -30,8 +30,40 @@
 //   missing player entry defaults to present.
 // - Foul, Substitution and unknown/legacy types (e.g. 'Blue') carry no
 //   fantasy counter and are skipped — same as the tally engines.
+// - forfeit comes from the game's `forfeitedBy` marker (see FORFEITS).
+//
+// FORFEITS (spec §8a, owner Option B): a game carrying `forfeitedBy: 1|2`
+// (parseForfeitedBy — the Manager's Forfeit button) maps every entry with
+// forfeit 'won' (this team showed up) or 'lost' (this team forfeited), and
+// its activity events are IGNORED ENTIRELY — stray stats recorded on a
+// forfeited game never count, and a player known only from such an event
+// is not in the result at all. The player set is then exactly the
+// attendance keys, so CALLERS MUST PASS THE FULL ROSTER-COMPOSED
+// ATTENDANCE (every rostered player -> true, absentees -> false: the
+// finalizer's fullAttendance) — with no attendance map a forfeit yields no
+// players and nobody gets the appearance point.
 
-import { PlayerGameStats } from './player_game_stats';
+import { GameForfeit, PlayerGameStats } from './player_game_stats';
+
+/** Game-node key for the forfeit marker (1 | 2). */
+export const FORFEITED_BY_KEY = 'forfeitedBy';
+
+/** `forfeitedBy` as 1 or 2; null for absent / junk / any other number.
+ *  Port of lib/misc/forfeit.dart parseForfeitedBy (= the Manager's):
+ *  ints and whole doubles count, a String is trimmed then parsed as a
+ *  signed decimal integer (the same gate as this file's score(); Dart's
+ *  int.tryParse would also take a 0x-hex string, a shape no writer ever
+ *  produces); everything else is not a forfeit. */
+export function parseForfeitedBy(raw: unknown): 1 | 2 | null {
+  let v: number | null = null;
+  if (typeof raw === 'number') {
+    if (Number.isFinite(raw) && Number.isInteger(raw)) v = raw;
+  } else if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (/^[+-]?\d+$/.test(s)) v = Number(s);
+  }
+  return v === 1 || v === 2 ? v : null;
+}
 
 /** Plain object — arrays (RTDB integer-key coercion) are NOT maps,
  *  matching Dart's `is Map` on a List. */
@@ -95,12 +127,14 @@ class Tally {
   goals = 0; assists = 0; saves = 0; penSaved = 0; penMissed = 0;
   ownGoals = 0; yellows = 0; reds = 0; dpl = 0;
 
-  toStats(teamConceded: number, present: boolean): PlayerGameStats {
+  toStats(
+    teamConceded: number, present: boolean, forfeit: GameForfeit = 'none',
+  ): PlayerGameStats {
     return {
       goals: this.goals, assists: this.assists, saves: this.saves,
       penSaved: this.penSaved, penMissed: this.penMissed,
       ownGoals: this.ownGoals, yellows: this.yellows, reds: this.reds,
-      dpl: this.dpl, teamConceded, present,
+      dpl: this.dpl, teamConceded, present, forfeit,
     };
   }
 }
@@ -108,8 +142,9 @@ class Tally {
 /** Per-player stats for [teamName]'s side of [gameNode]. The player set is
  *  everyone who has an activity event PLUS everyone keyed in [attendance]
  *  (so a present player with zero events still earns the appearance point,
- *  and the attendance step can list the full roster). Throws when
- *  [teamName] is neither team1 nor team2. */
+ *  and the attendance step can list the full roster) — on a FORFEITED game
+ *  only the [attendance] keys (see FORFEITS above). Throws when [teamName]
+ *  is neither team1 nor team2. */
 export function mapGameToStats(
   gameNode: Record<string, unknown>,
   args: { teamName: string; attendance?: Record<string, boolean> | null },
@@ -117,16 +152,30 @@ export function mapGameToStats(
   const { teamName, attendance } = args;
   let ownActivity: unknown;
   let conceded: number;
+  let side: 1 | 2;
   if (gameNode['team1'] != null && teamName === String(gameNode['team1'])) {
     ownActivity = gameNode['team1activity'];
     conceded = score(gameNode['team2score'] ?? gameNode['team2Score']);
+    side = 1;
   } else if (gameNode['team2'] != null &&
     teamName === String(gameNode['team2'])) {
     ownActivity = gameNode['team2activity'];
     conceded = score(gameNode['team1score'] ?? gameNode['team1Score']);
+    side = 2;
   } else {
     throw new Error(
       `teamName "${teamName}" is neither team1 nor team2 of this game node`);
+  }
+
+  const forfeitedBy = parseForfeitedBy(gameNode[FORFEITED_BY_KEY]);
+  if (forfeitedBy !== null) {
+    const forfeit: GameForfeit = forfeitedBy === side ? 'lost' : 'won';
+    const out: Record<string, PlayerGameStats> = {};
+    for (const name of attendance ? Object.keys(attendance) : []) {
+      out[name] = new Tally().toStats(
+        conceded, attendance?.[name] ?? true, forfeit);
+    }
+    return out;
   }
 
   const tallies = new Map<string, Tally>();

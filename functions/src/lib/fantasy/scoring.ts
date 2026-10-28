@@ -3,7 +3,7 @@
 // line's label and points match the Dart engine character for character.
 
 import { FantasyConfig, FantasyPosition } from './fantasy_config';
-import { PlayerGameStats } from './player_game_stats';
+import { PlayerGameStats, playedGame } from './player_game_stats';
 
 export interface ScoreLine {
   label: string;
@@ -30,8 +30,15 @@ function intDiv(a: number, b: number): number {
 export function scorePlayerGame(
   s: PlayerGameStats, pos: FantasyPosition, cfg: FantasyConfig,
 ): GameScore {
-  if (!s.present) return { total: 0, breakdown: [] };
+  // Absent, or on the team that forfeited (spec §8a): nothing at all — no
+  // appearance, no goals-conceded penalty.
+  if (!playedGame(s)) return { total: 0, breakdown: [] };
   const r = cfg.scoring[pos];
+  // The team that showed up to a forfeit: the appearance point ONLY — no
+  // clean sheet, and any stray recorded stats never count.
+  if (s.forfeit === 'won') {
+    return { total: r.plays, breakdown: [{ label: 'Plays', points: r.plays }] };
+  }
   const lines: ScoreLine[] = [{ label: 'Plays', points: r.plays }];
   if (s.goals > 0) {
     lines.push({ label: `Goals ×${s.goals}`, points: s.goals * r.goal });
@@ -90,7 +97,9 @@ export function scorePlayerWeek(
   const scored = games.map((g) => scorePlayerGame(g, pos, cfg));
   return {
     total: scored.reduce((a, g) => a + g.total, 0),
-    played: games.some((g) => g.present),
+    // A forfeiting team's players did not play (spec §8a) — exactly like
+    // absent players for auto-subs and the vice-captain armband.
+    played: games.some(playedGame),
     games: scored,
   };
 }

@@ -1,7 +1,8 @@
 // Port of test/fantasy/stats_mapper_test.dart — coercion shapes,
 // second-yellow counting, pen-save double-bump, attendance defaults.
 import { describe, expect, it } from 'vitest';
-import { mapGameToStats } from './stats_mapper';
+import { playedGame } from './player_game_stats';
+import { mapGameToStats, parseForfeitedBy } from './stats_mapper';
 
 // Mirrors a REAL `Futsal/<season>/Date/<MMDDYYYY>/<i>` node:
 // - minute-keyed activity map with array buckets (team1activity),
@@ -182,5 +183,76 @@ describe('stats_mapper', () => {
 
   it('unknown team name throws', () => {
     expect(() => mapGameToStats(gameNode(), { teamName: 'Eagles' })).toThrow();
+  });
+});
+
+describe('stats_mapper — forfeits (spec §8a)', () => {
+  // Wolves forfeited (forfeitedBy 2): 5–0 to the Sharks; the node still
+  // carries the stray events above, which must be ignored entirely.
+  function forfeitNode(marker: unknown = 2): Record<string, unknown> {
+    return { ...gameNode(), team1score: 5, team2score: 0, forfeitedBy: marker };
+  }
+
+  it('showing-up side = won, forfeiting side = lost; the player set is the ' +
+    'attendance keys only, events ignored', () => {
+    const sharks = mapGameToStats(forfeitNode(), {
+      teamName: 'Sharks', attendance: { Sam: true, Dana: true, Riley: false },
+    });
+    // Alex scored twice on the timeline but is not in the attendance map.
+    expect(Object.keys(sharks).sort()).toEqual(['Dana', 'Riley', 'Sam']);
+    for (const s of Object.values(sharks)) {
+      expect(s.forfeit).toBe('won');
+      expect(s.goals + s.assists + s.saves + s.penSaved).toBe(0);
+    }
+    expect(sharks['Riley'].present).toBe(false);
+    expect(sharks['Dana'].teamConceded).toBe(0);
+
+    const wolves = mapGameToStats(forfeitNode(), {
+      teamName: 'Wolves', attendance: { Wes: true, Will: true },
+    });
+    expect(Object.keys(wolves).sort()).toEqual(['Wes', 'Will']);
+    for (const s of Object.values(wolves)) {
+      expect(s.forfeit).toBe('lost');
+      expect(playedGame(s)).toBe(false);
+      expect(s.yellows + s.reds + s.saves + s.ownGoals).toBe(0);
+    }
+  });
+
+  it('no attendance map on a forfeit -> no players (callers must pass the ' +
+    'roster-composed map)', () => {
+    expect(mapGameToStats(forfeitNode(), { teamName: 'Sharks' })).toEqual({});
+  });
+
+  it('tolerant marker parse: "1"/2.0 count; 0, 3, junk = not a forfeit', () => {
+    const byString = mapGameToStats(forfeitNode('1'),
+      { teamName: 'Sharks', attendance: { Sam: true } });
+    expect(byString['Sam'].forfeit).toBe('lost'); // team1 forfeited
+    const byDouble = mapGameToStats(forfeitNode(2.0),
+      { teamName: 'Sharks', attendance: { Sam: true } });
+    expect(byDouble['Sam'].forfeit).toBe('won');
+    for (const junk of [0, 3, 'x', null, true, 1.5]) {
+      const stats = mapGameToStats(forfeitNode(junk), { teamName: 'Sharks' });
+      expect(stats['Alex'].forfeit, String(junk)).toBe('none');
+      expect(stats['Alex'].goals, String(junk)).toBe(2); // events count
+    }
+  });
+
+  it('parseForfeitedBy mirrors lib/misc/forfeit.dart', () => {
+    expect(parseForfeitedBy(1)).toBe(1);
+    expect(parseForfeitedBy(2)).toBe(2);
+    expect(parseForfeitedBy(' 2 ')).toBe(2);
+    expect(parseForfeitedBy('+1')).toBe(1);
+    expect(parseForfeitedBy(2.5)).toBeNull();
+    expect(parseForfeitedBy(Infinity)).toBeNull();
+    expect(parseForfeitedBy(undefined)).toBeNull();
+    expect(parseForfeitedBy({})).toBeNull();
+  });
+
+  it('undo (marker removed) maps the same node normally again', () => {
+    const node = forfeitNode();
+    delete node['forfeitedBy'];
+    const sharks = mapGameToStats(node, { teamName: 'Sharks' });
+    expect(sharks['Alex'].forfeit).toBe('none');
+    expect(sharks['Alex'].goals).toBe(2);
   });
 });

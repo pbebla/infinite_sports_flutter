@@ -46,7 +46,7 @@ import {
   runMondayReprice,
 } from '../src/lib/fantasy/orchestration';
 import { FantasyDb } from '../src/lib/fantasy/orchestration_db';
-import { PlayerGameStats } from '../src/lib/fantasy/player_game_stats';
+import { PlayerGameStats, playedGame } from '../src/lib/fantasy/player_game_stats';
 import { applyDelta, openingPrices, repriceDeltas } from '../src/lib/fantasy/pricing';
 import { scorePlayerGame, scorePlayerWeek } from '../src/lib/fantasy/scoring';
 import {
@@ -515,7 +515,9 @@ function independentWeek(
     base[name] = scorePlayerWeek(list, p.position, cfg).total;
     bonus[name] = bonusByName[name] ?? 0;
     points[name] = base[name] + bonus[name];
-    played[name] = list.some((s) => s.present);
+    // Same "played" as the engine's scorePlayerWeek (a forfeiting team's
+    // players did not play — spec §8a; S15 has no forfeits).
+    played[name] = list.some(playedGame);
   }
   return { gw: gw.number, date: gw.date, games, points, base, bonus, played, awards, bothSides };
 }
