@@ -354,7 +354,9 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
 }
 
 /// Spent vs budget with the remaining amount — fills as picks land, flips to
-/// the error color when over.
+/// the error color when over. Restyled in the P3b feedback round (Task 5):
+/// the fill is the pitch-green family (works both themes), the remaining
+/// text reads in onSurface, and ONLY the over-budget state goes error-red.
 class _BudgetBar extends StatelessWidget {
   const _BudgetBar({required this.spent, required this.budget});
 
@@ -364,7 +366,7 @@ class _BudgetBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final accent = fantasyAccent(context);
+    final green = fantasyPitchGreen(context);
     final over = spent > budget;
     final remaining = budget - spent;
     final fill = budget == 0 ? 1.0 : (spent / budget).clamp(0.0, 1.0);
@@ -398,7 +400,9 @@ class _BudgetBar extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.w800,
-                  color: over ? scheme.error : accent,
+                  // onSurface (white in dark, near-black in light) — the
+                  // error color is reserved for the over-budget state.
+                  color: over ? scheme.error : scheme.onSurface,
                 ),
               ),
             ],
@@ -414,7 +418,7 @@ class _BudgetBar extends StatelessWidget {
               builder: (context, value, _) => LinearProgressIndicator(
                 value: value,
                 minHeight: 7,
-                color: over ? scheme.error : accent,
+                color: over ? scheme.error : green,
                 backgroundColor: scheme.outlineVariant.withValues(alpha: 0.4),
               ),
             ),
