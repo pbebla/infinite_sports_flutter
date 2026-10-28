@@ -128,6 +128,23 @@ rather than only the one-active-per-gameweek rule, to avoid confusion.
   *"<Name> is marked not present."* → **[He's here — mark present & record]** /
   **[My mistake — cancel]** (cancel returns to the player picker).
 
+## 8a. Forfeits (owner decision, 2026-10-28)
+
+- A forfeit is marked EXPLICITLY on the game in the Manager (Forfeit button on
+  the game's scoring screen, beside Attendance): "Which team forfeited?" →
+  the score is set to **5–0** for the other team, the game ends (Final), and
+  the game node records `forfeitedBy: 1 | 2`. Undo restores normal. Never
+  inferred from "5–0 with no stats" (unreliable both ways); instead, ending a
+  game that has a score but zero recorded events prompts "No stats were
+  recorded — was this a forfeit?".
+- **Fantasy (Option B):** players on the team that showed up each get the
+  +1 appearance point only (attendance still applies — marked-absent players
+  get 0); no clean sheet, no bonus points from that game. The forfeiting
+  team's players get 0 (no appearance, no goals-conceded penalties). Any
+  stats accidentally recorded on a forfeited game are ignored for fantasy.
+- League standings count the 5–0 normally. Fan match pages label it
+  "5–0 · Forfeit".
+
 ## 9. Transparency & social
 
 - Everyone's points and ranks are public.
