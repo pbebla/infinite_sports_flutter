@@ -79,13 +79,15 @@ double pitchWidthFactor(double y) => pitchTopScale + (1 - pitchTopScale) * y;
     (x: 0.5 + (o.x - 0.5) * pitchWidthFactor(o.y), y: o.y);
 
 // ── Owner's "Neon Gold Isometric Soccer Pitch" asset geometry ──────────────
-// The image (assets/fantasy/pitch_neon_gold.jpg, 1024×1536) bakes its own
-// perspective; these fractions were measured off the artwork so slots land on
-// its drawn grass. The pitch surface spans y 0.12–0.84 of the image; its
-// half-width grows from 0.335 (far/top) to 0.474 (near/bottom) of the image
-// width.
-const double pitchAssetTopY = 0.12;
-const double pitchAssetBottomY = 0.84;
+// The image (assets/fantasy/pitch_neon_gold.jpg, 1024×1244 — cropped from the
+// original artwork to trim its heavy glow halo to a thin rim, owner feedback)
+// bakes its own perspective; these fractions were measured off the artwork so
+// slots land on its drawn grass. In the cropped frame the pitch surface spans
+// y 0.056–0.944; its half-width grows from 0.335 (far/top) to 0.474
+// (near/bottom) of the image width.
+const double pitchAssetAspect = 1024 / 1244;
+const double pitchAssetTopY = 0.0556;
+const double pitchAssetBottomY = 0.9444;
 const double pitchAssetHalfTop = 0.335;
 const double pitchAssetHalfBottom = 0.474;
 

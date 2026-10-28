@@ -110,10 +110,10 @@ class FantasyCourtView extends StatelessWidget {
     return Column(
       children: [
         AspectRatio(
-          // The asset renders at its own 2:3; the painter keeps its 0.78
-          // (taller than wide — room for the big photo chips either way; the
-          // page scrolls).
-          aspectRatio: useNeonPitchAsset ? 1024 / 1536 : 0.78,
+          // The asset renders at its own (cropped) aspect; the painter keeps
+          // its 0.78 (taller than wide — room for the big photo chips either
+          // way; the page scrolls).
+          aspectRatio: useNeonPitchAsset ? pitchAssetAspect : 0.78,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(18),
             child: useNeonPitchAsset
