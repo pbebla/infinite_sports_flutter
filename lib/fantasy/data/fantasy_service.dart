@@ -26,11 +26,15 @@ class FantasyService {
   // ── Session snapshot caches (instant revisits) ────────────────────────
   static final Map<String, FantasyConfigState> _configCache = {};
   static final Map<String, List<FantasyPlayer>> _playersCache = {};
+  static final Map<String, Map<String, FantasyPlayerTotals>> _totalsCache = {};
+  static final Map<String, List<FantasyPriceChange>> _priceChangesCache = {};
 
   /// Clears the session caches (sign-out hygiene, tests).
   static void clearSessionCaches() {
     _configCache.clear();
     _playersCache.clear();
+    _totalsCache.clear();
+    _priceChangesCache.clear();
   }
 
   /// Live `Fantasy/<sport>/<season>/Config` → engine FantasyConfig + lock
@@ -63,6 +67,40 @@ class FantasyService {
       final players = playersFromNode(event.snapshot.value);
       _playersCache[key] = players;
       yield players;
+    }
+  }
+
+  /// Live finalized totals (`PlayerTotals`, P4 functions-written). null =
+  /// node absent (no finalized gameweeks yet) — the market hides its points/
+  /// ownership column and the Points sort on null (P3c Task 4).
+  static Stream<Map<String, FantasyPlayerTotals>?> watchPlayerTotals(
+      String sport, String season) async* {
+    final key = _root(sport, season);
+    final seed = _totalsCache[key];
+    if (seed != null) yield seed;
+    await for (final event in _ref('$key/PlayerTotals').onValue) {
+      final totals = playerTotalsFromNode(event.snapshot.value);
+      if (totals != null) {
+        _totalsCache[key] = totals;
+      } else {
+        _totalsCache.remove(key);
+      }
+      yield totals;
+    }
+  }
+
+  /// Live latest-gameweek price moves (`PriceChanges/<gw>`, P4 repricing
+  /// job). Empty until the first Monday repricing runs — the risers &
+  /// fallers strip hides entirely on empty (P3c Task 5).
+  static Stream<List<FantasyPriceChange>> watchPriceChanges(
+      String sport, String season) async* {
+    final key = _root(sport, season);
+    final seed = _priceChangesCache[key];
+    if (seed != null) yield seed;
+    await for (final event in _ref('$key/PriceChanges').onValue) {
+      final changes = latestPriceChangesFromNode(event.snapshot.value);
+      _priceChangesCache[key] = changes;
+      yield changes;
     }
   }
 

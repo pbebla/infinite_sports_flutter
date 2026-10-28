@@ -160,6 +160,75 @@ void main() {
     });
   });
 
+  group('playerTotalsFromNode (P3c)', () {
+    test('absent/malformed → null (hide the points column + Points sort)',
+        () {
+      expect(playerTotalsFromNode(null), isNull);
+      expect(playerTotalsFromNode('nope'), isNull);
+      expect(playerTotalsFromNode([1, 2]), isNull);
+    });
+    test('parses points + ownershipPct, tolerating strings and bare numbers',
+        () {
+      final totals = playerTotalsFromNode({
+        'Ava Striker': {'points': 54, 'ownershipPct': 62.5},
+        'Deb Rock': {'points': '31', 'ownershipPct': '12'},
+        'No Pct': {'points': 9},
+        'Bare': 17,
+        'Junk': 'nope',
+      })!;
+      expect(totals['Ava Striker']!.points, 54);
+      expect(totals['Ava Striker']!.ownershipPct, 62.5);
+      expect(totals['Deb Rock']!.points, 31);
+      expect(totals['Deb Rock']!.ownershipPct, 12);
+      expect(totals['No Pct']!.points, 9);
+      expect(totals['No Pct']!.ownershipPct, isNull);
+      expect(totals['Bare']!.points, 17);
+      expect(totals.containsKey('Junk'), isFalse);
+    });
+  });
+
+  group('latestPriceChangesFromNode (P3c)', () {
+    test('absent/malformed → empty (the strip hides entirely)', () {
+      expect(latestPriceChangesFromNode(null), isEmpty);
+      expect(latestPriceChangesFromNode('nope'), isEmpty);
+      expect(latestPriceChangesFromNode({'1': 'junk'}), isEmpty);
+    });
+    test('map node: numerically LATEST gameweek wins, risers first, zeros '
+        'and junk skipped', () {
+      final changes = latestPriceChangesFromNode({
+        '2': {
+          'Old Riser': {'delta': 5}
+        },
+        '10': {
+          'Faller': {'delta': -5},
+          'Big Riser': {'delta': 10},
+          'Riser': {'delta': 5},
+          'Flat': {'delta': 0},
+          'Junk': {'delta': 'nope'},
+        },
+        'weird': {
+          'Ignored': {'delta': 5}
+        },
+      });
+      expect(changes.map((c) => c.name).toList(),
+          ['Big Riser', 'Riser', 'Faller']);
+      expect(changes.first.deltaTenths, 10);
+      expect(changes.last.deltaTenths, -5);
+    });
+    test('list coercion (gw keys ARE small ints): last non-null entry wins; '
+        'bare-number deltas tolerated', () {
+      final changes = latestPriceChangesFromNode([
+        null,
+        {'Old': 5},
+        {'Up': 5, 'Down': -5},
+        null,
+      ]);
+      expect(changes.map((c) => c.name).toList(), ['Up', 'Down']);
+      expect(changes.first.deltaTenths, 5);
+      expect(changes.last.deltaTenths, -5);
+    });
+  });
+
   group('dateKeysFromNode', () {
     test('map keys with non-null values', () {
       expect(

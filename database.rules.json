@@ -385,6 +385,12 @@
           "Leaderboards": {
             ".read": true
           },
+          "PlayerTotals": {
+            ".read": true
+          },
+          "PriceChanges": {
+            ".read": true
+          },
           "News": {
             ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
             "Published": {

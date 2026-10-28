@@ -86,6 +86,97 @@ FantasySquad? squadFromNode(Object? node) {
   }
 }
 
+/// One player's finalized season totals (P3c) — written by the P4 functions
+/// to `Fantasy/<sport>/<season>/PlayerTotals/<name>` as
+/// `{points, ownershipPct}`. Until a gameweek finalizes the node is absent
+/// and the market hides its points/ownership column entirely.
+class FantasyPlayerTotals {
+  const FantasyPlayerTotals({required this.points, this.ownershipPct});
+
+  /// Total fantasy points across finalized gameweeks.
+  final int points;
+
+  /// Share of managers holding the player (0–100); null when the functions
+  /// haven't written one.
+  final double? ownershipPct;
+}
+
+/// The whole `PlayerTotals` node → name → totals. null when the node is
+/// absent/malformed — meaningful: NO finalized gameweeks yet, so the market
+/// hides the points column and the Points sort option (never shows zeros).
+Map<String, FantasyPlayerTotals>? playerTotalsFromNode(Object? node) {
+  if (node is! Map) return null;
+  final out = <String, FantasyPlayerTotals>{};
+  node.forEach((name, raw) {
+    if (raw is Map) {
+      final rawPoints = raw['points'];
+      final rawPct = raw['ownershipPct'];
+      out[name.toString()] = FantasyPlayerTotals(
+        points: rawPoints is num
+            ? rawPoints.toInt()
+            : int.tryParse(rawPoints?.toString() ?? '') ?? 0,
+        ownershipPct: rawPct is num
+            ? rawPct.toDouble()
+            : double.tryParse(rawPct?.toString() ?? ''),
+      );
+    } else if (raw is num) {
+      // Tolerate a bare-points shape.
+      out[name.toString()] = FantasyPlayerTotals(points: raw.toInt());
+    }
+  });
+  return out;
+}
+
+/// One Monday repricing move (P3c risers & fallers) — a row of
+/// `Fantasy/<sport>/<season>/PriceChanges/<gw>` written by the P4 repricing
+/// job: `<name>: {delta: <signed tenths>}` (a bare number tolerated).
+class FantasyPriceChange {
+  const FantasyPriceChange({required this.name, required this.deltaTenths});
+  final String name;
+
+  /// Signed move in $0.1M units (+5 = up $0.5M).
+  final int deltaTenths;
+}
+
+/// The LATEST gameweek's price moves from the whole `PriceChanges` node:
+/// risers first (delta desc, ties by name), zero/unparseable moves skipped.
+/// Gameweek keys are small ints, so RTDB WILL list-coerce this node — a List
+/// takes its last non-null entry, a Map its numerically largest key. Empty
+/// when absent/malformed (the strip hides entirely).
+List<FantasyPriceChange> latestPriceChangesFromNode(Object? node) {
+  Object? latest;
+  if (node is List) {
+    for (final child in node) {
+      if (child != null) latest = child;
+    }
+  } else if (node is Map) {
+    int? bestGw;
+    for (final e in node.entries) {
+      final gw = int.tryParse(e.key.toString());
+      if (gw == null || e.value == null) continue;
+      if (bestGw == null || gw > bestGw) {
+        bestGw = gw;
+        latest = e.value;
+      }
+    }
+  }
+  if (latest is! Map) return const [];
+  final out = <FantasyPriceChange>[];
+  latest.forEach((name, raw) {
+    final Object? rawDelta = raw is Map ? raw['delta'] : raw;
+    final delta = rawDelta is num
+        ? rawDelta.toInt()
+        : int.tryParse(rawDelta?.toString() ?? '');
+    if (delta == null || delta == 0) return;
+    out.add(FantasyPriceChange(name: name.toString(), deltaTenths: delta));
+  });
+  out.sort((a, b) {
+    final byDelta = b.deltaTenths.compareTo(a.deltaTenths);
+    return byDelta != 0 ? byDelta : a.name.compareTo(b.name);
+  });
+  return out;
+}
+
 /// Match-day keys (MMDDYYYY) from the season's `/<sport>/<season>/Date` node
 /// — the deriveGameweeks input. Date keys never list-coerce (they aren't
 /// small ints), but guard anyway.
