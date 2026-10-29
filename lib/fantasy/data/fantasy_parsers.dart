@@ -27,17 +27,38 @@ enum FantasyLockOverride {
 class FantasyConfigState {
   const FantasyConfigState({required this.config, required this.lockOverride});
   final FantasyConfig config;
+
+  /// The EFFECTIVE override (automation spec 2026-10-28 §2): an open/locked
+  /// override whose `lockOverrideUntil` has passed already counts as auto.
   final FantasyLockOverride lockOverride;
 }
 
 /// null when the node is absent/malformed — absence is meaningful: it gates
 /// the league page's Fantasy tab (no config = no fantasy this season).
-FantasyConfigState? configStateFromNode(Object? node) {
+/// [now] is a test seam (defaults to the real clock).
+FantasyConfigState? configStateFromNode(Object? node, {DateTime? now}) {
   if (node is! Map) return null;
   return FantasyConfigState(
     config: FantasyConfig.fromMap(node),
-    lockOverride: FantasyLockOverride.parse(node['lockOverride']),
+    lockOverride: _effectiveLockOverride(node, now ?? DateTime.now()),
   );
+}
+
+/// Spec §2 effective override — server parity with `lockOverrideOf`
+/// (functions orchestration_db.ts): open/locked with a numeric
+/// `lockOverrideUntil` (epoch ms) at or before [now] → auto. A missing or
+/// non-numeric until means "no automatic return" (the override stands). The
+/// sweep also flips the stored value to auto within 15 minutes.
+FantasyLockOverride _effectiveLockOverride(Map node, DateTime now) {
+  final raw = FantasyLockOverride.parse(node['lockOverride']);
+  if (raw == FantasyLockOverride.auto) return raw;
+  final until = node['lockOverrideUntil'];
+  if (until is num &&
+      until.isFinite &&
+      now.millisecondsSinceEpoch >= until) {
+    return FantasyLockOverride.auto;
+  }
+  return raw;
 }
 
 /// One `Fantasy/<sport>/<season>/Managers/<uid>` entry (spec §10b): the
@@ -409,9 +430,126 @@ List<FantasyMiniLeague> miniLeaguesFromNode(Object? node) {
   return out;
 }
 
-// ── News feed (P3d, spec §13) ──────────────────────────────────────────────
-// `News/Published/<id>` = {Title, Body, At, PhotoUrl?} (owner/AI-published in
-// P4/P5; public read already in the rules). `At` is epoch millis.
+// ── News feed (P3d, spec §13; News desk 2.0, spec 2026-10-28 §4.1/§4.2) ────
+// `News/Published/<id>` = {Title, Body, At, PhotoUrl?, Template?, Gw?,
+//   Players?: {"0": PlayerCard, ...}, Push?, PushedAt?, PushSent?, EditedAt?}
+// (Manager/autopilot-published; public read in the rules). `At` is epoch
+// millis. Push/PushedAt/PushSent/EditedAt are server/Manager bookkeeping the
+// fan feed never needs. Players are SNAPSHOTS taken when the post was built
+// (functions news_cards.ts / Manager news_cards.dart) — the feed renders them
+// as-is with no extra listeners. Players' small int keys list-coerce, so the
+// node arrives as a List or an index-keyed Map.
+
+/// One tagged-player snapshot (spec §4.1 PlayerCard). The server OMITS an
+/// optional field when it is unknown — those parse as null and render "–".
+class NewsPlayerCard {
+  const NewsPlayerCard({
+    required this.name,
+    required this.position,
+    required this.team,
+    this.photoUrl,
+    required this.priceTenths,
+    this.priceDeltaTenths,
+    this.gw,
+    this.gwPoints,
+    this.seasonPoints,
+    this.ownershipPct,
+    this.goals = 0,
+    this.assists = 0,
+  });
+
+  final String name;
+  final FantasyPosition position;
+
+  /// Team name; '' when the snapshot had none.
+  final String team;
+  final String? photoUrl;
+
+  /// Price in $0.1M units at snapshot time.
+  final int priceTenths;
+
+  /// Latest repricing move (signed tenths); null = no move recorded.
+  final int? priceDeltaTenths;
+
+  /// Latest finalized gameweek of the season at snapshot time.
+  final int? gw;
+
+  /// This player's points in [gw]; null when he had no entry that week.
+  final int? gwPoints;
+  final int? seasonPoints;
+
+  /// Share of managers holding him (0–100).
+  final double? ownershipPct;
+  final int goals;
+  final int assists;
+}
+
+/// One PlayerCard child → card; null when unusable (no name, an unknown
+/// position or no price — skipped, never a crash).
+NewsPlayerCard? newsPlayerCardFromNode(Object? node) {
+  if (node is! Map) return null;
+  final name = node['name']?.toString().trim() ?? '';
+  if (name.isEmpty) return null;
+  final FantasyPosition position;
+  try {
+    position = FantasyPosition.parse(node['position']?.toString().trim() ?? '');
+  } on ArgumentError {
+    return null;
+  }
+  final price = _optInt(node['priceTenths']);
+  if (price == null) return null;
+  final photo = node['photoUrl']?.toString().trim();
+  final rawPct = node['ownershipPct'];
+  final pct = rawPct is num
+      ? rawPct.toDouble()
+      : double.tryParse(rawPct?.toString() ?? '');
+  return NewsPlayerCard(
+    name: name,
+    position: position,
+    team: node['team']?.toString().trim() ?? '',
+    photoUrl: (photo == null || photo.isEmpty) ? null : photo,
+    priceTenths: price,
+    priceDeltaTenths: _optInt(node['priceDeltaTenths']),
+    gw: _optInt(node['gw']),
+    gwPoints: _optInt(node['gwPoints']),
+    seasonPoints: _optInt(node['seasonPoints']),
+    ownershipPct: (pct == null || !pct.isFinite) ? null : pct,
+    goals: _optInt(node['goals']) ?? 0,
+    assists: _optInt(node['assists']) ?? 0,
+  );
+}
+
+/// A post's `Players` node in display order: a List (RTDB coercion) in index
+/// order, an index-keyed Map sorted numerically by key (non-index keys
+/// ignored). Holes and malformed cards are skipped.
+List<NewsPlayerCard> newsPlayerCardsFromNode(Object? node) {
+  final children = <Object?>[];
+  if (node is List) {
+    children.addAll(node);
+  } else if (node is Map) {
+    final entries = node.entries
+        .map((e) => (index: int.tryParse(e.key.toString()), value: e.value))
+        .where((e) => e.index != null)
+        .toList()
+      ..sort((a, b) => a.index!.compareTo(b.index!));
+    children.addAll([for (final e in entries) e.value]);
+  }
+  return [
+    for (final raw in children)
+      if (newsPlayerCardFromNode(raw) case final card?) card,
+  ];
+}
+
+/// The fan-facing card header label for a post template (spec §4.2).
+/// 'free', 'ai' and anything unknown read as plain "News".
+String newsTemplateLabel(String template) => switch (template) {
+      'spotlight' => 'Spotlight',
+      'star' => 'Star of the week',
+      'price' => 'Price watch',
+      'h2h' => 'Head to head',
+      'dreamteam' => 'Team of the week',
+      _ => 'News',
+    };
 
 class FantasyNewsPost {
   const FantasyNewsPost({
@@ -420,6 +558,9 @@ class FantasyNewsPost {
     required this.body,
     required this.atMs,
     this.photoUrl,
+    this.template = 'free',
+    this.gw,
+    this.players = const [],
   });
 
   final String id;
@@ -427,10 +568,28 @@ class FantasyNewsPost {
   final String body;
   final int atMs;
   final String? photoUrl;
+
+  /// 'spotlight' | 'star' | 'price' | 'h2h' | 'free' | 'dreamteam' | 'ai'
+  /// (absent = 'free'; unknown values kept, labelled "News").
+  final String template;
+
+  /// The gameweek the story is about; null for undated owner posts.
+  final int? gw;
+
+  /// Tagged-player snapshots in display order (0–5).
+  final List<NewsPlayerCard> players;
+
+  /// The card's header line: "Spotlight · GW7", or just the label.
+  String get headerText {
+    final label = newsTemplateLabel(template);
+    return gw == null ? label : '$label · GW$gw';
+  }
 }
 
 /// Published news, NEWEST FIRST (At desc, ties by id desc — push ids sort
-/// chronologically). Children without a title are skipped.
+/// chronologically). Children without a title are skipped — including the
+/// rare server leftover where a push stamp (PushedAt/PushSent) lands after
+/// the post was deleted.
 List<FantasyNewsPost> newsPostsFromNode(Object? node) {
   final out = <FantasyNewsPost>[];
   if (node is! Map) return out;
@@ -439,12 +598,17 @@ List<FantasyNewsPost> newsPostsFromNode(Object? node) {
     final title = raw['Title']?.toString().trim() ?? '';
     if (title.isEmpty) return;
     final photo = raw['PhotoUrl']?.toString().trim();
+    final template = raw['Template']?.toString().trim() ?? '';
+    final gw = _optInt(raw['Gw']);
     out.add(FantasyNewsPost(
       id: id.toString(),
       title: title,
       body: raw['Body']?.toString() ?? '',
       atMs: _optInt(raw['At']) ?? 0,
       photoUrl: (photo == null || photo.isEmpty) ? null : photo,
+      template: template.isEmpty ? 'free' : template,
+      gw: (gw == null || gw <= 0) ? null : gw,
+      players: newsPlayerCardsFromNode(raw['Players']),
     ));
   });
   out.sort((a, b) {

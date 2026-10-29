@@ -29,6 +29,46 @@ void main() {
       expect(FantasyLockOverride.parse('locked'), FantasyLockOverride.locked);
       expect(FantasyLockOverride.parse('weird'), FantasyLockOverride.auto);
     });
+
+    group('lockOverrideUntil expiry (spec §2: effective override)', () {
+      final now = DateTime.utc(2026, 11, 2, 23);
+      final nowMs = now.millisecondsSinceEpoch;
+      FantasyLockOverride effective(Object? override, Object? until) {
+        final node = FantasyConfig.futsalDefault().toMap()
+          ..['lockOverride'] = override;
+        if (until != null) node['lockOverrideUntil'] = until;
+        return configStateFromNode(node, now: now)!.lockOverride;
+      }
+
+      test('no until → the override stands (Never / testing)', () {
+        expect(effective('locked', null), FantasyLockOverride.locked);
+        expect(effective('open', null), FantasyLockOverride.open);
+      });
+      test('until in the future → still overridden', () {
+        expect(effective('open', nowMs + 60000), FantasyLockOverride.open);
+        expect(
+            effective('locked', nowMs + 1), FantasyLockOverride.locked);
+      });
+      test('until passed (or exactly now) → auto', () {
+        expect(effective('open', nowMs - 1), FantasyLockOverride.auto);
+        expect(effective('locked', nowMs), FantasyLockOverride.auto);
+        expect(effective('locked', (nowMs - 5000).toDouble()),
+            FantasyLockOverride.auto);
+      });
+      test('junk until is treated as absent; auto stays auto', () {
+        expect(effective('locked', 'x'), FantasyLockOverride.locked);
+        expect(effective('locked', '123'), FantasyLockOverride.locked);
+        expect(effective('auto', nowMs + 60000), FantasyLockOverride.auto);
+        expect(effective(null, nowMs - 1), FantasyLockOverride.auto);
+      });
+      test('defaults to the real clock when no now is given', () {
+        final node = FantasyConfig.futsalDefault().toMap()
+          ..['lockOverride'] = 'locked'
+          ..['lockOverrideUntil'] = 1000; // 1970: long expired
+        expect(configStateFromNode(node)!.lockOverride,
+            FantasyLockOverride.auto);
+      });
+    });
   });
 
   group('managerFromNode', () {

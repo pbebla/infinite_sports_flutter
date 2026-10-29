@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/eventpage.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 import 'package:infinite_sports_flutter/league_match_detail.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -43,6 +45,26 @@ Future<void> openMatchFromNotification(Map<String, dynamic> data) async {
         MaterialPageRoute(builder: (_) => EventPage(v2Id: eventId)),
       );
     }
+    return;
+  }
+
+  // Fantasy pushes (deadline reminder, weekly recap, position alerts, owner
+  // messages, news posts) carry {type:'fantasy', sport, season, gw,
+  // postId?}. They also carry sport/season, so this MUST run before the
+  // league-watcher branch below (which would otherwise swallow them and do
+  // nothing). News → the hub's News tab scrolled to the post; else My Team.
+  if (type == 'fantasy') {
+    final route = fantasyRouteFromPayload(data);
+    final fantasyCtx = mainContext;
+    if (route == null || fantasyCtx == null) return;
+    Navigator.of(fantasyCtx, rootNavigator: true).push(MaterialPageRoute(
+      builder: (_) => FantasyHubPage(
+        sport: route.sport,
+        season: route.season,
+        initialTab: route.initialTab,
+        focusPostId: route.focusPostId,
+      ),
+    ));
     return;
   }
 
