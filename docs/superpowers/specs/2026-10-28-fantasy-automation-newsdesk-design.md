@@ -187,11 +187,13 @@ After each finalized (non-voided) gameweek (existing NewsDrafted guard):
 ### 4.5 Server pieces
 
 - **Trigger `onFantasyNewsPublished`** (`onValueWritten`
-  `/Fantasy/{sport}/{season}/News/Published/{postId}`): when the row exists, has `Push`
-  and no `PushedAt` → transaction-claim `PushedAt` → resolve audience → send → write
-  `PushSent`. Audiences: managers / owners (owners of ANY tagged player) / everyone
-  (FCM topic `all_users`, same as campaigns). Payload adds `postId`. Edits never
-  re-push (PushedAt stays). This one path covers Manager publish, draft publish and
+  `/Fantasy/{sport}/{season}/News/Published/{postId}`): when the row exists and has
+  `Push` → claim the server-only once-only node `News/PushClaims/<postId>` =
+  `{At, Sent?, Skipped?}` → resolve audience → send → stamp `PushedAt`/`PushSent` on
+  the row for display (only while it still exists). Audiences: managers / owners
+  (owners of ANY tagged player) / everyone (FCM topic `all_users`, same as
+  campaigns). Payload adds `postId`. Edits and whole-row rewrites never re-push (the
+  claim lives outside the row). This one path covers Manager publish, draft publish and
   autopilot publish. A post whose `At` is over 60 min old when first seen never pushes.
 - **Callable `writeFantasyCopy`** (admin-only, Anthropic `claude-haiku-5-5`, secret
   ANTHROPIC_API_KEY, 8s timeout, same playful-never-mean / stats-only rules):
