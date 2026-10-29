@@ -4,7 +4,7 @@
 // imports it.
 
 import { clone, Json, loadGoldenFixture } from './golden_fixture';
-import { FantasyDb } from './orchestration_db';
+import { FantasyDb, FantasyTxResult } from './orchestration_db';
 import { FantasyPusher, FantasyUserPush } from './pushes';
 
 export const fixture = loadGoldenFixture();
@@ -60,6 +60,18 @@ export class FakeDb implements FantasyDb {
     if ((await this.read(path)) !== null) return false;
     await this.write(path, value);
     return true;
+  }
+
+  async transaction(
+    path: string, update: (current: unknown) => unknown,
+  ): Promise<FantasyTxResult> {
+    // The update sees a COPY (it may not mutate stored state, as in RTDB).
+    const current = await this.read(path);
+    const next = update(current === null ? null : clone(current));
+    if (next === undefined) return { committed: false, value: current };
+    // null over an absent node is RTDB's no-op: nothing written, no stub.
+    if (!(next === null && current === null)) await this.write(path, next);
+    return { committed: true, value: next === null ? null : clone(next) };
   }
 
   snapshot(): string {

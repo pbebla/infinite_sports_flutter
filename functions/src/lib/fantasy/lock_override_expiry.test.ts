@@ -57,12 +57,12 @@ describe('sweep: expired lock override reverts to auto and the season runs', () 
       const log = capturingLog();
       await runLifecycleSweep(db, AFTER_LOCK2, log);
 
-      // The DB carries the revert: auto, no until, the rest of Config intact.
+      // The DB carries the revert: auto, no until, the rest of Config intact
+      // — ONE compare-and-set write of Config, the sweep's first write.
       expect(configOf(db)).toEqual({ lockHour: 15, lockOverride: 'auto' });
-      expect(db.writes.slice(0, 2)).toEqual([
-        `${F_ROOT}/Config/lockOverride`,
-        `${F_ROOT}/Config/lockOverrideUntil`,
-      ]);
+      expect(db.writes[0]).toBe(`${F_ROOT}/Config`);
+      expect(db.writes.filter((p) => p.startsWith(`${F_ROOT}/Config`)))
+        .toEqual([`${F_ROOT}/Config`]);
       expect(log.infos).toContainEqual(
         { message: EXPIRED_MSG, context: { sport: 'Futsal', season: '15' } });
 
@@ -92,6 +92,50 @@ describe('sweep: expired lock override reverts to auto and the season runs', () 
     const db = overridden('open', undefined, { gw2Status: 1 });
     await runLifecycleSweep(db, AFTER_LOCK2);
     expect(db.writes).toEqual([]);
+  });
+
+  /** A db whose 'Fantasy' read (the sweep's season snapshot) is taken just
+   *  BEFORE [ownerWrite] lands on Config — the owner's change races the
+   *  revert. */
+  function racing(
+    expiredOverride: string, ownerWrite: (config: Record<string, any>) => void,
+  ): FakeDb {
+    const db = overridden(expiredOverride, AFTER_LOCK2.getTime() - 1, { gw2Status: 1 });
+    const read = db.read.bind(db);
+    db.read = async (path: string) => {
+      const value = await read(path);
+      if (path !== 'Fantasy') return value;
+      const snapshot = JSON.parse(JSON.stringify(value));
+      ownerWrite(configOf(db));
+      return snapshot;
+    };
+    return db;
+  }
+
+  it('an owner re-lock (new until) between the sweep read and the revert is never wiped', async () => {
+    const newUntil = AFTER_LOCK2.getTime() + 6 * HOUR_MS;
+    const db = racing('locked', (c) => { c.lockOverrideUntil = newUntil; });
+    const log = capturingLog();
+    await runLifecycleSweep(db, AFTER_LOCK2, log);
+
+    expect(configOf(db)).toEqual({
+      lockHour: 15, lockOverride: 'locked', lockOverrideUntil: newUntil,
+    });
+    const messages = log.infos.map((i) => i.message);
+    expect(messages).not.toContain(EXPIRED_MSG);
+    // The sweep runs on the owner's fresh config: frozen again.
+    expect(messages).toContain('fantasy sweep: lockOverride frozen — standing down');
+    expect(await db.read(`${F_ROOT}/PublishedPicks/2`)).toBeNull();
+    expect((await db.read(`${F_ROOT}/GwState`) as Record<string, unknown>)['status'])
+      .toBe('open');
+  });
+
+  it('a changed override value (same until) is not reverted either', async () => {
+    const db = racing('locked', (c) => { c.lockOverride = 'open'; });
+    await runLifecycleSweep(db, AFTER_LOCK2);
+    expect(configOf(db)).toEqual({
+      lockHour: 15, lockOverride: 'open', lockOverrideUntil: AFTER_LOCK2.getTime() - 1,
+    });
   });
 });
 

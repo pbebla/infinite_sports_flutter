@@ -8,10 +8,11 @@ import { describe, expect, it } from 'vitest';
 import { FetchLike } from '../support';
 import { MarketPlayer } from './finalize_core';
 import {
-  buildDreamTeamDraft, buildNewsPrompt, buildNewsStats, dreamTeamNames,
-  formatLeagueWeekdayTime, generateNewsDrafts, NEWS_BODY_MAX, NEWS_MODEL,
-  NEWS_SYSTEM_PROMPT, NEWS_TITLE_MAX, newsAutopilotConfigFrom,
-  nextLeagueWeekdayInstantUtc, parseNewsDrafts, shouldAutoPublish,
+  autopilotPublishAtUtc, buildDreamTeamDraft, buildNewsPrompt, buildNewsStats,
+  dreamTeamNames, formatLeagueWeekdayTime, generateNewsDrafts, NEWS_BODY_MAX,
+  NEWS_MODEL, NEWS_REVIEW_WINDOW_MS, NEWS_SYSTEM_PROMPT, NEWS_TITLE_MAX,
+  newsAutopilotConfigFrom, nextLeagueWeekdayInstantUtc, parseNewsDrafts,
+  shouldAutoPublish,
 } from './news';
 import { PlayerCard } from './news_cards';
 
@@ -108,6 +109,18 @@ describe('parseNewsDrafts (validation)', () => {
       title: `T${i}`, body: `B${i}`,
     }));
     expect(parseNewsDrafts(JSON.stringify(five))).toHaveLength(4);
+  });
+
+  it('cuts at a word boundary and never splits an emoji (the copywriter clamp)', () => {
+    const family = '\u{1F468}‍\u{1F469}‍\u{1F467}'; // one grapheme, 8 UTF-16 units
+    const [d] = parseNewsDrafts(JSON.stringify([{
+      // The 60-char cut lands inside "fantastic" -> back up to the space.
+      title: `${'x'.repeat(55)} fantastic week`,
+      // The 400th character is the emoji: kept whole, never half a surrogate.
+      body: `${'b'.repeat(399)}${family} and more`,
+    }]))!;
+    expect(d.title).toBe('x'.repeat(55));
+    expect(d.body).toBe(`${'b'.repeat(399)}${family}`);
   });
 });
 
@@ -327,6 +340,23 @@ describe('Dream Team post + schedule', () => {
     expect(nextLeagueWeekdayInstantUtc(
       new Date(Date.UTC(2026, 0, 14, 12)), 4, 10).getTime())
       .toBe(Date.UTC(2026, 0, 15, 18));
+  });
+
+  it('autopilotPublishAtUtc: the next slot, but never under 12 h of review', () => {
+    expect(NEWS_REVIEW_WINDOW_MS).toBe(12 * 3_600_000);
+    // Sun Jun 28 23:00Z -> the Tue 10:00 PDT slot is 42 h away: the slot.
+    expect(autopilotPublishAtUtc(
+      new Date(Date.UTC(2026, 5, 28, 23)), 2, 10).getTime())
+      .toBe(Date.UTC(2026, 5, 30, 17));
+    // Exactly 12 h before the slot: still the slot.
+    expect(autopilotPublishAtUtc(
+      new Date(Date.UTC(2026, 5, 30, 5)), 2, 10).getTime())
+      .toBe(Date.UTC(2026, 5, 30, 17));
+    // A late finalize Tue 08:00 PDT (15:00Z): the slot is 2 h away -> now +
+    // 12 h = Tue 20:00 PDT (Wed 03:00Z).
+    const late = new Date(Date.UTC(2026, 5, 30, 15));
+    expect(autopilotPublishAtUtc(late, 2, 10).getTime())
+      .toBe(Date.UTC(2026, 6, 1, 3));
   });
 
   it('shouldAutoPublish: any Source with a due numeric AutoPublishAt', () => {

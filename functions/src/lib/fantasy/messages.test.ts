@@ -3,16 +3,18 @@
 // (sendManagerMessage — audiences all / unchanged / owners, trim + cut, the
 // throws the callable maps to failed-precondition) and the sweep's
 // scheduled-message step (ScheduledPushes/<id>: due rows claimed via SentAt
-// and sent once, future rows untouched, a failing row records Error and is
-// never retried, and it runs even while the engine is paused). World:
+// — a transaction on the row, so a cancelled row is never sent nor
+// recreated — and sent once, future rows untouched, a failing row records
+// Error and is never retried, a row over 3 h overdue is claimed as expired
+// and never sent, and it runs even while the engine is paused). World:
 // test_support.ts world2 (GW1 settled, GW2 open until Sun Jun 28 22:00Z).
 // Golden squads: alpha holds Alex + Will (bench), boost holds Will + Sam,
 // churn holds neither; nobody holds Wes.
 
 import { describe, expect, it } from 'vitest';
 import {
-  isScheduledMessageDue, managerMessageAudienceOf, sendDueScheduledMessages,
-  sendManagerMessage,
+  isScheduledMessageDue, managerMessageAudienceOf, SCHEDULED_MESSAGE_EXPIRY_MS,
+  sendDueScheduledMessages, sendManagerMessage,
 } from './messages';
 import { FantasyLogger, runLifecycleSweep } from './orchestration';
 import { F_ROOT, FakeDb, FakePusher, world2 } from './test_support';
@@ -314,13 +316,95 @@ describe('scheduled manager messages (sweep step 0)', () => {
 
   it('a lost SentAt claim (a concurrent sweep won) sends nothing', async () => {
     const db = withScheduled(seeded());
-    db.writeIfAbsent = async () => false;
+    const transaction = db.transaction.bind(db);
+    db.transaction = async (path, update) => {
+      // A concurrent sweep's claim lands between our read and our claim.
+      await db.write(`${path}/SentAt`, NOW_MS - 1);
+      return transaction(path, update);
+    };
     const pusher = new FakePusher();
     expect(await sendDueScheduledMessages(db, pusher, {
       sport: 'Futsal', season: '15', nowUtc: NOW,
     })).toBe(0);
     expect(pusher.sends).toEqual([]);
     expect(await db.read(`${SCHED}/due/Sent`)).toBeNull();
+    expect(await db.read(`${SCHED}/due/SentAt`)).toBe(NOW_MS - 1);
+  });
+
+  it('a message cancelled before its claim is never sent; one cancelled mid-send is never recreated', async () => {
+    const db = seeded();
+    db.data.Fantasy.Futsal['15'].ScheduledPushes = {
+      first: { Title: 'First', Body: 'B', Audience: 'all', SendAt: NOW_MS - 60_000, CreatedAt: 1 },
+      second: { Title: 'Second', Body: 'B', Audience: 'all', SendAt: NOW_MS - 60_000, CreatedAt: 1 },
+    };
+    const pusher = new FakePusher();
+    const send = pusher.sendToUsers.bind(pusher);
+    pusher.sendToUsers = async (messages) => {
+      // The owner cancels both while the first one is going out.
+      await db.write(`${SCHED}/first`, null);
+      await db.write(`${SCHED}/second`, null);
+      return send(messages);
+    };
+
+    expect(await sendDueScheduledMessages(db, pusher, {
+      sport: 'Futsal', season: '15', nowUtc: NOW,
+    })).toBe(1);
+    expect(pusher.sends.map((b) => b[0].title)).toEqual(['First']);
+    // No {Sent} stub for 'first', no {SentAt} stub for 'second'.
+    expect(await db.read(`${SCHED}/first`)).toBeNull();
+    expect(await db.read(`${SCHED}/second`)).toBeNull();
+  });
+
+  it('a failed send of a row cancelled meanwhile records no Error stub', async () => {
+    const db = seeded();
+    db.data.Fantasy.Futsal['15'].ScheduledPushes = {
+      gone: { Title: 'T', Body: 'B', Audience: 'all', SendAt: NOW_MS - 1, CreatedAt: 1 },
+    };
+    const pusher = new FakePusher();
+    pusher.sendToUsers = async () => {
+      await db.write(`${SCHED}/gone`, null);
+      throw new Error('FCM down');
+    };
+    expect(await sendDueScheduledMessages(db, pusher, {
+      sport: 'Futsal', season: '15', nowUtc: NOW,
+    })).toBe(1);
+    expect(await db.read(`${SCHED}/gone`)).toBeNull();
+  });
+
+  it('more than 3 hours overdue: claimed as expired, never sent; exactly 3 hours still sends', async () => {
+    const db = seeded();
+    const stale = {
+      Title: 'Too late', Body: 'B', Audience: 'all',
+      SendAt: NOW_MS - SCHEDULED_MESSAGE_EXPIRY_MS - 1, CreatedAt: 1,
+    };
+    db.data.Fantasy.Futsal['15'].ScheduledPushes = {
+      stale,
+      edge: {
+        Title: 'Just in time', Body: 'B', Audience: 'all',
+        SendAt: NOW_MS - SCHEDULED_MESSAGE_EXPIRY_MS, CreatedAt: 1,
+      },
+    };
+    const pusher = new FakePusher();
+    const log = capturingLog();
+    expect(await sendDueScheduledMessages(db, pusher, {
+      sport: 'Futsal', season: '15', nowUtc: NOW, log,
+    })).toBe(2);
+
+    expect(SCHEDULED_MESSAGE_EXPIRY_MS).toBe(3 * HOUR_MS);
+    expect(pusher.sends.map((b) => b[0].title)).toEqual(['Just in time']);
+    expect(await db.read(`${SCHED}/stale`)).toEqual({
+      ...stale, SentAt: NOW_MS, Error: 'expired',
+    });
+    expect(await db.read(`${SCHED}/edge/Sent`)).toBe(4);
+    expect(log.warns.map((w) => w.message))
+      .toEqual(['fantasy message: scheduled message expired — not sent']);
+    expect(log.warns[0].context).toMatchObject({ id: 'stale' });
+
+    // Never retried.
+    expect(await sendDueScheduledMessages(db, pusher, {
+      sport: 'Futsal', season: '15', nowUtc: new Date(NOW_MS + 15 * 60_000),
+    })).toBe(0);
+    expect(pusher.sends).toHaveLength(1);
   });
 
   it('a pusher that throws records Error (no retry); junk rows are skipped', async () => {

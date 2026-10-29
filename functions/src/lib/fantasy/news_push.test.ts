@@ -1,15 +1,23 @@
 // News push on publish (spec 2026-10-28 §4.5): a News/Published row with a
-// Push map and no PushedAt pushes exactly once — the PushedAt claim makes a
-// repeat (the trigger re-firing on its own PushedAt/PushSent writes, an
-// edit, a concurrent instance) a no-op. Audiences: managers (Managers ∪
-// Squads), owners of ANY tagged player, everyone (FCM topic all_users).
+// Push map and no PushedAt pushes exactly once — the News/PushClaims/<id>
+// claim makes a repeat (the trigger re-firing on its own PushedAt/PushSent
+// writes, an edit, a whole-row republish that wiped the display stamps, a
+// concurrent instance) a no-op; a post first seen over an hour after it was
+// published is claimed as stale and never pushes. Audiences: managers
+// (Managers ∪ Squads), owners of ANY tagged player, everyone (FCM topic
+// all_users).
 
 import { describe, expect, it } from 'vitest';
-import { needsNewsPush, pushPublishedPost } from './news_push';
+import {
+  NEWS_PUSH_STALE_MS, needsNewsPush, pushPublishedPost,
+} from './news_push';
 import { F_ROOT, FakeDb, FakePusher } from './test_support';
 
 const NOW = new Date(Date.UTC(2026, 9, 28, 17, 0));
 const POST = `${F_ROOT}/News/Published/p1`;
+const CLAIM = `${F_ROOT}/News/PushClaims/p1`;
+// Published a minute before the trigger runs (a fresh publish).
+const PUBLISHED_AT = NOW.getTime() - 60_000;
 
 function pick(playerId: string, position: string, bench = false) {
   return { playerId, position, priceTenths: 50, bench };
@@ -54,7 +62,7 @@ function world(post: Record<string, unknown> | null, extra: {
 
 function post(push: unknown, extra: Record<string, unknown> = {}) {
   return {
-    Title: 'Team of the Week', Body: 'Five made it.', At: 1, Gw: 3,
+    Title: 'Team of the Week', Body: 'Five made it.', At: PUBLISHED_AT, Gw: 3,
     ...(push === undefined ? {} : { Push: push }),
     ...extra,
   };
@@ -81,6 +89,8 @@ describe('pushPublishedPost', () => {
     expect(pusher.topicSends).toEqual([]);
     expect(await db.read(`${POST}/PushedAt`)).toBe(NOW.getTime());
     expect(await db.read(`${POST}/PushSent`)).toBe(4);
+    // The authoritative once-only claim lives in its own node.
+    expect(await db.read(CLAIM)).toEqual({ At: NOW.getTime(), Sent: 4 });
     // The post itself is untouched.
     expect(await db.read(`${POST}/Title`)).toBe('Team of the Week');
   });
@@ -229,6 +239,92 @@ describe('pushPublishedPost', () => {
     expect(await pushPublishedPost(db, pusher, ARGS)).toBeNull();
     expect(db.writes).toEqual([]);
     expect(pusher.topicSends).toEqual([]);
+  });
+});
+
+describe('once-only across row rewrites (review 2026-10-28)', () => {
+  it('a republish that rewrites the whole row (stamps wiped) never pushes again', async () => {
+    const db = world(post({ Title: 'T', Body: 'B', Audience: 'managers' }));
+    const pusher = new FakePusher();
+    expect(await pushPublishedPost(db, pusher, ARGS)).toEqual({ sent: 4 });
+
+    // The Manager's publish multi-path update (or an old sweep) sets the
+    // whole row again: PushedAt/PushSent are gone, At is fresh.
+    const later = new Date(NOW.getTime() + 5 * 60_000);
+    await db.write(POST, post(
+      { Title: 'T', Body: 'B', Audience: 'managers' },
+      { Title: 'Edited', At: later.getTime() },
+    ));
+    expect(needsNewsPush(await db.read(POST))).toBe(true); // the gate passes...
+    expect(await pushPublishedPost(db, pusher, { ...ARGS, nowUtc: later }))
+      .toBeNull(); // ...the claim does not
+
+    expect(pusher.sends).toHaveLength(1);
+    expect(await db.read(CLAIM)).toEqual({ At: NOW.getTime(), Sent: 4 });
+  });
+
+  it('an existing PushClaims entry -> null, nothing written, nothing sent', async () => {
+    const db = world(post({ Title: 'T', Body: 'B', Audience: 'everyone' }));
+    db.data.Fantasy.Futsal['15'].News.PushClaims = { p1: { At: 5, Sent: 1 } };
+    const pusher = new FakePusher();
+    expect(await pushPublishedPost(db, pusher, ARGS)).toBeNull();
+    expect(db.writes).toEqual([]);
+    expect(pusher.topicSends).toEqual([]);
+  });
+
+  it('a post deleted while its push goes out is never recreated by the stamps', async () => {
+    const db = world(post({ Title: 'T', Body: 'B', Audience: 'managers' }));
+    const pusher = new FakePusher();
+    const send = pusher.sendToUsers.bind(pusher);
+    pusher.sendToUsers = async (messages) => {
+      await db.write(POST, null); // the owner deletes the post mid-send
+      return send(messages);
+    };
+
+    expect(await pushPublishedPost(db, pusher, ARGS)).toEqual({ sent: 4 });
+    expect(await db.read(POST)).toBeNull(); // no {PushSent} stub row
+    expect(await db.read(CLAIM)).toEqual({ At: NOW.getTime(), Sent: 4 });
+  });
+});
+
+describe('stale first push (review 2026-10-28)', () => {
+  it('a post published over 60 minutes ago is claimed as skipped — nothing sent, ever', async () => {
+    const db = world(post(
+      { Title: 'T', Body: 'B', Audience: 'everyone' },
+      { At: NOW.getTime() - NEWS_PUSH_STALE_MS - 1 },
+    ));
+    const pusher = new FakePusher();
+
+    expect(await pushPublishedPost(db, pusher, ARGS)).toBeNull();
+    expect(pusher.topicSends).toEqual([]);
+    expect(pusher.sends).toEqual([]);
+    expect(await db.read(CLAIM)).toEqual({ At: NOW.getTime(), Skipped: 'stale' });
+    // Nothing is stamped on the row: it was never pushed.
+    expect(await db.read(`${POST}/PushedAt`)).toBeNull();
+    expect(await db.read(`${POST}/PushSent`)).toBeNull();
+
+    // A later edit re-fires the trigger: still nothing.
+    expect(await pushPublishedPost(db, pusher, {
+      ...ARGS, nowUtc: new Date(NOW.getTime() + 60_000),
+    })).toBeNull();
+    expect(pusher.topicSends).toEqual([]);
+    expect(await db.read(CLAIM)).toEqual({ At: NOW.getTime(), Skipped: 'stale' });
+  });
+
+  it('exactly 60 minutes old still pushes; a row without a numeric At is never stale', async () => {
+    for (const extra of [
+      { At: NOW.getTime() - NEWS_PUSH_STALE_MS },
+      { At: undefined },
+      { At: 'yesterday' },
+    ]) {
+      const db = world(post({ Title: 'T', Body: 'B', Audience: 'everyone' }, extra));
+      if (extra.At === undefined) {
+        delete db.data.Fantasy.Futsal['15'].News.Published.p1.At;
+      }
+      const pusher = new FakePusher();
+      expect(await pushPublishedPost(db, pusher, ARGS)).toEqual({ sent: 1 });
+      expect(pusher.topicSends).toHaveLength(1);
+    }
   });
 });
 

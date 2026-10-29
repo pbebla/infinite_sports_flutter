@@ -25,14 +25,21 @@
 //     SentAt?:int, Sent?:int, Error?:string }
 //
 // The sweep (orchestration.ts sweepSeason step 0) sends every row whose
-// numeric SendAt is due and that has no SentAt: claim SentAt via
-// writeIfAbsent (the only sweep that finds it empty sends — at most once,
-// ever), send, record Sent = delivered count. A send that throws (no
-// player, no current gameweek for 'unchanged', an FCM outage) logs a
-// warning and records Error — the SentAt claim stands, so a bad row is
-// never retried forever. The Manager's Cancel removes a pending row. The
-// step runs BEFORE the lock-override stand-down: owner messages are not
-// engine jobs, so a paused engine still delivers "Match day postponed".
+// numeric SendAt is due and that has no SentAt: claim SentAt with a
+// transaction on the row itself (updateIfPresent — the only sweep that
+// still finds the row due sends, at most once, ever; a row the owner
+// cancelled meanwhile is gone, so the claim aborts and nothing is sent),
+// send (with the claimed row's text), record Sent = delivered count. A send
+// that throws (no player, no current gameweek for 'unchanged', an FCM
+// outage) logs a warning and records Error — the SentAt claim stands, so a
+// bad row is never retried forever. Sent / Error are only written while the
+// row still exists (a cancel mid-send leaves no stub). A row more than
+// SCHEDULED_MESSAGE_EXPIRY_MS (3 h) overdue — the sweep was down, or the
+// engine was off for days — is claimed with Error:'expired' in the same
+// write and never sent (a days-late "Deadline moved" is wrong news). The
+// Manager's Cancel removes a pending row. The step runs BEFORE the
+// lock-override stand-down: owner messages are not engine jobs, so a
+// paused engine still delivers "Match day postponed".
 
 import { allManagers, ownersOf } from './audiences';
 import { clampText, COPY_LIMITS } from './copywriter';
@@ -41,6 +48,7 @@ import { currentGameweek, deriveGameweeks } from './gameweeks';
 import type { FantasyLogger } from './orchestration';
 import {
   childEntries, dateKeysOf, FantasyDb, fantasyRoot, isPlainMap,
+  updateIfPresent,
 } from './orchestration_db';
 import { FantasyPusher, fantasyPushData, reminderAudience } from './pushes';
 
@@ -147,13 +155,26 @@ export function isScheduledMessageDue(row: unknown, nowMs: number): boolean {
   return typeof at === 'number' && Number.isFinite(at) && at <= nowMs;
 }
 
+/** A due scheduled message more than this overdue is never sent (see the
+ *  header). */
+export const SCHEDULED_MESSAGE_EXPIRY_MS = 3 * 3_600_000;
+
+/** Whether a row's numeric SendAt is more than SCHEDULED_MESSAGE_EXPIRY_MS
+ *  before [nowMs]. */
+function isScheduledMessageExpired(
+  row: Record<string, unknown>, nowMs: number,
+): boolean {
+  const at = row['SendAt'];
+  return typeof at === 'number' && nowMs - at > SCHEDULED_MESSAGE_EXPIRY_MS;
+}
+
 function stringOf(v: unknown): string {
   return typeof v === 'string' ? v : '';
 }
 
 /** The sweep's scheduled-message step (see the header): claims + sends
  *  every due row of the season once. Returns how many rows this call
- *  claimed (sent or failed). */
+ *  claimed (sent, failed or expired). */
 export async function sendDueScheduledMessages(
   db: FantasyDb, pusher: FantasyPusher,
   args: { sport: string; season: string; nowUtc: Date; log?: FantasyLogger },
@@ -168,9 +189,21 @@ export async function sendDueScheduledMessages(
   for (const [id, raw] of childEntries(await db.read(base))) {
     if (!isScheduledMessageDue(raw, nowMs)) continue;
     const path = `${base}/${id}`;
-    if (!(await db.writeIfAbsent(`${path}/SentAt`, nowMs))) continue;
+    // The claim re-checks the CURRENT row: gone (cancelled), already
+    // claimed or rescheduled into the future -> no claim, nothing sent.
+    const row = await updateIfPresent(db, path, (cur) => {
+      if (!isScheduledMessageDue(cur, nowMs)) return undefined;
+      return isScheduledMessageExpired(cur, nowMs)
+        ? { ...cur, SentAt: nowMs, Error: 'expired' }
+        : { ...cur, SentAt: nowMs };
+    });
+    if (row === null) continue;
     handled++;
-    const row = raw as Record<string, unknown>;
+    if (isScheduledMessageExpired(row, nowMs)) {
+      log.warn('fantasy message: scheduled message expired — not sent',
+        { ...ctx, id, sendAt: row['SendAt'] });
+      continue;
+    }
     try {
       const res = await sendManagerMessage(db, pusher, {
         sport,
@@ -182,12 +215,12 @@ export async function sendDueScheduledMessages(
         nowUtc,
         log,
       });
-      await db.write(`${path}/Sent`, res.sent);
+      await updateIfPresent(db, path, (cur) => ({ ...cur, Sent: res.sent }));
       log.info('fantasy message: scheduled message sent', { ...ctx, id, ...res });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       log.warn('fantasy message: scheduled message failed', { ...ctx, id, error });
-      await db.write(`${path}/Error`, error);
+      await updateIfPresent(db, path, (cur) => ({ ...cur, Error: error }));
     }
   }
   return handled;

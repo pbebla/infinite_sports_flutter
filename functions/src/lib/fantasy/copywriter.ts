@@ -22,8 +22,8 @@
 
 import { FetchLike } from '../support';
 import {
-  NEWS_BODY_MAX, NEWS_MODEL, NEWS_TIMEOUT_MS, NEWS_TITLE_MAX, parseNewsText,
-  stripJsonFences,
+  clampText, NEWS_BODY_MAX, NEWS_MODEL, NEWS_TIMEOUT_MS, NEWS_TITLE_MAX,
+  parseNewsText, stripJsonFences,
 } from './news';
 import {
   buildPlayerCard, MAX_POST_PLAYERS, PlayerCard, seasonGoalsAssists,
@@ -48,33 +48,12 @@ export interface CopyText {
   body: string;
 }
 
-// ── Text clamp (shared with messages.ts) ────────────────────────────────────
+// ── Text clamp ──────────────────────────────────────────────────────────────
 
-const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-
-/** [text] cut to at most [max] user-perceived characters — grapheme
- *  clusters, what the Manager's character counters count, so an emoji is
- *  never split — with trailing whitespace trimmed. With `wordBoundary`, a
- *  cut that lands inside a word backs up to the last whitespace, as long as
- *  that keeps at least half of [max] (one huge word is hard-cut instead). */
-export function clampText(
-  text: string, max: number, opts: { wordBoundary?: boolean } = {},
-): string {
-  const chars = Array.from(graphemeSegmenter.segment(text), (s) => s.segment);
-  if (chars.length <= max) return text;
-  let cut = chars.slice(0, max);
-  if (opts.wordBoundary && !/^\s/.test(chars[max])) {
-    let space = -1;
-    for (let i = cut.length - 1; i >= 0; i--) {
-      if (/^\s/.test(cut[i])) {
-        space = i;
-        break;
-      }
-    }
-    if (space >= Math.floor(max / 2)) cut = cut.slice(0, space);
-  }
-  return cut.join('').trimEnd();
-}
+// The grapheme / word-boundary clamp lives in news.ts (it also clamps the AI
+// drafts, and news.ts cannot import this module without a cycle); re-exported
+// so messages.ts and the tests keep importing it from here.
+export { clampText };
 
 // ── Prompt ──────────────────────────────────────────────────────────────────
 

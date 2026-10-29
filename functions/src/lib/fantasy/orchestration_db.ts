@@ -7,6 +7,14 @@
 import { FantasyPosition, parsePosition } from './fantasy_config';
 import { MarketPlayer } from './finalize_core';
 
+/** What a FantasyDb.transaction resolved to. */
+export interface FantasyTxResult {
+  /** false = the update aborted (returned undefined); nothing was written. */
+  committed: boolean;
+  /** The node's value as committed (on an abort: as last seen). */
+  value: unknown;
+}
+
 /** Everything the fantasy jobs do to the database. Paths are RTDB paths
  *  relative to the root, never leading-slashed. */
 export interface FantasyDb {
@@ -16,6 +24,17 @@ export interface FantasyDb {
   write(path: string, value: unknown): Promise<void>;
   /** Transactional set-if-absent; true when this call won the claim. */
   writeIfAbsent(path: string, value: unknown): Promise<boolean>;
+  /** Compare-and-set (an RTDB transaction on [path]): [update] gets the
+   *  node's current value (null when absent) and returns the value to
+   *  store (null removes) or undefined to abort. It may run more than once
+   *  — a concurrent write re-runs it on the fresh value — so it must be
+   *  pure. RTDB caveat: the first run can see null for a node that exists
+   *  but is not cached yet, so an update must never ABORT on null; return
+   *  null (a no-op when it really is absent — RTDB re-runs it on the real
+   *  value otherwise). updateIfPresent below wraps that rule. */
+  transaction(
+    path: string, update: (current: unknown) => unknown,
+  ): Promise<FantasyTxResult>;
 }
 
 export function fantasyRoot(sport: string, season: string): string {
@@ -25,6 +44,30 @@ export function fantasyRoot(sport: string, season: string): string {
 /** Plain object — RTDB array coercion (a JS Array) is NOT a map. */
 export function isPlainMap(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/** Changes the map at [path] only while it exists (review 2026-10-28: a
+ *  stamp or claim on a row the owner deleted must never recreate a partial
+ *  stub row). [next] gets the CURRENT map and returns its replacement, or
+ *  undefined to leave it alone (the compare-and-set "no"). An absent node
+ *  (or a non-map) is never handed to [next]. Resolves to the value [next]
+ *  produced once it committed; null when nothing changed (absent, not a
+ *  map, or [next] declined). */
+export async function updateIfPresent(
+  db: FantasyDb, path: string,
+  next: (current: Record<string, unknown>) => Record<string, unknown> | undefined,
+): Promise<Record<string, unknown> | null> {
+  let landed: Record<string, unknown> | null = null;
+  const res = await db.transaction(path, (current) => {
+    landed = null; // every (re-)run decides afresh
+    if (current === null || current === undefined) return null; // see FantasyDb
+    if (!isPlainMap(current)) return undefined;
+    const value = next(current);
+    if (value === undefined) return undefined;
+    landed = value;
+    return value;
+  });
+  return res.committed ? landed : null;
 }
 
 /** Dart-ish tolerant int: num -> trunc, full signed decimal string -> parse,

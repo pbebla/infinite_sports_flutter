@@ -45,7 +45,7 @@ import {
   FantasyLogger, maybeFinalizeGame, recordSquadSave, runLifecycleSweep,
   runMondayReprice,
 } from '../src/lib/fantasy/orchestration';
-import { FantasyDb } from '../src/lib/fantasy/orchestration_db';
+import { FantasyDb, FantasyTxResult } from '../src/lib/fantasy/orchestration_db';
 import { PlayerGameStats, playedGame } from '../src/lib/fantasy/player_game_stats';
 import { applyDelta, openingPrices, repriceDeltas } from '../src/lib/fantasy/pricing';
 import { scorePlayerGame, scorePlayerWeek } from '../src/lib/fantasy/scoring';
@@ -185,6 +185,7 @@ async function loadSnapshot(offline: boolean): Promise<Snapshot> {
 //   non-negative integers with maxKey < 2 * count comes back as a
 //   null-padded array (gameweek-keyed nodes, picks, Breakdown...);
 // - writeIfAbsent is a set-if-null claim (the transaction in fantasy_adapter);
+//   transaction is the compare-and-set seam (undefined aborts, null removes);
 // - read results are deep-frozen and structurally shared (persistent tree),
 //   so the pipeline can never mutate stored state through a read.
 
@@ -296,7 +297,7 @@ interface WriteRec {
   at: string;
   atMs: number;
   job: string;
-  op: 'write' | 'writeIfAbsent';
+  op: 'write' | 'writeIfAbsent' | 'transaction';
   path: string;
   won?: boolean;
   value: unknown;
@@ -329,6 +330,21 @@ class OverlayDb implements FantasyDb {
     this.capture(this.pipelineWrites, 'writeIfAbsent', p, value, won);
     if (won) this.assign(p, value);
     return won;
+  }
+
+  async transaction(
+    p: string, update: (current: unknown) => unknown,
+  ): Promise<FantasyTxResult> {
+    // Reads are deep-frozen, so the update can never mutate stored state.
+    const current = this.get(p);
+    const next = update(current);
+    if (next === undefined) return { committed: false, value: current };
+    // null over an absent node is RTDB's no-op: nothing written.
+    if (!(next === null && current === null)) {
+      this.capture(this.pipelineWrites, 'transaction', p, next);
+      this.assign(p, next);
+    }
+    return { committed: true, value: this.get(p) };
   }
 
   // ── simulation-side access (clients, live scoring, setup) ──

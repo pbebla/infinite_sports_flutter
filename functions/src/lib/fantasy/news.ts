@@ -19,20 +19,28 @@
 //
 // - News/Published/<id> = { Title, Body, At:int, Template?, Gw?, Players?,
 //   Push?, PhotoUrl? } — the public feed row (the sweep's auto-publish and
-//   the Manager's publish write the same shape).
+//   the Manager's publish write the same shape). The push-on-publish
+//   bookkeeping (PushedAt/PushSent stamps + the News/PushClaims/<id>
+//   once-only claim) lives in news_push.ts.
 //
 // - Config/NewsAutopilot = { Enabled:bool (default TRUE — automation
 //   first; only an explicit false turns it off), Weekday:string (default
 //   'tuesday'), Hour:int (default 10, league time) } — owner-editable in
 //   the Manager. When enabled, EVERY server-built draft carries
-//   AutoPublishAt = the next such league-local instant. The legacy
+//   AutoPublishAt = the next such league-local instant, but never less
+//   than NEWS_REVIEW_WINDOW_MS (12 h) after drafting (autopilotPublishAtUtc
+//   — a late finalize still leaves the owner a review window). The legacy
 //   Config/DreamTeamPost {AutoPublish, Weekday, Hour} is read as a fallback
 //   while NewsAutopilot is absent (AutoPublish -> Enabled).
 //
 // THE AUTO-PUBLISH RULE (spec §4.4): the sweep publishes ANY draft — every
-// Source — whose numeric AutoPublishAt is due. The schedule is always
-// owner-visible and owner-controlled: the Manager's Auto-publish switch
-// writes or removes AutoPublishAt, and a discard deletes the draft.
+// Source — whose numeric AutoPublishAt is due, and ONLY into an empty
+// News/Published/<key> (set-if-absent): a draft whose key is already live is
+// never written over the live post (that wiped its push stamps) — the sweep
+// clears its AutoPublishAt instead, leaving it in the queue as a visible
+// duplicate. The schedule is always owner-visible and owner-controlled: the
+// Manager's Auto-publish switch writes or removes AutoPublishAt, and a
+// discard deletes the draft.
 
 import { FetchLike } from '../support';
 import { MarketPlayer } from './finalize_core';
@@ -47,6 +55,34 @@ export const NEWS_TITLE_MAX = 60;
 export const NEWS_BODY_MAX = 400;
 /** Players an AI draft may tag (spec §4.4: 0–3). */
 export const NEWS_PLAYERS_MAX = 3;
+
+// ── Text clamp (shared: AI drafts here, copywriter.ts, messages.ts) ─────────
+
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/** [text] cut to at most [max] user-perceived characters — grapheme
+ *  clusters, what the Manager's character counters count, so an emoji is
+ *  never split — with trailing whitespace trimmed. With `wordBoundary`, a
+ *  cut that lands inside a word backs up to the last whitespace, as long as
+ *  that keeps at least half of [max] (one huge word is hard-cut instead). */
+export function clampText(
+  text: string, max: number, opts: { wordBoundary?: boolean } = {},
+): string {
+  const chars = Array.from(graphemeSegmenter.segment(text), (s) => s.segment);
+  if (chars.length <= max) return text;
+  let cut = chars.slice(0, max);
+  if (opts.wordBoundary && !/^\s/.test(chars[max])) {
+    let space = -1;
+    for (let i = cut.length - 1; i >= 0; i--) {
+      if (/^\s/.test(cut[i])) {
+        space = i;
+        break;
+      }
+    }
+    if (space >= Math.floor(max / 2)) cut = cut.slice(0, space);
+  }
+  return cut.join('').trimEnd();
+}
 
 // ── Stats the model may write about (and nothing else) ─────────────────────
 
@@ -208,9 +244,11 @@ export function stripJsonFences(text: string): string {
 
 /** Validates the model's reply: a JSON array (stray markdown fences
  *  tolerated) of objects with non-empty string title/body (+ an optional
- *  "players" name list). Items are length-clamped defensively; invalid
- *  items are dropped; more than 4 are cut. Null = nothing usable (refusal
- *  prose, garbage JSON, empty array) — the caller then writes NOTHING. */
+ *  "players" name list). Items are length-clamped defensively — at a word
+ *  boundary, never splitting an emoji (clampText, the copywriter's clamp);
+ *  invalid items are dropped; more than 4 are cut. Null = nothing usable
+ *  (refusal prose, garbage JSON, empty array) — the caller then writes
+ *  NOTHING. */
 export function parseNewsDrafts(text: string): NewsDraftText[] | null {
   let parsed: unknown;
   try {
@@ -227,8 +265,8 @@ export function parseNewsDrafts(text: string): NewsDraftText[] | null {
     const body = typeof m['body'] === 'string' ? m['body'].trim() : '';
     if (!title || !body) continue;
     out.push({
-      title: title.slice(0, NEWS_TITLE_MAX),
-      body: body.slice(0, NEWS_BODY_MAX),
+      title: clampText(title, NEWS_TITLE_MAX, { wordBoundary: true }),
+      body: clampText(body, NEWS_BODY_MAX, { wordBoundary: true }),
       players: parseDraftPlayers(m['players']),
     });
     if (out.length === 4) break;
@@ -371,6 +409,24 @@ export function nextLeagueWeekdayInstantUtc(
   }
   /* istanbul ignore next -- every weekday occurs twice within 9 days */
   throw new Error('nextLeagueWeekdayInstantUtc found no instant');
+}
+
+/** The owner's minimum review window for autopilot drafts (review
+ *  2026-10-28): a draft never auto-publishes sooner than this after it was
+ *  drafted. */
+export const NEWS_REVIEW_WINDOW_MS = 12 * 3_600_000;
+
+/** An autopilot draft's AutoPublishAt (spec §4.4): the next [weekday]
+ *  [hour]:00 league-time slot — or, when that slot is less than
+ *  NEWS_REVIEW_WINDOW_MS away (a finalize that lands late, e.g. Tuesday
+ *  morning before a Tuesday 10 AM slot), [nowUtc] + the window. The admin
+ *  heads-up names this exact instant. */
+export function autopilotPublishAtUtc(
+  nowUtc: Date, weekday: number, hour: number,
+): Date {
+  const slot = nextLeagueWeekdayInstantUtc(nowUtc, weekday, hour);
+  const earliest = nowUtc.getTime() + NEWS_REVIEW_WINDOW_MS;
+  return slot.getTime() >= earliest ? slot : new Date(earliest);
 }
 
 // ── Dream Team post ─────────────────────────────────────────────────────────

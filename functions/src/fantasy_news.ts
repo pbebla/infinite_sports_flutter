@@ -1,14 +1,15 @@
 // Infinite Fantasy news push on publish (spec 2026-10-28 §4.5). Thin: the
-// whole decision (claim PushedAt, resolve the audience, send, record
-// PushSent) lives pure in src/lib/fantasy/news_push.ts, which also
-// documents the row shape.
+// whole decision (stale check, the News/PushClaims/<id> once-only claim,
+// resolve the audience, send, stamp PushedAt/PushSent) lives pure in
+// src/lib/fantasy/news_push.ts, which also documents the shapes.
 //
 // One wildcard trigger covers every sport/season (fantasy_transfers.ts
 // convention: the Fantasy/ prefix keeps the wildcard off the busy league
 // paths) and every way a post goes live — Manager publish, draft publish,
 // autopilot publish. It re-fires on its own PushedAt/PushSent writes and on
 // Manager edits; the event's after-value already shows PushedAt then, so
-// those return before any database read.
+// those return before any database read (a row rewritten without its stamps
+// costs a read and is stopped by the claim).
 
 import { onValueWritten } from 'firebase-functions/v2/database';
 import type { Reference } from 'firebase-admin/database';

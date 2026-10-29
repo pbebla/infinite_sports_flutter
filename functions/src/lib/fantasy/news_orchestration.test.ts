@@ -220,6 +220,46 @@ describe('post-finalize news drafting (NewsDrafted-guarded)', () => {
     });
     expect(await garbage.read(`${F_ROOT}/News/Drafts/gw2ai1`)).toBeNull();
   });
+
+  it('a player-card source failure still writes every draft (no Players) and the heads-up', async () => {
+    const db = newsWorld();
+    db.data.Admins = { owner: true };
+    const read = db.read.bind(db);
+    db.read = async (path: string) => {
+      if (path === `${F_ROOT}/PlayerTotals`) throw new Error('RTDB unavailable');
+      return read(path);
+    };
+    const warns: string[] = [];
+    const log: FantasyLogger = {
+      info: () => undefined,
+      warn: (m) => { warns.push(m); },
+    };
+    const pusher = new FakePusher();
+    await runLifecycleSweep(db, AFTER_LOCK2, log, {
+      pusher, news: { apiKey: 'k', fetchImpl: TWO_DRAFTS },
+    });
+
+    expect(await db.read(`${F_ROOT}/NewsDrafted/2`))
+      .toEqual({ At: AFTER_LOCK2.getTime() });
+    const dream = await db.read(`${F_ROOT}/News/Drafts/gw2dreamteam`) as Json;
+    expect(dream).toMatchObject({
+      Template: 'dreamteam', Body: DREAM_BODY, Push: DREAM_PUSH,
+      AutoPublishAt: TUE_10AM,
+    });
+    expect('Players' in dream).toBe(false);
+    for (const key of ['gw2ai1', 'gw2ai2']) {
+      const draft = await db.read(`${F_ROOT}/News/Drafts/${key}`) as Json;
+      expect(draft).toMatchObject({ Source: 'ai', AutoPublishAt: TUE_10AM });
+      expect('Players' in draft).toBe(false);
+    }
+    expect(pusher.sends[1]).toEqual([{
+      uid: 'owner', title: 'Fantasy stories ready',
+      body: '3 posts publish Tue 10:00 AM unless you change them in the Manager.',
+      data: HEADS_UP_DATA,
+    }]);
+    expect(warns).toContain(
+      'fantasy news: player cards unavailable — drafts without Players');
+  });
 });
 
 describe('admin heads-up push (once per gameweek, with the drafts)', () => {
@@ -250,6 +290,27 @@ describe('admin heads-up push (once per gameweek, with the drafts)', () => {
       deps: { pusher, news: { apiKey: 'k', fetchImpl: TWO_DRAFTS } },
     });
     expect(pusher.sends).toHaveLength(2);
+  });
+
+  it('a late finalize still leaves 12 h of review: AutoPublishAt = now + 12 h, named in the heads-up', async () => {
+    const db = adminWorld();
+    const pusher = new FakePusher();
+    // Tue Jun 30 08:00 PDT (15:00Z): the stock Tuesday 10:00 slot is 2 h
+    // away -> every draft waits until Tue 20:00 PDT (Wed Jul 1 03:00Z).
+    const late = new Date(Date.UTC(2026, 5, 30, 15));
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: '06282026', nowUtc: late,
+      deps: { pusher, news: { apiKey: 'k', fetchImpl: TWO_DRAFTS } },
+    });
+
+    const at = Date.UTC(2026, 6, 1, 3);
+    for (const key of ['gw2dreamteam', 'gw2ai1', 'gw2ai2']) {
+      expect(await db.read(`${F_ROOT}/News/Drafts/${key}/AutoPublishAt`)).toBe(at);
+    }
+    expect(pusher.sends[1].map((m) => m.body)).toEqual([
+      '3 posts publish Tue 8:00 PM unless you change them in the Manager.',
+      '3 posts publish Tue 8:00 PM unless you change them in the Manager.',
+    ]);
   });
 
   it('autopilot off: the stories wait for approval', async () => {
@@ -361,6 +422,50 @@ describe('draft auto-publish (sweep step)', () => {
       .map(([, c]) => c?.['key']).sort()).toEqual(['ai1', 'due', 'mine']);
 
     // Idempotent: the next sweep republishes nothing.
+    const before = db.snapshot();
+    await runLifecycleSweep(db, now);
+    expect(db.snapshot()).toBe(before);
+  });
+
+  it('a due draft whose Published row already exists never overwrites it: schedule cleared, draft kept', async () => {
+    const db = new FakeDb(world2({ gw2Status: 1 })); // games live: no finalize
+    const now = new Date(Date.UTC(2026, 5, 24, 12));
+    // The live post, pushed yesterday (its display stamps are what a
+    // rewrite used to wipe — and the push trigger then sent again).
+    const live = {
+      Title: 'Team of the Week — GW1', Body: DREAM_BODY,
+      At: now.getTime() - 86_400_000, Template: 'dreamteam', Gw: 1,
+      Push: DREAM_PUSH, PushedAt: now.getTime() - 86_400_000, PushSent: 3,
+    };
+    // A duplicate draft under the same key (resurrected / failed delete).
+    const duplicate = {
+      Title: 'Team of the Week — GW1 (edited)', Body: DREAM_BODY, Gw: 1,
+      CreatedAt: 1, Source: 'dreamteam', Template: 'dreamteam',
+      Push: DREAM_PUSH, EditedAt: 2,
+    };
+    db.data.Fantasy.Futsal['15'].News = {
+      Published: { gw1dreamteam: live },
+      Drafts: {
+        gw1dreamteam: { ...duplicate, AutoPublishAt: now.getTime() - 60_000 },
+      },
+    };
+    const logged: Array<[string, Record<string, unknown> | undefined]> = [];
+    const log: FantasyLogger = {
+      info: (m, c) => { logged.push([m, c]); },
+      warn: (m, c) => { logged.push([m, c]); },
+    };
+    await runLifecycleSweep(db, now, log);
+
+    expect(await db.read(`${F_ROOT}/News/Published/gw1dreamteam`)).toEqual(live);
+    // Kept in the owner's queue as a visible duplicate, no longer scheduled.
+    expect(await db.read(`${F_ROOT}/News/Drafts/gw1dreamteam`)).toEqual(duplicate);
+    expect(logged).toContainEqual([
+      'fantasy news: draft already published — schedule cleared',
+      { sport: 'Futsal', season: '15', key: 'gw1dreamteam' },
+    ]);
+    expect(logged.map(([m]) => m)).not.toContain('fantasy news: draft auto-published');
+
+    // The next sweep leaves both alone (no schedule = waits for the owner).
     const before = db.snapshot();
     await runLifecycleSweep(db, now);
     expect(db.snapshot()).toBe(before);

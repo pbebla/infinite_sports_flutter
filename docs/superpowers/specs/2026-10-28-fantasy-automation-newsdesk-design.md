@@ -72,6 +72,7 @@ lock-override stand-down (owner messages are not engine jobs). Data payload
 `Fantasy/<sport>/<season>/ScheduledPushes/<id>` =
 `{Title, Body, Audience:'all'|'unchanged'|'owners', Player?, SendAt:int, CreatedAt:int,
 SentAt?:int, Sent?:int}`; claim = transaction on `SentAt` before sending.
+A row found more than 3 h past its `SendAt` is claimed with `Error:'expired'` and not sent.
 
 Audience resolution (shared helper, pure): managers = keys of `Managers` ∪ `Squads`;
 unchanged = existing `reminderAudience`; owners = managers whose current squad contains
@@ -171,13 +172,17 @@ After each finalized (non-voided) gameweek (existing NewsDrafted guard):
   who made it.', Audience:'managers'}`.
 - AI drafts (2–4): the model also returns `players` (names, must be from the stats it
   was given; unknown names dropped; max 3) → snapshots; `Template:'ai'`; no push.
-- When Enabled: every new draft gets `AutoPublishAt` = next Weekday Hour league time.
+- When Enabled: every new draft gets `AutoPublishAt` = next Weekday Hour league time, or
+  now + 12 h if that is later (the owner always gets ≥ 12 h to review).
 - **Admin heads-up push** (to every uid in `Admins`), once per gameweek with the drafts:
   Enabled → "Fantasy stories ready" / "N posts publish Tue 10:00 AM unless you change
-  them in the Manager."; disabled → "N fantasy stories are waiting for your approval in
-  the Manager." Payload `{type:'fantasy', sport, season, gw}`.
+  them in the Manager." (the drafts' actual `AutoPublishAt`); disabled → "N fantasy
+  stories are waiting for your approval in the Manager." Payload `{type:'fantasy', sport,
+  season, gw}`.
 - Sweep auto-publish: ANY draft whose `AutoPublishAt` is due publishes (all Source
   values), copying the §4.1 fields; voided-week drafts stay held (existing rule).
+  A due draft whose `Published/<id>` already exists never overwrites it: its
+  `AutoPublishAt` is cleared and it stays in the queue.
 
 ### 4.5 Server pieces
 
@@ -187,7 +192,7 @@ After each finalized (non-voided) gameweek (existing NewsDrafted guard):
   `PushSent`. Audiences: managers / owners (owners of ANY tagged player) / everyone
   (FCM topic `all_users`, same as campaigns). Payload adds `postId`. Edits never
   re-push (PushedAt stays). This one path covers Manager publish, draft publish and
-  autopilot publish.
+  autopilot publish. A post whose `At` is over 60 min old when first seen never pushes.
 - **Callable `writeFantasyCopy`** (admin-only, Anthropic `claude-haiku-5-5`, secret
   ANTHROPIC_API_KEY, 8s timeout, same playful-never-mean / stats-only rules):
   `{sport, season, mode:'post'|'push'|'message', template?, players?:string[], title?,

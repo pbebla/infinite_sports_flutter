@@ -63,7 +63,8 @@
 // - NewsDrafted/<gw> = { At:int } (functions-internal): once-only claim for
 //   the Phase G news step (the Dream Team post + the AI drafts + the admin
 //   heads-up push). The News/Drafts, News/Published and Config/NewsAutopilot
-//   (legacy Config/DreamTeamPost) shapes live in news.ts.
+//   (legacy Config/DreamTeamPost) shapes live in news.ts; News/PushClaims
+//   (the push-on-publish once-only claim) in news_push.ts.
 //
 // - ScheduledPushes/<id> (Manager-written owner messages; the sweep sends
 //   the due ones — even while lockOverride freezes the engine): the shape
@@ -96,7 +97,9 @@
 // sandbox escape hatch; the H rehearsal flips a COPY season to 'auto').
 // An optional Config.lockOverrideUntil (epoch ms) bounds it: every check
 // reads the EFFECTIVE value at its job's now (lockOverrideOf), and the sweep
-// reverts an expired override to 'auto' in the DB (spec §2 auto-return).
+// reverts an expired override to 'auto' in the DB (spec §2 auto-return) —
+// a compare-and-set on Config, so an owner change made after the sweep's
+// read is never wiped.
 
 import {
   configFromMap, FANTASY_POSITIONS, FantasyConfig,
@@ -109,11 +112,13 @@ import {
   currentGameweek, deriveGameweeks, Gameweek, gameweekStatusAt,
 } from './gameweeks';
 import {
-  buildDreamTeamDraft, buildNewsStats, dreamTeamNames,
+  autopilotPublishAtUtc, buildDreamTeamDraft, buildNewsStats, dreamTeamNames,
   formatLeagueWeekdayTime, generateNewsDrafts, newsAutopilotConfigFrom,
-  nextLeagueWeekdayInstantUtc, publishedRowFromDraft, shouldAutoPublish,
+  publishedRowFromDraft, shouldAutoPublish,
 } from './news';
-import { buildPlayerCard, cardsNode, seasonGoalsAssists } from './news_cards';
+import {
+  buildPlayerCard, cardsNode, PlayerCard, seasonGoalsAssists,
+} from './news_cards';
 import { sendDueScheduledMessages } from './messages';
 import {
   allGamesFinal, childEntries, dateKeysOf, FantasyDb, fantasyRoot,
@@ -121,7 +126,7 @@ import {
   isServerSquadWrite, isVoidFlag, lockedPositionsOf, lockOverrideOf,
   marketPlayersOf, marketPricesOf, markServerSquadWrite, parseAbsentMap,
   positionsSnapshotOf, rosterNamesOf, SERVER_WRITE_KEY, toIntLoose,
-  voidedWeeksOf, withLockedPositions,
+  updateIfPresent, voidedWeeksOf, withLockedPositions,
 } from './orchestration_db';
 import { applyDelta, repriceDeltas } from './pricing';
 import {
@@ -448,6 +453,42 @@ async function latestPriceChanges(
   return best < 0 ? null : await db.read(`${root}/PriceChanges/${best}`);
 }
 
+const NO_CARDS_MSG = 'fantasy news: player cards unavailable — drafts without Players';
+
+/** The news step's player-card builder: the card sources read once, fresh
+ *  (finalize just wrote PlayerWeeks/PlayerTotals; goals/assists tally the
+ *  whole season's Date node). Best-effort (review 2026-10-28): a source
+ *  read or a card build that throws is logged and yields NO cards, so the
+ *  drafts still go out — without Players — instead of not at all. */
+async function newsCardBuilder(
+  db: FantasyDb, sport: string, season: string,
+  log: FantasyLogger, ctx: Record<string, unknown>,
+): Promise<(names: string[]) => Array<PlayerCard | null>> {
+  const root = fantasyRoot(sport, season);
+  let sources: Parameters<typeof buildPlayerCard>[1] | null = null;
+  try {
+    sources = {
+      playersRaw: await db.read(`${root}/Players`),
+      playerTotalsRaw: await db.read(`${root}/PlayerTotals`),
+      playerWeeksRaw: await db.read(`${root}/PlayerWeeks`),
+      priceChangesRaw: await db.read(`${root}/PriceChanges`),
+      goalsAssists: seasonGoalsAssists(await db.read(`${sport}/${season}/Date`)),
+    };
+  } catch (err) {
+    log.warn(NO_CARDS_MSG, { ...ctx, error: String(err) });
+  }
+  const src = sources;
+  return (names) => {
+    if (src === null) return [];
+    try {
+      return names.map((name) => buildPlayerCard(name, src));
+    } catch (err) {
+      log.warn(NO_CARDS_MSG, { ...ctx, error: String(err) });
+      return [];
+    }
+  };
+}
+
 export interface FinalizeArgs {
   sport: string;
   season: string;
@@ -697,36 +738,35 @@ export async function finalizeGameweek(
   // (logged) and never blocks the finalize (spec §13). News desk 2.0 (spec
   // 2026-10-28 §4.4): every draft carries player-card snapshots of the
   // players it tags, the autopilot (ON unless Config/NewsAutopilot says
-  // Enabled:false) schedules every draft, and the admins get one heads-up.
+  // Enabled:false) schedules every draft — never sooner than 12 h out
+  // (autopilotPublishAtUtc) — and the admins get one heads-up.
+  //
+  // Review 2026-10-28: every read the step needs happens BEFORE the claim,
+  // so a transient read error throws with NewsDrafted still free instead of
+  // spending the week's only drafting run; and the player cards are
+  // best-effort on top (newsCardBuilder) — a card failure drafts without
+  // Players rather than not at all.
   if (!voided && (await db.read(`${root}/NewsDrafted/${gw.number}`)) == null) {
+    const nowMs = args.nowUtc.getTime();
+    const news = args.deps?.news;
+    const dreamTeamRaw =
+      out.dreamTeam ?? await db.read(`${root}/DreamTeam/${gw.number}`);
+    const autopilot = newsAutopilotConfigFrom(
+      await db.read(`${root}/Config/NewsAutopilot`),
+      await db.read(`${root}/Config/DreamTeamPost`));
+    const priceChangesRaw = news?.apiKey
+      ? await latestPriceChanges(db, root, gw.number) : null;
+    const admins = pusher ? adminUidsOf(await db.read('Admins')) : [];
+    const cardsFor = await newsCardBuilder(db, sport, season, log, ctx);
+
     const wonNews = await db.writeIfAbsent(`${root}/NewsDrafted/${gw.number}`,
-      { At: args.nowUtc.getTime() });
+      { At: nowMs });
     if (wonNews) {
-      const nowMs = args.nowUtc.getTime();
-      const dreamTeamRaw =
-        out.dreamTeam ?? await db.read(`${root}/DreamTeam/${gw.number}`);
-      const autopilot = newsAutopilotConfigFrom(
-        await db.read(`${root}/Config/NewsAutopilot`),
-        await db.read(`${root}/Config/DreamTeamPost`));
       const publishAt = autopilot.enabled
-        ? nextLeagueWeekdayInstantUtc(
-          args.nowUtc, autopilot.weekday, autopilot.hour)
+        ? autopilotPublishAtUtc(args.nowUtc, autopilot.weekday, autopilot.hour)
         : null;
       const schedule = publishAt !== null
         ? { AutoPublishAt: publishAt.getTime() } : {};
-
-      // Card sources, read fresh: finalize wrote PlayerWeeks/PlayerTotals
-      // above; goals/assists tally the whole season's Date node once.
-      const cardSources = {
-        playersRaw: await db.read(`${root}/Players`),
-        playerTotalsRaw: await db.read(`${root}/PlayerTotals`),
-        playerWeeksRaw: await db.read(`${root}/PlayerWeeks`),
-        priceChangesRaw: await db.read(`${root}/PriceChanges`),
-        goalsAssists: seasonGoalsAssists(
-          await db.read(`${sport}/${season}/Date`)),
-      };
-      const cardsFor = (names: string[]) =>
-        names.map((name) => buildPlayerCard(name, cardSources));
 
       let drafted = 0;
       const dtDraft = buildDreamTeamDraft({
@@ -742,7 +782,6 @@ export async function finalizeGameweek(
         log.info('fantasy news: dream team post drafted', ctx);
       }
 
-      const news = args.deps?.news;
       if (news?.apiKey) {
         const drafts = await generateNewsDrafts({
           stats: buildNewsStats({
@@ -751,7 +790,7 @@ export async function finalizeGameweek(
             playerWeeksPrevGw: playerWeeksByWeek[gw.number - 1] ?? null,
             players,
             dreamTeamRaw,
-            priceChangesRaw: await latestPriceChanges(db, root, gw.number),
+            priceChangesRaw,
           }),
           apiKey: news.apiKey,
           fetchImpl: news.fetchImpl,
@@ -785,19 +824,17 @@ export async function finalizeGameweek(
 
       // Admin heads-up (spec §4.4): once per gameweek — inside this claim —
       // and only when something was drafted. The Manager has no FCM token,
-      // so it lands in each admin's fan app.
-      if (drafted > 0 && pusher) {
-        const admins = adminUidsOf(await db.read('Admins'));
-        if (admins.length > 0) {
-          const body = newsReadyBody(drafted,
-            publishAt !== null ? formatLeagueWeekdayTime(publishAt) : null);
-          const data = fantasyPushData(sport, season, gw.number);
-          const sent = await pusher.sendToUsers(admins.map((uid) => ({
-            uid, title: NEWS_READY_TITLE, body, data,
-          })));
-          log.info('fantasy news: admin heads-up pushed',
-            { ...ctx, admins: admins.length, sent, drafted });
-        }
+      // so it lands in each admin's fan app. It names the drafts' actual
+      // AutoPublishAt instant.
+      if (drafted > 0 && pusher && admins.length > 0) {
+        const body = newsReadyBody(drafted,
+          publishAt !== null ? formatLeagueWeekdayTime(publishAt) : null);
+        const data = fantasyPushData(sport, season, gw.number);
+        const sent = await pusher.sendToUsers(admins.map((uid) => ({
+          uid, title: NEWS_READY_TITLE, body, data,
+        })));
+        log.info('fantasy news: admin heads-up pushed',
+          { ...ctx, admins: admins.length, sent, drafted });
       }
     }
   }
@@ -1020,15 +1057,36 @@ async function sweepSeason(
   // 0. Lock-override auto-return (spec §2): an open/locked override whose
   //    Config.lockOverrideUntil has passed is reverted in the DB (back to
   //    'auto', until removed) and the season then runs normally in THIS
-  //    sweep, on a config copy that reads 'auto'.
+  //    sweep, on the reverted config. The revert is a compare-and-set on
+  //    Config (review 2026-10-28): it lands only while Config still holds
+  //    the SAME override and until this sweep read — an owner re-lock (or a
+  //    new until, or Resume Auto) that raced in after the read is never
+  //    wiped; the sweep then runs on the fresh config instead (still
+  //    expired = reverted by the next sweep).
   let configNode = ref.configNode;
   if (lockOverrideOf(configNode) !== 'auto' &&
     lockOverrideOf(configNode, nowMs) === 'auto') {
-    await db.write(`${root}/Config/lockOverride`, 'auto');
-    await db.write(`${root}/Config/lockOverrideUntil`, null);
-    log.info('fantasy sweep: lock override expired — back to auto', ctx);
-    configNode = { ...configNode, lockOverride: 'auto' };
-    delete configNode['lockOverrideUntil'];
+    const expiredOverride = configNode['lockOverride'];
+    const expiredUntil = configNode['lockOverrideUntil'];
+    const reverted = await updateIfPresent(db, `${root}/Config`, (cur) => {
+      if (cur['lockOverride'] !== expiredOverride ||
+        cur['lockOverrideUntil'] !== expiredUntil) {
+        return undefined;
+      }
+      const next: Record<string, unknown> = { ...cur, lockOverride: 'auto' };
+      delete next['lockOverrideUntil'];
+      return next;
+    });
+    if (reverted !== null) {
+      log.info('fantasy sweep: lock override expired — back to auto', ctx);
+      configNode = reverted;
+    } else {
+      const fresh = await db.read(`${root}/Config`);
+      if (!isPlainMap(fresh)) return; // Config removed meanwhile
+      log.info('fantasy sweep: lock override changed since read — ' +
+        'revert skipped', ctx);
+      configNode = fresh;
+    }
   }
   // 0b. Scheduled manager messages (spec 2026-10-28 §3): owner messages are
   //     not engine jobs, so they go out BEFORE the stand-down below — a
@@ -1079,13 +1137,24 @@ async function sweepSeason(
   //     the season-over return, so the last gameweek's posts still ship. A
   //     draft for an owner-VOIDED week is held (never deleted — it is the
   //     owner's queue): its week no longer counts; an un-void releases it.
+  //     The row lands set-if-absent (review 2026-10-28): a due draft whose
+  //     key is ALREADY published (a resurrected draft, a failed draft
+  //     delete) never overwrites the live post — that wiped its push stamps
+  //     and re-pushed it. Its AutoPublishAt is cleared instead, so it waits
+  //     in the owner's queue as a visible duplicate (never deleted).
   const voidedNow = voidedWeeksOf(await db.read(`${root}/Voided`));
   for (const [key, draft] of childEntries(await db.read(`${root}/News/Drafts`))) {
     if (!shouldAutoPublish(draft, nowUtc.getTime())) continue;
     const d = draft as Record<string, unknown>;
     if (voidedNow.includes(toIntLoose(d['Gw']))) continue;
-    await db.write(`${root}/News/Published/${key}`,
+    const published = await db.writeIfAbsent(`${root}/News/Published/${key}`,
       publishedRowFromDraft(d, nowUtc.getTime()));
+    if (!published) {
+      await db.write(`${root}/News/Drafts/${key}/AutoPublishAt`, null);
+      log.warn('fantasy news: draft already published — schedule cleared',
+        { ...ctx, key });
+      continue;
+    }
     await db.write(`${root}/News/Drafts/${key}`, null);
     log.info('fantasy news: draft auto-published',
       { ...ctx, key, source: String(d['Source'] ?? '') });

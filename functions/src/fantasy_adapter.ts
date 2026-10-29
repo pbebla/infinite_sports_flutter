@@ -7,7 +7,7 @@ import * as admin from 'firebase-admin';
 import * as logger from 'firebase-functions/logger';
 import type { Reference } from 'firebase-admin/database';
 import { chunk } from './lib/campaigns';
-import { FantasyDb } from './lib/fantasy/orchestration_db';
+import { FantasyDb, FantasyTxResult } from './lib/fantasy/orchestration_db';
 import { FantasyLogger } from './lib/fantasy/orchestration';
 import { FantasyPusher, FantasyUserPush } from './lib/fantasy/pushes';
 import { anthropicApiKey } from './support_joke';
@@ -42,6 +42,15 @@ export function rtdbFantasyDb(root: Reference): FantasyDb {
       const result = await root.child(path).transaction((cur) =>
         (cur === null ? value : undefined));
       return result.committed;
+    },
+    async transaction(
+      path: string, update: (current: unknown) => unknown,
+    ): Promise<FantasyTxResult> {
+      // RTDB semantics 1:1 — undefined aborts, null removes, the update
+      // re-runs on the server value when the first (cached) guess was stale.
+      const result = await root.child(path).transaction(
+        (cur) => update(cur ?? null));
+      return { committed: result.committed, value: result.snapshot.val() };
     },
   };
 }
