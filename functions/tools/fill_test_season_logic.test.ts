@@ -6,8 +6,9 @@ import { describe, expect, it } from 'vitest';
 import { FantasyPosition, futsalDefault } from '../src/lib/fantasy/fantasy_config';
 import { FantasySquad, validateSquad } from '../src/lib/fantasy/squad';
 import {
-  assertEnginePaused, assertSafePaths, buildWritePlan, fakeManagerDefs,
-  fakeManagerRow, FillMarketEntry, StrategyTemplate, TEST_SEASON_ROOT,
+  assertEnginePaused, assertRequestAllowed, assertSafePaths, BACKUP_KIND,
+  buildWritePlan, clearPlan, fakeChildDeletes, fakeManagerDefs, fakeManagerRow,
+  FillMarketEntry, StrategyTemplate, TEST_SEASON_ROOT,
 } from './fill_test_season_logic';
 
 const cfg = futsalDefault();
@@ -163,6 +164,107 @@ describe('assertSafePaths', () => {
     for (const path of bad) {
       expect(() => assertSafePaths([...ok.map((p) => ({ path: p })), { path }]), path).toThrow();
     }
+  });
+
+  it('assertSafePaths rejects Voided', () => {
+    for (const path of [`${ROOT}/Voided`, `${ROOT}/Voided/3`]) {
+      expect(() => assertSafePaths([{ path }]), path).toThrow(/Voided/);
+    }
+  });
+
+  it('assertSafePaths rejects whole Managers / Squads nodes', () => {
+    for (const path of [`${ROOT}/Managers`, `${ROOT}/Squads`]) {
+      expect(() => assertSafePaths([{ path }]), path).toThrow(/whole/);
+    }
+  });
+
+  it('assertSafePaths rejects a real manager under Managers / Squads (and anything below)', () => {
+    const bad = [
+      `${ROOT}/Managers/${REAL}`, `${ROOT}/Squads/${REAL}`,
+      `${ROOT}/Squads/${REAL}/picks/0`, `${ROOT}/Managers/${REAL_NO_SQUAD}/TeamName`,
+      `${ROOT}/Squads/test-1`, `${ROOT}/Managers/test-001`, `${ROOT}/Squads/xtest-01`,
+    ];
+    for (const path of bad) {
+      expect(() => assertSafePaths([{ path }]), path).toThrow(/test-NN/);
+    }
+    // Fake managers (and anything below them) stay writable.
+    expect(() => assertSafePaths([`${ROOT}/Squads/test-01`, `${ROOT}/Managers/test-20`,
+      `${ROOT}/Squads/test-07/picks`].map((path) => ({ path })))).not.toThrow();
+  });
+});
+
+describe('clearPlan (the --clear path set)', () => {
+  const backup = (entries: unknown[]) => ({ kind: BACKUP_KIND, root: ROOT, entries });
+  const good = [
+    { path: `${ROOT}/TestFill`, existed: false, value: null },
+    { path: `${ROOT}/Players`, existed: true, value: { 'GK Player 00': { priceTenths: 45 } } },
+    { path: `${ROOT}/History`, existed: false, value: null },
+    { path: `${ROOT}/Squads/test-01`, existed: false, value: null },
+  ];
+
+  it('restores existed nodes, deletes absent ones, leaves the marker for last', () => {
+    expect(clearPlan(backup(good))).toEqual([
+      { method: 'PUT', path: `${ROOT}/Players`, value: { 'GK Player 00': { priceTenths: 45 } } },
+      { method: 'DELETE', path: `${ROOT}/History` },
+      { method: 'DELETE', path: `${ROOT}/Squads/test-01` },
+    ]);
+  });
+
+  it('a corrupted / hand-edited backup can never touch real managers, Voided, Config, News or another season', () => {
+    const corrupt = [
+      `${ROOT}/Squads`, `${ROOT}/Managers`, `${ROOT}/Squads/${REAL}`,
+      `${ROOT}/Managers/${REAL}`, `${ROOT}/Voided`, `${ROOT}/Config`, `${ROOT}/News`,
+      'Fantasy/Futsal/16/Players', `${ROOT}`,
+    ];
+    for (const path of corrupt) {
+      for (const existed of [false, true]) {
+        const entry = { path, existed, value: existed ? { x: 1 } : null };
+        expect(() => clearPlan(backup([...good, entry])), `${path} existed=${existed}`)
+          .toThrow(/Refusing unsafe path/);
+      }
+    }
+  });
+
+  it('rejects anything that is not a fill backup of this season', () => {
+    expect(() => clearPlan(null)).toThrow(/fill backup/);
+    expect(() => clearPlan({ kind: 'nope', root: ROOT, entries: good })).toThrow(/fill backup/);
+    expect(() => clearPlan({ kind: BACKUP_KIND, root: 'Fantasy/Futsal/16', entries: good }))
+      .toThrow(/fill backup/);
+    expect(() => clearPlan({ kind: BACKUP_KIND, root: ROOT, entries: 'x' })).toThrow(/fill backup/);
+    expect(() => clearPlan(backup([{ path: `${ROOT}/Players`, existed: true, value: null }])))
+      .toThrow(/Malformed/);
+    expect(() => clearPlan(backup([{ path: `${ROOT}/Players`, existed: 'yes', value: {} }])))
+      .toThrow(/Malformed/);
+  });
+
+  it('fakeChildDeletes only ever names test-NN children', () => {
+    expect(fakeChildDeletes('Squads', [REAL, 'test-01', 'test-1', 'test-20'])).toEqual([
+      { method: 'DELETE', path: `${ROOT}/Squads/test-01` },
+      { method: 'DELETE', path: `${ROOT}/Squads/test-20` },
+    ]);
+    expect(fakeChildDeletes('Managers', [REAL_NO_SQUAD])).toEqual([]);
+  });
+});
+
+describe('assertRequestAllowed (every REST call the CLI makes)', () => {
+  const reads = ['Futsal/15/Date'];
+
+  it('a read-only (dry run) client can GET but never PUT or DELETE', () => {
+    expect(() => assertRequestAllowed('GET', `${ROOT}/Squads`, { readOnly: true, readPaths: reads })).not.toThrow();
+    expect(() => assertRequestAllowed('GET', 'Futsal/15/Date', { readOnly: true, readPaths: reads })).not.toThrow();
+    for (const method of ['PUT', 'DELETE', 'PATCH', 'POST']) {
+      expect(() => assertRequestAllowed(method, `${ROOT}/Players`, { readOnly: true, readPaths: reads }), method)
+        .toThrow(/read-only/);
+    }
+  });
+
+  it('reads stay inside the test season + the replay inputs; writes go through assertSafePaths', () => {
+    expect(() => assertRequestAllowed('GET', 'Users', { readOnly: false, readPaths: reads })).toThrow();
+    expect(() => assertRequestAllowed('GET', 'Fantasy/Futsal/16/Squads', { readOnly: false, readPaths: reads })).toThrow();
+    expect(() => assertRequestAllowed('PUT', `${ROOT}/Players`, { readOnly: false, readPaths: reads })).not.toThrow();
+    expect(() => assertRequestAllowed('DELETE', `${ROOT}/Squads/${REAL}`, { readOnly: false, readPaths: reads })).toThrow();
+    expect(() => assertRequestAllowed('PUT', 'Futsal/15/Date', { readOnly: false, readPaths: reads })).toThrow();
+    expect(() => assertRequestAllowed('PATCH', `${ROOT}/Players`, { readOnly: false, readPaths: reads })).toThrow();
   });
 });
 

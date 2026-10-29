@@ -123,11 +123,15 @@ export function assertEnginePaused(config: unknown): void {
 
 // eslint-disable-next-line no-control-regex
 const BAD_SEGMENT = /[.#$[\]\u0000-\u001F\u007F]/;
-const FORBIDDEN_TOP = new Set(['Config', 'News']);
+const FORBIDDEN_TOP = new Set(['Config', 'News', 'Voided']);
+const FAKE_ONLY_TOP = new Set(['Managers', 'Squads']);
 
-/** Throws unless EVERY path is a real child of Fantasy/Futsal/15/: no other
- *  season (Fantasy/Futsal/150 included), never the season root itself, no
- *  empty / dot / RTDB-illegal segments, never Config or News. */
+/** The guard EVERY write and delete passes (the plan, the --clear set, and
+ *  each single REST call). Throws unless the path is a real child of
+ *  Fantasy/Futsal/15/: no other season (Fantasy/Futsal/150 included), never
+ *  the season root itself, no empty / dot / RTDB-illegal segments, never
+ *  Config, News or Voided, and Managers/Squads only at or below a fake
+ *  manager's own child (test-NN) — never the whole node, never a real uid. */
 export function assertSafePaths(plan: ReadonlyArray<{ path: string }>): void {
   const prefix = `${TEST_SEASON_ROOT}/`;
   for (const { path } of plan) {
@@ -141,7 +145,73 @@ export function assertSafePaths(plan: ReadonlyArray<{ path: string }>): void {
       throw why('empty or illegal segment');
     }
     if (FORBIDDEN_TOP.has(rest[0])) throw why(`${rest[0]} is never written`);
+    if (FAKE_ONLY_TOP.has(rest[0])) {
+      if (rest.length === 1) throw why(`${rest[0]} is never written whole`);
+      if (!isFakeUid(rest[1])) throw why(`${rest[0]} only for fake managers (test-NN)`);
+    }
   }
+}
+
+/** One REST call the CLI is about to make. Reads: the test season or the
+ *  replay's own input paths [readPaths]. A read-only client (the dry run)
+ *  can never PUT/DELETE; a writing client only PUTs/DELETEs paths that
+ *  pass assertSafePaths. */
+export function assertRequestAllowed(
+  method: string, path: string, opts: { readOnly: boolean; readPaths: readonly string[] },
+): void {
+  if (method === 'GET') {
+    if (!path.startsWith(`${TEST_SEASON_ROOT}/`) && !opts.readPaths.includes(path)) {
+      throw new Error(`Refusing GET of ${path}`);
+    }
+    return;
+  }
+  if (opts.readOnly) throw new Error(`Refusing ${method} ${path}: read-only client (dry run)`);
+  if (method !== 'PUT' && method !== 'DELETE') throw new Error(`Refusing ${method} ${path}`);
+  assertSafePaths([{ path }]);
+}
+
+// ── --clear ────────────────────────────────────────────────────────────────
+
+export const BACKUP_KIND = 'fantasy-test-fill-backup';
+export const TEST_FILL_MARKER = `${TEST_SEASON_ROOT}/TestFill`;
+
+export interface ClearOp {
+  method: 'PUT' | 'DELETE';
+  path: string;
+  value?: unknown;
+}
+
+/** The restore half of --clear, from a backup file's parsed JSON: PUT every
+ *  node that existed before the fill, DELETE every one that was absent —
+ *  the marker excluded (the CLI deletes it last). The backup is untrusted
+ *  input: wrong kind/season, malformed entries, or ANY path failing
+ *  assertSafePaths throws before a single op is returned. */
+export function clearPlan(backup: unknown): ClearOp[] {
+  if (!isMap(backup) || backup['kind'] !== BACKUP_KIND || backup['root'] !== TEST_SEASON_ROOT ||
+    !Array.isArray(backup['entries'])) {
+    throw new Error(`Not a ${TEST_SEASON_ROOT} fill backup.`);
+  }
+  const entries = backup['entries'] as unknown[];
+  for (const e of entries) {
+    if (!isMap(e) || typeof e['path'] !== 'string' || typeof e['existed'] !== 'boolean' ||
+      (e['existed'] === true && (e['value'] === null || e['value'] === undefined))) {
+      throw new Error(`Malformed backup entry ${JSON.stringify(e)?.slice(0, 120)}.`);
+    }
+  }
+  const typed = entries as Array<{ path: string; existed: boolean; value: unknown }>;
+  assertSafePaths(typed);
+  return typed.filter((e) => e.path !== TEST_FILL_MARKER).map((e) => (e.existed
+    ? { method: 'PUT' as const, path: e.path, value: e.value }
+    : { method: 'DELETE' as const, path: e.path }));
+}
+
+/** --clear's sweep of leftover fake managers: DELETE Managers|Squads/<uid>
+ *  for the live child keys that are fake (test-NN) — never anything else. */
+export function fakeChildDeletes(node: 'Managers' | 'Squads', liveKeys: readonly string[]): ClearOp[] {
+  const ops = [...liveKeys].filter(isFakeUid).sort()
+    .map((uid) => ({ method: 'DELETE' as const, path: `${TEST_SEASON_ROOT}/${node}/${uid}` }));
+  assertSafePaths(ops);
+  return ops;
 }
 
 /** The fill's writes, in order: the TestFill marker first (so a partial

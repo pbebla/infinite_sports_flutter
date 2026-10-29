@@ -5,9 +5,12 @@
 //   1. GETs a fresh snapshot (the rehearsal's READ_PATHS + the live
 //      Fantasy/Futsal/15 Squads, Managers and TestFill) into
 //      tools/rehearsal_out/fill_snapshot.json (--offline replays that cache).
-//      Public REST reads, behind the rehearsal's GET-only network guard; a
-//      path the public read is denied refuses a dry run and is re-read with
-//      the admin login on --apply (no input is ever silently skipped).
+//      Dry run AND --apply read with the same admin GETs (the firebase-tools
+//      login), so the preview works under any read rules; the dry run's
+//      client is read-only (it cannot PUT/DELETE). If no admin token can be
+//      minted, a dry run falls back to public reads (behind the rehearsal's
+//      GET-only network guard) and says so; a path that read is denied
+//      refuses the run — no input is ever silently skipped.
 //   2. Replays all of Season 15 in memory through the REAL pipeline
 //      (rehearse_s15.ts runReplay): 20 made-up managers test-01..test-20 +
 //      every real manager's saved squad held every week (a squad the client
@@ -35,8 +38,10 @@
 //   - Refuses unless the live engine is paused for good: lockOverride
 //     'open'/'locked' and NO Config/lockOverrideUntil (re-checked with an
 //     admin read right before writing or clearing).
-//   - Refuses any path outside Fantasy/Futsal/15/ (assertSafePaths on the
-//     plan, the backup, and again on every single write).
+//   - Every write/delete passes assertSafePaths (on the plan, on the backup
+//     via clearPlan before any login, and again on every single REST call):
+//     only children of Fantasy/Futsal/15/, never Config/News/Voided, and
+//     Managers/Squads only under a fake test-NN uid.
 //   - --apply refuses when the season is already filled (TestFill present),
 //     when the replay broke an invariant or crashed, or when Config changed
 //     since the snapshot.
@@ -49,8 +54,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
-  assertEnginePaused, assertSafePaths, buildWritePlan, EXPECTED_NODES, isFakeUid,
-  LiveSeason, PlanEntry, realManagersOf, TEST_SEASON_ROOT,
+  assertEnginePaused, assertRequestAllowed, assertSafePaths, BACKUP_KIND,
+  buildWritePlan, clearPlan, EXPECTED_NODES, fakeChildDeletes, isFakeUid, LiveSeason,
+  PlanEntry, realManagersOf, TEST_FILL_MARKER, TEST_SEASON_ROOT,
 } from './fill_test_season_logic';
 import {
   DB_URL, installNetworkGuard, loadSnapshot, READ_PATHS, runReplay, Snapshot,
@@ -63,8 +69,7 @@ const MANAGER_COUNT = 20;
 const OUT_DIR = path.join(process.cwd(), 'tools', 'rehearsal_out');
 const SNAPSHOT_FILE = 'fill_snapshot.json';
 const LIVE_PATHS = [`${ROOT}/Squads`, `${ROOT}/Managers`, `${ROOT}/TestFill`];
-const MARKER = `${ROOT}/TestFill`;
-const BACKUP_KIND = 'fantasy-test-fill-backup';
+const MARKER = TEST_FILL_MARKER;
 // The public firebase-tools "installed app" OAuth client (shipped in the
 // firebase-tools source; not a secret) — what `firebase login` minted the
 // refresh token for.
@@ -142,14 +147,11 @@ interface AdminRest {
   del(p: string): Promise<void>;
 }
 
-function adminRest(token: string): AdminRest {
+/** [readOnly] (the dry run): every PUT/DELETE throws before any network. */
+function adminRest(token: string, opts: { readOnly: boolean }): AdminRest {
   const call = async (method: string, p: string, body?: unknown, shallow = false): Promise<unknown> => {
-    if (method === 'GET') {
-      // Reads: the test season, or the replay's league inputs.
-      if (!p.startsWith(`${ROOT}/`) && !READ_PATHS.includes(p)) throw new Error(`Refusing GET of ${p}`);
-    } else {
-      assertSafePaths([{ path: p }]); // every single write
-    }
+    // Reads: the test season or the replay's inputs; writes: assertSafePaths.
+    assertRequestAllowed(method, p, { readOnly: opts.readOnly, readPaths: READ_PATHS });
     const url = `${DB_URL}/${p.split('/').map(encodeURIComponent).join('/')}.json` +
       `?access_token=${encodeURIComponent(token)}${shallow ? '&shallow=true' : ''}`;
     let res: Response;
@@ -177,31 +179,55 @@ function adminRest(token: string): AdminRest {
 
 // ── fill (dry run / apply) ─────────────────────────────────────────────────
 
+/** The replay's inputs + the live test season. Live: admin GETs (dry run
+ *  and --apply alike — the preview must work under any read rules); the dry
+ *  run's client is read-only. No admin token: a dry run falls back to the
+ *  public reads (GET-only network guard) and says so; --apply refuses. Any
+ *  path that could not be read refuses the run — every input matters (a
+ *  skipped Voided or Squads would silently change what gets written). */
+async function takeSnapshot(apply: boolean, offline: boolean): Promise<Snapshot> {
+  if (offline) return loadSnapshot(true, { file: SNAPSHOT_FILE });
+  let token: string | null = null;
+  try {
+    token = await accessToken();
+  } catch (err) {
+    if (apply) throw err;
+    console.log(`  admin login unavailable (${(err as Error).message}) — ` +
+      'dry run falls back to PUBLIC reads');
+  }
+  let snap: Snapshot;
+  if (token !== null) {
+    const db = adminRest(token, { readOnly: !apply });
+    const values: Record<string, unknown> = {};
+    for (const p of [...READ_PATHS, ...LIVE_PATHS]) values[p] = await db.get(p);
+    snap = { fetchedAt: new Date().toISOString(), source: `${DB_URL} (admin read)`, values, skipped: [] };
+    fs.mkdirSync(OUT_DIR, { recursive: true });
+    fs.writeFileSync(path.join(OUT_DIR, SNAPSHOT_FILE), JSON.stringify(snap, null, 1));
+    console.log(`  read with the admin login (${apply ? 'apply' : 'read-only dry run'})`);
+  } else {
+    const restoreNetwork = installNetworkGuard();
+    try {
+      snap = await loadSnapshot(false, { file: SNAPSHOT_FILE, extraPaths: LIVE_PATHS });
+    } finally {
+      restoreNetwork();
+    }
+  }
+  if (snap.skipped.length > 0) {
+    throw new Error('Refusing: could not read ' +
+      `${snap.skipped.map((s) => `${s.path} (HTTP ${s.status})`).join(', ')} — ` +
+      'fix the firebase-tools login (`npx firebase-tools login`) so the run can read as admin.');
+  }
+  return snap;
+}
+
 async function fill(apply: boolean, offline: boolean): Promise<void> {
   console.log(`Infinite Fantasy — fill the ${ROOT} test season (${apply ? 'APPLY' : 'DRY RUN'})`);
 
-  // 1. Snapshot: public GETs only, behind the rehearsal's GET-only guard.
-  const restoreNetwork = installNetworkGuard();
-  let snap: Snapshot;
-  try {
-    snap = await loadSnapshot(offline, { file: SNAPSHOT_FILE, extraPaths: LIVE_PATHS });
-  } finally {
-    restoreNetwork();
-  }
-  console.log(`  snapshot ${snap.fetchedAt} (${offline ? 'offline cache' : 'live GET'})`);
-  // Every input matters here (a skipped Voided or Squads would silently
-  // change what gets written), so a path the public read was denied is
-  // re-read with the admin login on --apply, and refused on a dry run.
+  // 1. Snapshot.
+  const snap = await takeSnapshot(apply, offline);
+  console.log(`  snapshot ${snap.fetchedAt} (${offline ? 'offline cache' : snap.source})`);
   if (snap.skipped.length > 0) {
-    const list = snap.skipped.map((s) => `${s.path} (HTTP ${s.status})`).join(', ');
-    if (!apply) {
-      throw new Error(`Refusing: not publicly readable: ${list}. The dry run reads without ` +
-        'credentials; --apply re-reads these with the admin login.');
-    }
-    const db = adminRest(await accessToken());
-    for (const s of snap.skipped) snap.values[s.path] = await db.get(s.path);
-    console.log(`  re-read with the admin login: ${list}`);
-    snap = { ...snap, skipped: [] };
+    throw new Error(`Refusing: the cached snapshot could not read ${snap.skipped.map((s) => s.path).join(', ')}.`);
   }
   const live: LiveSeason = {
     config: snap.values[`${ROOT}/Config`] ?? null,
@@ -273,8 +299,7 @@ async function fill(apply: boolean, offline: boolean): Promise<void> {
   if (invFails.length > 0 || result.crashes.length > 0) {
     throw new Error('Refusing to apply: the replay broke an invariant or crashed (see above).');
   }
-  const token = await accessToken();
-  const db = adminRest(token);
+  const db = adminRest(await accessToken(), { readOnly: false });
   const configNow = await db.get(`${ROOT}/Config`);
   assertEnginePaused(configNow);
   if (canon(configNow) !== canon(live.config)) {
@@ -291,10 +316,10 @@ async function fill(apply: boolean, offline: boolean): Promise<void> {
   }
   const createdAt = new Date().toISOString();
   const backupFile = path.join(OUT_DIR, `fill_backup_${createdAt.replace(/[:.]/g, '-')}.json`);
+  const backup = { kind: BACKUP_KIND, root: ROOT, createdAt, planDigest: digest, entries };
+  clearPlan(backup); // the backup must be one --clear will accept, before any write
   fs.mkdirSync(OUT_DIR, { recursive: true });
-  fs.writeFileSync(backupFile, JSON.stringify({
-    kind: BACKUP_KIND, root: ROOT, createdAt, planDigest: digest, entries,
-  }, null, 1));
+  fs.writeFileSync(backupFile, JSON.stringify(backup, null, 1));
   console.log(`  backup of ${entries.length} target nodes (${entries.filter((e) => e.existed).length} existed): ${backupFile}`);
 
   for (const e of plan) {
@@ -309,37 +334,27 @@ async function fill(apply: boolean, offline: boolean): Promise<void> {
 
 async function clear(file: string): Promise<void> {
   console.log(`Infinite Fantasy — clear the ${ROOT} test-season fill`);
-  const backup = JSON.parse(fs.readFileSync(path.resolve(file), 'utf8'));
-  if (backup?.kind !== BACKUP_KIND || backup?.root !== ROOT || !Array.isArray(backup?.entries)) {
-    throw new Error(`${file} is not a ${ROOT} fill backup.`);
-  }
-  const entries = backup.entries as Array<{ path: string; existed: boolean; value: unknown }>;
-  assertSafePaths(entries);
-  for (const e of entries) {
-    if (typeof e.existed !== 'boolean' || (e.existed && (e.value === null || e.value === undefined))) {
-      throw new Error(`Malformed backup entry for ${e.path}.`);
-    }
-  }
+  // The backup is untrusted input: clearPlan validates it and runs every
+  // path through assertSafePaths BEFORE any login or network call.
+  const ops = clearPlan(JSON.parse(fs.readFileSync(path.resolve(file), 'utf8')));
 
-  const token = await accessToken();
-  const db = adminRest(token);
+  const db = adminRest(await accessToken(), { readOnly: false });
   assertEnginePaused(await db.get(`${ROOT}/Config`));
 
-  for (const e of entries) {
-    if (e.path === MARKER) continue; // removed last
-    if (e.existed) {
-      await db.put(e.path, e.value);
-      console.log(`    restored ${e.path}`);
+  for (const op of ops) {
+    if (op.method === 'PUT') {
+      await db.put(op.path, op.value);
+      console.log(`    restored ${op.path}`);
     } else {
-      await db.del(e.path);
-      console.log(`    deleted  ${e.path} (absent before the fill)`);
+      await db.del(op.path);
+      console.log(`    deleted  ${op.path} (absent before the fill)`);
     }
   }
-  for (const node of ['Managers', 'Squads']) {
+  for (const node of ['Managers', 'Squads'] as const) {
     const keys = Object.keys((await db.get(`${ROOT}/${node}`, true) as Record<string, unknown>) ?? {});
-    for (const uid of keys.filter(isFakeUid)) {
-      await db.del(`${ROOT}/${node}/${uid}`);
-      console.log(`    deleted  ${ROOT}/${node}/${uid}`);
+    for (const op of fakeChildDeletes(node, keys)) {
+      await db.del(op.path);
+      console.log(`    deleted  ${op.path}`);
     }
   }
   await db.del(MARKER);
