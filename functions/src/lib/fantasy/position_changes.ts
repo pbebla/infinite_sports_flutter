@@ -302,7 +302,7 @@ export async function handlePositionWrite(
   const ctx = { sport, season, player: name, from, to };
   const configNode = await db.read(`${root}/Config`);
   if (!isPlainMap(configNode)) return 'ignored'; // not fantasy-enabled
-  if (lockOverrideOf(configNode) !== 'auto') {
+  if (lockOverrideOf(configNode, args.nowUtc.getTime()) !== 'auto') {
     log.info('fantasy positions: lockOverride frozen — standing down', ctx);
     return 'frozen';
   }

@@ -62,6 +62,41 @@ describe('lockOverrideOf', () => {
     expect(lockOverrideOf({ lockOverride: 'locked' })).toBe('locked');
     expect(lockOverrideOf(null)).toBe('auto');
   });
+
+  // Config.lockOverrideUntil (epoch ms, spec §2): an open/locked override is
+  // effective only while now < until; at/after it the engine is back on auto.
+  const NOW = Date.UTC(2026, 9, 28, 12);
+  it('open without lockOverrideUntil stays open (with or without now)', () => {
+    expect(lockOverrideOf({ lockOverride: 'open' }, NOW)).toBe('open');
+    expect(lockOverrideOf({ lockOverride: 'open' })).toBe('open');
+  });
+  it('open with lockOverrideUntil in the future stays open', () => {
+    expect(lockOverrideOf(
+      { lockOverride: 'open', lockOverrideUntil: NOW + 1 }, NOW)).toBe('open');
+  });
+  it('open with lockOverrideUntil in the past is auto', () => {
+    expect(lockOverrideOf(
+      { lockOverride: 'open', lockOverrideUntil: NOW - 1 }, NOW)).toBe('auto');
+  });
+  it('locked with lockOverrideUntil == now is auto (the instant it expires)', () => {
+    expect(lockOverrideOf(
+      { lockOverride: 'locked', lockOverrideUntil: NOW }, NOW)).toBe('auto');
+  });
+  it('junk lockOverrideUntil is treated as absent', () => {
+    for (const until of ['x', String(NOW - 1), NaN, Infinity, true, {}]) {
+      expect(lockOverrideOf(
+        { lockOverride: 'locked', lockOverrideUntil: until }, NOW)).toBe('locked');
+    }
+  });
+  it('no now = old behaviour (an until alone never expires it)', () => {
+    expect(lockOverrideOf(
+      { lockOverride: 'locked', lockOverrideUntil: NOW - 1 })).toBe('locked');
+  });
+  it('auto stays auto whatever the until', () => {
+    expect(lockOverrideOf(
+      { lockOverride: 'auto', lockOverrideUntil: NOW + 1 }, NOW)).toBe('auto');
+    expect(lockOverrideOf({ lockOverrideUntil: NOW - 1 }, NOW)).toBe('auto');
+  });
 });
 
 describe('owner void flags (Voided/<gw> = true)', () => {

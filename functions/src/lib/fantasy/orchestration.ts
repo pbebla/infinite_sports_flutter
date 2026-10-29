@@ -90,6 +90,9 @@
 // Config.lockOverride: anything but absent/'auto' freezes the machine —
 // sweep, finalize and repricing all stand down for that season (the owner's
 // sandbox escape hatch; the H rehearsal flips a COPY season to 'auto').
+// An optional Config.lockOverrideUntil (epoch ms) bounds it: every check
+// reads the EFFECTIVE value at its job's now (lockOverrideOf), and the sweep
+// reverts an expired override to 'auto' in the DB (spec §2 auto-return).
 
 import {
   configFromMap, FANTASY_POSITIONS, FantasyConfig,
@@ -349,7 +352,7 @@ export async function recordSquadSave(
 
   const configNode = await db.read(`${root}/Config`);
   if (!isPlainMap(configNode)) return; // not fantasy-enabled: stay silent
-  if (lockOverrideOf(configNode) !== 'auto') return; // frozen machine
+  if (lockOverrideOf(configNode, nowMs) !== 'auto') return; // frozen machine
   const cfg = configFromMap(configNode);
 
   const gwState = await db.read(`${root}/GwState`);
@@ -792,7 +795,7 @@ export async function maybeFinalizeGame(
   const configNode = await db.read(`${root}/Config`);
   if (!isPlainMap(configNode)) return; // not fantasy-enabled: stay silent
   const ctx = { sport, season, dateKey };
-  if (lockOverrideOf(configNode) !== 'auto') {
+  if (lockOverrideOf(configNode, nowUtc.getTime()) !== 'auto') {
     log.info('fantasy finalize: lockOverride frozen — standing down', ctx);
     return;
   }
@@ -847,7 +850,7 @@ export async function resettleVoidToggle(
 
   const configNode = await db.read(`${root}/Config`);
   if (!isPlainMap(configNode)) return; // not fantasy-enabled: stay silent
-  if (lockOverrideOf(configNode) !== 'auto') {
+  if (lockOverrideOf(configNode, args.nowUtc.getTime()) !== 'auto') {
     log.info('fantasy void: lockOverride frozen — standing down', ctx);
     return;
   }
@@ -956,12 +959,27 @@ async function sweepSeason(
 ): Promise<void> {
   const { sport, season } = ref;
   const ctx = { sport, season };
-  if (lockOverrideOf(ref.configNode) !== 'auto') {
+  const root = fantasyRoot(sport, season);
+  const nowMs = nowUtc.getTime();
+
+  // 0. Lock-override auto-return (spec §2): an open/locked override whose
+  //    Config.lockOverrideUntil has passed is reverted in the DB (back to
+  //    'auto', until removed) and the season then runs normally in THIS
+  //    sweep, on a config copy that reads 'auto'.
+  let configNode = ref.configNode;
+  if (lockOverrideOf(configNode) !== 'auto' &&
+    lockOverrideOf(configNode, nowMs) === 'auto') {
+    await db.write(`${root}/Config/lockOverride`, 'auto');
+    await db.write(`${root}/Config/lockOverrideUntil`, null);
+    log.info('fantasy sweep: lock override expired — back to auto', ctx);
+    configNode = { ...configNode, lockOverride: 'auto' };
+    delete configNode['lockOverrideUntil'];
+  }
+  if (lockOverrideOf(configNode, nowMs) !== 'auto') {
     log.info('fantasy sweep: lockOverride frozen — standing down', ctx);
     return;
   }
-  const cfg = configFromMap(ref.configNode);
-  const root = fantasyRoot(sport, season);
+  const cfg = configFromMap(configNode);
 
   const dates = dateKeysOf(await db.read(`${sport}/${season}/Date`));
   const gws = deriveGameweeks(dates, cfg);
@@ -1060,7 +1078,7 @@ async function sweepSeason(
   //    double-push; a sweep without a pusher claims nothing.
   const pusher = deps?.pusher;
   if (pusher && status === 'open') {
-    const rCfg = reminderConfigFrom(ref.configNode['Reminder']);
+    const rCfg = reminderConfigFrom(configNode['Reminder']);
     if (rCfg.enabled &&
       nowUtc.getTime() >= reminderInstantMs(current.lockUtc.getTime(), rCfg) &&
       (await db.read(`${root}/ReminderSent/${current.number}`)) == null) {
@@ -1183,7 +1201,7 @@ export async function runMondayReprice(
     const { sport, season } = ref;
     const ctx = { sport, season };
     try {
-      if (lockOverrideOf(ref.configNode) !== 'auto') {
+      if (lockOverrideOf(ref.configNode, nowUtc.getTime()) !== 'auto') {
         log.info('fantasy reprice: lockOverride frozen — standing down', ctx);
         continue;
       }

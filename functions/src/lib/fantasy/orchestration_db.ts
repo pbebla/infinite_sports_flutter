@@ -91,11 +91,25 @@ export async function markServerSquadWrite(
 
 /** Config.lockOverride (fantasy_parsers.dart FantasyLockOverride.parse):
  *  absent/unknown = 'auto' (production). Anything but 'auto' freezes the
- *  whole machine — lifecycle, finalize and repricing all stand down. */
-export function lockOverrideOf(configNode: unknown): 'open' | 'locked' | 'auto' {
+ *  whole machine — lifecycle, finalize and repricing all stand down.
+ *
+ *  Auto-return (spec §2, 2026-10-28): the optional Config.lockOverrideUntil
+ *  (epoch ms) bounds an open/locked override — once [nowMs] reaches it the
+ *  EFFECTIVE value is 'auto' (the sweep then reverts the DB). Only a finite
+ *  number counts; junk/absent = no automatic return ("Never"). Without
+ *  [nowMs] this is the raw value (old behaviour). */
+export function lockOverrideOf(
+  configNode: unknown, nowMs?: number,
+): 'open' | 'locked' | 'auto' {
   const raw = isPlainMap(configNode) ? configNode['lockOverride'] : null;
   const s = raw == null ? '' : String(raw);
-  return s === 'open' || s === 'locked' ? s : 'auto';
+  if (s !== 'open' && s !== 'locked') return 'auto';
+  const until = isPlainMap(configNode) ? configNode['lockOverrideUntil'] : null;
+  if (nowMs !== undefined && typeof until === 'number' &&
+    Number.isFinite(until) && nowMs >= until) {
+    return 'auto';
+  }
+  return s;
 }
 
 /** One `Voided/<gw>` leaf: ONLY a literal boolean true voids the week (the
