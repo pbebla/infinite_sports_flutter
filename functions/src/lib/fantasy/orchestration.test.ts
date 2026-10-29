@@ -467,3 +467,82 @@ describe('Monday repricing (Phase D)', () => {
     expect(frozen.writes).toEqual([]);
   });
 });
+
+// Round 3 spec §3.2: the lock step records the price every market player has
+// DURING the gameweek in PriceHistory/<gw>, claimed once on its OWN
+// set-if-absent — independent of the PublishedPicks claim, so a week with no
+// squads still records prices. Expected prices are the golden fixture's
+// priceTenths (golden_gameweek.json players).
+const GOLDEN_PRICES: Record<string, number> = {
+  Sam: 85, Wes: 65, Eli: 55, Bo: 75, Dana: 80, Will: 60,
+  Eva: 50, Bea: 70, Alex: 95, Wren: 75, Ezra: 65, Ben: 85,
+};
+const LATER_SWEEP = new Date(AFTER_LOCK.getTime() + 15 * 60_000);
+
+describe('PriceHistory at lock (round 3 spec 3.2)', () => {
+  it('lock snapshots PriceHistory once, even with no squads', async () => {
+    const seed = world({ gameStatus: 1 }); // games live: lock only
+    delete seed.Fantasy.Futsal['15'].Squads;
+    const db = new FakeDb(seed);
+
+    await runLifecycleSweep(db, AFTER_LOCK);
+    // No squads: the picks claim never happens, but prices are recorded.
+    expect(await db.read(`${fRoot}/PublishedPicks/1`)).toBeNull();
+    expect(await db.read(`${fRoot}/PriceHistory/1`)).toEqual(GOLDEN_PRICES);
+
+    // Once only: a resweep adds no write for it.
+    await runLifecycleSweep(db, LATER_SWEEP);
+    expect(db.writeCount('PriceHistory/1')).toBe(1);
+  });
+
+  it('records alongside PublishedPicks when squads exist', async () => {
+    const db = new FakeDb(world({ gameStatus: 1 }));
+    await runLifecycleSweep(db, AFTER_LOCK);
+    expect(await db.read(`${fRoot}/PublishedPicks/1`)).not.toBeNull();
+    expect(await db.read(`${fRoot}/PriceHistory/1`)).toEqual(GOLDEN_PRICES);
+    expect(db.writeCount('PriceHistory/1')).toBe(1);
+  });
+
+  it('PriceHistory is not overwritten by a later sweep after a price edit', async () => {
+    const db = new FakeDb(world({ gameStatus: 1 }));
+    await runLifecycleSweep(db, AFTER_LOCK);
+
+    // Owner edits a price mid-lock (and a Monday reprice would move more).
+    db.data.Fantasy.Futsal['15'].Players.Sam.priceTenths = 90;
+    await runLifecycleSweep(db, LATER_SWEEP);
+
+    expect(await db.read(`${fRoot}/PriceHistory/1/Sam`)).toBe(85);
+    expect(await db.read(`${fRoot}/Players/Sam/priceTenths`)).toBe(90);
+    expect(db.writeCount('PriceHistory/1')).toBe(1);
+  });
+
+  it('is claimed on its own: PublishedPicks already present still records prices', async () => {
+    const seed = world({ gameStatus: 1 });
+    seed.Fantasy.Futsal['15'].PublishedPicks = { 1: { alpha: { captainId: 'Ezra' } } };
+    const db = new FakeDb(seed);
+    await runLifecycleSweep(db, AFTER_LOCK);
+    expect(await db.read(`${fRoot}/PriceHistory/1`)).toEqual(GOLDEN_PRICES);
+  });
+
+  it('every Players entry is recorded, guests (ineligible) included', async () => {
+    const seed = world({ gameStatus: 1 });
+    seed.Fantasy.Futsal['15'].Players.Ezra.eligible = false;
+    const db = new FakeDb(seed);
+    await runLifecycleSweep(db, AFTER_LOCK);
+    expect(await db.read(`${fRoot}/PriceHistory/1/Ezra`)).toBe(65);
+    expect(Object.keys(await db.read(`${fRoot}/PriceHistory/1`) as Json).sort())
+      .toEqual(Object.keys(GOLDEN_PRICES).sort());
+  });
+
+  it('nothing is recorded before the lock, or for an empty market', async () => {
+    const open = new FakeDb(world());
+    await runLifecycleSweep(open, BEFORE_LOCK);
+    expect(await open.read(`${fRoot}/PriceHistory`)).toBeNull();
+
+    const seed = world({ gameStatus: 1 });
+    delete seed.Fantasy.Futsal['15'].Players;
+    const empty = new FakeDb(seed);
+    await runLifecycleSweep(empty, AFTER_LOCK);
+    expect(await empty.read(`${fRoot}/PriceHistory`)).toBeNull();
+  });
+});

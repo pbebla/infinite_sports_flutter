@@ -386,3 +386,8 @@ export { onFantasyNewsPublished } from './fantasy_news';
 // Message managers ----
 
 export { sendFantasyMessage, writeFantasyCopy } from './fantasy_messages';
+
+// ---- Infinite Fantasy round 3 (spec 2026-10-29 §3.4): admin-only email +
+// sign-in methods for a manager's Manager-app fantasy profile ----
+
+export { getUserContact } from './user_contact';

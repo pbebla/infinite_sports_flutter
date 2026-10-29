@@ -46,8 +46,10 @@ function optString(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;
 }
 
-/** Signed-in admin (/Admins/<uid> === true) or an HttpsError; the uid. */
-async function requireAdmin(request: CallableRequest): Promise<string> {
+/** Signed-in admin (/Admins/<uid> === true) or an HttpsError; the uid.
+ *  Exported for the other Manager callables (user_contact.ts) — index.ts
+ *  re-exports only the callables by name, so this is not deployed itself. */
+export async function requireAdmin(request: CallableRequest): Promise<string> {
   const uid = request.auth?.uid;
   if (!uid) {
     throw new HttpsError('unauthenticated', 'Sign in first.');

@@ -409,8 +409,26 @@
           "PlayerWeeks": {
             ".read": "auth != null && root.child('Admins').child(auth.uid).exists()"
           },
+          "PlayerWeekStats": {
+            ".read": true
+          },
           "PriceChanges": {
             ".read": true
+          },
+          "PriceHistory": {
+            ".read": true
+          },
+          "TransferCosts": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()"
+          },
+          "Watchlists": {
+            "$uid": {
+              ".read": "auth != null && auth.uid === $uid",
+              ".write": "auth != null && auth.uid === $uid",
+              "$name": {
+                ".validate": "newData.val() === true && $name.length <= 60"
+              }
+            }
           },
           "MiniLeagues": {
             ".read": true,

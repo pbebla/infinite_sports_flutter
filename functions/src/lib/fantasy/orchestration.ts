@@ -1023,6 +1023,28 @@ async function marketForGameweek(
 
 // ── Phase B: lifecycle sweep ───────────────────────────────────────────────
 
+/** Records the price (tenths) every market player has DURING gameweek [gw]
+ *  into PriceHistory/<gw>/<name> (round 3 spec §3.2), exactly once at the
+ *  week's lock — so owner manual price edits are captured too; the move
+ *  AFTER a week stays in PriceChanges/<gw>. Its OWN set-if-absent claim,
+ *  deliberately independent of PublishedPicks: a week with no squads (which
+ *  returns early in snapshotPublishedPicks) still records its prices. Every
+ *  Players entry is recorded, guests (ineligible) included; an empty market
+ *  writes nothing (RTDB would treat {} as a removal anyway). */
+async function snapshotPriceHistory(
+  db: FantasyDb, root: string, gw: number,
+  log: FantasyLogger, ctx: Record<string, unknown>,
+): Promise<void> {
+  const path = `${root}/PriceHistory/${gw}`;
+  if (await db.read(path) != null) return; // cheap re-check every sweep
+  const prices = marketPricesOf(await db.read(`${root}/Players`));
+  if (Object.keys(prices).length === 0) return;
+  if (await db.writeIfAbsent(path, prices)) {
+    log.info('fantasy lock: prices recorded',
+      { ...ctx, gw, players: Object.keys(prices).length });
+  }
+}
+
 /** Snapshot every saved squad into PublishedPicks/<gw>, exactly once (spec
  *  §9). The existence check keeps rereads cheap; the set-if-absent claim is
  *  what actually guarantees once-only under concurrent sweeps. Phase E's
@@ -1128,12 +1150,14 @@ async function sweepSeason(
   const gws = deriveGameweeks(dates, cfg);
   const current = currentGameweek(gws, nowUtc);
 
-  // 1. Lock snapshots for the current gameweek (positions, then picks),
-  //    before any finalize can need them. Existence-guarded rather than
-  //    transition-edge-triggered, so a sweep that was down at the lock
-  //    instant still snapshots exactly once.
+  // 1. Lock snapshots for the current gameweek (positions, prices, then
+  //    picks), before any finalize can need them. Existence-guarded rather
+  //    than transition-edge-triggered, so a sweep that was down at the lock
+  //    instant still snapshots exactly once. Prices are claimed before the
+  //    picks step because that one returns early for a week with no squads.
   if (current && gameweekStatusAt(current, nowUtc) === 'locked') {
     await snapshotLockedPositions(db, root, current.number, log, ctx);
+    await snapshotPriceHistory(db, root, current.number, log, ctx);
     await snapshotPublishedPicks(db, root, cfg, current.number, log, ctx);
   }
 
