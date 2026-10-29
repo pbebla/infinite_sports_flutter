@@ -332,8 +332,8 @@ describe('Monday repricing skips a voided week', () => {
   });
 });
 
-describe('Dream Team post auto-publish holds for a voided week', () => {
-  it('a due dreamteam draft of a voided week stays queued; un-void releases it', async () => {
+describe('News draft auto-publish holds for a voided week', () => {
+  it('due drafts of a voided week stay queued; un-void releases them', async () => {
     const db = new FakeDb(world2({ gw2Status: 1 })); // games live: no finalize
     const now = new Date(Date.UTC(2026, 5, 24, 12));
     const f = db.data.Fantasy.Futsal['15'];
@@ -343,18 +343,27 @@ describe('Dream Team post auto-publish holds for a voided week', () => {
           Title: 'Team of the Week — GW1', Body: 'B', Gw: 1, CreatedAt: 1,
           Source: 'dreamteam', AutoPublishAt: now.getTime() - 1,
         },
+        // Autopilot schedules AI drafts too: the hold covers every Source.
+        gw1ai1: {
+          Title: 'AI', Body: 'B', Gw: 1, CreatedAt: 1,
+          Source: 'ai', AutoPublishAt: now.getTime() - 1,
+        },
       },
     };
     f.Voided = { 1: true };
     await runLifecycleSweep(db, now);
     expect(await db.read(`${F_ROOT}/News/Published`)).toBeNull();
     expect(await db.read(`${F_ROOT}/News/Drafts/gw1dreamteam`)).not.toBeNull();
+    expect(await db.read(`${F_ROOT}/News/Drafts/gw1ai1`)).not.toBeNull();
 
     await db.write(`${F_ROOT}/Voided/1`, null);
     await runLifecycleSweep(db, now);
     expect(await db.read(`${F_ROOT}/News/Published/gw1dreamteam`)).toEqual({
-      Title: 'Team of the Week — GW1', Body: 'B', At: now.getTime(),
+      Title: 'Team of the Week — GW1', Body: 'B', At: now.getTime(), Gw: 1,
     });
     expect(await db.read(`${F_ROOT}/News/Drafts/gw1dreamteam`)).toBeNull();
+    expect(await db.read(`${F_ROOT}/News/Published/gw1ai1`)).toEqual({
+      Title: 'AI', Body: 'B', At: now.getTime(), Gw: 1,
+    });
   });
 });

@@ -4,9 +4,9 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_REMINDER_TEMPLATE, fantasyPushData, fillReminderTemplate,
-  formatDeadline, recapBody, reminderAudience, reminderConfigFrom,
-  reminderInstantMs,
+  adminUidsOf, DEFAULT_REMINDER_TEMPLATE, fantasyPushData,
+  fillReminderTemplate, formatDeadline, NEWS_READY_TITLE, newsReadyBody,
+  recapBody, reminderAudience, reminderConfigFrom, reminderInstantMs,
 } from './pushes';
 
 describe('reminderConfigFrom', () => {
@@ -94,5 +94,30 @@ describe('recapBody + push payload', () => {
     expect(fantasyPushData('Futsal', '15', 2)).toEqual({
       type: 'fantasy', sport: 'Futsal', season: '15', gw: '2',
     });
+  });
+});
+
+describe('news autopilot admin heads-up', () => {
+  it('autopilot on: N posts publish <when> (spec §4.4 copy)', () => {
+    expect(NEWS_READY_TITLE).toBe('Fantasy stories ready');
+    expect(newsReadyBody(3, 'Tue 10:00 AM')).toBe(
+      '3 posts publish Tue 10:00 AM unless you change them in the Manager.');
+    // Singular reads as English.
+    expect(newsReadyBody(1, 'Tue 10:00 AM')).toBe(
+      '1 post publishes Tue 10:00 AM unless you change it in the Manager.');
+  });
+
+  it('autopilot off: N stories wait for approval', () => {
+    expect(newsReadyBody(4, null)).toBe(
+      '4 fantasy stories are waiting for your approval in the Manager.');
+    expect(newsReadyBody(1, null)).toBe(
+      '1 fantasy story is waiting for your approval in the Manager.');
+  });
+
+  it('adminUidsOf: only Admins/<uid> === true, sorted', () => {
+    expect(adminUidsOf({ zed: true, amy: true, off: false, str: 'true', n: 1 }))
+      .toEqual(['amy', 'zed']);
+    expect(adminUidsOf(null)).toEqual([]);
+    expect(adminUidsOf('junk')).toEqual([]);
   });
 });

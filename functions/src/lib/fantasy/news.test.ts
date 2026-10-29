@@ -1,18 +1,19 @@
 // Phase G pure news logic: stats building (only real numbers reach the
 // model), the Claude call through a FAKE fetch (happy path, refusal prose,
 // garbage JSON, HTTP failure, missing key, thrown fetch), draft validation
-// + clamping, the Dream Team draft, the owner schedule math and the
-// acted-on auto-publish rule.
+// + clamping (incl. the tagged players), the Dream Team draft, the autopilot
+// config + schedule math + league-time formatting and the auto-publish rule.
 
 import { describe, expect, it } from 'vitest';
 import { FetchLike } from '../support';
 import { MarketPlayer } from './finalize_core';
 import {
-  buildDreamTeamDraft, buildNewsPrompt, buildNewsStats,
-  dreamTeamPostConfigFrom, generateNewsDrafts, NEWS_BODY_MAX, NEWS_MODEL,
-  NEWS_TITLE_MAX, nextLeagueWeekdayInstantUtc, parseNewsDrafts,
-  shouldAutoPublish,
+  buildDreamTeamDraft, buildNewsPrompt, buildNewsStats, dreamTeamNames,
+  formatLeagueWeekdayTime, generateNewsDrafts, NEWS_BODY_MAX, NEWS_MODEL,
+  NEWS_SYSTEM_PROMPT, NEWS_TITLE_MAX, newsAutopilotConfigFrom,
+  nextLeagueWeekdayInstantUtc, parseNewsDrafts, shouldAutoPublish,
 } from './news';
+import { PlayerCard } from './news_cards';
 
 const players: Record<string, MarketPlayer> = {
   A: { position: 'GK', eligible: true },
@@ -60,12 +61,28 @@ describe('buildNewsStats', () => {
 
 describe('parseNewsDrafts (validation)', () => {
   it('accepts a clean JSON array, with or without markdown fences', () => {
+    // No "players" key on an item = no tagged players.
     const json = '[{"title":"A","body":"B"},{"title":"C","body":"D"}]';
     expect(parseNewsDrafts(json)).toEqual([
-      { title: 'A', body: 'B' }, { title: 'C', body: 'D' },
+      { title: 'A', body: 'B', players: [] },
+      { title: 'C', body: 'D', players: [] },
     ]);
-    expect(parseNewsDrafts('```json\n' + json + '\n```'))
-      .toEqual([{ title: 'A', body: 'B' }, { title: 'C', body: 'D' }]);
+    expect(parseNewsDrafts('```json\n' + json + '\n```')).toEqual([
+      { title: 'A', body: 'B', players: [] },
+      { title: 'C', body: 'D', players: [] },
+    ]);
+  });
+
+  it('players: strings only (trimmed, blanks + repeats dropped), max 3', () => {
+    expect(parseNewsDrafts(JSON.stringify([
+      { title: 'A', body: 'B', players: ['Bea', 7, null, ' Bo ', '', 'Bea'] },
+      { title: 'C', body: 'D', players: ['P1', 'P2', 'P3', 'P4', 'P5'] },
+      { title: 'E', body: 'F', players: 'Bea' }, // not a list -> none
+    ]))).toEqual([
+      { title: 'A', body: 'B', players: ['Bea', 'Bo'] },
+      { title: 'C', body: 'D', players: ['P1', 'P2', 'P3'] },
+      { title: 'E', body: 'F', players: [] },
+    ]);
   });
 
   it('refusal prose, garbage JSON, non-arrays and empty arrays are null', () => {
@@ -79,7 +96,7 @@ describe('parseNewsDrafts (validation)', () => {
   it('drops invalid items, clamps lengths, cuts after four', () => {
     expect(parseNewsDrafts(
       '[{"title":"A","body":"B"},{"nope":1},{"title":7,"body":"x"}]',
-    )).toEqual([{ title: 'A', body: 'B' }]);
+    )).toEqual([{ title: 'A', body: 'B', players: [] }]);
 
     const long = parseNewsDrafts(JSON.stringify([
       { title: 'T'.repeat(100), body: 'B'.repeat(500) },
@@ -115,12 +132,36 @@ describe('generateNewsDrafts (fake fetch — never throws, null = skip)', () => 
     };
     const drafts = await generateNewsDrafts({ stats, apiKey: 'key-1', fetchImpl });
     expect(drafts).toEqual([
-      { title: 'A', body: 'B' }, { title: 'C', body: 'D' },
+      { title: 'A', body: 'B', players: [] },
+      { title: 'C', body: 'D', players: [] },
     ]);
     const body = JSON.parse(captured!.body);
     expect(body.model).toBe(NEWS_MODEL);
     expect(body.messages[0].content).toBe(buildNewsPrompt(stats));
     expect(String(body.system)).toContain('NEVER mean');
+  });
+
+  it('the prompt asks for 0–3 tagged players from the stats JSON', () => {
+    expect(NEWS_SYSTEM_PROMPT).toContain('"players"');
+    expect(NEWS_SYSTEM_PROMPT).toContain('0 to 3');
+    expect(NEWS_SYSTEM_PROMPT).toContain('stats JSON');
+  });
+
+  it('tagged players must be named in the stats the model was given', async () => {
+    // This week's stats name only A (top scorer). B is a market player the
+    // model was never shown; Zed does not exist — both dropped.
+    const drafts = await generateNewsDrafts({
+      stats,
+      apiKey: 'k',
+      fetchImpl: reply(JSON.stringify([
+        { title: 'A again', body: 'Five points.', players: ['A', 'B', 'Zed'] },
+        { title: 'Quiet', body: 'Nobody else.', players: ['B'] },
+      ])),
+    });
+    expect(drafts).toEqual([
+      { title: 'A again', body: 'Five points.', players: ['A'] },
+      { title: 'Quiet', body: 'Nobody else.', players: [] },
+    ]);
   });
 
   it('blank key: null without ever calling fetch', async () => {
@@ -158,30 +199,114 @@ describe('Dream Team post + schedule', () => {
     Auto: true,
   };
 
+  const boCard: PlayerCard = {
+    name: 'Bo', position: 'GK', team: 'Bulls', priceTenths: 75,
+    gw: 2, gwPoints: 12, goals: 0, assists: 0,
+  };
+  const beaCard: PlayerCard = {
+    name: 'Bea', position: 'DEF', team: 'Bulls', priceTenths: 70,
+    gw: 2, gwPoints: 15, goals: 0, assists: 1,
+  };
+  const DT_PUSH = {
+    Title: 'Team of the Week is out',
+    Body: "GW2's best five are in — see who made it.",
+    Audience: 'managers',
+  };
+
+  it('dreamTeamNames: the stored rows in order, blanks skipped', () => {
+    expect(dreamTeamNames(dreamTeamRaw)).toEqual(['Bo', 'Bea']);
+    expect(dreamTeamNames({ Players: [{ name: '' }, 'junk', { name: 'X' }] }))
+      .toEqual(['X']);
+    expect(dreamTeamNames(null)).toEqual([]);
+  });
+
   it('builds the structured post from the stored node', () => {
     expect(buildDreamTeamDraft({
       gw: 2, dreamTeamRaw, nowMs: 777, autoPublishAtMs: null,
+      cards: [boCard, null, beaCard], // an unknown name (null) is dropped
     })).toEqual({
       Title: 'Team of the Week — GW2',
       Body: 'Bo (GK) 12 · Bea (DEF) 15',
       Gw: 2,
       CreatedAt: 777,
       Source: 'dreamteam',
+      Template: 'dreamteam',
+      Players: { 0: boCard, 1: beaCard },
+      Push: DT_PUSH,
     });
     expect(buildDreamTeamDraft({
-      gw: 2, dreamTeamRaw, nowMs: 777, autoPublishAtMs: 999,
+      gw: 2, dreamTeamRaw, nowMs: 777, autoPublishAtMs: 999, cards: [boCard],
     })!['AutoPublishAt']).toBe(999);
+    // No resolvable cards: the Players node is omitted, the post still builds.
+    const bare = buildDreamTeamDraft({
+      gw: 2, dreamTeamRaw, nowMs: 777, autoPublishAtMs: null, cards: [null],
+    })!;
+    expect('Players' in bare).toBe(false);
+    expect(bare['Push']).toEqual(DT_PUSH);
     expect(buildDreamTeamDraft({
-      gw: 2, dreamTeamRaw: null, nowMs: 777, autoPublishAtMs: null,
+      gw: 2, dreamTeamRaw: null, nowMs: 777, autoPublishAtMs: null, cards: [],
     })).toBeNull();
   });
 
-  it('Config/DreamTeamPost: auto-publish OFF by default; Tuesday 10 stock schedule', () => {
-    expect(dreamTeamPostConfigFrom(null))
-      .toEqual({ autoPublish: false, weekday: 2, hour: 10 });
-    expect(dreamTeamPostConfigFrom({
-      AutoPublish: true, Weekday: 'Friday', Hour: 18,
-    })).toEqual({ autoPublish: true, weekday: 5, hour: 18 });
+  it('newsAutopilotConfigFrom: ON by default; Tuesday 10 stock schedule', () => {
+    expect(newsAutopilotConfigFrom(null, null))
+      .toEqual({ enabled: true, weekday: 2, hour: 10 });
+    expect(newsAutopilotConfigFrom({}, null))
+      .toEqual({ enabled: true, weekday: 2, hour: 10 });
+    // Garbage per field falls back; only Enabled === false turns it off.
+    expect(newsAutopilotConfigFrom(
+      { Enabled: 'no', Weekday: 'Funday', Hour: 31 }, null))
+      .toEqual({ enabled: true, weekday: 2, hour: 10 });
+  });
+
+  it('newsAutopilotConfigFrom: Config/NewsAutopilot fields', () => {
+    expect(newsAutopilotConfigFrom(
+      { Enabled: false, Weekday: 'Friday', Hour: 18 }, null))
+      .toEqual({ enabled: false, weekday: 5, hour: 18 });
+    expect(newsAutopilotConfigFrom(
+      { Enabled: true, Weekday: 'sunday', Hour: 0 }, null))
+      .toEqual({ enabled: true, weekday: 7, hour: 0 });
+  });
+
+  it('newsAutopilotConfigFrom: NewsAutopilot wins over the legacy DreamTeamPost', () => {
+    expect(newsAutopilotConfigFrom(
+      { Enabled: true, Weekday: 'monday', Hour: 9 },
+      { AutoPublish: false, Weekday: 'friday', Hour: 18 }))
+      .toEqual({ enabled: true, weekday: 1, hour: 9 });
+  });
+
+  it('newsAutopilotConfigFrom: legacy DreamTeamPost fallback (AutoPublish -> enabled)', () => {
+    expect(newsAutopilotConfigFrom(null,
+      { AutoPublish: false, Weekday: 'Friday', Hour: 18 }))
+      .toEqual({ enabled: false, weekday: 5, hour: 18 });
+    expect(newsAutopilotConfigFrom(null,
+      { AutoPublish: true, Weekday: 'wednesday', Hour: 7 }))
+      .toEqual({ enabled: true, weekday: 3, hour: 7 });
+    // A legacy row without the flag is not an "off" — automation first.
+    expect(newsAutopilotConfigFrom(null, { Hour: 12 }))
+      .toEqual({ enabled: true, weekday: 2, hour: 12 });
+  });
+
+  it('formatLeagueWeekdayTime: short weekday + h:mm AM/PM in league time', () => {
+    // Summer (PDT, UTC-7): Tue Jun 30 17:00Z = Tue 10:00 AM.
+    expect(formatLeagueWeekdayTime(new Date(Date.UTC(2026, 5, 30, 17))))
+      .toBe('Tue 10:00 AM');
+    // Winter (PST, UTC-8): Thu Jan 15 18:00Z = Thu 10:00 AM.
+    expect(formatLeagueWeekdayTime(new Date(Date.UTC(2026, 0, 15, 18))))
+      .toBe('Thu 10:00 AM');
+    // Afternoon with minutes: Jan 15 23:05Z = Thu 3:05 PM PST.
+    expect(formatLeagueWeekdayTime(new Date(Date.UTC(2026, 0, 15, 23, 5))))
+      .toBe('Thu 3:05 PM');
+    // Midnight and noon: Jan 16 08:00Z = Fri 12:00 AM; Jan 16 20:00Z = Fri
+    // 12:00 PM.
+    expect(formatLeagueWeekdayTime(new Date(Date.UTC(2026, 0, 16, 8))))
+      .toBe('Fri 12:00 AM');
+    expect(formatLeagueWeekdayTime(new Date(Date.UTC(2026, 0, 16, 20))))
+      .toBe('Fri 12:00 PM');
+    // The UTC date is already Wednesday, league time still Tuesday night:
+    // Wed Jul 1 03:30Z = Tue Jun 30 8:30 PM PDT.
+    expect(formatLeagueWeekdayTime(new Date(Date.UTC(2026, 6, 1, 3, 30))))
+      .toBe('Tue 8:30 PM');
   });
 
   it('nextLeagueWeekdayInstantUtc: next league-local weekday+hour, DST-aware', () => {
@@ -204,14 +329,21 @@ describe('Dream Team post + schedule', () => {
       .toBe(Date.UTC(2026, 0, 15, 18));
   });
 
-  it('shouldAutoPublish: the acted-on rule', () => {
+  it('shouldAutoPublish: any Source with a due numeric AutoPublishAt', () => {
     const due = { Source: 'dreamteam', AutoPublishAt: 1000 };
     expect(shouldAutoPublish(due, 1000)).toBe(true);
     expect(shouldAutoPublish(due, 999)).toBe(false); // not yet
     expect(shouldAutoPublish(
-      { Source: 'dreamteam' }, 5000)).toBe(false); // edit cleared the schedule
+      { Source: 'dreamteam' }, 5000)).toBe(false); // owner switched it off
     expect(shouldAutoPublish(
-      { Source: 'ai', AutoPublishAt: 1 }, 5000)).toBe(false); // never for ai
+      { Source: 'ai', AutoPublishAt: 1 }, 5000)).toBe(true);
+    expect(shouldAutoPublish(
+      { Source: 'owner', AutoPublishAt: 1 }, 5000)).toBe(true);
+    expect(shouldAutoPublish({ AutoPublishAt: 1 }, 5000)).toBe(true);
+    expect(shouldAutoPublish(
+      { Source: 'ai', AutoPublishAt: '1' }, 5000)).toBe(false); // not numeric
+    expect(shouldAutoPublish(
+      { Source: 'ai', AutoPublishAt: Number.NaN }, 5000)).toBe(false);
     expect(shouldAutoPublish(null, 5000)).toBe(false);
   });
 });

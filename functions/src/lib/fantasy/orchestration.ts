@@ -61,9 +61,9 @@
 //   a sweep without one (tests) leaves them unclaimed.
 //
 // - NewsDrafted/<gw> = { At:int } (functions-internal): once-only claim for
-//   the Phase G news step (the Dream Team post + the AI drafts). The
-//   News/Drafts, News/Published and Config/DreamTeamPost shapes live in
-//   news.ts.
+//   the Phase G news step (the Dream Team post + the AI drafts + the admin
+//   heads-up push). The News/Drafts, News/Published and Config/NewsAutopilot
+//   (legacy Config/DreamTeamPost) shapes live in news.ts.
 //
 // - Voided/<gw> = true (READ-only here; the Manager's "VOID week" toggle
 //   writes true or removes it — spec §15). A voided week settles to zero
@@ -71,7 +71,7 @@
 //   lock still freezes TransferCosts/<gw> so an un-void recharges exactly
 //   that), chips played in it are refunded at later locks, the Free Hit
 //   restore + rollover run as normal, the Monday job skips it, and its
-//   Dream Team draft never auto-publishes while the flag stands. Its settle
+//   news drafts never auto-publish while the flag stands. Its settle
 //   claims RecapSent/<gw> and NewsDrafted/<gw> as { At, Voided:true }
 //   WITHOUT sending or drafting — regardless of whether a pusher/news dep
 //   was injected, since there is nothing to deliver. Toggling the flag
@@ -105,9 +105,11 @@ import {
   currentGameweek, deriveGameweeks, Gameweek, gameweekStatusAt,
 } from './gameweeks';
 import {
-  buildDreamTeamDraft, buildNewsStats, dreamTeamPostConfigFrom,
-  generateNewsDrafts, nextLeagueWeekdayInstantUtc, shouldAutoPublish,
+  buildDreamTeamDraft, buildNewsStats, dreamTeamNames,
+  formatLeagueWeekdayTime, generateNewsDrafts, newsAutopilotConfigFrom,
+  nextLeagueWeekdayInstantUtc, publishedRowFromDraft, shouldAutoPublish,
 } from './news';
+import { buildPlayerCard, cardsNode, seasonGoalsAssists } from './news_cards';
 import {
   allGamesFinal, childEntries, dateKeysOf, FantasyDb, fantasyRoot,
   fantasySeasonsOf, fullAttendance, gamesOfDate, isPlainMap,
@@ -118,9 +120,9 @@ import {
 } from './orchestration_db';
 import { applyDelta, repriceDeltas } from './pricing';
 import {
-  FantasyPusher, fantasyPushData, fillReminderTemplate, formatDeadline,
-  RECAP_TITLE, recapBody, REMINDER_TITLE, reminderAudience,
-  reminderConfigFrom, reminderInstantMs,
+  adminUidsOf, FantasyPusher, fantasyPushData, fillReminderTemplate,
+  formatDeadline, NEWS_READY_TITLE, newsReadyBody, RECAP_TITLE, recapBody,
+  REMINDER_TITLE, reminderAudience, reminderConfigFrom, reminderInstantMs,
 } from './pushes';
 import {
   applyPendingPositionChanges, positionWindowOf,
@@ -687,26 +689,51 @@ export async function finalizeGameweek(
   // Dream Team post always builds — deterministic, from the SAME stored
   // DreamTeam node the hub reads — while the 2–4 AI drafts land only when
   // the Anthropic call succeeds: an API failure or blank key writes NOTHING
-  // (logged) and never blocks the finalize (spec §13).
+  // (logged) and never blocks the finalize (spec §13). News desk 2.0 (spec
+  // 2026-10-28 §4.4): every draft carries player-card snapshots of the
+  // players it tags, the autopilot (ON unless Config/NewsAutopilot says
+  // Enabled:false) schedules every draft, and the admins get one heads-up.
   if (!voided && (await db.read(`${root}/NewsDrafted/${gw.number}`)) == null) {
     const wonNews = await db.writeIfAbsent(`${root}/NewsDrafted/${gw.number}`,
       { At: args.nowUtc.getTime() });
     if (wonNews) {
+      const nowMs = args.nowUtc.getTime();
       const dreamTeamRaw =
         out.dreamTeam ?? await db.read(`${root}/DreamTeam/${gw.number}`);
-      const dtCfg = dreamTeamPostConfigFrom(
+      const autopilot = newsAutopilotConfigFrom(
+        await db.read(`${root}/Config/NewsAutopilot`),
         await db.read(`${root}/Config/DreamTeamPost`));
+      const publishAt = autopilot.enabled
+        ? nextLeagueWeekdayInstantUtc(
+          args.nowUtc, autopilot.weekday, autopilot.hour)
+        : null;
+      const schedule = publishAt !== null
+        ? { AutoPublishAt: publishAt.getTime() } : {};
+
+      // Card sources, read fresh: finalize wrote PlayerWeeks/PlayerTotals
+      // above; goals/assists tally the whole season's Date node once.
+      const cardSources = {
+        playersRaw: await db.read(`${root}/Players`),
+        playerTotalsRaw: await db.read(`${root}/PlayerTotals`),
+        playerWeeksRaw: await db.read(`${root}/PlayerWeeks`),
+        priceChangesRaw: await db.read(`${root}/PriceChanges`),
+        goalsAssists: seasonGoalsAssists(
+          await db.read(`${sport}/${season}/Date`)),
+      };
+      const cardsFor = (names: string[]) =>
+        names.map((name) => buildPlayerCard(name, cardSources));
+
+      let drafted = 0;
       const dtDraft = buildDreamTeamDraft({
         gw: gw.number,
         dreamTeamRaw,
-        nowMs: args.nowUtc.getTime(),
-        autoPublishAtMs: dtCfg.autoPublish
-          ? nextLeagueWeekdayInstantUtc(
-            args.nowUtc, dtCfg.weekday, dtCfg.hour).getTime()
-          : null,
+        nowMs,
+        autoPublishAtMs: publishAt?.getTime() ?? null,
+        cards: cardsFor(dreamTeamNames(dreamTeamRaw)),
       });
       if (dtDraft !== null) {
         await db.write(`${root}/News/Drafts/gw${gw.number}dreamteam`, dtDraft);
+        drafted++;
         log.info('fantasy news: dream team post drafted', ctx);
       }
 
@@ -730,19 +757,42 @@ export async function finalizeGameweek(
             'unusable reply', ctx);
         } else {
           for (let i = 0; i < drafts.length; i++) {
+            // Only market players become cards (unknown names drop out).
+            const tagged = cardsNode(cardsFor(drafts[i].players));
             await db.write(`${root}/News/Drafts/gw${gw.number}ai${i + 1}`, {
               Title: drafts[i].title,
               Body: drafts[i].body,
               Gw: gw.number,
-              CreatedAt: args.nowUtc.getTime(),
+              CreatedAt: nowMs,
               Source: 'ai',
+              Template: 'ai',
+              ...(tagged !== null ? { Players: tagged } : {}),
+              ...schedule,
             });
+            drafted++;
           }
           log.info('fantasy news: AI drafts queued',
             { ...ctx, drafts: drafts.length });
         }
       } else {
         log.info('fantasy news: no Anthropic key — AI drafting skipped', ctx);
+      }
+
+      // Admin heads-up (spec §4.4): once per gameweek — inside this claim —
+      // and only when something was drafted. The Manager has no FCM token,
+      // so it lands in each admin's fan app.
+      if (drafted > 0 && pusher) {
+        const admins = adminUidsOf(await db.read('Admins'));
+        if (admins.length > 0) {
+          const body = newsReadyBody(drafted,
+            publishAt !== null ? formatLeagueWeekdayTime(publishAt) : null);
+          const data = fantasyPushData(sport, season, gw.number);
+          const sent = await pusher.sendToUsers(admins.map((uid) => ({
+            uid, title: NEWS_READY_TITLE, body, data,
+          })));
+          log.info('fantasy news: admin heads-up pushed',
+            { ...ctx, admins: admins.length, sent, drafted });
+        }
       }
     }
   }
@@ -1006,26 +1056,25 @@ async function sweepSeason(
     await finalizeGameweek(db, { sport, season, cfg, gw, nowUtc, log, deps });
   }
 
-  // 2b. Dream Team post auto-publish (Phase G, spec §13): a draft the owner
-  //     scheduled (Source 'dreamteam', AutoPublishAt due) publishes itself
-  //     to News/Published and leaves the queue — unless the owner already
-  //     acted on it (an edit cleared AutoPublishAt, a discard deleted the
-  //     draft; see news.ts shouldAutoPublish). Before the season-over
-  //     return, so the last gameweek's post still ships. A draft for an
-  //     owner-VOIDED week is held (never deleted — it is the owner's queue):
-  //     its Dream Team no longer exists; an un-void releases it.
+  // 2b. News draft auto-publish (spec 2026-10-28 §4.4): ANY draft — autopilot
+  //     'dreamteam'/'ai' or an owner-scheduled 'owner' post — whose
+  //     AutoPublishAt is due publishes itself to News/Published (the §4.1
+  //     post fields, news.ts publishedRowFromDraft) and leaves the queue. A
+  //     draft without AutoPublishAt waits for the owner (autopilot off or
+  //     the Manager's Auto-publish switch off); a discard deleted it. Before
+  //     the season-over return, so the last gameweek's posts still ship. A
+  //     draft for an owner-VOIDED week is held (never deleted — it is the
+  //     owner's queue): its week no longer counts; an un-void releases it.
   const voidedNow = voidedWeeksOf(await db.read(`${root}/Voided`));
   for (const [key, draft] of childEntries(await db.read(`${root}/News/Drafts`))) {
     if (!shouldAutoPublish(draft, nowUtc.getTime())) continue;
     const d = draft as Record<string, unknown>;
     if (voidedNow.includes(toIntLoose(d['Gw']))) continue;
-    await db.write(`${root}/News/Published/${key}`, {
-      Title: String(d['Title'] ?? ''),
-      Body: String(d['Body'] ?? ''),
-      At: nowUtc.getTime(),
-    });
+    await db.write(`${root}/News/Published/${key}`,
+      publishedRowFromDraft(d, nowUtc.getTime()));
     await db.write(`${root}/News/Drafts/${key}`, null);
-    log.info('fantasy news: dream team post auto-published', { ...ctx, key });
+    log.info('fantasy news: draft auto-published',
+      { ...ctx, key, source: String(d['Source'] ?? '') });
   }
 
   // 3. GwState upsert, after the backstop so a finalize lands as 'finalized'

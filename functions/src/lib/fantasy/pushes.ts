@@ -7,7 +7,9 @@
 // Spec §12: deadline reminder (default Sunday noon, to managers with
 // UNCHANGED squads; time/template/on-off owner-editable + a manual Send
 // now), weekly recap "GW3: you scored 41, moved to #4, top score 52."
-// Lock/price notices stay hub badges — never pushes.
+// Lock/price notices stay hub badges — never pushes. News desk 2.0 (spec
+// 2026-10-28 §4.4) adds the once-per-gameweek admin heads-up that the
+// week's stories are drafted.
 
 import { parseDbDate } from './league_time';
 import { childEntries, isPlainMap, toIntLoose } from './orchestration_db';
@@ -80,7 +82,8 @@ export function reminderInstantMs(
   return lockUtcMs - cfg.hoursBefore * 3_600_000;
 }
 
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+/** Short weekday names indexed like Date#getUTCDay (Sun = 0). */
+export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -137,4 +140,32 @@ export function recapBody(args: {
 }): string {
   return `GW${args.gw}: you scored ${args.points}, moved to #${args.rank}, ` +
     `top score ${args.topScore}.`;
+}
+
+// ── News autopilot admin heads-up (spec 2026-10-28 §4.4) ────────────────────
+
+export const NEWS_READY_TITLE = 'Fantasy stories ready';
+
+/** The heads-up body, sent once per gameweek with that week's drafts.
+ *  [publishWhen] = the autopilot's league-local publish time ("Tue 10:00
+ *  AM"), or null when the autopilot is off. A single story reads singular. */
+export function newsReadyBody(count: number, publishWhen: string | null): string {
+  if (publishWhen !== null) {
+    return count === 1
+      ? `1 post publishes ${publishWhen} unless you change it in the Manager.`
+      : `${count} posts publish ${publishWhen} unless you change them in the ` +
+        'Manager.';
+  }
+  return count === 1
+    ? '1 fantasy story is waiting for your approval in the Manager.'
+    : `${count} fantasy stories are waiting for your approval in the Manager.`;
+}
+
+/** The heads-up audience: every /Admins/<uid> whose value is exactly true
+ *  (the same allowlist the rules and callables use), sorted. */
+export function adminUidsOf(adminsRaw: unknown): string[] {
+  return childEntries(adminsRaw)
+    .filter(([, v]) => v === true)
+    .map(([uid]) => uid)
+    .sort();
 }
