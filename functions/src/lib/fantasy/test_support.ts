@@ -67,13 +67,29 @@ export class FakeDb implements FantasyDb {
   }
 }
 
-/** Captures every sendToUsers batch; "delivers" to everyone. */
+export interface FakeTopicSend {
+  topic: string;
+  title: string;
+  body: string;
+  data: Record<string, string>;
+}
+
+/** Captures every sendToUsers batch and every topic send; "delivers" to
+ *  everyone (a topic send counts 1, like the real adapter). */
 export class FakePusher implements FantasyPusher {
   sends: FantasyUserPush[][] = [];
+  topicSends: FakeTopicSend[] = [];
 
   async sendToUsers(messages: FantasyUserPush[]): Promise<number> {
     this.sends.push(messages);
     return messages.length;
+  }
+
+  async sendToTopic(
+    topic: string, title: string, body: string, data: Record<string, string>,
+  ): Promise<number> {
+    this.topicSends.push({ topic, title, body, data });
+    return 1;
   }
 }
 

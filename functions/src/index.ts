@@ -377,3 +377,7 @@ export { onFantasyVoidWritten } from './fantasy_void';
 // ---- Infinite Fantasy (spec §3): holder protection on position changes ----
 
 export { onFantasyPositionWritten } from './fantasy_positions';
+
+// ---- Infinite Fantasy (spec 2026-10-28 §4.5): news push on publish ----
+
+export { onFantasyNewsPublished } from './fantasy_news';

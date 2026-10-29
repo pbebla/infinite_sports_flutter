@@ -27,6 +27,12 @@ export interface FantasyUserPush {
  *  count. */
 export interface FantasyPusher {
   sendToUsers(messages: FantasyUserPush[]): Promise<number>;
+  /** One push to an FCM topic (campaign_watch convention — 'all_users' is
+   *  everyone in the app). A topic send has no per-device count: 1 when
+   *  FCM accepted it, 0 when it failed. An empty [body] is omitted. */
+  sendToTopic(
+    topic: string, title: string, body: string, data: Record<string, string>,
+  ): Promise<number>;
 }
 
 /** Every fantasy push carries this payload — the future tap-routing hook. */

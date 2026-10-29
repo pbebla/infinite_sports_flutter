@@ -54,13 +54,49 @@ export const fantasyLogger: FantasyLogger = {
 
 const BRAND_COLOR = '#D00000'; // infiniteSportsPrimaryColor
 
+/** Banner-pop delivery on the app's max-importance channel — shared by the
+ *  per-user and topic sends (campaign_watch parity). */
+const FCM_DISPLAY = {
+  android: {
+    priority: 'high' as const,
+    notification: {
+      channelId: 'infinite_sports_notifications',
+      sound: 'default',
+      color: BRAND_COLOR,
+    },
+  },
+  apns: { payload: { aps: { sound: 'default' } } },
+};
+
 /** The real FantasyPusher over admin FCM (campaign_watch sendToUids
  *  conventions): resolves Users/<uid>/Token per message — uids without a
  *  stored token are skipped silently — sends personalized messages in
  *  batches of 500 on the app's max-importance channel, prunes tokens FCM
- *  reports dead, and dry-runs in the emulator. */
+ *  reports dead, and dry-runs in the emulator. Topic sends (campaign_watch
+ *  sendToTopic parity) count 1 when FCM accepts them; a failure is logged
+ *  and counts 0. */
 export function rtdbFantasyPusher(root: Reference): FantasyPusher {
   return {
+    async sendToTopic(
+      topic: string, title: string, body: string, data: Record<string, string>,
+    ): Promise<number> {
+      if (process.env.FUNCTIONS_EMULATOR === 'true') {
+        logger.info('DRY-RUN fantasy topic push', { topic, title });
+        return 1;
+      }
+      try {
+        await admin.messaging().send({
+          topic,
+          notification: { title, ...(body ? { body } : {}) },
+          data,
+          ...FCM_DISPLAY,
+        });
+        return 1;
+      } catch (err) {
+        logger.warn('fantasy topic push failed', { topic, error: String(err) });
+        return 0;
+      }
+    },
     async sendToUsers(messages: FantasyUserPush[]): Promise<number> {
       const withTokens: Array<{ msg: FantasyUserPush; token: string }> = [];
       await Promise.all(messages.map(async (msg) => {
@@ -85,15 +121,7 @@ export function rtdbFantasyPusher(root: Reference): FantasyPusher {
             title: msg.title, ...(msg.body ? { body: msg.body } : {}),
           },
           data: msg.data,
-          android: {
-            priority: 'high' as const,
-            notification: {
-              channelId: 'infinite_sports_notifications',
-              sound: 'default',
-              color: BRAND_COLOR,
-            },
-          },
-          apns: { payload: { aps: { sound: 'default' } } },
+          ...FCM_DISPLAY,
         })));
         sent += res.successCount;
         // Prune tokens FCM says are gone so future sends stay clean.
