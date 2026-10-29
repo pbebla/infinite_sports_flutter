@@ -225,6 +225,141 @@ void main() {
       expect(totals['Bare']!.points, 17);
       expect(totals.containsKey('Junk'), isFalse);
     });
+
+    test('round 3: reads form / ppg (tenths) and games when the server wrote '
+        'them', () {
+      final totals = playerTotalsFromNode({
+        'Ava Striker': {
+          'points': 54,
+          'ownershipPct': 62,
+          'form': 85,
+          'ppg': 77,
+          'games': 7,
+        },
+        'Strings': {'points': 9, 'form': '40', 'ppg': '30', 'games': '3'},
+        // A player with no games: the server writes zeros, never NaN.
+        'Fresh': {
+          'points': 0,
+          'ownershipPct': 0,
+          'form': 0,
+          'ppg': 0,
+          'games': 0,
+        },
+      })!;
+      final ava = totals['Ava Striker']!;
+      expect(ava.formTenths, 85);
+      expect(ava.ppgTenths, 77);
+      expect(ava.games, 7);
+      final s = totals['Strings']!;
+      expect((s.formTenths, s.ppgTenths, s.games), (40, 30, 3));
+      // Zeros are real values, not "absent".
+      final fresh = totals['Fresh']!;
+      expect((fresh.formTenths, fresh.ppgTenths, fresh.games), (0, 0, 0));
+    });
+
+    test('round 3: old-shape nodes leave form / ppg / games null (UI "—")',
+        () {
+      final totals = playerTotalsFromNode({
+        'Old': {'points': 12, 'ownershipPct': 10},
+        'Bare': 17,
+        'Junk': {'points': 3, 'form': 'nope', 'ppg': null, 'games': {}},
+      })!;
+      for (final name in ['Old', 'Bare', 'Junk']) {
+        final t = totals[name]!;
+        expect(t.formTenths, isNull, reason: '$name form');
+        expect(t.ppgTenths, isNull, reason: '$name ppg');
+        expect(t.games, isNull, reason: '$name games');
+      }
+      expect(totals['Old']!.points, 12);
+      expect(totals['Junk']!.points, 3);
+    });
+  });
+
+  group('priceHistoryFromNode (round 3, PriceHistory/<gw>/<name>)', () {
+    test('absent/malformed → empty', () {
+      expect(priceHistoryFromNode(null), isEmpty);
+      expect(priceHistoryFromNode('nope'), isEmpty);
+      expect(priceHistoryFromNode(5), isEmpty);
+    });
+    test('map node: week → name → tenths, strings coerced, junk skipped', () {
+      final h = priceHistoryFromNode({
+        '1': {'Ava Striker': 60, 'Deb Rock': '55', 'Bad': 'x', 'Nul': null},
+        '2': {'Ava Striker': 65},
+        'weird': {'Ignored': 1},
+        '3': 'not-a-map',
+      });
+      expect(h.keys.toList()..sort(), [1, 2]);
+      expect(h[1], {'Ava Striker': 60, 'Deb Rock': 55});
+      expect(h[2], {'Ava Striker': 65});
+    });
+    test('list coercion (gw keys ARE small ints): index = gameweek', () {
+      final h = priceHistoryFromNode([
+        null,
+        {'Ava Striker': 60},
+        {'Ava Striker': 65},
+      ]);
+      expect(h[1], {'Ava Striker': 60});
+      expect(h[2], {'Ava Striker': 65});
+      expect(h.containsKey(0), isFalse);
+    });
+    test('a week with no usable price is omitted (never an empty row)', () {
+      final h = priceHistoryFromNode({
+        '1': {'Bad': 'x'},
+        '2': {'Ok': 50},
+      });
+      expect(h.keys, [2]);
+    });
+  });
+
+  group('allPriceChangesFromNode (round 3, PriceChanges/<gw>)', () {
+    test('absent/malformed → empty', () {
+      expect(allPriceChangesFromNode(null), isEmpty);
+      expect(allPriceChangesFromNode('nope'), isEmpty);
+    });
+    test('every week kept; Manual/Voided flag keys and zeros ignored', () {
+      final c = allPriceChangesFromNode({
+        '2': {'Ava Striker': 5, 'Deb Rock': -5, 'Flat': 0},
+        '3': {'Ava Striker': -10, 'Manual': true, 'Voided': false},
+        '4': {'Voided': true}, // flag-only reprice week
+        '5': {'Bare': 5, 'Mapped': {'delta': -5}, 'Str': '10'},
+        'weird': {'Ignored': 5},
+      });
+      expect(c.keys.toList()..sort(), [2, 3, 4, 5]);
+      expect(c[2], {'Ava Striker': 5, 'Deb Rock': -5});
+      expect(c[3], {'Ava Striker': -10});
+      expect(c[4], isEmpty);
+      expect(c[5], {'Bare': 5, 'Mapped': -5, 'Str': 10});
+    });
+    test('list coercion: index = gameweek, holes skipped', () {
+      final c = allPriceChangesFromNode([
+        null,
+        {'Up': 5},
+        null,
+        {'Down': -5, 'Manual': true},
+      ]);
+      expect(c.keys.toList()..sort(), [1, 3]);
+      expect(c[1], {'Up': 5});
+      expect(c[3], {'Down': -5});
+    });
+  });
+
+  group('watchlistFromNode (round 3, Watchlists/<uid>)', () {
+    test('absent/malformed → empty set', () {
+      expect(watchlistFromNode(null), isEmpty);
+      expect(watchlistFromNode('nope'), isEmpty);
+      expect(watchlistFromNode([true]), isEmpty);
+    });
+    test('only names whose value is exactly true are starred', () {
+      expect(
+          watchlistFromNode({
+            'Ava Striker': true,
+            'Deb Rock': true,
+            'Un-starred': false,
+            'Weird': 'yes',
+            'Gone': null,
+          }),
+          {'Ava Striker', 'Deb Rock'});
+    });
   });
 
   group('latestPriceChangesFromNode (P3c)', () {

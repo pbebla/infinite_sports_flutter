@@ -112,7 +112,13 @@ FantasySquad? squadFromNode(Object? node) {
 /// `{points, ownershipPct}`. Until a gameweek finalizes the node is absent
 /// and the market hides its points/ownership column entirely.
 class FantasyPlayerTotals {
-  const FantasyPlayerTotals({required this.points, this.ownershipPct});
+  const FantasyPlayerTotals({
+    required this.points,
+    this.ownershipPct,
+    this.formTenths,
+    this.ppgTenths,
+    this.games,
+  });
 
   /// Total fantasy points across finalized gameweeks.
   final int points;
@@ -120,6 +126,19 @@ class FantasyPlayerTotals {
   /// Share of managers holding the player (0–100); null when the functions
   /// haven't written one.
   final double? ownershipPct;
+
+  /// Round 3 (spec §3.3), all null when the server hasn't written them (an
+  /// old-shape node) — the UI then shows "—", never a made-up 0.0.
+  ///
+  /// Form, in tenths: mean points of the last 3 non-voided finalized weeks.
+  final int? formTenths;
+
+  /// Points per game, in tenths (0 when he has played no games — callers
+  /// show "—" for [games] == 0, not "0.0").
+  final int? ppgTenths;
+
+  /// Games played this season.
+  final int? games;
 }
 
 /// The whole `PlayerTotals` node → name → totals. null when the node is
@@ -139,6 +158,9 @@ Map<String, FantasyPlayerTotals>? playerTotalsFromNode(Object? node) {
         ownershipPct: rawPct is num
             ? rawPct.toDouble()
             : double.tryParse(rawPct?.toString() ?? ''),
+        formTenths: _optInt(raw['form']),
+        ppgTenths: _optInt(raw['ppg']),
+        games: _optInt(raw['games']),
       );
     } else if (raw is num) {
       // Tolerate a bare-points shape.
@@ -196,6 +218,75 @@ List<FantasyPriceChange> latestPriceChangesFromNode(Object? node) {
     return byDelta != 0 ? byDelta : a.name.compareTo(b.name);
   });
   return out;
+}
+
+/// `<gw>` → `{name: int}` week nodes of [node] (the `PriceHistory` /
+/// `PriceChanges` shape). Gameweek keys are small ints, so RTDB WILL
+/// list-coerce the node (index = gameweek, holes null) — a List and an
+/// int-keyed Map both parse; non-int week keys and non-Map week nodes are
+/// skipped. Within a week, children that aren't ints (numeric strings are
+/// coerced; booleans such as the `Manual`/`Voided` flags, junk, nulls are
+/// not) are skipped; with [skipZero] zero values are skipped too. A week
+/// whose node IS a Map is kept even when nothing usable is left in it unless
+/// [dropEmptyWeeks].
+Map<int, Map<String, int>> _weeklyIntsFromNode(
+  Object? node, {
+  required bool skipZero,
+  required bool dropEmptyWeeks,
+  bool allowDeltaMap = false,
+}) {
+  final out = <int, Map<String, int>>{};
+  void take(int week, Object? weekNode) {
+    if (weekNode is! Map) return;
+    final names = <String, int>{};
+    weekNode.forEach((name, raw) {
+      final Object? value = (allowDeltaMap && raw is Map) ? raw['delta'] : raw;
+      // A bare bool is a flag, not a number (and must not parse as one).
+      if (value is bool) return;
+      final n = _optInt(value);
+      if (n == null || (skipZero && n == 0)) return;
+      names[name.toString()] = n;
+    });
+    if (names.isEmpty && dropEmptyWeeks) return;
+    out[week] = names;
+  }
+
+  if (node is Map) {
+    node.forEach((gw, weekNode) {
+      final week = int.tryParse(gw.toString());
+      if (week != null) take(week, weekNode);
+    });
+  } else if (node is List) {
+    for (var i = 0; i < node.length; i++) {
+      take(i, node[i]);
+    }
+  }
+  return out;
+}
+
+/// `PriceHistory/<gw>/<name>` (round 3, spec §3.2): the price in tenths each
+/// player had DURING each gameweek, snapshotted at that week's lock. A week
+/// with no usable price is omitted.
+Map<int, Map<String, int>> priceHistoryFromNode(Object? node) =>
+    _weeklyIntsFromNode(node, skipZero: false, dropEmptyWeeks: true);
+
+/// `PriceChanges/<gw>` for EVERY gameweek (round 3): `{name: deltaTenths}`
+/// per reprice. The server's `Manual` / `Voided` boolean flag keys and zero
+/// moves are ignored; a week that only carried flags stays in the map as an
+/// empty entry ("a reprice ran, nothing moved"). The existing
+/// [latestPriceChangesFromNode] keeps serving the market's latest-week strip.
+Map<int, Map<String, int>> allPriceChangesFromNode(Object? node) =>
+    _weeklyIntsFromNode(node,
+        skipZero: true, dropEmptyWeeks: false, allowDeltaMap: true);
+
+/// `Watchlists/<uid>` (round 3): `{name: true}` → the starred names. Only an
+/// exact `true` counts (the rules only ever allow `true`).
+Set<String> watchlistFromNode(Object? node) {
+  if (node is! Map) return <String>{};
+  return {
+    for (final e in node.entries)
+      if (e.value == true) e.key.toString(),
+  };
 }
 
 /// Match-day keys (MMDDYYYY) from the season's `/<sport>/<season>/Date` node

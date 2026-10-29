@@ -15,6 +15,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
+import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
@@ -36,6 +37,14 @@ class FantasyService {
   static final Map<String, List<FantasyMiniLeague>> _miniLeaguesCache = {};
   static final Map<String, List<FantasyNewsPost>> _newsCache = {};
   static final Map<String, Map<int, FantasyDreamTeam>> _dreamTeamsCache = {};
+  // Round 3 (player profiles): keyed `<root>` (season-wide) or
+  // `<root>|<name|uid>` (per player / per user).
+  static final Map<String, Map<int, Map<String, int>>> _priceHistoryCache = {};
+  static final Map<String, Map<int, Map<String, int>>> _allPriceChangesCache =
+      {};
+  static final Map<String, Map<int, PlayerWeekStats>> _playerWeekStatsCache =
+      {};
+  static final Map<String, Set<String>> _watchlistCache = {};
 
   /// Clears the session caches (sign-out hygiene, tests).
   static void clearSessionCaches() {
@@ -48,6 +57,10 @@ class FantasyService {
     _miniLeaguesCache.clear();
     _newsCache.clear();
     _dreamTeamsCache.clear();
+    _priceHistoryCache.clear();
+    _allPriceChangesCache.clear();
+    _playerWeekStatsCache.clear();
+    _watchlistCache.clear();
   }
 
   /// Live `Fantasy/<sport>/<season>/Config` → engine FantasyConfig + lock
@@ -115,6 +128,121 @@ class FantasyService {
       _priceChangesCache[key] = changes;
       yield changes;
     }
+  }
+
+  /// Live price moves of EVERY gameweek (`PriceChanges/<gw>/<name>` = delta
+  /// tenths, round 3): the profile's Price tab ("the move after each week")
+  /// and the market's Risers/Fallers "View all". The `Manual`/`Voided` flag
+  /// keys are ignored; empty until the first Monday repricing runs.
+  /// [watchPriceChanges] stays the latest-week-only strip feed.
+  static Stream<Map<int, Map<String, int>>> watchAllPriceChanges(
+      String sport, String season) async* {
+    final key = _root(sport, season);
+    final seed = _allPriceChangesCache[key];
+    if (seed != null) yield seed;
+    await for (final event in _ref('$key/PriceChanges').onValue) {
+      final moves = allPriceChangesFromNode(event.snapshot.value);
+      _allPriceChangesCache[key] = moves;
+      yield moves;
+    }
+  }
+
+  /// Live price history (`PriceHistory/<gw>/<name>` = tenths the player had
+  /// DURING that gameweek, snapshotted at lock — round 3, spec §3.2). Empty
+  /// until the first lock after the functions deploy (no backfill).
+  static Stream<Map<int, Map<String, int>>> watchPriceHistory(
+      String sport, String season) async* {
+    final key = _root(sport, season);
+    final seed = _priceHistoryCache[key];
+    if (seed != null) yield seed;
+    await for (final event in _ref('$key/PriceHistory').onValue) {
+      final history = priceHistoryFromNode(event.snapshot.value);
+      _priceHistoryCache[key] = history;
+      yield history;
+    }
+  }
+
+  /// One player's weekly records (`PlayerWeekStats/<gw>/<name>`, round 3,
+  /// spec §3.1): one onValue listener per gameweek in [weeks] on that small
+  /// entry (public read) — never the season's whole record for every player
+  /// (same multi-listener shape as [watchChipHistoryFor]). Emits only once
+  /// EVERY week has answered (no piecemeal pops), then on every change;
+  /// weeks without a record are simply absent from the map. Seeded from the
+  /// session cache so a revisited profile paints instantly. Callers
+  /// resubscribe when the finalized-week list changes.
+  static Stream<Map<int, PlayerWeekStats>> watchPlayerWeekStatsFor(
+      String sport, String season, String name, List<int> weeks) {
+    final wanted = weeks.toSet();
+    if (wanted.isEmpty) {
+      return Stream<Map<int, PlayerWeekStats>>.value(const {});
+    }
+    final root = _root(sport, season);
+    final cacheKey = '$root|$name';
+    final subs = <StreamSubscription<DatabaseEvent>>[];
+    final latest = <int, PlayerWeekStats?>{};
+    late final StreamController<Map<int, PlayerWeekStats>> controller;
+    controller = StreamController<Map<int, PlayerWeekStats>>(
+      onListen: () {
+        final seed = _playerWeekStatsCache[cacheKey];
+        if (seed != null) {
+          controller.add({
+            for (final e in seed.entries)
+              if (wanted.contains(e.key)) e.key: e.value,
+          });
+        }
+        for (final w in wanted) {
+          subs.add(_ref('$root/PlayerWeekStats/$w/$name')
+              .onValue
+              .listen((event) {
+            latest[w] = playerWeekStatsFromNode(event.snapshot.value);
+            if (latest.length < wanted.length) return; // not all answered yet
+            final map = {
+              for (final e in latest.entries)
+                if (e.value != null) e.key: e.value!,
+            };
+            _playerWeekStatsCache[cacheKey] = map;
+            controller.add(map);
+          }, onError: controller.addError));
+        }
+      },
+      onCancel: () async {
+        for (final s in subs) {
+          await s.cancel();
+        }
+        subs.clear();
+      },
+    );
+    return controller.stream;
+  }
+
+  /// Live own watchlist (`Watchlists/<uid>/<name>` = true, round 3): the
+  /// starred player names. Rules: read/write own uid only. Seeded from the
+  /// session cache (cleared with the others on sign-out).
+  static Stream<Set<String>> watchWatchlist(
+      String sport, String season, String uid) async* {
+    final key = '${_root(sport, season)}|$uid';
+    final seed = _watchlistCache[key];
+    if (seed != null) yield seed;
+    await for (final event
+        in _ref('${_root(sport, season)}/Watchlists/$uid').onValue) {
+      final names = watchlistFromNode(event.snapshot.value);
+      _watchlistCache[key] = names;
+      yield names;
+    }
+  }
+
+  /// Stars ([on] true → `true`) or un-stars (false → the node is removed)
+  /// [name] on [uid]'s watchlist. The stream is the single source of truth
+  /// after the write (the local echo re-emits at once).
+  static Future<void> setWatchlisted(
+      String sport, String season, String uid, String name, bool on) {
+    // An empty name would address the `Watchlists/<uid>` node itself.
+    if (name.trim().isEmpty) {
+      return Future.error(
+          ArgumentError.value(name, 'name', 'must not be empty'));
+    }
+    final ref = _ref('${_root(sport, season)}/Watchlists/$uid/$name');
+    return on ? ref.set(true) : ref.remove();
   }
 
   /// Live own squad (`Squads/<uid>`). null until first save. Re-renders on
