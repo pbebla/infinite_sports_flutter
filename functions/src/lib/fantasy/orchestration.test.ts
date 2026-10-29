@@ -112,6 +112,7 @@ function world(opts: {
   for (const p of fixture['players'] as Json[]) {
     players[p['id']] = {
       position: p['position'], priceTenths: p['priceTenths'], eligible: true,
+      teamName: p['team'],
     };
   }
   const squads: Json = {};
@@ -197,8 +198,25 @@ describe('lifecycle sweep (Phase B)', () => {
       churn: { points: 59, rank: 1 },
     });
     expect(await db.read(`${fRoot}/PlayerWeeks/1`)).toEqual(WEEK_POINTS);
+    // PlayerWeekStats/1: the whole week node, Games from Players/<n>/teamName
+    // (hand math: Dana = plays 1 + goal 6 + assist 4 + bonus 2; Ezra was
+    // marked absent on the Eagles' game, so Played false but the game lists).
+    const stats = await db.read(`${fRoot}/PlayerWeekStats/1`) as Json;
+    expect(Object.keys(stats).sort()).toEqual(Object.keys(WEEK_POINTS).sort());
+    expect(stats['Dana']).toEqual({
+      Pts: 13, Played: true, GP: 1,
+      Games: [{ Vs: 'Wolves', For: 3, Against: 1 }],
+      Lines: {
+        plays: { N: 1, P: 1 }, goals: { N: 1, P: 6 },
+        assists: { N: 1, P: 4 }, bonus: { N: 2, P: 2 },
+      },
+    });
+    expect(stats['Ezra']).toEqual({
+      Pts: 0, Played: false, GP: 0,
+      Games: [{ Vs: 'Bulls', For: 0, Against: 2 }],
+    });
     expect(((await db.read(`${fRoot}/PlayerTotals`)) as Json)['Bea'])
-      .toEqual({ points: 15, ownershipPct: 67 });
+      .toEqual({ points: 15, ownershipPct: 67, form: 150, ppg: 150, games: 1 });
     expect(((await db.read(`${fRoot}/DreamTeam/1`)) as Json)['Players']).toEqual([
       { name: 'Bo', position: 'GK', points: 12 },
       { name: 'Bea', position: 'DEF', points: 15 },
@@ -315,7 +333,7 @@ describe('match-day finalize trigger entry (Phase C)', () => {
       churn: { points: 42, rank: 1 },
     });
     expect(((await db.read(`${fRoot}/PlayerTotals`)) as Json)['Bo'])
-      .toEqual({ points: 4, ownershipPct: 33 });
+      .toEqual({ points: 4, ownershipPct: 33, form: 40, ppg: 40, games: 1 });
     // The admin's Dream Team was left alone.
     expect(await db.read(`${fRoot}/DreamTeam/1`)).toEqual(
       { Players: [{ name: 'OwnerPick', position: 'GK', points: 1 }] });

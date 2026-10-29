@@ -158,7 +158,10 @@ describe('golden forfeit replay (cross-engine contract, spec §8a)', () => {
     'History totals and a Dream Team with no forfeiter', () => {
     const market: Record<string, MarketPlayer> = {};
     for (const p of players) {
-      market[p['id']] = { position: parsePosition(p['position']), eligible: true };
+      market[p['id']] = {
+        position: parsePosition(p['position']), eligible: true,
+        teamName: p['team'],
+      };
     }
     const squadsByUid: Record<string, unknown> = {};
     for (const s of fixture['squads'] as Json[]) squadsByUid[s['name']] = s['squad'];
@@ -174,6 +177,7 @@ describe('golden forfeit replay (cross-engine contract, spec §8a)', () => {
       players: market,
       squadsByUid,
       playerWeeksByWeek: {},
+      playedGamesByWeek: {},
       historyTenthsByWeek: {},
       dreamTeamAuto: null,
       nowMs: 0,
@@ -187,5 +191,32 @@ describe('golden forfeit replay (cross-engine contract, spec §8a)', () => {
       expect(out.historyByUid[name]['TotalTenths'], name).toBe(e['totalTenths']);
     }
     expect(out.dreamTeam?.Players).toEqual(expected['dreamTeam']);
+
+    // PlayerWeekStats on the forfeit fixture (hand math from the notes: Lions
+    // showed up and won 5-0 by forfeit — Plays only; Tigers forfeited — did
+    // not play; Lena was absent; Hana's real 2-1 win carries real lines).
+    const stats = out.playerWeekStats;
+    expect(stats['Luca']).toStrictEqual({
+      Pts: 1, Played: true, GP: 1,
+      Games: [{ Vs: 'Tigers', For: 5, Against: 0, Forfeit: 'won' }],
+      Lines: { plays: { N: 1, P: 1 } },
+    });
+    expect(stats['Lena']).toStrictEqual({
+      Pts: 0, Played: false, GP: 0,
+      Games: [{ Vs: 'Tigers', For: 5, Against: 0, Forfeit: 'won' }],
+    });
+    expect(stats['Tom']).toStrictEqual({
+      Pts: 0, Played: false, GP: 0,
+      Games: [{ Vs: 'Lions', For: 0, Against: 5, Forfeit: 'lost' }],
+    });
+    // Every player's lines sum to Pts. Hana (DEF, Hawks 2-1 Foxes): plays 1 +
+    // goal 6 + assist 4 = 11 base, + bonus 3 = 14.
+    for (const [name, e] of Object.entries(stats)) {
+      const sum = Object.values(e.Lines ?? {}).reduce((a, l) => a + l.P, 0);
+      expect(sum, name).toBe(e.Pts);
+      expect(e.Pts, name).toBe(out.playerWeeks[name]);
+    }
+    expect(stats['Hana'].Games).toStrictEqual([{ Vs: 'Foxes', For: 2, Against: 1 }]);
+    expect(stats['Hana'].Lines!['bonus']).toStrictEqual({ N: 3, P: 3 });
   });
 });

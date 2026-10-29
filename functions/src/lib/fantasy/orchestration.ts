@@ -43,6 +43,11 @@
 //
 // - PlayerWeeks/<gw>/<name> = int (functions-internal; see finalize_core.ts).
 //
+// - PlayerWeekStats/<gw>/<name> = per-player weekly record (public read, no
+//   client write): Pts/Played/GP/Games/Lines — the shape lives in
+//   finalize_core.ts. Written as the whole <gw> node next to PlayerWeeks;
+//   other weeks' GP feed PlayerTotals games/ppg on every (re)run.
+//
 // - TransferState/<uid> = { Free:int, UsedThisGw:int, ChipPlayed?:string,
 //   SavedGw?:int, RolledGw?:int } — the Phase E transfer ledger; the
 //   field-by-field contract lives in transfer_state.ts. Written by the
@@ -610,6 +615,17 @@ export async function finalizeGameweek(
     for (const [name, v] of childEntries(byName)) m[name] = toIntLoose(v);
     playerWeeksByWeek[week] = m;
   }
+  // Other weeks' games played (PlayerWeekStats.GP) — PlayerTotals games/ppg.
+  const playedGamesByWeek: Record<number, Record<string, number>> = {};
+  for (const [w, byName] of childEntries(await db.read(`${root}/PlayerWeekStats`))) {
+    const week = Number(w);
+    if (!Number.isInteger(week) || week === gw.number) continue;
+    const m: Record<string, number> = {};
+    for (const [name, entry] of childEntries(byName)) {
+      if (isPlainMap(entry)) m[name] = toIntLoose(entry['GP']);
+    }
+    playedGamesByWeek[week] = m;
+  }
   const historyTenthsByWeek: Record<number, Record<string, number>> = {};
   for (const [w, byUid] of childEntries(historyRaw)) {
     const week = Number(w);
@@ -647,6 +663,7 @@ export async function finalizeGameweek(
     squadsByUid,
     transferCostPointsByUid,
     playerWeeksByWeek,
+    playedGamesByWeek,
     historyTenthsByWeek,
     dreamTeamAuto,
     voidedWeeks,
@@ -660,6 +677,10 @@ export async function finalizeGameweek(
 
   if (Object.keys(out.playerWeeks).length > 0) {
     await db.write(`${root}/PlayerWeeks/${gw.number}`, out.playerWeeks);
+  }
+  if (Object.keys(out.playerWeekStats).length > 0) {
+    await db.write(
+      `${root}/PlayerWeekStats/${gw.number}`, out.playerWeekStats);
   }
   if (Object.keys(out.historyByUid).length > 0) {
     await db.write(`${root}/History/${gw.number}`, out.historyByUid);

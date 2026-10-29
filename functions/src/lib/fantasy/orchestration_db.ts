@@ -276,7 +276,13 @@ export function marketPlayersOf(
     } catch {
       continue;
     }
-    out[name] = { position, eligible: raw['eligible'] === true };
+    const teamName = raw['teamName'];
+    out[name] = {
+      position,
+      eligible: raw['eligible'] === true,
+      ...(typeof teamName === 'string' && teamName.length > 0
+        ? { teamName } : {}),
+    };
   }
   return out;
 }

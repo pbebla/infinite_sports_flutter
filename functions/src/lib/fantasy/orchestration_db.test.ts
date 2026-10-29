@@ -169,6 +169,17 @@ describe('rosters + market', () => {
       Gus: { position: 'ATT', eligible: false },
     });
   });
+  it('marketPlayersOf carries teamName when it is a non-empty string', () => {
+    expect(marketPlayersOf({
+      Sam: { position: 'GK', teamName: 'Sharks' },
+      Gus: { position: 'ATT', teamName: '' },
+      Ann: { position: 'DEF', teamName: 7 },
+    })).toStrictEqual({
+      Sam: { position: 'GK', eligible: false, teamName: 'Sharks' },
+      Gus: { position: 'ATT', eligible: false },
+      Ann: { position: 'DEF', eligible: false },
+    });
+  });
   it('marketPricesOf reads tenths, junk reads 0', () => {
     expect(marketPricesOf({
       Sam: { priceTenths: 85 }, Gus: { priceTenths: 'x' },

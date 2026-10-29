@@ -71,6 +71,46 @@ void main() {
         s(goals: 2, saves: 4, conceded: 2), FantasyPosition.gk, cfg);
     expect(r.breakdown.fold<int>(0, (a, b) => a + b.points), r.total);
   });
+  test('every line carries a stable key and count', () {
+    // conceded 1: no clean sheet; ATT never loses points for conceding.
+    final r = scorePlayerGame(
+        s(goals: 2, assists: 1, yellows: 1, conceded: 1),
+        FantasyPosition.att, cfg);
+    expect([for (final l in r.breakdown) (l.key, l.count)],
+        [('plays', 1), ('goals', 2), ('assists', 1), ('yellow', 1)]);
+    // Labels and points are untouched by the new fields.
+    expect([for (final l in r.breakdown) (l.label, l.points)], [
+      ('Plays', 1),
+      ('Goals ×2', 8),
+      ('Assists ×1', 3),
+      ('Yellow ×1', -1),
+    ]);
+  });
+  test('keys/counts for every other source (the stat each count is)', () {
+    final def = scorePlayerGame(
+        s(goals: 1, assists: 2, dpl: 6, conceded: 3, yellows: 1, reds: 1,
+            ownGoals: 1, penMissed: 1),
+        FantasyPosition.def, cfg);
+    expect([for (final l in def.breakdown) (l.key, l.count)], [
+      ('plays', 1),
+      ('goals', 1),
+      ('assists', 2),
+      ('penMissed', 1),
+      ('conceded', 3),
+      ('dpl', 6),
+      ('yellow', 1),
+      ('red', 1),
+      ('ownGoals', 1),
+    ]);
+    final gk =
+        scorePlayerGame(s(saves: 5, penSaved: 1), FantasyPosition.gk, cfg);
+    expect([for (final l in gk.breakdown) (l.key, l.count)], [
+      ('plays', 1),
+      ('cleanSheet', 1),
+      ('saves', 5),
+      ('penSaved', 1),
+    ]);
+  });
   test('gameweek sum across multiple games', () {
     final wk = scorePlayerWeek(
         [s(goals: 1, conceded: 1), s(conceded: 2, yellows: 1)],
@@ -99,6 +139,8 @@ void main() {
         final r = scorePlayerGame(f(GameForfeit.won, goals: 2), pos, cfg);
         expect(r.total, 1, reason: pos.db);
         expect([for (final l in r.breakdown) l.label], ['Plays'],
+            reason: pos.db);
+        expect([for (final l in r.breakdown) (l.key, l.count)], [('plays', 1)],
             reason: pos.db);
       }
     });

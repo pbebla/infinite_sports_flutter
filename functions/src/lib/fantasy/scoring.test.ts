@@ -69,6 +69,38 @@ describe('scoring', () => {
     const r = scorePlayerGame(s({ goals: 2, saves: 4, conceded: 2 }), 'GK', cfg);
     expect(r.breakdown.reduce((a, b) => a + b.points, 0)).toBe(r.total);
   });
+  it('every line carries a stable key and count', () => {
+    // conceded 1: no clean sheet; ATT never loses points for conceding.
+    const r = scorePlayerGame(
+      s({ goals: 2, assists: 1, yellows: 1, conceded: 1 }), 'ATT', cfg);
+    expect(r.breakdown.map((l) => [l.key, l.count])).toEqual([
+      ['plays', 1], ['goals', 2], ['assists', 1], ['yellow', 1],
+    ]);
+    // Labels and points are untouched by the new fields.
+    expect(r.breakdown.map((l) => [l.label, l.points])).toEqual([
+      ['Plays', 1], ['Goals ×2', 8], ['Assists ×1', 3], ['Yellow ×1', -1],
+    ]);
+  });
+  it('keys/counts for every other source (the stat each count is)', () => {
+    const def = scorePlayerGame(s({
+      goals: 1, assists: 2, dpl: 6, conceded: 3, yellows: 1, reds: 1,
+      ownGoals: 1, penMissed: 1,
+    }), 'DEF', cfg);
+    expect(def.breakdown.map((l) => [l.key, l.count])).toEqual([
+      ['plays', 1], ['goals', 1], ['assists', 2], ['penMissed', 1],
+      ['conceded', 3], ['dpl', 6], ['yellow', 1], ['red', 1], ['ownGoals', 1],
+    ]);
+    const gk = scorePlayerGame(s({ saves: 5, penSaved: 1 }), 'GK', cfg);
+    expect(gk.breakdown.map((l) => [l.key, l.count])).toEqual([
+      ['plays', 1], ['cleanSheet', 1], ['saves', 5], ['penSaved', 1],
+    ]);
+  });
+  it('forfeit-won Plays line is keyed plays/1', () => {
+    const r = scorePlayerGame(s({ forfeit: 'won' }), 'GK', cfg);
+    expect(r.breakdown).toEqual([
+      { label: 'Plays', points: 1, key: 'plays', count: 1 },
+    ]);
+  });
   it('gameweek sum across multiple games', () => {
     const wk = scorePlayerWeek(
       [s({ goals: 1, conceded: 1 }), s({ conceded: 2, yellows: 1 })],

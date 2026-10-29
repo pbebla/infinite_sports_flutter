@@ -20,6 +20,12 @@
 //   PlayerTotals with GW1 seeded: normal = 2x (Bea 30, Bo 24), voided GW2
 //   = GW1 only (Bea 15, Bo 12). GW2 ownership: Bea held by boost + churn =
 //   round(200/3) = 67, Bo by churn only = round(100/3) = 33.
+// - Round 3 PlayerTotals (voidWorld seeds GW1's PlayerWeekStats: everyone but
+//   Ezra played 1 game): form (tenths) = round(10 x mean Pts of the 3 latest
+//   NON-voided weeks) and ppg = round(10 x points / games). Normal GW2:
+//   Bea weeks 15, 15 -> form 150; points 30 / games 2 -> ppg 150. Voided
+//   GW2: only GW1 counts -> Bea form 150, ppg round(10*15/1) = 150, games 1;
+//   Bo 120 / 120 / 1.
 // - Rollover after GW2 (normal OR voided): churn free 2 - used 3 clamps to
 //   0, + 2 = 2; alpha/boost (no state: free 2, used 0) bank to 4.
 
@@ -58,6 +64,12 @@ function voidWorld(opts: { gw2Status?: number } = {}): FakeDb {
   const db = new FakeDb(world2(opts));
   const f = db.data.Fantasy.Futsal['15'];
   f.PlayerWeeks = { 1: { ...WEEK_POINTS } };
+  f.PlayerWeekStats = {
+    1: Object.fromEntries(Object.entries(WEEK_POINTS).map(([n, pts]) => [n, {
+      Pts: pts, Played: n !== 'Ezra', GP: n === 'Ezra' ? 0 : 1,
+      Games: [{ Vs: 'X', For: 1, Against: 0 }],
+    }])),
+  };
   f.TransferState = { churn: { Free: 2, UsedThisGw: 3, SavedGw: 2 } };
   return db;
 }
@@ -124,8 +136,10 @@ describe('void BEFORE finalize (the week settles voided first time)', () => {
     expect(await db.read(`${F_ROOT}/Leaderboards/Overall`)).toEqual(VOIDED_OVERALL);
     expect(await db.read(`${F_ROOT}/PlayerWeeks/2`)).toEqual(WEEK_POINTS); // real
     const totals = await db.read(`${F_ROOT}/PlayerTotals`) as Json;
-    expect(totals['Bea']).toEqual({ points: 15, ownershipPct: 67 });
-    expect(totals['Bo']).toEqual({ points: 12, ownershipPct: 33 });
+    expect(totals['Bea']).toEqual(
+      { points: 15, ownershipPct: 67, form: 150, ppg: 150, games: 1 });
+    expect(totals['Bo']).toEqual(
+      { points: 12, ownershipPct: 33, form: 120, ppg: 120, games: 1 });
 
     expect(await db.read(`${F_ROOT}/DreamTeam/2`)).toBeNull();
     expect(pusher.sends).toEqual([]);
@@ -199,7 +213,7 @@ describe('void AFTER finalize (the Voided/<gw> toggle re-settles)', () => {
     // Normal settle first (sanity against the hand math).
     expect(await db.read(`${F_ROOT}/Leaderboards/Overall`)).toEqual(NORMAL_OVERALL);
     expect(((await db.read(`${F_ROOT}/PlayerTotals`)) as Json)['Bea'])
-      .toEqual({ points: 30, ownershipPct: 67 });
+      .toEqual({ points: 30, ownershipPct: 67, form: 150, ppg: 150, games: 2 });
     expect(pusher.sends).toHaveLength(1); // the GW2 recap
     expect(((await db.read(`${F_ROOT}/DreamTeam/2`)) as Json)['Auto']).toBe(true);
 
@@ -210,10 +224,20 @@ describe('void AFTER finalize (the Voided/<gw> toggle re-settles)', () => {
     expect(await db.read(`${F_ROOT}/Leaderboards/Overall`)).toEqual(VOIDED_OVERALL);
     expect(await db.read(`${F_ROOT}/Leaderboards/Gameweek/2`)).toEqual(ZERO_WEEK);
     const totals = await db.read(`${F_ROOT}/PlayerTotals`) as Json;
-    expect(totals['Bea']).toEqual({ points: 15, ownershipPct: 67 });
-    expect(totals['Bo']).toEqual({ points: 12, ownershipPct: 33 });
+    expect(totals['Bea']).toEqual(
+      { points: 15, ownershipPct: 67, form: 150, ppg: 150, games: 1 });
+    expect(totals['Bo']).toEqual(
+      { points: 12, ownershipPct: 33, form: 120, ppg: 120, games: 1 });
     expect(await db.read(`${F_ROOT}/History/2/churn/TotalTenths`)).toBe(0);
     expect(await db.read(`${F_ROOT}/History/2/churn/Voided`)).toBe(true);
+    // PlayerWeekStats re-settles with the void: Pts 0, marker, no Lines (the
+    // court record stays).
+    const voidedDana = await db.read(`${F_ROOT}/PlayerWeekStats/2/Dana`) as Json;
+    expect(voidedDana['Pts']).toBe(0);
+    expect(voidedDana['Voided']).toBe(true);
+    expect(voidedDana['Played']).toBe(true);
+    expect(voidedDana['GP']).toBe(1);
+    expect('Lines' in voidedDana).toBe(false);
     expect(await db.read(`${F_ROOT}/DreamTeam/2`)).toBeNull(); // ours: removed
     // Already-sent guards are untouched; nothing re-sent; no re-rollover.
     expect(pusher.sends).toHaveLength(1);
@@ -230,11 +254,21 @@ describe('void AFTER finalize (the Voided/<gw> toggle re-settles)', () => {
     expect(await db.read(`${F_ROOT}/Leaderboards/Overall`)).toEqual(NORMAL_OVERALL);
     expect(await db.read(`${F_ROOT}/Leaderboards/Gameweek/2`)).toEqual(NORMAL_WEEK2);
     const restored = await db.read(`${F_ROOT}/PlayerTotals`) as Json;
-    expect(restored['Bea']).toEqual({ points: 30, ownershipPct: 67 });
-    expect(restored['Bo']).toEqual({ points: 24, ownershipPct: 33 });
+    expect(restored['Bea']).toEqual(
+      { points: 30, ownershipPct: 67, form: 150, ppg: 150, games: 2 });
+    expect(restored['Bo']).toEqual(
+      { points: 24, ownershipPct: 33, form: 120, ppg: 120, games: 2 });
     const churn = await db.read(`${F_ROOT}/History/2/churn`) as Json;
     expect(churn['TotalTenths']).toBe(555);
     expect('Voided' in churn).toBe(false);
+    // ... and PlayerWeekStats comes back whole (set, so the marker is gone).
+    const backDana = await db.read(`${F_ROOT}/PlayerWeekStats/2/Dana`) as Json;
+    expect(backDana['Pts']).toBe(13);
+    expect('Voided' in backDana).toBe(false);
+    expect(backDana['Lines']).toEqual({
+      plays: { N: 1, P: 1 }, goals: { N: 1, P: 6 },
+      assists: { N: 1, P: 4 }, bonus: { N: 2, P: 2 },
+    });
     expect(await db.read(`${F_ROOT}/DreamTeam/2`)).toEqual({
       Players: GOLDEN_DREAM_PLAYERS, ComputedAt: LATER.getTime(), Auto: true,
     });

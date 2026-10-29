@@ -99,6 +99,19 @@ function score(v: unknown): number {
   return /^[+-]?\d+$/.test(s) ? Number(s) : 0;
 }
 
+/** Both final scores of a game node as ints: `team1score`/`team2score`
+ *  (int or String) with the legacy `team1Score`/`team2Score` spelling as the
+ *  fallback — the ONE reader mapGameToStats (teamConceded) and the
+ *  PlayerWeekStats Games lists share. */
+export function gameScores(
+  gameNode: Record<string, unknown>,
+): { team1: number; team2: number } {
+  return {
+    team1: score(gameNode['team1score'] ?? gameNode['team1Score']),
+    team2: score(gameNode['team2score'] ?? gameNode['team2Score']),
+  };
+}
+
 /** Walks every activity leaf, tolerating RTDB array coercion at BOTH levels
  *  (activity -> buckets, bucket -> leaves) and null padding at either. */
 function forEachLeaf(
@@ -150,17 +163,18 @@ export function mapGameToStats(
   args: { teamName: string; attendance?: Record<string, boolean> | null },
 ): Record<string, PlayerGameStats> {
   const { teamName, attendance } = args;
+  const scores = gameScores(gameNode);
   let ownActivity: unknown;
   let conceded: number;
   let side: 1 | 2;
   if (gameNode['team1'] != null && teamName === String(gameNode['team1'])) {
     ownActivity = gameNode['team1activity'];
-    conceded = score(gameNode['team2score'] ?? gameNode['team2Score']);
+    conceded = scores.team2;
     side = 1;
   } else if (gameNode['team2'] != null &&
     teamName === String(gameNode['team2'])) {
     ownActivity = gameNode['team2activity'];
-    conceded = score(gameNode['team1score'] ?? gameNode['team1Score']);
+    conceded = scores.team1;
     side = 2;
   } else {
     throw new Error(

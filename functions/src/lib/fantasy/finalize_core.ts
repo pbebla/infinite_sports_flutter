@@ -38,8 +38,13 @@
 //   (gross countedTenths sum minus transferCost*10) — the single source the
 //   Overall board resums from on later reruns.
 //
-// - PlayerTotals/<name> = { points:int, ownershipPct:int } — points = season
-//   sum of bonus-inclusive week points across finalized weeks; ownershipPct =
+// - PlayerTotals/<name> = { points:int, ownershipPct:int, form:int, ppg:int,
+//   games:int } — points = season
+//   sum of bonus-inclusive week points across finalized weeks; form (tenths)
+//   = round(10 x the mean Pts of the 3 highest-numbered NON-voided weeks, a
+//   week the player is missing from counting 0; fewer weeks = mean of those,
+//   none = 0); games = sum of GP (PlayerWeekStats) over non-voided weeks;
+//   ppg (tenths) = games == 0 ? 0 : round(10 x points / games); ownershipPct =
 //   round(100 * managers holding the player / managers scored) measured over
 //   the LATEST finalized gameweek's squads — ownership is a "right now"
 //   figure, so a score-edit rerun of an OLDER week must not roll it back to
@@ -61,6 +66,18 @@
 // - PlayerWeeks/<gw>/<name> = int — bonus-inclusive week points for every
 //   market player (functions-internal: feeds PlayerTotals resums and the
 //   Monday repricing job; not a client contract).
+//
+// - PlayerWeekStats/<gw>/<name> = PlayerWeekStatsEntry (public read; spec
+//   2026-10-29 §3.1) — the per-player weekly record the fan profile reads:
+//   { Pts (== PlayerWeeks), Played, GP, Games:[{Vs,For,Against,Forfeit?}],
+//   Lines:{<ScoreKey|'bonus'>:{N,P}} }. Lines sum the week's per-game
+//   ScoreLines by key (N = counts, P = points; the 3/2/1 bonus is its own
+//   'bonus' line, N = P = bonus points) and always add up to Pts; zero lines
+//   and an empty Lines are omitted. GP = games played (Lines.plays.N). Games
+//   are this week's games of the player's team (MarketPlayer.teamName), seen
+//   from that team (For/Against), Forfeit 'won'/'lost' on a forfeited game.
+//   A VOIDED week writes Pts 0 + Voided:true and NO Lines (Played/GP/Games
+//   keep the real court record). Players with no game: Games [], Pts 0.
 //
 // Transfer costs: Phase E records transfer usage; until it lands the callers
 // pass no costs (zero for everyone). transferCostPointsByUid is the seam.
@@ -89,16 +106,46 @@
 import { awardBonus, bpsScore } from './bps';
 import { FantasyConfig, FantasyPosition } from './fantasy_config';
 import { PlayerGameStats } from './player_game_stats';
-import { scorePlayerWeek } from './scoring';
+import { scorePlayerWeek, WeekScore } from './scoring';
 import { squadFromMap, squadToMap } from './squad';
 import { PlayerWeek, scoreSquadWeek, totalTenths } from './squad_week';
-import { mapGameToStats } from './stats_mapper';
+import { gameScores, mapGameToStats, parseForfeitedBy } from './stats_mapper';
 
 /** One market entry (Fantasy/<sport>/<season>/Players/<name>) as the
  *  finalizer needs it. */
 export interface MarketPlayer {
   position: FantasyPosition;
   eligible: boolean;
+  /** Players/<name>/teamName — which team's games a player's weekly
+   *  `Games` list (PlayerWeekStats). Absent = the list stays empty. */
+  teamName?: string;
+}
+
+/** One game of a player's week, from his team's side. */
+export interface PlayerWeekGame {
+  Vs: string;
+  For: number;
+  Against: number;
+  Forfeit?: 'won' | 'lost';
+}
+
+/** PlayerWeekStats/<gw>/<name> — see the header. */
+export interface PlayerWeekStatsEntry {
+  Pts: number;
+  Played: boolean;
+  GP: number;
+  Games: PlayerWeekGame[];
+  Lines?: Record<string, { N: number; P: number }>;
+  Voided?: true;
+}
+
+/** PlayerTotals/<name> — see the header. */
+export interface PlayerTotalsEntry {
+  points: number;
+  ownershipPct: number;
+  form: number;
+  ppg: number;
+  games: number;
 }
 
 /** One real game of the gameweek's match day, attendance already composed
@@ -133,6 +180,10 @@ export interface FinalizeInput {
   /** Existing PlayerWeeks node content: week -> name -> points. Week [gw]
    *  is replaced by this run. */
   playerWeeksByWeek: Record<number, Record<string, number>>;
+  /** Existing PlayerWeekStats GP: week -> name -> games played. Week [gw] is
+   *  replaced by this run; voided weeks never count toward PlayerTotals
+   *  games. A week/player with no record counts 0. */
+  playedGamesByWeek: Record<number, Record<string, number>>;
   /** Existing History TotalTenths: week -> uid -> net tenths. Week [gw] is
    *  replaced by this run. */
   historyTenthsByWeek: Record<number, Record<string, number>>;
@@ -165,8 +216,10 @@ export interface FinalizeOutput {
   gameweekBoard: Record<string, { points: number; rank: number }>;
   /** Leaderboards/Overall */
   overallBoard: Record<string, { points: number; rank: number; movement?: number }>;
+  /** PlayerWeekStats/<gw> (a voided week: Pts 0, Voided, no Lines) */
+  playerWeekStats: Record<string, PlayerWeekStatsEntry>;
   /** PlayerTotals */
-  playerTotals: Record<string, { points: number; ownershipPct: number }>;
+  playerTotals: Record<string, PlayerTotalsEntry>;
   /** DreamTeam/<gw>; null = not ours to write (admin-edited, or a voided
    *  week — see removeAutoDreamTeam). */
   dreamTeam: DreamTeamNode | null;
@@ -234,6 +287,58 @@ export function composeOverallBoard(
     };
   }
   return out;
+}
+
+/** Rounded tenths, never -0 (a tiny negative ppg must not become "-0"). */
+function roundTenths(value: number): number {
+  return Math.round(value) + 0;
+}
+
+/** One market player's PlayerWeekStats entry: the week's ScoreLines summed by
+ *  key (+ the bonus line), the games his team played from his team's side,
+ *  and GP. A voided week keeps the court record but zeroes Pts and drops
+ *  Lines. Never contains an undefined value (RTDB rejects those). */
+function playerWeekEntry(
+  p: MarketPlayer, wk: WeekScore, bonus: number, games: FinalizeGame[],
+  voided: boolean,
+): PlayerWeekStatsEntry {
+  const lines: Record<string, { N: number; P: number }> = {};
+  for (const game of wk.games) {
+    for (const l of game.breakdown) {
+      const line = (lines[l.key] ??= { N: 0, P: 0 });
+      line.N += l.count;
+      line.P += l.points;
+    }
+  }
+  if (bonus !== 0) lines['bonus'] = { N: bonus, P: bonus };
+
+  const list: PlayerWeekGame[] = [];
+  if (p.teamName !== undefined) {
+    for (const g of games) {
+      const { team1, team2 } = g.node;
+      const side = team1 === p.teamName ? 1 : team2 === p.teamName ? 2 : null;
+      if (side === null) continue;
+      const scores = gameScores(g.node);
+      const forfeitedBy = parseForfeitedBy(g.node['forfeitedBy']);
+      list.push({
+        Vs: String(side === 1 ? team2 : team1),
+        For: side === 1 ? scores.team1 : scores.team2,
+        Against: side === 1 ? scores.team2 : scores.team1,
+        ...(forfeitedBy === null
+          ? {}
+          : { Forfeit: forfeitedBy === side ? 'lost' as const : 'won' as const }),
+      });
+    }
+  }
+
+  return {
+    Pts: voided ? 0 : wk.total + bonus,
+    Played: wk.played,
+    GP: lines['plays']?.N ?? 0,
+    Games: list,
+    ...(!voided && Object.keys(lines).length > 0 ? { Lines: lines } : {}),
+    ...(voided ? { Voided: true as const } : {}),
+  };
 }
 
 /** The week's Dream Team: top bonus-inclusive scorers among ELIGIBLE market
@@ -309,6 +414,7 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
   // ── Stage 3: player weeks (base + bonus) for every market player ──
   const week: Record<string, PlayerWeek> = {};
   const playerWeeks: Record<string, number> = {};
+  const playerWeekStats: Record<string, PlayerWeekStatsEntry> = {};
   for (const [name, p] of Object.entries(input.players)) {
     const wk = scorePlayerWeek(
       statsByGame.filter((stats) => name in stats).map((stats) => stats[name]),
@@ -318,6 +424,7 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
     const bonus = bonusByGame.reduce((a, b) => a + (b[name] ?? 0), 0);
     week[name] = { points: wk.total + bonus, played: wk.played };
     playerWeeks[name] = wk.total + bonus;
+    playerWeekStats[name] = playerWeekEntry(p, wk, bonus, input.games, voided);
   }
 
   // ── Stage 4: squad weeks -> History entries + weekly board ──
@@ -413,18 +520,41 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
       }
     }
   }
-  const playerTotals: Record<string, { points: number; ownershipPct: number }> = {};
+  // Form window: the 3 highest-numbered NON-voided weeks (numeric sort —
+  // week 10 beats week 9) among every stored week plus this one.
+  const formWeeks = Object.keys(weeksAll).map(Number)
+    .filter((w) => Number.isFinite(w) && !voidedWeeks.has(w))
+    .sort((a, b) => b - a)
+    .slice(0, 3);
+  const playedGamesAll: Record<number, Record<string, number>> = {
+    ...input.playedGamesByWeek,
+    [gw]: Object.fromEntries(
+      Object.entries(playerWeekStats).map(([name, e]) => [name, e.GP])),
+  };
+  const playerTotals: Record<string, PlayerTotalsEntry> = {};
   for (const name of Object.keys(input.players)) {
     let points = 0;
     for (const [w, byName] of Object.entries(weeksAll)) {
       if (voidedWeeks.has(Number(w))) continue;
       points += byName[name] ?? 0;
     }
+    let games = 0;
+    for (const [w, byName] of Object.entries(playedGamesAll)) {
+      if (voidedWeeks.has(Number(w))) continue;
+      games += byName[name] ?? 0;
+    }
+    const formSum = formWeeks.reduce(
+      (a, w) => a + (weeksAll[w]?.[name] ?? 0), 0);
     playerTotals[name] = {
       points,
       ownershipPct: managers === 0
         ? 0
         : Math.round((100 * (ownHolders[name] ?? 0)) / managers),
+      form: formWeeks.length === 0
+        ? 0
+        : roundTenths((10 * formSum) / formWeeks.length),
+      ppg: games === 0 ? 0 : roundTenths((10 * points) / games),
+      games,
     };
   }
 
@@ -436,6 +566,7 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
 
   return {
     playerWeeks,
+    playerWeekStats,
     historyByUid,
     gameweekBoard,
     overallBoard,

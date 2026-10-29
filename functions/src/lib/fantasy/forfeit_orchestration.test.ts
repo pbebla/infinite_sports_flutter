@@ -167,7 +167,7 @@ describe('forfeit finalize (spec §8a) — mark and undo both re-settle', () => 
       { name: 'Fred', position: 'ATT', points: 7 },
     ]);
     expect((await db.read(`${ROOT}/PlayerTotals`) as Json)['Leo'])
-      .toEqual({ points: 10, ownershipPct: 100 });
+      .toEqual({ points: 10, ownershipPct: 100, form: 100, ppg: 100, games: 1 });
 
     // Re-marking the forfeit settles straight back to the golden numbers.
     markForfeit(db);
@@ -177,6 +177,6 @@ describe('forfeit finalize (spec §8a) — mark and undo both re-settle', () => 
     expect(again['split']['TotalTenths']).toBe(80);
     expect(again['noband']['TotalTenths']).toBe(315);
     expect((await db.read(`${ROOT}/PlayerTotals`) as Json)['Leo'])
-      .toEqual({ points: 1, ownershipPct: 100 });
+      .toEqual({ points: 1, ownershipPct: 100, form: 10, ppg: 10, games: 1 });
   });
 });

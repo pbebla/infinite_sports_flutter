@@ -2,7 +2,7 @@
 // second-yellow counting, pen-save double-bump, attendance defaults.
 import { describe, expect, it } from 'vitest';
 import { playedGame } from './player_game_stats';
-import { mapGameToStats, parseForfeitedBy } from './stats_mapper';
+import { gameScores, mapGameToStats, parseForfeitedBy } from './stats_mapper';
 
 // Mirrors a REAL `Futsal/<season>/Date/<MMDDYYYY>/<i>` node:
 // - minute-keyed activity map with array buckets (team1activity),
@@ -254,5 +254,21 @@ describe('stats_mapper — forfeits (spec §8a)', () => {
     const sharks = mapGameToStats(node, { teamName: 'Sharks' });
     expect(sharks['Alex'].forfeit).toBe('none');
     expect(sharks['Alex'].goals).toBe(2);
+  });
+});
+
+describe('gameScores (the shared score reader)', () => {
+  it('reads int and String scores, canonical spelling first', () => {
+    expect(gameScores({ team1score: '3', team2score: 1 }))
+      .toEqual({ team1: 3, team2: 1 });
+    expect(gameScores({ team1score: 2, team1Score: 9, team2score: 0 }))
+      .toEqual({ team1: 2, team2: 0 });
+  });
+  it('falls back to the legacy team1Score/team2Score spelling', () => {
+    expect(gameScores({ team1Score: 4, team2Score: '2' }))
+      .toEqual({ team1: 4, team2: 2 });
+  });
+  it('junk or absent scores read 0 (Dart int.tryParse ?? 0)', () => {
+    expect(gameScores({ team1score: '2x' })).toEqual({ team1: 0, team2: 0 });
   });
 });

@@ -42,7 +42,10 @@ function fixtureGames(): FinalizeGame[] {
 function fixturePlayers(): Record<string, MarketPlayer> {
   const out: Record<string, MarketPlayer> = {};
   for (const p of fixture['players'] as Json[]) {
-    out[p['id']] = { position: parsePosition(p['position']), eligible: true };
+    out[p['id']] = {
+      position: parsePosition(p['position']), eligible: true,
+      teamName: p['team'],
+    };
   }
   return out;
 }
@@ -66,6 +69,7 @@ function baseInput(): FinalizeInput {
     // churn used3/free2 -> (3-2)*4 = 4 points.
     transferCostPointsByUid: { alpha: 0, boost: 0, churn: 4 },
     playerWeeksByWeek: {},
+    playedGamesByWeek: {},
     historyTenthsByWeek: {},
     dreamTeamAuto: null,
     nowMs: 1_750_000_000_000,
@@ -258,13 +262,29 @@ describe('computeGameweekFinalize over the golden gameweek', () => {
     // Holdings (hand count over the three squads): Eva/Ezra/Wren in all 3
     // (100), Dana/Will/Bea/Ben in 2 (round(200/3)=67), Eli/Alex/Sam/Bo in 1
     // (round(100/3)=33), Wes in none (0).
-    expect(out.playerTotals['Eva']).toEqual({ points: -3, ownershipPct: 100 });
-    expect(out.playerTotals['Ezra']).toEqual({ points: 0, ownershipPct: 100 });
-    expect(out.playerTotals['Wren']).toEqual({ points: 3, ownershipPct: 100 });
-    expect(out.playerTotals['Dana']).toEqual({ points: 13, ownershipPct: 67 });
-    expect(out.playerTotals['Ben']).toEqual({ points: 9, ownershipPct: 67 });
-    expect(out.playerTotals['Bo']).toEqual({ points: 12, ownershipPct: 33 });
-    expect(out.playerTotals['Wes']).toEqual({ points: 1, ownershipPct: 0 });
+    // One finalized week: form (tenths) = 10 x that week's points; every
+    // player but absent Ezra played one game, so ppg (tenths) = form.
+    expect(out.playerTotals['Eva']).toEqual({
+      points: -3, ownershipPct: 100, form: -30, ppg: -30, games: 1,
+    });
+    expect(out.playerTotals['Ezra']).toEqual({
+      points: 0, ownershipPct: 100, form: 0, ppg: 0, games: 0,
+    });
+    expect(out.playerTotals['Wren']).toEqual({
+      points: 3, ownershipPct: 100, form: 30, ppg: 30, games: 1,
+    });
+    expect(out.playerTotals['Dana']).toEqual({
+      points: 13, ownershipPct: 67, form: 130, ppg: 130, games: 1,
+    });
+    expect(out.playerTotals['Ben']).toEqual({
+      points: 9, ownershipPct: 67, form: 90, ppg: 90, games: 1,
+    });
+    expect(out.playerTotals['Bo']).toEqual({
+      points: 12, ownershipPct: 33, form: 120, ppg: 120, games: 1,
+    });
+    expect(out.playerTotals['Wes']).toEqual({
+      points: 1, ownershipPct: 0, form: 10, ppg: 10, games: 1,
+    });
     expect(Object.keys(out.playerTotals).length).toBe(12);
   });
 
@@ -371,6 +391,7 @@ describe('computeGameweekFinalize edges', () => {
       players: { Ann: { position: 'ATT', eligible: true } },
       squadsByUid: {},
       playerWeeksByWeek: {},
+      playedGamesByWeek: {},
       historyTenthsByWeek: {},
       dreamTeamAuto: null,
       nowMs: 1,
@@ -416,9 +437,15 @@ describe('computeGameweekFinalize edges', () => {
       churn: { points: 0, rank: 1 },
     });
     expect(out.playerWeeks).toEqual(WEEK_POINTS);
-    expect(out.playerTotals['Bea']).toEqual({ points: 0, ownershipPct: 67 });
-    expect(out.playerTotals['Bo']).toEqual({ points: 0, ownershipPct: 33 });
-    expect(out.playerTotals['Eva']).toEqual({ points: 0, ownershipPct: 100 });
+    // A voided week is excluded from form/games too: nothing non-voided
+    // is left, so form 0, games 0, ppg 0.
+    const none = { form: 0, ppg: 0, games: 0 };
+    expect(out.playerTotals['Bea'])
+      .toEqual({ points: 0, ownershipPct: 67, ...none });
+    expect(out.playerTotals['Bo'])
+      .toEqual({ points: 0, ownershipPct: 33, ...none });
+    expect(out.playerTotals['Eva'])
+      .toEqual({ points: 0, ownershipPct: 100, ...none });
     expect(out.dreamTeam).toBeNull();
     expect(out.removeAutoDreamTeam).toBe(false); // nothing of ours existed
   });
@@ -485,10 +512,14 @@ describe('computeGameweekFinalize edges', () => {
     input.ownershipSquadsByUid = { ...latest, junk: { picks: 'nope' } };
     const out = computeGameweekFinalize(input);
     const plain = computeGameweekFinalize(baseInput());
-    expect(out.playerTotals['Bea']).toEqual({ points: 15, ownershipPct: 50 });
-    expect(out.playerTotals['Bo']).toEqual({ points: 12, ownershipPct: 0 });
-    expect(out.playerTotals['Sam']).toEqual({ points: 9, ownershipPct: 50 });
-    expect(out.playerTotals['Eva']).toEqual({ points: -3, ownershipPct: 100 });
+    const pick = (n: string) => {
+      const { points, ownershipPct } = out.playerTotals[n];
+      return { points, ownershipPct };
+    };
+    expect(pick('Bea')).toEqual({ points: 15, ownershipPct: 50 });
+    expect(pick('Bo')).toEqual({ points: 12, ownershipPct: 0 });
+    expect(pick('Sam')).toEqual({ points: 9, ownershipPct: 50 });
+    expect(pick('Eva')).toEqual({ points: -3, ownershipPct: 100 });
     // Everything except ownership is identical to a plain run.
     expect(out.historyByUid).toEqual(plain.historyByUid);
     expect(out.dreamTeam).toEqual(plain.dreamTeam);
@@ -502,7 +533,326 @@ describe('computeGameweekFinalize edges', () => {
     expect(out.gameweekBoard).toEqual({});
     expect(out.overallBoard).toEqual({});
     expect(out.playerWeeks).toEqual(WEEK_POINTS);
-    expect(out.playerTotals['Bea'])
-      .toEqual({ points: 15, ownershipPct: 0 });
+    expect(out.playerTotals['Bea']).toEqual(
+      { points: 15, ownershipPct: 0, form: 150, ppg: 150, games: 1 });
+  });
+});
+
+// ── Round 3 (spec 2026-10-29 §3.1/§3.3): per-player weekly records + the
+// richer PlayerTotals. Expected values below are hand math. ──
+
+/** One-game world: A 1-0 B and Ann (A's ATT) the lone scorer. Hand math:
+ *  plays 1 + goal 4 + clean sheet 2 + bonus 3 (she is the only one with
+ *  BPS) = 10 points, 1 game played. */
+function annWeek(overrides: Partial<FinalizeInput> = {}): FinalizeInput {
+  return {
+    cfg,
+    gw: 5,
+    games: [{
+      node: {
+        team1: 'A', team2: 'B', team1score: 1, team2score: 0, status: 2,
+        team1activity: { "1'": [{ Goal: 'Ann' }] },
+      },
+      attendance: null,
+    }],
+    players: { Ann: { position: 'ATT', eligible: true, teamName: 'A' } },
+    squadsByUid: {},
+    playerWeeksByWeek: {},
+    playedGamesByWeek: {},
+    historyTenthsByWeek: {},
+    dreamTeamAuto: null,
+    nowMs: 1,
+    ...overrides,
+  };
+}
+
+describe('PlayerWeekStats (spec §3.1)', () => {
+  const out = computeGameweekFinalize(baseInput());
+
+  it('PlayerWeekStats lines sum to Pts for every player in the golden week', () => {
+    expect(Object.keys(out.playerWeekStats).sort())
+      .toEqual(Object.keys(WEEK_POINTS).sort());
+    for (const [name, entry] of Object.entries(out.playerWeekStats)) {
+      const sum = Object.values(entry.Lines ?? {}).reduce((a, l) => a + l.P, 0);
+      expect(sum, `${name} lines`).toBe(entry.Pts);
+      expect(entry.Pts, `${name} Pts`).toBe(out.playerWeeks[name]);
+    }
+  });
+
+  it('hand-computed Lines/GP/Games for golden players', () => {
+    // Dana (DEF, Sharks 3-1 Wolves): plays 1 + goal 6 + assist 4 (dpl 1 < 5,
+    // conceded 1: no CS, no deduction) + bonus 2 = 13.
+    expect(out.playerWeekStats['Dana']).toEqual({
+      Pts: 13, Played: true, GP: 1,
+      Games: [{ Vs: 'Wolves', For: 3, Against: 1 }],
+      Lines: {
+        plays: { N: 1, P: 1 }, goals: { N: 1, P: 6 },
+        assists: { N: 1, P: 4 }, bonus: { N: 2, P: 2 },
+      },
+    });
+    // Bea (DEF, Bulls 2-0 Eagles; the "2" score is a String in the node):
+    // plays 1 + assist 4 + clean sheet 5 + dpl(5) 2 + bonus 3 = 15.
+    expect(out.playerWeekStats['Bea']).toEqual({
+      Pts: 15, Played: true, GP: 1,
+      Games: [{ Vs: 'Eagles', For: 2, Against: 0 }],
+      Lines: {
+        plays: { N: 1, P: 1 }, assists: { N: 1, P: 4 },
+        cleanSheet: { N: 1, P: 5 }, dpl: { N: 5, P: 2 },
+        bonus: { N: 3, P: 3 },
+      },
+    });
+    // Sam (GK): plays 1 + saves 4 (3 Save + the PenSaved pairs) -> 2 +
+    // penalty save 5 + bonus 1 = 9.
+    expect(out.playerWeekStats['Sam'].Lines).toEqual({
+      plays: { N: 1, P: 1 }, saves: { N: 4, P: 2 },
+      penSaved: { N: 1, P: 5 }, bonus: { N: 1, P: 1 },
+    });
+    // Eva (DEF, Eagles 0-2 Bulls): plays 1 - conceded 2 (2 -> -1) - yellow 1
+    // - own goal 2 = -3; no bonus line (zero lines are omitted).
+    expect(out.playerWeekStats['Eva'].Lines).toEqual({
+      plays: { N: 1, P: 1 }, conceded: { N: 2, P: -1 },
+      yellow: { N: 1, P: -1 }, ownGoals: { N: 1, P: -2 },
+    });
+    // Will (DEF, Wolves): plays 1, conceded 3 -> -1, yellow -1, red -3 = -4.
+    expect(out.playerWeekStats['Will'].Lines).toEqual({
+      plays: { N: 1, P: 1 }, conceded: { N: 3, P: -1 },
+      yellow: { N: 1, P: -1 }, red: { N: 1, P: -3 },
+    });
+    // Wren (ATT, Wolves): plays 1 + goal 4 + pen miss -2 = 3.
+    expect(out.playerWeekStats['Wren'].Lines).toEqual({
+      plays: { N: 1, P: 1 }, goals: { N: 1, P: 4 },
+      penMissed: { N: 1, P: -2 },
+    });
+  });
+
+  it('absent player (team played, he did not): Played false, GP 0, no Lines', () => {
+    // Ezra is marked absent on the Eagles' game: 0 points, but the team's
+    // game still appears in his Games.
+    expect(out.playerWeekStats['Ezra']).toStrictEqual({
+      Pts: 0, Played: false, GP: 0,
+      Games: [{ Vs: 'Bulls', For: 0, Against: 2 }],
+    });
+  });
+
+  it('PlayerWeekStats Games lists opponent and score from the player team view', () => {
+    // Team A 4-2 B. A's players see {Vs:B, For:4, Against:2}; B's players see
+    // it from their side.
+    const out2 = computeGameweekFinalize(annWeek({
+      games: [{
+        node: { team1: 'A', team2: 'B', team1score: 4, team2score: 2, status: 2 },
+        attendance: { A: { Ann: true }, B: { Bob: true } },
+      }],
+      players: {
+        Ann: { position: 'ATT', eligible: true, teamName: 'A' },
+        Bob: { position: 'DEF', eligible: true, teamName: 'B' },
+      },
+    }));
+    expect(out2.playerWeekStats['Ann'].Games[0])
+      .toStrictEqual({ Vs: 'B', For: 4, Against: 2 });
+    expect(out2.playerWeekStats['Bob'].Games[0])
+      .toStrictEqual({ Vs: 'A', For: 2, Against: 4 });
+  });
+
+  it('Games read String and legacy team1Score/team2Score scores too', () => {
+    const out2 = computeGameweekFinalize(annWeek({
+      games: [{
+        node: { team1: 'A', team2: 'B', team1Score: '3', team2Score: 1, status: 2 },
+        attendance: { A: { Ann: true }, B: {} },
+      }],
+    }));
+    expect(out2.playerWeekStats['Ann'].Games)
+      .toStrictEqual([{ Vs: 'B', For: 3, Against: 1 }]);
+  });
+
+  it('two games in the week: both listed in order, GP and lines sum', () => {
+    const second = {
+      node: {
+        team1: 'C', team2: 'A', team1score: 0, team2score: 2, status: 2,
+        team2activity: { "3'": [{ Goal: 'Ann' }, { Goal: 'Ann' }] },
+      },
+      attendance: null,
+    };
+    const input = annWeek();
+    input.games = [...input.games, second];
+    const e = computeGameweekFinalize(input).playerWeekStats['Ann'];
+    expect(e.Games).toStrictEqual([
+      { Vs: 'B', For: 1, Against: 0 },
+      { Vs: 'C', For: 2, Against: 0 },
+    ]);
+    expect(e.GP).toBe(2);
+    expect(e.Lines!['plays']).toStrictEqual({ N: 2, P: 2 });
+    expect(e.Lines!['goals']).toStrictEqual({ N: 3, P: 12 });
+    expect(e.Lines!['cleanSheet']).toStrictEqual({ N: 2, P: 4 });
+    expect(Object.values(e.Lines!).reduce((a, l) => a + l.P, 0)).toBe(e.Pts);
+  });
+
+  it('forfeit: the team that showed up gets Plays only; the forfeiter did not play', () => {
+    const o = computeGameweekFinalize(annWeek({
+      games: [{
+        node: {
+          team1: 'A', team2: 'B', team1score: 0, team2score: 0, status: 2,
+          forfeitedBy: 2,
+        },
+        attendance: { A: { Ann: true }, B: { Bob: true } },
+      }],
+      players: {
+        Ann: { position: 'ATT', eligible: true, teamName: 'A' },
+        Bob: { position: 'DEF', eligible: true, teamName: 'B' },
+      },
+    }));
+    expect(o.playerWeekStats['Ann']).toStrictEqual({
+      Pts: 1, Played: true, GP: 1,
+      Games: [{ Vs: 'B', For: 0, Against: 0, Forfeit: 'won' }],
+      Lines: { plays: { N: 1, P: 1 } },
+    });
+    expect(o.playerWeekStats['Bob']).toStrictEqual({
+      Pts: 0, Played: false, GP: 0,
+      Games: [{ Vs: 'A', For: 0, Against: 0, Forfeit: 'lost' }],
+    });
+  });
+
+  it('voided week writes Pts 0, Voided true, no Lines', () => {
+    const input = baseInput();
+    input.voidedWeeks = [1];
+    const v = computeGameweekFinalize(input);
+    expect(Object.keys(v.playerWeekStats).length).toBe(12);
+    for (const [name, e] of Object.entries(v.playerWeekStats)) {
+      expect(e.Pts, name).toBe(0);
+      expect(e.Voided, name).toBe(true);
+      expect('Lines' in e, `${name} has no Lines`).toBe(false);
+    }
+    // What happened on court is still recorded (Played + Games), exactly
+    // like the History Breakdown of a voided week; PlayerWeeks keeps real
+    // points, as before.
+    expect(v.playerWeekStats['Dana'].Played).toBe(true);
+    expect(v.playerWeekStats['Dana'].Games)
+      .toStrictEqual([{ Vs: 'Wolves', For: 3, Against: 1 }]);
+    expect(v.playerWeekStats['Ezra'].Played).toBe(false);
+    expect(v.playerWeeks).toEqual(WEEK_POINTS);
+    // A normal week never carries the marker.
+    expect('Voided' in out.playerWeekStats['Dana']).toBe(false);
+  });
+
+  it('player with no game this week: {Pts:0, Played:false, GP:0, Games:[]}', () => {
+    const input = baseInput();
+    input.players['Zed'] = { position: 'ATT', eligible: true, teamName: 'Nobody' };
+    input.players['Nox'] = { position: 'DEF', eligible: true }; // no teamName
+    const o = computeGameweekFinalize(input);
+    expect(o.playerWeekStats['Zed'])
+      .toStrictEqual({ Pts: 0, Played: false, GP: 0, Games: [] });
+    expect(o.playerWeekStats['Nox'])
+      .toStrictEqual({ Pts: 0, Played: false, GP: 0, Games: [] });
+  });
+
+  it('guests outside the market get no entry', () => {
+    const o = computeGameweekFinalize(annWeek({ players: {} }));
+    expect(o.playerWeekStats).toEqual({});
+  });
+
+  it('rerun is identical', () => {
+    const input = annWeek({
+      playerWeeksByWeek: { 1: { Ann: 3 }, 2: { Ann: 5 } },
+      playedGamesByWeek: { 1: { Ann: 1 }, 2: { Ann: 2 } },
+    });
+    const a = computeGameweekFinalize(input);
+    const b = computeGameweekFinalize(input); // the SAME input object again
+    expect(b).toEqual(a);
+    expect(JSON.stringify(b)).toBe(JSON.stringify(a));
+    expect(computeGameweekFinalize(baseInput()).playerWeekStats)
+      .toEqual(out.playerWeekStats);
+  });
+});
+
+describe('PlayerTotals form / ppg / games (spec §3.3)', () => {
+  it('Ann alone scores 10 over 1 game (the scenario every case below uses)', () => {
+    const o = computeGameweekFinalize(annWeek());
+    expect(o.playerWeeks).toEqual({ Ann: 10 });
+    expect(o.playerWeekStats['Ann'].GP).toBe(1);
+  });
+
+  it('form averages the 3 latest non-voided weeks', () => {
+    // Weeks 1..5 Pts [2,4,6,8,10], week 4 voided: the 3 highest NON-voided
+    // are 5, 3, 2 -> (10 + 6 + 4) / 3 = 6.667 -> 67 tenths.
+    const o = computeGameweekFinalize(annWeek({
+      playerWeeksByWeek: {
+        1: { Ann: 2 }, 2: { Ann: 4 }, 3: { Ann: 6 }, 4: { Ann: 8 },
+      },
+      voidedWeeks: [4],
+    }));
+    expect(o.playerTotals['Ann'].form).toBe(67);
+  });
+
+  it('form: "highest-numbered" is numeric (week 10 beats week 9, not lexical)', () => {
+    // gw 11 (Ann 10) + week 10 (4) + week 9 (2) -> 16 / 3 = 5.33 -> 53;
+    // week 2 (100) must NOT count.
+    const o = computeGameweekFinalize(annWeek({
+      gw: 11,
+      playerWeeksByWeek: { 2: { Ann: 100 }, 9: { Ann: 2 }, 10: { Ann: 4 } },
+    }));
+    expect(o.playerTotals['Ann'].form).toBe(53);
+  });
+
+  it('form: fewer than 3 weeks averages just those; a week without the player counts 0', () => {
+    // gw 2 + week 1 (5): (10 + 5) / 2 = 7.5 -> 75.
+    const two = computeGameweekFinalize(annWeek({
+      gw: 2, playerWeeksByWeek: { 1: { Ann: 5 } },
+    }));
+    expect(two.playerTotals['Ann'].form).toBe(75);
+    // gw 4, week 3 exists but without Ann (0), week 2 (6): (10 + 0 + 6) / 3
+    // = 5.33 -> 53; week 1 (9) is outside the window.
+    const miss = computeGameweekFinalize(annWeek({
+      gw: 4, playerWeeksByWeek: { 1: { Ann: 9 }, 2: { Ann: 6 }, 3: { Bob: 5 } },
+    }));
+    expect(miss.playerTotals['Ann'].form).toBe(53);
+  });
+
+  it('form: no non-voided week at all -> 0', () => {
+    const o = computeGameweekFinalize(annWeek({ gw: 1, voidedWeeks: [1] }));
+    expect(o.playerTotals['Ann']).toEqual(
+      { points: 0, ownershipPct: 0, form: 0, ppg: 0, games: 0 });
+  });
+
+  it('ppg is 0 when no games', () => {
+    // Zed's team never plays: no game this week, and the stored week has
+    // points but no GP record -> games 0, ppg 0 (never NaN / Infinity).
+    // Form: weeks 5 (0) and 1 (5) -> 2.5 -> 25 tenths.
+    const o = computeGameweekFinalize(annWeek({
+      players: {
+        Zed: { position: 'ATT', eligible: true, teamName: 'Nobody' },
+      },
+      playerWeeksByWeek: { 1: { Zed: 5 } },
+    }));
+    expect(o.playerTotals['Zed'])
+      .toEqual({ points: 5, ownershipPct: 0, form: 25, ppg: 0, games: 0 });
+  });
+
+  it('ppg = round(10 × points / games)', () => {
+    // Points 6 + 7 + 10 = 23 over games 2 + 1 + 1 = 4 -> 5.75 -> 58 tenths.
+    const o = computeGameweekFinalize(annWeek({
+      playerWeeksByWeek: { 1: { Ann: 6 }, 2: { Ann: 7 } },
+      playedGamesByWeek: { 1: { Ann: 2 }, 2: { Ann: 1 } },
+    }));
+    expect(o.playerTotals['Ann'].points).toBe(23);
+    expect(o.playerTotals['Ann'].games).toBe(4);
+    expect(o.playerTotals['Ann'].ppg).toBe(58);
+  });
+
+  it('games and ppg skip voided weeks like points do', () => {
+    // Week 3 (50 points, 5 games) is voided: points 6 + 10 = 16, games
+    // 2 + 1 = 3 -> 5.33 -> 53. Form: weeks 5 (10) and 1 (6) -> 8 -> 80.
+    const o = computeGameweekFinalize(annWeek({
+      playerWeeksByWeek: { 1: { Ann: 6 }, 3: { Ann: 50 } },
+      playedGamesByWeek: { 1: { Ann: 2 }, 3: { Ann: 5 } },
+      voidedWeeks: [3],
+    }));
+    expect(o.playerTotals['Ann'])
+      .toEqual({ points: 16, ownershipPct: 0, form: 80, ppg: 53, games: 3 });
+  });
+
+  it('this week replaces any stale stored GP for the same gameweek', () => {
+    const o = computeGameweekFinalize(annWeek({
+      playedGamesByWeek: { 5: { Ann: 9 } },
+    }));
+    expect(o.playerTotals['Ann'].games).toBe(1);
   });
 });
