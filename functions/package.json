@@ -8,7 +8,8 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "rehearse:s15": "tsc -p tools/tsconfig.json && node tools/rehearsal_out/build/tools/rehearse_s15.js"
+    "rehearse:s15": "tsc -p tools/tsconfig.json && node tools/rehearsal_out/build/tools/rehearse_s15.js",
+    "fill:s15": "tsc -p tools/tsconfig.json && node tools/rehearsal_out/build/tools/fill_test_season.js"
   },
   "dependencies": {
     "firebase-admin": "^13.0.0",

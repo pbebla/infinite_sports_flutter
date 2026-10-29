@@ -5,5 +5,5 @@
     "outDir": "rehearsal_out/build",
     "sourceMap": false
   },
-  "include": ["rehearse_s15.ts"]
+  "include": ["rehearse_s15.ts", "fill_test_season.ts"]
 }

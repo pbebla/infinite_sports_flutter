@@ -1,0 +1,247 @@
+// Pure logic of the Season 15 test-season fill tool (spec 2026-10-29 §9):
+// the write plan, its path guard, the paused-engine guard and the
+// deterministic fake managers. The CLI (fill_test_season.ts) and the replay
+// (rehearse_s15.ts) are exercised by running them, not here.
+import { describe, expect, it } from 'vitest';
+import { FantasyPosition, futsalDefault } from '../src/lib/fantasy/fantasy_config';
+import { FantasySquad, validateSquad } from '../src/lib/fantasy/squad';
+import {
+  assertEnginePaused, assertSafePaths, buildWritePlan, fakeManagerDefs,
+  fakeManagerRow, FillMarketEntry, StrategyTemplate, TEST_SEASON_ROOT,
+} from './fill_test_season_logic';
+
+const cfg = futsalDefault();
+const ROOT = TEST_SEASON_ROOT;
+const REAL = 'EsDzzsdVM9TASCyBmVbOviYZL4z1';
+const REAL_NO_SQUAD = '7w3JtYKaUZYyABN1In9N5xf8qWr2';
+const paused = { lockOverride: 'open', budgetTenths: 500 };
+
+/** A small but realistic market: prices 4.0..15.0, a couple of guests. */
+function market(): Record<string, FillMarketEntry> {
+  const out: Record<string, FillMarketEntry> = {};
+  const add = (pos: FantasyPosition, n: number) => {
+    for (let i = 0; i < n; i++) {
+      out[`${pos} Player ${String(i).padStart(2, '0')}`] = {
+        position: pos, eligible: true, price: 40 + ((i * 35) % 115),
+      };
+    }
+  };
+  add('GK', 6);
+  add('DEF', 14);
+  add('ATT', 14);
+  out['Guest Keeper'] = { position: 'GK', eligible: false, price: 40 };
+  out['Guest Striker'] = { position: 'ATT', eligible: false, price: 40 };
+  return out;
+}
+
+/** The rehearsal's persona shapes: one names players (re-targeted onto the
+ *  seeded squad), one plays chips, one transfers. */
+const templates: StrategyTemplate[] = [
+  {
+    persona: 'steady',
+    weeks: { 6: { benchSwap: ['Someone Real', 'Someone Else'], captain: 'X', vice: 'Y' } },
+  },
+  { persona: 'chips', weeks: { 3: { chip: 'tripleCaptain' }, 4: { chip: null } } },
+  { persona: 'churn', weeks: { 2: { transfers: 4 }, 6: { transfers: 3, undoOneNextDay: true } } },
+];
+
+function squadOf(
+  initial: { picks: Array<[string, boolean]>; captain: string; vice: string },
+  mkt: Record<string, FillMarketEntry>,
+): FantasySquad {
+  return {
+    picks: initial.picks.map(([name, bench]) => ({
+      playerId: name, position: mkt[name].position, priceTenths: mkt[name].price, bench,
+    })),
+    captainId: initial.captain,
+    viceId: initial.vice,
+    chip: null,
+  };
+}
+
+/** A replayed final state, shaped like OverlayDb.get (RTDB-coerced arrays). */
+function replayState(): Record<string, unknown> {
+  const defs = fakeManagerDefs(2, market(), cfg, templates);
+  return {
+    Config: { lockOverride: 'auto', budgetTenths: 500 },
+    News: { Drafts: { gw1dreamteam: { Title: 'x' } }, PushClaims: { a: 1 } },
+    Voided: [null, null, true],
+    Players: { 'GK Player 00': { position: 'GK', priceTenths: 45, eligible: true } },
+    PlayerTotals: { 'GK Player 00': { points: 12 } },
+    History: [null, { [REAL]: { TotalTenths: 30 }, 'test-01': { TotalTenths: 20 } }],
+    GwState: { current: 12, status: 'finalized', lockAtUtc: 1, date: '10052026' },
+    Repriced: [null, { At: 1 }],
+    RecapSent: [null, { At: 1 }],
+    ReminderSent: [null, { At: 1 }],
+    NewsDrafted: [null, { At: 1 }],
+    LockedPositions: [null, { 'GK Player 00': 'GK' }],
+    SomeFutureGuard: [null, { At: 1 }],
+    TransferState: { [REAL]: { Free: 2 }, 'test-01': { Free: 3 } },
+    Managers: {
+      [REAL]: { TeamName: 'Zaya.Arami', NameFlagged: false },
+      'test-01': fakeManagerRow(defs[0]),
+      'test-02': fakeManagerRow(defs[1]),
+    },
+    Squads: {
+      [REAL]: { picks: [], captainId: 'a', viceId: 'b' },
+      'test-01': { picks: [{ playerId: 'GK Player 00' }], captainId: 'a', viceId: 'b' },
+      'test-02': { picks: [{ playerId: 'GK Player 01' }], captainId: 'a', viceId: 'b' },
+    },
+  };
+}
+
+const live = {
+  config: paused,
+  managers: {
+    [REAL]: { TeamName: 'Zaya.Arami', NameFlagged: false },
+    [REAL_NO_SQUAD]: { TeamName: 'Nimrud', NameFlagged: false },
+  },
+  squads: { [REAL]: { picks: [], captainId: 'a', viceId: 'b' } },
+};
+
+describe('buildWritePlan', () => {
+  it('write plan never touches Config, News, or real managers', () => {
+    const plan = buildWritePlan(replayState(), live, 1234);
+    const paths = plan.map((e) => e.path);
+
+    for (const p of paths) {
+      expect(p.startsWith(`${ROOT}/`)).toBe(true);
+      expect(p).not.toMatch(/\/(Config|News|Voided)(\/|$)/);
+      expect(p).not.toContain(REAL);
+      expect(p).not.toContain(REAL_NO_SQUAD);
+    }
+    // Managers / Squads only ever as fake-uid children, never whole.
+    expect(paths).not.toContain(`${ROOT}/Managers`);
+    expect(paths).not.toContain(`${ROOT}/Squads`);
+    expect(paths.filter((p) => /\/(Managers|Squads)\//.test(p)).sort()).toEqual([
+      `${ROOT}/Managers/test-01`, `${ROOT}/Managers/test-02`,
+      `${ROOT}/Squads/test-01`, `${ROOT}/Squads/test-02`,
+    ]);
+
+    // Derived nodes + every done-marker, including one we have never seen.
+    for (const node of ['Players', 'PlayerTotals', 'History', 'GwState', 'Repriced',
+      'RecapSent', 'ReminderSent', 'NewsDrafted', 'LockedPositions', 'SomeFutureGuard',
+      'TransferState']) {
+      expect(paths).toContain(`${ROOT}/${node}`);
+    }
+    // Whole nodes are written in RTDB storage form (coerced arrays back to
+    // index-keyed maps, no null holes).
+    const history = plan.find((e) => e.path === `${ROOT}/History`)!.value;
+    expect(history).toEqual({ 1: { [REAL]: { TotalTenths: 30 }, 'test-01': { TotalTenths: 20 } } });
+
+    expect(plan.find((e) => e.path === `${ROOT}/TestFill`)!.value)
+      .toEqual({ At: 1234, Managers: 2 });
+  });
+
+  it('refuses to build a plan while the engine is on auto', () => {
+    expect(() => buildWritePlan(replayState(), { ...live, config: { lockOverride: 'auto' } }, 1))
+      .toThrow(/auto/i);
+  });
+});
+
+describe('assertSafePaths', () => {
+  it('assertSafePaths rejects anything outside Fantasy/Futsal/15', () => {
+    const ok = [`${ROOT}/Players`, `${ROOT}/Managers/test-01`, `${ROOT}/TestFill`,
+      `${ROOT}/History`];
+    expect(() => assertSafePaths(ok.map((path) => ({ path })))).not.toThrow();
+
+    const bad = [
+      'Fantasy/Futsal/16/Players',
+      'Fantasy/Futsal/150/Players', // prefix trick
+      'Fantasy/Futsal/15', // the whole season root
+      'Fantasy/Futsal/15/', // ditto
+      'Futsal/15/Date',
+      '/Fantasy/Futsal/15/Players',
+      'Fantasy/Futsal/15/../16/Players',
+      'Fantasy/Futsal/15/./Players',
+      'Fantasy/Futsal/15//Players',
+      'Fantasy/Futsal/15/Players.json',
+      'Fantasy/Futsal/15/Config',
+      'Fantasy/Futsal/15/News/Drafts',
+      '',
+    ];
+    for (const path of bad) {
+      expect(() => assertSafePaths([...ok.map((p) => ({ path: p })), { path }]), path).toThrow();
+    }
+  });
+});
+
+describe('assertEnginePaused', () => {
+  it('assertEnginePaused rejects auto and rejects an auto-return time', () => {
+    expect(() => assertEnginePaused({ lockOverride: 'open' })).not.toThrow();
+    expect(() => assertEnginePaused({ lockOverride: 'locked' })).not.toThrow();
+
+    expect(() => assertEnginePaused({ lockOverride: 'auto' })).toThrow();
+    expect(() => assertEnginePaused({})).toThrow(); // absent = auto
+    expect(() => assertEnginePaused({ lockOverride: 'Open' })).toThrow(); // engine reads it as auto
+    expect(() => assertEnginePaused(null)).toThrow();
+    expect(() => assertEnginePaused({ lockOverride: 'open', lockOverrideUntil: 1893456000000 }))
+      .toThrow(/lockOverrideUntil/);
+    expect(() => assertEnginePaused({ lockOverride: 'locked', lockOverrideUntil: 'junk' }))
+      .toThrow(/lockOverrideUntil/);
+  });
+});
+
+describe('fakeManagerDefs', () => {
+  it('20 fake managers with deterministic team names', () => {
+    const a = fakeManagerDefs(20, market(), cfg, templates);
+    const b = fakeManagerDefs(20, market(), cfg, templates);
+    expect(a).toEqual(b);
+
+    expect(a.map((d) => d.uid)).toEqual(
+      Array.from({ length: 20 }, (_, i) => `test-${String(i + 1).padStart(2, '0')}`));
+    const names = a.map((d) => d.name);
+    expect(new Set(names).size).toBe(20);
+    for (const n of names) {
+      expect(n.trim().length).toBeGreaterThanOrEqual(3);
+      expect(n.length).toBeLessThanOrEqual(30);
+    }
+    for (const d of a) expect(fakeManagerRow(d)).toEqual({ TeamName: d.name, NameFlagged: false });
+
+    // Seeded, not cloned: the squads differ between managers.
+    expect(new Set(a.map((d) => d.initial.picks.map(([n]) => n).sort().join('|'))).size)
+      .toBeGreaterThan(15);
+
+    // Strategies cycle through the templates.
+    expect(a[0].persona).toContain('steady');
+    expect(a[3].persona).toContain('steady');
+    expect(a[4].weeks).toEqual(templates[1].weeks);
+    expect(a[5].weeks).toEqual(templates[2].weeks);
+
+    const mkt = market();
+    for (const d of a) {
+      const s = squadOf(d.initial, mkt);
+      expect(validateSquad(s, cfg), d.uid).toEqual([]);
+      for (const p of s.picks) expect(mkt[p.playerId].eligible).toBe(true);
+      // Named steps are re-targeted onto this manager's own squad and keep
+      // it legal (armband swap + a same-position bench swap).
+      const wk6 = d.weeks[6];
+      if (d.persona.includes('steady')) {
+        expect(wk6.captain).toBe(d.initial.vice);
+        expect(wk6.vice).toBe(d.initial.captain);
+        const [inName, outName] = wk6.benchSwap!;
+        const swapped: FantasySquad = {
+          ...s,
+          picks: s.picks.map((p) => (p.playerId === inName || p.playerId === outName
+            ? { ...p, bench: !p.bench } : p)),
+          captainId: wk6.captain!,
+          viceId: wk6.vice!,
+        };
+        expect(validateSquad(swapped, cfg), d.uid).toEqual([]);
+      }
+    }
+
+    // Two runs -> identical Managers/Squads part of the plan.
+    const stateFor = () => ({
+      Players: {},
+      Managers: Object.fromEntries(a.map((d) => [d.uid, fakeManagerRow(d)])),
+      Squads: Object.fromEntries(a.map((d) => [d.uid, { initial: d.initial }])),
+    });
+    const fakePart = (plan: Array<{ path: string; value: unknown }>) =>
+      plan.filter((e) => /\/(Managers|Squads)\//.test(e.path));
+    const p1 = fakePart(buildWritePlan(stateFor(), live, 1));
+    const p2 = fakePart(buildWritePlan(stateFor(), live, 2));
+    expect(p1).toHaveLength(40);
+    expect(p1).toEqual(p2);
+  });
+});

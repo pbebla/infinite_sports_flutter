@@ -31,9 +31,15 @@
 // RUN (from functions/):
 //   npm run rehearse:s15                live GET snapshot (cached), then replay
 //   npm run rehearse:s15 -- --offline   replay from the cached snapshot only
+//
+// REUSE: the replay is also exported as runReplay() for the test-season
+// fill tool (fill_test_season.ts), which replays the season with 20 made-up
+// managers (+ the real managers' saved squads) and hands back the final
+// in-memory Fantasy/Futsal/15 subtree. Importing this module runs nothing.
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { fakeManagerDefs, fakeManagerRow } from './fill_test_season_logic';
 import { awardBonus, bpsScore } from '../src/lib/fantasy/bps';
 import {
   configFromMap, configToMap, FANTASY_POSITIONS, FantasyConfig, FantasyPosition,
@@ -42,12 +48,13 @@ import {
 import { deriveGameweeks, Gameweek } from '../src/lib/fantasy/gameweeks';
 import { lockInstantUtc } from '../src/lib/fantasy/league_time';
 import {
-  FantasyLogger, maybeFinalizeGame, recordSquadSave, runLifecycleSweep,
-  runMondayReprice,
+  FantasyJobDeps, FantasyLogger, maybeFinalizeGame, recordSquadSave,
+  runLifecycleSweep, runMondayReprice,
 } from '../src/lib/fantasy/orchestration';
 import { FantasyDb, FantasyTxResult } from '../src/lib/fantasy/orchestration_db';
 import { PlayerGameStats, playedGame } from '../src/lib/fantasy/player_game_stats';
 import { applyDelta, openingPrices, repriceDeltas } from '../src/lib/fantasy/pricing';
+import { FantasyPusher } from '../src/lib/fantasy/pushes';
 import { scorePlayerGame, scorePlayerWeek } from '../src/lib/fantasy/scoring';
 import {
   FantasySquad, spentTenths, squadFromMap, squadToMap, validateSquad,
@@ -65,8 +72,8 @@ const SPORT = 'Futsal';
 const SEASON = '15';
 const LEAGUE = `${SPORT}/${SEASON}`;
 const F = `Fantasy/${SPORT}/${SEASON}`;
-const DB_URL = 'https://infinite-sports-app.firebaseio.com';
-const READ_PATHS = [
+export const DB_URL = 'https://infinite-sports-app.firebaseio.com';
+export const READ_PATHS = [
   `${LEAGUE}/Date`, `${LEAGUE}/Line Ups`, `${LEAGUE}/Teams`,
   `${F}/Config`, `${F}/Players`, `${F}/Voided`,
 ];
@@ -125,9 +132,12 @@ const networkLog: Array<{ method: string; url: string; allowed: boolean; reason?
 let networkOpen = true;
 
 /** Wrap globalThis.fetch: GET to the public REST host only, and nothing at
- *  all after the snapshot is loaded. */
-function installNetworkGuard(): void {
-  const native = (globalThis as any).fetch.bind(globalThis);
+ *  all after the snapshot is loaded. Returns the restore function (puts the
+ *  native fetch back — the fill tool needs it after the replay). */
+export function installNetworkGuard(): () => void {
+  const original = (globalThis as any).fetch;
+  const native = original.bind(globalThis);
+  networkOpen = true;
   (globalThis as any).fetch = async (input: any, init?: any): Promise<any> => {
     const url = typeof input === 'string' ? input : String(input?.url ?? input);
     const method = String(init?.method ?? 'GET').toUpperCase();
@@ -139,6 +149,10 @@ function installNetworkGuard(): void {
     if (reason) throw new Error(`rehearsal network guard: ${reason} (${method} ${url})`);
     return native(url, { method: 'GET' });
   };
+  return () => {
+    (globalThis as any).fetch = original;
+    networkOpen = true;
+  };
 }
 
 async function restGet(p: string): Promise<{ ok: boolean; status: number; value?: unknown; body?: string }> {
@@ -149,22 +163,29 @@ async function restGet(p: string): Promise<{ ok: boolean; status: number; value?
   return { ok: true, status: res.status, value: JSON.parse(text) };
 }
 
-interface Snapshot {
+export interface Snapshot {
   fetchedAt: string;
   source: string;
   values: Record<string, unknown>;
   skipped: Array<{ path: string; status: number; body: string }>;
 }
 
-async function loadSnapshot(offline: boolean): Promise<Snapshot> {
-  const cachePath = path.join(OUT_DIR, 'snapshot.json');
+/** GET every READ_PATHS node (+ [opts.extraPaths]) and cache it in
+ *  rehearsal_out/[opts.file] (default snapshot.json — the rehearsal's own
+ *  cache; the fill tool keeps a separate one). Offline = the cache only.
+ *  Only READ_PATHS values are ever seeded into the replay. */
+export async function loadSnapshot(
+  offline: boolean, opts: { file?: string; extraPaths?: string[] } = {},
+): Promise<Snapshot> {
+  const cachePath = path.join(OUT_DIR, opts.file ?? 'snapshot.json');
   if (offline) {
     if (!fs.existsSync(cachePath)) throw new Error(`--offline but no ${cachePath}`);
     return JSON.parse(fs.readFileSync(cachePath, 'utf8')) as Snapshot;
   }
+  fs.mkdirSync(OUT_DIR, { recursive: true });
   const values: Record<string, unknown> = {};
   const skipped: Snapshot['skipped'] = [];
-  for (const p of READ_PATHS) {
+  for (const p of [...READ_PATHS, ...(opts.extraPaths ?? [])]) {
     const r = await restGet(p);
     if (r.ok) values[p] = r.value;
     else skipped.push({ path: p, status: r.status, body: r.body ?? '' });
@@ -730,19 +751,98 @@ interface ExpState {
 
 interface SimEvent { at: number; prio: number; seq: number; label: string; run: () => Promise<void> }
 
+interface ReplayOptions {
+  offline: boolean;
+  /** A snapshot already loaded by the caller (skips loadSnapshot). */
+  snapshot?: Snapshot;
+  /** The synthetic managers playing the client role, built once the
+   *  opening market + config are known. */
+  managers: (market: Record<string, MarketEntry>, cfg: FantasyConfig) => ManagerDef[];
+  /** Seed Managers/<uid> = { TeamName, NameFlagged:false } for every
+   *  synthetic manager (the fill tool's fakes; the rehearsal never did). */
+  seedManagerRows?: boolean;
+  /** Real managers: uid -> raw saved squad. Saved once before GW1 through
+   *  the client path (validated like the synthetic saves, then
+   *  recordSquadSave) and held unchanged; a rejected one is skipped. */
+  extraManagers?: Record<string, unknown>;
+  /** Inject a recording no-op pusher (sends nothing anywhere) so the push
+   *  steps run and claim their once-only guards (ReminderSent, RecapSent). */
+  stubPusher?: boolean;
+  /** Seeded managers make as many of a week's scripted transfers as they
+   *  can afford instead of crashing the replay (see transfers()). */
+  lenientTransfers?: boolean;
+  /** Write rehearsal_out/{captured_writes,summary}.json + report_tables.md
+   *  and print the console verdict (the rehearsal itself). */
+  writeOutputs: boolean;
+}
+
+export interface ReplayResult {
+  /** The final in-memory Fantasy/Futsal/15 subtree (RTDB-coerced shape). */
+  state: Record<string, unknown>;
+  skippedManagers: Array<{ uid: string; reason: string }>;
+  /** Invariant name -> failures (empty when everything holds). */
+  invariantFailures: Record<string, string[]>;
+  crashes: Array<{ at: string; job: string; error: string }>;
+  /** Synthetic + accepted real managers, and the expected-ledger mismatches. */
+  managerUids: string[];
+  managerLedgerMismatches: number;
+  pushesRecorded: number;
+  /** Seeded-manager weeks whose scripted transfers were cut to what the
+   *  budget allowed (lenientTransfers only). */
+  transfersCapped: number;
+}
+
+/** Replay Season 15 through the real pipeline with [managerCount] made-up
+ *  managers test-01.. (seeded squads, the rehearsal personas' scripts
+ *  cycled) plus [extraManagers] (real uid -> saved squad, held every week).
+ *  Pure in-memory: the network is closed for the whole replay, nothing is
+ *  ever written anywhere. Push steps run against a recording stub so their
+ *  done-markers exist; a seeded manager makes only the scripted transfers it
+ *  can afford; rehearsal_out reports are NOT written. */
+export async function runReplay(opts: {
+  offline: boolean;
+  managerCount: number;
+  extraManagers?: Record<string, unknown>;
+  snapshot?: Snapshot;
+}): Promise<ReplayResult> {
+  const templates = MANAGERS.map((m) => ({ persona: m.persona, weeks: m.weeks }));
+  return replaySeason({
+    offline: opts.offline,
+    snapshot: opts.snapshot,
+    managers: (market, cfg) => fakeManagerDefs(opts.managerCount, market, cfg, templates),
+    seedManagerRows: true,
+    extraManagers: opts.extraManagers,
+    stubPusher: true,
+    lenientTransfers: true,
+    writeOutputs: false,
+  });
+}
+
 async function main(): Promise<void> {
   if (!fs.existsSync(path.join(FUNCTIONS_DIR, 'tools', 'rehearse_s15.ts'))) {
     throw new Error('Run from functions/ (npm run rehearse:s15).');
   }
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const offline = process.argv.includes('--offline');
+  await replaySeason({ offline, managers: () => MANAGERS, writeOutputs: true });
+}
 
-  installNetworkGuard();
-  const snap = await loadSnapshot(offline);
+async function replaySeason(opts: ReplayOptions): Promise<ReplayResult> {
+  const restoreNetwork = installNetworkGuard();
+  try {
+    return await replaySeasonGuarded(opts);
+  } finally {
+    restoreNetwork();
+  }
+}
+
+async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
+  const offline = opts.offline;
+  const snap = opts.snapshot ?? await loadSnapshot(offline);
   networkOpen = false; // from here on, ANY network attempt throws
 
   const db = new OverlayDb();
-  for (const [p, v] of Object.entries(snap.values)) db.seed(p, v);
+  for (const p of READ_PATHS) if (p in snap.values) db.seed(p, snap.values[p]);
   const configRaw = snap.values[`${F}/Config`];
   if (!isMap(configRaw)) throw new Error('No Fantasy Config in the snapshot — cannot rehearse.');
   const liveLockOverride = configRaw['lockOverride'] ?? null;
@@ -760,6 +860,30 @@ async function main(): Promise<void> {
   const gws = deriveGameweeks(dateKeys, cfg);
   const gwByNumber: Record<number, Gameweek> = {};
   for (const g of gws) gwByNumber[g.number] = g;
+
+  const managers = opts.managers(market, cfg);
+  if (opts.seedManagerRows) {
+    for (const m of managers) {
+      db.seed(`${F}/Managers/${m.uid}`, fakeManagerRow(m));
+    }
+  }
+  const skippedManagers: ReplayResult['skippedManagers'] = [];
+  const acceptedExtras: string[] = [];
+  let transfersCapped = 0;
+  // Recording no-op pusher: the push steps run (and claim their guards) but
+  // nothing is sent anywhere — the network is closed anyway.
+  const pushLog: Json[] = [];
+  const stubPusher: FantasyPusher = {
+    sendToUsers: async (messages) => {
+      for (const m of messages) pushLog.push({ at: iso(db.nowMs), job: db.job, uid: m.uid, title: m.title });
+      return messages.length;
+    },
+    sendToTopic: async (topic, title) => {
+      pushLog.push({ at: iso(db.nowMs), job: db.job, topic, title });
+      return 1;
+    },
+  };
+  const deps: FantasyJobDeps | undefined = opts.stubPusher ? { pusher: stubPusher } : undefined;
 
   const logs: Array<{ at: string; job: string; level: string; message: string; context?: unknown }> = [];
   const logger: FantasyLogger = {
@@ -919,7 +1043,7 @@ async function main(): Promise<void> {
     // fantasy_finalize.ts payload gate: nothing unless the game is Final.
     if (!isMap(after) || intLoose(after['status']) !== 2) return;
     await runJob(`trigger:onGameWritten(${date}/${idx} ${why})`, t,
-      () => maybeFinalizeGame(db, { sport: SPORT, season: SEASON, dateKey: date, nowUtc: new Date(t), log: logger }));
+      () => maybeFinalizeGame(db, { sport: SPORT, season: SEASON, dateKey: date, nowUtc: new Date(t), log: logger, deps }));
   }
 
   // ── client helpers (what the app does, using only client-visible nodes) ──
@@ -975,9 +1099,35 @@ async function main(): Promise<void> {
     fixArmband(s, form);
     return s;
   }
+  /** transferGreedy — or, for the fill's seeded managers
+   *  (opts.lenientTransfers), as many of the n transfers as the greedy can
+   *  afford (n, n-1, … 0), so one unlucky seeded squad cannot crash the
+   *  replay. The rehearsal stays strict: there a failure is a finding. */
+  function transfers(squad: FantasySquad, n: number, notes: string[], pairs: Array<[string, string]>): FantasySquad {
+    if (!opts.lenientTransfers) return transferGreedy(squad, n, notes, pairs);
+    for (let k = n; k > 0; k--) {
+      const kNotes: string[] = [];
+      const kPairs: Array<[string, string]> = [];
+      try {
+        const out = transferGreedy(squad, k, kNotes, kPairs);
+        if (k < n) {
+          kNotes.push(`only ${k} of ${n} transfers affordable`);
+          transfersCapped++;
+        }
+        notes.push(...kNotes);
+        pairs.push(...kPairs);
+        return out;
+      } catch {
+        // one fewer
+      }
+    }
+    notes.push(`no affordable transfer (wanted ${n})`);
+    transfersCapped++;
+    return squad;
+  }
 
   const exp: Record<string, ExpState> = {};
-  for (const m of MANAGERS) {
+  for (const m of managers) {
     exp[m.uid] = {
       held: null, lastLocked: null, free: cfg.freeTransfersPerWeek, honored: {},
       week: { saves: 0, lastSaved: null, intent: null }, rows: {}, lastTransfers: [],
@@ -1029,15 +1179,15 @@ async function main(): Promise<void> {
       const plan = m.weeks[gw];
       e.lastTransfers = [];
       if (plan.rebuild === 'freeHit') {
-        squad = transferGreedy(squad, squad.picks.length, notes, e.lastTransfers);
+        squad = transfers(squad, squad.picks.length, notes, e.lastTransfers);
         squad.chip = 'freeHit';
         e.week.intent = 'freeHit';
       } else if (plan.rebuild === 'wildcard') {
-        squad = transferGreedy(squad, plan.transfers ?? 5, notes, e.lastTransfers);
+        squad = transfers(squad, plan.transfers ?? 5, notes, e.lastTransfers);
         squad.chip = 'wildcard';
         e.week.intent = 'wildcard';
       } else if (plan.transfers) {
-        squad = transferGreedy(squad, plan.transfers, notes, e.lastTransfers);
+        squad = transfers(squad, plan.transfers, notes, e.lastTransfers);
       }
       if ('chip' in plan) {
         squad.chip = plan.chip ?? null;
@@ -1076,6 +1226,38 @@ async function main(): Promise<void> {
       }
     }
     clientSaves.push({ at: iso(t), uid: m.uid, gw, kind: 'undo-skipped (budget)' });
+  }
+
+  /** A real manager's saved squad, replayed as-is: one save before GW1
+   *  through the same client path (the client's own checks, the Squads
+   *  write, the onFantasySquadWritten trigger), then held — the server
+   *  keeps it every week, exactly like a manager who saved once. A squad
+   *  the client path cannot take is skipped, never repaired. */
+  async function extraSave(uid: string, raw: unknown, t: number): Promise<void> {
+    const reject = (reason: string) => { skippedManagers.push({ uid, reason }); };
+    if (!isMap(raw)) return reject('saved squad is not a map');
+    let squad: FantasySquad;
+    try {
+      squad = squadFromMap(raw);
+    } catch (err) {
+      return reject(`malformed saved squad: ${(err as Error).message}`);
+    }
+    const mkt = livePlayers();
+    const unknown = squad.picks.map((p) => p.playerId).filter((n) => !(n in mkt));
+    if (unknown.length > 0) return reject(`not in the market: ${unknown.join(', ')}`);
+    const issues = validateSquad(squad, cfg);
+    if (issues.length > 0) return reject(`invalid squad: ${issues.join(', ')}`);
+    db.nowMs = t;
+    db.job = `client:${uid}`;
+    db.simWrite(`${F}/Squads/${uid}`, squadToMap(squad));
+    clientSaves.push({
+      at: iso(t), uid, gw: 1, kind: 'real squad (held)', notes: [], spent: spentTenths(squad),
+      chip: squad.chip, captain: squad.captainId, vice: squad.viceId,
+      picks: squad.picks.map((p) => `${p.playerId}${p.bench ? ' (bench)' : ''}`),
+    });
+    acceptedExtras.push(uid);
+    await runJob(`trigger:onFantasySquadWritten(${uid})`, t,
+      () => recordSquadSave(db, { sport: SPORT, season: SEASON, uid, log: logger, nowUtc: new Date(t) }));
   }
 
   /** The expected (spec) ledger at the lock instant — never reads pipeline
@@ -1143,7 +1325,7 @@ async function main(): Promise<void> {
   }
 
   for (let t = simStart; t <= simEnd; t += 15 * MIN) {
-    at(t, 1, 'sweep', () => runJob('cron:fantasyLifecycleSweep', t, () => runLifecycleSweep(db, new Date(t), logger)));
+    at(t, 1, 'sweep', () => runJob('cron:fantasyLifecycleSweep', t, () => runLifecycleSweep(db, new Date(t), logger, deps)));
   }
   for (let d = Math.floor(simStart / DAY) * DAY; d <= simEnd; d += DAY) {
     const day = new Date(d);
@@ -1154,7 +1336,7 @@ async function main(): Promise<void> {
   }
   for (const gw of gws) {
     const L = gw.lockUtc.getTime();
-    at(L, 0, `expected-ledger lock GW${gw.number}`, async () => { for (const m of MANAGERS) expectLock(m, gw.number); });
+    at(L, 0, `expected-ledger lock GW${gw.number}`, async () => { for (const m of managers) expectLock(m, gw.number); });
     const games = entriesOf(childAt(originalDate, gw.date)).filter(([, g]) => isMap(g));
     games.forEach(([idx], k) => {
       const t = L + 97 * MIN + k * HOUR;
@@ -1170,7 +1352,7 @@ async function main(): Promise<void> {
       at(t, 0, `rerun ${gw.date}`, () => fireGameTrigger(gw.date, games[0][0], t, 'later edit'));
     }
   }
-  MANAGERS.forEach((m, mi) => {
+  managers.forEach((m, mi) => {
     for (const gw of gws) {
       const n = gw.number;
       if (n !== 1 && !m.weeks[n]) continue;
@@ -1183,6 +1365,11 @@ async function main(): Promise<void> {
       }
     }
   });
+  Object.entries(opts.extraManagers ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .forEach(([uid, raw], k) => {
+      const t = firstLock - 2 * DAY + 2 * HOUR + 7 * MIN + (managers.length + k) * 3 * MIN;
+      at(t, 3, `client ${uid} GW1 (real squad)`, () => extraSave(uid, raw, t));
+    });
   let preLate: Json = null;
   let postLate: Json = null;
   const lateT = simEnd - DAY + 11 * MIN;
@@ -1216,6 +1403,15 @@ async function main(): Promise<void> {
 
   auditState('final state');
   const finalState = db.get(F);
+  // A real squad the client path took but no gameweek ever scored (finalize
+  // skips a squad it cannot read) is skipped too.
+  for (const uid of [...acceptedExtras]) {
+    const scored = entriesOf(db.get(`${F}/History`)).some(([, byUid]) => isMap(childAt(byUid, uid)));
+    if (!scored) {
+      skippedManagers.push({ uid, reason: 'saved, but no gameweek ever scored it (finalize skipped the squad)' });
+      acceptedExtras.splice(acceptedExtras.indexOf(uid), 1);
+    }
+  }
 
   // F1. Player weeks: pipeline vs independent recomputation (indep was
   // computed up front from the original snapshot)
@@ -1350,7 +1546,7 @@ async function main(): Promise<void> {
   // F4. Managers: pipeline vs the independent expected ledger
   const managerMismatches: Json[] = [];
   const managerTable: Json[] = [];
-  for (const m of MANAGERS) {
+  for (const m of managers) {
     const e = exp[m.uid];
     let expOverall = 0;
     const weeks: Json[] = [];
@@ -1466,7 +1662,7 @@ async function main(): Promise<void> {
   const movers = Object.keys(market).map((n) => ({ name: n, position: market[n].position, team: market[n].team,
     start: startPrices[n], end: finalPrices[n], net: finalPrices[n] - startPrices[n],
     moves: Object.values(priceChangesByGw).filter((c) => n in c).length }));
-  const overallRows = entriesOf(db.get(`${F}/Leaderboards/Overall`)).map(([uid, r]) => ({ uid, name: MANAGERS.find((x) => x.uid === uid)?.name, ...r }))
+  const overallRows = entriesOf(db.get(`${F}/Leaderboards/Overall`)).map(([uid, r]) => ({ uid, name: managers.find((x) => x.uid === uid)?.name, ...r }))
     .sort((a, b) => a.rank - b.rank);
 
   const checks = {
@@ -1497,6 +1693,18 @@ async function main(): Promise<void> {
     pipelineWrites: db.pipelineWrites.length, simulatedWrites: db.simWrites.length,
     marketIssues,
   };
+
+  const result: ReplayResult = {
+    state: (isMap(finalState) ? finalState : {}) as Record<string, unknown>,
+    skippedManagers,
+    invariantFailures,
+    crashes,
+    managerUids: [...managers.map((m) => m.uid), ...acceptedExtras],
+    managerLedgerMismatches: managerMismatches.length,
+    pushesRecorded: pushLog.length,
+    transfersCapped,
+  };
+  if (!opts.writeOutputs) return result;
 
   fs.writeFileSync(path.join(OUT_DIR, 'captured_writes.json'), JSON.stringify({
     meta,
@@ -1542,6 +1750,7 @@ async function main(): Promise<void> {
   const managerOverall = managerTable.map((m) => `${m.name} ${m.overall?.points}/${m.expectedOverall}`).join(', ');
   console.log(`  manager Overall (pipeline/expected): ${managerOverall}`);
   console.log(`  outputs: ${OUT_DIR}`);
+  return result;
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -1752,7 +1961,11 @@ function reportTables(s: Json, market: Record<string, MarketEntry>): string {
   return L.join('\n');
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exitCode = 1;
-});
+// Run the rehearsal only when executed directly (npm run rehearse:s15) —
+// the fill tool imports runReplay without triggering it.
+if (typeof require !== 'undefined' && require.main === module) {
+  main().catch((err) => {
+    console.error(err);
+    process.exitCode = 1;
+  });
+}
