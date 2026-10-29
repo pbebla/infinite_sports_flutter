@@ -311,6 +311,19 @@ describe('stale first push (review 2026-10-28)', () => {
     expect(await db.read(CLAIM)).toEqual({ At: NOW.getTime(), Skipped: 'stale' });
   });
 
+  it('a freshly CREATED row pushes even when its At is hours old (skewed tablet clock)', async () => {
+    const db = world(post(
+      { Title: 'T', Body: 'B', Audience: 'everyone' },
+      { At: NOW.getTime() - 5 * NEWS_PUSH_STALE_MS },
+    ));
+    const pusher = new FakePusher();
+
+    expect(await pushPublishedPost(db, pusher, { ...ARGS, isCreate: true }))
+      .toEqual({ sent: 1 });
+    expect(pusher.topicSends).toHaveLength(1);
+    expect(await db.read(CLAIM)).toEqual({ At: NOW.getTime(), Sent: 1 });
+  });
+
   it('exactly 60 minutes old still pushes; a row without a numeric At is never stale', async () => {
     for (const extra of [
       { At: NOW.getTime() - NEWS_PUSH_STALE_MS },

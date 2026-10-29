@@ -76,8 +76,8 @@ Future<void> main() async {
     }
     if (message.notification != null) {
       PushNotifications.showSimpleNotification(
-          title: message.notification!.title!,
-          body: message.notification!.body!,
+          title: message.notification!.title ?? '',
+          body: message.notification!.body ?? '',
           payload: payloadData);
     }
   });

@@ -7,10 +7,12 @@
 // trigger on that row is the only thing that pushes. A row is a candidate
 // when it carries a `Push` map ({Title, Body, Audience}) and no `PushedAt`:
 //
-//   stale  a row whose numeric At is more than NEWS_PUSH_STALE_MS (60 min)
-//          before now is claimed as { At, Skipped:'stale' } and never
-//          pushes (a post published before this trigger existed, or a
-//          failed trigger re-fired days later by an edit)
+//   stale  on an UPDATE event only, a row whose numeric At is more than
+//          NEWS_PUSH_STALE_MS (60 min) before now is claimed as
+//          { At, Skipped:'stale' } and never pushes (a post published before
+//          this trigger existed, or a failed trigger re-fired days later by
+//          an edit). A create event always pushes — At is the publishing
+//          tablet's clock, which may be skewed.
 //   claim  writeIfAbsent(News/PushClaims/<id>, { At: now ms }) — the only
 //          writer that finds it empty sends (at most once, ever)
 //   send   Audience 'managers' -> every fantasy manager (Managers ∪ Squads)
@@ -102,6 +104,10 @@ export interface PushPublishedPostArgs {
   season: string;
   postId: string;
   nowUtc: Date;
+  /** True when this trigger event created the row (no previous value). A
+   *  fresh publish is never stale: its At comes from the publishing
+   *  device's clock, which can be hours off. */
+  isCreate?: boolean;
   log?: FantasyLogger;
 }
 
@@ -127,7 +133,8 @@ export async function pushPublishedPost(
   const push = row['Push'] as Record<string, unknown>;
 
   const publishedAt = row['At'];
-  if (typeof publishedAt === 'number' && Number.isFinite(publishedAt) &&
+  if (args.isCreate !== true &&
+    typeof publishedAt === 'number' && Number.isFinite(publishedAt) &&
     nowMs - publishedAt > NEWS_PUSH_STALE_MS) {
     if (await db.writeIfAbsent(claimPath, { At: nowMs, Skipped: 'stale' })) {
       log.warn('fantasy news: stale post — push skipped',

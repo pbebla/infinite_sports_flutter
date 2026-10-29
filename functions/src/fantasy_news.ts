@@ -30,6 +30,7 @@ export const onFantasyNewsPublished = onValueWritten(
       season: String(event.params['season']),
       postId: String(event.params['postId']),
       nowUtc: new Date(),
+      isCreate: !event.data.before.exists(),
       log: fantasyLogger,
     });
   },
