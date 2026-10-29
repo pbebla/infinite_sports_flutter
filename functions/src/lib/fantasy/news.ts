@@ -197,19 +197,24 @@ function parseDraftPlayers(raw: unknown): string[] {
   return out;
 }
 
+/** A model reply with any stray markdown fence (```json ... ```) removed —
+ *  the models are told not to fence, and sometimes do anyway. */
+export function stripJsonFences(text: string): string {
+  const t = text.trim();
+  return t.startsWith('```')
+    ? t.replace(/^```[a-zA-Z]*\s*/, '').replace(/\s*```$/, '')
+    : t;
+}
+
 /** Validates the model's reply: a JSON array (stray markdown fences
  *  tolerated) of objects with non-empty string title/body (+ an optional
  *  "players" name list). Items are length-clamped defensively; invalid
  *  items are dropped; more than 4 are cut. Null = nothing usable (refusal
  *  prose, garbage JSON, empty array) — the caller then writes NOTHING. */
 export function parseNewsDrafts(text: string): NewsDraftText[] | null {
-  let t = text.trim();
-  if (t.startsWith('```')) {
-    t = t.replace(/^```[a-zA-Z]*\s*/, '').replace(/\s*```$/, '');
-  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(t);
+    parsed = JSON.parse(stripJsonFences(text));
   } catch {
     return null;
   }

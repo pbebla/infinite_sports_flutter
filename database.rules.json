@@ -406,6 +406,9 @@
           "PlayerTotals": {
             ".read": true
           },
+          "PlayerWeeks": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()"
+          },
           "PriceChanges": {
             ".read": true
           },
@@ -431,6 +434,10 @@
             "Drafts": {
               ".read": "auth != null && root.child('Admins').child(auth.uid).exists()"
             }
+          },
+          "ScheduledPushes": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
           },
           "DreamTeam": {
             ".read": true,

@@ -9,7 +9,9 @@
 //   with the Phase E chip-void/cost freeze riding it), finalize any locked
 //   gameweek whose match day completed while the match-day trigger was down
 //   (fantasy_finalize.ts is the fast path), and push the once-per-gameweek
-//   deadline reminder to unchanged squads (spec §12).
+//   deadline reminder to unchanged squads (spec §12). Also sends the
+//   owner's due scheduled manager messages (ScheduledPushes, messages.ts) —
+//   even for a season whose lockOverride freezes the engine.
 //
 // - fantasyMondayReprice (Mondays 10:00 America/Los_Angeles — league time,
 //   spec §4/§5): reprice the most recent finalized gameweek not yet

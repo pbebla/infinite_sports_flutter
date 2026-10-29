@@ -65,6 +65,10 @@
 //   heads-up push). The News/Drafts, News/Published and Config/NewsAutopilot
 //   (legacy Config/DreamTeamPost) shapes live in news.ts.
 //
+// - ScheduledPushes/<id> (Manager-written owner messages; the sweep sends
+//   the due ones — even while lockOverride freezes the engine): the shape
+//   and the SentAt claim live in messages.ts.
+//
 // - Voided/<gw> = true (READ-only here; the Manager's "VOID week" toggle
 //   writes true or removes it — spec §15). A voided week settles to zero
 //   (finalize_core.ts VOIDED GAMEWEEKS), its transfer cost is waived (the
@@ -110,6 +114,7 @@ import {
   nextLeagueWeekdayInstantUtc, publishedRowFromDraft, shouldAutoPublish,
 } from './news';
 import { buildPlayerCard, cardsNode, seasonGoalsAssists } from './news_cards';
+import { sendDueScheduledMessages } from './messages';
 import {
   allGamesFinal, childEntries, dateKeysOf, FantasyDb, fantasyRoot,
   fantasySeasonsOf, fullAttendance, gamesOfDate, isPlainMap,
@@ -1024,6 +1029,15 @@ async function sweepSeason(
     log.info('fantasy sweep: lock override expired — back to auto', ctx);
     configNode = { ...configNode, lockOverride: 'auto' };
     delete configNode['lockOverrideUntil'];
+  }
+  // 0b. Scheduled manager messages (spec 2026-10-28 §3): owner messages are
+  //     not engine jobs, so they go out BEFORE the stand-down below — a
+  //     paused engine still delivers "Match day postponed". messages.ts owns
+  //     the ScheduledPushes shape (SentAt claim, Sent / Error). A sweep
+  //     without a pusher claims nothing.
+  if (deps?.pusher) {
+    await sendDueScheduledMessages(
+      db, deps.pusher, { sport, season, nowUtc, log });
   }
   if (lockOverrideOf(configNode, nowMs) !== 'auto') {
     log.info('fantasy sweep: lockOverride frozen — standing down', ctx);

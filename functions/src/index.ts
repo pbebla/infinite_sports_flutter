@@ -381,3 +381,8 @@ export { onFantasyPositionWritten } from './fantasy_positions';
 // ---- Infinite Fantasy (spec 2026-10-28 §4.5): news push on publish ----
 
 export { onFantasyNewsPublished } from './fantasy_news';
+
+// ---- Infinite Fantasy (spec 2026-10-28 §3, §4.5): Manager AI copy +
+// Message managers ----
+
+export { sendFantasyMessage, writeFantasyCopy } from './fantasy_messages';
