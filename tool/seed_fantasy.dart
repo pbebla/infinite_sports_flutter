@@ -10,7 +10,8 @@
 //
 // --dry prints the full summary (players per position, price spread, flagged
 // entries) and performs NO writes; a real run additionally PUTs the Config and
-// Players nodes with `?access_token=<adminToken>`. Launch data for a future
+// Players nodes with the admin OAuth access token in an
+// `Authorization: Bearer` header (never in the URL). Launch data for a future
 // season is a re-run of this tool against that season (plan P3a).
 //
 // All pure logic (position mapping, aggregation, pricing, node shapes) lives
@@ -39,8 +40,11 @@ Future<Object?> _get(HttpClient client, String path) async {
 
 Future<void> _put(
     HttpClient client, String path, String token, Object value) async {
-  final uri = Uri.https(_host, '$path.json', {'access_token': token});
+  // The token rides in the Authorization header (RTDB REST accepts OAuth2
+  // Bearer access tokens) — never in the URL, which logs and errors echo.
+  final uri = Uri.https(_host, '$path.json');
   final req = await client.putUrl(uri);
+  req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
   req.headers.contentType = ContentType.json;
   req.write(jsonEncode(value));
   final res = await req.close();
