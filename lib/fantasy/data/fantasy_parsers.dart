@@ -289,6 +289,11 @@ Set<String> watchlistFromNode(Object? node) {
   };
 }
 
+/// The league's own season-over flag, `/<sport>/<season>/Finished`: only an
+/// exact `true` means the season is over (absent / false / malformed → not
+/// finished). After it the price arrows go away (follow-up C).
+bool seasonFinishedFromNode(Object? node) => node == true;
+
 /// Match-day keys (MMDDYYYY) from the season's `/<sport>/<season>/Date` node
 /// — the deriveGameweeks input. Date keys never list-coerce (they aren't
 /// small ints), but guard anyway.

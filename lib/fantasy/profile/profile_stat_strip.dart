@@ -1,24 +1,33 @@
 // The profile's stat strip (round 3, spec §4, owner mockup): the price in
-// the fantasy accent with this week's move under it ("▲ $0.5M this week"
+// the same ink as the other numbers (colorScheme.onSurface — white on dark,
+// black on light) with this week's move under it ("▲ $0.5M this week"
 // green, "▼ $0.5M this week" red, "No change" muted, nothing before the
-// first reprice), then Total pts, PPG and Owned %. "—" wherever the truth is
-// "no data yet" (never a made-up 0 / 0.0).
+// first reprice), then Total pts, PPG and Owned %. Once the season is over
+// (the league's `Finished` flag) there is no move line: a muted "Final
+// price" sits under the price instead. "—" wherever the truth is "no data
+// yet" (never a made-up 0 / 0.0).
 
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
-import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/profile_common.dart';
 
 class FantasyProfileStatStrip extends StatelessWidget {
-  const FantasyProfileStatStrip({super.key, required this.model});
+  const FantasyProfileStatStrip({
+    super.key,
+    required this.model,
+    this.seasonFinished = false,
+  });
 
   final FantasyProfileModel model;
+
+  /// The season is over: "Final price" replaces the move line.
+  final bool seasonFinished;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final move = model.moveText;
+    final move = seasonFinished ? null : model.moveText;
     final divider = VerticalDivider(
       width: 1,
       thickness: 1,
@@ -45,10 +54,23 @@ class FantasyProfileStatStrip extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.w800,
-                        color: fantasyAccent(context),
+                        color: scheme.onSurface,
                       ),
                     ),
-                    if (move != null) ...[
+                    if (seasonFinished) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        kFinalPriceLabel,
+                        key: const ValueKey('profile_final_price'),
+                        textAlign: TextAlign.center,
+                        softWrap: true,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ] else if (move != null) ...[
                       const SizedBox(height: 3),
                       Text(
                         move,

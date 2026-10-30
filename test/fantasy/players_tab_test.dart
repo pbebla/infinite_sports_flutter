@@ -60,6 +60,7 @@ void main() {
   late StreamController<Map<int, Map<String, int>>> changes;
   late StreamController<List<TournamentMatch>> games;
   late StreamController<Set<String>> watchlist;
+  late StreamController<bool> seasonFinished;
   late List<String> opened;
 
   final players = <FantasyPlayer>[
@@ -90,6 +91,7 @@ void main() {
     changes = StreamController<Map<int, Map<String, int>>>.broadcast();
     games = StreamController<List<TournamentMatch>>.broadcast();
     watchlist = StreamController<Set<String>>.broadcast();
+    seasonFinished = StreamController<bool>.broadcast();
     opened = [];
   });
 
@@ -98,6 +100,7 @@ void main() {
     changes.close();
     games.close();
     watchlist.close();
+    seasonFinished.close();
   });
 
   Future<void> pumpTab(
@@ -109,6 +112,7 @@ void main() {
     ThemeMode themeMode = ThemeMode.light,
     Future<int> Function()? loadStartHour,
     Stream<List<TournamentMatch>> Function(int startHour)? leagueGamesFor,
+    Stream<bool>? seasonFinishedStates,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -133,6 +137,11 @@ void main() {
           leagueGamesFor: leagueGamesFor,
           loadStartHour: loadStartHour,
           watchlistStates: watchlist.stream,
+          // Default: the league's Finished flag answers "not over" at once
+          // (like a cache-seeded stream); a test drives it live by passing
+          // [seasonFinished].stream.
+          seasonFinishedStates:
+              seasonFinishedStates ?? Stream<bool>.value(false),
           selfUidOverride: selfUid,
           openPlayer: (context, name) => opened.add(name),
           nowUtc: () => DateTime.utc(2026, 11, 2, 18),
@@ -175,7 +184,7 @@ void main() {
 
   testWidgets('one fade reveal: a skeleton until EVERY feed has landed',
       (tester) async {
-    await pumpTab(tester);
+    await pumpTab(tester, seasonFinishedStates: seasonFinished.stream);
     expect(
         find.byKey(const ValueKey('players_market_skeleton')), findsOneWidget);
     expect(find.byKey(const ValueKey('market_row_Ava Striker')), findsNothing);
@@ -190,6 +199,14 @@ void main() {
     expect(find.byKey(const ValueKey('market_row_Ava Striker')), findsNothing);
 
     watchlist.add(const {});
+    await tester.pump();
+    // The season-finished flag hasn't answered yet either — still the
+    // skeleton (no price arrows flashing in then out).
+    expect(
+        find.byKey(const ValueKey('players_market_skeleton')), findsOneWidget);
+    expect(find.byKey(const ValueKey('market_row_Ava Striker')), findsNothing);
+
+    seasonFinished.add(false);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('players_market_skeleton')), findsNothing);
     expect(
@@ -550,6 +567,274 @@ void main() {
     await tester.pumpAndSettle();
     expect(opened, ['Ava Striker']);
     expect(find.byKey(const ValueKey('market_player_sheet')), findsNothing);
+  });
+
+  group('form line (owner follow-up A)', () {
+    // Form is shown next to total points: one decimal + " form", "—" when he
+    // has played no games (or the server wrote no form).
+    const formTotals = <String, FantasyPlayerTotals>{
+      'Ava Striker': FantasyPlayerTotals(
+          points: 331,
+          ownershipPct: 62,
+          formTenths: 250,
+          ppgTenths: 45,
+          games: 12),
+      'Gus Glove': FantasyPlayerTotals(
+          points: 70, ownershipPct: 8, formTenths: 67, ppgTenths: 58, games: 12),
+      // Old-shape node: points only — no form, no games.
+      'Dana Wall': FantasyPlayerTotals(points: 12, ownershipPct: 30),
+      // Games 0 → "—" even though a form number exists.
+      'Deb Rock': FantasyPlayerTotals(
+          points: 0, ownershipPct: 5, formTenths: 30, ppgTenths: 0, games: 0),
+      // Games but formTenths null.
+      'Axel Shot': FantasyPlayerTotals(
+          points: 9, ownershipPct: 1, ppgTenths: 12, games: 3),
+    };
+
+    String formText(WidgetTester tester, String name) => tester
+        .widget<Text>(find.byKey(ValueKey('market_form_$name')))
+        .data!;
+
+    testWidgets(
+        'under the points line: 250 → "25.0 form", 67 → "6.7 form"; no '
+        'form / no games / no entry → "— form"', (tester) async {
+      await pumpTab(tester);
+      await land(tester, totalsValue: formTotals);
+
+      expect(formText(tester, 'Ava Striker'), '25.0 form');
+      expect(formText(tester, 'Gus Glove'), '6.7 form');
+      expect(formText(tester, 'Dana Wall'), '— form'); // no form, no games
+      expect(formText(tester, 'Deb Rock'), '— form'); // games == 0
+      expect(formText(tester, 'Axel Shot'), '— form'); // formTenths null
+      expect(formText(tester, 'Alan Keeper'), '— form'); // totals, no entry
+      // The points line is unchanged.
+      expect(
+          tester
+              .widget<Text>(
+                  find.byKey(const ValueKey('market_points_Ava Striker')))
+              .data,
+          '331 pts');
+    });
+
+    testWidgets('same muted style as the points line, one line below it',
+        (tester) async {
+      await pumpTab(tester);
+      await land(tester, totalsValue: formTotals);
+
+      final points = tester.widget<Text>(
+          find.byKey(const ValueKey('market_points_Ava Striker')));
+      final form = tester
+          .widget<Text>(find.byKey(const ValueKey('market_form_Ava Striker')));
+      expect(form.style, points.style);
+      final pointsY = tester
+          .getTopLeft(find.byKey(const ValueKey('market_points_Ava Striker')))
+          .dy;
+      final formY = tester
+          .getTopLeft(find.byKey(const ValueKey('market_form_Ava Striker')))
+          .dy;
+      expect(formY, greaterThan(pointsY));
+      // Right-aligned with the points line (the same column).
+      expect(
+          tester
+              .getTopRight(
+                  find.byKey(const ValueKey('market_form_Ava Striker')))
+              .dx,
+          tester
+              .getTopRight(
+                  find.byKey(const ValueKey('market_points_Ava Striker')))
+              .dx);
+    });
+
+    testWidgets('absent totals: no form line at all (like the points line)',
+        (tester) async {
+      await pumpTab(tester);
+      await land(tester);
+      expect(
+          find.byKey(const ValueKey('market_form_Ava Striker')), findsNothing);
+      expect(find.textContaining(' form'), findsNothing);
+      expect(find.textContaining(' pts'), findsNothing);
+    });
+
+    testWidgets('sorting is untouched: Total Pts is still the default order',
+        (tester) async {
+      await pumpTab(tester);
+      await land(tester, totalsValue: formTotals);
+      expectOrder(tester, ['Ava Striker', 'Gus Glove', 'Dana Wall']);
+    });
+
+    for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+      testWidgets('no overflow at 360 px with the third line ($mode)',
+          (tester) async {
+        await pumpTab(tester,
+            size: const Size(360, 900),
+            themeMode: mode,
+            marketPlayers: [
+              player(longName, FantasyPosition.att, 105, team: longTeam),
+              ...players,
+            ]);
+        await land(tester, totalsValue: {
+          longName: const FantasyPlayerTotals(
+              points: 1234,
+              ownershipPct: 100,
+              formTenths: 1055,
+              ppgTenths: 99,
+              games: 20),
+          ...formTotals,
+        }, changesValue: const {
+          1: {'Ava Striker': 5},
+        });
+        expect(tester.takeException(), isNull);
+        expect(formText(tester, longName), '105.5 form');
+      });
+    }
+  });
+
+  group('season over (owner follow-up C): price arrows go away', () {
+    final market = <FantasyPlayer>[
+      player('Gil Keeper', FantasyPosition.gk, 50),
+      player('Gary Gloves', FantasyPosition.gk, 45, team: 'Team B'),
+      player('Dan Back', FantasyPosition.def, 60),
+      player('Abe Shot', FantasyPosition.att, 70),
+    ];
+    const moves = {
+      3: {'Gil Keeper': 3, 'Gary Gloves': -3, 'Dan Back': -2, 'Abe Shot': 5},
+    };
+    const owned = {
+      'Gil Keeper': FantasyPlayerTotals(points: 20, ownershipPct: 41),
+      'Dan Back': FantasyPlayerTotals(points: 15, ownershipPct: 17),
+    };
+
+    testWidgets(
+        'not finished: every row has its arrow and the Risers / Fallers '
+        'card shows', (tester) async {
+      await pumpTab(tester, marketPlayers: market);
+      await land(tester, totalsValue: owned, changesValue: moves);
+      for (final p in market) {
+        expect(find.byKey(ValueKey('market_move_${p.name}')), findsOneWidget,
+            reason: p.name);
+      }
+      expect(find.byKey(const ValueKey('price_movers_card')), findsOneWidget);
+    });
+
+    testWidgets(
+        'finished: no price-move arrow on any row and no Risers / Fallers '
+        'card — the owned % stays', (tester) async {
+      await pumpTab(tester,
+          marketPlayers: market, seasonFinishedStates: Stream.value(true));
+      await land(tester, totalsValue: owned, changesValue: moves);
+      for (final p in market) {
+        expect(find.byKey(ValueKey('market_move_${p.name}')), findsNothing,
+            reason: p.name);
+      }
+      expect(find.byKey(const ValueKey('price_movers_card')), findsNothing);
+      // The owned % keeps its column; price + points + form are untouched.
+      expect(find.byKey(const ValueKey('market_owned_Gil Keeper')),
+          findsOneWidget);
+      expect(find.text('41%'), findsOneWidget);
+      expect(find.byKey(const ValueKey('market_price_Gil Keeper')),
+          findsOneWidget);
+      expect(find.byKey(const ValueKey('market_points_Gil Keeper')),
+          findsOneWidget);
+      expect(
+          find.byKey(const ValueKey('market_form_Gil Keeper')), findsOneWidget);
+    });
+
+    testWidgets('live: the flag flipping removes / restores the arrows + card',
+        (tester) async {
+      await pumpTab(tester,
+          marketPlayers: market, seasonFinishedStates: seasonFinished.stream);
+      seasonFinished.add(false);
+      await land(tester, totalsValue: owned, changesValue: moves);
+      expect(find.byKey(const ValueKey('market_move_Gil Keeper')),
+          findsOneWidget);
+      expect(find.byKey(const ValueKey('price_movers_card')), findsOneWidget);
+
+      seasonFinished.add(true);
+      await tester.pumpAndSettle();
+      expect(
+          find.byKey(const ValueKey('market_move_Gil Keeper')), findsNothing);
+      expect(find.byKey(const ValueKey('price_movers_card')), findsNothing);
+
+      seasonFinished.add(false);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('market_move_Gil Keeper')),
+          findsOneWidget);
+      expect(find.byKey(const ValueKey('price_movers_card')), findsOneWidget);
+    });
+
+    testWidgets(
+        'the flag is part of the reveal gate: no arrows flashing in then '
+        'out', (tester) async {
+      await pumpTab(tester,
+          marketPlayers: market, seasonFinishedStates: seasonFinished.stream);
+      totals.add(owned);
+      changes.add(moves);
+      games.add(const []);
+      watchlist.add(const {});
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      // Everything else landed, the flag has not: still the skeleton, and no
+      // arrow was ever built.
+      expect(find.byKey(const ValueKey('players_market_skeleton')),
+          findsOneWidget);
+      expect(
+          find.byKey(const ValueKey('market_move_Gil Keeper')), findsNothing);
+
+      seasonFinished.add(true);
+      await tester.pumpAndSettle();
+      expect(
+          find.byKey(const ValueKey('players_market_skeleton')), findsNothing);
+      expect(
+          find.byKey(const ValueKey('market_row_Gil Keeper')), findsOneWidget);
+      expect(
+          find.byKey(const ValueKey('market_move_Gil Keeper')), findsNothing);
+    });
+
+    testWidgets('a failing flag feed is logged and treated as not finished',
+        (tester) async {
+      final logs = <String?>[];
+      final oldPrint = debugPrint;
+      // Restored in the body (the framework checks foundation vars BEFORE
+      // addTearDown callbacks run).
+      debugPrint = (String? m, {int? wrapWidth}) => logs.add(m);
+      try {
+        await pumpTab(tester,
+            marketPlayers: market,
+            seasonFinishedStates:
+                Stream<bool>.error(StateError('permission denied')));
+        await land(tester, totalsValue: owned, changesValue: moves);
+      } finally {
+        debugPrint = oldPrint;
+      }
+      expect(
+          find.byKey(const ValueKey('players_market_skeleton')), findsNothing);
+      expect(find.byKey(const ValueKey('market_move_Gil Keeper')),
+          findsOneWidget);
+      expect(find.byKey(const ValueKey('price_movers_card')), findsOneWidget);
+      expect(logs.any((l) => l != null && l.contains('permission denied')),
+          isTrue);
+    });
+
+    testWidgets('a revisit paints at once from the session (no skeleton)',
+        (tester) async {
+      await pumpTab(tester,
+          marketPlayers: market, seasonFinishedStates: Stream.value(true));
+      await land(tester, totalsValue: owned, changesValue: moves);
+      expect(
+          find.byKey(const ValueKey('market_move_Gil Keeper')), findsNothing);
+
+      await tester.pumpWidget(const SizedBox());
+      // The second visit's flag stream never answers: the session answers.
+      await pumpTab(tester,
+          marketPlayers: market,
+          seasonFinishedStates: const Stream<bool>.empty());
+      await tester.pump();
+      expect(
+          find.byKey(const ValueKey('players_market_skeleton')), findsNothing);
+      expect(
+          find.byKey(const ValueKey('market_move_Gil Keeper')), findsNothing);
+      expect(find.byKey(const ValueKey('price_movers_card')), findsNothing);
+    });
   });
 
   group('Price Risers / Price Fallers card', () {

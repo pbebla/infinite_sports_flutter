@@ -2,21 +2,23 @@
 // docs/superpowers/specs/assets/2026-10-29-fantasy-round3/
 // mockup-player-profile.webp). Replaces the market's bottom sheet: hero
 // (photo + gradient / initials over the team colour, team logo badge, name,
-// "Team · Position"), watchlist star, stat strip (price + this week's move,
-// total pts, PPG, owned %), tabs Overview · Stats · Matches · Price, and a
-// bottom bar — Add to Team / Remove under the market's exact rules (edits
-// the hub's SHARED draft; saving stays on My Team) or "Open in Fantasy" when
-// opened from outside the hub — plus "See full profile" for a linked
-// account only.
+// "Team · Position"), watchlist star, stat strip (price + this week's move —
+// or a muted "Final price" once the season is over — total pts, PPG, owned
+// %), tabs Overview · Stats · Matches · Price, and a bottom bar — Add to
+// Team / Remove under the market's exact rules (edits the hub's SHARED
+// draft; saving stays on My Team) or "Open in Fantasy" when opened from
+// outside the hub — plus "See full profile" for a linked account only.
 //
 // Data (all live streams, no RTDB get()): Config + schedule gameweeks (lock
 // state + which weeks to listen to), Players (his live price), PlayerTotals,
-// every PriceChanges / PriceHistory week, his PlayerWeekStats (one listener
-// per schedule gameweek), league rosters (season stats, shirt number, the
-// account link — team AND name), league games (next game; startHour passed
-// so legacy times never read "0 PM"), the Teams node (jersey colour) and,
-// signed in, his own watchlist. ONE fade reveal once every feed has landed;
-// any failing feed degrades to "no data" rather than holding the skeleton.
+// the league's season-over flag (`Finished`), every PriceChanges /
+// PriceHistory week, his PlayerWeekStats (one listener per schedule
+// gameweek), league rosters (season stats, shirt number, the account link —
+// team AND name), league games (next game; startHour passed so legacy times
+// never read "0 PM"), the Teams node (jersey colour) and, signed in, his own
+// watchlist. ONE fade reveal once every feed has landed (the season-over
+// flag included — no move line flashing in then out); any failing feed
+// degrades to "no data" rather than holding the skeleton.
 // The FantasyService/LeagueService feeds are session-cache seeded; the
 // schedule (Config → gameweeks → his weekly records) and the league games
 // (start hour → games) come from the shared feeds in
@@ -113,6 +115,7 @@ class FantasyPlayerProfilePage extends StatefulWidget {
     this.leagueGamesFor,
     this.teamsStates,
     this.watchlistStates,
+    this.seasonFinishedStates,
     this.selfUidOverride,
     this.setWatchlisted,
     this.loadLogoUrls,
@@ -155,6 +158,9 @@ class FantasyPlayerProfilePage extends StatefulWidget {
   final Stream<List<TournamentTeam>>? teamsStates;
   final Stream<Set<String>>? watchlistStates;
 
+  /// The league's `Finished` flag (`FantasyService.watchLeagueSeasonFinished`).
+  final Stream<bool>? seasonFinishedStates;
+
   /// '' = signed out (the star hides).
   final String? selfUidOverride;
   final Future<void> Function(String name, bool on)? setWatchlisted;
@@ -180,11 +186,12 @@ class FantasyPlayerProfilePage extends StatefulWidget {
   static final Map<String, Map<String, Color>> _teamColorsSession = {};
 
   /// Clears the page's session caches (sign-out hygiene, tests) — including
-  /// the shared schedule / games caches it paints from.
+  /// the shared schedule / games / season-over caches it paints from.
   static void clearSessionCaches() {
     _teamColorsSession.clear();
     FantasyScheduleFeed.clearSessionCache();
     FantasyLeagueGamesFeed.clearSessionCache();
+    FantasySeasonFinishedFeed.clearSessionCache();
   }
 
   @override
@@ -251,6 +258,18 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
     loadStartHour: widget.loadStartHour,
   );
 
+  /// The league's season-over flag (shared feed): its answer joins the reveal
+  /// gate so the move line never flashes in and out; once true the stat strip
+  /// shows "Final price" instead of the move.
+  late final FantasySeasonFinishedFeed _seasonFinished =
+      FantasySeasonFinishedFeed(
+    sport: widget.sport,
+    season: widget.season,
+    owner: 'FantasyPlayerProfilePage',
+    onChanged: _repaint,
+    finishedStates: widget.seasonFinishedStates,
+  );
+
   FantasyConfigState? get _config => _schedule.config;
   List<Gameweek>? get _gameweeks => _schedule.gameweeks;
   Map<int, PlayerWeekStats>? get _weeks => _schedule.weekData;
@@ -304,6 +323,7 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
       _priceHistory != null &&
       _priceChanges != null &&
       _schedule.weekLoaded &&
+      _seasonFinished.ready &&
       _rostersLoaded &&
       _leagueGames.ready &&
       _teamsLoaded &&
@@ -331,6 +351,7 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
     });
     _seedFromSession();
     _schedule.start();
+    _seasonFinished.start();
     _subscribeMarketFeeds();
     _subscribeLeagueFeeds();
     _subscribeWatchlist();
@@ -452,6 +473,7 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
   @override
   void dispose() {
     _schedule.dispose();
+    _seasonFinished.dispose();
     _leagueGames.dispose();
     _playersSub?.cancel();
     _totalsSub?.cancel();
@@ -671,7 +693,10 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-                  child: FantasyProfileStatStrip(model: model),
+                  child: FantasyProfileStatStrip(
+                    model: model,
+                    seasonFinished: _seasonFinished.finished,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 TabBar(

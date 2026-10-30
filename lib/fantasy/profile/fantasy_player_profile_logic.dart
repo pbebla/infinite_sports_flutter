@@ -28,6 +28,10 @@ const String kPointsStartCopy = 'Points start after Gameweek 1';
 /// Weeks exist but nothing scored (never played / only voided weeks).
 const String kNoPointsYetCopy = 'No points scored yet';
 
+/// Under the price once the season is over (the league's `Finished` flag):
+/// replaces the "this week" move line — the price is final, it cannot move.
+const String kFinalPriceLabel = 'Final price';
+
 /// One recent-form bar: a gameweek he has a record for.
 class FormBar {
   const FormBar({required this.gw, required this.points, required this.voided});
@@ -172,8 +176,7 @@ class FantasyProfileModel {
       (_noGames || ppgTenths == null) ? '—' : _tenthsText(ppgTenths!);
 
   /// "6.7"; "—" when he has played no games.
-  String get formText =>
-      (_noGames || formTenths == null) ? '—' : _tenthsText(formTenths!);
+  String get formText => formatFormTenths(formTenths, games: games);
 
   String get gamesText => games?.toString() ?? '—';
 

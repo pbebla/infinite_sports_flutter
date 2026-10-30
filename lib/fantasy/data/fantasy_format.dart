@@ -12,6 +12,15 @@ import 'package:infinite_sports_flutter/fantasy/engine/league_time.dart';
 String formatMoneyTenths(int tenths) =>
     '\$${(tenths / 10).toStringAsFixed(1)}M';
 
+/// A player's form (tenths of a point per game over his last weeks): 250 →
+/// "25.0", 67 → "6.7". "—" when he has played no games (null / 0) or the
+/// server wrote no form — never a made-up "0.0". The ONE source for the
+/// market rows' "6.7 form" line and the profile's Form cell.
+String formatFormTenths(int? formTenths, {required int? games}) =>
+    (games == null || games == 0 || formTenths == null)
+        ? '—'
+        : (formTenths / 10).toStringAsFixed(1);
+
 /// League-local lock hour → "3:00 PM" (cfg.lockHour is league wall-clock).
 String formatLockHour(int hour) {
   final h12 = hour % 12 == 0 ? 12 : hour % 12;

@@ -14,18 +14,26 @@
 // (survives filter changes and tab swipes). Without totals the market reads
 // Price and the other pills are dead with a reason.
 //
+// Each row's right column is price, total points, then the player's form
+// ("6.7 form", "— form" when he has played no games) — points and form show
+// only once PlayerTotals exists.
+//
 // The Price Risers / Price Fallers card (price_movers_card.dart) follows the
 // eligible rows (owner's mockup — the rows stay above the fold), before the
 // guests block, once the latest reprice moved somebody. Every row / mover
 // tap opens the full fantasy player profile (with the shared draft).
 //
+// Once the season is over (the league's own `Finished` flag) the rows' price
+// arrows and the Risers / Fallers card go away — the owned % stays.
+//
 // Data, all live streams (no RTDB get()): PlayerTotals, every PriceChanges
-// week (the latest is "this week"), the league games (next game; the season
-// start hour is passed so legacy times never read "0 PM" — an unknown hour
-// drops the time instead) and, signed in, the watchlist. ONE fade reveal
-// once every feed has landed; any failing feed degrades to "no data"
-// instead of holding the skeleton. Session caches make a revisit paint at
-// once.
+// week (the latest is "this week"), the league's season-over flag, the
+// league games (next game; the season start hour is passed so legacy times
+// never read "0 PM" — an unknown hour drops the time instead) and, signed
+// in, the watchlist. ONE fade reveal once every feed has landed (the flag
+// included — no arrow flashing in then out); any failing feed degrades to
+// "no data" instead of holding the skeleton. Session caches make a revisit
+// paint at once.
 //
 // House rules: colorScheme + fantasy accent both themes (gold on dark, the
 // primary red on light); names wrap, never underlined; glass-navbar bottom
@@ -71,6 +79,7 @@ class FantasyPlayersTab extends StatefulWidget {
     this.leagueGamesFor,
     this.loadStartHour,
     this.watchlistStates,
+    this.seasonFinishedStates,
     this.selfUidOverride,
     this.openPlayer,
     this.nowUtc,
@@ -106,6 +115,9 @@ class FantasyPlayersTab extends StatefulWidget {
   final Future<int> Function()? loadStartHour;
   final Stream<Set<String>>? watchlistStates;
 
+  /// The league's `Finished` flag (`FantasyService.watchLeagueSeasonFinished`).
+  final Stream<bool>? seasonFinishedStates;
+
   /// '' = signed out (no ★ chip).
   final String? selfUidOverride;
 
@@ -128,10 +140,11 @@ class FantasyPlayersTab extends StatefulWidget {
   static final Map<String, _MarketSession> _sessions = {};
 
   /// Clears the market's session snapshots (sign-out hygiene, tests) —
-  /// including the shared league-games cache it paints from.
+  /// including the shared league-games and season-over caches it paints from.
   static void clearSessionCaches() {
     _sessions.clear();
     FantasyLeagueGamesFeed.clearSessionCache();
+    FantasySeasonFinishedFeed.clearSessionCache();
   }
 
   @override
@@ -177,6 +190,22 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
     gamesFor: widget.leagueGamesFor,
     loadStartHour: widget.loadStartHour,
   );
+
+  /// The league's season-over flag (shared feed): its answer joins the reveal
+  /// gate, so no arrow ever flashes in and out; a revisit paints from the
+  /// session. [FantasySeasonFinishedFeed.finished] hides the arrows + card.
+  late final FantasySeasonFinishedFeed _seasonFinished =
+      FantasySeasonFinishedFeed(
+    sport: widget.sport,
+    season: widget.season,
+    owner: 'FantasyPlayersTab',
+    onChanged: () {
+      if (!mounted) return;
+      setState(() {});
+      _pushMovesForSheet();
+    },
+    finishedStates: widget.seasonFinishedStates,
+  );
   Set<String> _watchlist = const {};
   bool _watchlistLoaded = false;
 
@@ -212,6 +241,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
   bool get _ready =>
       _totalsLoaded &&
       _priceChanges != null &&
+      _seasonFinished.ready &&
       _leagueGames.ready &&
       _watchlistLoaded;
 
@@ -227,6 +257,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
     widget.draft.addListener(_onDraftChanged);
     _seedFromSession();
     _subscribeMarketFeeds();
+    _seasonFinished.start();
     _leagueGames.start();
     _subscribeWatchlist();
     // 30s tick keeps the editable/locked flip honest around the deadline
@@ -321,6 +352,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
     widget.draft.removeListener(_onDraftChanged);
     _totalsSub?.cancel();
     _priceChangesSub?.cancel();
+    _seasonFinished.dispose();
     _leagueGames.dispose();
     _watchlistSub?.cancel();
     _movesForSheet.close();
@@ -338,9 +370,10 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
       );
 
   /// Every move of the latest reprice for players in the market; null
-  /// before any reprice or when the latest one moved nobody (the card and
-  /// the sheet's content then hide).
+  /// before any reprice, when the latest one moved nobody, or once the season
+  /// is over (the card and the sheet's content then hide).
   PriceMovesSnapshot? _movesSnapshot() {
+    if (_seasonFinished.finished) return null;
     final latest = latestPriceMoves(_priceChanges ?? const {});
     if (latest == null) return null;
     final all = sortedPriceMoves(latest.changes, widget.players, _totals);
@@ -451,7 +484,10 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
       watchlist: _watchlist,
       watchlistOnly: watchlistOnly,
     );
-    final latest = latestPriceMoves(_priceChanges ?? const {});
+    // Season over: no price-move arrows (rows) and no Risers / Fallers card.
+    final latest = _seasonFinished.finished
+        ? null
+        : latestPriceMoves(_priceChanges ?? const {});
     final moves = _movesSnapshot();
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final appear =
@@ -717,6 +753,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
     final totals = _totals?[p.name];
     final unaffordable = availability == MarketAddAvailability.unaffordable;
     final pct = totals?.ownershipPct;
+    final form = formatFormTenths(totals?.formTenths, games: totals?.games);
     final showMoveColumn = latestGameweek != null || _totals != null;
     final muted = TextStyle(
       fontSize: 11.5,
@@ -790,13 +827,20 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
                         : (isDark ? fantasyAccent(context) : scheme.onSurface),
                   ),
                 ),
-                // Points only once finalized totals exist — never a made-up 0.
-                if (_totals != null)
+                // Points and form only once finalized totals exist — never a
+                // made-up 0. "— form" until he has played a game.
+                if (_totals != null) ...[
                   Text(
                     pointsText(totals?.points ?? 0),
                     key: ValueKey('market_points_${p.name}'),
                     style: muted,
                   ),
+                  Text(
+                    '$form form',
+                    key: ValueKey('market_form_${p.name}'),
+                    style: muted,
+                  ),
+                ],
               ],
             ),
           ),

@@ -10,6 +10,9 @@
 //   [FantasyLeagueGamesFeed]: the season's legacy start hour → the league
 //   games derived with it.
 //
+//   [FantasySeasonFinishedFeed]: the league's own `Finished` flag — the
+//   screens drop their price arrows once the season is over.
+//
 // This used to be hand-wired four times (home banner, hub, player profile,
 // the Infinite profile's Fantasy tab) plus twice for the games (market,
 // player profile), and the copies had drifted. One behaviour now, for every
@@ -483,5 +486,99 @@ class FantasyLeagueGamesFeed {
         _notify();
       },
     );
+  }
+}
+
+/// The league's own season-over flag (`/<sport>/<season>/Finished`) behind the
+/// screens that drop their price arrows once the season is over (the Players
+/// market, the player profile's stat strip, the Infinite profile's Fantasy
+/// tab). One wiring, one behaviour:
+///   • [ready] joins the owner's reveal gate — nothing paints the arrows
+///     before the flag has answered (no arrow flashing in then out);
+///   • an error (or a stream that cannot even be created — no Firebase app in
+///     a widget test) is logged with debugPrint and opens the gate: "not
+///     finished" unless an earlier real answer says otherwise (last good kept);
+///   • the last answer is session-cached per `<sport>|<season>`, so a revisit
+///     paints at once and the live stream then refreshes it in place.
+class FantasySeasonFinishedFeed {
+  FantasySeasonFinishedFeed({
+    required this.sport,
+    required this.season,
+    required this.owner,
+    required this.onChanged,
+    this.finishedStates,
+  });
+
+  final String sport;
+  final String season;
+  final String owner;
+  final VoidCallback onChanged;
+
+  /// Test seam REPLACING `FantasyService.watchLeagueSeasonFinished`.
+  final Stream<bool>? finishedStates;
+
+  /// The last answer per `<sport>|<season>` (written by every real emission).
+  static final Map<String, bool> _session = {};
+
+  /// Clears the shared flag cache (sign-out hygiene, tests).
+  static void clearSessionCache() => _session.clear();
+
+  String get _sessionKey => '$sport|$season';
+
+  bool _started = false;
+  bool _starting = false;
+  bool _disposed = false;
+  bool _finished = false;
+  bool _loaded = false;
+  StreamSubscription<bool>? _sub;
+
+  /// The season is over (false until the flag says so).
+  bool get finished => _finished;
+
+  /// The flag has answered (or failed) — joins the owner's reveal gate.
+  bool get ready => _loaded;
+
+  /// Seeds from the session and subscribes. Never notifies synchronously —
+  /// the owner reads the seeded state right after it returns.
+  void start() {
+    if (_started || _disposed) return;
+    _started = true;
+    _starting = true;
+    try {
+      final seed = _session[_sessionKey];
+      if (seed != null) {
+        _finished = seed;
+        _loaded = true;
+      }
+      _sub = _listenLogged<bool>(
+        owner: owner,
+        what: 'season finished feed',
+        make: () =>
+            finishedStates ??
+            FantasyService.watchLeagueSeasonFinished(sport, season),
+        disposed: () => _disposed,
+        onData: (finished) {
+          _session[_sessionKey] = finished;
+          _finished = finished;
+          _loaded = true;
+          _notify();
+        },
+        onError: () {
+          _loaded = true; // the last good answer stays; none = not finished
+          _notify();
+        },
+      );
+    } finally {
+      _starting = false;
+    }
+  }
+
+  void dispose() {
+    _disposed = true;
+    _sub?.cancel();
+  }
+
+  void _notify() {
+    if (!_disposed && !_starting) onChanged();
   }
 }

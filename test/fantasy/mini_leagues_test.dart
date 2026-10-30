@@ -5,8 +5,6 @@
 // already-member guard, Join writes own membership); the league detail's
 // ranked member rows + Share-code row; signed-out face.
 
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';

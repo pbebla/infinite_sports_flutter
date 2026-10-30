@@ -3,9 +3,10 @@
 // player and/or a fantasy manager of the current season (never on a limited
 // profile). Two sections, in the profile's own Card look:
 //
-//   * Fantasy Player — price with this week's move, total pts, form, owned %,
-//     the last six gameweeks' bars, and **Open in Fantasy** (the hub on its
-//     Players tab, which then opens THIS player's profile);
+//   * Fantasy Player — price (the same ink as the other numbers) with this
+//     week's move — or "Final price" once the season is over —, total pts,
+//     form, owned %, the last six gameweeks' bars, and **Open in Fantasy**
+//     (the hub on its Players tab, which then opens THIS player's profile);
 //   * Fantasy Manager — the team name (a flagged one never shows), overall
 //     rank + movement + points, and **View team** (the manager squad viewer;
 //     its court chips open the fantasy player profile from outside the hub).
@@ -30,8 +31,6 @@ import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart'
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart'
     show movementColor;
 import 'package:infinite_sports_flutter/fantasy/hub/manager_squad_viewer.dart';
-import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart'
-    show fantasyAccent;
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_page.dart'
     show FantasyProfileOpener, openFantasyPlayerProfile;
@@ -278,7 +277,9 @@ class _PlayerCard extends StatelessWidget {
       if (player.teamName.trim().isNotEmpty) player.teamName.trim(),
       positionLabel(player.position),
     ].join(' · ');
-    final move = model.moveText;
+    // Season over: no move line, and the label reads "Final price".
+    final finished = source.seasonFinished;
+    final move = finished ? null : model.moveText;
 
     return Card(
       key: const ValueKey('fantasy_player_card'),
@@ -319,12 +320,13 @@ class _PlayerCard extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.w800,
-                              color: fantasyAccent(context),
+                              color: scheme.onSurface,
                             ),
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            'Price',
+                            finished ? kFinalPriceLabel : 'Price',
+                            key: const ValueKey('fantasy_price_label'),
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,

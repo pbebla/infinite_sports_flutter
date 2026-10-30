@@ -45,6 +45,8 @@ class FantasyService {
   static final Map<String, Map<int, PlayerWeekStats>> _playerWeekStatsCache =
       {};
   static final Map<String, Set<String>> _watchlistCache = {};
+  // The league's own season-over flag, keyed `<sport>/<season>`.
+  static final Map<String, bool> _seasonFinishedCache = {};
 
   /// Clears the session caches (sign-out hygiene, tests).
   static void clearSessionCaches() {
@@ -61,6 +63,7 @@ class FantasyService {
     _allPriceChangesCache.clear();
     _playerWeekStatsCache.clear();
     _watchlistCache.clear();
+    _seasonFinishedCache.clear();
   }
 
   /// Live `Fantasy/<sport>/<season>/Config` → engine FantasyConfig + lock
@@ -213,6 +216,24 @@ class FantasyService {
       },
     );
     return controller.stream;
+  }
+
+  /// Live "season over" flag: the LEAGUE's own `/<sport>/<season>/Finished`
+  /// (not under `Fantasy/`; public read like the rest of the league tree).
+  /// Only an exact `true` is finished — absent / false → false. After the
+  /// season is over the price arrows and the Risers / Fallers card go away
+  /// (follow-up C). Seeded from the session cache so a revisit is instant;
+  /// cleared with the others by [clearSessionCaches].
+  static Stream<bool> watchLeagueSeasonFinished(
+      String sport, String season) async* {
+    final key = '$sport/$season';
+    final seed = _seasonFinishedCache[key];
+    if (seed != null) yield seed;
+    await for (final event in _ref('/$sport/$season/Finished').onValue) {
+      final finished = seasonFinishedFromNode(event.snapshot.value);
+      _seasonFinishedCache[key] = finished;
+      yield finished;
+    }
   }
 
   /// Live own watchlist (`Watchlists/<uid>/<name>` = true, round 3): the

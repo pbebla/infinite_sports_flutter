@@ -20,10 +20,11 @@
 //      session, so a revisit decides in its first frame;
 //   3. only for a uid WITH access, the CONTENT feeds: Config → schedule
 //      gameweeks, and per role the player's PlayerTotals / every PriceChanges
-//      week / his PlayerWeekStats (one listener per schedule gameweek), or
-//      the Leaderboards. [contentReady] flips once every feed that applies
-//      has landed (one fade reveal in the tab); a failing feed degrades to
-//      "no data" instead of holding the skeleton.
+//      week / the league's season-over flag (the price move line gives way to
+//      "Final price" once it is true) / his PlayerWeekStats (one listener per
+//      schedule gameweek), or the Leaderboards. [contentReady] flips once
+//      every feed that applies has landed (one fade reveal in the tab); a
+//      failing feed degrades to "no data" instead of holding the skeleton.
 //
 // The pure parts — [fantasyProfileAccess], [managerStanding],
 // [visibleTeamName] — are unit-tested in
@@ -73,6 +74,7 @@ class FantasyProfileSeams {
     this.gameweeksFor,
     this.totalsStates,
     this.priceChangeStates,
+    this.seasonFinishedStates,
     this.weekStatsFor,
     this.leaderboardsStates,
     this.selfUidOverride,
@@ -99,6 +101,9 @@ class FantasyProfileSeams {
   final Stream<List<Gameweek>> Function(FantasyConfig config)? gameweeksFor;
   final Stream<Map<String, FantasyPlayerTotals>?>? totalsStates;
   final Stream<Map<int, Map<String, int>>>? priceChangeStates;
+
+  /// The league's `Finished` flag (`FantasyService.watchLeagueSeasonFinished`).
+  final Stream<bool>? seasonFinishedStates;
   final Stream<Map<int, PlayerWeekStats>> Function(
       String playerName, List<int> weeks)? weekStatsFor;
   final Stream<FantasyLeaderboards>? leaderboardsStates;
@@ -234,10 +239,11 @@ class FantasyProfileSource extends ChangeNotifier {
   static final Map<String, _DecisionSeed> _decisionSession = {};
 
   /// Clears the session caches (sign-out hygiene, tests) — including the
-  /// shared schedule cache this source paints from.
+  /// shared schedule and season-over caches this source paints from.
   static void clearSessionCaches() {
     _decisionSession.clear();
     FantasyScheduleFeed.clearSessionCache();
+    FantasySeasonFinishedFeed.clearSessionCache();
     _resolving = null;
     _noSeasonAt = null;
   }
@@ -330,6 +336,9 @@ class FantasyProfileSource extends ChangeNotifier {
   /// A Config ERROR is not this: it keeps the last good config and the tab.
   bool get _configAbsent => _schedule?.configAbsent ?? false;
   bool _playerFeedsSubscribed = false;
+
+  /// The league's season-over flag (shared feed) — only for a player role.
+  FantasySeasonFinishedFeed? _seasonFinished;
   Map<String, FantasyPlayerTotals>? _totals;
   bool _totalsLoaded = false;
   Map<int, Map<String, int>>? _changes;
@@ -380,6 +389,11 @@ class FantasyProfileSource extends ChangeNotifier {
     );
   }
 
+  /// The season is over (the league's `Finished` flag): the player section
+  /// shows "Final price" instead of the move line. false until the flag says
+  /// so (and for a uid without a player role).
+  bool get seasonFinished => _seasonFinished?.finished ?? false;
+
   /// The manager section's standing (null without a manager role).
   FantasyManagerStanding? get standing =>
       _access?.manager == null || _boards == null
@@ -398,7 +412,10 @@ class FantasyProfileSource extends ChangeNotifier {
       return false;
     }
     if (a.player != null &&
-        !(_totalsLoaded && _changes != null && schedule.weekLoaded)) {
+        !(_totalsLoaded &&
+            _changes != null &&
+            (_seasonFinished?.ready ?? false) &&
+            schedule.weekLoaded)) {
       return false;
     }
     if (a.manager != null && _boards == null) return false;
@@ -636,6 +653,13 @@ class FantasyProfileSource extends ChangeNotifier {
           },
           label: 'price changes',
         );
+        _seasonFinished = FantasySeasonFinishedFeed(
+          sport: season.sport,
+          season: season.season,
+          owner: 'FantasyProfileSource',
+          onChanged: _notify,
+          finishedStates: seams.seasonFinishedStates,
+        )..start();
       }
       _syncWeeks(season, access.player!.name);
     }
@@ -703,6 +727,7 @@ class FantasyProfileSource extends ChangeNotifier {
     }
     _subs.clear();
     _schedule?.dispose();
+    _seasonFinished?.dispose();
     super.dispose();
   }
 }

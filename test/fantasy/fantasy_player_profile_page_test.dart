@@ -15,7 +15,11 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart'
+    show fantasyDownRed;
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart'
+    show fantasyAccent;
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_page.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
@@ -107,6 +111,7 @@ void main() {
   late StreamController<List<TournamentMatch>> games;
   late StreamController<List<TournamentTeam>> teams;
   late StreamController<Set<String>> watchlist;
+  late StreamController<bool> seasonFinished;
   late List<List<int>> requestedWeeks;
   late List<(String, bool)> starWrites;
   late List<String> openedProfiles;
@@ -132,6 +137,7 @@ void main() {
     games = StreamController<List<TournamentMatch>>.broadcast();
     teams = StreamController<List<TournamentTeam>>.broadcast();
     watchlist = StreamController<Set<String>>.broadcast();
+    seasonFinished = StreamController<bool>.broadcast();
     requestedWeeks = [];
     starWrites = [];
     openedProfiles = [];
@@ -152,6 +158,7 @@ void main() {
       games,
       teams,
       watchlist,
+      seasonFinished,
     ]) {
       c.close();
     }
@@ -168,6 +175,7 @@ void main() {
     ThemeMode themeMode = ThemeMode.light,
     Future<int> Function()? loadStartHour,
     Stream<List<TournamentMatch>> Function(int startHour)? leagueGamesFor,
+    Stream<bool>? seasonFinishedStates,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -199,6 +207,11 @@ void main() {
         leagueGamesFor: leagueGamesFor,
         teamsStates: teams.stream,
         watchlistStates: watchlist.stream,
+        // Default: the league's Finished flag answers "not over" at once
+        // (like a cache-seeded stream); a test drives it live by passing
+        // [seasonFinished].stream.
+        seasonFinishedStates:
+            seasonFinishedStates ?? Stream<bool>.value(false),
         selfUidOverride: selfUid,
         setWatchlisted: (n, on) async => starWrites.add((n, on)),
         loadLogoUrls: () async => const {},
@@ -279,6 +292,163 @@ void main() {
     await tester.tap(key('profile_tab_$tab'));
     await tester.pumpAndSettle();
   }
+
+  group('price colour + season over (owner follow-ups B + C)', () {
+    Color? priceColor(WidgetTester tester) =>
+        tester.widget<Text>(key('profile_price')).style?.color;
+
+    for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+      testWidgets(
+          'the big price is colorScheme.onSurface ($mode), not the fantasy '
+          'accent', (tester) async {
+        await pumpPage(tester, themeMode: mode);
+        await emitAll(tester);
+        final ctx = tester.element(key('profile_price'));
+        final scheme = Theme.of(ctx).colorScheme;
+        expect(priceColor(tester), scheme.onSurface);
+        expect(priceColor(tester), isNot(fantasyAccent(ctx)));
+        // Same ink as the other strip numbers.
+        expect(tester.widget<Text>(key('profile_total')).style?.color,
+            scheme.onSurface);
+        expect(find.text('\$7.5M'), findsWidgets);
+      });
+    }
+
+    testWidgets(
+        'not finished: the move line is exactly as before and there is no '
+        '"Final price"', (tester) async {
+      await pumpPage(tester);
+      await emitAll(tester);
+      expect(find.text('▲ \$0.5M this week'), findsOneWidget);
+      expect(key('profile_move'), findsOneWidget);
+      expect(find.text('Final price'), findsNothing);
+    });
+
+    testWidgets('a fall is still "▼ … this week" in the down red',
+        (tester) async {
+      await pumpPage(tester);
+      await emitAll(tester, changesValue: const {
+        2: {_name: -5},
+      });
+      expect(find.text('▼ \$0.5M this week'), findsOneWidget);
+      expect(tester.widget<Text>(key('profile_move')).style?.color,
+          fantasyDownRed(tester.element(key('profile_move'))));
+    });
+
+    testWidgets(
+        'finished: "Final price" (muted) under the price — no arrow, no '
+        '"this week"', (tester) async {
+      await pumpPage(tester, seasonFinishedStates: Stream.value(true));
+      await emitAll(tester);
+      expect(find.text('Final price'), findsOneWidget);
+      expect(key('profile_final_price'), findsOneWidget);
+      expect(key('profile_move'), findsNothing);
+      expect(find.textContaining('this week'), findsNothing);
+      expect(find.textContaining('▲'), findsNothing);
+      expect(find.textContaining('▼'), findsNothing);
+      expect(find.text('No change'), findsNothing);
+      final scheme = Theme.of(tester.element(key('profile_price'))).colorScheme;
+      expect(tester.widget<Text>(key('profile_final_price')).style?.color,
+          scheme.onSurfaceVariant);
+      // The price itself is still the same big number.
+      expect(find.text('\$7.5M'), findsWidgets);
+      expect(priceColor(tester), scheme.onSurface);
+    });
+
+    testWidgets('finished before any reprice ran: still "Final price"',
+        (tester) async {
+      await pumpPage(tester, seasonFinishedStates: Stream.value(true));
+      await emitAll(tester,
+          totalsValue: null,
+          historyValue: const {},
+          changesValue: const {},
+          weeksValue: const {});
+      expect(find.text('Final price'), findsOneWidget);
+      expect(key('profile_move'), findsNothing);
+    });
+
+    testWidgets('live: the flag flipping swaps the move line and the label',
+        (tester) async {
+      await pumpPage(tester, seasonFinishedStates: seasonFinished.stream);
+      seasonFinished.add(false);
+      await emitAll(tester);
+      expect(find.text('▲ \$0.5M this week'), findsOneWidget);
+
+      seasonFinished.add(true);
+      await tester.pumpAndSettle();
+      expect(find.text('Final price'), findsOneWidget);
+      expect(find.text('▲ \$0.5M this week'), findsNothing);
+
+      seasonFinished.add(false);
+      await tester.pumpAndSettle();
+      expect(find.text('▲ \$0.5M this week'), findsOneWidget);
+      expect(find.text('Final price'), findsNothing);
+    });
+
+    testWidgets('finished leaves the Price tab history untouched',
+        (tester) async {
+      await pumpPage(tester, seasonFinishedStates: Stream.value(true));
+      await emitAll(tester);
+      await openTab(tester, 'price');
+      // GW2's reprice (+$0.5M) still reads in the history rows.
+      expect(find.textContaining('▲ \$0.5M'), findsWidgets);
+    });
+
+    testWidgets(
+        'the flag is part of the reveal gate: nothing paints (no arrow '
+        'flash) until it has answered', (tester) async {
+      await pumpPage(tester, seasonFinishedStates: seasonFinished.stream);
+      config.add(FantasyConfigState(
+          config: FantasyConfig.futsalDefault(),
+          lockOverride: FantasyLockOverride.open));
+      gameweeks.add(_gameweeks(3));
+      players.add(market);
+      totals.add(const {});
+      history.add(const {});
+      changes.add(const {
+        2: {_name: 5},
+      });
+      rosters.add(const {});
+      games.add(const []);
+      teams.add(const []);
+      watchlist.add(const {});
+      await tester.pump();
+      weekStats.add(const {});
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      expect(key('fantasy_profile_skeleton'), findsOneWidget);
+      expect(key('fantasy_profile_ready'), findsNothing);
+      expect(find.text('▲ \$0.5M this week'), findsNothing);
+
+      seasonFinished.add(true);
+      await tester.pumpAndSettle();
+      expect(key('fantasy_profile_ready'), findsOneWidget);
+      expect(find.text('Final price'), findsOneWidget);
+      expect(find.text('▲ \$0.5M this week'), findsNothing);
+    });
+
+    testWidgets('a failing flag feed is logged and treated as not finished',
+        (tester) async {
+      final logs = <String?>[];
+      final oldPrint = debugPrint;
+      // Restored in the body (the framework checks foundation vars BEFORE
+      // addTearDown callbacks run).
+      debugPrint = (String? m, {int? wrapWidth}) => logs.add(m);
+      try {
+        await pumpPage(tester,
+            seasonFinishedStates:
+                Stream<bool>.error(StateError('permission denied')));
+        await emitAll(tester);
+      } finally {
+        debugPrint = oldPrint;
+      }
+      expect(key('fantasy_profile_ready'), findsOneWidget);
+      expect(find.text('▲ \$0.5M this week'), findsOneWidget);
+      expect(find.text('Final price'), findsNothing);
+      expect(logs.any((l) => l != null && l.contains('permission denied')),
+          isTrue);
+    });
+  });
 
   group('reveal', () {
     testWidgets(

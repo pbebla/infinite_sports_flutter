@@ -362,6 +362,19 @@ void main() {
     });
   });
 
+  group('seasonFinishedFromNode (/<sport>/<season>/Finished)', () {
+    test('only an exact true means the season is over', () {
+      expect(seasonFinishedFromNode(true), isTrue);
+    });
+    test('absent / false / anything else is not finished', () {
+      expect(seasonFinishedFromNode(null), isFalse);
+      expect(seasonFinishedFromNode(false), isFalse);
+      expect(seasonFinishedFromNode('true'), isFalse);
+      expect(seasonFinishedFromNode(1), isFalse);
+      expect(seasonFinishedFromNode({'a': true}), isFalse);
+    });
+  });
+
   group('latestPriceChangesFromNode (P3c)', () {
     test('absent/malformed → empty (the strip hides entirely)', () {
       expect(latestPriceChangesFromNode(null), isEmpty);
