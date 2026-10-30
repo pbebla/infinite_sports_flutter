@@ -519,7 +519,17 @@ void _viewTeam(BuildContext context, FantasyProfileSource source,
     String? teamName, String personName) {
   final access = source.access;
   final config = source.config;
-  if (access == null || config == null) return;
+  if (access == null) return;
+  if (config == null) {
+    // The season's Config never loaded (a failed read — logged by the
+    // source): the viewer cannot be built, so say so instead of doing
+    // nothing.
+    ScaffoldMessenger.maybeOf(context)
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(
+          content: Text("Couldn't open the team right now — try again.")));
+    return;
+  }
   final seams = source.seams;
   final sport = access.sport;
   final season = access.season;

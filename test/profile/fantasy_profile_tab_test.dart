@@ -756,6 +756,427 @@ void main() {
     });
   });
 
+  // ── The source's feed wiring ────────────────────────────────────────────
+  FantasyConfigState configState(int lockHour) => FantasyConfigState(
+        config: FantasyConfig.fromMap({'lockHour': lockHour}),
+        lockOverride: FantasyLockOverride.open,
+      );
+
+  /// All the decision feeds answering for [_uid] as the linked player.
+  Future<void> answerAsPlayer() async {
+    players.add(market);
+    rosters.add({
+      'Ishtar': [_row(_name, 'Ishtar', uid: _uid)],
+      'Nimrod': [_row('Other Def', 'Nimrod')],
+    });
+    manager.add(null);
+    await pumpEventQueue();
+  }
+
+  /// Streams that never answer (a fresh visit that only the session can
+  /// decide).
+  FantasyProfileSeams silentSeams({
+    Stream<List<FantasyPlayer>>? playersStates,
+  }) =>
+      FantasyProfileSeams(
+        resolveSeason: () async => resolved,
+        playersStates:
+            playersStates ?? StreamController<List<FantasyPlayer>>().stream,
+        rosterStates:
+            StreamController<Map<String, List<TournamentPlayer>>>().stream,
+        managerStates: StreamController<FantasyManager?>().stream,
+        configStates: StreamController<FantasyConfigState?>().stream,
+        gameweekStates: StreamController<List<Gameweek>>().stream,
+        totalsStates:
+            StreamController<Map<String, FantasyPlayerTotals>?>().stream,
+        priceChangeStates:
+            StreamController<Map<int, Map<String, int>>>().stream,
+        weekStatsFor: (name, weeks) =>
+            StreamController<Map<int, PlayerWeekStats>>().stream,
+        leaderboardsStates: StreamController<FantasyLeaderboards>().stream,
+      );
+
+  group('source: the REAL schedule branch (configStates, no gameweekStates)',
+      () {
+    late List<StreamController<List<Gameweek>>> schedules;
+    late List<int> scheduleLockHours;
+    late List<bool> scheduleCancelled;
+
+    setUp(() {
+      schedules = [];
+      scheduleLockHours = [];
+      scheduleCancelled = [];
+    });
+
+    FantasyProfileSeams realSchedule() => FantasyProfileSeams(
+          resolveSeason: () async => resolved,
+          playersStates: players.stream,
+          rosterStates: rosters.stream,
+          managerStates: manager.stream,
+          configStates: config.stream,
+          // gameweekStates deliberately null: the source derives the schedule
+          // itself from the config (FantasyService.watchGameweeks' seam).
+          gameweeksFor: (cfg) {
+            final i = schedules.length;
+            scheduleLockHours.add(cfg.lockHour);
+            scheduleCancelled.add(false);
+            final c = StreamController<List<Gameweek>>.broadcast(
+                onCancel: () => scheduleCancelled[i] = true);
+            schedules.add(c);
+            return c.stream;
+          },
+          totalsStates: totals.stream,
+          priceChangeStates: changes.stream,
+          weekStatsFor: (name, weeks) {
+            requestedWeeks.add((name, weeks));
+            return weekStats.stream;
+          },
+          leaderboardsStates: boards.stream,
+          selfUidOverride: 'me',
+        );
+
+    Future<FantasyProfileSource> startedPlayer() async {
+      final source = FantasyProfileSource(uid: _uid, seams: realSchedule())
+        ..start();
+      addTearDown(source.dispose);
+      await pumpEventQueue(); // season resolved, feeds subscribed
+      await answerAsPlayer();
+      return source;
+    }
+
+    test(
+        'a new lock hour resubscribes the schedule and cancels the old '
+        'one; the same lock hour does not', () async {
+      await startedPlayer();
+      config.add(configState(15));
+      await pumpEventQueue();
+      expect(scheduleLockHours, [15]);
+
+      config.add(configState(15)); // a re-emit that keeps the lock hour
+      await pumpEventQueue();
+      expect(scheduleLockHours, [15]);
+      expect(scheduleCancelled, [false]);
+
+      config.add(configState(16));
+      await pumpEventQueue();
+      expect(scheduleLockHours, [15, 16]);
+      expect(scheduleCancelled, [true, false]);
+    });
+
+    test(
+        'his weekly listeners follow the schedule: resubscribed only when '
+        'the week numbers change', () async {
+      final source = await startedPlayer();
+      config.add(configState(15));
+      await pumpEventQueue();
+      expect(requestedWeeks, isEmpty); // no schedule yet
+
+      schedules[0].add(_gameweeks(3));
+      await pumpEventQueue();
+      expect(requestedWeeks.map((r) => r.$2), [
+        [1, 2, 3]
+      ]);
+      expect(requestedWeeks.single.$1, _name);
+
+      schedules[0].add(_gameweeks(3)); // same weeks: no resubscribe
+      await pumpEventQueue();
+      expect(requestedWeeks, hasLength(1));
+
+      schedules[0].add(_gameweeks(4)); // a new match day appeared
+      await pumpEventQueue();
+      expect(requestedWeeks.last.$2, [1, 2, 3, 4]);
+      expect(source.gameweeks, hasLength(4));
+    });
+
+    test(
+        'the schedule is cached for the session: a revisit has it before '
+        'any feed answers', () async {
+      await startedPlayer();
+      config.add(configState(15));
+      await pumpEventQueue();
+      schedules[0].add(_gameweeks(5));
+      await pumpEventQueue();
+
+      final revisit = FantasyProfileSource(uid: _uid, seams: silentSeams())
+        ..start();
+      addTearDown(revisit.dispose);
+      await pumpEventQueue();
+      expect(revisit.gameweeks.map((g) => g.number), [1, 2, 3, 4, 5]);
+    });
+
+    test(
+        'a missing Config clears the schedule, its listener, the cached '
+        'schedule and the cached decision', () async {
+      final source = await startedPlayer();
+      config.add(configState(15));
+      await pumpEventQueue();
+      schedules[0].add(_gameweeks(3));
+      await pumpEventQueue();
+      expect(source.gameweeks, hasLength(3));
+      expect(source.hasTab, isTrue);
+
+      config.add(null); // fantasy removed for the season
+      await pumpEventQueue();
+      expect(source.gameweeks, isEmpty);
+      expect(scheduleCancelled, [true]);
+      expect(source.hasTab, isFalse);
+
+      // Nothing stale seeds the next visit.
+      final next = FantasyProfileSource(uid: _uid, seams: silentSeams())
+        ..start();
+      addTearDown(next.dispose);
+      await pumpEventQueue();
+      expect(next.gameweeks, isEmpty);
+      expect(next.decided, isFalse);
+    });
+
+    test('a failing schedule read keeps a schedule that is already showing',
+        () async {
+      final source = await startedPlayer();
+      config.add(configState(15));
+      await pumpEventQueue();
+      schedules[0].add(_gameweeks(3));
+      await pumpEventQueue();
+
+      schedules[0].addError(StateError('offline'));
+      await pumpEventQueue();
+      expect(source.gameweeks, hasLength(3)); // last good schedule kept
+      expect(source.hasTab, isTrue);
+    });
+  });
+
+  group('source: a failing feed', () {
+    test(
+        'decides THIS paint as no tab but is never cached — the next open '
+        're-decides', () async {
+      final failing = FantasyProfileSource(
+        uid: _uid,
+        seams: FantasyProfileSeams(
+          resolveSeason: () async => resolved,
+          playersStates: Stream<List<FantasyPlayer>>.error(StateError('x')),
+          rosterStates: rosters.stream,
+          managerStates: manager.stream,
+        ),
+      )..start();
+      addTearDown(failing.dispose);
+      await pumpEventQueue();
+      rosters.add({
+        'Ishtar': [_row(_name, 'Ishtar', uid: _uid)],
+      });
+      manager.add(null);
+      await pumpEventQueue();
+      expect(failing.decided, isTrue); // this paint gets an answer...
+      expect(failing.hasTab, isFalse);
+
+      // ...but it was an error fallback, so nothing was remembered.
+      final next = FantasyProfileSource(uid: _uid, seams: silentSeams())
+        ..start();
+      addTearDown(next.dispose);
+      await pumpEventQueue();
+      expect(next.decided, isFalse);
+    });
+
+    test(
+        'a feed that recovers corrects the decision, and only then is it '
+        'cached', () async {
+      final source = FantasyProfileSource(uid: _uid, seams: seams())..start();
+      addTearDown(source.dispose);
+      await pumpEventQueue();
+      players.addError(StateError('x'));
+      rosters.add({
+        'Ishtar': [_row(_name, 'Ishtar', uid: _uid)],
+      });
+      manager.add(null);
+      await pumpEventQueue();
+      expect(source.hasTab, isFalse);
+
+      players.add(market); // the market is back
+      await pumpEventQueue();
+      expect(source.hasTab, isTrue);
+
+      final next = FantasyProfileSource(uid: _uid, seams: silentSeams())
+        ..start();
+      addTearDown(next.dispose);
+      await pumpEventQueue();
+      expect(next.decided, isTrue);
+      expect(next.hasTab, isTrue);
+    });
+
+    test(
+        'a seeded decision survives a failing feed — a shown tab never '
+        'drops on an error', () async {
+      final first = FantasyProfileSource(uid: _uid, seams: seams())..start();
+      addTearDown(first.dispose);
+      await pumpEventQueue();
+      await answerAsPlayer();
+      expect(first.hasTab, isTrue);
+
+      // Revisit: rosters and manager answer for real, the market errors. The
+      // empty-market fallback must NOT erase the seeded (shown) tab.
+      final revisit = FantasyProfileSource(
+        uid: _uid,
+        seams: FantasyProfileSeams(
+          resolveSeason: () async => resolved,
+          playersStates: Stream<List<FantasyPlayer>>.error(StateError('x')),
+          rosterStates: Stream.value({
+            'Ishtar': [_row(_name, 'Ishtar', uid: _uid)],
+          }),
+          managerStates: Stream<FantasyManager?>.value(null),
+        ),
+      )..start();
+      addTearDown(revisit.dispose);
+      await pumpEventQueue();
+      expect(revisit.hasTab, isTrue);
+      expect(revisit.access!.player!.name, _name);
+    });
+
+    test('a Config error keeps the shown tab and the last good config',
+        () async {
+      final source = FantasyProfileSource(uid: _uid, seams: seams())..start();
+      addTearDown(source.dispose);
+      await pumpEventQueue();
+      await answerAsPlayer();
+      config.add(configState(16));
+      await pumpEventQueue();
+      expect(source.hasTab, isTrue);
+      expect(source.config!.lockHour, 16);
+
+      config.addError(StateError('permission-denied'));
+      await pumpEventQueue();
+      expect(source.hasTab, isTrue);
+      expect(source.config!.lockHour, 16); // last good config kept
+    });
+
+    test('a Config error before any config still leaves the tab in place',
+        () async {
+      final source = FantasyProfileSource(uid: _uid, seams: seams())..start();
+      addTearDown(source.dispose);
+      await pumpEventQueue();
+      await answerAsPlayer();
+      config.addError(StateError('permission-denied'));
+      await pumpEventQueue();
+      expect(source.hasTab, isTrue);
+      expect(source.config, isNull);
+    });
+
+    test(
+        'every failure path is logged (feeds, schedule, week records, the '
+        'season resolver)', () async {
+      final logs = <String>[];
+      final original = debugPrint;
+      debugPrint =
+          (String? message, {int? wrapWidth}) => logs.add(message ?? '');
+      addTearDown(() => debugPrint = original);
+
+      // Decision feeds failing.
+      final decision = FantasyProfileSource(
+        uid: _uid,
+        seams: FantasyProfileSeams(
+          resolveSeason: () async => resolved,
+          playersStates: Stream<List<FantasyPlayer>>.error(StateError('p')),
+          rosterStates: Stream<Map<String, List<TournamentPlayer>>>.error(
+              StateError('r')),
+          managerStates: Stream<FantasyManager?>.error(StateError('m')),
+        ),
+      )..start();
+      addTearDown(decision.dispose);
+      await pumpEventQueue();
+
+      // Content feeds failing for a uid that is both a player and a manager.
+      FantasyProfileSource.clearSessionCaches();
+      final content = FantasyProfileSource(
+        uid: _uid,
+        seams: FantasyProfileSeams(
+          resolveSeason: () async => resolved,
+          playersStates: Stream.value(market),
+          rosterStates: Stream.value({
+            'Ishtar': [_row(_name, 'Ishtar', uid: _uid)],
+          }),
+          managerStates: Stream.value(topCats),
+          configStates: Stream<FantasyConfigState?>.error(StateError('c')),
+          gameweekStates: Stream<List<Gameweek>>.error(StateError('g')),
+          totalsStates:
+              Stream<Map<String, FantasyPlayerTotals>?>.error(StateError('t')),
+          priceChangeStates:
+              Stream<Map<int, Map<String, int>>>.error(StateError('pc')),
+          leaderboardsStates:
+              Stream<FantasyLeaderboards>.error(StateError('b')),
+          weekStatsFor: (name, weeks) =>
+              Stream<Map<int, PlayerWeekStats>>.error(StateError('w')),
+        ),
+      )..start();
+      addTearDown(content.dispose);
+      await pumpEventQueue();
+
+      // The season resolver throwing (and the shared wrapper around it).
+      final resolver = FantasyProfileSource(
+        uid: 'other',
+        seams: FantasyProfileSeams(
+            resolveSeason: () async => throw StateError('boom')),
+      )..start();
+      addTearDown(resolver.dispose);
+      await pumpEventQueue();
+      FantasyProfileSource.clearSessionCaches();
+      await FantasyProfileSource.resolveSeasonShared(
+          () async => throw StateError('boom2'));
+
+      final all = logs.join('\n');
+      for (final label in [
+        'players',
+        'rosters',
+        'manager',
+        'config',
+        'schedule',
+        'totals',
+        'price changes',
+        'week stats',
+        'leaderboards',
+        'season',
+      ]) {
+        expect(all, contains(label), reason: 'no log line for "$label"');
+      }
+      expect(all, contains('boom2')); // the wrapped shared resolver
+    });
+  });
+
+  group('a failing Config on the profile', () {
+    testWidgets('never drops the Fantasy tab the reader is on', (tester) async {
+      await pumpProfile(tester);
+      await landEligibility(tester, asManager: topCats);
+      await landContent(tester, managerRole: true);
+      await openFantasyTab(tester);
+      expect(key('fantasy_manager_card'), findsOneWidget);
+
+      config.addError(StateError('permission-denied'));
+      await tester.pump();
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(Tab), findsNWidgets(3));
+      expect(key('fantasy_manager_card'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+        'View team without a loadable Config says so instead of doing '
+        'nothing', (tester) async {
+      await pumpProfile(tester);
+      await landEligibility(tester, asManager: topCats);
+      config.addError(StateError('permission-denied'));
+      gameweeks.add(_gameweeks(2));
+      boards.add(FantasyLeaderboards.empty);
+      await tester.pump();
+      await settle(tester);
+      await openFantasyTab(tester);
+
+      await tester.tap(key('fantasy_view_team'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(ManagerSquadViewerPage), findsNothing);
+      expect(find.textContaining("Couldn't open the team"), findsOneWidget);
+    });
+  });
+
   group('player section', () {
     testWidgets(
         'price + move, total pts, form, owned %, the last six weeks\' bars '

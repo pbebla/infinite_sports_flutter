@@ -68,6 +68,7 @@ class FantasyProfileSeams {
     this.managerStates,
     this.configStates,
     this.gameweekStates,
+    this.gameweeksFor,
     this.totalsStates,
     this.priceChangeStates,
     this.weekStatsFor,
@@ -88,6 +89,12 @@ class FantasyProfileSeams {
 
   /// Replaces the config-derived schedule gameweeks.
   final Stream<List<Gameweek>>? gameweekStates;
+
+  /// Replaces `FantasyService.watchGameweeks(sport, season, config)` ONLY
+  /// (the config → schedule wiring itself still runs): lets a test drive the
+  /// real lock-hour resubscribe / cache / clear branch. Ignored when
+  /// [gameweekStates] is given.
+  final Stream<List<Gameweek>> Function(FantasyConfig config)? gameweeksFor;
   final Stream<Map<String, FantasyPlayerTotals>?>? totalsStates;
   final Stream<Map<int, Map<String, int>>>? priceChangeStates;
   final Stream<Map<int, PlayerWeekStats>> Function(
@@ -265,13 +272,18 @@ class FantasyProfileSource extends ChangeNotifier {
     FantasySeasonKey? season;
     try {
       season = await resolver();
-    } catch (_) {
+    } catch (e) {
+      _log('season resolver', e);
       season = null;
     }
     _resolving = null;
     _noSeasonAt = season == null ? clock() : null;
     return season;
   }
+
+  /// Failures degrade to "no data" for the reader but are never silent.
+  static void _log(String what, Object error) =>
+      debugPrint('FantasyProfileSource: $what failed: $error');
 
   bool _started = false;
   bool _disposed = false;
@@ -280,16 +292,28 @@ class FantasyProfileSource extends ChangeNotifier {
   bool _decided = false;
   final Completer<void> _decision = Completer<void>();
 
-  // Decision feeds.
+  // Decision feeds. `*Real` = the feed has delivered an actual emission (not
+  // an error fallback); only an all-real decision is cached for the session.
   List<FantasyPlayer>? _players;
   Map<String, List<TournamentPlayer>>? _rosters;
   bool _managerLoaded = false;
   FantasyManager? _manager;
+  bool _playersReal = false;
+  bool _rostersReal = false;
+  bool _managerReal = false;
+
+  /// The decision on screen came from the session seed (and no all-real
+  /// answer has replaced it yet): error fallbacks must not override it.
+  bool _seeded = false;
 
   // Content feeds.
   bool _configSubscribed = false;
   FantasyConfigState? _config;
   bool _configLoaded = false;
+
+  /// A REAL emission said the season has no Config node (fantasy removed).
+  /// A Config ERROR is not this: it keeps the last good config and the tab.
+  bool _configAbsent = false;
   List<Gameweek>? _gameweeks;
   int? _gameweeksLockHour;
   bool _playerFeedsSubscribed = false;
@@ -318,9 +342,8 @@ class FantasyProfileSource extends ChangeNotifier {
   FantasyProfileAccess? get access => _access;
 
   /// Whether the profile shows a Fantasy tab right now. A season whose
-  /// Config disappeared (fantasy removed) no longer counts.
-  bool get hasTab =>
-      _decided && _access != null && !(_configLoaded && _config == null);
+  /// Config is really gone (an emission, not an error) no longer counts.
+  bool get hasTab => _decided && _access != null && !_configAbsent;
 
   /// The signed-in user viewing his OWN profile (the squad viewer then shows
   /// his live squad, not the lock-published copy).
@@ -386,7 +409,8 @@ class FantasyProfileSource extends ChangeNotifier {
         unawaited(_resolveThenBegin(resolver ??
             () => resolveSeasonShared(resolveCurrentFantasySeason)));
       }
-    } catch (_) {
+    } catch (e) {
+      _log('start', e);
       _settle();
     }
   }
@@ -396,7 +420,8 @@ class FantasyProfileSource extends ChangeNotifier {
     FantasySeasonKey? season;
     try {
       season = await resolve();
-    } catch (_) {
+    } catch (e) {
+      _log('season', e);
       season = null;
     }
     if (_disposed) return;
@@ -407,7 +432,8 @@ class FantasyProfileSource extends ChangeNotifier {
     }
     try {
       _begin(season);
-    } catch (_) {
+    } catch (e) {
+      _log('begin', e);
       _settle();
       _notify();
     }
@@ -430,6 +456,7 @@ class FantasyProfileSource extends ChangeNotifier {
               player: seed.player,
               manager: seed.manager,
             );
+      _seeded = true;
       _settle();
     }
     final cachedWeeks = _gameweeksSession['${season.sport}|${season.season}'];
@@ -441,12 +468,14 @@ class FantasyProfileSource extends ChangeNotifier {
           FantasyService.watchPlayers(season.sport, season.season),
       (p) {
         _players = p;
+        _playersReal = true;
         _recompute();
       },
       onFail: () {
         _players ??= const [];
         _recompute();
       },
+      label: 'players',
     );
     _listen<Map<String, List<TournamentPlayer>>>(
       () =>
@@ -454,12 +483,14 @@ class FantasyProfileSource extends ChangeNotifier {
           LeagueService.watchRosters(season.sport, season.season),
       (r) {
         _rosters = r;
+        _rostersReal = true;
         _recompute();
       },
       onFail: () {
         _rosters ??= const {};
         _recompute();
       },
+      label: 'rosters',
     );
     _listen<FantasyManager?>(
       () =>
@@ -468,13 +499,15 @@ class FantasyProfileSource extends ChangeNotifier {
       (m) {
         _manager = m;
         _managerLoaded = true;
+        _managerReal = true;
         _recompute();
       },
       onFail: () {
-        _manager = null;
+        // Keeps a seeded / earlier-real manager; a never-loaded one is null.
         _managerLoaded = true;
         _recompute();
       },
+      label: 'manager',
     );
     if (seed != null) {
       _ensureContent();
@@ -483,19 +516,23 @@ class FantasyProfileSource extends ChangeNotifier {
   }
 
   /// Subscribes defensively: a stream that cannot even be created (no
-  /// Firebase app in a widget test) or that errors degrades to [onFail].
+  /// Firebase app in a widget test) or that errors degrades to [onFail] —
+  /// and is logged under [label] (a feed error is never silent).
   void _listen<T>(
     Stream<T> Function() make,
     void Function(T value) onData, {
     required void Function() onFail,
+    required String label,
   }) {
     try {
       _subs.add(make().listen((v) {
         if (!_disposed) onData(v);
-      }, onError: (Object _) {
+      }, onError: (Object e) {
+        _log('$label feed', e);
         if (!_disposed) onFail();
       }));
-    } catch (_) {
+    } catch (e) {
+      _log('$label feed', e);
       onFail();
     }
   }
@@ -512,19 +549,29 @@ class FantasyProfileSource extends ChangeNotifier {
         _players != null &&
         _rosters != null &&
         _managerLoaded) {
-      _access = fantasyProfileAccess(
-        sport: season.sport,
-        season: season.season,
-        uid: uid,
-        players: _players!,
-        rosters: _rosters!,
-        manager: _manager,
-      );
-      _decisionSession[_seedKey(season)] = _DecisionSeed(
-        player: _access?.player,
-        manager: _access?.manager,
-      );
-      _settle();
+      final real = _playersReal && _rostersReal && _managerReal;
+      // A decision made from an error fallback may decide THIS paint, but it
+      // never overrides a seeded decision (a shown tab must not drop on an
+      // error) and is never cached: only an all-real answer is remembered, so
+      // the next open re-decides.
+      if (real || !_seeded) {
+        _access = fantasyProfileAccess(
+          sport: season.sport,
+          season: season.season,
+          uid: uid,
+          players: _players!,
+          rosters: _rosters!,
+          manager: _manager,
+        );
+        if (real) {
+          _seeded = false;
+          _decisionSession[_seedKey(season)] = _DecisionSeed(
+            player: _access?.player,
+            manager: _access?.manager,
+          );
+        }
+        _settle();
+      }
     }
     _ensureContent();
     _notify();
@@ -561,6 +608,7 @@ class FantasyProfileSource extends ChangeNotifier {
             _totalsLoaded = true;
             _notify();
           },
+          label: 'totals',
         );
         _listen<Map<int, Map<String, int>>>(
           () =>
@@ -574,6 +622,7 @@ class FantasyProfileSource extends ChangeNotifier {
             _changes ??= const {};
             _notify();
           },
+          label: 'price changes',
         );
       }
       _syncWeeks(season, access.player!.name);
@@ -592,6 +641,7 @@ class FantasyProfileSource extends ChangeNotifier {
           _boards ??= FantasyLeaderboards.empty;
           _notify();
         },
+        label: 'leaderboards',
       );
     }
   }
@@ -607,7 +657,13 @@ class FantasyProfileSource extends ChangeNotifier {
           FantasyService.watchConfig(season.sport, season.season),
       (state) {
         _config = state;
+        _configAbsent = state == null;
         _configLoaded = true;
+        if (state == null) {
+          // Fantasy removed for the season: nothing stale may seed a revisit.
+          _gameweeksSession.remove('${season.sport}|${season.season}');
+          _decisionSession.remove(_seedKey(season));
+        }
         if (gameweekSeam == null) {
           if (state == null) {
             // No fantasy config → no schedule-derived weeks.
@@ -619,8 +675,9 @@ class FantasyProfileSource extends ChangeNotifier {
             _gameweeksLockHour = state.config.lockHour;
             _gameweeksSub?.cancel();
             _gameweeksSub = _subscribeGameweeks(
-              FantasyService.watchGameweeks(
-                  season.sport, season.season, state.config),
+              seams.gameweeksFor?.call(state.config) ??
+                  FantasyService.watchGameweeks(
+                      season.sport, season.season, state.config),
               season,
               cache: true,
             );
@@ -630,11 +687,15 @@ class FantasyProfileSource extends ChangeNotifier {
         _notify();
       },
       onFail: () {
+        // The LAST GOOD config stays (and the tab with it): an error is not
+        // "fantasy removed". With no config ever loaded the player section
+        // still renders; View team says it can't open (see the tab).
         _configLoaded = true;
         _gameweeks ??= const [];
         _recomputeWeeks();
         _notify();
       },
+      label: 'config',
     );
   }
 
@@ -652,15 +713,17 @@ class FantasyProfileSource extends ChangeNotifier {
         _gameweeks = gws;
         _recomputeWeeks();
         _notify();
-      }, onError: (Object _) {
+      }, onError: (Object e) {
         // A failed schedule read: no weeks to listen to (never cached — the
         // next visit retries), unless a schedule is already showing.
+        _log('schedule feed', e);
         if (_disposed) return;
         _gameweeks ??= const [];
         _recomputeWeeks();
         _notify();
       });
-    } catch (_) {
+    } catch (e) {
+      _log('schedule feed', e);
       _gameweeks ??= const [];
       return null;
     }
@@ -700,12 +763,14 @@ class FantasyProfileSource extends ChangeNotifier {
         if (_disposed) return;
         _weeks = w;
         _notify();
-      }, onError: (Object _) {
+      }, onError: (Object e) {
+        _log('week stats feed', e);
         if (_disposed) return;
         _weeks ??= const {};
         _notify();
       });
-    } catch (_) {
+    } catch (e) {
+      _log('week stats feed', e);
       _weeks ??= const {};
     }
   }
