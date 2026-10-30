@@ -1,19 +1,26 @@
-// P3d + round 3 (Task 8) — the Leaderboards tab proved with fake streams (no
-// Firebase): single fade reveal; plain ranked rows (the podium is gone) with
-// a movement cell on the Overall scope only (▲n green / ▼n red / — muted);
-// two-line manager cells (real name, team name under it — team name alone
-// when no real name exists); Overall + Gameweek are the only scopes (My
-// Leagues hidden behind kShowMiniLeagues, a stale session scope falls back
-// to Overall); the signed-in manager's row gold-highlighted and PINNED to the
-// bottom when its natural place is scrolled away and released when it
-// scrolls into view; the Gameweek scope's week chips (1..N from the
-// schedule) with per-week empty copy; the friendly empty state while the node
-// is absent; row taps opening the squad viewer (via the builder seam); and
-// 360 px long names wrapping without overflow in light AND dark.
+// P3d + round 3 (Task 8) + the follow-up split — the Leaderboards tab proved
+// with fake streams (no Firebase): single fade reveal; plain ranked rows (the
+// podium is gone) with a movement cell on the Overall scope only (▲n green /
+// ▼n red / — muted); two-line manager cells (real name, team name under it —
+// team name alone when no real name exists); THREE scopes — Overall,
+// Gameweek, Team of the week (My Leagues hidden behind kShowMiniLeagues, a
+// stale session scope falls back to Overall); the Team of the Week card lives
+// ONLY in its own scope (never above the Overall / Gameweek lists) and the
+// selected week carries between Gameweek and Team of the week; the signed-in
+// manager's row gold-highlighted and PINNED to the bottom when its natural
+// place is scrolled away and released when it scrolls into view; the
+// Gameweek scope's week chips (1..N from the schedule) with per-week empty
+// copy; the friendly empty states; row taps opening the squad viewer (via the
+// builder seam); and 360 px long names + segment labels fitting in light AND
+// dark.
 
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
+import 'package:flutter/services.dart' show FontLoader;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
@@ -44,6 +51,44 @@ List<Gameweek> gameweeks(int count) => [
           opensUtc: null,
         ),
     ];
+
+/// The test environment draws every glyph as a 14 px Ahem square, which says
+/// nothing about whether a label really fits. This registers the SDK's real
+/// Roboto (the Android UI font) as 'RobotoReal' so a test can opt into true
+/// text metrics without disturbing the Ahem-based layouts elsewhere in the
+/// file. Returns false when the SDK's material_fonts folder can't be found.
+const String kRealFont = 'RobotoReal';
+bool? _realFontLoaded;
+
+Directory? _materialFontsDir() {
+  final candidates = <String>[];
+  final root = Platform.environment['FLUTTER_ROOT'];
+  if (root != null) candidates.add('$root/bin/cache/artifacts/material_fonts');
+  // flutter_tester lives in <sdk>/bin/cache/artifacts/engine/<platform>/.
+  var dir = File(Platform.resolvedExecutable).parent;
+  for (var i = 0; i < 6; i++) {
+    candidates.add('${dir.path}/material_fonts');
+    dir = dir.parent;
+  }
+  for (final path in candidates) {
+    final d = Directory(path);
+    if (File('${d.path}/roboto-regular.ttf').existsSync()) return d;
+  }
+  return null;
+}
+
+Future<bool> loadRealFont() async {
+  if (_realFontLoaded != null) return _realFontLoaded!;
+  final dir = _materialFontsDir();
+  if (dir == null) return _realFontLoaded = false;
+  final loader = FontLoader(kRealFont);
+  for (final file in ['roboto-regular.ttf', 'roboto-medium.ttf', 'roboto-bold.ttf']) {
+    final bytes = File('${dir.path}/$file').readAsBytesSync();
+    loader.addFont(Future.value(ByteData.sublistView(bytes)));
+  }
+  await loader.load();
+  return _realFontLoaded = true;
+}
 
 void main() {
   late StreamController<FantasyLeaderboards> boards;
@@ -82,12 +127,13 @@ void main() {
     void Function(String playerName)? onOpenPlayer,
     Map<String, PublicProfile>? profiles,
     Brightness brightness = Brightness.light,
+    String? fontFamily,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(
-      theme: ThemeData(brightness: brightness),
+      theme: ThemeData(brightness: brightness, fontFamily: fontFamily),
       home: Scaffold(
         body: FantasyLeaderboardsTab(
           sport: 'Futsal',
@@ -161,30 +207,44 @@ void main() {
     });
   });
 
-  group('dream team of the week (P6)', () {
-    Map<int, FantasyDreamTeam> twoWeeks() => dreamTeamsFromNode({
-          '1': {
-            'Players': [
-              {'name': 'Gale', 'position': 'GK', 'points': 9},
-              {'name': 'Dana', 'position': 'DEF', 'points': 7},
-              {'name': 'Yara', 'position': 'DEF', 'points': 6},
-              {'name': 'Alex', 'position': 'ATT', 'points': 8},
-              {'name': 'Wren', 'position': 'ATT', 'points': 5},
-            ],
-          },
-          '2': {
-            'Players': [
-              {'name': 'Kit', 'position': 'GK', 'points': 14},
-              {'name': 'Dana', 'position': 'DEF', 'points': 12},
-              {'name': 'Yara', 'position': 'DEF', 'points': 9},
-              {'name': 'Alex', 'position': 'ATT', 'points': 11},
-              {'name': 'Bo', 'position': 'ATT', 'points': 8},
-            ],
-          },
-        });
+  /// Taps one of the three scope segments by its label.
+  Future<void> pickScope(WidgetTester tester, String label) async {
+    await tester.tap(find.descendant(
+        of: find.byKey(const ValueKey('leaderboard_scope')),
+        matching: find.text(label)));
+    await tester.pumpAndSettle();
+  }
 
-    testWidgets('card tops the Overall scroll on the latest week; the week '
-        'chips step back through prior weeks', (tester) async {
+  final overallData = leaderboardsFromNode({
+    'Overall': {
+      'u1': {'points': 50, 'rank': 1},
+    },
+  });
+
+  Map<int, FantasyDreamTeam> twoWeeks() => dreamTeamsFromNode({
+        '1': {
+          'Players': [
+            {'name': 'Gale', 'position': 'GK', 'points': 9},
+            {'name': 'Dana', 'position': 'DEF', 'points': 7},
+            {'name': 'Yara', 'position': 'DEF', 'points': 6},
+            {'name': 'Alex', 'position': 'ATT', 'points': 8},
+            {'name': 'Wren', 'position': 'ATT', 'points': 5},
+          ],
+        },
+        '2': {
+          'Players': [
+            {'name': 'Kit', 'position': 'GK', 'points': 14},
+            {'name': 'Dana', 'position': 'DEF', 'points': 12},
+            {'name': 'Yara', 'position': 'DEF', 'points': 9},
+            {'name': 'Alex', 'position': 'ATT', 'points': 11},
+            {'name': 'Bo', 'position': 'ATT', 'points': 8},
+          ],
+        },
+      });
+
+  group('Team of the week scope (P6, split out of the lists)', () {
+    testWidgets('Overall and Gameweek do NOT contain the card; the Team of '
+        'the week view does — and ONLY the card', (tester) async {
       await pumpTab(tester, size: const Size(420, 1400));
       await emitAll(
         tester,
@@ -192,17 +252,58 @@ void main() {
           'Overall': {
             'u1': {'points': 50, 'rank': 1},
           },
+          'Gameweek': {
+            '2': {
+              'u1': {'points': 11, 'rank': 1},
+            },
+          },
         }),
         names: {'u1': manager('Top Cats')},
         dreamTeams: twoWeeks(),
       );
 
-      // Latest week (GW2) by default, above the board rows.
+      // Overall (the default scope): the list, no card.
+      expect(find.byKey(const ValueKey('dream_team_card')), findsNothing);
+      expect(find.byKey(const ValueKey('leaderboard_row_u1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('leaderboard_column_header')),
+          findsOneWidget);
+
+      // Gameweek: week chips + that week's ranking, no card.
+      await pickScope(tester, 'Gameweek');
+      expect(find.byKey(const ValueKey('dream_team_card')), findsNothing);
+      expect(find.text('Team of the Week · GW2'), findsNothing);
+      expect(find.byKey(const ValueKey('leaderboard_week_2')), findsOneWidget);
+      expect(find.byKey(const ValueKey('leaderboard_row_u1')), findsOneWidget);
+
+      // Team of the week: the card on the latest week, no list at all.
+      await pickScope(tester, kTeamOfWeekSegmentLabel);
       expect(find.byKey(const ValueKey('dream_team_card')), findsOneWidget);
       expect(find.text('Team of the Week · GW2'), findsOneWidget);
       expect(find.text('Kit'), findsOneWidget);
       expect(find.text('14 pts'), findsOneWidget);
+      expect(find.byKey(const ValueKey('leaderboard_row_u1')), findsNothing);
+      expect(find.byKey(const ValueKey('leaderboard_column_header')),
+          findsNothing);
+      expect(find.byKey(const ValueKey('leaderboard_week_2')), findsNothing);
+
+      // And back: Overall is exactly the list again.
+      await pickScope(tester, 'Overall');
+      expect(find.byKey(const ValueKey('dream_team_card')), findsNothing);
       expect(find.byKey(const ValueKey('leaderboard_row_u1')), findsOneWidget);
+    });
+
+    testWidgets("the card's own week chips step back through prior weeks",
+        (tester) async {
+      await pumpTab(tester, size: const Size(420, 1400));
+      await emitAll(
+        tester,
+        data: overallData,
+        names: {'u1': manager('Top Cats')},
+        dreamTeams: twoWeeks(),
+      );
+      await pickScope(tester, kTeamOfWeekSegmentLabel);
+
+      expect(find.text('Team of the Week · GW2'), findsOneWidget);
 
       // Step back to GW1.
       await tester.tap(find.byKey(const ValueKey('dream_week_1')));
@@ -220,46 +321,262 @@ void main() {
           size: const Size(420, 1400), onOpenPlayer: opened.add);
       await emitAll(
         tester,
-        data: leaderboardsFromNode({
-          'Overall': {
-            'u1': {'points': 50, 'rank': 1},
-          },
-        }),
+        data: overallData,
         names: {'u1': manager('Top Cats')},
         dreamTeams: twoWeeks(),
       );
+      await pickScope(tester, kTeamOfWeekSegmentLabel);
       await tester.tap(find.byKey(const ValueKey('squad_chip_Kit')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('squad_chip_Alex')));
       await tester.pumpAndSettle();
       expect(opened, ['Kit', 'Alex']);
-      // The manager row still opens the squad viewer, not a profile.
+      // Never the manager squad viewer from this view.
       expect(openedRows, isEmpty);
     });
 
-    testWidgets('card shows above the friendly empty state when a DreamTeam '
-        'exists before any board does', (tester) async {
+    testWidgets('the card shows in its own scope even when no board exists '
+        'yet — and the other scopes show only their empty state',
+        (tester) async {
       await pumpTab(tester, size: const Size(420, 1400));
       await emitAll(tester, dreamTeams: twoWeeks());
-      expect(find.byKey(const ValueKey('dream_team_card')), findsOneWidget);
+
+      // Overall: the friendly empty state, NOT the card.
+      expect(find.byKey(const ValueKey('leaderboards_empty')), findsOneWidget);
       expect(find.text('Leaderboards light up after the first gameweek.'),
           findsOneWidget);
+      expect(find.byKey(const ValueKey('dream_team_card')), findsNothing);
+
+      await pickScope(tester, kTeamOfWeekSegmentLabel);
+      expect(find.byKey(const ValueKey('dream_team_card')), findsOneWidget);
+      expect(find.byKey(const ValueKey('dream_team_empty')), findsNothing);
+      expect(find.byKey(const ValueKey('leaderboards_empty')), findsNothing);
+    });
+
+    testWidgets('no DreamTeam yet: the Team of the week view shows a '
+        'friendly one-liner (no card, no leaderboard copy)', (tester) async {
+      await pumpTab(tester);
+      await emitAll(
+        tester,
+        data: overallData,
+        names: {'u1': manager('Top Cats')},
+      );
+      await pickScope(tester, kTeamOfWeekSegmentLabel);
+
+      expect(find.byKey(const ValueKey('dream_team_empty')), findsOneWidget);
+      expect(find.text('Team of the Week appears once Gameweek 1 is scored.'),
+          findsOneWidget);
+      expect(find.byKey(const ValueKey('dream_team_card')), findsNothing);
+      expect(find.text('Leaderboards light up after the first gameweek.'),
+          findsNothing);
+      expect(find.byKey(const ValueKey('leaderboard_row_u1')), findsNothing);
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('the empty copy wraps and fits at 360 px — $brightness',
+          (tester) async {
+        await pumpTab(tester,
+            size: const Size(360, 760), brightness: brightness);
+        await emitAll(tester, data: overallData, names: {'u1': manager('A')});
+        await pickScope(tester, kTeamOfWeekSegmentLabel);
+        expect(find.byKey(const ValueKey('dream_team_empty')), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('the card fits at 360 px with no overflow — $brightness',
+          (tester) async {
+        await pumpTab(tester,
+            size: const Size(360, 760), brightness: brightness);
+        await emitAll(
+          tester,
+          data: overallData,
+          names: {'u1': manager('A')},
+          dreamTeams: twoWeeks(),
+        );
+        await pickScope(tester, kTeamOfWeekSegmentLabel);
+        expect(find.byKey(const ValueKey('dream_team_card')), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
+  });
+
+  group('week sync between Gameweek and Team of the week', () {
+    /// A full five-man dream team for each week, named after the week.
+    Map<int, FantasyDreamTeam> dreamWeeks(List<int> weeks) =>
+        dreamTeamsFromNode({
+          for (final w in weeks)
+            '$w': {
+              'Players': [
+                {'name': 'Keeper$w', 'position': 'GK', 'points': 10 + w},
+                {'name': 'DefA$w', 'position': 'DEF', 'points': 9},
+                {'name': 'DefB$w', 'position': 'DEF', 'points': 8},
+                {'name': 'AttA$w', 'position': 'ATT', 'points': 7},
+                {'name': 'AttB$w', 'position': 'ATT', 'points': 6},
+              ],
+            },
+        });
+
+    final threeScoredWeeks = leaderboardsFromNode({
+      'Overall': {
+        'u1': {'points': 50, 'rank': 1},
+      },
+      'Gameweek': {
+        for (var w = 1; w <= 3; w++)
+          '$w': {
+            'u1': {'points': 10 * w, 'rank': 1},
+          },
+      },
+    });
+
+    bool chipSelected(WidgetTester tester, String key) =>
+        tester.widget<ChoiceChip>(find.byKey(ValueKey(key))).selected;
+
+    testWidgets('Gameweek GW2 -> Team of the week opens on GW2 (not the '
+        'latest, GW3)', (tester) async {
+      await pumpTab(tester, size: const Size(420, 1400));
+      await emitAll(
+        tester,
+        data: threeScoredWeeks,
+        names: {'u1': manager('Top Cats')},
+        dreamTeams: dreamWeeks([1, 2, 3]),
+      );
+
+      await pickScope(tester, 'Gameweek');
+      await tester.tap(find.byKey(const ValueKey('leaderboard_week_2')));
+      await tester.pumpAndSettle();
+      expect(chipSelected(tester, 'leaderboard_week_2'), isTrue);
+
+      await pickScope(tester, kTeamOfWeekSegmentLabel);
+      expect(find.text('Team of the Week · GW2'), findsOneWidget);
+      expect(find.text('Keeper2'), findsOneWidget);
+      expect(chipSelected(tester, 'dream_week_2'), isTrue);
+    });
+
+    testWidgets('Team of the week GW1 -> Gameweek opens on GW1 (not the '
+        'latest scored week)', (tester) async {
+      await pumpTab(tester, size: const Size(420, 1400));
+      await emitAll(
+        tester,
+        data: threeScoredWeeks,
+        names: {'u1': manager('Top Cats')},
+        dreamTeams: dreamWeeks([1, 2, 3]),
+      );
+
+      await pickScope(tester, kTeamOfWeekSegmentLabel);
+      expect(find.text('Team of the Week · GW3'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('dream_week_1')));
+      await tester.pumpAndSettle();
+      expect(find.text('Team of the Week · GW1'), findsOneWidget);
+
+      await pickScope(tester, 'Gameweek');
+      expect(chipSelected(tester, 'leaderboard_week_1'), isTrue);
+      expect(chipSelected(tester, 'leaderboard_week_3'), isFalse);
+      // GW1's own ranking shows (u1 scored 10 that week).
+      expect(find.text('10 pts'), findsOneWidget);
+    });
+
+    testWidgets("a week the target view does not have leaves the target's "
+        'own selection alone', (tester) async {
+      await pumpTab(tester, size: const Size(420, 1400));
+      await emitAll(
+        tester,
+        data: threeScoredWeeks,
+        names: {'u1': manager('Top Cats')},
+        // Dream teams only through GW2.
+        dreamTeams: dreamWeeks([1, 2]),
+      );
+
+      // Gameweek GW3 has no Team of the Week -> the card stays on its latest.
+      await pickScope(tester, 'Gameweek');
+      await tester.tap(find.byKey(const ValueKey('leaderboard_week_3')));
+      await tester.pumpAndSettle();
+      await pickScope(tester, kTeamOfWeekSegmentLabel);
+      expect(find.text('Team of the Week · GW2'), findsOneWidget);
+
+      // The card steps back to GW1, then to Gameweek: GW1 carries over.
+      await tester.tap(find.byKey(const ValueKey('dream_week_1')));
+      await tester.pumpAndSettle();
+      await pickScope(tester, 'Gameweek');
+      expect(chipSelected(tester, 'leaderboard_week_1'), isTrue);
+
+      // Gameweek picks GW3 again (the card has none): GW1 stays on the card.
+      await tester.tap(find.byKey(const ValueKey('leaderboard_week_3')));
+      await tester.pumpAndSettle();
+      await pickScope(tester, kTeamOfWeekSegmentLabel);
+      expect(find.text('Team of the Week · GW1'), findsOneWidget);
     });
   });
 
   group('scopes (My Leagues hidden)', () {
-    testWidgets('the segments are exactly Overall + Gameweek', (tester) async {
+    testWidgets('the segments are exactly Overall + Gameweek + Team of the '
+        'week', (tester) async {
       await pumpTab(tester);
       await emitAll(tester);
 
       final segmented = tester.widget<SegmentedButton<LeaderboardScope>>(
           find.byKey(const ValueKey('leaderboard_scope')));
-      expect(segmented.segments.map((s) => s.value),
-          [LeaderboardScope.overall, LeaderboardScope.gameweek]);
+      expect(segmented.segments.map((s) => s.value), [
+        LeaderboardScope.overall,
+        LeaderboardScope.gameweek,
+        LeaderboardScope.teamOfWeek,
+      ]);
       expect(find.text('Overall'), findsOneWidget);
       expect(find.text('Gameweek'), findsOneWidget);
+      expect(find.text(kTeamOfWeekSegmentLabel), findsOneWidget);
       expect(find.text('My Leagues'), findsNothing);
     });
+
+    // Real Roboto metrics (see loadRealFont): the three segments are equal
+    // width (336 / 3 = 112 px at 360, minus padding), so a label that is too
+    // long wraps to a second line on a real phone even though the Ahem test
+    // font can't show it.
+    for (final brightness in Brightness.values) {
+      testWidgets('all three labels sit on ONE line, untruncated, at 360 px '
+          'with real Roboto metrics — $brightness', (tester) async {
+        if (!await loadRealFont()) {
+          markTestSkipped('Flutter SDK material_fonts (Roboto) not found');
+          return;
+        }
+        await pumpTab(tester,
+            size: const Size(360, 760),
+            brightness: brightness,
+            fontFamily: kRealFont);
+        await emitAll(tester);
+
+        final bar =
+            tester.getRect(find.byKey(const ValueKey('leaderboard_scope')));
+        double? oneLine;
+        for (final label in ['Overall', 'Gameweek', kTeamOfWeekSegmentLabel]) {
+          final paragraph = tester.renderObject<RenderParagraph>(find
+              .descendant(
+                  of: find.text(label), matching: find.byType(RichText)));
+          // The real font is actually in use (not the Ahem 14 px/glyph box).
+          expect(paragraph.size.width, lessThan(label.length * 14.0 - 10),
+              reason: 'still measuring with the Ahem test font');
+          // Untruncated: it got its full natural width (an ellipsized or
+          // wrapped label would be narrower than its max intrinsic width).
+          final needed = paragraph.getMaxIntrinsicWidth(double.infinity);
+          expect(paragraph.size.width, greaterThanOrEqualTo(needed - 0.01),
+              reason: '$label was squeezed');
+          // ...with a few px to spare, so a slightly wider system font (iOS
+          // SF) can't tip it onto a second line.
+          final available = paragraph.constraints.maxWidth;
+          expect(available - needed, greaterThanOrEqualTo(4),
+              reason: '$label has under 4 px to spare '
+                  '(needs $needed of $available)');
+          // One line: the same height as the others (a single text line).
+          oneLine ??= paragraph.size.height;
+          expect(paragraph.size.height, oneLine, reason: '$label wrapped');
+          // And inside the segmented control, inside the screen.
+          final box = tester.getRect(find.text(label));
+          expect(box.left, greaterThanOrEqualTo(bar.left));
+          expect(box.right, lessThanOrEqualTo(bar.right));
+          expect(box.right, lessThanOrEqualTo(360));
+        }
+        expect(oneLine, lessThan(24));
+        expect(tester.takeException(), isNull);
+      });
+    }
 
     testWidgets('the hidden mini-leagues feed is never subscribed to',
         (tester) async {
@@ -281,13 +598,33 @@ void main() {
           },
         }),
         names: {'u1': manager('Top Cats')},
+        dreamTeams: twoWeeks(),
       );
 
       expect(find.byType(MiniLeaguesView), findsNothing);
       expect(find.byKey(const ValueKey('leaderboard_row_u1')), findsOneWidget);
+      // Overall, with no card above it.
+      expect(find.byKey(const ValueKey('dream_team_card')), findsNothing);
       final segmented = tester.widget<SegmentedButton<LeaderboardScope>>(
           find.byKey(const ValueKey('leaderboard_scope')));
       expect(segmented.selected, {LeaderboardScope.overall});
+    });
+
+    testWidgets('a persisted Team of the week scope restores that view',
+        (tester) async {
+      FantasyLeaderboardsTab.sessionScope = LeaderboardScope.teamOfWeek;
+      await pumpTab(tester, size: const Size(420, 1400));
+      await emitAll(
+        tester,
+        data: overallData,
+        names: {'u1': manager('Top Cats')},
+        dreamTeams: twoWeeks(),
+      );
+      expect(find.byKey(const ValueKey('dream_team_card')), findsOneWidget);
+      expect(find.byKey(const ValueKey('leaderboard_row_u1')), findsNothing);
+      final segmented = tester.widget<SegmentedButton<LeaderboardScope>>(
+          find.byKey(const ValueKey('leaderboard_scope')));
+      expect(segmented.selected, {LeaderboardScope.teamOfWeek});
     });
   });
 

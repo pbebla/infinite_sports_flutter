@@ -86,6 +86,18 @@ void main() {
     expect(find.byKey(const ValueKey('dream_week_3')), findsNothing);
   });
 
+  test('resolveWeek: the session pick while that week exists, else the '
+      'latest (the one rule the card and the Leaderboards week-sync share)',
+      () {
+    expect(DreamTeamCard.resolveWeek([1, 2, 3]), 3);
+    DreamTeamCard.sessionWeek = 2;
+    expect(DreamTeamCard.resolveWeek([1, 2, 3]), 2);
+    expect(DreamTeamCard.resolveWeek([3, 1, 2]), 2); // order-independent
+    DreamTeamCard.sessionWeek = 9; // stale: no such week any more
+    expect(DreamTeamCard.resolveWeek([1, 2, 3]), 3);
+    expect(DreamTeamCard.resolveWeek([7]), 7);
+  });
+
   testWidgets('round 3: tapping a Team of the Week player opens his profile; '
       'an empty slot stays inert', (tester) async {
     final teams = dreamTeamsFromNode({

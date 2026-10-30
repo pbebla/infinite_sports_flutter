@@ -4,17 +4,20 @@
 // their name. Reads the SAME `DreamTeam/<gw>` node as the weekly news post,
 // so an admin correction fixes both at once.
 //
-// HOME: the top of the Leaderboards tab's Overall and Gameweek scrolls —
-// the Dream Team is public, standings-adjacent celebration (same data
-// family as the gameweek boards), while My Team is the private editing
-// surface already stacked with gates (name prompt, moderation freeze, lock
-// states) where a public showcase would routinely be hidden behind prompts.
+// HOME: the Leaderboards tab's own "Team of the week" segment (it sits beside
+// Overall and Gameweek and is the ONLY content of that view — it used to
+// float above both lists, which made switching them look like a no-op). The
+// Dream Team is public, standings-adjacent celebration (same data family as
+// the gameweek boards), while My Team is the private editing surface already
+// stacked with gates (name prompt, moderation freeze, lock states) where a
+// public showcase would routinely be hidden behind prompts.
 //
 // House rules: theme-safe both modes (the shared fantasy brand surface +
 // accent), names wrap on the chips (court behavior), photos never gate
 // content (initials fallback), week selection persists for the session
-// (the market-sort precedent). Hidden entirely while no DreamTeam exists —
-// the Leaderboards tab simply doesn't build it.
+// (the market-sort precedent; the Leaderboards tab carries it to and from the
+// Gameweek view). Renders nothing while no DreamTeam exists — the Leaderboards
+// tab shows its own friendly line instead of building the card.
 
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
@@ -50,6 +53,15 @@ class DreamTeamCard extends StatefulWidget {
   /// swiping away and back lands where the fan left off.
   static int? sessionWeek;
 
+  /// The week the card shows for these [weeks] (non-empty): the session
+  /// selection while that week still exists, else the latest. ONE rule shared
+  /// by the card and by the Leaderboards tab's Gameweek week-sync.
+  static int resolveWeek(Iterable<int> weeks) {
+    final latest = weeks.reduce((a, b) => a > b ? a : b);
+    final selected = sessionWeek;
+    return selected != null && weeks.contains(selected) ? selected : latest;
+  }
+
   @override
   State<DreamTeamCard> createState() => _DreamTeamCardState();
 }
@@ -59,9 +71,7 @@ class _DreamTeamCardState extends State<DreamTeamCard> {
   Widget build(BuildContext context) {
     final weeks = widget.teams.keys.toList()..sort();
     if (weeks.isEmpty) return const SizedBox.shrink();
-    final latest = weeks.last;
-    var selected = DreamTeamCard.sessionWeek ?? latest;
-    if (!widget.teams.containsKey(selected)) selected = latest;
+    final selected = DreamTeamCard.resolveWeek(weeks);
     final team = widget.teams[selected]!;
 
     final accent = FantasyBanner.accent(context);

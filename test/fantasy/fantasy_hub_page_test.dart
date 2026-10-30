@@ -355,6 +355,13 @@ void main() {
       viceId: 'Dana Wall',
     );
 
+    /// Taps one of the Leaderboards tab's scope segments by its label.
+    Future<void> selectScope(WidgetTester tester, String label) async {
+      await tester.tap(find.descendant(
+          of: key('leaderboard_scope'), matching: find.text(label)));
+      await tester.pumpAndSettle();
+    }
+
     Future<void> landBoards(WidgetTester tester) async {
       boards.add(leaderboardsFromNode({
         'Overall': {
@@ -374,6 +381,10 @@ void main() {
       await pumpHub(tester, tab: FantasyHubTab.leaderboards);
       await land(tester);
       await landBoards(tester);
+      // The card lives in its own "Team of the week" segment (not above the
+      // Overall list).
+      expect(key('dream_team_card'), findsNothing);
+      await selectScope(tester, kTeamOfWeekSegmentLabel);
       expect(key('dream_team_card'), findsOneWidget);
 
       await tester.tap(key('squad_chip_Ava Striker'));
@@ -396,9 +407,13 @@ void main() {
       await landBoards(tester);
 
       // Dream Team first, to compare the draft identity below.
+      await selectScope(tester, kTeamOfWeekSegmentLabel);
       await tester.tap(key('squad_chip_Ava Striker'));
       await tester.pumpAndSettle();
       expect(opened.map((o) => o.name), ['Ava Striker']);
+
+      // Back on Overall for the manager rows.
+      await selectScope(tester, 'Overall');
 
       // The default viewer builder (no squadViewerBuilder seam) is used.
       await tester.tap(key('leaderboard_row_u1'));

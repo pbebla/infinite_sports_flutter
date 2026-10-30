@@ -1,10 +1,14 @@
 // The hub's Leaderboards tab (P3d, spec §9/§10; redesigned in round 3, spec
-// §6): Overall / Gameweek scopes. Both render plain ranked rows (no podium) —
-// gold rank, a movement cell on Overall only, the manager's real name with the
-// team name under it — with the signed-in manager's row pinned when scrolled
-// away; the Gameweek scope adds week chips (1..N from the real schedule's
-// gameweeks). Tapping ANY manager opens their squad viewer (spec §9
-// transparency).
+// §6): three scopes — Overall | Gameweek | Team of the week. Overall and
+// Gameweek render plain ranked rows (no podium) — gold rank, a movement cell
+// on Overall only, the manager's real name with the team name under it — with
+// the signed-in manager's row pinned when scrolled away; the Gameweek scope
+// adds week chips (1..N from the real schedule's gameweeks). Tapping ANY
+// manager opens their squad viewer (spec §9 transparency). Team of the week
+// is the Dream Team card (dream_team_card.dart) as the ONLY content of its
+// own view — it no longer floats above the two lists (switching those looked
+// like a no-op). The selected week carries between Gameweek and Team of the
+// week.
 //
 // My Leagues (the mini-league create/join/share surface) is BUILT but hidden
 // behind [kShowMiniLeagues]: no segment, no MiniLeagues subscription, and it
@@ -37,7 +41,19 @@ import 'package:infinite_sports_flutter/fantasy/hub/mini_leagues_view.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
-enum LeaderboardScope { overall, gameweek, leagues }
+enum LeaderboardScope { overall, gameweek, teamOfWeek, leagues }
+
+/// The third segment's label. SegmentedButton gives every segment the SAME
+/// width, so at 360 px each gets only ~88 px of text. "Team of the week" needs
+/// ~113 px in Roboto (it wrapped to two lines); "Team of week" fits on one
+/// line. The fit is proved with real Roboto metrics in
+/// leaderboards_tab_test.dart.
+const String kTeamOfWeekSegmentLabel = 'Team of week';
+
+/// The Team of the week view's friendly line while no DreamTeam node exists
+/// (the functions write it once a gameweek is scored).
+const String kTeamOfWeekEmptyCopy =
+    'Team of the Week appears once Gameweek 1 is scored.';
 
 /// Owner decision (round 3): mini-leagues are hidden for now. The code, rules
 /// and data all stay — flip to true to restore the "My Leagues" segment, its
@@ -237,23 +253,6 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
       _profiles != null &&
       _dreamTeams != null;
 
-  /// Dream Team of the Week (P6): the top of the Overall and Gameweek
-  /// scrolls — see dream_team_card.dart's header for why it lives here and
-  /// not on My Team. null while no DreamTeam node exists (hidden entirely).
-  Widget? _dreamTeamCard() {
-    final teams = _dreamTeams;
-    if (teams == null || teams.isEmpty) return null;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-      child: DreamTeamCard(
-        teams: teams,
-        config: widget.configState.config,
-        players: widget.players,
-        onOpenPlayer: widget.onOpenPlayer,
-      ),
-    );
-  }
-
   void _openManager(LeaderboardRowData row) {
     final builder = widget.squadViewerBuilder ??
         (row) => ManagerSquadViewerPage(
@@ -285,6 +284,55 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
         : scope;
   }
 
+  /// Gameweek chips 1..N from the real schedule's gameweeks (falling back to
+  /// the weeks that actually hold data if the schedule hasn't streamed in).
+  List<int> _gameweekNumbers(Map<int, List<FantasyLeaderboardEntry>> byWeek) =>
+      widget.gameweeks.isNotEmpty
+          ? [for (final gw in widget.gameweeks) gw.number]
+          : (byWeek.keys.toList()..sort());
+
+  /// The Gameweek view's selected week: the session pick while it is still a
+  /// chip, else the latest scored week. [byWeek] must be non-empty.
+  int _selectedGameweek(Map<int, List<FantasyLeaderboardEntry>> byWeek) {
+    final latestScored = byWeek.keys.reduce((a, b) => a > b ? a : b);
+    final selected = FantasyLeaderboardsTab.sessionWeek ?? latestScored;
+    return _gameweekNumbers(byWeek).contains(selected)
+        ? selected
+        : latestScored;
+  }
+
+  /// Leaving Gameweek or Team of the week carries its selected week to the
+  /// other one's session selection — when that week exists there (GW8 in
+  /// Gameweek -> Team of the week opens on GW8). A week the target doesn't
+  /// have leaves the target's own selection alone. Runs inside setState.
+  void _carryWeekFrom(LeaderboardScope leaving) {
+    final byWeek =
+        _boards?.byWeek ?? const <int, List<FantasyLeaderboardEntry>>{};
+    final teams = _dreamTeams ?? const <int, FantasyDreamTeam>{};
+    switch (leaving) {
+      case LeaderboardScope.gameweek:
+        if (byWeek.isEmpty || teams.isEmpty) return;
+        final week = _selectedGameweek(byWeek);
+        if (teams.containsKey(week)) DreamTeamCard.sessionWeek = week;
+      case LeaderboardScope.teamOfWeek:
+        if (byWeek.isEmpty || teams.isEmpty) return;
+        final week = DreamTeamCard.resolveWeek(teams.keys);
+        if (_gameweekNumbers(byWeek).contains(week)) {
+          FantasyLeaderboardsTab.sessionWeek = week;
+        }
+      case LeaderboardScope.overall:
+      case LeaderboardScope.leagues:
+        break;
+    }
+  }
+
+  void _onScopeChanged(LeaderboardScope next) {
+    setState(() {
+      _carryWeekFrom(_scope);
+      FantasyLeaderboardsTab.sessionScope = next;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final Widget body;
@@ -311,20 +359,29 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
           child: SegmentedButton<LeaderboardScope>(
             key: const ValueKey('leaderboard_scope'),
             showSelectedIcon: false,
-            style: const ButtonStyle(visualDensity: VisualDensity.compact),
+            // Same compact look; segment padding trimmed 12 -> 8 so the three
+            // equal-width segments keep "Team of week" on one line at 360 px
+            // (88 px of text -> 96; the label needs ~89 in Roboto).
+            style: const ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              padding: WidgetStatePropertyAll(
+                  EdgeInsets.symmetric(horizontal: 8)),
+            ),
             segments: [
               const ButtonSegment(
                   value: LeaderboardScope.overall, label: Text('Overall')),
               const ButtonSegment(
                   value: LeaderboardScope.gameweek, label: Text('Gameweek')),
+              const ButtonSegment(
+                  value: LeaderboardScope.teamOfWeek,
+                  label: Text(kTeamOfWeekSegmentLabel)),
               if (kShowMiniLeagues)
                 const ButtonSegment(
                     value: LeaderboardScope.leagues,
                     label: Text('My Leagues')),
             ],
             selected: {scope},
-            onSelectionChanged: (s) => setState(
-                () => FantasyLeaderboardsTab.sessionScope = s.first),
+            onSelectionChanged: (s) => _onScopeChanged(s.first),
           ),
         ),
         const SizedBox(height: 6),
@@ -332,6 +389,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
           child: switch (scope) {
             LeaderboardScope.overall => _overallBody(),
             LeaderboardScope.gameweek => _gameweekBody(),
+            LeaderboardScope.teamOfWeek => _teamOfWeekBody(),
             LeaderboardScope.leagues => _leaguesBody(),
           },
         ),
@@ -362,13 +420,10 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
 
   Widget _overallBody() {
     final entries = _boards!.overall;
-    final dreamTeam = _dreamTeamCard();
     if (entries.isEmpty) {
-      return _LeaderboardsEmpty(
-          key: const ValueKey('leaderboards_empty'), header: dreamTeam);
+      return const _LeaderboardsEmpty(key: ValueKey('leaderboards_empty'));
     }
     return RankedLeaderboardList(
-      header: dreamTeam,
       rows: composeLeaderboardRows(
         entries: entries,
         managers: _managers!,
@@ -382,21 +437,12 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
 
   Widget _gameweekBody() {
     final byWeek = _boards!.byWeek;
-    final dreamTeam = _dreamTeamCard();
     if (byWeek.isEmpty) {
-      return _LeaderboardsEmpty(
-          key: const ValueKey('leaderboards_empty'), header: dreamTeam);
+      return const _LeaderboardsEmpty(key: ValueKey('leaderboards_empty'));
     }
 
-    // Chips 1..N from the real schedule's gameweeks (falling back to the
-    // weeks that actually hold data if the schedule hasn't streamed in).
-    final weekNumbers = widget.gameweeks.isNotEmpty
-        ? [for (final gw in widget.gameweeks) gw.number]
-        : (byWeek.keys.toList()..sort());
-    final latestScored =
-        byWeek.keys.reduce((a, b) => a > b ? a : b);
-    var selected = FantasyLeaderboardsTab.sessionWeek ?? latestScored;
-    if (!weekNumbers.contains(selected)) selected = latestScored;
+    final weekNumbers = _gameweekNumbers(byWeek);
+    final selected = _selectedGameweek(byWeek);
 
     final scheme = Theme.of(context).colorScheme;
     final chips = SingleChildScrollView(
@@ -424,7 +470,6 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (dreamTeam != null) Flexible(child: dreamTeam),
           chips,
           Expanded(
             child: Center(
@@ -446,12 +491,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
       );
     }
     return RankedLeaderboardList(
-      header: dreamTeam == null
-          ? chips
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [dreamTeam, chips],
-            ),
+      header: chips,
       rows: composeLeaderboardRows(
         entries: entries,
         managers: _managers!,
@@ -464,16 +504,43 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
       onRowTap: _openManager,
     );
   }
+
+  /// Team of the week (P6): the Dream Team card as the ONLY content of its
+  /// view — its own week chips, pitch, points and player taps (the hub's
+  /// profile opener) are the card's, unchanged. Friendly line while no
+  /// DreamTeam node exists yet.
+  Widget _teamOfWeekBody() {
+    final teams = _dreamTeams!;
+    if (teams.isEmpty) {
+      return const _LeaderboardsEmpty(
+        key: ValueKey('dream_team_empty'),
+        message: kTeamOfWeekEmptyCopy,
+      );
+    }
+    return SingleChildScrollView(
+      key: const ValueKey('team_of_week_scroll'),
+      padding: EdgeInsets.fromLTRB(
+          12, 6, 12, 24 + MediaQuery.paddingOf(context).bottom),
+      child: DreamTeamCard(
+        teams: teams,
+        config: widget.configState.config,
+        players: widget.players,
+        onOpenPlayer: widget.onOpenPlayer,
+      ),
+    );
+  }
 }
 
 /// The friendly empty state while the Leaderboards node is absent (nothing
-/// finalized yet — P4's functions write it after the first gameweek).
+/// finalized yet — P4's functions write it after the first gameweek). Also the
+/// Team of the week view's empty state, with its own [message].
 class _LeaderboardsEmpty extends StatelessWidget {
-  const _LeaderboardsEmpty({super.key, this.header});
+  const _LeaderboardsEmpty({
+    super.key,
+    this.message = 'Leaderboards light up after the first gameweek.',
+  });
 
-  /// Scrolled above the empty copy (the Dream Team card can exist before a
-  /// board does, e.g. an admin-seeded week).
-  final Widget? header;
+  final String message;
 
   @override
   Widget build(BuildContext context) {
@@ -483,10 +550,6 @@ class _LeaderboardsEmpty extends StatelessWidget {
           24, 48, 24, 24 + MediaQuery.paddingOf(context).bottom),
       child: Column(
         children: [
-          if (header != null) ...[
-            header!,
-            const SizedBox(height: 24),
-          ],
           Container(
             width: 72,
             height: 72,
@@ -499,7 +562,7 @@ class _LeaderboardsEmpty extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            'Leaderboards light up after the first gameweek.',
+            message,
             textAlign: TextAlign.center,
             softWrap: true,
             style: TextStyle(
