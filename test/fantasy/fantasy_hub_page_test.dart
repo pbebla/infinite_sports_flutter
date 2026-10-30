@@ -16,7 +16,9 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_prefs.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -61,6 +63,12 @@ void main() {
   late StreamController<FantasySquad?> squad;
   late StreamController<FantasySquadAlert?> alert;
   late StreamController<List<FantasyNewsPost>> news;
+  late StreamController<FantasyLeaderboards> boards;
+  late StreamController<Map<String, FantasyManager>> managers;
+  late StreamController<List<FantasyMiniLeague>> leagues;
+  late StreamController<Map<int, FantasyDreamTeam>> dreams;
+  late StreamController<Map<int, FantasySquad>> published;
+  late StreamController<Map<int, FantasySquad>> history;
   late List<_Opened> opened;
 
   final market = [
@@ -96,6 +104,15 @@ void main() {
     squad = StreamController<FantasySquad?>.broadcast();
     alert = StreamController<FantasySquadAlert?>.broadcast();
     news = StreamController<List<FantasyNewsPost>>.broadcast();
+    boards = StreamController<FantasyLeaderboards>.broadcast();
+    managers = StreamController<Map<String, FantasyManager>>.broadcast();
+    leagues = StreamController<List<FantasyMiniLeague>>.broadcast();
+    dreams = StreamController<Map<int, FantasyDreamTeam>>.broadcast();
+    published = StreamController<Map<int, FantasySquad>>.broadcast();
+    history = StreamController<Map<int, FantasySquad>>.broadcast();
+    FantasyLeaderboardsTab.sessionScope = LeaderboardScope.overall;
+    FantasyLeaderboardsTab.sessionWeek = null;
+    DreamTeamCard.sessionWeek = null;
     opened = [];
   });
 
@@ -106,6 +123,12 @@ void main() {
     squad.close();
     alert.close();
     news.close();
+    boards.close();
+    managers.close();
+    leagues.close();
+    dreams.close();
+    published.close();
+    history.close();
   });
 
   /// Lets the feeds land and the 300ms reveal fade finish. Never
@@ -140,6 +163,16 @@ void main() {
         gameweekStates: Stream.value(const []),
         chipHistoryFor: (weeks) => Stream.value(const {}),
         newsStates: news.stream,
+        leaderboardsFeeds: FantasyLeaderboardsFeeds(
+          leaderboardsStates: boards.stream,
+          managersStates: managers.stream,
+          miniLeaguesStates: leagues.stream,
+          dreamTeamsStates: dreams.stream,
+          loadProfiles: () async => {},
+          selfUidOverride: 'me',
+          viewerPublishedStates: published.stream,
+          viewerHistoryStates: history.stream,
+        ),
         profileOpener: (context,
             {required sport,
             required season,
@@ -289,6 +322,100 @@ void main() {
       expect(opened.map((o) => o.name), ['Ava Striker']);
       expect(key('action_profile'), findsNothing);
       expect(key('action_make_captain'), findsNothing);
+    });
+  });
+
+  group('Leaderboards tab (hub forwards its opener)', () {
+    // Team of the Week: five market players (GK, 2 DEF, 2 ATT).
+    Map<int, FantasyDreamTeam> teamOfTheWeek() => dreamTeamsFromNode({
+          '1': {
+            'Players': [
+              {'name': 'Alan Keeper', 'position': 'GK', 'points': 9},
+              {'name': 'Dana Wall', 'position': 'DEF', 'points': 7},
+              {'name': 'Deb Rock', 'position': 'DEF', 'points': 6},
+              {'name': 'Ava Striker', 'position': 'ATT', 'points': 8},
+              {'name': 'Axel Shot', 'position': 'ATT', 'points': 5},
+            ],
+          },
+        });
+
+    /// Another manager's published squad: Ari Goal / Dom Stone are only here
+    /// (never on the Team of the Week), so the chip tapped is unambiguous.
+    final theirSquad = FantasySquad(
+      picks: [
+        _pick('Alan Keeper', FantasyPosition.gk, 50),
+        _pick('Dana Wall', FantasyPosition.def, 60),
+        _pick('Deb Rock', FantasyPosition.def, 55),
+        _pick('Ava Striker', FantasyPosition.att, 70),
+        _pick('Axel Shot', FantasyPosition.att, 65),
+        _pick('Dom Stone', FantasyPosition.def, 50, bench: true),
+        _pick('Ari Goal', FantasyPosition.att, 60, bench: true),
+      ],
+      captainId: 'Ava Striker',
+      viceId: 'Dana Wall',
+    );
+
+    Future<void> landBoards(WidgetTester tester) async {
+      boards.add(leaderboardsFromNode({
+        'Overall': {
+          'u1': {'points': 50, 'rank': 1},
+        },
+      }));
+      managers.add({
+        'u1': const FantasyManager(teamName: 'Top Cats', nameFlagged: false),
+      });
+      leagues.add(const []);
+      dreams.add(teamOfTheWeek());
+      await settle(tester);
+    }
+
+    testWidgets('a Team of the Week chip opens that player via the hub '
+        'opener, with the shared draft', (tester) async {
+      await pumpHub(tester, tab: FantasyHubTab.leaderboards);
+      await land(tester);
+      await landBoards(tester);
+      expect(key('dream_team_card'), findsOneWidget);
+
+      await tester.tap(key('squad_chip_Ava Striker'));
+      await tester.pumpAndSettle();
+
+      expect(opened, hasLength(1));
+      final call = opened.single;
+      expect(call.name, 'Ava Striker');
+      expect(call.sport, 'Futsal');
+      expect(call.season, '15');
+      expect(call.outside, isFalse);
+      expect(call.draft, isNotNull);
+      expect(call.draft!.playerIds, contains('Ava Striker'));
+    });
+
+    testWidgets('row tap → manager squad viewer → a court chip opens that '
+        'player via the same hub opener and draft', (tester) async {
+      await pumpHub(tester, tab: FantasyHubTab.leaderboards);
+      await land(tester);
+      await landBoards(tester);
+
+      // Dream Team first, to compare the draft identity below.
+      await tester.tap(key('squad_chip_Ava Striker'));
+      await tester.pumpAndSettle();
+      expect(opened.map((o) => o.name), ['Ava Striker']);
+
+      // The default viewer builder (no squadViewerBuilder seam) is used.
+      await tester.tap(key('leaderboard_row_u1'));
+      await settle(tester); // the viewer shimmers until its feeds land
+      published.add({1: theirSquad});
+      history.add(const {});
+      await settle(tester);
+      expect(key('viewer_content'), findsOneWidget);
+
+      await tester.tap(key('squad_chip_Ari Goal'));
+      await tester.pumpAndSettle();
+      expect(opened.map((o) => o.name), ['Ava Striker', 'Ari Goal']);
+      expect(opened[1].sport, 'Futsal');
+      expect(opened[1].season, '15');
+      expect(opened[1].outside, isFalse);
+      expect(opened[1].draft, isNotNull);
+      expect(identical(opened[0].draft, opened[1].draft), isTrue);
     });
   });
 

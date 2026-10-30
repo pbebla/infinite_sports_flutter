@@ -80,6 +80,7 @@ class FantasyHubPage extends StatefulWidget {
     this.gameweekStates,
     this.chipHistoryFor,
     this.newsStates,
+    this.leaderboardsFeeds,
     this.profileOpener,
   });
 
@@ -116,6 +117,9 @@ class FantasyHubPage extends StatefulWidget {
 
   /// Forwarded to the News tab.
   final Stream<List<FantasyNewsPost>>? newsStates;
+
+  /// Forwarded to the Leaderboards tab (its feeds + the squad viewer's).
+  final FantasyLeaderboardsFeeds? leaderboardsFeeds;
 
   /// Replaces [openFantasyPlayerProfile] (records the call in tests).
   final FantasyProfileOpener? profileOpener;
@@ -454,6 +458,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         onFocusHandled: _onFocusHandled,
         onOpenPlayer: _openPlayerProfile,
         newsStates: widget.newsStates,
+        leaderboardsFeeds: widget.leaderboardsFeeds,
       );
     } else {
       body = const _HubSkeleton(key: ValueKey('skeleton'));
@@ -518,6 +523,7 @@ class _HubBody extends StatelessWidget {
     required this.onFocusHandled,
     required this.onOpenPlayer,
     this.newsStates,
+    this.leaderboardsFeeds,
   });
 
   final String sport;
@@ -555,6 +561,9 @@ class _HubBody extends StatelessWidget {
 
   /// Test seam forwarded to the News tab (null = the real feed).
   final Stream<List<FantasyNewsPost>>? newsStates;
+
+  /// Test seams forwarded to the Leaderboards tab (null = the real feeds).
+  final FantasyLeaderboardsFeeds? leaderboardsFeeds;
 
   @override
   Widget build(BuildContext context) {
@@ -636,6 +645,15 @@ class _HubBody extends StatelessWidget {
                   gameweeks: gameweeks,
                   squadStates: squadStates,
                   initialSquad: squad,
+                  leaderboardsStates: leaderboardsFeeds?.leaderboardsStates,
+                  managersStates: leaderboardsFeeds?.managersStates,
+                  miniLeaguesStates: leaderboardsFeeds?.miniLeaguesStates,
+                  dreamTeamsStates: leaderboardsFeeds?.dreamTeamsStates,
+                  loadProfiles: leaderboardsFeeds?.loadProfiles,
+                  selfUidOverride: leaderboardsFeeds?.selfUidOverride,
+                  viewerPublishedStates:
+                      leaderboardsFeeds?.viewerPublishedStates,
+                  viewerHistoryStates: leaderboardsFeeds?.viewerHistoryStates,
                   onOpenPlayer: onOpenPlayer,
                 ),
                 // Published league news (P3d) with tagged-player cards and

@@ -36,6 +36,34 @@ import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 enum LeaderboardScope { overall, gameweek, leagues }
 
+/// The Leaderboards tab's test seams as ONE bundle, so the hub can forward
+/// them to the tab it mounts (the hub test mounts the real tab with fake feeds
+/// and proves its player-profile forwarding). null fields = the real feeds.
+class FantasyLeaderboardsFeeds {
+  const FantasyLeaderboardsFeeds({
+    this.leaderboardsStates,
+    this.managersStates,
+    this.miniLeaguesStates,
+    this.dreamTeamsStates,
+    this.loadProfiles,
+    this.selfUidOverride,
+    this.viewerPublishedStates,
+    this.viewerHistoryStates,
+  });
+
+  final Stream<FantasyLeaderboards>? leaderboardsStates;
+  final Stream<Map<String, FantasyManager>>? managersStates;
+  final Stream<List<FantasyMiniLeague>>? miniLeaguesStates;
+  final Stream<Map<int, FantasyDreamTeam>>? dreamTeamsStates;
+  final Future<Map<String, PublicProfile>> Function()? loadProfiles;
+  final String? selfUidOverride;
+
+  /// The squad viewer's PublishedPicks / History feeds (the tab's default
+  /// viewer builder hands them to ManagerSquadViewerPage).
+  final Stream<Map<int, FantasySquad>>? viewerPublishedStates;
+  final Stream<Map<int, FantasySquad>>? viewerHistoryStates;
+}
+
 class FantasyLeaderboardsTab extends StatefulWidget {
   const FantasyLeaderboardsTab({
     super.key,
@@ -61,6 +89,8 @@ class FantasyLeaderboardsTab extends StatefulWidget {
     this.squadViewerBuilder,
     this.nowUtc,
     this.onOpenPlayer,
+    this.viewerPublishedStates,
+    this.viewerHistoryStates,
   });
 
   final String sport;
@@ -96,6 +126,11 @@ class FantasyLeaderboardsTab extends StatefulWidget {
   /// and the squad viewer's court chips open a player's fantasy profile
   /// with the hub's shared draft. null = those chips stay inert.
   final void Function(String playerName)? onOpenPlayer;
+
+  /// Test seams for the DEFAULT squad viewer (ignored when
+  /// [squadViewerBuilder] is given): its PublishedPicks / History feeds.
+  final Stream<Map<int, FantasySquad>>? viewerPublishedStates;
+  final Stream<Map<int, FantasySquad>>? viewerHistoryStates;
 
   /// Session-persistent scope + gameweek selection (the market-sort
   /// precedent): swiping away and back lands where the manager left off.
@@ -222,6 +257,8 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
               gameweeks: widget.gameweeks,
               squadStates: row.isSelf ? widget.squadStates : null,
               initialSquad: row.isSelf ? widget.initialSquad : null,
+              publishedStates: widget.viewerPublishedStates,
+              historyStates: widget.viewerHistoryStates,
               nowUtc: widget.nowUtc,
               onOpenPlayer: widget.onOpenPlayer,
             );
