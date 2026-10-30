@@ -31,6 +31,7 @@ class DreamTeamCard extends StatefulWidget {
     required this.teams,
     required this.config,
     required this.players,
+    this.onOpenPlayer,
   });
 
   /// gameweek -> team, from FantasyService.watchDreamTeams. Callers only
@@ -40,6 +41,10 @@ class DreamTeamCard extends StatefulWidget {
 
   /// The live market — photo source per dream player (initials fallback).
   final List<FantasyPlayer> players;
+
+  /// Round 3: tapping a Team of the Week player opens his fantasy profile
+  /// (the hub's one opener). null = chips inert.
+  final void Function(String playerName)? onOpenPlayer;
 
   /// Session-persistent week selection (the leaderboard-chips precedent):
   /// swiping away and back lands where the fan left off.
@@ -141,9 +146,11 @@ class _DreamTeamCardState extends State<DreamTeamCard> {
             config: widget.config,
             slots: slots,
             slotPicks: slotPicks,
-            // Read-only mini mode: nothing tappable, smaller chips, no
-            // prices — position + week points tell the story.
+            // Read-only mini mode: nothing editable, smaller chips, no
+            // prices — position + week points tell the story. A chip tap
+            // opens the player's profile (round 3).
             onSlotTap: null,
+            onPlayerTap: widget.onOpenPlayer,
             showPrices: false,
             chipWidth: 78,
             chipAvatarSize: 44,

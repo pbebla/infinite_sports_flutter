@@ -7,9 +7,11 @@
 // .pickerCandidates); unaffordable players show DISABLED with their price in
 // the error color.
 //
-// showSquadChipActions: tap a filled chip → Make Captain / Make Vice-Captain
-// / Swap / Remove. Bench chips offer only Swap / Remove — a bench armband is
-// impossible by construction, not by error message.
+// showSquadChipActions: tap a filled chip → Player profile / Make Captain /
+// Make Vice-Captain / Swap / Remove. Bench chips offer only Player profile /
+// Swap / Remove — a bench armband is impossible by construction, not by error
+// message. "Player profile" (round 3) leads the list and is offered whenever
+// the hub supplies an opener.
 //
 // The search sheet is a StatefulWidget owning its TextEditingController
 // (house dialog-controller rule).
@@ -246,7 +248,7 @@ class _PickerSheetState extends State<_PickerSheet> {
 }
 
 /// Actions available on a filled chip.
-enum SquadChipAction { makeCaptain, makeVice, swap, remove }
+enum SquadChipAction { profile, makeCaptain, makeVice, swap, remove }
 
 Future<SquadChipAction?> showSquadChipActions(
   BuildContext context, {
@@ -254,6 +256,7 @@ Future<SquadChipAction?> showSquadChipActions(
   required bool bench,
   bool isCaptain = false,
   bool isVice = false,
+  bool showProfile = false,
 }) {
   return showModalBottomSheet<SquadChipAction>(
     context: context,
@@ -287,6 +290,10 @@ Future<SquadChipAction?> showSquadChipActions(
                 ),
               ),
             ),
+            // Viewing a profile is always allowed — the first item (round 3).
+            if (showProfile)
+              tile(const ValueKey('action_profile'), Icons.person_outline,
+                  'Player profile', SquadChipAction.profile),
             // Armbands are starter-only: bench chips simply never offer
             // them (spec §2 — the kind way to enforce the invariant).
             if (!bench && !isCaptain)

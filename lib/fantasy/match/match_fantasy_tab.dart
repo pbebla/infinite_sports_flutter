@@ -4,7 +4,8 @@
 // viewer's squad members highlighted (accent border + YOURS tag), the
 // captain's "×2 applied" math spelled out, present-but-scoreless players
 // collapsed under "No returns yet", absent players omitted, and a button to
-// the Hub.
+// the Hub. Every points row opens that player's fantasy profile (round 3;
+// this page is OUTSIDE the hub, so the profile offers "Open in Fantasy").
 //
 // WHAT THE NUMBERS MEAN (see match_fantasy_logic.dart's header): RAW per-game
 // engine points with a labelled captain callout — bench weighting, auto-subs,
@@ -29,6 +30,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/match/match_fantasy_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_page.dart';
 import 'package:infinite_sports_flutter/widgets/forfeit_chip.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
@@ -46,6 +48,7 @@ class MatchFantasyTab extends StatefulWidget {
     this.squadStates,
     this.onOpenHub,
     this.earningStore,
+    this.profileOpener,
   });
 
   final String sport;
@@ -72,6 +75,9 @@ class MatchFantasyTab extends StatefulWidget {
   /// Test seam for the earning chip's session memory; production uses the
   /// app-lifetime [sessionEarnings] so re-pushes never replay the tween.
   final Map<String, int>? earningStore;
+
+  /// Test seam replacing [openFantasyPlayerProfile] (a points row's tap).
+  final FantasyProfileOpener? profileOpener;
 
   /// Last-shown earning value per game this session (see
   /// [recordEarningValue]).
@@ -224,6 +230,19 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
     );
   }
 
+  /// A points row's tap: that player's fantasy profile. This page lives
+  /// OUTSIDE the hub (the league match page), so there is no shared draft and
+  /// the profile's primary button is "Open in Fantasy".
+  void _openPlayer(String name) {
+    (widget.profileOpener ?? openFantasyPlayerProfile)(
+      context,
+      sport: widget.sport,
+      season: widget.season,
+      playerName: name,
+      fromOutsideHub: true,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final Widget body;
@@ -287,7 +306,8 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
               ),
             ),
           ),
-        for (final row in _rows.scored) _PointsRow(row: row),
+        for (final row in _rows.scored)
+          _PointsRow(row: row, onOpenPlayer: _openPlayer),
         if (_rows.scoreless.isNotEmpty) ...[
           const SizedBox(height: 6),
           _ScorelessSection(
@@ -295,6 +315,7 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
             expanded: _showScoreless,
             onToggle: () =>
                 setState(() => _showScoreless = !_showScoreless),
+            onOpenPlayer: _openPlayer,
           ),
         ],
         const SizedBox(height: 14),
@@ -460,11 +481,13 @@ class _EarningChip extends StatelessWidget {
 
 /// One ranked row: "+6" badge · avatar · name (wraps) + "(DEF)" · YOURS tag.
 /// The viewer's picks carry the accent border; the viewer's captain adds the
-/// "×2 applied" line so the math is never mysterious.
+/// "×2 applied" line so the math is never mysterious. The whole row is
+/// tappable: it opens that player's fantasy profile (round 3, spec §4).
 class _PointsRow extends StatelessWidget {
-  const _PointsRow({required this.row});
+  const _PointsRow({required this.row, required this.onOpenPlayer});
 
   final MatchFantasyRow row;
+  final void Function(String playerName) onOpenPlayer;
 
   @override
   Widget build(BuildContext context) {
@@ -550,6 +573,18 @@ class _PointsRow extends StatelessWidget {
       ),
     );
 
+    // The ripple lives on its own transparent Material INSIDE the viewer's
+    // decorated box, so it paints above the tint instead of behind it.
+    final tappable = Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        key: ValueKey('points_row_${row.name}'),
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => onOpenPlayer(row.name),
+        child: content,
+      ),
+    );
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: row.isViewerPick
@@ -560,9 +595,9 @@ class _PointsRow extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: accent.withValues(alpha: 0.45)),
               ),
-              child: content,
+              child: tappable,
             )
-          : content,
+          : tappable,
     );
   }
 }
@@ -574,11 +609,13 @@ class _ScorelessSection extends StatelessWidget {
     required this.rows,
     required this.expanded,
     required this.onToggle,
+    required this.onOpenPlayer,
   });
 
   final List<MatchFantasyRow> rows;
   final bool expanded;
   final VoidCallback onToggle;
+  final void Function(String playerName) onOpenPlayer;
 
   @override
   Widget build(BuildContext context) {
@@ -618,7 +655,9 @@ class _ScorelessSection extends StatelessWidget {
             ),
           ),
         ),
-        if (expanded) for (final row in rows) _PointsRow(row: row),
+        if (expanded)
+          for (final row in rows)
+            _PointsRow(row: row, onOpenPlayer: onOpenPlayer),
       ],
     );
   }

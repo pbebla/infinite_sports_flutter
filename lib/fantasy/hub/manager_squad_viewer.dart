@@ -7,9 +7,10 @@
 // Nothing published yet → "Picks are revealed when the gameweek locks."
 //
 // House rules: streams only; single fade reveal (skeleton until every stream
-// has emitted once); theme-safe court (FantasyCourtView, onSlotTap null =
-// nothing tappable); captain/vice armbands shown; names wrap; scrolling
-// clears the glass navbar; initials avatar fallback via the court's chips.
+// has emitted once); theme-safe court (FantasyCourtView, onSlotTap null = no
+// editing; a chip tap opens that player's profile — round 3); captain/vice
+// armbands shown; names wrap; scrolling clears the glass navbar; initials
+// avatar fallback via the court's chips.
 
 import 'dart:async';
 
@@ -41,6 +42,7 @@ class ManagerSquadViewerPage extends StatefulWidget {
     this.publishedStates,
     this.historyStates,
     this.nowUtc,
+    this.onOpenPlayer,
   });
 
   final String sport;
@@ -68,6 +70,11 @@ class ManagerSquadViewerPage extends StatefulWidget {
   final Stream<Map<int, FantasySquad>>? publishedStates;
   final Stream<Map<int, FantasySquad>>? historyStates;
   final DateTime Function()? nowUtc;
+
+  /// Round 3: tapping a chip on the court opens that player's fantasy
+  /// profile (the hub's one opener, bound to its shared draft). The court
+  /// itself stays read-only. null = chips inert.
+  final void Function(String playerName)? onOpenPlayer;
 
   @override
   State<ManagerSquadViewerPage> createState() => _ManagerSquadViewerPageState();
@@ -260,7 +267,8 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
               _ChipBanner(label: chip),
               const SizedBox(height: 10),
             ],
-            // The read-only court: nothing tappable, armbands shown.
+            // The read-only court: no editing, armbands shown; a chip tap
+            // opens that player's profile (round 3).
             FantasyCourtView(
               config: widget.config,
               slots: slots,
@@ -268,6 +276,7 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
               captainId: squad.captainId,
               viceId: squad.viceId,
               onSlotTap: null,
+              onPlayerTap: widget.onOpenPlayer,
               photoUrlFor: (id) => photoByName[id],
             ),
             const SizedBox(height: 10),

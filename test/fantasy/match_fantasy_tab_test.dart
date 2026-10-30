@@ -3,8 +3,9 @@
 // an unstarted node; ranked "+N · Name (POS)" rows with the viewer's picks
 // highlighted (YOURS) and the captain's ×2 math; "No returns yet" collapsed
 // until tapped; the earning chip's counter animating ONLY on a genuine
-// increase (re-mounts with the session store never replay the tween); and
-// the hub button seam.
+// increase (re-mounts with the session store never replay the tween); the
+// hub button seam; and (round 3) every points row opening the player's
+// fantasy profile from outside the hub.
 
 import 'dart:async';
 
@@ -96,6 +97,7 @@ void main() {
   late StreamController<FantasySquad?> squads;
   late Map<String, int> store;
   late int hubOpens;
+  late List<Map<String, Object?>> profileOpens;
 
   setUp(() {
     // sync: delivery lands inside the test body, so pump() frames sample the
@@ -105,6 +107,7 @@ void main() {
     squads = StreamController<FantasySquad?>.broadcast(sync: true);
     store = {};
     hubOpens = 0;
+    profileOpens = [];
   });
 
   tearDown(() {
@@ -134,6 +137,21 @@ void main() {
           squadStates: squads.stream,
           onOpenHub: () => hubOpens++,
           earningStore: store,
+          // Test seam for openFantasyPlayerProfile: records every argument.
+          profileOpener: (context,
+              {required sport,
+              required season,
+              required playerName,
+              draft,
+              fromOutsideHub = false}) async {
+            profileOpens.add({
+              'sport': sport,
+              'season': season,
+              'name': playerName,
+              'draft': draft,
+              'outside': fromOutsideHub,
+            });
+          },
         ),
       ),
     ));
@@ -297,5 +315,54 @@ void main() {
     expect(find.text('+48'), findsOneWidget);
     await tester.pumpAndSettle();
     expect(find.text('+48'), findsOneWidget);
+  });
+
+  group('round 3: a points row opens the fantasy player profile', () {
+    Map<String, Object?> opened(String name) => {
+          'sport': 'Futsal',
+          'season': '15',
+          'name': name,
+          'draft': null,
+          // The match page lives outside the hub: the profile's primary
+          // button is "Open in Fantasy" and there is no shared draft.
+          'outside': true,
+        };
+
+    testWidgets('tapping a ranked row opens THAT player (outside the hub, '
+        'no draft)', (tester) async {
+      await pumpTab(tester);
+      await emitAll(tester);
+
+      await tester.tap(find.text('Dana (DEF)'));
+      await tester.pump();
+      expect(profileOpens, [opened('Dana')]);
+
+      await tester.tap(find.text('Yara (DEF)'));
+      await tester.pump();
+      expect(profileOpens, [opened('Dana'), opened('Yara')]);
+    });
+
+    testWidgets('the viewer highlighted rows (YOURS, captain math) open '
+        'too, and so do rows in the expanded "No returns yet" section',
+        (tester) async {
+      await pumpTab(tester);
+      await emitAll(tester, viewerSquad: squad());
+
+      // Captain row (YOURS + the ×2 math line).
+      await tester.tap(find.byKey(const ValueKey('captain_math_Alex')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('yours_tag_Gale')));
+      await tester.pump();
+      expect(profileOpens, [opened('Alex'), opened('Gale')]);
+
+      await tester
+          .tap(find.byKey(const ValueKey('match_fantasy_scoreless_toggle')));
+      await tester.pumpAndSettle();
+      // The toggle itself opens nothing.
+      expect(profileOpens, hasLength(2));
+      await tester.tap(find.text('Zed (DEF)'));
+      await tester.pump();
+      expect(profileOpens.last, opened('Zed'));
+    });
   });
 }

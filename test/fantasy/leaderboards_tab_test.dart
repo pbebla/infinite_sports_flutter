@@ -71,6 +71,7 @@ void main() {
     String selfUid = 'me',
     List<Gameweek>? weeks,
     Size size = const Size(420, 760),
+    void Function(String playerName)? onOpenPlayer,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -96,6 +97,7 @@ void main() {
                 uid: 'u9', firstName: 'Fallback', lastName: 'Fran'),
           },
           selfUidOverride: selfUid,
+          onOpenPlayer: onOpenPlayer,
           squadViewerBuilder: (row) {
             openedRows.add(row);
             return Scaffold(
@@ -196,6 +198,30 @@ void main() {
       expect(find.text('Gale'), findsOneWidget);
       expect(find.text('9 pts'), findsOneWidget);
       expect(find.text('Kit'), findsNothing);
+    });
+
+    testWidgets('round 3: tapping a Team of the Week player opens his '
+        'profile through the hub callback', (tester) async {
+      final opened = <String>[];
+      await pumpTab(tester,
+          size: const Size(420, 1400), onOpenPlayer: opened.add);
+      await emitAll(
+        tester,
+        data: leaderboardsFromNode({
+          'Overall': {
+            'u1': {'points': 50, 'rank': 1},
+          },
+        }),
+        names: {'u1': manager('Top Cats')},
+        dreamTeams: twoWeeks(),
+      );
+      await tester.tap(find.byKey(const ValueKey('squad_chip_Kit')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('squad_chip_Alex')));
+      await tester.pumpAndSettle();
+      expect(opened, ['Kit', 'Alex']);
+      // The manager row still opens the squad viewer, not a profile.
+      expect(openedRows, isEmpty);
     });
 
     testWidgets('card shows above the friendly empty state when a DreamTeam '

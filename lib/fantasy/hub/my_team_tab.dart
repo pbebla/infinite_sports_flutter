@@ -37,7 +37,12 @@ class FantasyMyTeamTab extends StatelessWidget {
     this.alertStates,
     this.initialAlert,
     this.chipHistory,
+    this.onOpenPlayer,
   });
+
+  /// The hub's one profile opener (squad builder: the chip sheet's "Player
+  /// profile", and a locked chip's direct tap). null = no profile taps.
+  final void Function(String playerName)? onOpenPlayer;
 
   /// The manager's finalized chips by gameweek (the hub's
   /// FantasyService.watchChipHistoryFor feed) — the chip row's real counts.
@@ -125,6 +130,7 @@ class FantasyMyTeamTab extends StatelessWidget {
               nowUtc: nowUtc,
               alert: alert,
               chipHistory: chipHistory,
+              onOpenPlayer: onOpenPlayer,
             );
         final alerts = alertStates;
         if (alerts == null) return builder(initialAlert);

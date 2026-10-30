@@ -48,6 +48,7 @@ class FantasyCourtView extends StatelessWidget {
     this.captainId,
     this.viceId,
     this.onSlotTap,
+    this.onPlayerTap,
     this.weekPointsFor,
     this.photoUrlFor,
     this.chipWidth = 96,
@@ -66,6 +67,12 @@ class FantasyCourtView extends StatelessWidget {
 
   /// Called with the slot index; null = locked (nothing tappable).
   final void Function(int slotIndex)? onSlotTap;
+
+  /// Round 3: a FILLED chip's tap when [onSlotTap] is null (locked court,
+  /// read-only viewers, the Dream Team) — "view his profile" is always
+  /// allowed. Never fires for an empty slot, and never replaces [onSlotTap]
+  /// while editing is open (the action sheet carries "Player profile").
+  final void Function(String playerId)? onPlayerTap;
 
   /// Week-points text per playerId — only rendered when provided (P4/P6).
   final String? Function(String playerId)? weekPointsFor;
@@ -194,7 +201,9 @@ class FantasyCourtView extends StatelessWidget {
       isCaptain: pick.playerId == captainId,
       isVice: pick.playerId == viceId,
       weekPoints: weekPointsFor?.call(pick.playerId),
-      onTap: onSlotTap == null ? null : () => onSlotTap!(i),
+      onTap: onSlotTap != null
+          ? () => onSlotTap!(i)
+          : (onPlayerTap == null ? null : () => onPlayerTap!(pick.playerId)),
       width: chipWidth,
       avatarSize: chipAvatarSize,
     );

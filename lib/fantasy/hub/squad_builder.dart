@@ -49,7 +49,14 @@ class FantasySquadBuilder extends StatefulWidget {
     this.nowUtc,
     this.alert,
     this.chipHistory,
+    this.onOpenPlayer,
   });
+
+  /// Opens a player's fantasy profile (the hub's one opener, bound to its
+  /// sport/season/shared draft): the chip action sheet's first item, and —
+  /// when the court is locked — a filled chip's direct tap. null (standalone
+  /// builder/tests) = no profile affordance.
+  final void Function(String playerName)? onOpenPlayer;
 
   /// The manager's finalized chips by gameweek (`History/<gw>/<uid>`, via
   /// FantasyService.watchChipHistoryFor) — drives the chip row's real
@@ -171,8 +178,14 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
   // ── Edit actions ───────────────────────────────────────────────────────
 
   Future<void> _onSlotTap(int i) async {
-    if (!_editable) return;
     final pick = _draft.picks[i];
+    if (!_editable) {
+      // The deadline passed since the last rebuild (the 30s ticker hasn't
+      // re-locked the court yet): editing is closed, but viewing a profile
+      // never is.
+      if (pick != null) widget.onOpenPlayer?.call(pick.playerId);
+      return;
+    }
     if (pick == null) {
       await _pickInto(i, remainingExtraTenths: 0);
     } else {
@@ -211,9 +224,12 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       bench: _draft.slots[i].bench,
       isCaptain: pick.playerId == _draft.captainId,
       isVice: pick.playerId == _draft.viceId,
+      showProfile: widget.onOpenPlayer != null,
     );
     if (action == null || !mounted) return;
     switch (action) {
+      case SquadChipAction.profile:
+        widget.onOpenPlayer?.call(pick.playerId);
       case SquadChipAction.makeCaptain:
         _draft.makeCaptain(pick.playerId);
       case SquadChipAction.makeVice:
@@ -358,6 +374,9 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
             captainId: _draft.captainId,
             viceId: _draft.viceId,
             onSlotTap: editable ? _onSlotTap : null,
+            // Locked: viewing a profile is still allowed (filled chips only;
+            // empty slots stay inert).
+            onPlayerTap: widget.onOpenPlayer,
             // Big photo chips (Task 3): the market's photoUrl per pick;
             // initials fall back instantly when a player has none.
             photoUrlFor: (id) => photoByName[id],

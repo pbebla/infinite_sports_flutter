@@ -60,6 +60,7 @@ class FantasyLeaderboardsTab extends StatefulWidget {
     this.codeGenerator,
     this.squadViewerBuilder,
     this.nowUtc,
+    this.onOpenPlayer,
   });
 
   final String sport;
@@ -90,6 +91,11 @@ class FantasyLeaderboardsTab extends StatefulWidget {
   final String Function()? codeGenerator;
   final Widget Function(LeaderboardRowData row)? squadViewerBuilder;
   final DateTime Function()? nowUtc;
+
+  /// The hub's one player-profile opener (round 3): Team of the Week chips
+  /// and the squad viewer's court chips open a player's fantasy profile
+  /// with the hub's shared draft. null = those chips stay inert.
+  final void Function(String playerName)? onOpenPlayer;
 
   /// Session-persistent scope + gameweek selection (the market-sort
   /// precedent): swiping away and back lands where the manager left off.
@@ -198,6 +204,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
         teams: teams,
         config: widget.configState.config,
         players: widget.players,
+        onOpenPlayer: widget.onOpenPlayer,
       ),
     );
   }
@@ -216,6 +223,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
               squadStates: row.isSelf ? widget.squadStates : null,
               initialSquad: row.isSelf ? widget.initialSquad : null,
               nowUtc: widget.nowUtc,
+              onOpenPlayer: widget.onOpenPlayer,
             );
     Navigator.push(
         context, MaterialPageRoute(builder: (_) => builder(row)));

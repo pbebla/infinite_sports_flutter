@@ -57,14 +57,8 @@ Future<void> openMatchFromNotification(Map<String, dynamic> data) async {
     final route = fantasyRouteFromPayload(data);
     final fantasyCtx = mainContext;
     if (route == null || fantasyCtx == null) return;
-    Navigator.of(fantasyCtx, rootNavigator: true).push(MaterialPageRoute(
-      builder: (_) => FantasyHubPage(
-        sport: route.sport,
-        season: route.season,
-        initialTab: route.initialTab,
-        focusPostId: route.focusPostId,
-      ),
-    ));
+    Navigator.of(fantasyCtx, rootNavigator: true)
+        .push(fantasyHubPageRoute(route));
     return;
   }
 

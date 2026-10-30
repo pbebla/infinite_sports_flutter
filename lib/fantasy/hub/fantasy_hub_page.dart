@@ -12,9 +12,15 @@
 //
 // Push taps (automation spec 2026-10-28 §4.2): [FantasyHubPage.initialTab]
 // opens on News (a news push) or My Team (everything else), and
-// [FantasyHubPage.focusPostId] scrolls the News feed to the tapped post. A
-// tagged player's "View player" in News opens the SAME market sheet the
-// Players tab opens, editing the same shared draft.
+// [FantasyHubPage.focusPostId] scrolls the News feed to the tapped post.
+//
+// Player profiles (round 3, spec §4): EVERY player tap inside the hub — News
+// "View player" and compact rows, the My Team court (chip sheet's "Player
+// profile"; a locked court's chip tap), the Leaderboards tab's Team of the
+// Week and manager squad viewer, and (via [FantasyHubPage.initialPlayerName])
+// "Open in Fantasy" — goes through ONE opener, [_openPlayerProfile], which
+// pushes the full-screen profile editing this hub's shared draft. The
+// Players tab opens the same page itself, with the same draft.
 
 import 'dart:async';
 
@@ -32,20 +38,31 @@ import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_walkthrough.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
-import 'package:infinite_sports_flutter/fantasy/hub/market_player_sheet.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/my_team_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/news_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/players_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/rules_tab.dart';
-import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/team_name_dialog.dart';
-import 'package:infinite_sports_flutter/misc/league_service.dart';
-import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
+import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_page.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 export 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart'
     show FantasyHubTab;
+
+/// The page route that opens the hub for a [FantasyHubRoute] — shared by the
+/// push-tap router (News/My Team landings) and "Open in Fantasy" (Players tab
+/// + a player's profile), so the route → page mapping lives in one place.
+MaterialPageRoute<void> fantasyHubPageRoute(FantasyHubRoute route) =>
+    MaterialPageRoute<void>(
+      builder: (_) => FantasyHubPage(
+        sport: route.sport,
+        season: route.season,
+        initialTab: route.initialTab,
+        focusPostId: route.focusPostId,
+        initialPlayerName: route.initialPlayerName,
+      ),
+    );
 
 class FantasyHubPage extends StatefulWidget {
   const FantasyHubPage({
@@ -54,18 +71,54 @@ class FantasyHubPage extends StatefulWidget {
     required this.season,
     this.initialTab = FantasyHubTab.myTeam,
     this.focusPostId,
+    this.initialPlayerName,
+    this.configStates,
+    this.playersStates,
+    this.managerStates,
+    this.squadStates,
+    this.alertStates,
+    this.gameweekStates,
+    this.chipHistoryFor,
+    this.newsStates,
+    this.profileOpener,
   });
 
   final String sport;
   final String season;
 
   /// The tab the hub opens on (push taps: News for a news post, else My
-  /// Team).
+  /// Team; "Open in Fantasy": Players).
   final FantasyHubTab initialTab;
 
   /// A news post to scroll to + highlight once the News feed loads (a
   /// tapped news push); "This post was removed." when it's gone.
   final String? focusPostId;
+
+  /// "Open in Fantasy": a market player whose profile the hub pushes once it
+  /// is ready (after the first-open walkthrough, if one is showing) — once
+  /// per hub, with the hub's shared draft. A name that has left the market
+  /// says so in a SnackBar instead.
+  final String? initialPlayerName;
+
+  // ── Test seams — null = the real FantasyService feeds ──────────────────
+  final Stream<FantasyConfigState?>? configStates;
+  final Stream<List<FantasyPlayer>>? playersStates;
+  final Stream<FantasyManager?>? managerStates;
+  final Stream<FantasySquad?>? squadStates;
+  final Stream<FantasySquadAlert?>? alertStates;
+
+  /// Replaces the config-derived schedule gameweeks.
+  final Stream<List<Gameweek>>? gameweekStates;
+
+  /// The manager's chip history for the schedule's gameweek numbers.
+  final Stream<Map<int, ChipHistoryEntry>> Function(List<int> weeks)?
+      chipHistoryFor;
+
+  /// Forwarded to the News tab.
+  final Stream<List<FantasyNewsPost>>? newsStates;
+
+  /// Replaces [openFantasyPlayerProfile] (records the call in tests).
+  final FantasyProfileOpener? profileOpener;
 
   @override
   State<FantasyHubPage> createState() => _FantasyHubPageState();
@@ -147,18 +200,12 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   /// has resolved it so a remounted tab (far tab swipes) never re-focuses.
   String? _pendingFocusPostId;
 
-  // ── Market-sheet feeds for News "View player" ──────────────────────────
-  // The same two feeds the Players tab hands its detail sheet (finalized
-  // totals + the league's season stats), started LAZILY on the first View
-  // player tap and kept live for the hub's life — a hub that never opens a
-  // player from News never loads them. Not part of the reveal gate.
-  Map<String, FantasyPlayerTotals>? _sheetTotals;
-  Map<String, TournamentPlayer> _sheetStats = const {};
-  final StreamController<Map<String, TournamentPlayer>> _sheetStatsFeed =
-      StreamController<Map<String, TournamentPlayer>>.broadcast();
-  StreamSubscription<Map<String, FantasyPlayerTotals>?>? _sheetTotalsSub;
-  StreamSubscription<Map<String, List<TournamentPlayer>>>? _sheetRostersSub;
-  final Completer<void> _sheetTotalsFirst = Completer<void>();
+  /// "Open in Fantasy": the player whose profile still has to open. Cleared
+  /// the moment the hub body is first built (so live re-emits, rebuilds and
+  /// returning from the profile never reopen it).
+  String? _pendingPlayerName;
+
+  /// Guards a double tap from stacking two profiles.
   bool _openingPlayer = false;
 
   bool get _ready =>
@@ -173,11 +220,13 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   void initState() {
     super.initState();
     _pendingFocusPostId = widget.focusPostId;
+    _pendingPlayerName = widget.initialPlayerName;
     FantasyPrefs.hasSeenWalkthrough().then((seen) {
       if (mounted) setState(() => _walkthroughSeen = seen);
     });
-    _configSub =
-        FantasyService.watchConfig(widget.sport, widget.season).listen((s) {
+    _configSub = (widget.configStates ??
+            FantasyService.watchConfig(widget.sport, widget.season))
+        .listen((s) {
       if (!mounted) return;
       setState(() {
         _configState = s;
@@ -193,11 +242,13 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
       _configForRules.add(s);
       if (s != null) _subscribeGameweeks(s);
     });
-    _playersSub =
-        FantasyService.watchPlayers(widget.sport, widget.season).listen((p) {
+    _playersSub = (widget.playersStates ??
+            FantasyService.watchPlayers(widget.sport, widget.season))
+        .listen((p) {
       if (mounted) setState(() => _players = p);
     });
-    _managerSub = FantasyService.watchMyManager(widget.sport, widget.season)
+    _managerSub = (widget.managerStates ??
+            FantasyService.watchMyManager(widget.sport, widget.season))
         .listen((m) {
       if (!mounted) return;
       setState(() {
@@ -210,7 +261,8 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
       // skeleton — the tab just shows the name prompt until a re-emit.
       if (mounted) setState(() => _managerLoaded = true);
     });
-    _squadSub = FantasyService.watchMySquadAuto(widget.sport, widget.season)
+    _squadSub = (widget.squadStates ??
+            FantasyService.watchMySquadAuto(widget.sport, widget.season))
         .listen((s) {
       if (!mounted) return;
       setState(() {
@@ -226,9 +278,9 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
       // an eternal skeleton.
       if (mounted) setState(() => _squadLoaded = true);
     });
-    _alertSub =
-        FantasyService.watchMySquadAlertAuto(widget.sport, widget.season)
-            .listen((a) {
+    _alertSub = (widget.alertStates ??
+            FantasyService.watchMySquadAlertAuto(widget.sport, widget.season))
+        .listen((a) {
       if (!mounted) return;
       setState(() {
         _alert = a;
@@ -249,8 +301,9 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     if (_gameweeksLockHour == s.config.lockHour) return;
     _gameweeksLockHour = s.config.lockHour;
     _gameweeksSub?.cancel();
-    _gameweeksSub = FantasyService.watchGameweeks(
-            widget.sport, widget.season, s.config)
+    _gameweeksSub = (widget.gameweekStates ??
+            FantasyService.watchGameweeks(
+                widget.sport, widget.season, s.config))
         .listen((gws) {
       if (!mounted) return;
       setState(() => _gameweeks = gws);
@@ -275,8 +328,9 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     }
     _chipWeeks = weeks;
     _chipSub?.cancel();
-    _chipSub = FantasyService.watchMyChipHistoryAuto(
-            widget.sport, widget.season, weeks)
+    _chipSub = (widget.chipHistoryFor?.call(weeks) ??
+            FantasyService.watchMyChipHistoryAuto(
+                widget.sport, widget.season, weeks))
         .listen((history) {
       if (!mounted) return;
       setState(() {
@@ -298,13 +352,10 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _squadSub?.cancel();
     _alertSub?.cancel();
     _chipSub?.cancel();
-    _sheetTotalsSub?.cancel();
-    _sheetRostersSub?.cancel();
     _configForRules.close();
     _managerForTabs.close();
     _squadForTabs.close();
     _alertForTabs.close();
-    _sheetStatsFeed.close();
     _draft?.dispose();
     super.dispose();
   }
@@ -319,52 +370,19 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     setState(() => _pendingFocusPostId = null);
   }
 
-  /// Starts the market-sheet feeds once (see the field comment).
-  void _startSheetFeeds() {
-    if (_sheetTotalsSub != null) return;
-    void firstTotals() {
-      if (!_sheetTotalsFirst.isCompleted) _sheetTotalsFirst.complete();
-    }
-
-    _sheetTotalsSub =
-        FantasyService.watchPlayerTotals(widget.sport, widget.season).listen(
-      (totals) {
-        _sheetTotals = totals;
-        firstTotals();
-      },
-      // A failed totals read just hides the sheet's totals line.
-      onError: (Object _) => firstTotals(),
-    );
-    _sheetRostersSub =
-        LeagueService.watchRosters(widget.sport, widget.season).listen(
-      (rosters) {
-        final byName = <String, TournamentPlayer>{
-          for (final players in rosters.values)
-            for (final p in players) p.name: p,
-        };
-        _sheetStats = byName;
-        if (!_sheetStatsFeed.isClosed) _sheetStatsFeed.add(byName);
-      },
-      // No league stats → the sheet's tiles stay dashes.
-      onError: (Object _) {},
-    );
-  }
-
-  /// News "View player": the Players tab's market sheet for [name], or a
-  /// SnackBar when the player has left the market since the post was
-  /// written.
-  Future<void> _openPlayerFromNews(String name) async {
-    if (_openingPlayer) return;
-    FantasyPlayer? player;
-    for (final p in _players ?? const <FantasyPlayer>[]) {
-      if (p.name == name) {
-        player = p;
-        break;
-      }
-    }
+  /// The ONE way a player tap inside the hub opens his fantasy profile —
+  /// News "View player" / rows, My Team court chips, the Leaderboards tab's
+  /// Team of the Week and squad viewer, and "Open in Fantasy". The profile
+  /// edits this hub's shared draft (Add / Remove; saving stays on My Team).
+  /// A player who has left the market since the post / squad was written gets
+  /// a SnackBar instead of an empty page.
+  Future<void> _openPlayerProfile(String name) async {
+    if (_openingPlayer || !mounted) return;
     final draft = _draft;
-    final configState = _configState;
-    if (player == null || draft == null || configState == null) {
+    final inMarket = (_players ?? const <FantasyPlayer>[]).any(
+      (p) => p.name == name,
+    );
+    if (!inMarket || draft == null) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(
@@ -373,30 +391,28 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     }
     _openingPlayer = true;
     try {
-      _startSheetFeeds();
-      // Totals are one small, session-cached node: wait briefly so the
-      // sheet opens WITH its points line (the sheet takes them as a value);
-      // league stats stream into the open sheet on their own.
-      await _sheetTotalsFirst.future
-          .timeout(const Duration(milliseconds: 1500), onTimeout: () {});
-      if (!mounted) return;
-      await showMarketPlayerSheet(
+      await (widget.profileOpener ?? openFantasyPlayerProfile)(
         context,
-        player: player,
+        sport: widget.sport,
+        season: widget.season,
+        playerName: name,
         draft: draft,
-        editable: squadEditable(
-          lockOverride: configState.lockOverride,
-          gameweeks: _gameweeks,
-          nowUtc: DateTime.now().toUtc(),
-        ),
-        totals: _sheetTotals?[player.name],
-        totalsAvailable: _sheetTotals != null,
-        initialStats: _sheetStats,
-        statsStates: _sheetStatsFeed.stream,
       );
     } finally {
       _openingPlayer = false;
     }
+  }
+
+  /// "Open in Fantasy": once the hub body is first shown, pushes the named
+  /// player's profile on top (back lands on the hub). One-shot — see
+  /// [_pendingPlayerName].
+  void _openPendingPlayer() {
+    final name = _pendingPlayerName;
+    if (name == null) return;
+    _pendingPlayerName = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _openPlayerProfile(name);
+    });
   }
 
   @override
@@ -412,6 +428,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         onDone: _finishWalkthrough,
       );
     } else if (_ready && _walkthroughSeen != null) {
+      _openPendingPlayer();
       body = _HubBody(
         key: const ValueKey('hub'),
         sport: widget.sport,
@@ -435,7 +452,8 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         initialTab: widget.initialTab,
         focusPostId: _pendingFocusPostId,
         onFocusHandled: _onFocusHandled,
-        onOpenPlayer: _openPlayerFromNews,
+        onOpenPlayer: _openPlayerProfile,
+        newsStates: widget.newsStates,
       );
     } else {
       body = const _HubSkeleton(key: ValueKey('skeleton'));
@@ -499,6 +517,7 @@ class _HubBody extends StatelessWidget {
     required this.focusPostId,
     required this.onFocusHandled,
     required this.onOpenPlayer,
+    this.newsStates,
   });
 
   final String sport;
@@ -531,8 +550,11 @@ class _HubBody extends StatelessWidget {
   final String? focusPostId;
   final VoidCallback onFocusHandled;
 
-  /// News "View player" → the market sheet.
+  /// Every player tap in the tabs → the hub's one profile opener.
   final void Function(String name) onOpenPlayer;
+
+  /// Test seam forwarded to the News tab (null = the real feed).
+  final Stream<List<FantasyNewsPost>>? newsStates;
 
   @override
   Widget build(BuildContext context) {
@@ -592,6 +614,7 @@ class _HubBody extends StatelessWidget {
                   alertStates: alertStates,
                   initialAlert: alert,
                   chipHistory: chipHistory,
+                  onOpenPlayer: onOpenPlayer,
                 ),
                 // The market (P3c) — edits the SAME shared draft as above;
                 // saving stays on My Team.
@@ -613,12 +636,14 @@ class _HubBody extends StatelessWidget {
                   gameweeks: gameweeks,
                   squadStates: squadStates,
                   initialSquad: squad,
+                  onOpenPlayer: onOpenPlayer,
                 ),
                 // Published league news (P3d) with tagged-player cards and
                 // push-tap focus (News desk 2.0).
                 FantasyNewsTab(
                   sport: sport,
                   season: season,
+                  newsStates: newsStates,
                   focusPostId: focusPostId,
                   onFocusHandled: onFocusHandled,
                   onOpenPlayer: onOpenPlayer,

@@ -8,8 +8,8 @@
 // - 3+ players (Team of the week) → compact rows: photo, name, position
 //   chip, week points. A row tap opens the player too.
 //
-// "View player" calls the hub's onOpenPlayer(name), which opens the same
-// market sheet the Players tab uses.
+// "View player" calls the hub's onOpenPlayer(name), which opens the full
+// fantasy player profile (the same page the Players tab opens).
 //
 // House rules: colorScheme in both themes (the price-move colors are a
 // brightness-conditional pair readable on these surfaces); names WRAP,

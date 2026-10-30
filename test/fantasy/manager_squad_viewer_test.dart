@@ -2,8 +2,9 @@
 // fake streams: another manager's current week comes from PublishedPicks,
 // earlier weeks from History (published wins on overlap), browsable via the
 // week chips; nothing published yet → "Picks are revealed when the gameweek
-// locks."; the court is READ-ONLY (no slot taps) with the captain armband
-// shown; the viewer's own squad renders live under the "Now" chip.
+// locks."; the court is READ-ONLY (no slot edits) with the captain armband
+// shown; the viewer's own squad renders live under the "Now" chip; and
+// (round 3) a chip tap opens that player's profile via the hub callback.
 
 import 'dart:async';
 
@@ -15,6 +16,7 @@ import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/manager_squad_viewer.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 
 FantasySquad squad(String gk, {String? chip}) => FantasySquad(
       picks: [
@@ -60,6 +62,7 @@ void main() {
     WidgetTester tester, {
     bool isSelf = false,
     FantasySquad? initialSquad,
+    void Function(String playerName)? onOpenPlayer,
   }) async {
     tester.view.physicalSize = const Size(420, 1200);
     tester.view.devicePixelRatio = 1.0;
@@ -87,6 +90,7 @@ void main() {
         publishedStates: published.stream,
         historyStates: history.stream,
         nowUtc: testNow,
+        onOpenPlayer: onOpenPlayer,
       ),
     ));
   }
@@ -147,6 +151,60 @@ void main() {
     expect(find.text('Gameweek 1 squad'), findsOneWidget);
     // No "Now" chip for someone else's squad.
     expect(find.byKey(const ValueKey('viewer_week_now')), findsNothing);
+  });
+
+  testWidgets('round 3: tapping a player on the court opens his profile '
+      '(slots stay read-only); empty slots stay inert', (tester) async {
+    final opened = <String>[];
+    await pumpViewer(tester, onOpenPlayer: opened.add);
+    published.add({2: squad('Pub Keeper')});
+    history.add(const {});
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('squad_chip_Pub Keeper')));
+    await tester.pumpAndSettle();
+    expect(opened, ['Pub Keeper']);
+
+    // Still read-only: no edit slot callback, empty slots do nothing.
+    final court = tester.widget<FantasyCourtView>(find.byType(FantasyCourtView));
+    expect(court.onSlotTap, isNull);
+    await tester.tap(find.byKey(const ValueKey('empty_slot_1')));
+    await tester.pumpAndSettle();
+    expect(opened, ['Pub Keeper']);
+
+    // An earlier week's chips open too (browsing history).
+    history.add({1: squad('Old Keeper')});
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('viewer_week_1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('squad_chip_Old Keeper')));
+    await tester.pumpAndSettle();
+    expect(opened, ['Pub Keeper', 'Old Keeper']);
+  });
+
+  testWidgets('own live squad ("Now") opens profiles too', (tester) async {
+    final opened = <String>[];
+    await pumpViewer(tester,
+        isSelf: true,
+        initialSquad: squad('Live Keeper'),
+        onOpenPlayer: opened.add);
+    published.add(const {});
+    history.add(const {});
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('squad_chip_Live Keeper')));
+    await tester.pumpAndSettle();
+    expect(opened, ['Live Keeper']);
+  });
+
+  testWidgets('without an opener the court stays fully inert (unchanged)',
+      (tester) async {
+    await pumpViewer(tester);
+    published.add({2: squad('Pub Keeper')});
+    history.add(const {});
+    await tester.pumpAndSettle();
+    final chip = tester.widget<FantasyPlayerChip>(
+        find.byKey(const ValueKey('squad_chip_Pub Keeper')));
+    expect(chip.onTap, isNull);
   });
 
   testWidgets('current week not published yet → opens on the LATEST history '

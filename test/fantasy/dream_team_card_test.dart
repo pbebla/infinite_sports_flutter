@@ -1,7 +1,8 @@
 // P6 — the Dream Team card itself: read-only mini court (no bench surface,
-// no prices, nothing tappable), points under names, photo lookup from the
+// no prices, nothing editable), points under names, photo lookup from the
 // market, short positions leaving quiet empty slots, and the latest-week
-// default with session persistence.
+// default with session persistence. Round 3: a chip tap opens the player's
+// profile through the hub callback (inert without one).
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +21,7 @@ void main() {
     WidgetTester tester, {
     required Map<int, FantasyDreamTeam> teams,
     List<FantasyPlayer> players = const [],
+    void Function(String playerName)? onOpenPlayer,
   }) async {
     tester.view.physicalSize = const Size(420, 1200);
     tester.view.devicePixelRatio = 1.0;
@@ -31,6 +33,7 @@ void main() {
             teams: teams,
             config: FantasyConfig.futsalDefault(),
             players: players,
+            onOpenPlayer: onOpenPlayer,
           ),
         ),
       ),
@@ -75,11 +78,38 @@ void main() {
     // doesn't exist at all in the 5-starter mini mode.
     expect(find.text('+ DEF'), findsOneWidget);
     expect(find.textContaining('Bench ·'), findsNothing);
-    // Read-only: no chip reacts to taps.
+    // Without an opener (standalone card) no chip reacts to taps.
     final chip = tester
         .widget<FantasyPlayerChip>(find.byKey(const ValueKey('squad_chip_Gale')));
     expect(chip.onTap, isNull);
     // One selectable week: no week chips at all.
     expect(find.byKey(const ValueKey('dream_week_3')), findsNothing);
+  });
+
+  testWidgets('round 3: tapping a Team of the Week player opens his profile; '
+      'an empty slot stays inert', (tester) async {
+    final teams = dreamTeamsFromNode({
+      '3': {
+        'Players': [
+          {'name': 'Gale', 'position': 'GK', 'points': 14},
+          {'name': 'Dana', 'position': 'DEF', 'points': 12},
+          // One DEF short: the second DEF slot is an empty affordance.
+          {'name': 'Alex', 'position': 'ATT', 'points': 11},
+          {'name': 'Bo', 'position': 'ATT', 'points': 8},
+        ],
+      },
+    });
+    final opened = <String>[];
+    await pumpCard(tester, teams: teams, onOpenPlayer: opened.add);
+
+    for (final name in ['Gale', 'Alex', 'Bo']) {
+      await tester.tap(find.byKey(ValueKey('squad_chip_$name')));
+      await tester.pumpAndSettle();
+    }
+    expect(opened, ['Gale', 'Alex', 'Bo']);
+
+    await tester.tap(find.text('+ DEF'));
+    await tester.pumpAndSettle();
+    expect(opened, hasLength(3));
   });
 }

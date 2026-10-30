@@ -52,8 +52,8 @@ class FantasyNewsTab extends StatefulWidget {
   /// so the hub can drop it — a remounted tab must not re-focus.
   final VoidCallback? onFocusHandled;
 
-  /// "View player" on a tagged-player card → the hub opens the market
-  /// player sheet. null hides the button (and row taps).
+  /// "View player" on a tagged-player card → the hub opens the player's
+  /// fantasy profile. null hides the button (and row taps).
   final void Function(String name)? onOpenPlayer;
 
   /// How long after the FIRST emit a focused post may take to appear before

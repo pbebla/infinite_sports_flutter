@@ -120,6 +120,7 @@ void main() {
     List<Gameweek> gameweeks = const [],
     Map<int, ChipHistoryEntry>? chipHistory,
     DateTime Function()? nowUtc,
+    void Function(String playerName)? onOpenPlayer,
   }) async {
     // Tall, phone-wide surface so the whole column (budget bar, court,
     // bench, chips, save) is on screen and tappable without scrolling.
@@ -142,6 +143,7 @@ void main() {
           alert: alert,
           chipHistory: chipHistory,
           nowUtc: nowUtc,
+          onOpenPlayer: onOpenPlayer,
         ),
       ),
     ));
@@ -444,6 +446,141 @@ void main() {
       expect(t.style?.decoration ?? TextDecoration.none, TextDecoration.none,
           reason: '"${t.data}" must not be underlined');
     }
+  });
+
+  // Round 3 (spec §4): every player tap opens the fantasy player profile.
+  group('player profile (round 3)', () {
+    testWidgets('a filled chip action sheet leads with "Player profile"; '
+        'it opens the tapped player and changes nothing in the draft',
+        (tester) async {
+      final opened = <String>[];
+      await pumpBuilder(tester,
+          initialSquad: fullSquad(), onOpenPlayer: opened.add);
+
+      await tester.tap(find.byKey(const ValueKey('squad_chip_Att One')));
+      await tester.pumpAndSettle();
+      final profile = find.byKey(const ValueKey('action_profile'));
+      expect(profile, findsOneWidget);
+      expect(find.text('Player profile'), findsOneWidget);
+      // FIRST item: above the armband actions, swap and remove.
+      final profileY = tester.getTopLeft(profile).dy;
+      for (final key in const [
+        'action_make_captain',
+        'action_make_vice',
+        'action_swap',
+        'action_remove',
+      ]) {
+        expect(profileY, lessThan(tester.getTopLeft(find.byKey(ValueKey(key))).dy),
+            reason: 'Player profile must sit above $key');
+      }
+
+      await tester.tap(profile);
+      await tester.pumpAndSettle();
+      expect(opened, ['Att One']);
+      // The sheet closed and nothing was edited.
+      expect(find.byKey(const ValueKey('action_profile')), findsNothing);
+      expect(find.byKey(const ValueKey('squad_chip_Att One')), findsOneWidget);
+      expect(saveEnabled(tester), isFalse);
+    });
+
+    testWidgets('bench chips offer Player profile too', (tester) async {
+      final opened = <String>[];
+      await pumpBuilder(tester,
+          initialSquad: fullSquad(), onOpenPlayer: opened.add);
+      await tester.tap(find.byKey(const ValueKey('squad_chip_Bench Def')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('action_make_captain')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('action_profile')));
+      await tester.pumpAndSettle();
+      expect(opened, ['Bench Def']);
+    });
+
+    testWidgets('without an opener (standalone builder) the sheet is '
+        'unchanged — no Player profile item', (tester) async {
+      await pumpBuilder(tester, initialSquad: fullSquad());
+      await tester.tap(find.byKey(const ValueKey('squad_chip_Att One')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('action_profile')), findsNothing);
+      expect(find.byKey(const ValueKey('action_make_captain')), findsOneWidget);
+    });
+
+    testWidgets('locked court: a chip tap opens the profile directly (no '
+        'sheet); empty slots stay inert', (tester) async {
+      final opened = <String>[];
+      await pumpBuilder(tester,
+          lockOverride: FantasyLockOverride.locked,
+          initialSquad: FantasySquad(
+            // One empty starter slot: no ATT Two.
+            picks: [
+              pick('GK One', FantasyPosition.gk),
+              pick('Def One', FantasyPosition.def),
+              pick('Def Two', FantasyPosition.def),
+              pick('Att One', FantasyPosition.att),
+              pick('Bench Def', FantasyPosition.def, bench: true),
+              pick('Bench Att', FantasyPosition.att, bench: true),
+            ],
+            captainId: 'GK One',
+            viceId: 'Def One',
+          ),
+          onOpenPlayer: opened.add);
+
+      await tester.tap(find.byKey(const ValueKey('squad_chip_GK One')));
+      await tester.pumpAndSettle();
+      expect(opened, ['GK One']);
+      expect(find.byKey(const ValueKey('action_profile')), findsNothing);
+      expect(find.byKey(const ValueKey('action_make_captain')), findsNothing);
+
+      // Bench chips are locked-viewable too.
+      await tester.tap(find.byKey(const ValueKey('squad_chip_Bench Att')));
+      await tester.pumpAndSettle();
+      expect(opened, ['GK One', 'Bench Att']);
+
+      // The empty slot never reacts — not the picker, not the profile.
+      await tester.tap(find.byKey(const ValueKey('empty_slot_4')));
+      await tester.pumpAndSettle();
+      expect(find.text('Pick an attacker'), findsNothing);
+      expect(opened, hasLength(2));
+    });
+
+    testWidgets('the deadline passing under an open court (the 30s ticker has '
+        'not re-locked it yet): a chip tap opens the profile, never the '
+        'edit sheet', (tester) async {
+      final opened = <String>[];
+      var clock = DateTime.utc(2026, 1, 1, 21); // an hour before the lock
+      await pumpBuilder(
+        tester,
+        lockOverride: FantasyLockOverride.auto,
+        initialSquad: fullSquad(),
+        gameweeks: [
+          Gameweek(
+            number: 1,
+            date: '01012026',
+            lockUtc: DateTime.utc(2026, 1, 1, 22),
+            opensUtc: null,
+          ),
+        ],
+        nowUtc: () => clock,
+        onOpenPlayer: opened.add,
+      );
+      expect(find.byKey(const ValueKey('squad_save')), findsOneWidget);
+
+      // The lock passes; the builder hasn't rebuilt yet.
+      clock = DateTime.utc(2026, 1, 1, 22, 5);
+      await tester.tap(find.byKey(const ValueKey('squad_chip_Att One')));
+      await tester.pumpAndSettle();
+      expect(opened, ['Att One']);
+      expect(find.byKey(const ValueKey('action_make_captain')), findsNothing);
+      expect(find.byKey(const ValueKey('action_profile')), findsNothing);
+    });
+
+    testWidgets('locked without an opener keeps chips inert (unchanged)',
+        (tester) async {
+      await pumpBuilder(tester,
+          lockOverride: FantasyLockOverride.locked, initialSquad: fullSquad());
+      await tester.tap(find.byKey(const ValueKey('squad_chip_GK One')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('action_profile')), findsNothing);
+    });
   });
 
   group('holder protection (spec §3)', () {

@@ -34,6 +34,7 @@ import 'package:infinite_sports_flutter/fantasy/data/player_account_link.dart';
 import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/market_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
@@ -50,10 +51,22 @@ import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
+/// The shape of [openFantasyPlayerProfile] — the seam type for every caller
+/// that opens a profile (the hub's one opener, the match page's rows): tests
+/// inject a recorder to assert the sport/season/name/draft/outside-hub flag.
+typedef FantasyProfileOpener = Future<void> Function(
+  BuildContext context, {
+  required String sport,
+  required String season,
+  required String playerName,
+  SquadDraftController? draft,
+  bool fromOutsideHub,
+});
+
 /// Opens [playerName]'s fantasy profile full-screen. Inside the hub pass the
 /// hub's shared [draft] (Add/Remove edit it); from outside the hub (the
-/// Infinite profile's Fantasy tab) pass [fromOutsideHub] — the primary
-/// button is then "Open in Fantasy".
+/// Infinite profile's Fantasy tab, the match page) pass [fromOutsideHub] —
+/// the primary button is then "Open in Fantasy".
 Future<void> openFantasyPlayerProfile(
   BuildContext context, {
   required String sport,
@@ -143,7 +156,11 @@ class FantasyPlayerProfilePage extends StatefulWidget {
   final Future<int> Function()? loadStartHour;
   final void Function(BuildContext context, String uid, String name)?
       openFullProfile;
-  final void Function(BuildContext context)? openInFantasy;
+  /// "Open in Fantasy" (from outside the hub): receives the hub route that
+  /// lands on the Players tab and then THIS player's profile
+  /// ([fantasyRouteForPlayer]). null = pushes [fantasyHubPageRoute] for it.
+  final void Function(BuildContext context, FantasyHubRoute route)?
+      openInFantasy;
   final DateTime Function()? nowUtc;
 
   // ── Session caches (instant revisits) for the feeds the services don't
@@ -587,22 +604,20 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
     openPlayerProfileById(context, uid: uid, name: name);
   }
 
+  /// "Open in Fantasy": the hub on its Players tab, which then pushes THIS
+  /// player's profile (with the hub's shared draft) once it is ready.
   void _openInFantasy() {
+    final route = fantasyRouteForPlayer(
+      sport: widget.sport,
+      season: widget.season,
+      playerName: widget.playerName,
+    );
     final open = widget.openInFantasy;
     if (open != null) {
-      open(context);
+      open(context, route);
       return;
     }
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => FantasyHubPage(
-          sport: widget.sport,
-          season: widget.season,
-          initialTab: FantasyHubTab.players,
-        ),
-      ),
-    );
+    Navigator.push(context, fantasyHubPageRoute(route));
   }
 
   bool get _editable {

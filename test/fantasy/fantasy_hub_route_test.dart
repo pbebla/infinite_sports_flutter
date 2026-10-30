@@ -67,6 +67,16 @@ void main() {
       expect(fantasyRouteFromPayload(const {}), isNull);
     });
 
+    test('a push payload never names a player', () {
+      final route = fantasyRouteFromPayload({
+        'type': 'fantasy',
+        'sport': 'Futsal',
+        'season': '16',
+        'postId': '-Nabc123',
+      })!;
+      expect(route.initialPlayerName, isNull);
+    });
+
     test('tab enum order matches the hub TabBar order', () {
       expect(FantasyHubTab.values.map((t) => t.index), [0, 1, 2, 3, 4]);
       expect(FantasyHubTab.myTeam.index, 0);
@@ -74,6 +84,18 @@ void main() {
       expect(FantasyHubTab.leaderboards.index, 2);
       expect(FantasyHubTab.news.index, 3);
       expect(FantasyHubTab.rules.index, 4);
+    });
+  });
+
+  group('fantasyRouteForPlayer ("Open in Fantasy")', () {
+    test('opens the hub on the Players tab with that player profile', () {
+      final route = fantasyRouteForPlayer(
+          sport: 'Futsal', season: '15', playerName: 'Ava Striker');
+      expect(route.sport, 'Futsal');
+      expect(route.season, '15');
+      expect(route.initialTab, FantasyHubTab.players);
+      expect(route.initialPlayerName, 'Ava Striker');
+      expect(route.focusPostId, isNull);
     });
   });
 }

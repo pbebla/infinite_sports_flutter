@@ -15,6 +15,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_page.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
@@ -109,7 +110,7 @@ void main() {
   late List<List<int>> requestedWeeks;
   late List<(String, bool)> starWrites;
   late List<String> openedProfiles;
-  late int openInFantasyCalls;
+  late List<FantasyHubRoute> openInFantasyRoutes;
   late SquadDraftController draft;
 
   final market = [
@@ -134,7 +135,7 @@ void main() {
     requestedWeeks = [];
     starWrites = [];
     openedProfiles = [];
-    openInFantasyCalls = 0;
+    openInFantasyRoutes = [];
     draft = SquadDraftController(config: FantasyConfig.futsalDefault());
   });
 
@@ -199,7 +200,7 @@ void main() {
         loadLogoUrls: () async => const {},
         loadStartHour: loadStartHour,
         openFullProfile: (context, uid, n) => openedProfiles.add('$uid|$n'),
-        openInFantasy: (context) => openInFantasyCalls++,
+        openInFantasy: (context, route) => openInFantasyRoutes.add(route),
         nowUtc: () => DateTime.utc(2026, 11, 2, 18),
       ),
     ));
@@ -495,7 +496,24 @@ void main() {
       expect(find.text('Open in Fantasy'), findsOneWidget);
       await tester.tap(key('profile_open_in_fantasy'));
       await tester.pump();
-      expect(openInFantasyCalls, 1);
+      // The hub opens ON THIS PLAYER's profile (Players tab + his name), not
+      // just on the market list.
+      expect(openInFantasyRoutes, hasLength(1));
+      final route = openInFantasyRoutes.single;
+      expect(route.sport, 'Futsal');
+      expect(route.season, '15');
+      expect(route.initialTab, FantasyHubTab.players);
+      expect(route.initialPlayerName, _name);
+    });
+
+    testWidgets('Open in Fantasy carries the OPENED player (a long, odd name '
+        'survives untouched)', (tester) async {
+      await pumpPage(tester,
+          name: _longName, withDraft: false, fromOutsideHub: true);
+      await emitAll(tester);
+      await tester.tap(key('profile_open_in_fantasy'));
+      await tester.pump();
+      expect(openInFantasyRoutes.single.initialPlayerName, _longName);
     });
   });
 
