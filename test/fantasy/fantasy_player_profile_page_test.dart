@@ -1,0 +1,599 @@
+// Fantasy round 3, Task 5 — the full-screen player profile page proved with
+// fake streams (no Firebase): one fade reveal once every feed lands; name,
+// price, move and the four tabs; "See full profile" only for a linked
+// account; Add to Team edits the shared draft (reasons when it can't);
+// "Open in Fantasy" from outside the hub; the watchlist star (hidden signed
+// out); empty + voided copy; and no overflow at 360×780 in light AND dark.
+
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
+import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
+import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_page.dart';
+import 'package:infinite_sports_flutter/misc/league_adapters.dart';
+import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
+import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
+import 'package:infinite_sports_flutter/model/tournamentteam.dart';
+
+const _name = 'Demsin Betvarda';
+const _longName =
+    'Maximiliano Alessandro Bartholomew-Featherstonehaugh Von Grünewald';
+
+FantasyPlayer _player(String name, FantasyPosition pos, int price,
+        {String team = 'Ishtar', bool eligible = true}) =>
+    FantasyPlayer(
+      name: name,
+      position: pos,
+      priceTenths: price,
+      eligible: eligible,
+      teamName: team,
+    );
+
+TournamentPlayer _rosterRow(String name, String team,
+        {String? uid, String? number, int goals = 8}) =>
+    TournamentPlayer(
+      name: name,
+      teamId: team,
+      teamName: team,
+      uid: uid,
+      number: number,
+      goals: goals,
+      assists: 6,
+      saves: 0,
+      dpl: 2,
+      cleanSheets: 4,
+      yellowCards: 1,
+      redCards: 0,
+    );
+
+List<Gameweek> _gameweeks(int count) => [
+      for (var i = 1; i <= count; i++)
+        Gameweek(
+          number: i,
+          date: '1${i - 1}012026',
+          lockUtc: DateTime.utc(2026, 10, i, 23),
+          opensUtc: null,
+        ),
+    ];
+
+PlayerWeekStats _week(int pts,
+        {Map<String, ScoreSourceLine> lines = const {},
+        bool voided = false,
+        String vs = 'Nimrod'}) =>
+    PlayerWeekStats(
+      points: pts,
+      played: true,
+      gamesPlayed: 1,
+      games: [PlayerWeekGame(vs: vs, goalsFor: 3, goalsAgainst: 2)],
+      lines: lines,
+      voided: voided,
+    );
+
+TournamentMatch _game(String date, String team1, String team2) =>
+    leagueMatchFromGameMap(
+      dateKey: date,
+      index: 0,
+      raw: {'team1': team1, 'team2': team2, 'status': 0, 'Time': '15:00'},
+    );
+
+void main() {
+  late StreamController<FantasyConfigState?> config;
+  late StreamController<List<Gameweek>> gameweeks;
+  late StreamController<List<FantasyPlayer>> players;
+  late StreamController<Map<String, FantasyPlayerTotals>?> totals;
+  late StreamController<Map<int, Map<String, int>>> history;
+  late StreamController<Map<int, Map<String, int>>> changes;
+  late StreamController<Map<int, PlayerWeekStats>> weekStats;
+  late StreamController<Map<String, List<TournamentPlayer>>> rosters;
+  late StreamController<List<TournamentMatch>> games;
+  late StreamController<List<TournamentTeam>> teams;
+  late StreamController<Set<String>> watchlist;
+  late List<List<int>> requestedWeeks;
+  late List<(String, bool)> starWrites;
+  late List<String> openedProfiles;
+  late int openInFantasyCalls;
+  late SquadDraftController draft;
+
+  final market = [
+    _player(_name, FantasyPosition.def, 75),
+    _player('Other Def', FantasyPosition.def, 60, team: 'Nimrod'),
+    _player(_longName, FantasyPosition.att, 105, team: 'Kings'),
+  ];
+
+  setUp(() {
+    FantasyPlayerProfilePage.clearSessionCaches();
+    config = StreamController<FantasyConfigState?>.broadcast();
+    gameweeks = StreamController<List<Gameweek>>.broadcast();
+    players = StreamController<List<FantasyPlayer>>.broadcast();
+    totals = StreamController<Map<String, FantasyPlayerTotals>?>.broadcast();
+    history = StreamController<Map<int, Map<String, int>>>.broadcast();
+    changes = StreamController<Map<int, Map<String, int>>>.broadcast();
+    weekStats = StreamController<Map<int, PlayerWeekStats>>.broadcast();
+    rosters = StreamController<Map<String, List<TournamentPlayer>>>.broadcast();
+    games = StreamController<List<TournamentMatch>>.broadcast();
+    teams = StreamController<List<TournamentTeam>>.broadcast();
+    watchlist = StreamController<Set<String>>.broadcast();
+    requestedWeeks = [];
+    starWrites = [];
+    openedProfiles = [];
+    openInFantasyCalls = 0;
+    draft = SquadDraftController(config: FantasyConfig.futsalDefault());
+  });
+
+  tearDown(() {
+    for (final c in [
+      config,
+      gameweeks,
+      players,
+      totals,
+      history,
+      changes,
+      weekStats,
+      rosters,
+      games,
+      teams,
+      watchlist,
+    ]) {
+      c.close();
+    }
+    draft.dispose();
+  });
+
+  Future<void> pumpPage(
+    WidgetTester tester, {
+    String name = _name,
+    String selfUid = 'me',
+    bool withDraft = true,
+    bool fromOutsideHub = false,
+    Size size = const Size(420, 900),
+    ThemeMode themeMode = ThemeMode.light,
+  }) async {
+    tester.view.physicalSize = size;
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(useMaterial3: true, brightness: Brightness.light),
+      darkTheme: ThemeData(useMaterial3: true, brightness: Brightness.dark),
+      themeMode: themeMode,
+      home: FantasyPlayerProfilePage(
+        sport: 'Futsal',
+        season: '15',
+        playerName: name,
+        draft: withDraft ? draft : null,
+        fromOutsideHub: fromOutsideHub,
+        configStates: config.stream,
+        gameweekStates: gameweeks.stream,
+        playersStates: players.stream,
+        totalsStates: totals.stream,
+        priceHistoryStates: history.stream,
+        priceChangeStates: changes.stream,
+        weekStatsFor: (weeks) {
+          requestedWeeks.add(weeks);
+          return weekStats.stream;
+        },
+        rosterStates: rosters.stream,
+        gamesStates: games.stream,
+        teamsStates: teams.stream,
+        watchlistStates: watchlist.stream,
+        selfUidOverride: selfUid,
+        setWatchlisted: (n, on) async => starWrites.add((n, on)),
+        loadLogoUrls: () async => const {},
+        openFullProfile: (context, uid, n) => openedProfiles.add('$uid|$n'),
+        openInFantasy: (context) => openInFantasyCalls++,
+        nowUtc: () => DateTime.utc(2026, 11, 2, 18),
+      ),
+    ));
+  }
+
+  /// Every feed lands (week stats only after the schedule, as in the app).
+  Future<void> emitAll(
+    WidgetTester tester, {
+    FantasyLockOverride lock = FantasyLockOverride.open,
+    List<Gameweek>? weeks,
+    Map<String, FantasyPlayerTotals>? totalsValue = const {
+      _name: FantasyPlayerTotals(
+          points: 64,
+          ownershipPct: 55,
+          formTenths: 67,
+          ppgTenths: 53,
+          games: 12),
+    },
+    Map<int, Map<String, int>> historyValue = const {
+      1: {_name: 70},
+      2: {_name: 70},
+      3: {_name: 75},
+    },
+    Map<int, Map<String, int>> changesValue = const {
+      1: {'Other Def': 2},
+      2: {_name: 5},
+    },
+    Map<int, PlayerWeekStats>? weeksValue,
+    Map<String, List<TournamentPlayer>>? rostersValue,
+    List<TournamentMatch> gamesValue = const [],
+    Set<String> watchlistValue = const {},
+    List<FantasyPlayer>? playersValue,
+  }) async {
+    config.add(FantasyConfigState(
+        config: FantasyConfig.futsalDefault(), lockOverride: lock));
+    gameweeks.add(weeks ?? _gameweeks(3));
+    players.add(playersValue ?? market);
+    totals.add(totalsValue);
+    history.add(historyValue);
+    changes.add(changesValue);
+    rosters.add(rostersValue ??
+        {
+          'Ishtar': [_rosterRow(_name, 'Ishtar', number: '3')],
+        });
+    games.add(gamesValue);
+    teams.add(const []);
+    watchlist.add(watchlistValue);
+    await tester.pump();
+    weekStats.add(weeksValue ??
+        {
+          1: _week(2, lines: const {
+            'plays': ScoreSourceLine(count: 1, points: 2),
+          }),
+          2: _week(8,
+              lines: const {
+                'plays': ScoreSourceLine(count: 1, points: 2),
+                'goals': ScoreSourceLine(count: 1, points: 6),
+              },
+              vs: 'Kings'),
+          3: _week(6, lines: const {
+            'plays': ScoreSourceLine(count: 1, points: 2),
+            'assists': ScoreSourceLine(count: 1, points: 4),
+          }),
+        });
+    await tester.pump();
+    await tester.pumpAndSettle();
+  }
+
+  Finder key(String k) => find.byKey(ValueKey(k));
+
+  Future<void> openTab(WidgetTester tester, String tab) async {
+    await tester.tap(key('profile_tab_$tab'));
+    await tester.pumpAndSettle();
+  }
+
+  group('reveal', () {
+    testWidgets(
+        'skeleton until every feed lands, then ONE fade to the '
+        'profile', (tester) async {
+      await pumpPage(tester);
+      expect(key('fantasy_profile_skeleton'), findsOneWidget);
+
+      config.add(FantasyConfigState(
+          config: FantasyConfig.futsalDefault(),
+          lockOverride: FantasyLockOverride.open));
+      gameweeks.add(_gameweeks(3));
+      players.add(market);
+      totals.add(null);
+      history.add(const {});
+      changes.add(const {});
+      rosters.add(const {});
+      games.add(const []);
+      teams.add(const []);
+      watchlist.add(const {});
+      await tester.pump();
+      // Week stats (one listener per schedule gameweek) haven't answered.
+      expect(requestedWeeks.last, [1, 2, 3]);
+      expect(key('fantasy_profile_skeleton'), findsOneWidget);
+      expect(key('fantasy_profile_ready'), findsNothing);
+
+      weekStats.add(const {});
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(key('fantasy_profile_ready'), findsOneWidget);
+      expect(key('fantasy_profile_skeleton'), findsNothing);
+    });
+
+    testWidgets('a player who left the market gets a friendly message',
+        (tester) async {
+      await pumpPage(tester, name: 'Gone Player');
+      await emitAll(tester);
+      expect(key('fantasy_profile_missing'), findsOneWidget);
+      expect(find.text("This player isn't in the fantasy market anymore."),
+          findsOneWidget);
+    });
+  });
+
+  testWidgets(
+      'renders name, team · position, price, move, the stat strip '
+      'and the four tabs', (tester) async {
+    await pumpPage(tester);
+    await emitAll(tester);
+
+    expect(find.text(_name), findsOneWidget);
+    expect(find.text('Ishtar · Defender #3'), findsOneWidget);
+    expect(find.text('\$7.5M'), findsWidgets);
+    expect(find.text('▲ \$0.5M this week'), findsOneWidget);
+    expect(find.text('64'), findsOneWidget); // total pts
+    expect(find.text('5.3'), findsOneWidget); // ppg
+    expect(find.text('55%'), findsOneWidget);
+    for (final tab in ['Overview', 'Stats', 'Matches', 'Price']) {
+      expect(find.text(tab), findsOneWidget);
+    }
+
+    // Overview: last weeks' bars with the value on top, next game, stats.
+    expect(key('form_bar_1'), findsOneWidget);
+    expect(key('form_bar_3'), findsOneWidget);
+    expect(find.text('Season stats (S15)'), findsOneWidget);
+    expect(find.text('1Y · 0R'), findsOneWidget);
+
+    // Stats: points by source.
+    await openTab(tester, 'stats');
+    expect(find.text('Where his points came from'), findsOneWidget);
+    expect(find.text('Played ×3'), findsOneWidget);
+    expect(find.text('Goals ×1'), findsOneWidget);
+    expect(find.text('6.7'), findsOneWidget); // form
+
+    // Matches: newest first with the season total to date.
+    await openTab(tester, 'matches');
+    expect(tester.getTopLeft(key('match_row_3')).dy,
+        lessThan(tester.getTopLeft(key('match_row_1')).dy));
+    expect(find.text('Season 16'), findsOneWidget);
+
+    // Price: start / high / low and per-week rows.
+    await openTab(tester, 'price');
+    expect(key('price_row_3'), findsOneWidget);
+    expect(find.text('▲ \$0.5M'), findsOneWidget); // move after GW2
+  });
+
+  testWidgets('a form bar tap shows that week\'s breakdown', (tester) async {
+    await pumpPage(tester);
+    await emitAll(tester);
+    expect(key('week_breakdown'), findsNothing);
+    await tester.tap(key('form_bar_2'));
+    await tester.pumpAndSettle();
+    expect(key('week_breakdown'), findsOneWidget);
+    expect(find.text('Goals ×1'), findsOneWidget);
+    expect(find.text('6 pts'), findsOneWidget);
+  });
+
+  testWidgets('next game line comes from the live schedule', (tester) async {
+    await pumpPage(tester);
+    await emitAll(tester, gamesValue: [_game('11082026', 'Ishtar', 'Nimrod')]);
+    expect(find.text('Next: vs Nimrod · Sun 3 PM'), findsOneWidget);
+  });
+
+  group('See full profile', () {
+    testWidgets('hidden when the player has no linked account', (tester) async {
+      await pumpPage(tester);
+      await emitAll(tester);
+      expect(key('profile_full_profile'), findsNothing);
+    });
+
+    testWidgets('hidden when the only link is the same name on ANOTHER team',
+        (tester) async {
+      await pumpPage(tester);
+      await emitAll(tester, rostersValue: {
+        'Nimrod': [_rosterRow(_name, 'Nimrod', uid: 'someone-else')],
+        'Ishtar': [_rosterRow(_name, 'Ishtar')],
+      });
+      expect(key('profile_full_profile'), findsNothing);
+    });
+
+    testWidgets('shown with a linked uid and opens that account',
+        (tester) async {
+      await pumpPage(tester);
+      await emitAll(tester, rostersValue: {
+        'Ishtar': [_rosterRow(_name, 'Ishtar', uid: 'uid-42')],
+      });
+      expect(key('profile_full_profile'), findsOneWidget);
+      await tester.tap(key('profile_full_profile'));
+      await tester.pump();
+      expect(openedProfiles, ['uid-42|$_name']);
+    });
+  });
+
+  group('Add to Team', () {
+    testWidgets('adds to the shared draft, flips to Remove, then removes',
+        (tester) async {
+      await pumpPage(tester);
+      await emitAll(tester);
+      expect(find.text('Add to Team'), findsOneWidget);
+
+      await tester.tap(key('profile_add'));
+      await tester.pumpAndSettle();
+      expect(draft.playerIds, contains(_name));
+      expect(draft.dirty, isTrue);
+      expect(key('profile_remove'), findsOneWidget);
+      expect(find.text('Changes save from the My Team tab.'), findsOneWidget);
+
+      await tester.tap(key('profile_remove'));
+      await tester.pumpAndSettle();
+      expect(draft.playerIds, isNot(contains(_name)));
+      expect(key('profile_add'), findsOneWidget);
+    });
+
+    testWidgets('locked: the button is dead with the market\'s reason',
+        (tester) async {
+      await pumpPage(tester);
+      await emitAll(tester, lock: FantasyLockOverride.locked);
+      final button = tester.widget<FilledButton>(key('profile_add'));
+      expect(button.onPressed, isNull);
+      expect(find.text('Gameweek locked — no changes now.'), findsOneWidget);
+    });
+
+    testWidgets('from outside the hub the primary button is Open in Fantasy',
+        (tester) async {
+      await pumpPage(tester, withDraft: false, fromOutsideHub: true);
+      await emitAll(tester);
+      expect(key('profile_add'), findsNothing);
+      expect(find.text('Open in Fantasy'), findsOneWidget);
+      await tester.tap(key('profile_open_in_fantasy'));
+      await tester.pump();
+      expect(openInFantasyCalls, 1);
+    });
+  });
+
+  group('watchlist star', () {
+    testWidgets('hidden when signed out', (tester) async {
+      await pumpPage(tester, selfUid: '');
+      await emitAll(tester);
+      expect(key('fantasy_profile_ready'), findsOneWidget);
+      expect(key('profile_star'), findsNothing);
+    });
+
+    testWidgets('signed in: reflects the watchlist and toggles it',
+        (tester) async {
+      await pumpPage(tester);
+      await emitAll(tester);
+      expect(find.byIcon(Icons.star_outline_rounded), findsOneWidget);
+      await tester.tap(key('profile_star'));
+      await tester.pump();
+      expect(starWrites, [(_name, true)]);
+
+      watchlist.add({_name});
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.star_rounded), findsOneWidget);
+      await tester.tap(key('profile_star'));
+      await tester.pump();
+      expect(starWrites.last, (_name, false));
+    });
+  });
+
+  testWidgets(
+      'before any finalized week: "Points start" copy, dashes, and '
+      'friendly empty Matches / Price', (tester) async {
+    await pumpPage(tester);
+    await emitAll(
+      tester,
+      totalsValue: null,
+      historyValue: const {},
+      changesValue: const {},
+      weeksValue: const {},
+    );
+    expect(find.text('Points start after Gameweek 1'), findsOneWidget);
+    expect(find.text('▲ \$0.5M this week'), findsNothing);
+    expect(find.text('No change'), findsNothing);
+    expect(find.text('0.0'), findsNothing);
+
+    await openTab(tester, 'matches');
+    expect(key('matches_empty'), findsOneWidget);
+    await openTab(tester, 'price');
+    expect(key('price_empty'), findsOneWidget);
+  });
+
+  testWidgets(
+      'a voided week reads "Week voided — 0" on Matches; a played '
+      'week expands to its lines', (tester) async {
+    await pumpPage(tester);
+    await emitAll(tester, weeksValue: {
+      1: _week(5, lines: const {
+        'plays': ScoreSourceLine(count: 1, points: 2),
+        'goals': ScoreSourceLine(count: 1, points: 3),
+      }),
+      2: _week(0, voided: true),
+    });
+    await openTab(tester, 'matches');
+    expect(find.text('Week voided — 0'), findsOneWidget);
+    expect(find.text('Goals ×1'), findsNothing);
+    await tester.tap(key('match_row_1'));
+    await tester.pumpAndSettle();
+    expect(find.text('Goals ×1'), findsOneWidget);
+  });
+
+  for (final mode in [ThemeMode.dark, ThemeMode.light]) {
+    testWidgets(
+        '${mode.name} theme at 360×780: a long name wraps with no '
+        'overflow on every tab', (tester) async {
+      await pumpPage(tester,
+          name: _longName, size: const Size(360, 780), themeMode: mode);
+      await emitAll(
+        tester,
+        totalsValue: {
+          _longName: const FantasyPlayerTotals(
+              points: 128,
+              ownershipPct: 100,
+              formTenths: 105,
+              ppgTenths: 107,
+              games: 12),
+        },
+        historyValue: {
+          for (var gw = 1; gw <= 8; gw++) gw: {_longName: 100 + gw},
+        },
+        changesValue: {
+          for (var gw = 1; gw <= 8; gw++) gw: {_longName: gw.isEven ? 3 : -2},
+        },
+        weeks: _gameweeks(8),
+        weeksValue: {
+          for (var gw = 1; gw <= 8; gw++)
+            gw: _week(gw * 3 - 4,
+                voided: gw == 5,
+                vs: 'Real Sociedad de Fútbol Internacional',
+                lines: const {
+                  'plays': ScoreSourceLine(count: 2, points: 4),
+                  'goals': ScoreSourceLine(count: 3, points: 15),
+                  'penMissed': ScoreSourceLine(count: 1, points: -2),
+                }),
+        },
+        rostersValue: {
+          'Kings': [_rosterRow(_longName, 'Kings', uid: 'u1', number: '99')],
+        },
+        gamesValue: [_game('11082026', 'Kings', 'Nimrod')],
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.text(_longName), findsOneWidget);
+      final nameText = tester.widget<Text>(find.text(_longName));
+      expect(nameText.overflow, isNot(TextOverflow.ellipsis));
+
+      await tester.tap(key('form_bar_8'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      for (final tab in ['stats', 'matches', 'price']) {
+        await openTab(tester, tab);
+        expect(tester.takeException(), isNull, reason: '$tab tab overflowed');
+      }
+      // An expanded Matches row (negative line in red) also fits.
+      await openTab(tester, 'matches');
+      await tester.ensureVisible(key('match_row_8'));
+      await tester.pumpAndSettle();
+      await tester.tap(key('match_row_8'));
+      await tester.pumpAndSettle();
+      expect(find.text('Penalty misses ×1'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets(
+      'light theme: status-bar icons are light over the hero and '
+      'follow the theme once it scrolls away', (tester) async {
+    // A short phone, so the Overview is tall enough to scroll the hero away.
+    await pumpPage(tester, size: const Size(360, 600));
+    await emitAll(tester);
+    SystemUiOverlayStyle style() => tester
+        .widget<AnnotatedRegion<SystemUiOverlayStyle>>(find
+            .byWidgetPredicate(
+                (w) => w is AnnotatedRegion<SystemUiOverlayStyle>)
+            .first)
+        .value;
+    expect(style(), SystemUiOverlayStyle.light);
+
+    await tester.drag(key('profile_scroll'), const Offset(0, -600));
+    await tester.pumpAndSettle();
+    expect(style(), SystemUiOverlayStyle.dark);
+  });
+
+  testWidgets('no underlined text anywhere on the profile (house rule)',
+      (tester) async {
+    await pumpPage(tester);
+    await emitAll(tester, rostersValue: {
+      'Ishtar': [_rosterRow(_name, 'Ishtar', uid: 'uid-42')],
+    });
+    for (final tab in ['overview', 'stats', 'matches', 'price']) {
+      await openTab(tester, tab);
+      for (final t in tester.widgetList<Text>(find.byType(Text))) {
+        expect(t.style?.decoration ?? TextDecoration.none, TextDecoration.none,
+            reason: '"${t.data}" must not be underlined');
+      }
+    }
+  });
+}
