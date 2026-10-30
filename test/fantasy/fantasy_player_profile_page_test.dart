@@ -167,6 +167,7 @@ void main() {
     Size size = const Size(420, 900),
     ThemeMode themeMode = ThemeMode.light,
     Future<int> Function()? loadStartHour,
+    Stream<List<TournamentMatch>> Function(int startHour)? leagueGamesFor,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -192,7 +193,10 @@ void main() {
           return weekStats.stream;
         },
         rosterStates: rosters.stream,
-        gamesStates: games.stream,
+        // [leagueGamesFor] runs the REAL hour → games path (and its session
+        // cache) with only LeagueService.watchGames replaced.
+        gamesStates: leagueGamesFor == null ? games.stream : null,
+        leagueGamesFor: leagueGamesFor,
         teamsStates: teams.stream,
         watchlistStates: watchlist.stream,
         selfUidOverride: selfUid,
@@ -426,6 +430,49 @@ void main() {
       await pumpPage(tester, loadStartHour: fivePm);
       await emitAll(tester);
       expect(calls, 1);
+    });
+
+    testWidgets(
+        'a revisit after a FAILED then SUCCESSFUL read never shows "0 PM" '
+        '(the real games path and its session cache)', (tester) async {
+      final derived = <int, StreamController<List<TournamentMatch>>>{};
+      Stream<List<TournamentMatch>> gamesFor(int hour) {
+        final c = StreamController<List<TournamentMatch>>.broadcast();
+        derived[hour] = c;
+        addTearDown(c.close);
+        return c.stream;
+      }
+
+      // Visit 1: the hour read fails → the games are derived with hour 0.
+      await pumpPage(tester,
+          loadStartHour: () async => throw StateError('offline'),
+          leagueGamesFor: gamesFor);
+      await tester.pump();
+      derived[0]!.add([_legacyGame('11082026', 'Ishtar', 'Nimrod')]);
+      await emitAll(tester);
+      expect(find.text('Next: vs Nimrod · Sun'), findsOneWidget);
+
+      // Visit 2: the hour read now succeeds — but the session's games were
+      // derived with 0 until the re-derived ones arrive.
+      final hour = Completer<int>();
+      await tester.pumpWidget(const SizedBox());
+      await pumpPage(tester,
+          loadStartHour: () => hour.future, leagueGamesFor: gamesFor);
+      await emitAll(tester);
+      expect(find.text('Next: vs Nimrod · Sun'), findsOneWidget);
+
+      hour.complete(5);
+      await tester.pump();
+      await tester.pump();
+      expect(derived.keys, [0, 5]); // re-derived with the real hour
+      expect(find.text('Next: vs Nimrod · Sun'), findsOneWidget);
+      expect(find.textContaining('0 PM'), findsNothing);
+
+      derived[5]!
+          .add([_legacyGame('11082026', 'Ishtar', 'Nimrod', startHour: 5)]);
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Next: vs Nimrod · Sun 5 PM'), findsOneWidget);
     });
   });
 

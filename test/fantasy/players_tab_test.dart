@@ -107,6 +107,7 @@ void main() {
     Size size = const Size(420, 1400),
     ThemeMode themeMode = ThemeMode.light,
     Future<int> Function()? loadStartHour,
+    Stream<List<TournamentMatch>> Function(int startHour)? leagueGamesFor,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -125,7 +126,10 @@ void main() {
           gameweeks: const [],
           totalsStates: totals.stream,
           priceChangeStates: changes.stream,
-          gamesStates: games.stream,
+          // [leagueGamesFor] runs the REAL hour → games path (and its
+          // session cache) with only LeagueService.watchGames replaced.
+          gamesStates: leagueGamesFor == null ? games.stream : null,
+          leagueGamesFor: leagueGamesFor,
           loadStartHour: loadStartHour,
           watchlistStates: watchlist.stream,
           selfUidOverride: selfUid,
@@ -447,6 +451,63 @@ void main() {
     await tester.pumpAndSettle();
     expect(unknownCalls, 2);
     expect(find.textContaining('0 PM'), findsNothing);
+  });
+
+  testWidgets(
+      'a revisit after a FAILED then SUCCESSFUL start-hour read never shows '
+      '"0 PM" (the real games path and its session cache)', (tester) async {
+    final derived = <int, StreamController<List<TournamentMatch>>>{};
+    Stream<List<TournamentMatch>> gamesFor(int hour) {
+      final c = StreamController<List<TournamentMatch>>.broadcast();
+      derived[hour] = c;
+      addTearDown(c.close);
+      return c.stream;
+    }
+
+    List<TournamentMatch> legacyAt(int hour) => [
+          leagueMatchFromGameMap(
+            dateKey: '11082026',
+            index: 0,
+            raw: {'team1': 'Team A', 'team2': 'Team B', 'status': 0},
+            startHour: hour,
+          ),
+        ];
+    String nextLine() => tester
+        .widget<Text>(find.byKey(const ValueKey('market_next_Ava Striker')))
+        .data!;
+
+    // Visit 1: the hour read fails → the games are derived with hour 0.
+    await pumpTab(tester,
+        loadStartHour: () async => throw StateError('offline'),
+        leagueGamesFor: gamesFor);
+    await tester.pump();
+    totals.add(null);
+    changes.add(const {});
+    watchlist.add(const {});
+    derived[0]!.add(legacyAt(0));
+    await tester.pumpAndSettle();
+    expect(nextLine(), 'vs Team B · Sun');
+
+    // Visit 2: the hour read now succeeds — but the session's games were
+    // derived with 0 until the re-derived ones arrive.
+    final hour = Completer<int>();
+    await tester.pumpWidget(const SizedBox());
+    await pumpTab(tester,
+        loadStartHour: () => hour.future, leagueGamesFor: gamesFor);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('players_market_skeleton')), findsNothing);
+    expect(nextLine(), 'vs Team B · Sun');
+
+    hour.complete(5);
+    await tester.pump();
+    await tester.pump();
+    expect(derived.keys, [0, 5]); // re-derived with the real hour
+    expect(nextLine(), 'vs Team B · Sun'); // the stale games: no "0 PM"
+    expect(find.textContaining('0 PM'), findsNothing);
+
+    derived[5]!.add(legacyAt(5));
+    await tester.pumpAndSettle();
+    expect(nextLine(), 'vs Team B · Sun 5 PM');
   });
 
   testWidgets('★ chip filters the market to the watchlist (live)',

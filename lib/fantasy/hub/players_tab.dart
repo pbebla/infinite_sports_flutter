@@ -39,6 +39,7 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/data/next_game.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
@@ -51,7 +52,6 @@ import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_page.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/profile_common.dart';
-import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
@@ -67,6 +67,7 @@ class FantasyPlayersTab extends StatefulWidget {
     this.totalsStates,
     this.priceChangeStates,
     this.gamesStates,
+    this.leagueGamesFor,
     this.loadStartHour,
     this.watchlistStates,
     this.selfUidOverride,
@@ -93,6 +94,11 @@ class FantasyPlayersTab extends StatefulWidget {
   final Stream<Map<int, Map<String, int>>>? priceChangeStates;
   final Stream<List<TournamentMatch>>? gamesStates;
 
+  /// Replaces ONLY `LeagueService.watchGames(sport, season, startHour:)`:
+  /// the start hour → games wiring and its session caches still run.
+  /// Ignored when [gamesStates] is given.
+  final Stream<List<TournamentMatch>> Function(int startHour)? leagueGamesFor;
+
   /// The season's legacy start hour (`LeagueService.getStartHour`; 0 =
   /// absent or a failed read). Null with a [gamesStates] seam = treated as
   /// known (the fed games carry their own times).
@@ -116,11 +122,16 @@ class FantasyPlayersTab extends StatefulWidget {
   static bool sessionDescending = true;
 
   /// Last-seen feed values per `<sport>|<season>` so a revisit paints at
-  /// once (the live streams then refresh in place).
+  /// once (the live streams then refresh in place). The league games + start
+  /// hour live in the shared games feed's cache (fantasy_schedule_feed.dart).
   static final Map<String, _MarketSession> _sessions = {};
 
-  /// Clears the market's session snapshots (sign-out hygiene, tests).
-  static void clearSessionCaches() => _sessions.clear();
+  /// Clears the market's session snapshots (sign-out hygiene, tests) —
+  /// including the shared league-games cache it paints from.
+  static void clearSessionCaches() {
+    _sessions.clear();
+    FantasyLeagueGamesFeed.clearSessionCache();
+  }
 
   @override
   State<FantasyPlayersTab> createState() => _FantasyPlayersTabState();
@@ -131,11 +142,6 @@ class _MarketSession {
   bool totalsLoaded = false;
   Map<String, FantasyPlayerTotals>? totals;
   Map<int, Map<String, int>>? priceChanges;
-  List<TournamentMatch>? games;
-
-  /// Only a REAL start hour (> 0): an absent node / failed read is retried
-  /// on the next visit.
-  int? startHour;
   String? watchlistUid;
   Set<String>? watchlist;
 }
@@ -153,13 +159,23 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
 
   /// Every reprice by gameweek; null until the feed lands.
   Map<int, Map<String, int>>? _priceChanges;
-  List<TournamentMatch> _games = const [];
-  bool _gamesLoaded = false;
 
-  /// The start hour behind derived game times: null = not needed / not
-  /// loaded, 0 = unknown (the next-game line then drops a derived time).
-  int? _startHour;
-  bool _startHourPending = false;
+  /// League games for the next-game lines, derived with the season start
+  /// hour — the shared feed (fantasy_schedule_feed.dart): the hour joins a
+  /// first visit's reveal gate, a revisit paints from the session, and an
+  /// unknown hour drops a derived time — never "0 PM", not even on a
+  /// revisit after a failed read.
+  late final FantasyLeagueGamesFeed _leagueGames = FantasyLeagueGamesFeed(
+    sport: widget.sport,
+    season: widget.season,
+    owner: 'FantasyPlayersTab',
+    onChanged: () {
+      if (mounted) setState(() {});
+    },
+    gamesStates: widget.gamesStates,
+    gamesFor: widget.leagueGamesFor,
+    loadStartHour: widget.loadStartHour,
+  );
   Set<String> _watchlist = const {};
   bool _watchlistLoaded = false;
 
@@ -170,7 +186,6 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
 
   StreamSubscription<Map<String, FantasyPlayerTotals>?>? _totalsSub;
   StreamSubscription<Map<int, Map<String, int>>>? _priceChangesSub;
-  StreamSubscription<List<TournamentMatch>>? _gamesSub;
   StreamSubscription<Set<String>>? _watchlistSub;
   Timer? _lockTicker;
 
@@ -196,8 +211,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
   bool get _ready =>
       _totalsLoaded &&
       _priceChanges != null &&
-      _gamesLoaded &&
-      !_startHourPending &&
+      _leagueGames.ready &&
       _watchlistLoaded;
 
   bool get _editable => squadEditable(
@@ -212,7 +226,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
     widget.draft.addListener(_onDraftChanged);
     _seedFromSession();
     _subscribeMarketFeeds();
-    _subscribeGames();
+    _leagueGames.start();
     _subscribeWatchlist();
     // 30s tick keeps the editable/locked flip honest around the deadline
     // (same cadence as the squad builder); cancelled in dispose.
@@ -230,10 +244,6 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
       _totalsLoaded = true;
     }
     _priceChanges = s.priceChanges;
-    if (s.games != null) {
-      _games = s.games!;
-      _gamesLoaded = true;
-    }
     if (s.watchlist != null && s.watchlistUid == _selfUid) {
       _watchlist = s.watchlist!;
       _watchlistLoaded = true;
@@ -266,66 +276,6 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
     }, onError: (Object _) {
       if (mounted) setState(() => _priceChanges ??= const {});
     });
-  }
-
-  /// League games for the next-game lines. A legacy game without a stored
-  /// time derives it from the season start hour, so the hour is loaded
-  /// first (Task 4/5 review: never "0 PM"); 0 = unknown → the line drops a
-  /// derived time (nextGameText). The load joins the reveal gate.
-  void _subscribeGames() {
-    final gamesSeam = widget.gamesStates;
-    final loadHour = widget.loadStartHour ??
-        (gamesSeam != null
-            ? null
-            : () => LeagueService.getStartHour(widget.sport, widget.season));
-    if (gamesSeam != null) {
-      _gamesSub = gamesSeam.listen(_onGames, onError: _onGamesError);
-    }
-    if (loadHour == null) return;
-    final cachedHour = _session.startHour;
-    if (cachedHour != null) {
-      _startHour = cachedHour;
-      _listenLeagueGames(cachedHour);
-      return;
-    }
-    // No real hour this session yet (first visit, or the league has none /
-    // the read failed — 0 is never cached). A first visit waits for it
-    // inside the reveal; a revisit already holding this session's games
-    // paints at once with the hour unknown and refreshes in place.
-    if (_gamesLoaded) {
-      _startHour = 0;
-    } else {
-      _startHourPending = true;
-    }
-    Future<int>.sync(loadHour).catchError((Object _) => 0).then((hour) {
-      if (hour > 0) _session.startHour = hour;
-      if (!mounted) return;
-      setState(() {
-        _startHour = hour;
-        _startHourPending = false;
-      });
-      _listenLeagueGames(hour);
-    });
-  }
-
-  void _listenLeagueGames(int startHour) {
-    if (widget.gamesStates != null) return;
-    _gamesSub = LeagueService.watchGames(widget.sport, widget.season,
-            startHour: startHour)
-        .listen(_onGames, onError: _onGamesError);
-  }
-
-  void _onGames(List<TournamentMatch> games) {
-    _session.games = games;
-    if (!mounted) return;
-    setState(() {
-      _games = games;
-      _gamesLoaded = true;
-    });
-  }
-
-  void _onGamesError(Object _) {
-    if (mounted) setState(() => _gamesLoaded = true);
   }
 
   void _subscribeWatchlist() {
@@ -370,7 +320,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
     widget.draft.removeListener(_onDraftChanged);
     _totalsSub?.cancel();
     _priceChangesSub?.cancel();
-    _gamesSub?.cancel();
+    _leagueGames.dispose();
     _watchlistSub?.cancel();
     _movesForSheet.close();
     _lockTicker?.cancel();
@@ -510,10 +460,11 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
     final now = _now.toLocal();
     final nextByTeam = <String, String?>{};
     String? nextFor(FantasyPlayer p) => nextByTeam.putIfAbsent(p.teamName, () {
-          final next = nextGameForTeam(p.teamName, _games, now);
+          final next = nextGameForTeam(p.teamName, _leagueGames.games, now);
           return next == null
               ? null
-              : nextGameText(next, startHourKnown: _startHour != 0);
+              : nextGameText(next,
+                  startHourKnown: _leagueGames.startHourKnown);
         });
 
     Widget row(FantasyPlayer p) => _row(

@@ -18,7 +18,9 @@
 // signed in, his own watchlist. ONE fade reveal once every feed has landed;
 // any failing feed degrades to "no data" rather than holding the skeleton.
 // The FantasyService/LeagueService feeds are session-cache seeded; the
-// schedule-derived feeds get the page's own session caches below so a
+// schedule (Config → gameweeks → his weekly records) and the league games
+// (start hour → games) come from the shared feeds in
+// fantasy_schedule_feed.dart, which cache them for the session too, so a
 // revisit paints at once.
 
 import 'dart:async';
@@ -28,6 +30,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/data/next_game.dart';
 import 'package:infinite_sports_flutter/fantasy/data/player_account_link.dart';
@@ -106,6 +109,7 @@ class FantasyPlayerProfilePage extends StatefulWidget {
     this.weekStatsFor,
     this.rosterStates,
     this.gamesStates,
+    this.leagueGamesFor,
     this.teamsStates,
     this.watchlistStates,
     this.selfUidOverride,
@@ -142,6 +146,11 @@ class FantasyPlayerProfilePage extends StatefulWidget {
       weekStatsFor;
   final Stream<Map<String, List<TournamentPlayer>>>? rosterStates;
   final Stream<List<TournamentMatch>>? gamesStates;
+
+  /// Replaces ONLY `LeagueService.watchGames(sport, season, startHour:)`:
+  /// the start hour → games wiring and its session caches still run.
+  /// Ignored when [gamesStates] is given.
+  final Stream<List<TournamentMatch>> Function(int startHour)? leagueGamesFor;
   final Stream<List<TournamentTeam>>? teamsStates;
   final Stream<Set<String>>? watchlistStates;
 
@@ -164,20 +173,17 @@ class FantasyPlayerProfilePage extends StatefulWidget {
   final DateTime Function()? nowUtc;
 
   // ── Session caches (instant revisits) for the feeds the services don't
-  // cache themselves: the derived schedule, the league games + their start
-  // hour (only a REAL hour > 0 — an absent/failed read is retried next
-  // visit), and the team colours. Keyed `<sport>|<season>`.
-  static final Map<String, List<Gameweek>> _gameweeksSession = {};
-  static final Map<String, List<TournamentMatch>> _gamesSession = {};
-  static final Map<String, int> _startHourSession = {};
+  // cache themselves: the team colours here, keyed `<sport>|<season>`; the
+  // derived schedule and the league games + their start hour live in the
+  // shared feeds (fantasy_schedule_feed.dart).
   static final Map<String, Map<String, Color>> _teamColorsSession = {};
 
-  /// Clears the page's session caches (sign-out hygiene, tests).
+  /// Clears the page's session caches (sign-out hygiene, tests) — including
+  /// the shared schedule / games caches it paints from.
   static void clearSessionCaches() {
-    _gameweeksSession.clear();
-    _gamesSession.clear();
-    _startHourSession.clear();
     _teamColorsSession.clear();
+    FantasyScheduleFeed.clearSessionCache();
+    FantasyLeagueGamesFeed.clearSessionCache();
   }
 
   @override
@@ -210,27 +216,51 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
   final ScrollController _scroll = ScrollController();
   bool _pastHero = false;
 
-  FantasyConfigState? _config;
-  bool _configLoaded = false;
-  List<Gameweek>? _gameweeks;
-  int? _gameweeksLockHour;
+  /// Config (lock state) → schedule gameweeks (which weeks to listen to) →
+  /// his PlayerWeekStats, one listener per schedule gameweek — the shared
+  /// wiring (fantasy_schedule_feed.dart): lock-hour / week-number
+  /// resubscribe, a removed Config clears the schedule, errors logged with
+  /// the last good value kept, the schedule session-cached.
+  late final FantasyScheduleFeed<Map<int, PlayerWeekStats>> _schedule =
+      FantasyScheduleFeed(
+    sport: widget.sport,
+    season: widget.season,
+    owner: 'FantasyPlayerProfilePage',
+    onChanged: _repaint,
+    configStates: widget.configStates,
+    gameweekStates: widget.gameweekStates,
+    weekFeed: (weeks) =>
+        widget.weekStatsFor?.call(weeks) ??
+        FantasyService.watchPlayerWeekStatsFor(
+            widget.sport, widget.season, widget.playerName, weeks),
+    weekLabel: 'week stats feed',
+  );
+
+  /// The league games for the Next line, derived with the season start hour
+  /// (the shared sibling feed: the hour joins the first visit's reveal gate,
+  /// a revisit paints from the session, and an unknown hour drops a derived
+  /// time — never "0 PM", not even on a revisit after a failed read).
+  late final FantasyLeagueGamesFeed _leagueGames = FantasyLeagueGamesFeed(
+    sport: widget.sport,
+    season: widget.season,
+    owner: 'FantasyPlayerProfilePage',
+    onChanged: _repaint,
+    gamesStates: widget.gamesStates,
+    gamesFor: widget.leagueGamesFor,
+    loadStartHour: widget.loadStartHour,
+  );
+
+  FantasyConfigState? get _config => _schedule.config;
+  List<Gameweek>? get _gameweeks => _schedule.gameweeks;
+  Map<int, PlayerWeekStats>? get _weeks => _schedule.weekData;
+
   List<FantasyPlayer>? _players;
   Map<String, FantasyPlayerTotals>? _totals;
   bool _totalsLoaded = false;
   Map<int, Map<String, int>>? _priceHistory;
   Map<int, Map<String, int>>? _priceChanges;
-  Map<int, PlayerWeekStats>? _weeks;
-  List<int>? _weekNumbers;
   Map<String, List<TournamentPlayer>> _rosters = const {};
   bool _rostersLoaded = false;
-  List<TournamentMatch> _games = const [];
-  bool _gamesLoaded = false;
-
-  /// The season start hour behind derived game times: null = not needed /
-  /// not loaded, 0 = unknown (absent or failed read). Joins the reveal gate
-  /// while loading so the Next line never re-renders after the fade.
-  int? _startHour;
-  bool _startHourPending = false;
   Map<String, Color> _teamColors = const {};
   bool _teamsLoaded = false;
   Set<String> _watchlist = const {};
@@ -240,15 +270,11 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
   bool? _starOverride;
   Map<String, String> _logoUrls = const {};
 
-  StreamSubscription<FantasyConfigState?>? _configSub;
-  StreamSubscription<List<Gameweek>>? _gameweeksSub;
   StreamSubscription<List<FantasyPlayer>>? _playersSub;
   StreamSubscription<Map<String, FantasyPlayerTotals>?>? _totalsSub;
   StreamSubscription<Map<int, Map<String, int>>>? _historySub;
   StreamSubscription<Map<int, Map<String, int>>>? _changesSub;
-  StreamSubscription<Map<int, PlayerWeekStats>>? _weeksSub;
   StreamSubscription<Map<String, List<TournamentPlayer>>>? _rostersSub;
-  StreamSubscription<List<TournamentMatch>>? _gamesSub;
   StreamSubscription<List<TournamentTeam>>? _teamsSub;
   StreamSubscription<Set<String>>? _watchlistSub;
   Timer? _lockTicker;
@@ -270,18 +296,21 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
   }();
 
   bool get _ready =>
-      _configLoaded &&
-      _gameweeks != null &&
+      _schedule.configLoaded &&
+      _schedule.gameweeks != null &&
       _players != null &&
       _totalsLoaded &&
       _priceHistory != null &&
       _priceChanges != null &&
-      _weeks != null &&
+      _schedule.weekLoaded &&
       _rostersLoaded &&
-      _gamesLoaded &&
-      !_startHourPending &&
+      _leagueGames.ready &&
       _teamsLoaded &&
       _watchlistLoaded;
+
+  void _repaint() {
+    if (mounted) setState(() {});
+  }
 
   bool get _showsDraftAction => !widget.fromOutsideHub && widget.draft != null;
 
@@ -300,7 +329,7 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
       if (past != _pastHero) setState(() => _pastHero = past);
     });
     _seedFromSession();
-    _subscribeConfig();
+    _schedule.start();
     _subscribeMarketFeeds();
     _subscribeLeagueFeeds();
     _subscribeWatchlist();
@@ -318,101 +347,15 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
     }
   }
 
-  /// Seeds the schedule-derived feeds from this session (real feeds only).
+  /// Seeds the team colours from this session (real feed only); the
+  /// schedule and the games seed themselves (the shared feeds).
   void _seedFromSession() {
     final key = _sessionKey;
-    if (widget.gameweekStates == null &&
-        FantasyPlayerProfilePage._gameweeksSession[key] != null) {
-      _onGameweeks(FantasyPlayerProfilePage._gameweeksSession[key]!,
-          initial: true);
-    }
-    if (widget.gamesStates == null &&
-        FantasyPlayerProfilePage._gamesSession[key] != null) {
-      _games = FantasyPlayerProfilePage._gamesSession[key]!;
-      _gamesLoaded = true;
-    }
     if (widget.teamsStates == null &&
         FantasyPlayerProfilePage._teamColorsSession[key] != null) {
       _teamColors = FantasyPlayerProfilePage._teamColorsSession[key]!;
       _teamsLoaded = true;
     }
-  }
-
-  void _subscribeConfig() {
-    _configSub = (widget.configStates ??
-            FantasyService.watchConfig(widget.sport, widget.season))
-        .listen((state) {
-      if (!mounted) return;
-      setState(() {
-        _config = state;
-        _configLoaded = true;
-      });
-      if (widget.gameweekStates != null) return;
-      if (state == null) {
-        // No fantasy config → no schedule-derived weeks.
-        _gameweeksSub?.cancel();
-        _gameweeksLockHour = null;
-        _onGameweeks(const []);
-      } else if (_gameweeksLockHour != state.config.lockHour) {
-        _gameweeksLockHour = state.config.lockHour;
-        _gameweeksSub?.cancel();
-        _gameweeksSub = FantasyService.watchGameweeks(
-                widget.sport, widget.season, state.config)
-            .listen(_onGameweeks, onError: _onGameweeksFailed);
-      }
-    }, onError: (Object e) {
-      if (!mounted) return;
-      setState(() => _configLoaded = true);
-      if (widget.gameweekStates == null) _onGameweeksFailed(e);
-    });
-    if (widget.gameweekStates != null) {
-      _gameweeksSub = widget.gameweekStates!
-          .listen(_onGameweeks, onError: _onGameweeksFailed);
-    }
-  }
-
-  /// A failed schedule read: no weeks to listen to (never cached — the next
-  /// visit retries live), unless a schedule is already showing.
-  void _onGameweeksFailed(Object _) {
-    if (!mounted || _gameweeks != null) return;
-    setState(() => _gameweeks = const []);
-    _subscribeWeeks(const []);
-  }
-
-  void _onGameweeks(List<Gameweek> gws, {bool initial = false}) {
-    if (!initial && !mounted) return;
-    if (widget.gameweekStates == null) {
-      FantasyPlayerProfilePage._gameweeksSession[_sessionKey] = gws;
-    }
-    if (initial) {
-      _gameweeks = gws;
-    } else {
-      setState(() => _gameweeks = gws);
-    }
-    _subscribeWeeks([for (final g in gws) g.number]);
-  }
-
-  /// One PlayerWeekStats listener per schedule gameweek; resubscribes only
-  /// when the week numbers change (a config/schedule re-emit that keeps them
-  /// never flickers the page). The previous map stays until the new emits.
-  void _subscribeWeeks(List<int> weeks) {
-    final known = _weekNumbers;
-    if (known != null &&
-        known.length == weeks.length &&
-        Iterable<int>.generate(weeks.length)
-            .every((i) => known[i] == weeks[i])) {
-      return;
-    }
-    _weekNumbers = weeks;
-    _weeksSub?.cancel();
-    final source = widget.weekStatsFor?.call(weeks) ??
-        FantasyService.watchPlayerWeekStatsFor(
-            widget.sport, widget.season, widget.playerName, weeks);
-    _weeksSub = source.listen((w) {
-      if (mounted) setState(() => _weeks = w);
-    }, onError: (Object _) {
-      if (mounted) setState(() => _weeks ??= const {});
-    });
   }
 
   void _subscribeMarketFeeds() {
@@ -482,52 +425,7 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
       if (mounted) setState(() => _teamsLoaded = true);
     });
 
-    // The legacy derived time needs the season's start hour, else a game
-    // without a stored Time reads "0 PM" (Task 4 review). getStartHour
-    // returns 0 for an absent node AND a failed read: 0 is "unknown" —
-    // never cached (the next visit retries) and the Next line then drops a
-    // derived time instead of showing "0 PM" (nextGameText).
-    final gamesSeam = widget.gamesStates;
-    final loadHour = widget.loadStartHour ??
-        (gamesSeam != null
-            ? null
-            : () => LeagueService.getStartHour(widget.sport, widget.season));
-    if (gamesSeam != null) {
-      _gamesSub = gamesSeam.listen(_onGames, onError: _onGamesError);
-    }
-    if (loadHour == null) return;
-    _startHourPending = true;
-    final key = _sessionKey;
-    final cachedHour = FantasyPlayerProfilePage._startHourSession[key];
-    (cachedHour != null ? Future<int>.value(cachedHour) : loadHour())
-        .catchError((Object _) => 0)
-        .then((hour) {
-      if (hour > 0) FantasyPlayerProfilePage._startHourSession[key] = hour;
-      if (!mounted) return;
-      setState(() {
-        _startHour = hour;
-        _startHourPending = false;
-      });
-      if (gamesSeam != null) return;
-      _gamesSub =
-          LeagueService.watchGames(widget.sport, widget.season, startHour: hour)
-              .listen(_onGames, onError: _onGamesError);
-    });
-  }
-
-  void _onGames(List<TournamentMatch> games) {
-    if (!mounted) return;
-    if (widget.gamesStates == null) {
-      FantasyPlayerProfilePage._gamesSession[_sessionKey] = games;
-    }
-    setState(() {
-      _games = games;
-      _gamesLoaded = true;
-    });
-  }
-
-  void _onGamesError(Object _) {
-    if (mounted) setState(() => _gamesLoaded = true);
+    _leagueGames.start();
   }
 
   void _subscribeWatchlist() {
@@ -552,15 +450,13 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
 
   @override
   void dispose() {
-    _configSub?.cancel();
-    _gameweeksSub?.cancel();
+    _schedule.dispose();
+    _leagueGames.dispose();
     _playersSub?.cancel();
     _totalsSub?.cancel();
     _historySub?.cancel();
     _changesSub?.cancel();
-    _weeksSub?.cancel();
     _rostersSub?.cancel();
-    _gamesSub?.cancel();
     _teamsSub?.cancel();
     _watchlistSub?.cancel();
     _lockTicker?.cancel();
@@ -733,7 +629,8 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
     );
     final roster = rosterRowFor(player, _rosters);
     final uid = uidForFantasyPlayer(player, _rosters);
-    final next = nextGameForTeam(player.teamName, _games, _nowUtc.toLocal());
+    final next = nextGameForTeam(
+        player.teamName, _leagueGames.games, _nowUtc.toLocal());
     final teamColor = _teamColors[player.teamName.trim()] ??
         fallbackTeamColor(player.teamName);
     final heroHeight = _heroHeightFor(context);
@@ -747,7 +644,8 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
           season: widget.season,
           nextGameText: next == null
               ? null
-              : nextGameText(next, startHourKnown: _startHour != 0),
+              : nextGameText(next,
+                  startHourKnown: _leagueGames.startHourKnown),
           seasonStats: roster,
         ),
     };
