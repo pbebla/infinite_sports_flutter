@@ -217,6 +217,38 @@ void main() {
       expect(rows.map((r) => r.viewerTitle),
           ['Top Cats', 'Fake FC 1', 'Pat Lee', 'Unnamed manager']);
     });
+
+    test(
+        'a team named exactly like its manager (any case, stray spaces) '
+        'shows ONE line, never the name twice', () {
+      final rows = composeLeaderboardRows(
+        entries: [
+          entry('same', 50, rank: 1),
+          entry('cased', 40, rank: 2),
+          entry('spaced', 30, rank: 3),
+          entry('close', 20, rank: 4),
+        ],
+        managers: {
+          'same': manager('Zoe Park'),
+          'cased': manager('ADA NG'),
+          'spaced': manager('  pat lee  '),
+          'close': manager('Sam Fox FC'),
+        },
+        profiles: {
+          'same': profile('same', 'Zoe', 'Park'),
+          'cased': profile('cased', 'Ada', 'Ng'),
+          'spaced': profile('spaced', 'Pat', 'Lee'),
+          'close': profile('close', 'Sam', 'Fox'),
+        },
+        selfUid: '',
+      );
+      expect(rows.map((r) => r.name),
+          ['Zoe Park', 'Ada Ng', 'Pat Lee', 'Sam Fox']);
+      expect(rows.map((r) => r.secondaryName), [null, null, null, 'Sam Fox FC']);
+      // The team name itself is untouched (the viewer still titles by it).
+      expect(rows.map((r) => r.viewerTitle),
+          ['Zoe Park', 'ADA NG', 'pat lee', 'Sam Fox FC']);
+    });
   });
 
   group('movement', () {

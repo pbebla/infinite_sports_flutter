@@ -56,8 +56,16 @@ class LeaderboardRowData {
   String get name => realName ?? teamName ?? 'Unnamed manager';
 
   /// The second line: the team name UNDER a real name. null when the team
-  /// name already IS the primary line (no real name) or there is none.
-  String? get secondaryName => realName == null ? null : teamName;
+  /// name already IS the primary line (no real name), when there is none, or
+  /// when the team is simply named after the manager (same text ignoring case
+  /// and surrounding spaces) — the row never repeats the name.
+  String? get secondaryName {
+    final real = realName;
+    final team = teamName;
+    if (real == null || team == null) return null;
+    if (real.trim().toLowerCase() == team.trim().toLowerCase()) return null;
+    return team;
+  }
 
   /// The squad viewer's app-bar title keeps its contract (the manager's
   /// fantasy TEAM name), falling back to [name].
