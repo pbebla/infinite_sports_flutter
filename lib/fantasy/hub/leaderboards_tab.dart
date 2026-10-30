@@ -1,18 +1,21 @@
-// The hub's Leaderboards tab (P3d, spec §9/§10): Overall / Gameweek / My
-// Leagues scopes. Overall and Gameweek render the podium top-3 + ranked rows
-// (movement arrows where the data provides them) with the signed-in
-// manager's row pinned when scrolled away; the Gameweek scope adds week
-// chips (1..N from the real schedule's gameweeks); My Leagues is the
-// mini-league create/join/share surface. Tapping ANY manager opens their
-// squad viewer (spec §9 transparency).
+// The hub's Leaderboards tab (P3d, spec §9/§10; redesigned in round 3, spec
+// §6): Overall / Gameweek scopes. Both render plain ranked rows (no podium) —
+// gold rank, a movement cell on Overall only, the manager's real name with the
+// team name under it — with the signed-in manager's row pinned when scrolled
+// away; the Gameweek scope adds week chips (1..N from the real schedule's
+// gameweeks). Tapping ANY manager opens their squad viewer (spec §9
+// transparency).
+//
+// My Leagues (the mini-league create/join/share surface) is BUILT but hidden
+// behind [kShowMiniLeagues]: no segment, no MiniLeagues subscription, and it
+// no longer gates the reveal. Flip the constant to bring it back.
 //
 // Data: the functions-written Leaderboards node (friendly empty state until
 // P4 writes it), the whole Managers node for team names, PublicProfiles
-// (once, session-cached) for name fallback + avatar photos, and the
-// client-written MiniLeagues node.
+// (once, session-cached) for real names + avatar photos.
 //
 // House rules: streams/once only; SINGLE fade reveal (skeleton until the
-// leaderboards+managers+leagues streams and the profiles read have ALL
+// leaderboards+managers+dream-teams streams and the profiles read have ALL
 // landed); session caches make revisits instant; theme-safe both modes;
 // names wrap, never underlined; glass-navbar clearance; scope + selected
 // week persist for the session (the market-sort precedent).
@@ -35,6 +38,11 @@ import 'package:infinite_sports_flutter/misc/public_profiles.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 enum LeaderboardScope { overall, gameweek, leagues }
+
+/// Owner decision (round 3): mini-leagues are hidden for now. The code, rules
+/// and data all stay — flip to true to restore the "My Leagues" segment, its
+/// MiniLeagues subscription and its place in the reveal gate.
+const bool kShowMiniLeagues = false;
 
 /// The Leaderboards tab's test seams as ONE bundle, so the hub can forward
 /// them to the tab it mounts (the hub test mounts the real tab with fake feeds
@@ -182,11 +190,13 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
         .listen((managers) {
       if (mounted) setState(() => _managers = managers);
     });
-    _leaguesSub = (widget.miniLeaguesStates ??
-            FantasyService.watchMiniLeagues(widget.sport, widget.season))
-        .listen((leagues) {
-      if (mounted) setState(() => _leagues = leagues);
-    });
+    if (kShowMiniLeagues) {
+      _leaguesSub = (widget.miniLeaguesStates ??
+              FantasyService.watchMiniLeagues(widget.sport, widget.season))
+          .listen((leagues) {
+        if (mounted) setState(() => _leagues = leagues);
+      });
+    }
     _dreamTeamsSub = (widget.dreamTeamsStates ??
             FantasyService.watchDreamTeams(widget.sport, widget.season))
         .listen((teams) {
@@ -223,7 +233,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
   bool get _ready =>
       _boards != null &&
       _managers != null &&
-      _leagues != null &&
+      (!kShowMiniLeagues || _leagues != null) &&
       _profiles != null &&
       _dreamTeams != null;
 
@@ -250,7 +260,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
               sport: widget.sport,
               season: widget.season,
               uid: row.uid,
-              title: row.name,
+              title: row.viewerTitle,
               isSelf: row.isSelf,
               config: widget.configState.config,
               players: widget.players,
@@ -264,6 +274,15 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
             );
     Navigator.push(
         context, MaterialPageRoute(builder: (_) => builder(row)));
+  }
+
+  /// The scope actually shown: a My Leagues scope restored from the session
+  /// (it is a static) falls back to Overall while mini-leagues are hidden.
+  LeaderboardScope get _scope {
+    final scope = FantasyLeaderboardsTab.sessionScope;
+    return !kShowMiniLeagues && scope == LeaderboardScope.leagues
+        ? LeaderboardScope.overall
+        : scope;
   }
 
   @override
@@ -282,7 +301,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
   }
 
   Widget _content(BuildContext context) {
-    final scope = FantasyLeaderboardsTab.sessionScope;
+    final scope = _scope;
     return Column(
       key: const ValueKey('leaderboards_ready'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -293,13 +312,15 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
             key: const ValueKey('leaderboard_scope'),
             showSelectedIcon: false,
             style: const ButtonStyle(visualDensity: VisualDensity.compact),
-            segments: const [
-              ButtonSegment(
+            segments: [
+              const ButtonSegment(
                   value: LeaderboardScope.overall, label: Text('Overall')),
-              ButtonSegment(
+              const ButtonSegment(
                   value: LeaderboardScope.gameweek, label: Text('Gameweek')),
-              ButtonSegment(
-                  value: LeaderboardScope.leagues, label: Text('My Leagues')),
+              if (kShowMiniLeagues)
+                const ButtonSegment(
+                    value: LeaderboardScope.leagues,
+                    label: Text('My Leagues')),
             ],
             selected: {scope},
             onSelectionChanged: (s) => setState(
@@ -311,30 +332,33 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
           child: switch (scope) {
             LeaderboardScope.overall => _overallBody(),
             LeaderboardScope.gameweek => _gameweekBody(),
-            LeaderboardScope.leagues => MiniLeaguesView(
-                leagues: _leagues!,
-                overall: _boards!.overall,
-                managers: _managers!,
-                profiles: _profiles!,
-                selfUid: _selfUid,
-                onOpenManager: _openManager,
-                onCreateLeague: widget.createLeague ??
-                    (name, code) => FantasyService.createMiniLeague(
-                        widget.sport, widget.season,
-                        name: name, code: code),
-                onJoinLeague: widget.joinLeague ??
-                    (id) => FantasyService.joinMiniLeague(
-                        widget.sport, widget.season, id),
-                copyText: widget.copyText,
-                shareText: widget.shareText,
-                readClipboard: widget.readClipboard,
-                codeGenerator: widget.codeGenerator,
-              ),
+            LeaderboardScope.leagues => _leaguesBody(),
           },
         ),
       ],
     );
   }
+
+  /// The hidden My Leagues surface (only reachable while [kShowMiniLeagues]).
+  Widget _leaguesBody() => MiniLeaguesView(
+        leagues: _leagues ?? const [],
+        overall: _boards!.overall,
+        managers: _managers!,
+        profiles: _profiles!,
+        selfUid: _selfUid,
+        onOpenManager: _openManager,
+        onCreateLeague: widget.createLeague ??
+            (name, code) => FantasyService.createMiniLeague(
+                widget.sport, widget.season,
+                name: name, code: code),
+        onJoinLeague: widget.joinLeague ??
+            (id) => FantasyService.joinMiniLeague(
+                widget.sport, widget.season, id),
+        copyText: widget.copyText,
+        shareText: widget.shareText,
+        readClipboard: widget.readClipboard,
+        codeGenerator: widget.codeGenerator,
+      );
 
   Widget _overallBody() {
     final entries = _boards!.overall;

@@ -3,7 +3,9 @@
 // (test/fantasy/leaderboard_logic_test.dart). The widgets in
 // leaderboards_tab.dart / leaderboard_rows.dart / mini_leagues_view.dart /
 // manager_squad_viewer.dart stay thin over these helpers: row composition
-// with the Managers-then-PublicProfiles name fallback, movement direction,
+// with the two-line names (real name from PublicProfiles + the unflagged
+// Managers team name under it; no real name → team name alone), movement
+// direction/label,
 // mini-league code generation/matching, member ranking, and the
 // published-vs-history week fallback the squad viewer enforces (spec §9).
 
@@ -19,7 +21,8 @@ import 'package:infinite_sports_flutter/misc/public_profiles.dart';
 class LeaderboardRowData {
   const LeaderboardRowData({
     required this.uid,
-    required this.name,
+    this.realName,
+    this.teamName,
     required this.points,
     required this.displayRank,
     this.movement,
@@ -29,9 +32,13 @@ class LeaderboardRowData {
 
   final String uid;
 
-  /// The manager's fantasy TEAM name (Managers node), falling back to the
-  /// PublicProfiles first+last name, then 'Unnamed manager'.
-  final String name;
+  /// The manager's real name (PublicProfiles first + last); null when no
+  /// profile name is known (e.g. the fake test managers).
+  final String? realName;
+
+  /// The manager's fantasy TEAM name (Managers node); null when absent or
+  /// FLAGGED (a flagged name is never shown publicly).
+  final String? teamName;
   final int points;
 
   /// 1-based: the functions-written rank when present, else list position.
@@ -43,26 +50,78 @@ class LeaderboardRowData {
 
   /// PublicProfiles photo; null → initials avatar (photos never gate).
   final String? photoUrl;
+
+  /// The primary line (and the squad viewer's title): the real name, else the
+  /// team name alone, else 'Unnamed manager'.
+  String get name => realName ?? teamName ?? 'Unnamed manager';
+
+  /// The second line: the team name UNDER a real name. null when the team
+  /// name already IS the primary line (no real name) or there is none.
+  String? get secondaryName => realName == null ? null : teamName;
+
+  /// The squad viewer's app-bar title keeps its contract (the manager's
+  /// fantasy TEAM name), falling back to [name].
+  String get viewerTitle => teamName ?? name;
 }
 
-/// Name resolution (spec §10b): the fantasy team name wherever one exists —
-/// but a FLAGGED name is never shown publicly (the owner flagged it as
-/// inappropriate), so flagged managers fall back like unnamed ones: the
-/// public profile's real name, then 'Unnamed manager'.
-String managerDisplayName({
+/// Name resolution (spec §6 / §10b): [realName] is the PublicProfiles first +
+/// last name; [teamName] the fantasy team name — but a FLAGGED team name is
+/// never shown publicly (the owner flagged it as inappropriate), so a flagged
+/// manager keeps only the real name. Blank values count as absent.
+({String? realName, String? teamName}) managerNames({
   required String uid,
   required Map<String, FantasyManager> managers,
   required Map<String, PublicProfile> profiles,
 }) {
   final manager = managers[uid];
-  if (manager != null && !manager.nameFlagged) return manager.teamName;
-  final fullName = profiles[uid]?.fullName ?? '';
-  return fullName.isEmpty ? 'Unnamed manager' : fullName;
+  final team = manager != null && !manager.nameFlagged
+      ? manager.teamName.trim()
+      : '';
+  final real = profiles[uid]?.fullName ?? '';
+  return (
+    realName: real.isEmpty ? null : real,
+    teamName: team.isEmpty ? null : team,
+  );
+}
+
+/// The one-line display name: the real name when known, else the team name
+/// alone, else 'Unnamed manager' (what [LeaderboardRowData.name] resolves to).
+String managerDisplayName({
+  required String uid,
+  required Map<String, FantasyManager> managers,
+  required Map<String, PublicProfile> profiles,
+}) {
+  final names = managerNames(uid: uid, managers: managers, profiles: profiles);
+  return names.realName ?? names.teamName ?? 'Unnamed manager';
 }
 
 String? _photoFor(String uid, Map<String, PublicProfile> profiles) {
   final url = profiles[uid]?.profileUrl ?? '';
   return url.isEmpty ? null : url;
+}
+
+/// One resolved row: names, photo and the self flag come from the same lookup
+/// everywhere (Overall, Gameweek and mini-league rows can never drift).
+LeaderboardRowData _rowFor({
+  required String uid,
+  required int points,
+  required int displayRank,
+  int? movement,
+  required Map<String, FantasyManager> managers,
+  required Map<String, PublicProfile> profiles,
+  required String selfUid,
+}) {
+  final names = managerNames(uid: uid, managers: managers, profiles: profiles);
+  return LeaderboardRowData(
+    uid: uid,
+    realName: names.realName,
+    teamName: names.teamName,
+    points: points,
+    displayRank: displayRank,
+    movement: movement,
+    isSelf: selfUid.isNotEmpty && uid == selfUid,
+    photoUrl: _photoFor(uid, profiles),
+  );
 }
 
 /// Entries (already sorted by the parser) → rendered rows. [showMovement]
@@ -76,15 +135,14 @@ List<LeaderboardRowData> composeLeaderboardRows({
 }) =>
     [
       for (final (i, e) in entries.indexed)
-        LeaderboardRowData(
+        _rowFor(
           uid: e.uid,
-          name:
-              managerDisplayName(uid: e.uid, managers: managers, profiles: profiles),
           points: e.points,
           displayRank: e.rank ?? i + 1,
           movement: showMovement ? e.movement : null,
-          isSelf: selfUid.isNotEmpty && e.uid == selfUid,
-          photoUrl: _photoFor(e.uid, profiles),
+          managers: managers,
+          profiles: profiles,
+          selfUid: selfUid,
         ),
     ];
 
@@ -102,6 +160,14 @@ String movementGlyph(MovementDirection d) => switch (d) {
       MovementDirection.down => '▼',
       MovementDirection.none => '—',
     };
+
+/// The movement cell's text: the arrow + how many places moved ("▲2", "▼1");
+/// a bare dash for 0 or no earlier week.
+String movementLabel(int? movement) {
+  final direction = movementDirection(movement);
+  if (direction == MovementDirection.none) return movementGlyph(direction);
+  return '${movementGlyph(direction)}${movement!.abs()}';
+}
 
 // ── Mini-leagues ───────────────────────────────────────────────────────────
 
@@ -167,13 +233,13 @@ List<LeaderboardRowData> composeMiniLeagueRows({
   for (final e in overall) {
     if (!league.hasMember(e.uid)) continue;
     seen.add(e.uid);
-    ranked.add(LeaderboardRowData(
+    ranked.add(_rowFor(
       uid: e.uid,
-      name: managerDisplayName(uid: e.uid, managers: managers, profiles: profiles),
       points: e.points,
       displayRank: ranked.length + 1,
-      isSelf: selfUid.isNotEmpty && e.uid == selfUid,
-      photoUrl: _photoFor(e.uid, profiles),
+      managers: managers,
+      profiles: profiles,
+      selfUid: selfUid,
     ));
   }
   final unranked = [
@@ -189,13 +255,13 @@ List<LeaderboardRowData> composeMiniLeagueRows({
       return byName != 0 ? byName : a.uid.compareTo(b.uid);
     });
   for (final m in unranked) {
-    ranked.add(LeaderboardRowData(
+    ranked.add(_rowFor(
       uid: m.uid,
-      name: m.name,
       points: 0,
       displayRank: ranked.length + 1,
-      isSelf: selfUid.isNotEmpty && m.uid == selfUid,
-      photoUrl: _photoFor(m.uid, profiles),
+      managers: managers,
+      profiles: profiles,
+      selfUid: selfUid,
     ));
   }
   return ranked;

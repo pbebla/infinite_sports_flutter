@@ -257,11 +257,6 @@ class _RulesBody extends StatelessWidget {
                 a: 'A voided gameweek scores nobody — no points gained or '
                     'lost, and chips played that week are returned.',
               ),
-              _Faq(
-                q: 'Can I play against just my friends?',
-                a: 'Yes — private mini-leagues with join codes are coming to '
-                    'the Leaderboards tab this season.',
-              ),
             ],
           ),
         ),

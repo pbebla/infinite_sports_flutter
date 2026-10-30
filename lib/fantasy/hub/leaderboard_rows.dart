@@ -1,20 +1,34 @@
-// Shared leaderboard presentation (P3d): the gameweek-podium top 3, the
-// ranked row tile, and RankedLeaderboardList — the scrolling list that keeps
-// the signed-in manager's row PINNED to the bottom of the viewport whenever
-// its natural place is scrolled away (FPL-style sticky own-row, spec §10
-// adopted decision). Used by the Overall and Gameweek scopes AND inside a
-// mini-league, so the three can never drift apart.
+// Shared leaderboard presentation (P3d, redesigned in round 3): the ranked row
+// tile and RankedLeaderboardList — the scrolling list that keeps the signed-in
+// manager's row PINNED to the bottom of the viewport whenever its natural
+// place is scrolled away (FPL-style sticky own-row, spec §10 adopted
+// decision). Used by the Overall and Gameweek scopes AND inside a mini-league,
+// so the three can never drift apart.
+//
+// Round 3 (spec §6, the owner's mockup): the podium is gone — every manager is
+// a plain row: gold rank, movement cell (Overall only: ▲n green / ▼n red / —
+// muted), avatar, the manager's real name with the team name UNDER it (both
+// wrap — no side-by-side columns), points. The own row carries the gold
+// highlight.
 //
 // House rules: theme-safe both modes (fantasy accent = gold in dark, primary
 // red in light; movement up = the pitch-green family, down = error); manager
-// names WRAP and are never underlined; list clears the glass navbar; photos
-// never gate rows (FantasyAvatar's initials fallback); the pinned row's
-// appear/disappear is 200ms and zero under reduced motion.
+// names WRAP and are never underlined or ellipsized; list clears the glass
+// navbar; photos never gate rows (FantasyAvatar's initials fallback); the
+// pinned row's appear/disappear is 200ms and zero under reduced motion.
 
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
+
+// Column geometry shared by the rows and the column header so "#", the
+// movement cell and the manager column line up.
+const double _rankWidth = 30;
+const double _movementWidth = 36;
+const double _avatarSize = 38;
+const double _afterMovementGap = 6;
+const double _afterAvatarGap = 10;
 
 /// Movement arrow color for this theme: green up (pitch family — legitimate
 /// in both themes), error down, muted neutral.
@@ -24,9 +38,9 @@ Color movementColor(BuildContext context, MovementDirection d) => switch (d) {
       MovementDirection.none => Theme.of(context).colorScheme.onSurfaceVariant,
     };
 
-/// One ranked row: rank, movement arrow (when the data provides one),
-/// avatar, team name (wraps), points. The signed-in manager's row carries
-/// the accent highlight.
+/// One ranked row: rank, movement cell (when the data provides one), avatar,
+/// the two-line manager cell (real name; team name under it), points. The
+/// signed-in manager's row carries the accent highlight.
 class LeaderboardRowTile extends StatelessWidget {
   const LeaderboardRowTile({
     super.key,
@@ -44,51 +58,78 @@ class LeaderboardRowTile extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final accent = fantasyAccent(context);
     final direction = movementDirection(row.movement);
+    final secondary = row.secondaryName;
 
     final content = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
         children: [
           SizedBox(
-            width: 30,
+            width: _rankWidth,
             child: Text(
               '${row.displayRank}',
               textAlign: TextAlign.center,
+              // The rank is the gold/red accent on every row (the mockup).
               style: TextStyle(
                 fontSize: 13.5,
                 fontWeight: FontWeight.w800,
-                color: row.isSelf ? accent : scheme.onSurfaceVariant,
+                color: accent,
               ),
             ),
           ),
           if (showMovement)
             SizedBox(
-              width: 20,
-              child: Text(
-                movementGlyph(direction),
-                key: ValueKey('movement_${row.uid}'),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  color: movementColor(context, direction),
+              width: _movementWidth,
+              // Scales down rather than overflow on a 3-digit climb.
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  movementLabel(row.movement),
+                  key: ValueKey('movement_${row.uid}'),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w800,
+                    color: movementColor(context, direction),
+                  ),
                 ),
               ),
             ),
-          const SizedBox(width: 6),
-          FantasyAvatar(name: row.name, photoUrl: row.photoUrl, size: 38),
-          const SizedBox(width: 10),
+          const SizedBox(width: _afterMovementGap),
+          FantasyAvatar(
+              name: row.name, photoUrl: row.photoUrl, size: _avatarSize),
+          const SizedBox(width: _afterAvatarGap),
           Expanded(
-            child: Text(
-              row.name,
-              // Wraps, never underlined or ellipsized (house rules).
-              softWrap: true,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: row.isSelf ? FontWeight.w800 : FontWeight.w600,
-                height: 1.25,
-                color: scheme.onSurface,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  row.name,
+                  key: ValueKey('leaderboard_name_${row.uid}'),
+                  // Wraps, never underlined or ellipsized (house rules).
+                  softWrap: true,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: row.isSelf ? FontWeight.w800 : FontWeight.w700,
+                    height: 1.25,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                if (secondary != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: Text(
+                      secondary,
+                      key: ValueKey('leaderboard_team_${row.uid}'),
+                      softWrap: true,
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.25,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
           const SizedBox(width: 8),
@@ -107,8 +148,9 @@ class LeaderboardRowTile extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
       child: Material(
+        // The own row: a clear gold (red in light) wash, not a whisper.
         color: row.isSelf
-            ? accent.withValues(alpha: 0.10)
+            ? accent.withValues(alpha: 0.20)
             : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
@@ -120,7 +162,7 @@ class LeaderboardRowTile extends StatelessWidget {
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(12),
                     border:
-                        Border.all(color: accent.withValues(alpha: 0.45)),
+                        Border.all(color: accent.withValues(alpha: 0.65)),
                   ),
                   child: content,
                 )
@@ -131,166 +173,66 @@ class LeaderboardRowTile extends StatelessWidget {
   }
 }
 
-/// The podium (spec §10 adopted decision): 2nd · 1st · 3rd, the champion
-/// raised with the accent ring — medal-ish using the fantasy accent only,
-/// no new assets.
-class LeaderboardPodium extends StatelessWidget {
-  const LeaderboardPodium({super.key, required this.top3, this.onTap});
+/// The mockup's "# · Manager · Pts" header — same paddings and column widths
+/// as [LeaderboardRowTile] so the labels sit over their columns.
+class _LeaderboardColumnHeader extends StatelessWidget {
+  const _LeaderboardColumnHeader({required this.showMovement});
 
-  /// The first 1–3 rows, best first.
-  final List<LeaderboardRowData> top3;
-  final void Function(LeaderboardRowData row)? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    // Visual order 2nd · 1st · 3rd; missing places just leave gaps.
-    final first = top3.isNotEmpty ? top3[0] : null;
-    final second = top3.length > 1 ? top3[1] : null;
-    final third = top3.length > 2 ? top3[2] : null;
-    return Padding(
-      key: const ValueKey('leaderboard_podium'),
-      padding: const EdgeInsets.fromLTRB(12, 14, 12, 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-              child: second == null
-                  ? const SizedBox.shrink()
-                  : _PodiumSpot(row: second, champion: false, onTap: onTap)),
-          Expanded(
-              child: first == null
-                  ? const SizedBox.shrink()
-                  : _PodiumSpot(row: first, champion: true, onTap: onTap)),
-          Expanded(
-              child: third == null
-                  ? const SizedBox.shrink()
-                  : _PodiumSpot(row: third, champion: false, onTap: onTap)),
-        ],
-      ),
-    );
-  }
-}
-
-class _PodiumSpot extends StatelessWidget {
-  const _PodiumSpot({
-    required this.row,
-    required this.champion,
-    required this.onTap,
-  });
-
-  final LeaderboardRowData row;
-  final bool champion;
-  final void Function(LeaderboardRowData row)? onTap;
+  final bool showMovement;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final accent = fantasyAccent(context);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final avatarSize = champion ? 64.0 : 50.0;
-
-    return InkWell(
-      key: ValueKey('podium_${row.uid}'),
-      borderRadius: BorderRadius.circular(14),
-      onTap: onTap == null ? null : () => onTap!(row),
-      child: Padding(
-        // The runners-up sit a step lower than the champion.
-        padding: EdgeInsets.only(top: champion ? 0 : 22, left: 4, right: 4),
-        child: Column(
-          children: [
-            Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(2),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      // Champion: the accent ring; runners-up: a quiet one.
-                      color: champion
-                          ? accent
-                          : scheme.outlineVariant.withValues(alpha: 0.8),
-                      width: champion ? 2.5 : 1.5,
-                    ),
-                  ),
-                  child: FantasyAvatar(
-                      name: row.name, photoUrl: row.photoUrl, size: avatarSize),
-                ),
-                Positioned(
-                  bottom: -4,
-                  right: -2,
-                  child: Container(
-                    width: 22,
-                    height: 22,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: champion ? accent : scheme.surfaceContainerHighest,
-                      border: champion
-                          ? null
-                          : Border.all(color: scheme.outline, width: 1),
-                    ),
-                    child: Text(
-                      '${row.displayRank}',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w900,
-                        // Gold needs dark text; light's primary takes
-                        // onPrimary (the armband badge's rule).
-                        color: champion
-                            ? (isDark ? Colors.black : scheme.onPrimary)
-                            : scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 7),
-            Text(
-              row.name,
-              textAlign: TextAlign.center,
-              // Wraps, never underlined or ellipsized (house rules).
-              softWrap: true,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
-                height: 1.2,
-                color: scheme.onSurface,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              '${row.points} pts',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                color: champion ? accent : scheme.onSurfaceVariant,
-              ),
-            ),
-          ],
+    final style = TextStyle(
+      fontSize: 11.5,
+      fontWeight: FontWeight.w700,
+      letterSpacing: 0.3,
+      color: scheme.onSurfaceVariant,
+    );
+    return Column(
+      key: const ValueKey('leaderboard_column_header'),
+      children: [
+        Padding(
+          // Outer 10 + inner 12, matching the tile.
+          padding: const EdgeInsets.fromLTRB(22, 4, 22, 6),
+          child: Row(
+            children: [
+              SizedBox(
+                  width: _rankWidth,
+                  child: Text('#', textAlign: TextAlign.center, style: style)),
+              if (showMovement) const SizedBox(width: _movementWidth),
+              const SizedBox(
+                  width: _afterMovementGap + _avatarSize + _afterAvatarGap),
+              Expanded(child: Text('Manager', style: style)),
+              Text('Pts', style: style),
+            ],
+          ),
         ),
-      ),
+        Divider(
+            height: 1,
+            thickness: 1,
+            indent: 12,
+            endIndent: 12,
+            color: scheme.outlineVariant.withValues(alpha: 0.6)),
+      ],
     );
   }
 }
 
-/// The scrolling standings: podium for the top 3 (once there ARE three),
-/// ranked tiles below, and the signed-in manager's row pinned to the bottom
-/// of the viewport whenever its natural place is out of view.
+/// The scrolling standings: a column header, plain ranked rows, and the
+/// signed-in manager's row pinned to the bottom of the viewport whenever its
+/// natural place is out of view.
 class RankedLeaderboardList extends StatefulWidget {
   const RankedLeaderboardList({
     super.key,
     required this.rows,
     this.showMovement = true,
-    this.usePodium = true,
     this.onRowTap,
     this.header,
   });
 
   final List<LeaderboardRowData> rows;
   final bool showMovement;
-  final bool usePodium;
   final void Function(LeaderboardRowData row)? onRowTap;
 
   /// Optional widget scrolled above everything (e.g. the week chips).
@@ -301,8 +243,8 @@ class RankedLeaderboardList extends StatefulWidget {
 }
 
 class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
-  /// Keys the signed-in manager's natural element (tile or podium spot) so
-  /// the pin logic can ask where it is.
+  /// Keys the signed-in manager's natural tile so the pin logic can ask where
+  /// it is.
   final GlobalKey _ownKey = GlobalKey();
   bool _pinned = false;
 
@@ -351,11 +293,8 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
   @override
   Widget build(BuildContext context) {
     final rows = widget.rows;
-    final podium = widget.usePodium && rows.length >= 3;
-    final podiumRows = podium ? rows.sublist(0, 3) : const <LeaderboardRowData>[];
-    final tileRows = podium ? rows.sublist(3) : rows;
-    final selfInPodium = podiumRows.any((r) => r.isSelf);
-    final headerCount = (widget.header != null ? 1 : 0) + (podium ? 1 : 0);
+    // The optional header, then the column header, then the rows.
+    final headerCount = (widget.header != null ? 1 : 0) + 1;
     final selfRow = rows.where((r) => r.isSelf).firstOrNull;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
 
@@ -371,24 +310,19 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
           child: ListView.builder(
             padding: EdgeInsets.fromLTRB(
                 0, 4, 0, 24 + MediaQuery.paddingOf(context).bottom),
-            itemCount: headerCount + tileRows.length,
+            itemCount: headerCount + rows.length,
             itemBuilder: (context, i) {
               var index = i;
               if (widget.header != null) {
                 if (index == 0) return widget.header!;
                 index--;
               }
-              if (podium) {
-                if (index == 0) {
-                  final podiumWidget = LeaderboardPodium(
-                      top3: podiumRows, onTap: widget.onRowTap);
-                  return selfInPodium
-                      ? KeyedSubtree(key: _ownKey, child: podiumWidget)
-                      : podiumWidget;
-                }
-                index--;
+              if (index == 0) {
+                return _LeaderboardColumnHeader(
+                    showMovement: widget.showMovement);
               }
-              final row = tileRows[index];
+              index--;
+              final row = rows[index];
               return LeaderboardRowTile(
                 key: row.isSelf ? _ownKey : null,
                 row: row,

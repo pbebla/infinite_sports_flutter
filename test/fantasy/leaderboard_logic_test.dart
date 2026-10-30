@@ -47,17 +47,27 @@ void main() {
     final managers = {
       'named': manager('Gold Rush'),
       'flagged': manager('Rude FC', flagged: true),
+      'both': manager('Top Cats'),
     };
     final profiles = {
       'flagged': profile('flagged', 'Pat', 'Lee'),
       'profiled': profile('profiled', 'Sam', 'Cruz'),
+      'both': profile('both', 'Zoe', 'Park'),
     };
 
-    test('team name wins when clean', () {
+    test('no real name available → the team name alone', () {
       expect(
           managerDisplayName(
               uid: 'named', managers: managers, profiles: profiles),
           'Gold Rush');
+    });
+
+    test('round 3: the manager\'s REAL name is the primary line when known',
+        () {
+      expect(
+          managerDisplayName(
+              uid: 'both', managers: managers, profiles: profiles),
+          'Zoe Park');
     });
 
     test('a FLAGGED name is never shown — profile name instead', () {
@@ -76,6 +86,68 @@ void main() {
       expect(
           managerDisplayName(uid: 'ghost', managers: managers, profiles: profiles),
           'Unnamed manager');
+    });
+  });
+
+  group('managerNames (round 3 — two-line cell data)', () {
+    test('real name + clean team name: both resolved', () {
+      final names = managerNames(
+        uid: 'u1',
+        managers: {'u1': manager('Top Cats')},
+        profiles: {'u1': profile('u1', 'Zoe', 'Park')},
+      );
+      expect(names.realName, 'Zoe Park');
+      expect(names.teamName, 'Top Cats');
+    });
+
+    test('Review Focus 5: a manager with no PublicProfiles entry (the fake '
+        'test managers) → team name only', () {
+      final names = managerNames(
+        uid: 'test-01',
+        managers: {'test-01': manager('Fake FC 1')},
+        profiles: const {},
+      );
+      expect(names.realName, isNull);
+      expect(names.teamName, 'Fake FC 1');
+    });
+
+    test('a half-known real name still counts; a blank one does not', () {
+      final first = managerNames(
+        uid: 'u1',
+        managers: const {},
+        profiles: {'u1': profile('u1', 'Zoe', '')},
+      );
+      expect(first.realName, 'Zoe');
+      final blank = managerNames(
+        uid: 'u1',
+        managers: const {},
+        profiles: {'u1': profile('u1', ' ', '')},
+      );
+      expect(blank.realName, isNull);
+    });
+
+    test('FLAGGED team name is dropped, the real name stays', () {
+      final names = managerNames(
+        uid: 'u1',
+        managers: {'u1': manager('Rude FC', flagged: true)},
+        profiles: {'u1': profile('u1', 'Pat', 'Lee')},
+      );
+      expect(names.realName, 'Pat Lee');
+      expect(names.teamName, isNull);
+    });
+
+    test('flagged AND no profile, or nothing at all → neither name', () {
+      final flagged = managerNames(
+        uid: 'u1',
+        managers: {'u1': manager('Rude FC', flagged: true)},
+        profiles: const {},
+      );
+      expect(flagged.realName, isNull);
+      expect(flagged.teamName, isNull);
+      final ghost =
+          managerNames(uid: 'ghost', managers: const {}, profiles: const {});
+      expect(ghost.realName, isNull);
+      expect(ghost.teamName, isNull);
     });
   });
 
@@ -111,6 +183,40 @@ void main() {
       expect(rows.single.movement, isNull);
       expect(rows.single.isSelf, isFalse);
     });
+
+    test('round 3: rows carry the real name (primary) with the team name '
+        'under it; no real name → team name alone; neither → "Unnamed '
+        'manager"; flagged team names never reach a row', () {
+      final rows = composeLeaderboardRows(
+        entries: [
+          entry('both', 50, rank: 1),
+          entry('test-01', 40, rank: 2),
+          entry('flagged', 30, rank: 3),
+          entry('ghost', 20, rank: 4),
+        ],
+        managers: {
+          'both': manager('Top Cats'),
+          'test-01': manager('Fake FC 1'),
+          'flagged': manager('Rude FC', flagged: true),
+        },
+        profiles: {
+          'both': profile('both', 'Zoe', 'Park'),
+          'flagged': profile('flagged', 'Pat', 'Lee'),
+        },
+        selfUid: '',
+      );
+      expect(rows.map((r) => r.name),
+          ['Zoe Park', 'Fake FC 1', 'Pat Lee', 'Unnamed manager']);
+      expect(rows.map((r) => r.realName), ['Zoe Park', null, 'Pat Lee', null]);
+      expect(rows.map((r) => r.teamName), ['Top Cats', 'Fake FC 1', null, null]);
+      // The second line: the team name, only UNDER a real name.
+      expect(rows.map((r) => r.secondaryName),
+          ['Top Cats', null, null, null]);
+      // The squad viewer keeps titling itself by the TEAM name (its contract),
+      // falling back like the primary line does.
+      expect(rows.map((r) => r.viewerTitle),
+          ['Top Cats', 'Fake FC 1', 'Pat Lee', 'Unnamed manager']);
+    });
   });
 
   group('movement', () {
@@ -122,6 +228,16 @@ void main() {
       expect(movementGlyph(MovementDirection.up), '▲');
       expect(movementGlyph(MovementDirection.down), '▼');
       expect(movementGlyph(MovementDirection.none), '—');
+    });
+
+    test('round 3: the cell label is the arrow + the places moved; absent or '
+        '0 → a bare dash', () {
+      expect(movementLabel(2), '▲2');
+      expect(movementLabel(12), '▲12');
+      expect(movementLabel(-1), '▼1');
+      expect(movementLabel(-10), '▼10');
+      expect(movementLabel(0), '—');
+      expect(movementLabel(null), '—');
     });
   });
 

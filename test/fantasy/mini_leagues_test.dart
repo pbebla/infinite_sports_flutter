@@ -249,13 +249,13 @@ void main() {
 
     expect(find.byKey(const ValueKey('mini_league_detail_a')), findsOneWidget);
     expect(find.textContaining('KX7Q2M'), findsOneWidget);
-    // Same ranked-rows UI scoped to members: podium top 3 (u2, me, then the
-    // total-less members by name — ann before zed), the 4th as a tile row.
-    expect(find.byKey(const ValueKey('podium_u2')), findsOneWidget);
-    expect(find.byKey(const ValueKey('podium_me')), findsOneWidget);
-    expect(find.byKey(const ValueKey('podium_ann')), findsOneWidget);
-    expect(find.byKey(const ValueKey('leaderboard_row_zed')), findsOneWidget);
-    // Absent totals → 0 pts (ann on the podium, zed's tile).
+    // Same ranked-rows UI scoped to members, plain rows (round 3 dropped the
+    // podium): u2, me, then the total-less members by name — ann before zed.
+    expect(find.byKey(const ValueKey('leaderboard_podium')), findsNothing);
+    for (final uid in ['u2', 'me', 'ann', 'zed']) {
+      expect(find.byKey(ValueKey('leaderboard_row_$uid')), findsOneWidget);
+    }
+    // Absent totals → 0 pts (ann and zed).
     expect(find.text('0 pts'), findsNWidgets(2));
 
     await tester.tap(find.byKey(const ValueKey('mini_league_copy')));
