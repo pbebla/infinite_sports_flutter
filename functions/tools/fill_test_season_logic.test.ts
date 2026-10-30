@@ -6,8 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { FantasyPosition, futsalDefault } from '../src/lib/fantasy/fantasy_config';
 import { FantasySquad, validateSquad } from '../src/lib/fantasy/squad';
 import {
-  assertEnginePaused, assertRequestAllowed, assertSafePaths, BACKUP_KIND,
-  buildWritePlan, clearPlan, fakeChildDeletes, fakeManagerDefs, fakeManagerRow,
+  assertEnginePaused, assertMarkerMatches, assertRequestAllowed, assertSafePaths, BACKUP_KIND,
+  buildWritePlan, clearPlan, EXPECTED_NODES, fakeChildDeletes, fakeManagerDefs, fakeManagerRow,
   FillMarketEntry, StrategyTemplate, TEST_SEASON_ROOT,
 } from './fill_test_season_logic';
 
@@ -76,8 +76,12 @@ function replayState(): Record<string, unknown> {
     ReminderSent: [null, { At: 1 }],
     NewsDrafted: [null, { At: 1 }],
     LockedPositions: [null, { 'GK Player 00': 'GK' }],
-    SomeFutureGuard: [null, { At: 1 }],
     TransferState: { [REAL]: { Free: 2 }, 'test-01': { Free: 3 } },
+    // Client / owner inputs the replay's state also carries: never written.
+    Watchlists: { [REAL]: { 'GK Player 00': true } },
+    MiniLeagues: { abc: { Name: 'x' } },
+    ScheduledPushes: { p1: { At: 1 } },
+    Analytics: { opens: 3 },
     Managers: {
       [REAL]: { TeamName: 'Zaya.Arami', NameFlagged: false },
       'test-01': fakeManagerRow(defs[0]),
@@ -119,11 +123,14 @@ describe('buildWritePlan', () => {
       `${ROOT}/Squads/test-01`, `${ROOT}/Squads/test-02`,
     ]);
 
-    // Derived nodes + every done-marker, including one we have never seen.
+    // Derived nodes + every done-marker.
     for (const node of ['Players', 'PlayerTotals', 'History', 'GwState', 'Repriced',
-      'RecapSent', 'ReminderSent', 'NewsDrafted', 'LockedPositions', 'SomeFutureGuard',
-      'TransferState']) {
+      'RecapSent', 'ReminderSent', 'NewsDrafted', 'LockedPositions', 'TransferState']) {
       expect(paths).toContain(`${ROOT}/${node}`);
+    }
+    // Client / owner inputs never.
+    for (const node of ['Watchlists', 'MiniLeagues', 'ScheduledPushes', 'Analytics']) {
+      expect(paths.some((p) => p.startsWith(`${ROOT}/${node}`)), node).toBe(false);
     }
     // Whole nodes are written in RTDB storage form (coerced arrays back to
     // index-keyed maps, no null holes).
@@ -137,6 +144,13 @@ describe('buildWritePlan', () => {
   it('refuses to build a plan while the engine is on auto', () => {
     expect(() => buildWritePlan(replayState(), { ...live, config: { lockOverride: 'auto' } }, 1))
       .toThrow(/auto/i);
+  });
+
+  it('a node the replay produced that is NOT on the allowlist refuses the whole plan', () => {
+    // Fail closed: a new engine guard must be added to EXPECTED_NODES on
+    // purpose — never written (or later cleared) just because it showed up.
+    expect(() => buildWritePlan({ ...replayState(), SomeFutureGuard: [null, { At: 1 }] }, live, 1))
+      .toThrow(/SomeFutureGuard.*allowlist/);
   });
 });
 
@@ -163,6 +177,28 @@ describe('assertSafePaths', () => {
     ];
     for (const path of bad) {
       expect(() => assertSafePaths([...ok.map((p) => ({ path: p })), { path }]), path).toThrow();
+    }
+  });
+
+  it('assertSafePaths is an ALLOWLIST: the plan\'s nodes, fake managers and TestFill — nothing else', () => {
+    const allowed = [
+      ...EXPECTED_NODES.map((n) => `${ROOT}/${n}`),
+      `${ROOT}/PlayerWeeks/3`, // inside an allowed node
+      `${ROOT}/Managers/test-01`, `${ROOT}/Squads/test-20/picks/0`,
+      `${ROOT}/TestFill`,
+    ];
+    for (const path of allowed) expect(() => assertSafePaths([{ path }]), path).not.toThrow();
+
+    const rejected = [
+      `${ROOT}/ScheduledPushes`, `${ROOT}/ScheduledPushes/p1`,
+      `${ROOT}/Watchlists`, `${ROOT}/Watchlists/test-01`, `${ROOT}/Watchlists/${REAL}`,
+      `${ROOT}/MiniLeagues`, `${ROOT}/MiniLeagues/abc`,
+      `${ROOT}/Analytics`, `${ROOT}/News`, `${ROOT}/Config`, `${ROOT}/Voided`,
+      `${ROOT}/SquadAlerts`, `${ROOT}/SomeFutureGuard`, `${ROOT}/${REAL}`,
+      `${ROOT}/TestFill/At`, // the marker is written / deleted whole only
+    ];
+    for (const path of rejected) {
+      expect(() => assertSafePaths([{ path }]), path).toThrow(/Refusing unsafe path/);
     }
   });
 
@@ -194,7 +230,8 @@ describe('assertSafePaths', () => {
 });
 
 describe('clearPlan (the --clear path set)', () => {
-  const backup = (entries: unknown[]) => ({ kind: BACKUP_KIND, root: ROOT, entries });
+  const marker = { At: 1234, Managers: 20 };
+  const backup = (entries: unknown[]) => ({ kind: BACKUP_KIND, root: ROOT, marker, entries });
   const good = [
     { path: `${ROOT}/TestFill`, existed: false, value: null },
     { path: `${ROOT}/Players`, existed: true, value: { 'GK Player 00': { priceTenths: 45 } } },
@@ -215,6 +252,9 @@ describe('clearPlan (the --clear path set)', () => {
       `${ROOT}/Squads`, `${ROOT}/Managers`, `${ROOT}/Squads/${REAL}`,
       `${ROOT}/Managers/${REAL}`, `${ROOT}/Voided`, `${ROOT}/Config`, `${ROOT}/News`,
       'Fantasy/Futsal/16/Players', `${ROOT}`,
+      // Not on the allowlist either: a backup can't restore / delete them.
+      `${ROOT}/ScheduledPushes`, `${ROOT}/Watchlists`, `${ROOT}/Watchlists/${REAL}`,
+      `${ROOT}/MiniLeagues`, `${ROOT}/Analytics`, `${ROOT}/SomeOtherNode`,
     ];
     for (const path of corrupt) {
       for (const existed of [false, true]) {
@@ -227,14 +267,21 @@ describe('clearPlan (the --clear path set)', () => {
 
   it('rejects anything that is not a fill backup of this season', () => {
     expect(() => clearPlan(null)).toThrow(/fill backup/);
-    expect(() => clearPlan({ kind: 'nope', root: ROOT, entries: good })).toThrow(/fill backup/);
-    expect(() => clearPlan({ kind: BACKUP_KIND, root: 'Fantasy/Futsal/16', entries: good }))
+    expect(() => clearPlan({ kind: 'nope', root: ROOT, marker, entries: good })).toThrow(/fill backup/);
+    expect(() => clearPlan({ kind: BACKUP_KIND, root: 'Fantasy/Futsal/16', marker, entries: good }))
       .toThrow(/fill backup/);
-    expect(() => clearPlan({ kind: BACKUP_KIND, root: ROOT, entries: 'x' })).toThrow(/fill backup/);
+    expect(() => clearPlan({ kind: BACKUP_KIND, root: ROOT, marker, entries: 'x' })).toThrow(/fill backup/);
     expect(() => clearPlan(backup([{ path: `${ROOT}/Players`, existed: true, value: null }])))
       .toThrow(/Malformed/);
     expect(() => clearPlan(backup([{ path: `${ROOT}/Players`, existed: 'yes', value: {} }])))
       .toThrow(/Malformed/);
+  });
+
+  it('a backup without the TestFill marker it wrote is refused', () => {
+    for (const bad of [undefined, null, 'x', 5, []]) {
+      expect(() => clearPlan({ kind: BACKUP_KIND, root: ROOT, marker: bad, entries: good }), String(bad))
+        .toThrow(/marker/);
+    }
   });
 
   it('fakeChildDeletes only ever names test-NN children', () => {
@@ -243,6 +290,30 @@ describe('clearPlan (the --clear path set)', () => {
       { method: 'DELETE', path: `${ROOT}/Squads/test-20` },
     ]);
     expect(fakeChildDeletes('Managers', [REAL_NO_SQUAD])).toEqual([]);
+  });
+});
+
+describe('assertMarkerMatches (--clear only undoes the fill its backup came from)', () => {
+  const backup = { kind: BACKUP_KIND, root: ROOT, marker: { At: 1234, Managers: 20 }, entries: [] };
+
+  it('the live marker must exist and equal the backup\'s (key order aside)', () => {
+    expect(() => assertMarkerMatches({ Managers: 20, At: 1234 }, backup)).not.toThrow();
+  });
+
+  it('refuses when the live marker is missing (never filled, or already cleared)', () => {
+    expect(() => assertMarkerMatches(null, backup)).toThrow(/no TestFill marker/);
+    expect(() => assertMarkerMatches(undefined, backup)).toThrow(/no TestFill marker/);
+  });
+
+  it('refuses when the live marker belongs to ANOTHER fill', () => {
+    expect(() => assertMarkerMatches({ At: 9999, Managers: 20 }, backup)).toThrow(/does not match/);
+    expect(() => assertMarkerMatches({ At: 1234, Managers: 19 }, backup)).toThrow(/does not match/);
+    expect(() => assertMarkerMatches({ At: 1234, Managers: 20, Extra: 1 }, backup)).toThrow(/does not match/);
+  });
+
+  it('refuses a backup that carries no marker at all', () => {
+    expect(() => assertMarkerMatches({ At: 1234, Managers: 20 }, { ...backup, marker: undefined }))
+      .toThrow(/marker/);
   });
 });
 

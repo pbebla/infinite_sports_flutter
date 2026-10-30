@@ -125,13 +125,23 @@ export function assertEnginePaused(config: unknown): void {
 const BAD_SEGMENT = /[.#$[\]\u0000-\u001F\u007F]/;
 const FORBIDDEN_TOP = new Set(['Config', 'News', 'Voided']);
 const FAKE_ONLY_TOP = new Set(['Managers', 'Squads']);
+const MARKER_NODE = 'TestFill';
+/** The derived + done-marker nodes the plan writes whole (and nothing else). */
+const ALLOWED_WHOLE = new Set(EXPECTED_NODES);
 
 /** The guard EVERY write and delete passes (the plan, the --clear set, and
- *  each single REST call). Throws unless the path is a real child of
- *  Fantasy/Futsal/15/: no other season (Fantasy/Futsal/150 included), never
- *  the season root itself, no empty / dot / RTDB-illegal segments, never
- *  Config, News or Voided, and Managers/Squads only at or below a fake
- *  manager's own child (test-NN) — never the whole node, never a real uid. */
+ *  each single REST call) — an ALLOWLIST. Throws unless the path is a real
+ *  child of Fantasy/Futsal/15/ (no other season — Fantasy/Futsal/150
+ *  included —, never the season root itself, no empty / dot / RTDB-illegal
+ *  segments) AND is one of:
+ *    - an [EXPECTED_NODES] node (the replay's derived data and the engine's
+ *      done-markers), or anything inside one;
+ *    - Managers/<test-NN> or Squads/<test-NN> (or below) — never the whole
+ *      node, never a real uid;
+ *    - the TestFill marker itself.
+ *  Everything else — Config, News, Voided, Watchlists, MiniLeagues,
+ *  ScheduledPushes, Analytics, a real uid, any node nobody listed — is
+ *  refused, so neither the plan nor a hand-edited backup can reach it. */
 export function assertSafePaths(plan: ReadonlyArray<{ path: string }>): void {
   const prefix = `${TEST_SEASON_ROOT}/`;
   for (const { path } of plan) {
@@ -144,12 +154,39 @@ export function assertSafePaths(plan: ReadonlyArray<{ path: string }>): void {
     if (rest.length === 0 || rest.some((s) => s.length === 0 || BAD_SEGMENT.test(s))) {
       throw why('empty or illegal segment');
     }
-    if (FORBIDDEN_TOP.has(rest[0])) throw why(`${rest[0]} is never written`);
-    if (FAKE_ONLY_TOP.has(rest[0])) {
-      if (rest.length === 1) throw why(`${rest[0]} is never written whole`);
-      if (!isFakeUid(rest[1])) throw why(`${rest[0]} only for fake managers (test-NN)`);
+    const top = rest[0];
+    if (FORBIDDEN_TOP.has(top)) throw why(`${top} is never written`);
+    if (FAKE_ONLY_TOP.has(top)) {
+      if (rest.length === 1) throw why(`${top} is never written whole`);
+      if (!isFakeUid(rest[1])) throw why(`${top} only for fake managers (test-NN)`);
+      continue;
+    }
+    if (top === MARKER_NODE) {
+      if (rest.length !== 1) throw why('the TestFill marker is only written / deleted whole');
+      continue;
+    }
+    if (!ALLOWED_WHOLE.has(top)) {
+      throw why(`${top} is not on the fill allowlist ` +
+        '(EXPECTED_NODES, Managers|Squads/test-NN, TestFill)');
     }
   }
+}
+
+/** Deterministic JSON (object keys sorted, arrays in order) — for comparing
+ *  RTDB values whose key order is not guaranteed. */
+export function canonicalJson(v: unknown): string {
+  const sortDeep = (x: unknown): unknown => {
+    if (Array.isArray(x)) return x.map(sortDeep);
+    if (x !== null && typeof x === 'object') {
+      const o: Record<string, unknown> = {};
+      for (const k of Object.keys(x as Record<string, unknown>).sort()) {
+        o[k] = sortDeep((x as Record<string, unknown>)[k]);
+      }
+      return o;
+    }
+    return x;
+  };
+  return JSON.stringify(sortDeep(v)) ?? 'undefined';
 }
 
 /** One REST call the CLI is about to make. Reads: the test season or the
@@ -181,16 +218,48 @@ export interface ClearOp {
   value?: unknown;
 }
 
+/** The TestFill marker value a backup recorded at --apply time (the value
+ *  that fill wrote); throws when the backup carries none. */
+function backupMarker(backup: Record<string, unknown>): Record<string, unknown> {
+  const marker = backup['marker'];
+  if (!isMap(marker)) {
+    throw new Error('The backup has no TestFill marker of its own — it cannot prove which ' +
+      'fill it belongs to, so --clear will not use it.');
+  }
+  return marker;
+}
+
+/** --clear only undoes the fill its backup came from: the LIVE TestFill
+ *  marker must exist (absent = never filled, or already cleared — nothing
+ *  for this backup to undo) and equal the marker the backup recorded at
+ *  --apply time (another value = a different fill, whose nodes this
+ *  backup's "before" values would wrongly overwrite). */
+export function assertMarkerMatches(liveMarker: unknown, backup: unknown): void {
+  if (!isMap(backup)) throw new Error(`Not a ${TEST_SEASON_ROOT} fill backup.`);
+  const recorded = backupMarker(backup);
+  if (liveMarker === null || liveMarker === undefined) {
+    throw new Error(`Refusing --clear: the live test season has no TestFill marker ` +
+      '(never filled, or already cleared) — nothing for this backup to undo.');
+  }
+  if (canonicalJson(liveMarker) !== canonicalJson(recorded)) {
+    throw new Error(`Refusing --clear: the live TestFill marker ${canonicalJson(liveMarker)} ` +
+      `does not match this backup's ${canonicalJson(recorded)} — the season holds a ` +
+      'different fill than the one this backup was taken for.');
+  }
+}
+
 /** The restore half of --clear, from a backup file's parsed JSON: PUT every
  *  node that existed before the fill, DELETE every one that was absent —
  *  the marker excluded (the CLI deletes it last). The backup is untrusted
- *  input: wrong kind/season, malformed entries, or ANY path failing
- *  assertSafePaths throws before a single op is returned. */
+ *  input: wrong kind/season, no recorded TestFill marker, malformed
+ *  entries, or ANY path failing assertSafePaths throws before a single op is
+ *  returned. */
 export function clearPlan(backup: unknown): ClearOp[] {
   if (!isMap(backup) || backup['kind'] !== BACKUP_KIND || backup['root'] !== TEST_SEASON_ROOT ||
     !Array.isArray(backup['entries'])) {
     throw new Error(`Not a ${TEST_SEASON_ROOT} fill backup.`);
   }
+  backupMarker(backup);
   const entries = backup['entries'] as unknown[];
   for (const e of entries) {
     if (!isMap(e) || typeof e['path'] !== 'string' || typeof e['existed'] !== 'boolean' ||
@@ -216,10 +285,13 @@ export function fakeChildDeletes(node: 'Managers' | 'Squads', liveKeys: readonly
 
 /** The fill's writes, in order: the TestFill marker first (so a partial
  *  apply is visibly marked), then every top-level node the replay produced
- *  — derived data AND the engine's once-only done-markers, including any
- *  guard this list has never heard of — whole, then the fake managers'
- *  Managers/Squads children. Never Config, News, Voided, or anything of a
- *  real manager's Managers/Squads. */
+ *  — derived data AND the engine's once-only done-markers, all of them on
+ *  the [EXPECTED_NODES] allowlist — whole, then the fake managers'
+ *  Managers/Squads children. Never Config, News, Voided, the other client /
+ *  owner inputs ([NEVER_WRITTEN_WHOLE]), or anything of a real manager's
+ *  Managers/Squads. A replayed node on NEITHER list refuses the whole plan
+ *  (fail closed: a new engine guard is added to EXPECTED_NODES on purpose,
+ *  never written just because it showed up). */
 export function buildWritePlan(
   state: Record<string, unknown>, live: LiveSeason, nowMs: number = Date.now(),
 ): PlanEntry[] {
@@ -229,13 +301,19 @@ export function buildWritePlan(
     .filter(isFakeUid).sort();
 
   const plan: PlanEntry[] = [
-    { path: `${root}/TestFill`, value: { At: nowMs, Managers: fakeUids.length } },
+    { path: `${root}/${MARKER_NODE}`, value: { At: nowMs, Managers: fakeUids.length } },
   ];
   const never = new Set(NEVER_WRITTEN_WHOLE);
   for (const key of Object.keys(state).sort()) {
     if (never.has(key)) continue;
     const value = storageForm(state[key]);
-    if (value !== null) plan.push({ path: `${root}/${key}`, value });
+    if (value === null) continue;
+    if (!ALLOWED_WHOLE.has(key)) {
+      throw new Error(`Refusing: the replay produced ${key}, which is not on the fill ` +
+        'allowlist (EXPECTED_NODES). If it is derived data or an engine done-marker, add ' +
+        'it to EXPECTED_NODES in fill_test_season_logic.ts; nothing was written.');
+    }
+    plan.push({ path: `${root}/${key}`, value });
   }
   for (const node of ['Managers', 'Squads']) {
     const parent = state[node];
