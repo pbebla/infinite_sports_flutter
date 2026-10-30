@@ -15,16 +15,49 @@
 // "new season created, Fantasy not set up yet" case. `once()` reads only —
 // NEVER `.get()` (house rule; the Manager's guard test enforces it there).
 //
-// The decision logic is the pure [pickFantasySeason] (unit-tested with
-// injected probes in test/fantasy/fantasy_season_resolver_test.dart); the
-// Firebase wiring in [resolveCurrentFantasySeason] is not (repo convention).
+// The answer is THREE-way ([FantasySeasonResolution]): a season, a real
+// "none", or an error. A failed read (a network blip, a permission hiccup)
+// is not "there is no fantasy season" — callers that remember a "none" (the
+// profile's Fantasy tab) must only remember the real one and retry an error.
+//
+// The decision logic is the pure [pickFantasySeason] / [resolveFantasySeasonWith]
+// (unit-tested with injected reads in
+// test/fantasy/fantasy_season_resolver_test.dart); the Firebase readers in
+// [resolveFantasySeason] are not (repo convention).
 
 import 'package:firebase_database/firebase_database.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
-import 'package:infinite_sports_flutter/misc/utility.dart';
 
 /// A resolved fantasy season.
 typedef FantasySeasonKey = ({String sport, String season});
+
+/// What resolving the current fantasy season answered: [season] (found), a
+/// real "none" ([isNone] — no pointer set, or no season in reach has a
+/// Config), or a failure ([failed] — a read errored; the truth is unknown).
+class FantasySeasonResolution {
+  const FantasySeasonResolution.found(FantasySeasonKey this.season)
+      : error = null;
+  const FantasySeasonResolution.none()
+      : season = null,
+        error = null;
+  const FantasySeasonResolution.failed(Object this.error) : season = null;
+
+  /// The season; null for none AND for an error.
+  final FantasySeasonKey? season;
+
+  /// What failed; null unless [failed].
+  final Object? error;
+
+  bool get failed => error != null;
+  bool get isNone => season == null && error == null;
+
+  @override
+  String toString() => failed
+      ? 'FantasySeasonResolution.failed($error)'
+      : isNone
+          ? 'FantasySeasonResolution.none()'
+          : 'FantasySeasonResolution.found(${season!.sport}/${season!.season})';
+}
 
 /// RTDB key characters that can never appear in a path segment — also what
 /// the pointer readers' error text (`e.toString()` on failure) always contains.
@@ -92,20 +125,59 @@ Future<bool> _configExists(String sport, String season) async {
   return configStateFromNode(snap.value) != null;
 }
 
-/// The current fantasy season, or null when there is none (or the reads
-/// failed — never throws, callers simply show no Fantasy surface).
-Future<FantasySeasonKey?> resolveCurrentFantasySeason() async {
+/// A top-level pointer node (`Current League`, `<Sport> Season`) — the same
+/// nodes frontpage.dart / the search hub read, but read here directly so a
+/// FAILED read throws instead of coming back as error text (utility.dart's
+/// getCurrentSport/getCurrentSeason swallow errors into the returned
+/// string, which would be indistinguishable from "no pointer"). '' = absent.
+Future<String> _readPointer(String path) async {
+  final snap = (await FirebaseDatabase.instance.ref(path).once()).snapshot;
+  return snap.value?.toString() ?? '';
+}
+
+/// Pure three-way core: [readSport] / [readSeason] read the pointers (a
+/// throw = a failed read), [hasConfig] probes Config nodes (see
+/// [pickFantasySeason]). Never throws: any failure is
+/// [FantasySeasonResolution.failed].
+Future<FantasySeasonResolution> resolveFantasySeasonWith({
+  required Future<String> Function() readSport,
+  required Future<String> Function(String sport) readSeason,
+  required Future<bool> Function(String sport, String season) hasConfig,
+}) async {
   try {
-    final sport = await getCurrentSport();
-    final season = await getCurrentSeason(sport);
+    final sport = (await readSport()).trim();
+    if (!_usableSegment(sport)) return const FantasySeasonResolution.none();
+    final season = await readSeason(sport);
     final resolved = await pickFantasySeason(
       sport: sport,
       currentSeason: season,
-      hasConfig: _configExists,
+      hasConfig: hasConfig,
     );
-    if (resolved != null) _lastResolved = resolved;
-    return resolved;
-  } catch (_) {
-    return null;
+    return resolved == null
+        ? const FantasySeasonResolution.none()
+        : FantasySeasonResolution.found(resolved);
+  } catch (e) {
+    return FantasySeasonResolution.failed(e);
   }
 }
+
+/// The current fantasy season as a three-way answer (season / none /
+/// error). Never throws. A found season is memoized
+/// ([lastResolvedFantasySeason]).
+Future<FantasySeasonResolution> resolveFantasySeason() async {
+  final result = await resolveFantasySeasonWith(
+    readSport: () => _readPointer('Current League'),
+    readSeason: (sport) => _readPointer('$sport Season'),
+    hasConfig: _configExists,
+  );
+  final season = result.season;
+  if (season != null) _lastResolved = season;
+  return result;
+}
+
+/// The current fantasy season, or null when there is none OR the reads
+/// failed (never throws). Kept for callers that only need "a season or
+/// not"; anything that REMEMBERS a "none" must use [resolveFantasySeason]
+/// so an error is never cached as "no season".
+Future<FantasySeasonKey?> resolveCurrentFantasySeason() async =>
+    (await resolveFantasySeason()).season;

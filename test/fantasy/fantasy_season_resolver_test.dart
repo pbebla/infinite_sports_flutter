@@ -102,7 +102,7 @@ void main() {
     }
   });
 
-  test('a failing probe propagates (the wrapper turns it into null)', () {
+  test('a failing probe propagates (the wrapper turns it into an error)', () {
     expect(
         pickFantasySeason(
           sport: 'Futsal',
@@ -110,5 +110,60 @@ void main() {
           hasConfig: (_, __) async => throw StateError('offline'),
         ),
         throwsStateError);
+  });
+
+  // ── The three-way answer: season / none / error ─────────────────────────
+  // A failed read (network blip, permission hiccup) must never be mistaken
+  // for "there is no fantasy season" — only a real "none" may be cached.
+  group('resolveFantasySeasonWith', () {
+    test('found: the season', () async {
+      final f = fake({'Futsal/15'});
+      final r = await resolveFantasySeasonWith(
+        readSport: () async => 'Futsal',
+        readSeason: (sport) async => '15',
+        hasConfig: f.probe,
+      );
+      expect(r.season, (sport: 'Futsal', season: '15'));
+      expect(r.isNone, isFalse);
+      expect(r.failed, isFalse);
+    });
+
+    test('none: unset pointers, or no Config in reach', () async {
+      for (final pointers in [('', '15'), ('Futsal', ''), ('Futsal', '15')]) {
+        final r = await resolveFantasySeasonWith(
+          readSport: () async => pointers.$1,
+          readSeason: (sport) async => pointers.$2,
+          hasConfig: fake({}).probe,
+        );
+        expect(r.isNone, isTrue, reason: '$pointers');
+        expect(r.failed, isFalse, reason: '$pointers');
+        expect(r.season, isNull, reason: '$pointers');
+      }
+    });
+
+    test('error: a failing pointer read or Config probe is NOT "none"',
+        () async {
+      final sportFails = await resolveFantasySeasonWith(
+        readSport: () async => throw StateError('offline'),
+        readSeason: (sport) async => '15',
+        hasConfig: fake({'Futsal/15'}).probe,
+      );
+      final seasonFails = await resolveFantasySeasonWith(
+        readSport: () async => 'Futsal',
+        readSeason: (sport) async => throw StateError('denied'),
+        hasConfig: fake({'Futsal/15'}).probe,
+      );
+      final probeFails = await resolveFantasySeasonWith(
+        readSport: () async => 'Futsal',
+        readSeason: (sport) async => '16',
+        hasConfig: (_, __) async => throw StateError('blip'),
+      );
+      for (final r in [sportFails, seasonFails, probeFails]) {
+        expect(r.failed, isTrue);
+        expect(r.isNone, isFalse);
+        expect(r.season, isNull);
+        expect(r.error, isA<StateError>());
+      }
+    });
   });
 }

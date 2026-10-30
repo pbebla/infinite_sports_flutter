@@ -10,8 +10,9 @@
 //
 // Flow (all live streams, never an RTDB get(); `once()` only inside the season
 // resolver):
-//   1. the season — `resolveCurrentFantasySeason()` (the home banner's
-//      resolution), or this session's last resolved one;
+//   1. the season — `resolveFantasySeason()` (the home banner's resolution;
+//      a real "none" is remembered a few minutes, a failed read is not), or
+//      this session's last resolved one;
 //   2. the DECISION feeds: Players + league rosters + `Managers/<uid>` →
 //      [fantasyProfileAccess]. The first answer completes [decision] (the
 //      page waits for it, bounded by [kFantasyTabDecisionGrace]); live
@@ -242,19 +243,23 @@ class FantasyProfileSource extends ChangeNotifier {
   // ── Shared season resolution ────────────────────────────────────────────
   // The resolver memoizes only a SUCCESS ([lastResolvedFantasySeason]); with
   // no fantasy season in reach it would otherwise re-probe ~30 Config nodes
-  // on EVERY profile open. So a "none" answer is remembered for a few
-  // minutes, and simultaneous opens share one in-flight resolution.
+  // on EVERY profile open. So a REAL "none" answer is remembered for a few
+  // minutes, and simultaneous opens share one in-flight resolution. A FAILED
+  // resolve (a network blip) is logged and never remembered — it means "no
+  // tab this time", and the very next open asks again.
   static Future<FantasySeasonKey?>? _resolving;
   static DateTime? _noSeasonAt;
 
   /// How long a "no fantasy season" answer is trusted before asking again.
   static const Duration kNoSeasonRecheck = Duration(minutes: 5);
 
-  /// [resolver] (the real [resolveCurrentFantasySeason] in the app), shared:
-  /// one in-flight call at a time, a null answer cached for
-  /// [kNoSeasonRecheck]. Public so the memoization is unit-testable.
+  /// [resolver] (the real [resolveFantasySeason] in the app), shared: one
+  /// in-flight call at a time; only a real "none" is cached, for
+  /// [kNoSeasonRecheck]; an error (returned or thrown) is logged and not
+  /// cached. Resolves to the season, or null for none / error. Public so the
+  /// memoization is unit-testable.
   static Future<FantasySeasonKey?> resolveSeasonShared(
-    Future<FantasySeasonKey?> Function() resolver, {
+    Future<FantasySeasonResolution> Function() resolver, {
     DateTime Function()? now,
   }) {
     final clock = now ?? DateTime.now;
@@ -266,19 +271,23 @@ class FantasyProfileSource extends ChangeNotifier {
   }
 
   static Future<FantasySeasonKey?> _runResolve(
-    Future<FantasySeasonKey?> Function() resolver,
+    Future<FantasySeasonResolution> Function() resolver,
     DateTime Function() clock,
   ) async {
-    FantasySeasonKey? season;
+    FantasySeasonResolution result;
     try {
-      season = await resolver();
+      result = await resolver();
     } catch (e) {
-      _log('season resolver', e);
-      season = null;
+      result = FantasySeasonResolution.failed(e);
     }
     _resolving = null;
-    _noSeasonAt = season == null ? clock() : null;
-    return season;
+    if (result.failed) {
+      _log('season resolver', result.error!);
+      _noSeasonAt = null; // unknown ≠ none: retried on the next open
+    } else {
+      _noSeasonAt = result.isNone ? clock() : null;
+    }
+    return result.season;
   }
 
   /// Failures degrade to "no data" for the reader but are never silent.
@@ -406,8 +415,8 @@ class FantasyProfileSource extends ChangeNotifier {
       if (memo != null) {
         _begin(memo);
       } else {
-        unawaited(_resolveThenBegin(resolver ??
-            () => resolveSeasonShared(resolveCurrentFantasySeason)));
+        unawaited(_resolveThenBegin(
+            resolver ?? () => resolveSeasonShared(resolveFantasySeason)));
       }
     } catch (e) {
       _log('start', e);

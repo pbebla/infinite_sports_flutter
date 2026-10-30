@@ -236,9 +236,9 @@ void main() {
         () async {
       var calls = 0;
       var clock = DateTime(2026, 10, 29, 12);
-      Future<FantasySeasonKey?> none() async {
+      Future<FantasySeasonResolution> none() async {
         calls++;
-        return null;
+        return const FantasySeasonResolution.none();
       }
 
       expect(
@@ -261,38 +261,79 @@ void main() {
 
     test('simultaneous opens share ONE in-flight resolution', () async {
       var calls = 0;
-      final gate = Completer<FantasySeasonKey?>();
-      Future<FantasySeasonKey?> slow() {
+      final gate = Completer<FantasySeasonResolution>();
+      Future<FantasySeasonResolution> slow() {
         calls++;
         return gate.future;
       }
 
       final a = FantasyProfileSource.resolveSeasonShared(slow);
       final b = FantasyProfileSource.resolveSeasonShared(slow);
-      gate.complete((sport: 'Futsal', season: '15'));
+      gate.complete(
+          const FantasySeasonResolution.found((sport: 'Futsal', season: '15')));
       expect((await a)?.season, '15');
       expect((await b)?.season, '15');
       expect(calls, 1);
     });
 
-    test(
-        'a success is not cached here (the resolver memoizes it) and a '
-        'throwing resolver counts as none', () async {
+    test('a success is not cached here (the resolver memoizes it)', () async {
       var calls = 0;
-      Future<FantasySeasonKey?> ok() async {
+      Future<FantasySeasonResolution> ok() async {
         calls++;
-        return (sport: 'Futsal', season: '15');
+        return const FantasySeasonResolution.found(
+            (sport: 'Futsal', season: '15'));
       }
 
       await FantasyProfileSource.resolveSeasonShared(ok);
       await FantasyProfileSource.resolveSeasonShared(ok);
       expect(calls, 2);
+    });
 
-      FantasyProfileSource.clearSessionCaches();
+    test(
+        'a FAILED resolve (network blip) is never cached as "no season": '
+        'it is logged and the very next open asks again', () async {
+      final logs = <String>[];
+      final original = debugPrint;
+      debugPrint =
+          (String? message, {int? wrapWidth}) => logs.add(message ?? '');
+      addTearDown(() => debugPrint = original);
+
+      var calls = 0;
+      var answer =
+          FantasySeasonResolution.failed(StateError('network-error blip'));
+      Future<FantasySeasonResolution> flaky() async {
+        calls++;
+        return answer;
+      }
+
+      final clock = DateTime(2026, 10, 29, 12);
       expect(
-          await FantasyProfileSource.resolveSeasonShared(
-              () async => throw StateError('offline')),
-          isNull);
+          await FantasyProfileSource.resolveSeasonShared(flaky,
+              now: () => clock),
+          isNull); // no tab THIS time...
+      expect(logs.join('\n'), contains('network-error blip'));
+
+      // ...but a second later the next open re-resolves (not trusted for
+      // five minutes like a real "none") and finds the season.
+      answer =
+          const FantasySeasonResolution.found((sport: 'Futsal', season: '15'));
+      final next = await FantasyProfileSource.resolveSeasonShared(flaky,
+          now: () => clock.add(const Duration(seconds: 1)));
+      expect(next?.season, '15');
+      expect(calls, 2);
+    });
+
+    test('a THROWING resolver is an error too — logged, never cached',
+        () async {
+      var calls = 0;
+      Future<FantasySeasonResolution> throwing() async {
+        calls++;
+        throw StateError('offline');
+      }
+
+      expect(await FantasyProfileSource.resolveSeasonShared(throwing), isNull);
+      expect(await FantasyProfileSource.resolveSeasonShared(throwing), isNull);
+      expect(calls, 2); // asked again: an error is not "none"
     });
   });
 
