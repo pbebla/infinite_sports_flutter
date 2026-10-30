@@ -16,6 +16,8 @@ import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/player.dart';
 import 'package:infinite_sports_flutter/model/soccerplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
+import 'package:infinite_sports_flutter/profile/fantasy_profile_source.dart';
+import 'package:infinite_sports_flutter/profile/fantasy_profile_tab.dart';
 import 'package:infinite_sports_flutter/profile/profile_hero.dart';
 import 'package:infinite_sports_flutter/profile/profile_tab.dart';
 import 'package:infinite_sports_flutter/profile/stats_tab.dart';
@@ -78,8 +80,17 @@ class ProfilePage extends StatefulWidget {
   /// [loadOverride] alone resolves the full page (both phases at once).
   final Future<void> Function()? careerLoadOverride;
 
+  /// Test seams for the Fantasy tab (round 3): the fantasy feeds and the
+  /// tab's navigation. null = the real FantasyService / LeagueService feeds.
+  /// A limited profile never has a Fantasy tab, so it takes none.
+  final FantasyProfileSeams? fantasySeams;
+
   const ProfilePage(
-      {super.key, required this.uid, this.loadOverride, this.careerLoadOverride})
+      {super.key,
+      required this.uid,
+      this.loadOverride,
+      this.careerLoadOverride,
+      this.fantasySeams})
       : _isLimited = false,
         _limitedName = '';
 
@@ -89,7 +100,8 @@ class ProfilePage extends StatefulWidget {
         _isLimited = true,
         _limitedName = name,
         loadOverride = null,
-        careerLoadOverride = null;
+        careerLoadOverride = null,
+        fantasySeams = null;
 
   /// Clears the session career cache (mirrors
   /// TournamentService.clearProfileUrlCache). Call after a sign-out or when
@@ -102,9 +114,28 @@ class ProfilePage extends StatefulWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Index of the Fantasy tab when it is shown (Profile, Career, Fantasy).
+const int _kFantasyTabIndex = 2;
+
+// TickerProviderStateMixin (not Single…): a late Fantasy-tab decision swaps
+// in a second TabController while the first is still alive for the fade.
 class _ProfilePageState extends State<ProfilePage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late TabController _tabController;
+
+  /// The Fantasy tab's data (null on limited profiles / without a uid).
+  FantasyProfileSource? _fantasy;
+
+  /// Whether the TabBar currently has the third (Fantasy) tab.
+  bool _showFantasyTab = false;
+
+  /// True while the Fantasy tab is the selected one (the Share action — which
+  /// only knows the Profile / Career cards — hides).
+  bool _fantasyTabSelected = false;
+
+  /// Controllers replaced by a late tab-count change: kept alive until the
+  /// page disposes so the outgoing TabBar can finish its cross-fade.
+  final List<TabController> _retiredTabControllers = [];
 
   // ── Raw loaded data ──────────────────────────────────────────────────────
   String _firstName = '';
@@ -139,12 +170,72 @@ class _ProfilePageState extends State<ProfilePage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    // The Fantasy tab (round 3) exists only on full (uid) profiles. start()
+    // runs BEFORE the listener is attached so a synchronous (session-cached)
+    // decision never calls setState inside initState — it is simply read
+    // here, and the TabController is built with the right length at once.
+    if (!widget._isLimited && widget.uid.trim().isNotEmpty) {
+      final fantasy =
+          FantasyProfileSource(uid: widget.uid, seams: widget.fantasySeams)
+            ..start();
+      fantasy.addListener(_onFantasyChanged);
+      _fantasy = fantasy;
+      _showFantasyTab = fantasy.hasTab;
+    }
+    _tabController = _newTabController(0);
+  }
+
+  TabController _newTabController(int initialIndex) {
+    final length = _showFantasyTab ? 3 : 2;
+    return TabController(
+      length: length,
+      vsync: this,
+      initialIndex: initialIndex.clamp(0, length - 1),
+    )..addListener(_onTabTick);
+  }
+
+  /// The Share action hides on the Fantasy tab; rebuild only when that flips
+  /// (this fires on every animation tick of a tab change).
+  void _onTabTick() {
+    final selected =
+        _showFantasyTab && _tabController.index == _kFantasyTabIndex;
+    if (selected != _fantasyTabSelected && mounted) {
+      setState(() => _fantasyTabSelected = selected);
+    }
+  }
+
+  void _onFantasyChanged() {
+    final fantasy = _fantasy;
+    if (!mounted || fantasy == null || !fantasy.decided) return;
+    _applyFantasyTab(fantasy.hasTab);
+  }
+
+  /// Gives the TabBar / TabBarView the new tab count. Before the page has
+  /// revealed this is invisible (the skeleton is up); after it, the TabBar
+  /// cross-fades between its two- and three-tab faces (see build) and the
+  /// selected tab is kept. No-op when the count is unchanged.
+  void _applyFantasyTab(bool show) {
+    if (show == _showFantasyTab || !mounted) return;
+    final old = _tabController;
+    old.removeListener(_onTabTick);
+    _retiredTabControllers.add(old);
+    _showFantasyTab = show;
+    _tabController = _newTabController(old.index);
+    setState(() {
+      _fantasyTabSelected =
+          show && _tabController.index == _kFantasyTabIndex;
+    });
   }
 
   @override
   void dispose() {
+    _fantasy
+      ?..removeListener(_onFantasyChanged)
+      ..dispose();
     _tabController.dispose();
+    for (final c in _retiredTabControllers) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -554,13 +645,21 @@ class _ProfilePageState extends State<ProfilePage>
                 teamColor: _teamColor,
               ),
               // Tab bar — PR #10: Stats + Career merged into one Career tab
-              // (the enhanced StatsTab).
-              TabBar(
-                controller: _tabController,
-                tabs: const [
-                  Tab(text: 'Profile'),
-                  Tab(text: 'Career'),
-                ],
+              // (the enhanced StatsTab). Round 3 adds Fantasy as a third tab
+              // for a fantasy player / manager. Its presence is decided
+              // before this is first built; a late decision cross-fades the
+              // two faces (keyed by tab count) instead of jumping.
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 250),
+                child: TabBar(
+                  key: ValueKey('profile_tabbar_${_tabController.length}'),
+                  controller: _tabController,
+                  tabs: [
+                    const Tab(text: 'Profile'),
+                    const Tab(text: 'Career'),
+                    if (_showFantasyTab) const Tab(text: 'Fantasy'),
+                  ],
+                ),
               ),
               // Tab content
               Expanded(
@@ -605,6 +704,13 @@ class _ProfilePageState extends State<ProfilePage>
                               ],
                             ),
                     ),
+                    if (_showFantasyTab)
+                      FantasyProfileTab(
+                        source: _fantasy!,
+                        // The profile owner's real name ('' until known) —
+                        // the squad viewer's title fallback.
+                        personName: '$_firstName $_lastName'.trim(),
+                      ),
                   ],
                 ),
               ),
@@ -619,7 +725,9 @@ class _ProfilePageState extends State<ProfilePage>
     return AppBar(
       centerTitle: true,
       title: const Text('Profile'),
-      actions: widget._isLimited
+      // No Share on the Fantasy tab: the share cards only cover the Profile
+      // (trophy cabinet) and Career (stats) tabs.
+      actions: (widget._isLimited || _fantasyTabSelected)
           ? null
           : [
               IconButton(
@@ -705,8 +813,23 @@ class _ProfilePageState extends State<ProfilePage>
   // it and fills the career-dependent sections in via setState when done.
   Future<int>? _loadFuture;
   Future<int> _loadOnce() {
-    _loadFuture ??= _doLoad();
+    _loadFuture ??= _fantasy == null ? _doLoad() : _doLoadThenFantasy();
     return _loadFuture!;
+  }
+
+  /// Identity first, then the Fantasy tab's decision — bounded: the TabBar's
+  /// tab count is decided BEFORE the TabBar is built, so the reveal never
+  /// shows two tabs and then three. A decision that misses the grace window
+  /// still lands later (a faded tab swap); an already-cached one costs
+  /// nothing.
+  Future<int> _doLoadThenFantasy() async {
+    final value = await _doLoad();
+    final fantasy = _fantasy;
+    if (fantasy != null && !fantasy.decided) {
+      await fantasy.decision.timeout(kFantasyTabDecisionGrace, onTimeout: () {});
+    }
+    if (fantasy != null && fantasy.decided) _applyFantasyTab(fantasy.hasTab);
+    return value;
   }
 
   Future<int> _doLoad() async {
