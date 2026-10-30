@@ -34,6 +34,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_season_resolver.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/data/player_account_link.dart';
@@ -226,16 +227,17 @@ class FantasyProfileSource extends ChangeNotifier {
   final FantasyProfileSeams seams;
 
   // ── Session caches (instant revisits) ───────────────────────────────────
-  // `<sport>|<season>|<uid>` → what the uid was last decided to be; the
-  // schedule per `<sport>|<season>`. The Fantasy/League services seed their
-  // own streams; these two are the pieces they don't.
+  // `<sport>|<season>|<uid>` → what the uid was last decided to be. The
+  // Fantasy/League services seed their own streams and the shared schedule
+  // feed (fantasy_schedule_feed.dart) caches the schedule; the decision is
+  // the piece they don't.
   static final Map<String, _DecisionSeed> _decisionSession = {};
-  static final Map<String, List<Gameweek>> _gameweeksSession = {};
 
-  /// Clears the session caches (sign-out hygiene, tests).
+  /// Clears the session caches (sign-out hygiene, tests) — including the
+  /// shared schedule cache this source paints from.
   static void clearSessionCaches() {
     _decisionSession.clear();
-    _gameweeksSession.clear();
+    FantasyScheduleFeed.clearSessionCache();
     _resolving = null;
     _noSeasonAt = null;
   }
@@ -316,28 +318,25 @@ class FantasyProfileSource extends ChangeNotifier {
   bool _seeded = false;
 
   // Content feeds.
-  bool _configSubscribed = false;
-  FantasyConfigState? _config;
-  bool _configLoaded = false;
+  /// Config → schedule gameweeks → the player's PlayerWeekStats (one
+  /// listener per schedule gameweek, keyed by his name) — the shared wiring
+  /// (fantasy_schedule_feed.dart): lock-hour / week-number resubscribe, a
+  /// removed Config clears the schedule, errors logged with the last good
+  /// value kept, the schedule session-cached. Created once the uid has
+  /// access.
+  FantasyScheduleFeed<Map<int, PlayerWeekStats>>? _schedule;
 
   /// A REAL emission said the season has no Config node (fantasy removed).
   /// A Config ERROR is not this: it keeps the last good config and the tab.
-  bool _configAbsent = false;
-  List<Gameweek>? _gameweeks;
-  int? _gameweeksLockHour;
+  bool get _configAbsent => _schedule?.configAbsent ?? false;
   bool _playerFeedsSubscribed = false;
   Map<String, FantasyPlayerTotals>? _totals;
   bool _totalsLoaded = false;
   Map<int, Map<String, int>>? _changes;
-  Map<int, PlayerWeekStats>? _weeks;
-  List<int>? _weekNumbers;
-  String? _weeksPlayer;
   bool _boardsSubscribed = false;
   FantasyLeaderboards? _boards;
 
   final List<StreamSubscription<Object?>> _subs = [];
-  StreamSubscription<List<Gameweek>>? _gameweeksSub;
-  StreamSubscription<Map<int, PlayerWeekStats>>? _weeksSub;
 
   // ── Public state ────────────────────────────────────────────────────────
 
@@ -364,8 +363,8 @@ class FantasyProfileSource extends ChangeNotifier {
 
   /// The live market (the squad viewer's photo source).
   List<FantasyPlayer> get players => _players ?? const [];
-  FantasyConfig? get config => _config?.config;
-  List<Gameweek> get gameweeks => _gameweeks ?? const [];
+  FantasyConfig? get config => _schedule?.config?.config;
+  List<Gameweek> get gameweeks => _schedule?.gameweeks ?? const [];
 
   /// The player section's model (Task 5's pure builder): null without a
   /// player role. `priceHistory` is not shown here, so it is left empty.
@@ -375,7 +374,7 @@ class FantasyProfileSource extends ChangeNotifier {
     return buildProfileModel(
       player: player,
       totals: _totals?[player.name],
-      weeks: _weeks ?? const {},
+      weeks: _schedule?.weekData ?? const {},
       priceHistory: const {},
       priceChanges: _changes ?? const {},
     );
@@ -391,9 +390,15 @@ class FantasyProfileSource extends ChangeNotifier {
   /// its content in once, never piece by piece.
   bool get contentReady {
     final a = _access;
-    if (a == null || !_configLoaded || _gameweeks == null) return false;
+    final schedule = _schedule;
+    if (a == null ||
+        schedule == null ||
+        !schedule.configLoaded ||
+        schedule.gameweeks == null) {
+      return false;
+    }
     if (a.player != null &&
-        !(_totalsLoaded && _changes != null && _weeks != null)) {
+        !(_totalsLoaded && _changes != null && schedule.weekLoaded)) {
       return false;
     }
     if (a.manager != null && _boards == null) return false;
@@ -468,8 +473,6 @@ class FantasyProfileSource extends ChangeNotifier {
       _seeded = true;
       _settle();
     }
-    final cachedWeeks = _gameweeksSession['${season.sport}|${season.season}'];
-    if (cachedWeeks != null) _gameweeks = cachedWeeks;
 
     _listen<List<FantasyPlayer>>(
       () =>
@@ -600,10 +603,7 @@ class FantasyProfileSource extends ChangeNotifier {
     final season = _season;
     if (access == null || season == null) return;
 
-    if (!_configSubscribed) {
-      _configSubscribed = true;
-      _subscribeConfig(season);
-    }
+    if (_schedule == null) _subscribeConfig(season);
     if (access.player != null) {
       if (!_playerFeedsSubscribed) {
         _playerFeedsSubscribed = true;
@@ -658,133 +658,41 @@ class FantasyProfileSource extends ChangeNotifier {
     }
   }
 
+  /// Starts the shared Config → schedule → week-stats wiring for [season].
+  /// A Config ERROR keeps the last good config (and the tab with it — it is
+  /// not "fantasy removed"); with no config ever loaded the player section
+  /// still renders and View team says it can't open (see the tab).
   void _subscribeConfig(FantasySeasonKey season) {
-    final gameweekSeam = seams.gameweekStates;
-    if (gameweekSeam != null) {
-      _gameweeksSub = _subscribeGameweeks(gameweekSeam, season, cache: false);
-    }
-    _listen<FantasyConfigState?>(
-      () =>
-          seams.configStates ??
-          FantasyService.watchConfig(season.sport, season.season),
-      (state) {
-        _config = state;
-        _configAbsent = state == null;
-        _configLoaded = true;
-        if (state == null) {
-          // Fantasy removed for the season: nothing stale may seed a revisit.
-          _gameweeksSession.remove('${season.sport}|${season.season}');
-          _decisionSession.remove(_seedKey(season));
-        }
-        if (gameweekSeam == null) {
-          if (state == null) {
-            // No fantasy config → no schedule-derived weeks.
-            _gameweeksSub?.cancel();
-            _gameweeksSub = null;
-            _gameweeksLockHour = null;
-            _gameweeks = const [];
-          } else if (_gameweeksLockHour != state.config.lockHour) {
-            _gameweeksLockHour = state.config.lockHour;
-            _gameweeksSub?.cancel();
-            _gameweeksSub = _subscribeGameweeks(
-              seams.gameweeksFor?.call(state.config) ??
-                  FantasyService.watchGameweeks(
-                      season.sport, season.season, state.config),
-              season,
-              cache: true,
-            );
-          }
-        }
-        _recomputeWeeks();
-        _notify();
+    final schedule = FantasyScheduleFeed<Map<int, PlayerWeekStats>>(
+      sport: season.sport,
+      season: season.season,
+      owner: 'FantasyProfileSource',
+      onChanged: _notify,
+      onConfig: (state) {
+        // Fantasy removed for the season: no stale decision may seed a
+        // revisit (the feed drops the cached schedule itself).
+        if (state == null) _decisionSession.remove(_seedKey(season));
       },
-      onFail: () {
-        // The LAST GOOD config stays (and the tab with it): an error is not
-        // "fantasy removed". With no config ever loaded the player section
-        // still renders; View team says it can't open (see the tab).
-        _configLoaded = true;
-        _gameweeks ??= const [];
-        _recomputeWeeks();
-        _notify();
-      },
-      label: 'config',
+      configStates: seams.configStates,
+      gameweekStates: seams.gameweekStates,
+      gameweeksFor: seams.gameweeksFor,
+      weekLabel: 'week stats feed',
     );
+    _schedule = schedule;
+    schedule.start();
   }
 
-  StreamSubscription<List<Gameweek>>? _subscribeGameweeks(
-    Stream<List<Gameweek>> stream,
-    FantasySeasonKey season, {
-    required bool cache,
-  }) {
-    try {
-      return stream.listen((gws) {
-        if (_disposed) return;
-        if (cache) {
-          _gameweeksSession['${season.sport}|${season.season}'] = gws;
-        }
-        _gameweeks = gws;
-        _recomputeWeeks();
-        _notify();
-      }, onError: (Object e) {
-        // A failed schedule read: no weeks to listen to (never cached — the
-        // next visit retries), unless a schedule is already showing.
-        _log('schedule feed', e);
-        if (_disposed) return;
-        _gameweeks ??= const [];
-        _recomputeWeeks();
-        _notify();
-      });
-    } catch (e) {
-      _log('schedule feed', e);
-      _gameweeks ??= const [];
-      return null;
-    }
-  }
-
-  void _recomputeWeeks() {
-    final access = _access;
-    final season = _season;
-    if (access?.player == null || season == null) return;
-    _syncWeeks(season, access!.player!.name);
-  }
-
-  /// One PlayerWeekStats listener per schedule gameweek; resubscribes only
-  /// when the player or the week numbers change (a config re-emit that keeps
-  /// them never flickers the tab).
+  /// His PlayerWeekStats, one listener per schedule gameweek; resubscribed
+  /// only when the player or the week numbers change (a config re-emit that
+  /// keeps them never flickers the tab), never another player's weeks.
   void _syncWeeks(FantasySeasonKey season, String playerName) {
-    final gws = _gameweeks;
-    if (gws == null) return;
-    final weeks = [for (final g in gws) g.number];
-    final known = _weekNumbers;
-    if (_weeksPlayer == playerName &&
-        known != null &&
-        known.length == weeks.length &&
-        Iterable<int>.generate(weeks.length)
-            .every((i) => known[i] == weeks[i])) {
-      return;
-    }
-    if (_weeksPlayer != playerName) _weeks = null; // never another player's
-    _weeksPlayer = playerName;
-    _weekNumbers = weeks;
-    _weeksSub?.cancel();
-    try {
-      final source = seams.weekStatsFor?.call(playerName, weeks) ??
+    _schedule?.setWeekFeed(
+      playerName,
+      (weeks) =>
+          seams.weekStatsFor?.call(playerName, weeks) ??
           FantasyService.watchPlayerWeekStatsFor(
-              season.sport, season.season, playerName, weeks);
-      _weeksSub = source.listen((w) {
-        if (_disposed) return;
-        _weeks = w;
-        _notify();
-      }, onError: (Object e) {
-        _log('week stats feed', e);
-        if (_disposed) return;
-        _weeks ??= const {};
-        _notify();
-      });
-    } catch (e) {
-      _log('week stats feed', e);
-      _weeks ??= const {};
-    }
+              season.sport, season.season, playerName, weeks),
+    );
   }
 
   @override
@@ -794,8 +702,7 @@ class FantasyProfileSource extends ChangeNotifier {
       s.cancel();
     }
     _subs.clear();
-    _gameweeksSub?.cancel();
-    _weeksSub?.cancel();
+    _schedule?.dispose();
     super.dispose();
   }
 }
