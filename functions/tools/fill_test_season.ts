@@ -26,7 +26,8 @@
 //                                             path + JSON size + skipped
 //                                             managers; writes NOTHING
 //   npm run fill:s15 -- --offline             dry run from the cached snapshot
-//   npm run fill:s15 -- --apply               backs up every target node to
+//   npm run fill:s15 -- --apply               backs up every target node (and
+//                                             the TestFill marker it writes) to
 //                                             rehearsal_out/fill_backup_<ISO>.json,
 //                                             then PUTs the plan
 //   npm run fill:s15 -- --clear <backupFile>  restores every backed-up node
@@ -38,25 +39,34 @@
 //   - Refuses unless the live engine is paused for good: lockOverride
 //     'open'/'locked' and NO Config/lockOverrideUntil (re-checked with an
 //     admin read right before writing or clearing).
-//   - Every write/delete passes assertSafePaths (on the plan, on the backup
-//     via clearPlan before any login, and again on every single REST call):
-//     only children of Fantasy/Futsal/15/, never Config/News/Voided, and
-//     Managers/Squads only under a fake test-NN uid.
+//   - Every write/delete passes assertSafePaths — an ALLOWLIST (on the plan,
+//     on the backup via clearPlan before any login, and again on every
+//     single REST call): only the EXPECTED_NODES the plan writes (derived
+//     data + the engine's done-markers), Managers/Squads under a fake
+//     test-NN uid, and TestFill. Config, News, Voided, Watchlists,
+//     MiniLeagues, ScheduledPushes, Analytics, real uids and any unlisted
+//     node are refused; a replay that produces an unlisted node refuses the
+//     plan.
 //   - --apply refuses when the season is already filled (TestFill present),
 //     when the replay broke an invariant or crashed, or when Config changed
 //     since the snapshot.
-//   - Writes use an OAuth access token minted from the firebase-tools login
-//     (~/.config/configstore/firebase-tools.json). The token is never
-//     printed, logged, or put in an error message.
+//   - --clear refuses unless the LIVE TestFill marker exists and equals the
+//     one the backup recorded at --apply time (so a backup only ever undoes
+//     its own fill, never a later one or an already-cleared season).
+//   - Admin REST calls send an OAuth access token minted from the
+//     firebase-tools login (~/.config/configstore/firebase-tools.json) in an
+//     `Authorization: Bearer` header — never in a URL. The token and the
+//     login file's contents are never printed, logged, or put in an error
+//     message.
 
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
-  assertEnginePaused, assertRequestAllowed, assertSafePaths, BACKUP_KIND,
-  buildWritePlan, clearPlan, EXPECTED_NODES, fakeChildDeletes, isFakeUid, LiveSeason,
-  PlanEntry, realManagersOf, TEST_FILL_MARKER, TEST_SEASON_ROOT,
+  assertEnginePaused, assertMarkerMatches, assertRequestAllowed, assertSafePaths, BACKUP_KIND,
+  buildWritePlan, canonicalJson, clearPlan, EXPECTED_NODES, fakeChildDeletes, isFakeUid,
+  LiveSeason, PlanEntry, realManagersOf, TEST_FILL_MARKER, TEST_SEASON_ROOT,
 } from './fill_test_season_logic';
 import {
   DB_URL, installNetworkGuard, loadSnapshot, READ_PATHS, runReplay, Snapshot,
@@ -78,20 +88,7 @@ const OAUTH_CLIENT_SECRET = 'j9iVZfS8kkCEFUPaAeJV0sAi';
 
 const USAGE = 'Usage: npm run fill:s15 [-- --offline | -- --apply | -- --clear <backupFile>]';
 
-function canon(v: unknown): string {
-  const sortDeep = (x: unknown): unknown => {
-    if (Array.isArray(x)) return x.map(sortDeep);
-    if (x !== null && typeof x === 'object') {
-      const o: Record<string, unknown> = {};
-      for (const k of Object.keys(x as Record<string, unknown>).sort()) {
-        o[k] = sortDeep((x as Record<string, unknown>)[k]);
-      }
-      return o;
-    }
-    return x;
-  };
-  return JSON.stringify(sortDeep(v));
-}
+const canon = canonicalJson;
 
 function bytes(v: unknown): number {
   return Buffer.byteLength(JSON.stringify(v), 'utf8');
@@ -117,12 +114,27 @@ function accessToken(): Promise<string> {
   return (tokenOnce ??= mintAccessToken());
 }
 
+/** The firebase-tools refresh token. The login file holds secrets, so a
+ *  read or parse failure is rethrown as a GENERIC message — never the
+ *  underlying error, whose text can quote the file's contents (JSON.parse
+ *  echoes the offending input). */
+function readRefreshToken(file: string): unknown {
+  let parsed: any;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    throw new Error("Couldn't read the firebase-tools login file — run " +
+      '`npx firebase-tools login` again.');
+  }
+  return parsed?.tokens?.refresh_token;
+}
+
 async function mintAccessToken(): Promise<string> {
   const file = path.join(os.homedir(), '.config', 'configstore', 'firebase-tools.json');
   if (!fs.existsSync(file)) {
     throw new Error('No firebase-tools login found — run `npx firebase-tools login` first.');
   }
-  const refresh = JSON.parse(fs.readFileSync(file, 'utf8'))?.tokens?.refresh_token;
+  const refresh = readRefreshToken(file);
   if (typeof refresh !== 'string' || refresh.length === 0) {
     throw new Error('The firebase-tools login has no refresh token — run `npx firebase-tools login`.');
   }
@@ -152,18 +164,22 @@ function adminRest(token: string, opts: { readOnly: boolean }): AdminRest {
   const call = async (method: string, p: string, body?: unknown, shallow = false): Promise<unknown> => {
     // Reads: the test season or the replay's inputs; writes: assertSafePaths.
     assertRequestAllowed(method, p, { readOnly: opts.readOnly, readPaths: READ_PATHS });
+    // The token rides in the Authorization header (RTDB REST accepts OAuth2
+    // Bearer access tokens) — never in the URL, which proxies, logs and error
+    // messages can echo.
     const url = `${DB_URL}/${p.split('/').map(encodeURIComponent).join('/')}.json` +
-      `?access_token=${encodeURIComponent(token)}${shallow ? '&shallow=true' : ''}`;
+      (shallow ? '?shallow=true' : '');
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
     let res: Response;
     try {
       res = await fetch(url, {
         method,
-        ...(body === undefined ? {} : {
-          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-        }),
+        headers,
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
     } catch (err) {
-      // Never surface the URL (it carries the token) — path + reason only.
+      // Path + reason only (never the request, which carries the token).
       throw new Error(`${method} ${p} failed: ${(err as Error)?.message ?? 'network error'}`);
     }
     const text = await res.text();
@@ -284,9 +300,10 @@ async function fill(apply: boolean, offline: boolean): Promise<void> {
   const written = new Set(plan.map((e) => e.path.slice(ROOT.length + 1).split('/')[0]));
   const missing = EXPECTED_NODES.filter((n) => !written.has(n));
   console.log(`  spec nodes the replay did not produce: ${missing.length ? missing.join(', ') : 'none'}`);
-  const extra = [...written].filter((n) => !EXPECTED_NODES.includes(n) && !['TestFill', 'Managers', 'Squads'].includes(n));
-  console.log(`  other pipeline nodes written (guards/derived): ${extra.length ? extra.join(', ') : 'none'}`);
-  console.log(`  never written: Config, News, Voided, Managers/<real uid>, Squads/<real uid>`);
+  console.log('  allowlist: EXPECTED_NODES + Managers|Squads/test-NN + TestFill ' +
+    '(an unlisted replay node refuses the plan)');
+  console.log('  never written: Config, News, Voided, Watchlists, MiniLeagues, ScheduledPushes, ' +
+    'Analytics, Managers/<real uid>, Squads/<real uid>');
   const digest = planDigest(plan);
   console.log(`  plan digest (marker excluded): ${digest}`);
 
@@ -316,7 +333,10 @@ async function fill(apply: boolean, offline: boolean): Promise<void> {
   }
   const createdAt = new Date().toISOString();
   const backupFile = path.join(OUT_DIR, `fill_backup_${createdAt.replace(/[:.]/g, '-')}.json`);
-  const backup = { kind: BACKUP_KIND, root: ROOT, createdAt, planDigest: digest, entries };
+  // The marker THIS fill writes: --clear later refuses unless the live
+  // TestFill still equals it (the backup only undoes its own fill).
+  const marker = plan.find((e) => e.path === MARKER)?.value;
+  const backup = { kind: BACKUP_KIND, root: ROOT, createdAt, planDigest: digest, marker, entries };
   clearPlan(backup); // the backup must be one --clear will accept, before any write
   fs.mkdirSync(OUT_DIR, { recursive: true });
   fs.writeFileSync(backupFile, JSON.stringify(backup, null, 1));
@@ -334,12 +354,18 @@ async function fill(apply: boolean, offline: boolean): Promise<void> {
 
 async function clear(file: string): Promise<void> {
   console.log(`Infinite Fantasy — clear the ${ROOT} test-season fill`);
-  // The backup is untrusted input: clearPlan validates it and runs every
-  // path through assertSafePaths BEFORE any login or network call.
-  const ops = clearPlan(JSON.parse(fs.readFileSync(path.resolve(file), 'utf8')));
+  // The backup is untrusted input: clearPlan validates it (its recorded
+  // TestFill marker included) and runs every path through assertSafePaths
+  // BEFORE any login or network call.
+  const backup = JSON.parse(fs.readFileSync(path.resolve(file), 'utf8'));
+  const ops = clearPlan(backup);
 
   const db = adminRest(await accessToken(), { readOnly: false });
   assertEnginePaused(await db.get(`${ROOT}/Config`));
+  // Only the fill this backup came from: the live marker must still be the
+  // one it recorded (absent = nothing to undo; different = another fill).
+  assertMarkerMatches(await db.get(MARKER), backup);
+  console.log('  live TestFill marker matches this backup');
 
   for (const op of ops) {
     if (op.method === 'PUT') {
