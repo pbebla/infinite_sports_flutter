@@ -572,8 +572,11 @@ class FantasyProfileSource extends ChangeNotifier {
           rosters: _rosters!,
           manager: _manager,
         );
-        if (real) {
-          _seeded = false;
+        if (real) _seeded = false;
+        // Only remembered while the season really has fantasy: once a real
+        // emission said its Config is gone, a later market / roster /
+        // manager emission must not re-seed a tab for the next visit.
+        if (real && !_configAbsent) {
           _decisionSession[_seedKey(season)] = _DecisionSeed(
             player: _access?.player,
             manager: _access?.manager,

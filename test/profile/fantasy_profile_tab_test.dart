@@ -971,6 +971,35 @@ void main() {
       expect(next.decided, isFalse);
     });
 
+    test(
+        'after fantasy is removed, a later live decision-feed emission never '
+        're-caches a tab for the next visit', () async {
+      final source = await startedPlayer();
+      config.add(configState(15));
+      await pumpEventQueue();
+      expect(source.hasTab, isTrue);
+
+      config.add(null); // fantasy removed for the season
+      await pumpEventQueue();
+      expect(source.hasTab, isFalse);
+
+      // The market (and the other decision feeds) keep streaming live.
+      players.add([...market]);
+      rosters.add({
+        'Ishtar': [_row(_name, 'Ishtar', uid: _uid)],
+      });
+      manager.add(null);
+      await pumpEventQueue();
+      expect(source.hasTab, isFalse);
+
+      final next = FantasyProfileSource(uid: _uid, seams: silentSeams())
+        ..start();
+      addTearDown(next.dispose);
+      await pumpEventQueue();
+      expect(next.decided, isFalse); // nothing seeded a tab
+      expect(next.hasTab, isFalse);
+    });
+
     test('a failing schedule read keeps a schedule that is already showing',
         () async {
       final source = await startedPlayer();
