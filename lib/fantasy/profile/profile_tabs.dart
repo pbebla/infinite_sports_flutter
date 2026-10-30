@@ -244,8 +244,11 @@ class ProfileStatsTab extends StatelessWidget {
           title: 'Where his points came from',
           child: model.sourceTotals.isEmpty
               ? Text(
-                  kPointsStartCopy,
-                  key: const ValueKey('sources_empty'),
+                  // No record at all → before GW1; records but nothing
+                  // scored (never played / only voided weeks) → neutral.
+                  model.hasWeeks ? kNoPointsYetCopy : kPointsStartCopy,
+                  key: ValueKey(
+                      model.hasWeeks ? 'sources_none' : 'sources_empty'),
                   softWrap: true,
                   style: TextStyle(
                     fontSize: 14,

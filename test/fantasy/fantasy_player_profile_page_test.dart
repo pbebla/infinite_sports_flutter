@@ -83,6 +83,17 @@ TournamentMatch _game(String date, String team1, String team2) =>
       raw: {'team1': team1, 'team2': team2, 'status': 0, 'Time': '15:00'},
     );
 
+/// A legacy game with NO stored Time: its text is derived from the season
+/// start hour the adapter was given (0 → "0:00PM").
+TournamentMatch _legacyGame(String date, String team1, String team2,
+        {int startHour = 0}) =>
+    leagueMatchFromGameMap(
+      dateKey: date,
+      index: 0,
+      raw: {'team1': team1, 'team2': team2, 'status': 0},
+      startHour: startHour,
+    );
+
 void main() {
   late StreamController<FantasyConfigState?> config;
   late StreamController<List<Gameweek>> gameweeks;
@@ -154,6 +165,7 @@ void main() {
     bool fromOutsideHub = false,
     Size size = const Size(420, 900),
     ThemeMode themeMode = ThemeMode.light,
+    Future<int> Function()? loadStartHour,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -185,6 +197,7 @@ void main() {
         selfUidOverride: selfUid,
         setWatchlisted: (n, on) async => starWrites.add((n, on)),
         loadLogoUrls: () async => const {},
+        loadStartHour: loadStartHour,
         openFullProfile: (context, uid, n) => openedProfiles.add('$uid|$n'),
         openInFantasy: (context) => openInFantasyCalls++,
         nowUtc: () => DateTime.utc(2026, 11, 2, 18),
@@ -363,6 +376,58 @@ void main() {
     expect(find.text('Next: vs Nimrod · Sun 3 PM'), findsOneWidget);
   });
 
+  group('season start hour', () {
+    testWidgets(
+        'unknown (0 = absent / failed read): a derived time is '
+        'dropped, never "0 PM"', (tester) async {
+      await pumpPage(tester, loadStartHour: () async => 0);
+      await emitAll(tester,
+          gamesValue: [_legacyGame('11082026', 'Ishtar', 'Nimrod')]);
+      expect(find.text('Next: vs Nimrod · Sun'), findsOneWidget);
+      expect(find.textContaining('0 PM'), findsNothing);
+    });
+
+    testWidgets('a failed read is not cached — the next visit asks again',
+        (tester) async {
+      var calls = 0;
+      Future<int> failing() async {
+        calls++;
+        throw StateError('offline');
+      }
+
+      await pumpPage(tester, loadStartHour: failing);
+      await emitAll(tester,
+          gamesValue: [_legacyGame('11082026', 'Ishtar', 'Nimrod')]);
+      expect(find.text('Next: vs Nimrod · Sun'), findsOneWidget);
+      expect(calls, 1);
+
+      await tester.pumpWidget(const SizedBox());
+      await pumpPage(tester, loadStartHour: failing);
+      await emitAll(tester);
+      expect(calls, 2);
+    });
+
+    testWidgets('a real hour is cached for the session (one read)',
+        (tester) async {
+      var calls = 0;
+      Future<int> fivePm() async {
+        calls++;
+        return 5;
+      }
+
+      await pumpPage(tester, loadStartHour: fivePm);
+      await emitAll(tester, gamesValue: [
+        _legacyGame('11082026', 'Ishtar', 'Nimrod', startHour: 5),
+      ]);
+      expect(find.text('Next: vs Nimrod · Sun 5 PM'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await pumpPage(tester, loadStartHour: fivePm);
+      await emitAll(tester);
+      expect(calls, 1);
+    });
+  });
+
   group('See full profile', () {
     testWidgets('hidden when the player has no linked account', (tester) async {
       await pumpPage(tester);
@@ -480,6 +545,31 @@ void main() {
     expect(key('matches_empty'), findsOneWidget);
     await openTab(tester, 'price');
     expect(key('price_empty'), findsOneWidget);
+    await openTab(tester, 'stats');
+    expect(find.text('Points start after Gameweek 1'), findsOneWidget);
+  });
+
+  testWidgets(
+      'weeks exist but nothing scored (never played / only voided): Stats '
+      'says "No points scored yet", never the Gameweek 1 copy', (tester) async {
+    await pumpPage(tester);
+    await emitAll(tester, weeksValue: {
+      1: const PlayerWeekStats(
+          points: 0,
+          played: false,
+          gamesPlayed: 0,
+          games: [],
+          lines: {},
+          voided: false),
+      2: _week(0, voided: true),
+    });
+    // Overview has records: bars, not the GW1 copy.
+    expect(find.text('Points start after Gameweek 1'), findsNothing);
+    expect(key('form_bar_1'), findsOneWidget);
+
+    await openTab(tester, 'stats');
+    expect(find.text('No points scored yet'), findsOneWidget);
+    expect(find.text('Points start after Gameweek 1'), findsNothing);
   });
 
   testWidgets(
@@ -575,11 +665,24 @@ void main() {
                 (w) => w is AnnotatedRegion<SystemUiOverlayStyle>)
             .first)
         .value;
-    expect(style(), SystemUiOverlayStyle.light);
+    void expectStatusBarOnly(SystemUiOverlayStyle s) {
+      // Never touches the system navigation bar (the `.light`/`.dark`
+      // presets force it black on Android < 15).
+      expect(s.systemNavigationBarColor, isNull);
+      expect(s.systemNavigationBarIconBrightness, isNull);
+      expect(s.systemNavigationBarDividerColor, isNull);
+      expect(s.statusBarColor, Colors.transparent);
+    }
+
+    expect(style().statusBarIconBrightness, Brightness.light);
+    expect(style().statusBarBrightness, Brightness.dark);
+    expectStatusBarOnly(style());
 
     await tester.drag(key('profile_scroll'), const Offset(0, -600));
     await tester.pumpAndSettle();
-    expect(style(), SystemUiOverlayStyle.dark);
+    expect(style().statusBarIconBrightness, Brightness.dark);
+    expect(style().statusBarBrightness, Brightness.light);
+    expectStatusBarOnly(style());
   });
 
   testWidgets('no underlined text anywhere on the profile (house rule)',

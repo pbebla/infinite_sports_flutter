@@ -98,6 +98,7 @@ class FantasyPlayerProfilePage extends StatefulWidget {
     this.selfUidOverride,
     this.setWatchlisted,
     this.loadLogoUrls,
+    this.loadStartHour,
     this.openFullProfile,
     this.openInFantasy,
     this.nowUtc,
@@ -135,6 +136,11 @@ class FantasyPlayerProfilePage extends StatefulWidget {
   final String? selfUidOverride;
   final Future<void> Function(String name, bool on)? setWatchlisted;
   final Future<Map<String, String>> Function()? loadLogoUrls;
+
+  /// The season's legacy start hour (`LeagueService.getStartHour`; 0 =
+  /// absent or a failed read). Null with a [gamesStates] seam = treated as
+  /// known (the fed games carry their own times).
+  final Future<int> Function()? loadStartHour;
   final void Function(BuildContext context, String uid, String name)?
       openFullProfile;
   final void Function(BuildContext context)? openInFantasy;
@@ -142,7 +148,8 @@ class FantasyPlayerProfilePage extends StatefulWidget {
 
   // ── Session caches (instant revisits) for the feeds the services don't
   // cache themselves: the derived schedule, the league games + their start
-  // hour, and the team colours. Keyed `<sport>|<season>`.
+  // hour (only a REAL hour > 0 — an absent/failed read is retried next
+  // visit), and the team colours. Keyed `<sport>|<season>`.
   static final Map<String, List<Gameweek>> _gameweeksSession = {};
   static final Map<String, List<TournamentMatch>> _gamesSession = {};
   static final Map<String, int> _startHourSession = {};
@@ -160,6 +167,17 @@ class FantasyPlayerProfilePage extends StatefulWidget {
   State<FantasyPlayerProfilePage> createState() =>
       _FantasyPlayerProfilePageState();
 }
+
+/// The profile's status-bar style: ONLY the status bar (icon brightness on
+/// Android, bar brightness on iOS, transparent like the app's M3 AppBars) —
+/// never the system navigation bar, which the presets `.light`/`.dark`
+/// would force black on Android < 15.
+SystemUiOverlayStyle profileStatusBarStyle({required bool lightIcons}) =>
+    SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: lightIcons ? Brightness.light : Brightness.dark,
+      statusBarBrightness: lightIcons ? Brightness.dark : Brightness.light,
+    );
 
 /// The hero's height: ~42% of the screen, clamped for tiny/huge screens.
 double _heroHeightFor(BuildContext context) =>
@@ -190,6 +208,12 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
   bool _rostersLoaded = false;
   List<TournamentMatch> _games = const [];
   bool _gamesLoaded = false;
+
+  /// The season start hour behind derived game times: null = not needed /
+  /// not loaded, 0 = unknown (absent or failed read). Joins the reveal gate
+  /// while loading so the Next line never re-renders after the fade.
+  int? _startHour;
+  bool _startHourPending = false;
   Map<String, Color> _teamColors = const {};
   bool _teamsLoaded = false;
   Set<String> _watchlist = const {};
@@ -238,6 +262,7 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
       _weeks != null &&
       _rostersLoaded &&
       _gamesLoaded &&
+      !_startHourPending &&
       _teamsLoaded &&
       _watchlistLoaded;
 
@@ -440,21 +465,33 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
       if (mounted) setState(() => _teamsLoaded = true);
     });
 
+    // The legacy derived time needs the season's start hour, else a game
+    // without a stored Time reads "0 PM" (Task 4 review). getStartHour
+    // returns 0 for an absent node AND a failed read: 0 is "unknown" —
+    // never cached (the next visit retries) and the Next line then drops a
+    // derived time instead of showing "0 PM" (nextGameText).
     final gamesSeam = widget.gamesStates;
+    final loadHour = widget.loadStartHour ??
+        (gamesSeam != null
+            ? null
+            : () => LeagueService.getStartHour(widget.sport, widget.season));
     if (gamesSeam != null) {
       _gamesSub = gamesSeam.listen(_onGames, onError: _onGamesError);
-      return;
     }
-    // The legacy derived time needs the season's start hour, else a game
-    // without a stored Time reads "0 PM" (Task 4 review).
+    if (loadHour == null) return;
+    _startHourPending = true;
     final key = _sessionKey;
     final cachedHour = FantasyPlayerProfilePage._startHourSession[key];
-    (cachedHour != null
-            ? Future<int>.value(cachedHour)
-            : LeagueService.getStartHour(widget.sport, widget.season))
+    (cachedHour != null ? Future<int>.value(cachedHour) : loadHour())
+        .catchError((Object _) => 0)
         .then((hour) {
-      FantasyPlayerProfilePage._startHourSession[key] = hour;
+      if (hour > 0) FantasyPlayerProfilePage._startHourSession[key] = hour;
       if (!mounted) return;
+      setState(() {
+        _startHour = hour;
+        _startHourPending = false;
+      });
+      if (gamesSeam != null) return;
       _gamesSub =
           LeagueService.watchGames(widget.sport, widget.season, startHour: hour)
               .listen(_onGames, onError: _onGamesError);
@@ -608,9 +645,7 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
     final onHero = player != null && !_pastHero;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: (onHero || isDark)
-          ? SystemUiOverlayStyle.light
-          : SystemUiOverlayStyle.dark,
+      value: profileStatusBarStyle(lightIcons: onHero || isDark),
       child: Scaffold(
         body: Stack(
           children: [
@@ -695,7 +730,9 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
       _ => ProfileOverviewTab(
           model: model,
           season: widget.season,
-          nextGameText: next == null ? null : formatNextGame(next),
+          nextGameText: next == null
+              ? null
+              : nextGameText(next, startHourKnown: _startHour != 0),
           seasonStats: roster,
         ),
     };

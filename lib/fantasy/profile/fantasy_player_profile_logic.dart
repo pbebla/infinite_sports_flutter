@@ -13,6 +13,7 @@
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
+import 'package:infinite_sports_flutter/fantasy/data/next_game.dart';
 import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -20,8 +21,12 @@ import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 /// How many recent gameweeks the form bars show.
 const int kProfileFormBarCount = 6;
 
-/// The Overview copy before any finalized week (spec §4).
+/// The copy before any finalized week (spec §4) — ONLY while he has no
+/// weekly record at all ([FantasyProfileModel.hasWeeks] false).
 const String kPointsStartCopy = 'Points start after Gameweek 1';
+
+/// Weeks exist but nothing scored (never played / only voided weeks).
+const String kNoPointsYetCopy = 'No points scored yet';
 
 /// One recent-form bar: a gameweek he has a record for.
 class FormBar {
@@ -362,6 +367,28 @@ String priceMoveText(int? moveTenths) {
   if (moveTenths == null) return '—';
   if (moveTenths == 0) return 'No change';
   return '${moveTenths > 0 ? '▲' : '▼'} ${formatMoneyTenths(moveTenths.abs())}';
+}
+
+/// True for the legacy DERIVED game time `gameTimeText` falls back to when a
+/// game has no stored `Time`: `'<startHour + index>:00PM'` (no space — a
+/// stored time always renders "3:00 PM" with one).
+bool isDerivedGameTime(String timeText) =>
+    RegExp(r'^\d{1,2}:00PM$').hasMatch(timeText.trim());
+
+/// The profile's "Next:" text. When the season's start hour is unknown
+/// ([startHourKnown] false — `getStartHour` returns 0 for an absent node AND
+/// for a failed read) a derived time is meaningless ("0 PM"), so it is
+/// dropped: "vs Nimrod · Sun". A stored time is always kept.
+String nextGameText(NextGame g, {required bool startHourKnown}) {
+  if (startHourKnown || !isDerivedGameTime(g.timeText)) {
+    return formatNextGame(g);
+  }
+  return formatNextGame(NextGame(
+    opponent: g.opponent,
+    date: g.date,
+    timeText: '',
+    placeholder: g.placeholder,
+  ));
 }
 
 /// "Goalkeeper" / "Defender" / "Attacker" (the hero's "Team · Position").

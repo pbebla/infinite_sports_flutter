@@ -7,6 +7,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
+import 'package:infinite_sports_flutter/fantasy/data/next_game.dart';
 import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_logic.dart';
@@ -266,6 +267,38 @@ void main() {
       expect(priceMoveText(0), 'No change');
       expect(priceMoveText(3), '▲ \$0.3M');
       expect(priceMoveText(-12), '▼ \$1.2M');
+    });
+  });
+
+  group('next game text (start hour)', () {
+    // Sunday Nov 8, 2026.
+    NextGame g(String time) => NextGame(
+        opponent: 'Nimrod',
+        date: DateTime(2026, 11, 8),
+        timeText: time,
+        placeholder: false);
+
+    test('derived legacy times are recognised; stored times are not', () {
+      expect(isDerivedGameTime('0:00PM'), isTrue);
+      expect(isDerivedGameTime('5:00PM'), isTrue);
+      expect(isDerivedGameTime('3:00 PM'), isFalse);
+      expect(isDerivedGameTime('3:30 PM'), isFalse);
+      expect(isDerivedGameTime(''), isFalse);
+    });
+
+    test(
+        'unknown start hour (0 = absent or failed read) drops a derived '
+        'time — never "0 PM"', () {
+      expect(
+          nextGameText(g('0:00PM'), startHourKnown: false), 'vs Nimrod · Sun');
+      expect(
+          nextGameText(g('1:00PM'), startHourKnown: false), 'vs Nimrod · Sun');
+      // A stored time is real whatever the start hour.
+      expect(nextGameText(g('3:00 PM'), startHourKnown: false),
+          'vs Nimrod · Sun 3 PM');
+      // Known start hour: the derived time is the league's own time.
+      expect(nextGameText(g('5:00PM'), startHourKnown: true),
+          'vs Nimrod · Sun 5 PM');
     });
   });
 
