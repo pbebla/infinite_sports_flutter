@@ -73,6 +73,34 @@ void main() {
     expect(find.byKey(const ValueKey('fantasy_home_banner')), findsNothing);
   });
 
+  testWidgets(
+      'a Config error is logged and keeps a shown banner (the last good '
+      'config); before any config it stays hidden', (tester) async {
+    final logs = <String>[];
+    final original = debugPrint;
+    debugPrint = (String? message, {int? wrapWidth}) => logs.add(message ?? '');
+    try {
+      await pumpBanner(tester);
+      configs.addError(StateError('offline'));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('fantasy_home_banner')), findsNothing);
+
+      configs.add(state());
+      await tester.pump();
+      expect(find.byKey(const ValueKey('fantasy_home_banner')), findsOneWidget);
+
+      configs.addError(StateError('permission-denied blip'));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('fantasy_home_banner')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    } finally {
+      debugPrint = original;
+    }
+    expect(logs.join('\n'),
+        contains('FantasyHomeBanner: config feed failed: Bad state: offline'));
+    expect(logs.join('\n'), contains('permission-denied blip'));
+  });
+
   testWidgets('deadline chip while the gameweek is open under auto lock; '
       'tap opens the hub', (tester) async {
     await pumpBanner(tester); // two days before GW1's lock

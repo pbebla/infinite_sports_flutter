@@ -519,4 +519,30 @@ void main() {
       expect(hub.initialPlayerName, isNull);
     });
   });
+
+  group('the shared schedule wiring', () {
+    testWidgets(
+        'a Config error is logged and the showing hub keeps its last good '
+        'config — never an unhandled stream error', (tester) async {
+      final logs = <String>[];
+      final original = debugPrint;
+      debugPrint =
+          (String? message, {int? wrapWidth}) => logs.add(message ?? '');
+      try {
+        await pumpHub(tester);
+        await land(tester);
+        expect(key('hub'), findsOneWidget);
+
+        config.addError(StateError('permission-denied'));
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+        expect(key('hub'), findsOneWidget);
+      } finally {
+        debugPrint = original;
+      }
+      expect(logs.join('\n'),
+          contains('FantasyHubPage: config feed failed: Bad state: '
+              'permission-denied'));
+    });
+  });
 }

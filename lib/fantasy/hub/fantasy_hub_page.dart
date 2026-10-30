@@ -29,6 +29,7 @@ import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_prefs.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
@@ -129,10 +130,39 @@ class FantasyHubPage extends StatefulWidget {
 }
 
 class _FantasyHubPageState extends State<FantasyHubPage> {
-  FantasyConfigState? _configState;
+  /// Config → schedule gameweeks → the signed-in manager's finalized chips
+  /// by gameweek (`History/<gw>/<uid>`, one small listener per schedule
+  /// gameweek) — the shared wiring (fantasy_schedule_feed.dart): lock-hour
+  /// resubscribe, a removed Config clears the schedule, errors logged with
+  /// the last good value kept. The chips are the chip row's real "1 left" /
+  /// "Used" counts and join the reveal gate (no badge pops after the fade);
+  /// they load once the schedule's gameweeks are known, and the same week
+  /// numbers keep the running listeners (no flicker on a re-emit).
+  late final FantasyScheduleFeed<Map<int, ChipHistoryEntry>> _schedule =
+      FantasyScheduleFeed(
+    sport: widget.sport,
+    season: widget.season,
+    owner: 'FantasyHubPage',
+    onChanged: () {
+      if (mounted) setState(() {});
+    },
+    onConfig: _onConfig,
+    configStates: widget.configStates,
+    gameweekStates: widget.gameweekStates,
+    weekFeed: (weeks) =>
+        widget.chipHistoryFor?.call(weeks) ??
+        FantasyService.watchMyChipHistoryAuto(
+            widget.sport, widget.season, weeks),
+    weekLabel: 'chip history feed',
+  );
+
+  FantasyConfigState? get _configState => _schedule.config;
+  List<Gameweek> get _gameweeks => _schedule.gameweeks ?? const [];
+  Map<int, ChipHistoryEntry> get _chipHistory =>
+      _schedule.weekData ?? const {};
+  bool get _chipsLoaded => _schedule.weekLoaded;
+
   List<FantasyPlayer>? _players;
-  List<Gameweek> _gameweeks = const [];
-  int? _gameweeksLockHour; // lockHour the gameweek stream was derived with
 
   /// The signed-in user's Managers entry (spec §10b): null until named.
   /// [_managerLoaded] joins the single-reveal gate so the banner never pops
@@ -151,15 +181,6 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   /// reveal gate so the banner never pops in after the fade.
   FantasySquadAlert? _alert;
   bool _alertLoaded = false;
-
-  /// The signed-in manager's finalized chips by gameweek
-  /// (`History/<gw>/<uid>`, one small listener per schedule gameweek) — the
-  /// chip row's real "1 left" / "Used" counts. Joins the reveal gate (no
-  /// badge pops after the fade); it can only load once the schedule's
-  /// gameweeks are known.
-  Map<int, ChipHistoryEntry> _chipHistory = const {};
-  bool _chipsLoaded = false;
-  List<int>? _chipWeeks; // gameweek numbers the chip feed listens to
 
   /// First-open walkthrough (spec §10a): null while the prefs flag loads,
   /// false = show the intro, true = straight to the hub.
@@ -192,13 +213,10 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   final StreamController<FantasySquadAlert?> _alertForTabs =
       StreamController<FantasySquadAlert?>.broadcast();
 
-  StreamSubscription<FantasyConfigState?>? _configSub;
   StreamSubscription<List<FantasyPlayer>>? _playersSub;
-  StreamSubscription<List<Gameweek>>? _gameweeksSub;
   StreamSubscription<FantasyManager?>? _managerSub;
   StreamSubscription<FantasySquad?>? _squadSub;
   StreamSubscription<FantasySquadAlert?>? _alertSub;
-  StreamSubscription<Map<int, ChipHistoryEntry>>? _chipSub;
 
   /// The push-tapped news post still to focus; cleared once the News tab
   /// has resolved it so a remounted tab (far tab swipes) never re-focuses.
@@ -228,24 +246,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     FantasyPrefs.hasSeenWalkthrough().then((seen) {
       if (mounted) setState(() => _walkthroughSeen = seen);
     });
-    _configSub = (widget.configStates ??
-            FantasyService.watchConfig(widget.sport, widget.season))
-        .listen((s) {
-      if (!mounted) return;
-      setState(() {
-        _configState = s;
-        if (s != null) {
-          if (_draft == null) {
-            _draft = SquadDraftController(
-                config: s.config, initial: _squadLoaded ? _squad : null);
-          } else {
-            _draft!.syncConfig(s.config);
-          }
-        }
-      });
-      _configForRules.add(s);
-      if (s != null) _subscribeGameweeks(s);
-    });
+    _schedule.start();
     _playersSub = (widget.playersStates ??
             FantasyService.watchPlayers(widget.sport, widget.season))
         .listen((p) {
@@ -298,64 +299,28 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     });
   }
 
-  /// Gameweeks derive from the real schedule WITH the config's lock hour —
-  /// resubscribe only when that hour actually changes (config tweaks that
-  /// don't move deadlines shouldn't restart the stream).
-  void _subscribeGameweeks(FantasyConfigState s) {
-    if (_gameweeksLockHour == s.config.lockHour) return;
-    _gameweeksLockHour = s.config.lockHour;
-    _gameweeksSub?.cancel();
-    _gameweeksSub = (widget.gameweekStates ??
-            FantasyService.watchGameweeks(
-                widget.sport, widget.season, s.config))
-        .listen((gws) {
-      if (!mounted) return;
-      setState(() => _gameweeks = gws);
-      _subscribeChips(gws);
-    }, onError: (Object _) {
-      // No schedule → no chip feed: never hold the hub on the skeleton.
-      if (mounted) setState(() => _chipsLoaded = true);
-    });
-  }
-
-  /// (Re)subscribes the chip-usage feed when the schedule's gameweek list
-  /// changes — the same numbers keep the running listeners (and the badges)
-  /// untouched, so a config/schedule re-emit never flickers them.
-  void _subscribeChips(List<Gameweek> gws) {
-    final weeks = [for (final g in gws) g.number];
-    final known = _chipWeeks;
-    if (known != null &&
-        known.length == weeks.length &&
-        Iterable<int>.generate(weeks.length)
-            .every((i) => known[i] == weeks[i])) {
-      return;
+  /// Every real Config emission: the ONE shared draft is created on the
+  /// first config (seeded with the saved squad once it is known) and follows
+  /// later config changes; the Rules tab's re-listenable feed gets it too.
+  void _onConfig(FantasyConfigState? s) {
+    if (s != null) {
+      if (_draft == null) {
+        _draft = SquadDraftController(
+            config: s.config, initial: _squadLoaded ? _squad : null);
+      } else {
+        _draft!.syncConfig(s.config);
+      }
     }
-    _chipWeeks = weeks;
-    _chipSub?.cancel();
-    _chipSub = (widget.chipHistoryFor?.call(weeks) ??
-            FantasyService.watchMyChipHistoryAuto(
-                widget.sport, widget.season, weeks))
-        .listen((history) {
-      if (!mounted) return;
-      setState(() {
-        _chipHistory = history;
-        _chipsLoaded = true;
-      });
-    }, onError: (Object _) {
-      // A failed History read just means no usage shown ("1 left").
-      if (mounted) setState(() => _chipsLoaded = true);
-    });
+    _configForRules.add(s);
   }
 
   @override
   void dispose() {
-    _configSub?.cancel();
+    _schedule.dispose();
     _playersSub?.cancel();
-    _gameweeksSub?.cancel();
     _managerSub?.cancel();
     _squadSub?.cancel();
     _alertSub?.cancel();
-    _chipSub?.cancel();
     _configForRules.close();
     _managerForTabs.close();
     _squadForTabs.close();

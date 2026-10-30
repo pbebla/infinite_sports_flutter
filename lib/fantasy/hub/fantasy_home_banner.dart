@@ -17,7 +17,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
-import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
@@ -52,27 +52,28 @@ class FantasyHomeBanner extends StatefulWidget {
 }
 
 class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
-  FantasyConfigState? _config;
-  List<Gameweek> _gameweeks = const [];
-  int? _gameweeksLockHour; // lockHour the gameweek stream was derived with
-
-  StreamSubscription<FantasyConfigState?>? _configSub;
-  StreamSubscription<List<Gameweek>>? _gameweeksSub;
+  /// Config → schedule gameweeks (the shared wiring: lock-hour resubscribe,
+  /// a removed Config clears the schedule, errors logged with the last good
+  /// value kept — offline before any config, the banner stays hidden).
+  late final FantasyScheduleFeed<Object> _schedule = FantasyScheduleFeed(
+    sport: widget.sport,
+    season: widget.season,
+    owner: 'FantasyHomeBanner',
+    onChanged: () {
+      if (mounted) setState(() {});
+    },
+    configStates: widget.configStates,
+    gameweekStates: widget.gameweeksStates,
+  );
   Timer? _ticker;
+
+  FantasyConfigState? get _config => _schedule.config;
+  List<Gameweek> get _gameweeks => _schedule.gameweeks ?? const [];
 
   @override
   void initState() {
     super.initState();
-    _configSub = (widget.configStates ??
-            FantasyService.watchConfig(widget.sport, widget.season))
-        .listen((s) {
-      if (!mounted) return;
-      setState(() => _config = s);
-      if (s != null) _subscribeGameweeks(s);
-    }, onError: (Object _) {
-      // Offline/unreachable: the banner simply stays hidden.
-      if (mounted) setState(() => _config = null);
-    });
+    _schedule.start();
     // 60s refresh keeps the countdown text honest (information, not
     // decoration — no per-tick animation); cancelled in dispose.
     _ticker = Timer.periodic(const Duration(seconds: 60), (_) {
@@ -80,28 +81,9 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
     });
   }
 
-  /// Gameweeks derive from the real schedule WITH the config's lock hour —
-  /// resubscribe only when that hour actually changes (hub pattern).
-  void _subscribeGameweeks(FantasyConfigState s) {
-    if (widget.gameweeksStates == null &&
-        _gameweeksLockHour == s.config.lockHour) {
-      return;
-    }
-    if (widget.gameweeksStates != null && _gameweeksSub != null) return;
-    _gameweeksLockHour = s.config.lockHour;
-    _gameweeksSub?.cancel();
-    _gameweeksSub = (widget.gameweeksStates ??
-            FantasyService.watchGameweeks(
-                widget.sport, widget.season, s.config))
-        .listen((gws) {
-      if (mounted) setState(() => _gameweeks = gws);
-    });
-  }
-
   @override
   void dispose() {
-    _configSub?.cancel();
-    _gameweeksSub?.cancel();
+    _schedule.dispose();
     _ticker?.cancel();
     super.dispose();
   }
