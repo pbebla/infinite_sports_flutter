@@ -54,6 +54,7 @@ import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_p
 import 'package:infinite_sports_flutter/fantasy/profile/profile_common.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 
 class FantasyPlayersTab extends StatefulWidget {
   const FantasyPlayersTab({
@@ -785,7 +786,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
                     // otherwise gold on dark (mockup), plain text on light
                     // (the light accent is red — it would read "too dear").
                     color: unaffordable
-                        ? scheme.error
+                        ? fantasyDownRed(context)
                         : (isDark ? fantasyAccent(context) : scheme.onSurface),
                   ),
                 ),

@@ -21,6 +21,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/squad_builder.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 
 FantasyPlayer player(String name, FantasyPosition pos, int price,
         {bool eligible = true, String team = 'Team A'}) =>
@@ -750,7 +751,7 @@ void main() {
     // $46.0M of $50.0M spent: everyone above $4.0M flips unaffordable.
     final context =
         tester.element(find.byKey(const ValueKey('players_market')));
-    final errorColor = Theme.of(context).colorScheme.error;
+    final errorColor = fantasyDownRed(context);
     final price = tester
         .widget<Text>(find.byKey(const ValueKey('market_price_Dana Wall')));
     expect(price.style?.color, errorColor);

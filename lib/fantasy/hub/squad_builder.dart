@@ -484,7 +484,7 @@ class _BudgetBar extends StatelessWidget {
                   fontWeight: FontWeight.w800,
                   // onSurface (white in dark, near-black in light) — the
                   // error color is reserved for the over-budget state.
-                  color: over ? scheme.error : scheme.onSurface,
+                  color: over ? fantasyDownRed(context) : scheme.onSurface,
                 ),
               ),
             ],
@@ -500,7 +500,7 @@ class _BudgetBar extends StatelessWidget {
               builder: (context, value, _) => LinearProgressIndicator(
                 value: value,
                 minHeight: 7,
-                color: over ? scheme.error : green,
+                color: over ? fantasyDownRed(context) : green,
                 backgroundColor: scheme.outlineVariant.withValues(alpha: 0.4),
               ),
             ),
@@ -722,7 +722,7 @@ class _IssueList extends StatelessWidget {
                   Icons.info_outline,
                   size: 15,
                   color: issue.contains('over budget')
-                      ? scheme.error
+                      ? fantasyDownRed(context)
                       : scheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 7),
@@ -734,7 +734,7 @@ class _IssueList extends StatelessWidget {
                       fontSize: 12.5,
                       height: 1.3,
                       color: issue.contains('over budget')
-                          ? scheme.error
+                          ? fantasyDownRed(context)
                           : scheme.onSurfaceVariant,
                     ),
                   ),

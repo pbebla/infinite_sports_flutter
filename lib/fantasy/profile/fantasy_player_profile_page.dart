@@ -53,6 +53,7 @@ import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 
 /// The shape of [openFantasyPlayerProfile] — the seam type for every caller
 /// that opens a profile (the hub's one opener, the match page's rows): tests
@@ -866,7 +867,7 @@ class _DraftAction extends StatelessWidget {
               fontSize: 12,
               fontWeight: FontWeight.w600,
               color: availability == MarketAddAvailability.unaffordable
-                  ? scheme.error
+                  ? fantasyDownRed(context)
                   : scheme.onSurfaceVariant,
             ),
           ),

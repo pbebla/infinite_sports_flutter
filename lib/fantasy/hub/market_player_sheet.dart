@@ -16,6 +16,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/market_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 
 Future<void> showMarketPlayerSheet(
   BuildContext context, {
@@ -187,7 +188,7 @@ class _EligibilityBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final tone = eligible ? fantasyAccent(context) : scheme.error;
+    final tone = eligible ? fantasyAccent(context) : fantasyDownRed(context);
     return Container(
       key: ValueKey(eligible ? 'badge_eligible' : 'badge_not_eligible'),
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
@@ -359,7 +360,7 @@ class _SheetAction extends StatelessWidget {
               fontSize: 12,
               fontWeight: FontWeight.w600,
               color: availability == MarketAddAvailability.unaffordable
-                  ? scheme.error
+                  ? fantasyDownRed(context)
                   : scheme.onSurfaceVariant,
             ),
           ),

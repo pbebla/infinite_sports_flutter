@@ -34,6 +34,15 @@ Color fantasyPitchGreen(BuildContext context) =>
         ? const Color(0xFF2E8B57)
         : const Color(0xFF2FA05A);
 
+/// The fantasy "down" red — price falls, places lost, negative points,
+/// over budget. A clear, bright red in both themes (owner 2026-10-30: the
+/// Material dark-mode error tone read as a soft pink). ≥4.5:1 on the hub's
+/// dark and light surfaces. Error *containers* keep the scheme roles.
+Color fantasyDownRed(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFFFF5252)
+        : const Color(0xFFD32F2F);
+
 /// Owner's pick: render his "Neon Gold Isometric Soccer Pitch" artwork as the
 /// pitch instead of the code-drawn trapezoid. Flip to false to fall back to
 /// the painter (kept intact below).

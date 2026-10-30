@@ -12,7 +12,7 @@ Color profileUpColor(BuildContext context) => fantasyPitchGreen(context);
 
 /// Price/points falling tone.
 Color profileDownColor(BuildContext context) =>
-    Theme.of(context).colorScheme.error;
+    fantasyDownRed(context);
 
 /// The tone for a signed move (null/0 = muted).
 Color profileMoveColor(BuildContext context, int? move) {

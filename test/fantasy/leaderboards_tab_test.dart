@@ -357,7 +357,7 @@ void main() {
         expect(cell('u1').data, '▲2');
         expect(cell('u1').style!.color, fantasyPitchGreen(context));
         expect(cell('u2').data, '▼1');
-        expect(cell('u2').style!.color, scheme.error);
+        expect(cell('u2').style!.color, fantasyDownRed(context));
         expect(cell('u3').data, '—');
         expect(cell('u3').style!.color, scheme.onSurfaceVariant);
         expect(cell('u4').data, '—');

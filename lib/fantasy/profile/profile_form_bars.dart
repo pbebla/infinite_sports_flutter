@@ -10,6 +10,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 
 class FantasyFormBars extends StatelessWidget {
   const FantasyFormBars({
@@ -50,7 +51,7 @@ class FantasyFormBars extends StatelessWidget {
                       : _stub,
                   tone: b.voided
                       ? scheme.onSurfaceVariant.withValues(alpha: 0.35)
-                      : (b.points < 0 ? scheme.error : accent),
+                      : (b.points < 0 ? fantasyDownRed(context) : accent),
                   selected: b.gw == selectedGw,
                   onTap: onTapBar == null ? null : () => onTapBar!(b.gw),
                 ),

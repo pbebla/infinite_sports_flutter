@@ -34,7 +34,7 @@ const double _afterAvatarGap = 10;
 /// in both themes), error down, muted neutral.
 Color movementColor(BuildContext context, MovementDirection d) => switch (d) {
       MovementDirection.up => fantasyPitchGreen(context),
-      MovementDirection.down => Theme.of(context).colorScheme.error,
+      MovementDirection.down => fantasyDownRed(context),
       MovementDirection.none => Theme.of(context).colorScheme.onSurfaceVariant,
     };
 

@@ -23,6 +23,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 
 class MiniLeaguesView extends StatefulWidget {
   const MiniLeaguesView({
@@ -466,7 +467,7 @@ class _CreateLeagueDialogState extends State<_CreateLeagueDialog> {
             Text(
               _error!,
               softWrap: true,
-              style: TextStyle(fontSize: 12.5, color: scheme.error),
+              style: TextStyle(fontSize: 12.5, color: fantasyDownRed(context)),
             ),
           ],
         ],
@@ -616,7 +617,7 @@ class _JoinLeagueDialogState extends State<_JoinLeagueDialog> {
             Text(
               _error!,
               softWrap: true,
-              style: TextStyle(fontSize: 12.5, color: scheme.error),
+              style: TextStyle(fontSize: 12.5, color: fantasyDownRed(context)),
             ),
           ],
         ],

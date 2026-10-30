@@ -21,11 +21,12 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/market_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 
 /// Price-move text color: a deeper green on light surfaces and a lighter
 /// green on dark ones (≥4.5:1 on the news card in both), error for drops.
 Color newsPriceMoveColor(BuildContext context, {required bool up}) {
-  if (!up) return Theme.of(context).colorScheme.error;
+  if (!up) return fantasyDownRed(context);
   return Theme.of(context).brightness == Brightness.dark
       ? const Color(0xFF6FD08C)
       : const Color(0xFF17692F);

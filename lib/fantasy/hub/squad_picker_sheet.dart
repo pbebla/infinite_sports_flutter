@@ -22,6 +22,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 
 Future<FantasyPlayer?> showSquadPickerSheet(
   BuildContext context, {
@@ -111,7 +112,7 @@ class _PickerSheetState extends State<_PickerSheet> {
                       fontSize: 12.5,
                       fontWeight: FontWeight.w600,
                       color: widget.remainingTenths < 0
-                          ? scheme.error
+                          ? fantasyDownRed(context)
                           : scheme.onSurfaceVariant,
                     ),
                   ),
@@ -236,7 +237,7 @@ class _PickerSheetState extends State<_PickerSheet> {
                   fontSize: 13.5,
                   fontWeight: FontWeight.w700,
                   // Unaffordable = the price itself carries the warning.
-                  color: affordable ? scheme.onSurface : scheme.error,
+                  color: affordable ? scheme.onSurface : fantasyDownRed(context),
                 ),
               ),
             ],
@@ -307,7 +308,7 @@ Future<SquadChipAction?> showSquadChipActions(
                 SquadChipAction.swap),
             tile(const ValueKey('action_remove'), Icons.person_remove_outlined,
                 'Remove', SquadChipAction.remove,
-                color: scheme.error),
+                color: fantasyDownRed(context)),
             const SizedBox(height: 4),
           ],
         ),

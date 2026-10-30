@@ -33,6 +33,7 @@ import 'package:infinite_sports_flutter/fantasy/match/match_fantasy_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_page.dart';
 import 'package:infinite_sports_flutter/widgets/forfeit_chip.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 
 class MatchFantasyTab extends StatefulWidget {
   const MatchFantasyTab({
@@ -508,7 +509,7 @@ class _PointsRow extends StatelessWidget {
                 fontSize: 15,
                 fontWeight: FontWeight.w800,
                 fontFeatures: const [FontFeature.tabularFigures()],
-                color: row.points < 0 ? scheme.error : scheme.onSurface,
+                color: row.points < 0 ? fantasyDownRed(context) : scheme.onSurface,
               ),
             ),
           ),
