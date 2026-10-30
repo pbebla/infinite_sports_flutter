@@ -161,6 +161,10 @@ void main() {
     }
   }
 
+  final marketScrollable = find.descendant(
+      of: find.byKey(const ValueKey('market_list')),
+      matching: find.byType(Scrollable));
+
   IconData? sortArrow(WidgetTester tester) =>
       tester.widget<Icon>(find.byKey(const ValueKey('market_sort_dir'))).icon;
 
@@ -727,6 +731,45 @@ void main() {
     }
   });
 
+  testWidgets(
+      'the Price Changes card follows every eligible row and sits '
+      'before the "Not eligible" guests (owner\'s mockup)', (tester) async {
+    await pumpTab(tester);
+    await land(
+      tester,
+      totalsValue: someTotals,
+      changesValue: const {
+        2: {'Ava Striker': 5, 'Deb Rock': -2},
+      },
+    );
+    // The player rows lead the market — the first row is the list's first
+    // item, right under the sort bar.
+    expect(
+        rowY(tester, 'Gus Glove'),
+        lessThan(tester
+                .getBottomLeft(find.byKey(const ValueKey('market_sort_points')))
+                .dy +
+            40));
+    final cardTop =
+        tester.getTopLeft(find.byKey(const ValueKey('price_movers_card'))).dy;
+    for (final name in [
+      'Alan Keeper',
+      'Gus Glove',
+      'Dana Wall',
+      'Deb Rock',
+      'Ava Striker',
+      'Axel Shot',
+    ]) {
+      expect(rowY(tester, name), lessThan(cardTop), reason: name);
+    }
+    expect(
+        cardTop,
+        lessThan(tester
+            .getTopLeft(find.byKey(const ValueKey('not_eligible_divider')))
+            .dy));
+    expect(cardTop, lessThan(rowY(tester, 'Guest Guy')));
+  });
+
   // Review Focus 4: long names at 360 px — market rows and the risers /
   // fallers card (and its View all sheet) wrap without overflow, light AND
   // dark.
@@ -764,8 +807,17 @@ void main() {
         watchlistValue: {longName},
       );
       expect(tester.takeException(), isNull);
-      expect(find.byKey(const ValueKey('price_movers_card')), findsOneWidget);
+      // The player rows lead (above the fold); the card follows them.
       expect(find.byKey(ValueKey('market_row_$longName')), findsOneWidget);
+      await tester.scrollUntilVisible(
+          find.byKey(const ValueKey('price_movers_card')), 150,
+          scrollable: marketScrollable);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('price_movers_card')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.drag(
+          find.byKey(const ValueKey('market_list')), const Offset(0, 3000));
+      await tester.pumpAndSettle();
 
       // Search open + unsaved pill + every sort.
       await tester.tap(find.byKey(const ValueKey('market_search_toggle')));
@@ -779,15 +831,22 @@ void main() {
         expect(tester.takeException(), isNull, reason: 'sort $s overflowed');
       }
 
-      // Scroll the whole list (guests at the bottom).
+      // Scroll the whole list — through the card to the guests at the
+      // bottom.
       await tester.drag(
-          find.byKey(const ValueKey('market_list')), const Offset(0, -2000));
+          find.byKey(const ValueKey('market_list')), const Offset(0, -3000));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+      expect(
+          find.byKey(ValueKey('market_row_$longName Guest')), findsOneWidget);
       await tester.drag(
-          find.byKey(const ValueKey('market_list')), const Offset(0, 2000));
+          find.byKey(const ValueKey('market_list')), const Offset(0, 3000));
       await tester.pumpAndSettle();
 
+      await tester.scrollUntilVisible(
+          find.byKey(const ValueKey('price_movers_view_all')), 150,
+          scrollable: marketScrollable);
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('price_movers_view_all')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('price_moves_sheet')), findsOneWidget);

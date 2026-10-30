@@ -14,9 +14,10 @@
 // (survives filter changes and tab swipes). Without totals the market reads
 // Price and the other pills are dead with a reason.
 //
-// The Price Risers / Price Fallers card (price_movers_card.dart) heads the
-// list once the latest reprice moved somebody. Every row / mover tap opens
-// the full fantasy player profile (with the shared draft).
+// The Price Risers / Price Fallers card (price_movers_card.dart) follows the
+// eligible rows (owner's mockup — the rows stay above the fold), before the
+// guests block, once the latest reprice moved somebody. Every row / mover
+// tap opens the full fantasy player profile (with the shared draft).
 //
 // Data, all live streams (no RTDB get()): PlayerTotals, every PriceChanges
 // week (the latest is "this week"), the league games (next game; the season
@@ -523,10 +524,15 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
           move: latest?.changes[p.name],
         );
 
-    final rowCount = market.eligible.length +
-        (market.ineligible.isEmpty ? 0 : 1 + market.ineligible.length);
-    final lead = moves == null ? 0 : 1;
-    final itemCount = lead + (rowCount == 0 ? 1 : rowCount);
+    // List order (owner's mockup): the eligible rows (or the empty state),
+    // then the Price Changes card, then the "Not eligible" guests block —
+    // the player rows stay above the fold, the card never splits a section.
+    final rowCount = market.eligible.length + market.ineligible.length;
+    final mainCount = rowCount == 0 ? 1 : market.eligible.length;
+    final cardCount = moves == null ? 0 : 1;
+    final guestCount =
+        market.ineligible.isEmpty ? 0 : 1 + market.ineligible.length;
+    final itemCount = mainCount + cardCount + guestCount;
 
     return Column(
       key: const ValueKey('players_market'),
@@ -600,9 +606,17 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
                 0, 4, 0, 24 + MediaQuery.paddingOf(context).bottom),
             itemCount: itemCount,
             itemBuilder: (context, i) {
-              if (moves != null && i == 0) {
+              if (i < mainCount) {
+                return rowCount == 0
+                    ? _EmptyMarket(
+                        watchlistEmpty: watchlistOnly && _watchlist.isEmpty,
+                      )
+                    : row(market.eligible[i]);
+              }
+              var k = i - mainCount;
+              if (moves != null && k == 0) {
                 return Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
                   child: PriceMoversCard(
                     key: const ValueKey('price_movers_card'),
                     gameweek: moves.gameweek,
@@ -618,14 +632,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
                   ),
                 );
               }
-              final j = i - lead;
-              if (rowCount == 0) {
-                return _EmptyMarket(
-                  watchlistEmpty: watchlistOnly && _watchlist.isEmpty,
-                );
-              }
-              if (j < market.eligible.length) return row(market.eligible[j]);
-              final k = j - market.eligible.length;
+              k -= cardCount;
               if (k == 0) return const _NotEligibleDivider();
               return row(market.ineligible[k - 1]);
             },
