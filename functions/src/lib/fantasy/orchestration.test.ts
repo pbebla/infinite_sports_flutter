@@ -6,6 +6,7 @@
 // below), never copied from pipeline output.
 
 import { describe, expect, it } from 'vitest';
+import { STARTER_CATALOG } from './badges';
 import { clone, Json, loadGoldenFixture } from './golden_fixture';
 import {
   maybeFinalizeGame, runLifecycleSweep, runMondayReprice,
@@ -241,6 +242,10 @@ describe('lifecycle sweep (Phase B)', () => {
   it("lockOverride 'locked'/'open' freezes the machine (zero writes)", async () => {
     for (const lockOverride of ['locked', 'open']) {
       const db = new FakeDb(world({ lockOverride }));
+      // The global badge catalog is seeded on every run, frozen or not
+      // (badges.test.ts); with it already in place the frozen season gets
+      // zero writes.
+      db.data.Fantasy.BadgeCatalog = clone(STARTER_CATALOG);
       await runLifecycleSweep(db, AFTER_LOCK);
       expect(db.writes).toEqual([]);
     }

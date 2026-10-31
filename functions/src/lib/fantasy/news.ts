@@ -365,8 +365,8 @@ export function newsAutopilotConfigFrom(
 
 /** League-local wall clock of an instant, as a Date whose UTC fields read
  *  the league time (America/Los_Angeles via isPacificDst — the same
- *  offset rule as the lock math). */
-function leagueWallClock(instantUtc: Date): Date {
+ *  offset rule as the lock math). Also the badges' cabinet Date. */
+export function leagueWallClock(instantUtc: Date): Date {
   const guess = new Date(instantUtc.getTime() - 8 * 3_600_000);
   const guessDay = new Date(Date.UTC(
     guess.getUTCFullYear(), guess.getUTCMonth(), guess.getUTCDate()));

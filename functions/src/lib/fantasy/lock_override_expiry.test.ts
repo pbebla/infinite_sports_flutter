@@ -8,6 +8,8 @@
 // two-gameweek world (GW1 finalized, GW2 open, lock 2026-06-28 22:00Z).
 
 import { describe, expect, it } from 'vitest';
+import { STARTER_CATALOG } from './badges';
+import { clone } from './golden_fixture';
 import {
   FantasyLogger, maybeFinalizeGame, recordSquadSave, resettleVoidToggle,
   runLifecycleSweep, runMondayReprice,
@@ -28,6 +30,9 @@ function overridden(
   opts: Parameters<typeof world2>[0] = {},
 ): FakeDb {
   const db = new FakeDb(world2(opts));
+  // Steady state: earlier sweeps already seeded the global badge catalog, so
+  // every write below is this season's (a frozen season: none at all).
+  db.data.Fantasy.BadgeCatalog = clone(STARTER_CATALOG);
   const config = db.data.Fantasy.Futsal['15'].Config;
   config.lockOverride = lockOverride;
   if (untilMs !== undefined) config.lockOverrideUntil = untilMs;

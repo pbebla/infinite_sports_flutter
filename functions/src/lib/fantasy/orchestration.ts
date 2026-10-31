@@ -75,6 +75,13 @@
 //   the due ones — even while lockOverride freezes the engine): the shape
 //   and the SentAt claim live in messages.ts.
 //
+// - Badges/<uid>/<awardId>, BadgePushClaims/<uid>/<awardId> and the global
+//   Fantasy/BadgeCatalog (achievement badges, spec 2026-10-30): shapes, the
+//   rerun-exact reconcile, the season-end rule and the trophy-cabinet copy
+//   live in badges.ts, the once-only push in badge_push.ts. Finalize settles
+//   week N's auto awards and then the season end; the sweep seeds the
+//   catalog and checks the season end (sweep mode).
+//
 // - Voided/<gw> = true (READ-only here; the Manager's "VOID week" toggle
 //   writes true or removes it — spec §15). A voided week settles to zero
 //   (finalize_core.ts VOIDED GAMEWEEKS), its transfer cost is waived (the
@@ -110,6 +117,9 @@ import {
   configFromMap, FANTASY_POSITIONS, FantasyConfig,
 } from './fantasy_config';
 import { FetchLike } from '../support';
+import {
+  seedBadgeCatalog, settleSeasonBadges, settleWeeklyBadges,
+} from './badges';
 import {
   computeGameweekFinalize, FinalizeGame, MarketPlayer,
 } from './finalize_core';
@@ -861,6 +871,37 @@ export async function finalizeGameweek(
     }
   }
 
+  // Achievement badges (spec 2026-10-30 §4; badges.ts), last so a badge
+  // problem can never hold up the scores, the recap or the news: week N's
+  // auto awards re-settled from THIS run's outputs (rerun-exact — added and
+  // removed; a voided week keeps none; manual awards never touched), then
+  // the season-end awards whenever the season is over (a late score
+  // correction re-settles the placements + the trophy cabinet). A failure
+  // is logged and never fails the finalize (the sweep's backstop loop and
+  // its later steps must still run); the week's next rerun re-settles.
+  if (Object.keys(out.historyByUid).length > 0) {
+    try {
+      const dreamTeamForBadges = voided
+        ? null
+        : out.dreamTeam ?? await db.read(`${root}/DreamTeam/${gw.number}`);
+      await settleWeeklyBadges(db, {
+        sport, season, gw: gw.number,
+        squadsByUid: out.historyByUid,
+        playerWeeks: out.playerWeeks,
+        playedByName: Object.fromEntries(Object.entries(out.playerWeekStats)
+          .map(([name, e]) => [name, e.Played])),
+        dreamTeamNames: dreamTeamNames(dreamTeamForBadges),
+        gameweekBoard: out.gameweekBoard,
+        voided,
+        nowMs: args.nowUtc.getTime(),
+        log,
+      });
+      await settleSeasonBadges(db, { sport, season, cfg, nowUtc: args.nowUtc, log });
+    } catch (err) {
+      log.warn('fantasy badges: settle failed', { ...ctx, error: String(err) });
+    }
+  }
+
   const managers = Object.keys(out.historyByUid).length;
   log.info('fantasy gameweek finalized', {
     ...ctx, source, managers, games: gameNodes.length,
@@ -1174,6 +1215,22 @@ async function sweepSeason(
     await finalizeGameweek(db, { sport, season, cfg, gw, nowUtc, log, deps });
   }
 
+  // 2a. Season-end badges (spec 2026-10-30 §4): the league may flag the
+  //     season Finished AFTER its last finalize, so the sweep checks too —
+  //     but only settles a season holding no auto season award yet (every
+  //     later re-settle comes from a finalize rerun; badges.ts SEASON END).
+  //     Before the season-over return below, which is exactly when it fires.
+  //     A failure is logged (the next sweep retries — still unsettled) and
+  //     never blocks the steps below.
+  try {
+    await settleSeasonBadges(db, {
+      sport, season, cfg, nowUtc, log, onlyIfUnsettled: true,
+    });
+  } catch (err) {
+    log.warn('fantasy badges: season-end check failed',
+      { ...ctx, error: String(err) });
+  }
+
   // 2b. News draft auto-publish (spec 2026-10-28 §4.4): ANY draft — autopilot
   //     'dreamteam'/'ai' or an owner-scheduled 'owner' post — whose
   //     AutoPublishAt is due publishes itself to News/Published (the §4.1
@@ -1283,12 +1340,24 @@ async function sweepSeason(
 }
 
 /** The 15-minute scheduled sweep over every fantasy-enabled season. One
- *  season's failure never starves the others. */
+ *  season's failure never starves the others. Every run first seeds the
+ *  global badge catalog (Fantasy/BadgeCatalog, set-if-absent per starter
+ *  id — owner edits are never overwritten) from the Fantasy node it reads
+ *  anyway, so the catalog exists for the Manager and the fan app even while
+ *  every season is paused; the sibling is skipped by fantasySeasonsOf (no
+ *  Config). */
 export async function runLifecycleSweep(
   db: FantasyDb, nowUtc: Date, log: FantasyLogger = silent,
   deps?: FantasyJobDeps,
 ): Promise<void> {
-  const seasons = fantasySeasonsOf(await db.read('Fantasy'));
+  const fantasyNode = await db.read('Fantasy');
+  try {
+    await seedBadgeCatalog(db,
+      isPlainMap(fantasyNode) ? fantasyNode['BadgeCatalog'] ?? null : null, log);
+  } catch (err) {
+    log.warn('fantasy badges: catalog seeding failed', { error: String(err) });
+  }
+  const seasons = fantasySeasonsOf(fantasyNode);
   for (const ref of seasons) {
     try {
       await sweepSeason(db, ref, nowUtc, log, deps);
