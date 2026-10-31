@@ -350,6 +350,10 @@
       }
     },
     "Fantasy": {
+      "BadgeCatalog": {
+        ".read": true,
+        ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+      },
       "$sport": {
         "$season": {
           "Config": {
@@ -461,6 +465,14 @@
           "DreamTeam": {
             ".read": true,
             ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+          },
+          "Badges": {
+            ".read": true,
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+          },
+          "BadgePushClaims": {
+            ".read": false,
+            ".write": false
           },
           "Analytics": {
             ".read": "auth != null && root.child('Admins').child(auth.uid).exists()"
