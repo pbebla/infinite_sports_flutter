@@ -117,6 +117,85 @@ void main() {
     });
   });
 
+  // ─── Infinite Fantasy podium copies (badges spec 2026-10-30 §3) ────────────
+  // The server writes season-end Champion / Runner-up / Third place into
+  // Users/<uid>/Awards with ScopeType 'fantasy' (functions badges.ts
+  // cabinetAwardFor) — the exact row shape is parsed here.
+
+  group('fantasy awards in the cabinet', () {
+    Award fantasy(String season,
+            {String badge = 'champion',
+            String name = 'Champion',
+            String tier = 'gold',
+            String icon = 'trophy_gold'}) =>
+        Award.fromMap('fantasy_${badge}_fantasy_Futsal_$season', {
+          'TrophyId': 'fantasy_$badge',
+          'Name': name,
+          'Icon': icon,
+          'IconType': 'builtin',
+          'Tier': tier,
+          'Sport': 'Futsal',
+          'ScopeType': 'fantasy',
+          'ScopeId': 'Futsal/$season',
+          'Season': season,
+          'Edition': '',
+          'Context': 'Infinite Fantasy',
+          'Date': '11032026',
+          'Source': 'auto',
+        });
+
+    test('the label: "Infinite Fantasy · Futsal Season 15"; null for any '
+        'other award', () {
+      expect(fantasyAwardLine(fantasy('15')),
+          'Infinite Fantasy · Futsal Season 15');
+      expect(fantasyAwardLine(_award(id: 'x', context: 'Summer Cup')), isNull);
+    });
+
+    testWidgets('renders (no crash): name + "Infinite Fantasy"; the sheet '
+        'says which fantasy season', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: TrophyCabinet(awards: [
+            fantasy('15'),
+            fantasy('15',
+                badge: 'runnerUp',
+                name: 'Runner-up',
+                tier: 'silver',
+                icon: 'medal'),
+          ]),
+        ),
+      ));
+      expect(tester.takeException(), isNull);
+      expect(find.text('Champion'), findsOneWidget);
+      expect(find.text('Runner-up'), findsOneWidget);
+      expect(find.text('Infinite Fantasy'), findsNWidgets(2));
+      expect(find.byIcon(Icons.emoji_events), findsOneWidget); // trophy_gold
+      expect(find.byIcon(Icons.military_tech), findsOneWidget); // medal
+
+      await tester.tap(find.text('Champion'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Infinite Fantasy · Futsal Season 15'),
+          findsOneWidget);
+      expect(find.textContaining('Nov 3, 2026'), findsOneWidget);
+    });
+
+    testWidgets('two fantasy seasons group ×2 and still say "Infinite '
+        'Fantasy" (never a bare "Champion")', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: TrophyCabinet(awards: [fantasy('14'), fantasy('15')]),
+        ),
+      ));
+      expect(find.text('×2'), findsOneWidget);
+      expect(find.text('Infinite Fantasy'), findsOneWidget);
+
+      await tester.tap(find.text('Champion'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Futsal Season 14'), findsOneWidget);
+      expect(find.textContaining('Futsal Season 15'), findsOneWidget);
+    });
+  });
+
   // ─── CareerRow ──────────────────────────────────────────────────────────────
 
   group('CareerRow', () {
