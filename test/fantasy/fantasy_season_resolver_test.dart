@@ -102,6 +102,26 @@ void main() {
     }
   });
 
+  test('badges: Fantasy/BadgeCatalog sits beside the sports — a pointer that '
+      'names it is never a sport (no probe)', () async {
+    final f = fake({'BadgeCatalog/15', 'BadgeCatalog/captainGenius'});
+    for (final season in ['15', 'captainGenius']) {
+      expect(
+          await pickFantasySeason(
+              sport: ' BadgeCatalog ',
+              currentSeason: season,
+              hasConfig: f.probe),
+          isNull);
+    }
+    expect(f.calls, isEmpty);
+    final r = await resolveFantasySeasonWith(
+      readSport: () async => 'BadgeCatalog',
+      readSeason: (_) async => '15',
+      hasConfig: f.probe,
+    );
+    expect(r.isNone, isTrue);
+  });
+
   test('a failing probe propagates (the wrapper turns it into an error)', () {
     expect(
         pickFantasySeason(

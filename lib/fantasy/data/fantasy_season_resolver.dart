@@ -26,6 +26,8 @@
 // [resolveFantasySeason] are not (repo convention).
 
 import 'package:firebase_database/firebase_database.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart'
+    show kFantasyReservedRootKeys;
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 
 /// A resolved fantasy season.
@@ -76,9 +78,11 @@ const int _probeBatch = 6;
 /// Pure decision core. [hasConfig] answers "does
 /// `Fantasy/<sport>/<season>/Config` exist?" (a failing probe propagates).
 /// Returns null when [sport]/[currentSeason] aren't usable path segments (an
-/// unset pointer, or the pointer reader's error text), or when no season in
-/// reach has a Config. A non-numeric [currentSeason] can only be checked
-/// directly — there is no season to count down from.
+/// unset pointer, or the pointer reader's error text), when [sport] is one of
+/// the non-sport keys under `Fantasy/` (`BadgeCatalog` — the global badge
+/// catalog sits beside the sports), or when no season in reach has a Config.
+/// A non-numeric [currentSeason] can only be checked directly — there is no
+/// season to count down from.
 Future<FantasySeasonKey?> pickFantasySeason({
   required String sport,
   required String currentSeason,
@@ -87,7 +91,11 @@ Future<FantasySeasonKey?> pickFantasySeason({
 }) async {
   final s = sport.trim();
   final current = currentSeason.trim();
-  if (!_usableSegment(s) || !_usableSegment(current)) return null;
+  if (!_usableSegment(s) ||
+      !_usableSegment(current) ||
+      kFantasyReservedRootKeys.contains(s)) {
+    return null;
+  }
 
   if (await hasConfig(s, current)) return (sport: s, season: current);
 

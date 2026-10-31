@@ -13,6 +13,7 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
@@ -47,6 +48,12 @@ class FantasyService {
   static final Map<String, Set<String>> _watchlistCache = {};
   // The league's own season-over flag, keyed `<sport>/<season>`.
   static final Map<String, bool> _seasonFinishedCache = {};
+  // Achievement badges: the GLOBAL catalog, a season's whole Badges node
+  // (keyed `<root>`) and one manager's awards (keyed `<root>|<uid>`).
+  static FantasyBadgeCatalog? _badgeCatalogCache;
+  static final Map<String, Map<String, List<FantasyBadgeAward>>> _badgesCache =
+      {};
+  static final Map<String, List<FantasyBadgeAward>> _badgesForCache = {};
 
   /// Clears the session caches (sign-out hygiene, tests).
   static void clearSessionCaches() {
@@ -64,6 +71,9 @@ class FantasyService {
     _playerWeekStatsCache.clear();
     _watchlistCache.clear();
     _seasonFinishedCache.clear();
+    _badgeCatalogCache = null;
+    _badgesCache.clear();
+    _badgesForCache.clear();
   }
 
   /// Live `Fantasy/<sport>/<season>/Config` → engine FantasyConfig + lock
@@ -233,6 +243,50 @@ class FantasyService {
       final finished = seasonFinishedFromNode(event.snapshot.value);
       _seasonFinishedCache[key] = finished;
       yield finished;
+    }
+  }
+
+  // ── Achievement badges (spec 2026-10-30 §3/§5) ─────────────────────────
+
+  /// Live GLOBAL badge catalog (`Fantasy/BadgeCatalog`, public read): the
+  /// stored entries over the starter set (fantasy_badges.dart) — an absent
+  /// node still emits (the starter set). Seeded from the session cache.
+  static Stream<FantasyBadgeCatalog> watchBadgeCatalog() async* {
+    final seed = _badgeCatalogCache;
+    if (seed != null) yield seed;
+    await for (final event in _ref('Fantasy/BadgeCatalog').onValue) {
+      final catalog = badgeCatalogFromNode(event.snapshot.value);
+      _badgeCatalogCache = catalog;
+      yield catalog;
+    }
+  }
+
+  /// Live season `Badges` node, whole (public read): uid → awards — the
+  /// leaderboard's badge counts. Absent = an empty map (still emits).
+  static Stream<Map<String, List<FantasyBadgeAward>>> watchBadges(
+      String sport, String season) async* {
+    final key = _root(sport, season);
+    final seed = _badgesCache[key];
+    if (seed != null) yield seed;
+    await for (final event in _ref('$key/Badges').onValue) {
+      final byUid = badgesByUidFromNode(event.snapshot.value);
+      _badgesCache[key] = byUid;
+      yield byUid;
+    }
+  }
+
+  /// Live `Badges/<uid>` — one manager's awards, oldest first (the badge
+  /// shelf). Absent = an empty list (still emits).
+  static Stream<List<FantasyBadgeAward>> watchBadgesFor(
+      String sport, String season, String uid) async* {
+    final key = '${_root(sport, season)}|$uid';
+    final seed = _badgesForCache[key];
+    if (seed != null) yield seed;
+    await for (final event
+        in _ref('${_root(sport, season)}/Badges/$uid').onValue) {
+      final awards = badgeAwardsFromNode(event.snapshot.value);
+      _badgesForCache[key] = awards;
+      yield awards;
     }
   }
 
