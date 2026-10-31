@@ -8,7 +8,10 @@
 //     "Season 15"), and for owner-given badges "Given by Infinite Sports"
 //     plus the owner's notes.
 //   * [BadgeCountChip] — the leaderboard's small military_tech + N beside a
-//     manager's name (Overall + Gameweek); nothing at 0.
+//     manager's name (Overall + Gameweek); nothing at 0. A FIXED size
+//     ([kBadgeCountChipWidth] × [kBadgeCountChipHeight], content scaled down
+//     rather than overflowing for a 3-digit count) so the rows can reserve
+//     its slot while the counts load and fill it without a reflow.
 //
 // Data: fantasy_badges.dart (pure). Earned badges always show — an inactive
 // catalog entry included; an id missing from the catalog is a generic badge.
@@ -361,9 +364,19 @@ class BadgeDetailSheet extends StatelessWidget {
   }
 }
 
+/// The [BadgeCountChip]'s fixed width: icon + a two-digit count at their
+/// natural size (three digits scale down to fit).
+const double kBadgeCountChipWidth = 40;
+
+/// The [BadgeCountChip]'s fixed height (the 14 px icon + 1 px padding each
+/// side, with a little air).
+const double kBadgeCountChipHeight = 18;
+
 /// The leaderboard's badge count beside a manager's name: military_tech + N
 /// in the fantasy accent, read as "N badges". Nothing at all when [count] is
-/// 0 or less.
+/// 0 or less; otherwise ALWAYS [kBadgeCountChipWidth] × [kBadgeCountChipHeight]
+/// (the slot a loading row reserves), the content scaled down — never
+/// overflowing — when it needs more.
 class BadgeCountChip extends StatelessWidget {
   const BadgeCountChip({super.key, required this.count});
 
@@ -383,26 +396,32 @@ class BadgeCountChip extends StatelessWidget {
         label: label,
         child: ExcludeSemantics(
           child: Container(
-            padding: const EdgeInsets.fromLTRB(3, 1, 6, 1),
+            width: kBadgeCountChipWidth,
+            height: kBadgeCountChipHeight,
+            padding: const EdgeInsets.fromLTRB(3, 1, 5, 1),
+            alignment: Alignment.center,
             decoration: BoxDecoration(
               color: accent.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.military_tech, size: 14, color: accent),
-                const SizedBox(width: 2),
-                Text(
-                  '$count',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w800,
-                    height: 1.2,
-                    color: accent,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.military_tech, size: 14, color: accent),
+                  const SizedBox(width: 2),
+                  Text(
+                    '$count',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w800,
+                      height: 1.2,
+                      color: accent,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

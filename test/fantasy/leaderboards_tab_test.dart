@@ -13,9 +13,11 @@
 // copy; the friendly empty states; row taps opening the squad viewer (via the
 // builder seam); 360 px long names + segment labels fitting in light AND
 // dark; and (badges, spec 2026-10-30 §5) the badge-count chip beside the
-// manager name on Overall + Gameweek rows — its feed joins the reveal, 0 shows
-// nothing, a failing feed never holds the board, and it wraps with the
-// climber/drop badge at 360 px.
+// manager name on Overall + Gameweek rows — its feed does NOT gate the reveal
+// (Opus audit item 1: every row reserves the chip's fixed slot until the
+// counts land, then they fill in without moving a row), 0 shows nothing, a
+// failing feed never holds the board, and it wraps with the climber/drop
+// badge at 360 px (light + dark, before and after the counts land).
 
 import 'dart:async';
 
@@ -1538,22 +1540,44 @@ void main() {
           findsOneWidget);
     });
 
-    testWidgets('the badges feed joins the single reveal; live updates '
-        're-count', (tester) async {
+    testWidgets(
+        'the badges feed does NOT gate the reveal: every row reserves the '
+        "chip's slot, the counts fill it in later without moving a row; live "
+        'updates re-count', (tester) async {
       final badges = StreamController<Map<String, List<FantasyBadgeAward>>>();
       addTearDown(badges.close);
-      await pumpTab(tester, badgesStates: badges.stream);
-      boards.add(data);
-      managers.add(names);
-      dreams.add(const {});
-      await tester.pump();
-      await tester.pump();
-      expect(byKey('leaderboards_skeleton'), findsOneWidget);
-
-      badges.add(const {});
-      await tester.pumpAndSettle();
+      await pumpTab(tester,
+          size: const Size(800, 760), badgesStates: badges.stream);
+      await emitAll(tester, data: data, names: names);
+      // Revealed without the (whole-season) badges node.
       expect(byKey('leaderboards_ready'), findsOneWidget);
-      expect(byKey('badge_count_u1'), findsNothing);
+      expect(byKey('leaderboards_skeleton'), findsNothing);
+      expect(find.byType(BadgeCountChip), findsNothing);
+      final slot = tester.getRect(byKey('badge_slot_u1'));
+      expect(slot.size, const Size(kBadgeCountChipWidth, kBadgeCountChipHeight));
+      expect(byKey('badge_slot_u2'), findsOneWidget);
+      final rowsBefore = {
+        for (final uid in ['u1', 'u2'])
+          uid: tester.getRect(byKey('leaderboard_row_$uid')),
+      };
+      final climberBefore = tester.getRect(byKey('climber_badge_u1'));
+
+      badges.add({'u1': n('u1', 3)});
+      await tester.pump(); // delivers the emission (setState)
+      await tester.pump(); // one frame — no animation needed to settle
+      // The number lands IN the reserved slot; nothing else moves.
+      expect(tester.getRect(byKey('badge_count_u1')), slot);
+      expect(
+          find.descendant(of: byKey('badge_count_u1'), matching: find.text('3')),
+          findsOneWidget);
+      expect(tester.getRect(byKey('climber_badge_u1')), climberBefore);
+      for (final uid in ['u1', 'u2']) {
+        expect(tester.getRect(byKey('leaderboard_row_$uid')), rowsBefore[uid],
+            reason: uid);
+      }
+      // A manager with none: the slot goes, no chip.
+      expect(byKey('badge_slot_u2'), findsNothing);
+      expect(byKey('badge_count_u2'), findsNothing);
 
       badges.add({'u2': n('u2', 2)});
       await tester.pumpAndSettle();
@@ -1561,6 +1585,7 @@ void main() {
           find.descendant(
               of: byKey('badge_count_u2'), matching: find.text('2')),
           findsOneWidget);
+      expect(byKey('badge_count_u1'), findsNothing);
     });
 
     testWidgets('a failing badges feed never holds the board (no chips)',
@@ -1570,6 +1595,7 @@ void main() {
       expect(byKey('leaderboards_ready'), findsOneWidget);
       expect(byKey('leaderboard_row_u1'), findsOneWidget);
       expect(byKey('badge_count_u1'), findsNothing);
+      expect(byKey('badge_slot_u1'), findsNothing); // known: none
     });
 
     testWidgets('a mini-league style list (no counts passed) shows no chips',
@@ -1634,6 +1660,50 @@ void main() {
         expect(tester.takeException(), isNull);
         final r = tester.getRect(byKey('badge_count_u1'));
         expect(r.right, lessThanOrEqualTo(360));
+      });
+
+      testWidgets(
+          '360 px: the reserved slot + climber badge before the counts land, '
+          'then the 3-digit count in it — no overflow — $brightness',
+          (tester) async {
+        const longTeam =
+            'The Unbelievably Long Team Name Football Club Of Doom';
+        final badges =
+            StreamController<Map<String, List<FantasyBadgeAward>>>();
+        addTearDown(badges.close);
+        await pumpTab(
+          tester,
+          size: const Size(360, 760),
+          brightness: brightness,
+          profiles: {
+            'u1': const PublicProfile(
+                uid: 'u1',
+                firstName: 'Maximiliano',
+                lastName: 'Bartholomew Featherstonehaugh-Smythe'),
+          },
+          badgesStates: badges.stream,
+        );
+        await emitAll(tester,
+            data: data,
+            names: {'u1': manager(longTeam), 'me': manager(longTeam)});
+        expect(tester.takeException(), isNull);
+        expect(byKey('climber_badge_u1'), findsOneWidget);
+        final slot = tester.getRect(byKey('badge_slot_u1'));
+        final row = tester.getRect(byKey('leaderboard_row_u1'));
+        for (final r in [slot, row]) {
+          expect(r.left, greaterThanOrEqualTo(0));
+          expect(r.right, lessThanOrEqualTo(360));
+        }
+
+        badges.add({'u1': n('u1', 128)});
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(tester.getRect(byKey('badge_count_u1')), slot);
+        expect(tester.getRect(byKey('leaderboard_row_u1')), row);
+        expect(
+            find.descendant(
+                of: byKey('badge_count_u1'), matching: find.text('128')),
+            findsOneWidget);
       });
     }
   });

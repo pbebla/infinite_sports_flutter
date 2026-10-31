@@ -21,7 +21,11 @@
 // Badges (spec 2026-10-30 §5), opt-in like the extras:
 // [RankedLeaderboardList.badgeCounts] puts the small military_tech + N chip
 // beside a manager's name (Overall and Gameweek — never the mini-league
-// lists); it wraps with the climber/drop badge after a long name.
+// lists); it wraps with the climber/drop badge after a long name. The chip
+// is a FIXED-size slot ([kBadgeCountChipWidth] × [kBadgeCountChipHeight]):
+// while the counts are still loading (`badgeCounts == null`) every row
+// reserves that slot empty, so the numbers fill in after the reveal without
+// moving the name, the climber badge or the row (Opus audit item 1).
 //
 // House rules: theme-safe both modes (fantasy accent = gold in dark, primary
 // red in light; movement up = the pitch-green family, down = error); manager
@@ -32,7 +36,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/badge_shelf.dart'
-    show BadgeCountChip;
+    show BadgeCountChip, kBadgeCountChipHeight, kBadgeCountChipWidth;
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
@@ -132,8 +136,10 @@ class LeaderboardRowTile extends StatelessWidget {
   final WeeklyMover? mover;
 
   /// The manager's achievement-badge count, shown as a chip beside the name
-  /// when > 0 (Overall + Gameweek).
-  final int badgeCount;
+  /// when > 0 (Overall + Gameweek). null = not known yet: the chip's
+  /// fixed-size slot is reserved empty, so the number fills in later
+  /// without moving anything.
+  final int? badgeCount;
 
   /// Expandable row (the own row on Overall): null = not expandable (no
   /// chevron); false/true = the folded/unfolded chevron after the points.
@@ -154,6 +160,9 @@ class LeaderboardRowTile extends StatelessWidget {
     final secondary = row.secondaryName;
     final mover = this.mover;
     final expanded = this.expanded;
+    final badgeCount = this.badgeCount;
+    final reserveBadge = badgeCount == null;
+    final showBadge = badgeCount != null && badgeCount > 0;
 
     final nameText = Text(
       row.name,
@@ -211,7 +220,7 @@ class LeaderboardRowTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (mover == null && badgeCount <= 0)
+                if (mover == null && !reserveBadge && !showBadge)
                   nameText
                 else
                   // The badges follow the name and drop to their own line
@@ -222,7 +231,13 @@ class LeaderboardRowTile extends StatelessWidget {
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       nameText,
-                      if (badgeCount > 0)
+                      if (reserveBadge)
+                        SizedBox(
+                          key: ValueKey('badge_slot_${row.uid}'),
+                          width: kBadgeCountChipWidth,
+                          height: kBadgeCountChipHeight,
+                        )
+                      else if (showBadge)
                         BadgeCountChip(
                           key: ValueKey('badge_count_${row.uid}'),
                           count: badgeCount,
@@ -411,7 +426,14 @@ class RankedLeaderboardList extends StatefulWidget {
   final Map<String, WeeklyMover> movers;
 
   /// uid → achievement-badge count (Overall + Gameweek; empty elsewhere).
-  final Map<String, int> badgeCounts;
+  /// null = the counts are still loading: every row reserves the chip's
+  /// fixed-size slot (no row moves when they land).
+  final Map<String, int>? badgeCounts;
+
+  int? _badgeCountFor(String uid) {
+    final counts = badgeCounts;
+    return counts == null ? null : (counts[uid] ?? 0);
+  }
 
   /// When set (Overall), tapping the signed-in manager's row — natural or
   /// pinned — folds this panel open under it instead of calling [onRowTap];
@@ -470,7 +492,7 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
         showMovement: widget.showMovement,
         onTap: widget.onRowTap,
         mover: widget.movers[row.uid],
-        badgeCount: widget.badgeCounts[row.uid] ?? 0,
+        badgeCount: widget._badgeCountFor(row.uid),
         reserveChevron: _hasExpandableOwnRow,
       );
     }
@@ -484,7 +506,7 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
       showMovement: widget.showMovement,
       onTap: (_) => _toggleSelfPanel(),
       mover: widget.movers[row.uid],
-      badgeCount: widget.badgeCounts[row.uid] ?? 0,
+      badgeCount: widget._badgeCountFor(row.uid),
       expanded: _selfExpanded,
       footer: reduceMotion
           ? panel

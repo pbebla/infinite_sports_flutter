@@ -302,6 +302,24 @@ void main() {
       expect(find.bySemanticsLabel('1 badge'), findsOneWidget);
       semantics.dispose();
     });
+
+    // Opus audit item 1: the leaderboard rows reserve exactly this slot
+    // while the counts load, so the chip's size must not depend on N.
+    testWidgets('one fixed size for 1, 2 and 3 digits (3 scale down, never '
+        'overflow)', (tester) async {
+      for (final n in [1, 42, 128]) {
+        await pumpBody(
+            tester,
+            Align(
+                alignment: Alignment.topLeft,
+                child: BadgeCountChip(count: n)));
+        expect(tester.takeException(), isNull, reason: '$n');
+        expect(tester.getSize(find.byType(BadgeCountChip)),
+            const Size(kBadgeCountChipWidth, kBadgeCountChipHeight),
+            reason: '$n');
+        expect(find.text('$n'), findsOneWidget);
+      }
+    });
   });
 
   group('Review Focus 5 — 360 px, light + dark', () {

@@ -19,8 +19,13 @@
 //
 // Badges (spec 2026-10-30 §5): the season's whole `Badges` node feeds a
 // small military_tech + N chip beside each manager's name on Overall and
-// Gameweek; it joins the reveal gate (a failing feed = no chips, never a
-// held board) and seeds the squad viewer's shelf.
+// Gameweek, and seeds the squad viewer's shelf. It does NOT gate the reveal
+// (Opus audit item 1 — a whole-season node must never hold the board): the
+// per-manager counts are computed ONCE per emission (not per build), and
+// until the first one lands every row reserves the chip's fixed-size slot,
+// so the numbers fill in after the fade without moving a row. A failing
+// feed = no chips (logged). (A server-written per-row BadgeCount would drop
+// this whole-node stream — a separate, functions-side change.)
 //
 // My Leagues (the mini-league create/join/share surface) is BUILT but hidden
 // behind [kShowMiniLeagues]: no segment, no MiniLeagues subscription, and it
@@ -32,7 +37,8 @@
 //
 // House rules: streams/once only; SINGLE fade reveal (skeleton until the
 // leaderboards+managers+dream-teams streams and the profiles read have ALL
-// landed); session caches make revisits instant; theme-safe both modes;
+// landed — the profiles read is bounded, bounded_read.dart); session caches
+// make revisits instant; theme-safe both modes;
 // names wrap, never underlined; glass-navbar clearance; scope + selected
 // week persist for the session (the market-sort precedent).
 
@@ -211,9 +217,14 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
   Map<String, PublicProfile>? _profiles;
   Map<int, FantasyDreamTeam>? _dreamTeams;
 
-  /// uid → achievement badges this season (the rows' count chips). A failing
-  /// feed loads as "nobody has any" — never a held board.
+  /// uid → achievement badges this season (the squad viewer's shelf seed);
+  /// null until the feed first answers.
   Map<String, List<FantasyBadgeAward>>? _badges;
+
+  /// uid → badge count for the Overall / Gameweek rows, computed ONCE per
+  /// badges emission (never per build). null = not known yet: the rows
+  /// reserve the chip's slot. A failing feed loads as "nobody has any".
+  Map<String, int>? _badgeCounts;
   StreamSubscription<Map<String, List<FantasyBadgeAward>>>? _badgesSub;
 
   StreamSubscription<FantasyLeaderboards>? _boardsSub;
@@ -262,14 +273,28 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
       _badgesSub = (widget.badgesStates ??
               FantasyService.watchBadges(widget.sport, widget.season))
           .listen((badges) {
-        if (mounted) setState(() => _badges = badges);
+        // The counts are derived here, once per emission.
+        final counts = {
+          for (final e in badges.entries)
+            if (e.value.isNotEmpty) e.key: e.value.length,
+        };
+        if (!mounted) return;
+        setState(() {
+          _badges = badges;
+          _badgeCounts = counts;
+        });
       }, onError: (Object e) {
         debugPrint('FantasyLeaderboardsTab: badges feed failed: $e');
-        if (mounted) setState(() => _badges ??= const {});
+        if (!mounted) return;
+        setState(() {
+          _badges ??= const {};
+          _badgeCounts ??= const {};
+        });
       });
     } catch (e) {
       debugPrint('FantasyLeaderboardsTab: badges feed failed: $e');
       _badges = const {};
+      _badgeCounts = const {};
     }
     _loadProfiles();
   }
@@ -300,18 +325,14 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
     super.dispose();
   }
 
+  /// The badges feed is deliberately NOT here (see the file header): the
+  /// rows reserve its slot and the counts fill in after the fade.
   bool get _ready =>
       _boards != null &&
       _managers != null &&
       (!kShowMiniLeagues || _leagues != null) &&
       _profiles != null &&
-      _dreamTeams != null &&
-      _badges != null;
-
-  /// uid → badge count for the Overall / Gameweek rows.
-  Map<String, int> get _badgeCounts => {
-        for (final e in (_badges ?? const {}).entries) e.key: e.value.length,
-      };
+      _dreamTeams != null;
 
   void _openManager(LeaderboardRowData row) {
     final builder = widget.squadViewerBuilder ??
@@ -330,9 +351,10 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
               historyStates: widget.viewerHistoryStates,
               nowUtc: widget.nowUtc,
               onOpenPlayer: widget.onOpenPlayer,
-              // The season's badges are already here: the shelf paints
-              // without waiting on its own first emission.
-              initialBadges: _badges?[row.uid] ?? const [],
+              // Once the season's badges are here the shelf paints without
+              // waiting on its own first emission (null: it waits for it).
+              initialBadges:
+                  _badges == null ? null : (_badges![row.uid] ?? const []),
             );
     Navigator.push(
         context, MaterialPageRoute(builder: (_) => builder(row)));
