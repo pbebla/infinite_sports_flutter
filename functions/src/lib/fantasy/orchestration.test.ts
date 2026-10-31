@@ -559,6 +559,53 @@ describe('PriceHistory at lock (round 3 spec 3.2)', () => {
       .toEqual(Object.keys(GOLDEN_PRICES).sort());
   });
 
+  // Audit M2: the first-finalize backstop LockedPositions already had.
+  it('a first finalize that outran every sweep records PriceHistory itself (once)', async () => {
+    const db = new FakeDb(world()); // games final, no sweep ever ran
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: DATE_KEY, nowUtc: AFTER_LOCK,
+    });
+    expect(await db.read(`${fRoot}/History/1`)).not.toBeNull();
+    expect(await db.read(`${fRoot}/PriceHistory/1`)).toEqual(GOLDEN_PRICES);
+    expect(await db.read(`${fRoot}/LockedPositions/1`)).not.toBeNull();
+
+    // A price edit, then a score-edit rerun and a late sweep: the week's
+    // recorded prices never move.
+    db.data.Fantasy.Futsal['15'].Players.Sam.priceTenths = 90;
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: DATE_KEY, nowUtc: LATER_SWEEP,
+    });
+    await runLifecycleSweep(db, LATER_SWEEP);
+    expect(await db.read(`${fRoot}/PriceHistory/1/Sam`)).toBe(85);
+    expect(db.writeCount('PriceHistory/1')).toBe(1);
+  });
+
+  it('a first finalize never overwrites prices the lock sweep recorded', async () => {
+    const db = new FakeDb(world({ gameStatus: 1 })); // games live at lock
+    await runLifecycleSweep(db, AFTER_LOCK);
+    db.data.Fantasy.Futsal['15'].Players.Sam.priceTenths = 90; // owner edit
+    for (const g of db.data.Futsal['15'].Date[DATE_KEY]) g.status = 2;
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: DATE_KEY, nowUtc: LATER_SWEEP,
+    });
+    expect(await db.read(`${fRoot}/History/1`)).not.toBeNull();
+    expect(await db.read(`${fRoot}/PriceHistory/1/Sam`)).toBe(85);
+    expect(db.writeCount('PriceHistory/1')).toBe(1);
+  });
+
+  it('a rerun (History exists) never fabricates PriceHistory for its week', async () => {
+    const db = new FakeDb(world());
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: DATE_KEY, nowUtc: AFTER_LOCK,
+    });
+    // A week settled before PriceHistory existed has History and no prices.
+    delete db.data.Fantasy.Futsal['15'].PriceHistory;
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: DATE_KEY, nowUtc: LATER_SWEEP,
+    });
+    expect(await db.read(`${fRoot}/PriceHistory`)).toBeNull();
+  });
+
   it('nothing is recorded before the lock, or for an empty market', async () => {
     const open = new FakeDb(world());
     await runLifecycleSweep(open, BEFORE_LOCK);

@@ -1084,7 +1084,16 @@ async function snapshotLockedPositions(
 /** The market as gameweek [gw] is scored: live membership/eligibility with
  *  positions from LockedPositions/<gw>. [claim] (a first finalize) takes
  *  the snapshot when the lock sweep never did; otherwise a week without a
- *  snapshot (locked before this existed) falls back to live positions. */
+ *  snapshot (locked before this existed) falls back to live positions.
+ *
+ *  The same first-finalize backstop claims PriceHistory/<gw> (audit M2): a
+ *  sweep outage spanning the lock AND the first finalize used to leave the
+ *  week without recorded prices forever (the sweep only snapshots the
+ *  CURRENT gameweek at its lock). The finalize-time market prices are the
+ *  best available then — the Monday reprice of this week cannot have run
+ *  yet (it needs this week's History). Set-if-absent like the sweep's
+ *  claim, so a week the lock sweep already recorded is never touched; a
+ *  rerun (claim false) never writes it. */
 async function marketForGameweek(
   db: FantasyDb, root: string, gw: number, claim: boolean,
   log: FantasyLogger, ctx: Record<string, unknown>,
@@ -1093,6 +1102,7 @@ async function marketForGameweek(
   const locked = claim
     ? await snapshotLockedPositions(db, root, gw, log, ctx)
     : await db.read(`${root}/LockedPositions/${gw}`);
+  if (claim) await snapshotPriceHistory(db, root, gw, log, ctx);
   return withLockedPositions(players, lockedPositionsOf(locked));
 }
 
@@ -1101,7 +1111,9 @@ async function marketForGameweek(
 /** Records the price (tenths) every market player has DURING gameweek [gw]
  *  into PriceHistory/<gw>/<name> (round 3 spec §3.2), exactly once at the
  *  week's lock — so owner manual price edits are captured too; the move
- *  AFTER a week stays in PriceChanges/<gw>. Its OWN set-if-absent claim,
+ *  AFTER a week stays in PriceChanges/<gw>. A FIRST finalize that outran
+ *  every sweep claims it too (marketForGameweek), from the prices at that
+ *  moment. Its OWN set-if-absent claim,
  *  deliberately independent of PublishedPicks: a week with no squads (which
  *  returns early in snapshotPublishedPicks) still records its prices. Every
  *  Players entry is recorded, guests (ineligible) included; an empty market
