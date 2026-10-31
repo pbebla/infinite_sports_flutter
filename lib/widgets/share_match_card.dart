@@ -6,6 +6,7 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart'
     show isBadgeLeagueSport, leagueStatIcon;
+import 'package:infinite_sports_flutter/widgets/share_card_footer.dart';
 
 /// Fixed-size, theme-independent match card rendered to a PNG for sharing.
 /// Logical size 360x450; capture at pixelRatio 3 -> 1080x1350.
@@ -30,7 +31,6 @@ class ShareMatchCard extends StatelessWidget {
   static const Color _primary = Color(0xFFD00000);
   static const Color _default1 = Color(0xFF1565C0);
   static const Color _default2 = Color(0xFFC62828);
-  static const Color _footer = Color(0xFF111111);
 
   static const _statIcons = <String, String>{
     'goals': 'assets/goal.png',
@@ -104,38 +104,11 @@ class ShareMatchCard extends StatelessWidget {
                   ? const Alignment(0, -0.04)
                   : const Alignment(0, 0.22),
               child: _centerPill(finished, live)),
-          Positioned(
+          const Positioned(
             left: 0,
             right: 0,
             bottom: 0,
-            child: Container(
-              color: _footer,
-              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Image.asset('assets/infinite_mark.png', height: 34),
-                  const SizedBox(width: 6),
-                  const Flexible(
-                    child: Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(text: 'Follow '),
-                          TextSpan(
-                              text: 'Infinite Sports',
-                              style: TextStyle(color: Color(0xFFFF5A5A))),
-                          TextSpan(text: ' for live scores'),
-                        ],
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            child: ShareCardFooter(),
           ),
         ],
       ),
