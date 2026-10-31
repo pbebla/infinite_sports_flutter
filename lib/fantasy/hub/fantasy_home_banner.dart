@@ -7,6 +7,12 @@
 // live stream gate as the league page's Fantasy tab — and gone otherwise,
 // so the front page carries NO per-user state (not dismissible by design).
 //
+// Once the league's own `Finished` flag is set (FantasySeasonFinishedFeed —
+// Opus audit Minor 8) the copy reads "Season over — see the final
+// standings", the deadline chip goes and a tap opens the hub on
+// Leaderboards (Overall). The banner waits for that flag too (session-cached,
+// a failing feed = not finished), so its copy never flips after it shows.
+//
 // House rules: streams only; theme-safe both modes via the single-sourced
 // brand surface; text wraps, never underlined; the countdown line is
 // INFORMATION (a 60s refresh, nothing animates per tick, timer cancelled on
@@ -30,6 +36,7 @@ class FantasyHomeBanner extends StatefulWidget {
     required this.season,
     this.configStates,
     this.gameweeksStates,
+    this.finishedStates,
     this.onOpen,
     this.nowUtc,
   });
@@ -41,8 +48,12 @@ class FantasyHomeBanner extends StatefulWidget {
   final Stream<FantasyConfigState?>? configStates;
   final Stream<List<Gameweek>>? gameweeksStates;
 
-  /// Test seam replacing the real `Navigator.push(... FantasyHubPage ...)`.
-  final VoidCallback? onOpen;
+  /// The league's `Finished` flag (`FantasyService.watchLeagueSeasonFinished`).
+  final Stream<bool>? finishedStates;
+
+  /// Test seam replacing the real `Navigator.push(... FantasyHubPage ...)`:
+  /// receives the tab the hub would open on.
+  final void Function(FantasyHubTab tab)? onOpen;
 
   /// Test seam: injected clock. Production leaves it null (real UTC now).
   final DateTime Function()? nowUtc;
@@ -66,6 +77,20 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
     gameweekStates: widget.gameweeksStates,
     nowUtc: widget.nowUtc,
   );
+
+  /// The league's season-over flag (shared feed, session-cached): the
+  /// banner shows only once it has answered, so "Fantasy is live" never
+  /// flips to "Season over" in front of the fan.
+  late final FantasySeasonFinishedFeed _seasonFinished =
+      FantasySeasonFinishedFeed(
+    sport: widget.sport,
+    season: widget.season,
+    owner: 'FantasyHomeBanner',
+    onChanged: () {
+      if (mounted) setState(() {});
+    },
+    finishedStates: widget.finishedStates,
+  );
   Timer? _ticker;
 
   FantasyConfigState? get _config => _schedule.config;
@@ -75,6 +100,7 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
   void initState() {
     super.initState();
     _schedule.start();
+    _seasonFinished.start();
     // 60s refresh keeps the countdown text honest (information, not
     // decoration — no per-tick animation); cancelled in dispose.
     _ticker = Timer.periodic(const Duration(seconds: 60), (_) {
@@ -85,6 +111,7 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
   @override
   void dispose() {
     _schedule.dispose();
+    _seasonFinished.dispose();
     _ticker?.cancel();
     super.dispose();
   }
@@ -92,26 +119,33 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
   DateTime get _now => (widget.nowUtc ?? () => DateTime.now().toUtc())();
 
   void _openHub() {
+    // Season over: straight to the final standings.
+    final tab = _seasonFinished.finished
+        ? FantasyHubTab.leaderboards
+        : FantasyHubTab.myTeam;
     final open = widget.onOpen;
     if (open != null) {
-      open();
+      open(tab);
       return;
     }
     // Root navigator, matching the front page's other header pushes.
     Navigator.push(
       mainContext ?? context,
       MaterialPageRoute(
-        builder: (_) =>
-            FantasyHubPage(sport: widget.sport, season: widget.season),
+        builder: (_) => FantasyHubPage(
+            sport: widget.sport, season: widget.season, initialTab: tab),
       ),
     );
   }
 
   /// "GW3 locks in 2d 4h" while the current gameweek is OPEN under the
-  /// automatic lock; null in every other state (the banner stays slim).
+  /// automatic lock; null in every other state (the banner stays slim) —
+  /// and always once the season is over.
   String? _deadlineText() {
     final config = _config;
-    if (config == null || config.lockOverride != FantasyLockOverride.auto) {
+    if (config == null ||
+        config.lockOverride != FantasyLockOverride.auto ||
+        _seasonFinished.finished) {
       return null;
     }
     final now = _now;
@@ -123,9 +157,12 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
 
   @override
   Widget build(BuildContext context) {
-    if (_config == null) return const SizedBox.shrink();
+    if (_config == null || !_seasonFinished.ready) {
+      return const SizedBox.shrink();
+    }
     final accent = FantasyBanner.accent(context);
     final deadline = _deadlineText();
+    final finished = _seasonFinished.finished;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(19, 4, 19, 0),
@@ -155,7 +192,10 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Fantasy is live — set your squad',
+                          finished
+                              ? 'Season over — see the final standings'
+                              : 'Fantasy is live — set your squad',
+                          key: const ValueKey('fantasy_home_banner_title'),
                           // Wraps, never underlined (house rules).
                           softWrap: true,
                           style: TextStyle(
