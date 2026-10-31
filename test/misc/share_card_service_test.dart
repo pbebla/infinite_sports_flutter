@@ -43,6 +43,8 @@ void main() {
                 context,
                 card,
                 caption: 'Caption here',
+                // Decoded first; the wait's timeout timer never outlives it.
+                precache: const [AssetImage('assets/infinite_mark.png')],
                 share: share,
               ),
             ),
@@ -68,7 +70,8 @@ void main() {
     expect(find.byWidget(card), findsNothing);
   });
 
-  testWidgets('shareCardImage hands the seam a PNG, the caption and the '
+  testWidgets(
+      'shareCardImage hands the seam a PNG, the caption and the '
       "TAPPED button's rect (the iPad popover anchor)", (tester) async {
     final recorder = ShareRecorder();
     await pumpButton(tester, share: recorder.call);
@@ -117,7 +120,8 @@ void main() {
         ],
       ),
     ));
-    expect(shareOriginFor(tester.element(find.byKey(const ValueKey('half_off')))),
+    expect(
+        shareOriginFor(tester.element(find.byKey(const ValueKey('half_off')))),
         const Rect.fromLTWH(350, 10, 50, 40));
     expect(shareOriginFor(tester.element(find.byKey(const ValueKey('off')))),
         isNull);
@@ -132,9 +136,16 @@ void main() {
             children: [
               ShareMatchCard(
                 match: const TournamentMatch(
-                  id: 'm', stage: 'Final', label: 'F', date: '08272026',
-                  team1Id: 'a', team2Id: 'b', team1Score: 0,
-                  team2Score: 0, status: 0, bracketPosition: 1,
+                  id: 'm',
+                  stage: 'Final',
+                  label: 'F',
+                  date: '08272026',
+                  team1Id: 'a',
+                  team2Id: 'b',
+                  team1Score: 0,
+                  team2Score: 0,
+                  status: 0,
+                  bracketPosition: 1,
                 ),
                 team1: null,
                 team2: null,
@@ -152,8 +163,8 @@ void main() {
       ),
     ));
     expect(find.byType(ShareCardFooter), findsNWidgets(2));
-    expect(find.text('Follow Infinite Sports for live scores'),
-        findsNWidgets(2));
+    expect(
+        find.text('Follow Infinite Sports for live scores'), findsNWidgets(2));
   });
 }
 

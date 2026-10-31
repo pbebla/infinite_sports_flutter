@@ -18,15 +18,22 @@
 // (the market-sort precedent; the Leaderboards tab carries it to and from the
 // Gameweek view). Renders nothing while no DreamTeam exists — the Leaderboards
 // tab shows its own friendly line instead of building the card.
+//
+// Share (owner follow-up): with a [DreamTeamCard.seasonLabel] the header
+// carries a Share button that renders the week ON SCREEN as a branded story
+// image (fantasy_share.dart — the same court + chips) and opens the share
+// sheet.
 
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
-import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_share.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_share_button.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
+import 'package:infinite_sports_flutter/misc/share_card_service.dart';
 
 class DreamTeamCard extends StatefulWidget {
   const DreamTeamCard({
@@ -35,6 +42,8 @@ class DreamTeamCard extends StatefulWidget {
     required this.config,
     required this.players,
     this.onOpenPlayer,
+    this.seasonLabel,
+    this.shareImage,
   });
 
   /// gameweek -> team, from FantasyService.watchDreamTeams. Callers only
@@ -48,6 +57,13 @@ class DreamTeamCard extends StatefulWidget {
   /// Round 3: tapping a Team of the Week player opens his fantasy profile
   /// (the hub's one opener). null = chips inert.
   final void Function(String playerName)? onOpenPlayer;
+
+  /// "Futsal Season 15" — the share image's season line. null = no Share
+  /// button (the card is only shareable where the season is known).
+  final String? seasonLabel;
+
+  /// Test seam for the share sheet (null = the system sheet).
+  final SharePng? shareImage;
 
   /// Session-persistent week selection (the leaderboard-chips precedent):
   /// swiping away and back lands where the fan left off.
@@ -79,31 +95,10 @@ class _DreamTeamCardState extends State<DreamTeamCard> {
       for (final p in widget.players)
         if (p.photoUrl != null) p.name: p.photoUrl,
     };
-    final pointsByName = {
-      for (final p in team.players) p.name: p.points,
-    };
-
-    // 5 starter slots straight from the config formation (no bench — the
-    // court hides its bench surface when none exist); dream players land in
-    // the first empty slot of their position, extras from a config shrink
-    // are dropped.
-    final slots = [
-      for (final slot in buildSlots(widget.config))
-        if (!slot.bench) slot,
-    ];
-    final slotPicks = List<SquadPick?>.filled(slots.length, null);
-    for (final player in team.players) {
-      for (var i = 0; i < slots.length; i++) {
-        if (slotPicks[i] == null && slots[i].position == player.position) {
-          slotPicks[i] = SquadPick(
-            playerId: player.name,
-            position: player.position,
-            priceTenths: 0, // hidden: the court renders with showPrices false
-          );
-          break;
-        }
-      }
-    }
+    // The 5 starter slots from the config formation (no bench — the court
+    // hides its bench surface when none exist), shared with the share image.
+    final court = dreamTeamCourt(widget.config, team);
+    final seasonLabel = widget.seasonLabel;
 
     return Container(
       key: const ValueKey('dream_team_card'),
@@ -128,6 +123,21 @@ class _DreamTeamCardState extends State<DreamTeamCard> {
                   ),
                 ),
               ),
+              if (seasonLabel != null)
+                FantasyShareButton(
+                  key: const ValueKey('dream_team_share'),
+                  tooltip: 'Share Team of the Week',
+                  // The week ON SCREEN (the chips can step back).
+                  onShare: (buttonContext) => shareTeamOfWeekStory(
+                    buttonContext,
+                    week: selected,
+                    seasonLabel: seasonLabel,
+                    team: team,
+                    config: widget.config,
+                    photoUrlFor: (name) => photoByName[name],
+                    share: widget.shareImage,
+                  ),
+                ),
             ],
           ),
           if (weeks.length > 1) ...[
@@ -154,8 +164,8 @@ class _DreamTeamCardState extends State<DreamTeamCard> {
           const SizedBox(height: 10),
           FantasyCourtView(
             config: widget.config,
-            slots: slots,
-            slotPicks: slotPicks,
+            slots: court.slots,
+            slotPicks: court.slotPicks,
             // Read-only mini mode: nothing editable, smaller chips, no
             // prices — position + week points tell the story. A chip tap
             // opens the player's profile (round 3).
@@ -165,7 +175,7 @@ class _DreamTeamCardState extends State<DreamTeamCard> {
             chipWidth: 78,
             chipAvatarSize: 44,
             weekPointsFor: (name) {
-              final points = pointsByName[name];
+              final points = court.pointsByName[name];
               return points == null ? null : '$points pts';
             },
             photoUrlFor: (name) => photoByName[name],

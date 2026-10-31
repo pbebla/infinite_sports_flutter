@@ -48,6 +48,9 @@ Color fantasyDownRed(BuildContext context) =>
 /// the painter (kept intact below).
 const bool useNeonPitchAsset = true;
 
+/// The owner's neon gold pitch artwork (the court, the share images).
+const String kNeonPitchAsset = 'assets/fantasy/pitch_neon_gold.webp';
+
 class FantasyCourtView extends StatelessWidget {
   const FantasyCourtView({
     super.key,
@@ -154,7 +157,7 @@ class FantasyCourtView extends StatelessWidget {
                       ColoredBox(
                         color: surround,
                         child: Image.asset(
-                          'assets/fantasy/pitch_neon_gold.webp',
+                          kNeonPitchAsset,
                           fit: BoxFit.fill,
                         ),
                       ),

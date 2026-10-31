@@ -15,6 +15,9 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 
+/// The gold Infinite Fantasy wordmark (the banner, the share images).
+const String kFantasyLogoAsset = 'assets/fantasy/fantasy_logo.png';
+
 class FantasyBanner extends StatelessWidget {
   const FantasyBanner({
     super.key,
@@ -98,7 +101,7 @@ class FantasyBanner extends StatelessWidget {
         const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
   }) {
     final image = Image.asset(
-      'assets/fantasy/fantasy_logo.png',
+      kFantasyLogoAsset,
       height: height,
       width: width,
       fit: BoxFit.contain,

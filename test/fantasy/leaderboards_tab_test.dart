@@ -15,12 +15,9 @@
 // dark.
 
 import 'dart:async';
-import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderParagraph;
-import 'package:flutter/services.dart' show FontLoader;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
@@ -35,6 +32,10 @@ import 'package:infinite_sports_flutter/fantasy/hub/mini_leagues_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/rank_history_chart.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
+import 'package:infinite_sports_flutter/misc/share_card_service.dart';
+
+import '../helpers/real_fonts.dart';
+import '../helpers/share_capture.dart';
 
 FantasyLeaderboardEntry entry(String uid, int points,
         {int? rank, int? movement}) =>
@@ -53,44 +54,6 @@ List<Gameweek> gameweeks(int count) => [
           opensUtc: null,
         ),
     ];
-
-/// The test environment draws every glyph as a 14 px Ahem square, which says
-/// nothing about whether a label really fits. This registers the SDK's real
-/// Roboto (the Android UI font) as 'RobotoReal' so a test can opt into true
-/// text metrics without disturbing the Ahem-based layouts elsewhere in the
-/// file. Returns false when the SDK's material_fonts folder can't be found.
-const String kRealFont = 'RobotoReal';
-bool? _realFontLoaded;
-
-Directory? _materialFontsDir() {
-  final candidates = <String>[];
-  final root = Platform.environment['FLUTTER_ROOT'];
-  if (root != null) candidates.add('$root/bin/cache/artifacts/material_fonts');
-  // flutter_tester lives in <sdk>/bin/cache/artifacts/engine/<platform>/.
-  var dir = File(Platform.resolvedExecutable).parent;
-  for (var i = 0; i < 6; i++) {
-    candidates.add('${dir.path}/material_fonts');
-    dir = dir.parent;
-  }
-  for (final path in candidates) {
-    final d = Directory(path);
-    if (File('${d.path}/roboto-regular.ttf').existsSync()) return d;
-  }
-  return null;
-}
-
-Future<bool> loadRealFont() async {
-  if (_realFontLoaded != null) return _realFontLoaded!;
-  final dir = _materialFontsDir();
-  if (dir == null) return _realFontLoaded = false;
-  final loader = FontLoader(kRealFont);
-  for (final file in ['roboto-regular.ttf', 'roboto-medium.ttf', 'roboto-bold.ttf']) {
-    final bytes = File('${dir.path}/$file').readAsBytesSync();
-    loader.addFont(Future.value(ByteData.sublistView(bytes)));
-  }
-  await loader.load();
-  return _realFontLoaded = true;
-}
 
 void main() {
   late StreamController<FantasyLeaderboards> boards;
@@ -130,6 +93,7 @@ void main() {
     Map<String, PublicProfile>? profiles,
     Brightness brightness = Brightness.light,
     String? fontFamily,
+    SharePng? shareImage,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -159,6 +123,7 @@ void main() {
               },
           selfUidOverride: selfUid,
           onOpenPlayer: onOpenPlayer,
+          shareImage: shareImage,
           squadViewerBuilder: (row) {
             openedRows.add(row);
             return Scaffold(
@@ -337,6 +302,47 @@ void main() {
       expect(openedRows, isEmpty);
     });
 
+    testWidgets('share: the card header carries a Share button; tapping it '
+        'renders the 1080x1920 story PNG and hands it + the caption to the '
+        'share sheet (for the week on screen)', (tester) async {
+      final shares = ShareRecorder();
+      await pumpTab(tester,
+          size: const Size(420, 1400), shareImage: shares.call);
+      await emitAll(
+        tester,
+        data: overallData,
+        names: {'u1': manager('Top Cats')},
+        dreamTeams: twoWeeks(),
+      );
+      await pickScope(tester, kTeamOfWeekSegmentLabel);
+
+      final button = find.byKey(const ValueKey('dream_team_share'));
+      expect(button, findsOneWidget);
+      // In the card's HEADER: on the title's line, right of it.
+      final title = tester.getRect(find.byKey(const ValueKey('dream_team_title')));
+      final rect = tester.getRect(button);
+      expect(rect.left, greaterThanOrEqualTo(title.right));
+      expect(rect.center.dy, closeTo(title.center.dy, 14));
+
+      // The week on screen is what gets shared: step back to GW1 first.
+      await tester.tap(find.byKey(const ValueKey('dream_week_1')));
+      await tester.pumpAndSettle();
+      await tester.tap(button);
+      await pumpUntil(tester, () => shares.calls.isNotEmpty);
+
+      final call = shares.calls.single;
+      expect(isPng(call.png), isTrue);
+      expect(pngSize(call.png), const Size(1080, 1920));
+      expect(call.caption,
+          'Infinite Fantasy · Team of the Week · GW1 (Futsal Season 15)');
+      expect(call.origin, tester.getRect(button));
+      await tester.pumpAndSettle();
+      expect(find.byType(SnackBar), findsNothing);
+      expect(tester.takeException(), isNull);
+      // Sharing never navigates anywhere.
+      expect(openedRows, isEmpty);
+    });
+
     testWidgets('the card shows in its own scope even when no board exists '
         'yet — and the other scopes show only their empty state',
         (tester) async {
@@ -398,6 +404,11 @@ void main() {
         await pickScope(tester, kTeamOfWeekSegmentLabel);
         expect(find.byKey(const ValueKey('dream_team_card')), findsOneWidget);
         expect(tester.takeException(), isNull);
+        // The header's Share button stays on screen.
+        final share =
+            tester.getRect(find.byKey(const ValueKey('dream_team_share')));
+        expect(share.left, greaterThanOrEqualTo(0));
+        expect(share.right, lessThanOrEqualTo(360));
       });
     }
   });
@@ -1169,6 +1180,48 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('share: "Share my rank" sits in the panel beside "View team"; '
+        'tapping it renders the 1080x1920 story PNG and hands it + the '
+        'caption to the share sheet', (tester) async {
+      final shares = ShareRecorder();
+      await pumpTab(tester,
+          size: const Size(420, 1000), shareImage: shares.call);
+      await emitAll(
+        tester,
+        data: overallWith({
+          'me': {'1': 3, '2': 2},
+        }),
+        names: fourNames,
+      );
+      expect(byKey('rank_history_share'), findsNothing);
+      await tester.tap(byKey('leaderboard_row_me'));
+      await tester.pumpAndSettle();
+
+      final button = byKey('rank_history_share');
+      expect(button, findsOneWidget);
+      expect(find.text('Share my rank'), findsOneWidget);
+      expect(byKey('rank_history_view_team'), findsOneWidget);
+      expect(
+          find.descendant(
+              of: byKey('rank_history_panel'), matching: button),
+          findsOneWidget);
+
+      await tester.tap(button);
+      await pumpUntil(tester, () => shares.calls.isNotEmpty);
+      final call = shares.calls.single;
+      expect(isPng(call.png), isTrue);
+      expect(pngSize(call.png), const Size(1080, 1920));
+      expect(call.caption,
+          'Infinite Fantasy · My rank · #2 of 4 · 80 pts (Futsal Season 15)');
+      expect(call.origin, tester.getRect(button));
+      await tester.pumpAndSettle();
+      // The panel stays open; nothing navigated.
+      expect(byKey('rank_history_panel'), findsOneWidget);
+      expect(openedRows, isEmpty);
+      expect(find.byType(SnackBar), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('review fix: the chevron never pushes YOUR points out of the '
         'points column — every Overall row reserves its width (and the "Pts" '
         'header sits over it)', (tester) async {
@@ -1489,7 +1542,12 @@ void main() {
         expect(byKey('rank_history_chart'), findsOneWidget);
         expect(find.text('#120 → #2'), findsOneWidget);
         expect(tester.takeException(), isNull);
-        for (final key in ['rank_history_panel', 'rank_history_chart']) {
+        for (final key in [
+          'rank_history_panel',
+          'rank_history_chart',
+          'rank_history_share',
+          'rank_history_view_team',
+        ]) {
           final r = tester.getRect(byKey(key));
           expect(r.left, greaterThanOrEqualTo(0), reason: key);
           expect(r.right, lessThanOrEqualTo(360), reason: key);

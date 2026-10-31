@@ -26,8 +26,8 @@ class ShareRecorder {
 Future<void> pumpUntil(WidgetTester tester, bool Function() done,
     {int maxRounds = 200}) async {
   for (var i = 0; i < maxRounds && !done(); i++) {
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 25)));
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 25)));
     await tester.pump(const Duration(milliseconds: 40));
   }
 }
@@ -40,6 +40,5 @@ bool isPng(Uint8List bytes) =>
 /// The pixel size in a PNG's IHDR chunk (bytes 16..23, big-endian).
 Size pngSize(Uint8List bytes) {
   final data = ByteData.sublistView(bytes);
-  return Size(
-      data.getUint32(16).toDouble(), data.getUint32(20).toDouble());
+  return Size(data.getUint32(16).toDouble(), data.getUint32(20).toDouble());
 }

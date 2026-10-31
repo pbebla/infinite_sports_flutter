@@ -116,13 +116,11 @@ Future<void> shareCardImage(
   final origin = shareOriginFor(context);
   try {
     if (precache.isNotEmpty) {
-      await Future.any([
-        Future.wait([
-          for (final image in precache)
-            precacheImage(image, context, onError: (_, __) {}),
-        ]),
-        Future<void>.delayed(precacheTimeout),
-      ]);
+      // .timeout cancels its timer once the images land (no stray timer).
+      await Future.wait([
+        for (final image in precache)
+          precacheImage(image, context, onError: (_, __) {}),
+      ]).timeout(precacheTimeout, onTimeout: () => const []);
     }
     if (!context.mounted) return;
 

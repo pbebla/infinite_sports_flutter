@@ -13,7 +13,9 @@
 // is the Dream Team card (dream_team_card.dart) as the ONLY content of its
 // own view — it no longer floats above the two lists (switching those looked
 // like a no-op). The selected week carries between Gameweek and Team of the
-// week.
+// week. Share (owner follow-up): the Team of the Week header and the "Your
+// rank this season" panel each render a branded story image
+// (fantasy_share.dart) and open the share sheet.
 //
 // My Leagues (the mini-league create/join/share surface) is BUILT but hidden
 // behind [kShowMiniLeagues]: no segment, no MiniLeagues subscription, and it
@@ -39,6 +41,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_share.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/manager_squad_viewer.dart';
@@ -46,6 +49,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/mini_leagues_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/rank_history_chart.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
+import 'package:infinite_sports_flutter/misc/share_card_service.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 enum LeaderboardScope { overall, gameweek, teamOfWeek, leagues }
@@ -80,6 +84,7 @@ class FantasyLeaderboardsFeeds {
     this.selfUidOverride,
     this.viewerPublishedStates,
     this.viewerHistoryStates,
+    this.shareImage,
   });
 
   final Stream<FantasyLeaderboards>? leaderboardsStates;
@@ -93,6 +98,9 @@ class FantasyLeaderboardsFeeds {
   /// viewer builder hands them to ManagerSquadViewerPage).
   final Stream<Map<int, FantasySquad>>? viewerPublishedStates;
   final Stream<Map<int, FantasySquad>>? viewerHistoryStates;
+
+  /// The share-sheet seam for the story images (null = the system sheet).
+  final SharePng? shareImage;
 }
 
 class FantasyLeaderboardsTab extends StatefulWidget {
@@ -122,6 +130,7 @@ class FantasyLeaderboardsTab extends StatefulWidget {
     this.onOpenPlayer,
     this.viewerPublishedStates,
     this.viewerHistoryStates,
+    this.shareImage,
   });
 
   final String sport;
@@ -162,6 +171,10 @@ class FantasyLeaderboardsTab extends StatefulWidget {
   /// [squadViewerBuilder] is given): its PublishedPicks / History feeds.
   final Stream<Map<int, FantasySquad>>? viewerPublishedStates;
   final Stream<Map<int, FantasySquad>>? viewerHistoryStates;
+
+  /// Test seam for the Team of the Week / my-rank share images: receives the
+  /// rendered PNG + caption instead of the system share sheet.
+  final SharePng? shareImage;
 
   /// Session-persistent scope + gameweek selection (the market-sort
   /// precedent): swiping away and back lands where the manager left off.
@@ -281,6 +294,9 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
     Navigator.push(
         context, MaterialPageRoute(builder: (_) => builder(row)));
   }
+
+  /// "Futsal Season 15" — the share images' season line.
+  String get _seasonLabel => fantasySeasonLabel(widget.sport, widget.season);
 
   /// The scope actually shown: a My Leagues scope restored from the session
   /// (it is a static) falls back to Overall while mini-leagues are hidden.
@@ -443,10 +459,21 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
       movers: weeklyMovers(rows),
       // Your own row folds open your season's rank line (the viewer stays
       // one tap away inside the panel).
-      selfPanelBuilder: (self) => RankHistoryPanel(
-        series: rankSeries(_boards!.rankHistory[self.uid]),
-        onViewTeam: () => _openManager(self),
-      ),
+      selfPanelBuilder: (self) {
+        final series = rankSeries(_boards!.rankHistory[self.uid]);
+        return RankHistoryPanel(
+          series: series,
+          onViewTeam: () => _openManager(self),
+          onShare: (buttonContext) => shareMyRankStory(
+            buttonContext,
+            row: self,
+            managerCount: rows.length,
+            series: series,
+            seasonLabel: _seasonLabel,
+            share: widget.shareImage,
+          ),
+        );
+      },
     );
   }
 
@@ -551,6 +578,8 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
         config: widget.configState.config,
         players: widget.players,
         onOpenPlayer: widget.onOpenPlayer,
+        seasonLabel: _seasonLabel,
+        shareImage: widget.shareImage,
       ),
     );
   }

@@ -3,7 +3,9 @@
 // his Overall rank after every finalized gameweek (Leaderboards/RankHistory,
 // written by the functions' finalize) with rank 1 at the TOP, the "#start →
 // #now" journey label, and a "View team" action (the own row used to open the
-// squad viewer directly; it stays one tap away here).
+// squad viewer directly; it stays one tap away here). Share follow-up: a
+// "Share my rank" action beside it renders your season as a branded story
+// image (fantasy_share.dart) for Instagram stories / group chats.
 //
 // Plain widgets + CustomPaint (no chart package — house rule). Under two
 // weeks of history there is no line to draw: a short muted note instead.
@@ -14,6 +16,7 @@
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_share_button.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 
@@ -48,12 +51,21 @@ List<Offset> rankChartOffsets(List<RankPoint> series, Size size,
 }
 
 /// The expanded own-row panel: title + journey label, the chart (or the
-/// note), and "View team".
+/// note), and "Share my rank" + "View team".
 class RankHistoryPanel extends StatelessWidget {
-  const RankHistoryPanel({super.key, required this.series, this.onViewTeam});
+  const RankHistoryPanel({
+    super.key,
+    required this.series,
+    this.onViewTeam,
+    this.onShare,
+  });
 
   final List<RankPoint> series;
   final VoidCallback? onViewTeam;
+
+  /// Renders + shares your rank story (given the button's context, the
+  /// iPad share anchor). null = no "Share my rank" action.
+  final Future<void> Function(BuildContext buttonContext)? onShare;
 
   @override
   Widget build(BuildContext context) {
@@ -111,18 +123,30 @@ class RankHistoryPanel extends StatelessWidget {
                 color: scheme.onSurfaceVariant,
               ),
             ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              key: const ValueKey('rank_history_view_team'),
-              onPressed: onViewTeam,
-              style: TextButton.styleFrom(
-                foregroundColor: accent,
-                visualDensity: VisualDensity.compact,
+          // Right-aligned; wraps onto two lines rather than overflow.
+          Wrap(
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 4,
+            children: [
+              if (onShare != null)
+                FantasyShareButton(
+                  key: const ValueKey('rank_history_share'),
+                  label: 'Share my rank',
+                  tooltip: 'Share my rank',
+                  onShare: onShare!,
+                ),
+              TextButton.icon(
+                key: const ValueKey('rank_history_view_team'),
+                onPressed: onViewTeam,
+                style: TextButton.styleFrom(
+                  foregroundColor: accent,
+                  visualDensity: VisualDensity.compact,
+                ),
+                icon: const Icon(Icons.groups_outlined, size: 18),
+                label: const Text('View team'),
               ),
-              icon: const Icon(Icons.groups_outlined, size: 18),
-              label: const Text('View team'),
-            ),
+            ],
           ),
         ],
       ),

@@ -36,6 +36,40 @@ List<SquadSlot> buildSlots(FantasyConfig cfg) => [
         const SquadSlot(position: FantasyPosition.att, bench: true),
     ];
 
+/// A Team of the Week laid onto the court: the config's STARTER slots only
+/// (no bench — the Dream Team is five), each dream player in the first empty
+/// slot of his position (extras from a config shrink are dropped), plus his
+/// week points by name. Shared by the Dream Team card and its share image so
+/// the two can never disagree.
+({
+  List<SquadSlot> slots,
+  List<SquadPick?> slotPicks,
+  Map<String, int> pointsByName,
+}) dreamTeamCourt(FantasyConfig cfg, FantasyDreamTeam team) {
+  final slots = [
+    for (final slot in buildSlots(cfg))
+      if (!slot.bench) slot,
+  ];
+  final slotPicks = List<SquadPick?>.filled(slots.length, null);
+  for (final player in team.players) {
+    for (var i = 0; i < slots.length; i++) {
+      if (slotPicks[i] == null && slots[i].position == player.position) {
+        slotPicks[i] = SquadPick(
+          playerId: player.name,
+          position: player.position,
+          priceTenths: 0, // hidden: the court renders with showPrices false
+        );
+        break;
+      }
+    }
+  }
+  return (
+    slots: slots,
+    slotPicks: slotPicks,
+    pointsByName: {for (final p in team.players) p.name: p.points},
+  );
+}
+
 /// Court coordinates (0..1 fractions) for the STARTER slots, aligned with
 /// [buildSlots] order: GK row near the top goal, DEF mid, ATT low. Each row
 /// spreads its slots evenly.
