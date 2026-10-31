@@ -8,8 +8,10 @@
 //     form, owned %, the last six gameweeks' bars, and **Open in Fantasy**
 //     (the hub on its Players tab, which then opens THIS player's profile);
 //   * Fantasy Manager — the team name (a flagged one never shows), overall
-//     rank + movement + points, and **View team** (the manager squad viewer;
-//     its court chips open the fantasy player profile from outside the hub).
+//     rank + movement + points, his achievement-badge shelf (spec 2026-10-30
+//     §5; "No badges yet …" when none), and **View team** (the manager squad
+//     viewer; its court chips open the fantasy player profile from outside
+//     the hub).
 //
 // House rules: one fade reveal (a skeleton until every feed has landed, then
 // the content fades in once — never piece by piece); "—" / copy wherever the
@@ -19,11 +21,14 @@
 // the page keeps the tab alive so flipping tabs never replays the fade.
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart'
+    show kNoBadgesCopy;
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart'
     show FantasyManager;
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/badge_shelf.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart'
@@ -162,7 +167,7 @@ class _FantasyContent extends StatelessWidget {
 }
 
 class _SectionLabel extends StatelessWidget {
-  const _SectionLabel(this.text);
+  const _SectionLabel(this.text, {super.key});
 
   final String text;
 
@@ -496,6 +501,15 @@ class _ManagerCard extends StatelessWidget {
               const _Note(kFantasyRankPendingCopy,
                   key: ValueKey('fantasy_rank_pending')),
             const SizedBox(height: 14),
+            const _SectionLabel('Badges', key: ValueKey('fantasy_badges_label')),
+            const SizedBox(height: 8),
+            BadgeShelf(
+              awards: source.badges,
+              catalog: source.badgeCatalog,
+              season: source.access?.season ?? '',
+              emptyText: kNoBadgesCopy,
+            ),
+            const SizedBox(height: 14),
             SizedBox(
               width: double.infinity,
               child: OutlinedButton(
@@ -559,6 +573,10 @@ void _viewTeam(BuildContext context, FantasyProfileSource source,
         squadStates: live,
         publishedStates: seams.viewerPublishedStates,
         historyStates: seams.viewerHistoryStates,
+        // The badges this tab already shows: the viewer's shelf paints at
+        // once and its own live feeds keep it current.
+        initialBadges: source.badges,
+        initialBadgeCatalog: source.badgeCatalog,
         onOpenPlayer: (name) => opener(
           viewerContext,
           sport: sport,

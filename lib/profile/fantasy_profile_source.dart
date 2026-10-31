@@ -22,7 +22,8 @@
 //      gameweeks, and per role the player's PlayerTotals / every PriceChanges
 //      week / the league's season-over flag (the price move line gives way to
 //      "Final price" once it is true) / his PlayerWeekStats (one listener per
-//      schedule gameweek), or the Leaderboards. [contentReady] flips once
+//      schedule gameweek), or the Leaderboards + his achievement badges and
+//      the badge catalog (spec 2026-10-30 §5). [contentReady] flips once
 //      every feed that applies has landed (one fade reveal in the tab); a
 //      failing feed degrades to "no data" instead of holding the skeleton.
 //
@@ -33,6 +34,7 @@
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart';
@@ -83,6 +85,8 @@ class FantasyProfileSeams {
     this.viewerHistoryStates,
     this.viewerSquadStates,
     this.profileOpener,
+    this.badgeStates,
+    this.badgeCatalogStates,
   });
 
   final Future<FantasySeasonKey?> Function()? resolveSeason;
@@ -124,6 +128,11 @@ class FantasyProfileSeams {
 
   /// What a viewer court chip opens (`openFantasyPlayerProfile`'s shape).
   final FantasyProfileOpener? profileOpener;
+
+  /// The manager's achievement badges (`Badges/<uid>`) and the global badge
+  /// catalog — null = `FantasyService.watchBadgesFor` / `watchBadgeCatalog`.
+  final Stream<List<FantasyBadgeAward>>? badgeStates;
+  final Stream<FantasyBadgeCatalog>? badgeCatalogStates;
 }
 
 // ── Pure logic ──────────────────────────────────────────────────────────────
@@ -345,6 +354,12 @@ class FantasyProfileSource extends ChangeNotifier {
   bool _boardsSubscribed = false;
   FantasyLeaderboards? _boards;
 
+  /// The manager's badges + the catalog (manager role only); a failing feed
+  /// loads as "none" / the starter catalog.
+  bool _badgesSubscribed = false;
+  List<FantasyBadgeAward>? _badges;
+  FantasyBadgeCatalog? _badgeCatalog;
+
   final List<StreamSubscription<Object?>> _subs = [];
 
   // ── Public state ────────────────────────────────────────────────────────
@@ -400,6 +415,14 @@ class FantasyProfileSource extends ChangeNotifier {
           ? null
           : managerStanding(_boards!, uid);
 
+  /// The manager's earned badges, oldest first (empty without a manager role
+  /// or before they load).
+  List<FantasyBadgeAward> get badges => _badges ?? const [];
+
+  /// The badge catalog (the starter set until the live one loads).
+  FantasyBadgeCatalog get badgeCatalog =>
+      _badgeCatalog ?? kStarterBadgeCatalog;
+
   /// Every feed that applies to this uid's roles has landed: the tab fades
   /// its content in once, never piece by piece.
   bool get contentReady {
@@ -418,7 +441,10 @@ class FantasyProfileSource extends ChangeNotifier {
             schedule.weekLoaded)) {
       return false;
     }
-    if (a.manager != null && _boards == null) return false;
+    if (a.manager != null &&
+        (_boards == null || _badges == null || _badgeCatalog == null)) {
+      return false;
+    }
     return true;
   }
 
@@ -678,6 +704,35 @@ class FantasyProfileSource extends ChangeNotifier {
           _notify();
         },
         label: 'leaderboards',
+      );
+    }
+    if (access.manager != null && !_badgesSubscribed) {
+      _badgesSubscribed = true;
+      _listen<List<FantasyBadgeAward>>(
+        () =>
+            seams.badgeStates ??
+            FantasyService.watchBadgesFor(season.sport, season.season, uid),
+        (b) {
+          _badges = b;
+          _notify();
+        },
+        onFail: () {
+          _badges ??= const [];
+          _notify();
+        },
+        label: 'badges',
+      );
+      _listen<FantasyBadgeCatalog>(
+        () => seams.badgeCatalogStates ?? FantasyService.watchBadgeCatalog(),
+        (c) {
+          _badgeCatalog = c;
+          _notify();
+        },
+        onFail: () {
+          _badgeCatalog ??= kStarterBadgeCatalog;
+          _notify();
+        },
+        label: 'badge catalog',
       );
     }
   }

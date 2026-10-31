@@ -11,12 +11,17 @@
 //     the content; "Open in Fantasy" lands on THAT player's profile inside
 //     the hub; "View team" opens the real squad viewer (chips open the
 //     fantasy player profile from outside the hub); no overflow in light AND
-//     dark at 360 px.
+//     dark at 360 px;
+//   * badges (spec 2026-10-30 §5): the manager section's badge shelf (or the
+//     muted "No badges yet" line), its feeds joining the one reveal (a
+//     failing feed = none), never subscribed for a player-only uid, the
+//     viewer seeded with them, and many long-named badges at 360 px.
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_season_resolver.dart';
@@ -410,8 +415,17 @@ void main() {
 
   /// [finished] = the league's `Finished` flag feed; the default answers
   /// "not over" at once (like a cache-seeded stream).
-  FantasyProfileSeams seams({String self = 'me', Stream<bool>? finished}) =>
+  FantasyProfileSeams seams({
+    String self = 'me',
+    Stream<bool>? finished,
+    Stream<List<FantasyBadgeAward>>? badges,
+    Stream<FantasyBadgeCatalog>? badgeCatalog,
+  }) =>
       FantasyProfileSeams(
+        // Default: nothing earned, answered at once (a cache-seeded feed).
+        badgeStates: badges ?? Stream.value(const <FantasyBadgeAward>[]),
+        badgeCatalogStates:
+            badgeCatalog ?? Stream.value(badgeCatalogFromNode(null)),
         resolveSeason: () async => resolved,
         playersStates: players.stream,
         rosterStates: rosters.stream,
@@ -1635,6 +1649,181 @@ void main() {
       expect(viewer.isSelf, isTrue);
       expect(key('viewer_week_now'), findsOneWidget);
     });
+  });
+
+  group('badges (spec 2026-10-30 §5)', () {
+    List<FantasyBadgeAward> earned() => const [
+          FantasyBadgeAward(
+              id: 'captainGenius_gw3', badgeId: 'captainGenius', gw: 3, atMs: 3),
+          FantasyBadgeAward(
+              id: 'captainGenius_gw7', badgeId: 'captainGenius', gw: 7, atMs: 7),
+          FantasyBadgeAward(
+              id: 'captainGenius_gw9', badgeId: 'captainGenius', gw: 9, atMs: 9),
+          FantasyBadgeAward(
+              id: 'champion_season', badgeId: 'champion', atMs: 20),
+        ];
+
+    testWidgets('the manager section shows the shelf (×N for repeats); a chip '
+        'opens its sheet', (tester) async {
+      await pumpProfile(tester,
+          withSeams: seams(badges: Stream.value(earned())));
+      await landEligibility(tester, asManager: topCats);
+      await landContent(tester, managerRole: true);
+      await openFantasyTab(tester);
+
+      expect(key('fantasy_badges_label'), findsOneWidget);
+      expect(key('badge_shelf'), findsOneWidget);
+      expect(
+          find.descendant(
+              of: key('fantasy_manager_card'),
+              matching: key('badge_chip_captainGenius')),
+          findsOneWidget);
+      expect(find.text('×3'), findsOneWidget);
+      expect(find.text('Champion'), findsOneWidget);
+      expect(key('badge_shelf_empty'), findsNothing);
+
+      await tester.tap(key('badge_chip_champion'));
+      await tester.pumpAndSettle();
+      expect(key('badge_sheet'), findsOneWidget);
+      expect(find.text('Season 15'), findsOneWidget);
+    });
+
+    testWidgets('nothing earned: the short muted line', (tester) async {
+      await pumpProfile(tester);
+      await landEligibility(tester, asManager: topCats);
+      await landContent(tester, managerRole: true);
+      await openFantasyTab(tester);
+      expect(key('badge_shelf'), findsNothing);
+      expect(find.text(kNoBadgesCopy), findsOneWidget);
+    });
+
+    testWidgets('the badge feeds join the ONE reveal', (tester) async {
+      final badges = StreamController<List<FantasyBadgeAward>>.broadcast();
+      final catalog = StreamController<FantasyBadgeCatalog>.broadcast();
+      addTearDown(badges.close);
+      addTearDown(catalog.close);
+      await pumpProfile(tester,
+          withSeams:
+              seams(badges: badges.stream, badgeCatalog: catalog.stream));
+      await landEligibility(tester, asManager: topCats);
+      await tester.tap(fantasyTab());
+      await landContent(tester, managerRole: true);
+      // Board landed, badges not yet: still the skeleton.
+      expect(key('fantasy_tab_skeleton'), findsOneWidget);
+      expect(key('fantasy_tab_ready'), findsNothing);
+
+      badges.add(earned());
+      await tester.pump();
+      expect(key('fantasy_tab_ready'), findsNothing);
+      catalog.add(badgeCatalogFromNode(null));
+      await settle(tester);
+      expect(key('fantasy_tab_ready'), findsOneWidget);
+      expect(find.text('×3'), findsOneWidget);
+
+      // Live: a removed award re-renders the shelf (no refresh).
+      badges.add(earned().take(2).toList());
+      await settle(tester);
+      expect(find.text('×2'), findsOneWidget);
+    });
+
+    testWidgets('failing badge feeds never hold the tab (the empty line)',
+        (tester) async {
+      await pumpProfile(tester,
+          withSeams: seams(
+            badges: Stream.error(StateError('denied')),
+            badgeCatalog: Stream.error(StateError('offline')),
+          ));
+      await landEligibility(tester, asManager: topCats);
+      await landContent(tester, managerRole: true);
+      await openFantasyTab(tester);
+      expect(key('fantasy_tab_ready'), findsOneWidget);
+      expect(find.text(kNoBadgesCopy), findsOneWidget);
+    });
+
+    testWidgets('a player-only uid never subscribes to badges (no shelf)',
+        (tester) async {
+      final badges = StreamController<List<FantasyBadgeAward>>.broadcast();
+      addTearDown(badges.close);
+      await pumpProfile(tester, withSeams: seams(badges: badges.stream));
+      await landEligibility(tester, asPlayer: true);
+      await landContent(tester, player: true);
+      await openFantasyTab(tester);
+      expect(key('fantasy_player_card'), findsOneWidget);
+      expect(badges.hasListener, isFalse);
+      expect(key('badge_shelf'), findsNothing);
+      expect(find.text(kNoBadgesCopy), findsNothing);
+    });
+
+    testWidgets('View team seeds the viewer with the same badges',
+        (tester) async {
+      await pumpProfile(tester,
+          withSeams: seams(badges: Stream.value(earned())));
+      await landEligibility(tester, asManager: topCats);
+      await landContent(tester, managerRole: true);
+      await openFantasyTab(tester);
+
+      await tester.tap(key('fantasy_view_team'));
+      await tester.pump();
+      published.add({1: FantasySquad(picks: [
+        _pick('Alan Keeper', FantasyPosition.gk, 50),
+      ], captainId: 'Alan Keeper', viceId: 'Alan Keeper')});
+      history.add(const {});
+      await settle(tester);
+      final viewer = tester
+          .widget<ManagerSquadViewerPage>(find.byType(ManagerSquadViewerPage));
+      expect(viewer.initialBadges, hasLength(4));
+      expect(viewer.initialBadgeCatalog, isNotNull);
+      expect(
+          find.descendant(
+              of: find.byType(ManagerSquadViewerPage),
+              matching: key('badge_shelf')),
+          findsOneWidget);
+    });
+
+    for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+      testWidgets('many long-named badges wrap at 360 px ($mode)',
+          (tester) async {
+        const longBadge =
+            'The Extraordinarily Magnificent Never-Ending Captaincy Award';
+        final catalog = badgeCatalogFromNode({
+          for (var i = 0; i < 6; i++)
+            'long$i': {'Name': '$longBadge $i', 'Icon': 'bolt', 'Order': i},
+        });
+        await pumpProfile(
+          tester,
+          size: const Size(360, 780),
+          themeMode: mode,
+          withSeams: seams(
+            badges: Stream.value([
+              for (var i = 0; i < 6; i++)
+                for (var gw = 1; gw <= i + 1; gw++)
+                  FantasyBadgeAward(
+                      id: 'long${i}_gw$gw', badgeId: 'long$i', gw: gw),
+            ]),
+            badgeCatalog: Stream.value(catalog),
+          ),
+        );
+        await landEligibility(tester,
+            asManager: const FantasyManager(
+                teamName: '$_longTeam $_longTeam', nameFlagged: false));
+        await landContent(tester, managerRole: true);
+        await openFantasyTab(tester);
+
+        expect(tester.takeException(), isNull);
+        for (var i = 0; i < 6; i++) {
+          await tester.ensureVisible(key('badge_chip_long$i'));
+          await tester.pump();
+          final r = tester.getRect(key('badge_chip_long$i'));
+          expect(r.left, greaterThanOrEqualTo(0));
+          expect(r.right, lessThanOrEqualTo(360));
+        }
+        for (final t in tester.widgetList<Text>(find.byType(Text))) {
+          expect(t.overflow, isNot(TextOverflow.ellipsis));
+          expect(t.style?.decoration, isNot(TextDecoration.underline));
+        }
+        expect(tester.takeException(), isNull);
+      });
+    }
   });
 
   group('reveal', () {
