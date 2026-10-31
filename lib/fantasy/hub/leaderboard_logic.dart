@@ -8,6 +8,9 @@
 // direction/label,
 // mini-league code generation/matching, member ranking, and the
 // published-vs-history week fallback the squad viewer enforces (spec §9).
+// Leaderboard extras (follow-up): the own-row "Your rank this season" series
+// (Leaderboards/RankHistory), the week's biggest climber / faller badges, and
+// the Gameweek view's week summary.
 
 import 'dart:math' as math;
 
@@ -175,6 +178,135 @@ String movementLabel(int? movement) {
   final direction = movementDirection(movement);
   if (direction == MovementDirection.none) return movementGlyph(direction);
   return '${movementGlyph(direction)}${movement!.abs()}';
+}
+
+// ── Rank over the season (Leaderboards/RankHistory) ───────────────────────
+
+/// One point of a manager's season rank line.
+typedef RankPoint = ({int gameweek, int rank});
+
+/// The line needs two weeks; under that the panel shows a muted note.
+const int kRankChartMinWeeks = 2;
+
+/// A manager's RankHistory ({gameweek → Overall rank}) as points in
+/// gameweek order. null / empty → no points.
+List<RankPoint> rankSeries(Map<int, int>? history) {
+  if (history == null || history.isEmpty) return const [];
+  final weeks = history.keys.toList()..sort();
+  return [for (final w in weeks) (gameweek: w, rank: history[w]!)];
+}
+
+/// "#14 → #10": the first recorded rank → the latest. null under
+/// [kRankChartMinWeeks] points (no line to label yet).
+String? rankJourneyLabel(List<RankPoint> series) =>
+    series.length < kRankChartMinWeeks
+        ? null
+        : '#${series.first.rank} → #${series.last.rank}';
+
+/// The chart's screen-reader text: every week's rank in order.
+String rankSeriesSemantics(List<RankPoint> series) =>
+    'Your rank by gameweek: '
+    '${series.map((p) => 'GW${p.gameweek} #${p.rank}').join(', ')}';
+
+// ── Biggest climber / faller of the week (Overall) ────────────────────────
+
+enum MoverKind { climber, faller }
+
+/// A row's badge: the week's biggest climb or drop, [places] > 0.
+class WeeklyMover {
+  const WeeklyMover(this.kind, this.places);
+
+  final MoverKind kind;
+  final int places;
+
+  @override
+  bool operator ==(Object other) =>
+      other is WeeklyMover && other.kind == kind && other.places == places;
+
+  @override
+  int get hashCode => Object.hash(kind, places);
+
+  @override
+  String toString() => 'WeeklyMover($kind, $places)';
+}
+
+/// uid → badge. The manager(s) with the largest positive movement are the
+/// climbers, the largest negative the fallers; ties badge every tied
+/// manager. No climber when nobody climbed (max ≤ 0), no faller when nobody
+/// dropped (min ≥ 0) — absent movement (the first week) counts as neither.
+Map<String, WeeklyMover> weeklyMovers(List<LeaderboardRowData> rows) {
+  var maxUp = 0;
+  var maxDown = 0;
+  for (final row in rows) {
+    final m = row.movement ?? 0;
+    if (m > maxUp) maxUp = m;
+    if (m < maxDown) maxDown = m;
+  }
+  return {
+    for (final row in rows)
+      if (maxUp > 0 && row.movement == maxUp)
+        row.uid: WeeklyMover(MoverKind.climber, maxUp)
+      else if (maxDown < 0 && row.movement == maxDown)
+        row.uid: WeeklyMover(MoverKind.faller, -maxDown),
+  };
+}
+
+/// The badge's tooltip + semantics text ("Biggest climber this week (▲3)").
+String moverLabel(WeeklyMover mover) => switch (mover.kind) {
+      MoverKind.climber =>
+        'Biggest climber this week (${movementLabel(mover.places)})',
+      MoverKind.faller =>
+        'Biggest drop this week (${movementLabel(-mover.places)})',
+    };
+
+// ── Gameweek week summary ──────────────────────────────────────────────────
+
+/// The Gameweek view's one-line summary of the selected week.
+class GameweekSummary {
+  const GameweekSummary({
+    required this.average,
+    required this.highest,
+    required this.topNames,
+    this.you,
+  });
+
+  /// Mean of the week's points, rounded to whole (half away from zero).
+  final int average;
+  final int highest;
+
+  /// Display names of every manager on [highest], in row (rank) order.
+  final List<String> topNames;
+
+  /// The signed-in manager's points that week; null = no row that week.
+  final int? you;
+
+  /// "Sweeper Keepers", or "2 managers" on a tie for the top score.
+  String get highestWho =>
+      topNames.length == 1 ? topNames.single : '${topNames.length} managers';
+
+  /// "Average 48 pts · Highest 96 (Sweeper Keepers) · You 52".
+  String get label => [
+        'Average $average pts',
+        'Highest $highest ($highestWho)',
+        if (you != null) 'You $you',
+      ].join(' · ');
+}
+
+/// The selected week's composed rows → its summary (names follow the row
+/// rule: real name, else team name). null for a week with no rows.
+GameweekSummary? gameweekSummary(List<LeaderboardRowData> rows) {
+  if (rows.isEmpty) return null;
+  final total = rows.fold<int>(0, (sum, r) => sum + r.points);
+  final highest = rows.map((r) => r.points).reduce(math.max);
+  return GameweekSummary(
+    average: (total / rows.length).round(),
+    highest: highest,
+    topNames: [
+      for (final r in rows)
+        if (r.points == highest) r.name,
+    ],
+    you: rows.where((r) => r.isSelf).firstOrNull?.points,
+  );
 }
 
 // ── Mini-leagues ───────────────────────────────────────────────────────────

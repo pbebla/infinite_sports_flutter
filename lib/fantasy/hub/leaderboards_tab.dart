@@ -4,7 +4,12 @@
 // on Overall only, the manager's real name with the team name under it — with
 // the signed-in manager's row pinned when scrolled away; the Gameweek scope
 // adds week chips (1..N from the real schedule's gameweeks). Tapping ANY
-// manager opens their squad viewer (spec §9 transparency). Team of the week
+// manager opens their squad viewer (spec §9 transparency) — except your OWN
+// row on Overall (natural or pinned), which folds open "Your rank this
+// season" (rank_history_chart.dart, from Leaderboards/RankHistory) with a
+// "View team" action to your viewer. Overall also badges the week's biggest
+// climber(s) (flame) and biggest drop(s); Gameweek opens with the selected
+// week's summary ("Average · Highest (name) · You"). Team of the week
 // is the Dream Team card (dream_team_card.dart) as the ONLY content of its
 // own view — it no longer floats above the two lists (switching those looked
 // like a no-op). The selected week carries between Gameweek and Team of the
@@ -38,6 +43,8 @@ import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/manager_squad_viewer.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/mini_leagues_view.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/rank_history_chart.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
@@ -423,15 +430,23 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
     if (entries.isEmpty) {
       return const _LeaderboardsEmpty(key: ValueKey('leaderboards_empty'));
     }
+    final rows = composeLeaderboardRows(
+      entries: entries,
+      managers: _managers!,
+      profiles: _profiles!,
+      selfUid: _selfUid,
+    );
     return RankedLeaderboardList(
-      rows: composeLeaderboardRows(
-        entries: entries,
-        managers: _managers!,
-        profiles: _profiles!,
-        selfUid: _selfUid,
-      ),
+      rows: rows,
       showMovement: true,
       onRowTap: _openManager,
+      movers: weeklyMovers(rows),
+      // Your own row folds open your season's rank line (the viewer stays
+      // one tap away inside the panel).
+      selfPanelBuilder: (self) => RankHistoryPanel(
+        series: rankSeries(_boards!.rankHistory[self.uid]),
+        onViewTeam: () => _openManager(self),
+      ),
     );
   }
 
@@ -490,16 +505,26 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
         ],
       );
     }
+    final rows = composeLeaderboardRows(
+      entries: entries,
+      managers: _managers!,
+      profiles: _profiles!,
+      selfUid: _selfUid,
+      // The pinned Gameweek shape carries no movement (by design).
+      showMovement: false,
+    );
+    final summary = gameweekSummary(rows);
     return RankedLeaderboardList(
-      header: chips,
-      rows: composeLeaderboardRows(
-        entries: entries,
-        managers: _managers!,
-        profiles: _profiles!,
-        selfUid: _selfUid,
-        // The pinned Gameweek shape carries no movement (by design).
-        showMovement: false,
+      // The week chips, then the selected week's summary line.
+      header: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          chips,
+          if (summary != null) _GameweekSummaryCard(summary: summary),
+        ],
       ),
+      rows: rows,
       showMovement: false,
       onRowTap: _openManager,
     );
@@ -526,6 +551,65 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
         config: widget.configState.config,
         players: widget.players,
         onOpenPlayer: widget.onOpenPlayer,
+      ),
+    );
+  }
+}
+
+/// The Gameweek view's compact week summary: "Average 48 pts · Highest 96
+/// (Sweeper Keepers) · You 52" — numbers bold, yours in the accent. One
+/// wrapping paragraph (long names wrap at 360 px, never clip).
+class _GameweekSummaryCard extends StatelessWidget {
+  const _GameweekSummaryCard({required this.summary});
+
+  final GameweekSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final strong = TextStyle(
+      fontWeight: FontWeight.w800,
+      color: scheme.onSurface,
+    );
+    final you = summary.you;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: scheme.outlineVariant.withValues(alpha: 0.6)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          // Same words as GameweekSummary.label, styled per part.
+          child: Text.rich(
+            key: const ValueKey('gameweek_summary'),
+            TextSpan(
+              style: TextStyle(
+                fontSize: 12.5,
+                height: 1.35,
+                color: scheme.onSurfaceVariant,
+              ),
+              children: [
+                const TextSpan(text: 'Average '),
+                TextSpan(text: '${summary.average} pts', style: strong),
+                const TextSpan(text: ' · Highest '),
+                TextSpan(text: '${summary.highest}', style: strong),
+                TextSpan(text: ' (${summary.highestWho})'),
+                if (you != null) ...[
+                  const TextSpan(text: ' · You '),
+                  TextSpan(
+                    text: '$you',
+                    style: strong.copyWith(color: fantasyAccent(context)),
+                  ),
+                ],
+              ],
+            ),
+            softWrap: true,
+          ),
+        ),
       ),
     );
   }

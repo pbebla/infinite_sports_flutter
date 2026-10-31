@@ -29,9 +29,11 @@ import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/mini_leagues_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/rank_history_chart.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
 
 FantasyLeaderboardEntry entry(String uid, int points,
@@ -985,5 +987,480 @@ void main() {
               .selected,
           isTrue);
     });
+  });
+
+  // ── Leaderboard extras (follow-up): your rank this season, biggest
+  // climber / faller badges, the Gameweek week summary. ──────────────────
+
+  final fourNames = {
+    'u1': manager('Top Cats'),
+    'me': manager('My Team'),
+    'u3': manager('Thirds'),
+    'u4': manager('Fourths'),
+  };
+
+  FantasyLeaderboards overallWith(Map<String, Object?>? history,
+          {Map<String, Object?>? gameweek}) =>
+      leaderboardsFromNode({
+        'Overall': {
+          'u1': {'points': 90, 'rank': 1, 'movement': 1},
+          'me': {'points': 80, 'rank': 2, 'movement': 2},
+          'u3': {'points': 70, 'rank': 3, 'movement': -1},
+          'u4': {'points': 60, 'rank': 4, 'movement': -2},
+        },
+        if (gameweek != null) 'Gameweek': gameweek,
+        if (history != null) 'RankHistory': history,
+      });
+
+  Finder byKey(String key) => find.byKey(ValueKey(key));
+
+  group('extra 1 — your rank this season (own row, Overall)', () {
+    testWidgets('tapping YOUR row expands "Your rank this season" — the line '
+        'chart and "#start → #now" — instead of the viewer; tapping again '
+        'folds it', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpTab(tester, size: const Size(420, 1000));
+      await emitAll(
+        tester,
+        data: overallWith({
+          'me': {'1': 14, '2': 12, '3': 10},
+        }),
+        names: fourNames,
+      );
+      expect(byKey('rank_history_panel'), findsNothing);
+
+      await tester.tap(byKey('leaderboard_row_me'));
+      await tester.pumpAndSettle();
+      expect(byKey('rank_history_panel'), findsOneWidget);
+      expect(find.text('Your rank this season'), findsOneWidget);
+      expect(byKey('rank_history_chart'), findsOneWidget);
+      expect(find.text('#14 → #10'), findsOneWidget);
+      expect(byKey('rank_history_note'), findsNothing);
+      expect(find.bySemanticsLabel('Your rank by gameweek: GW1 #14, GW2 #12, '
+          'GW3 #10'), findsOneWidget);
+      // Rank 1 at the top: the best rank's axis label sits above the worst;
+      // the gameweeks run left to right.
+      expect(tester.getTopLeft(find.text('#10')).dy,
+          lessThan(tester.getTopLeft(find.text('#14')).dy));
+      expect(tester.getTopLeft(find.text('GW1')).dx,
+          lessThan(tester.getTopLeft(find.text('GW3')).dx));
+      // The panel opens UNDER the own row, inside its highlight.
+      expect(tester.getTopLeft(byKey('rank_history_panel')).dy,
+          greaterThanOrEqualTo(
+              tester.getBottomLeft(byKey('leaderboard_row_me')).dy - 0.5));
+      // The squad viewer did NOT open.
+      expect(openedRows, isEmpty);
+      expect(find.text('viewer page'), findsNothing);
+
+      await tester.tap(byKey('leaderboard_row_me'));
+      await tester.pumpAndSettle();
+      expect(byKey('rank_history_panel'), findsNothing);
+      expect(openedRows, isEmpty);
+      semantics.dispose();
+    });
+
+    testWidgets('"View team" inside the panel still opens your own squad '
+        'viewer', (tester) async {
+      await pumpTab(tester, size: const Size(420, 1000));
+      await emitAll(
+        tester,
+        data: overallWith({
+          'me': {'1': 3, '2': 2},
+        }),
+        names: fourNames,
+      );
+      await tester.tap(byKey('leaderboard_row_me'));
+      await tester.pumpAndSettle();
+      await tester.tap(byKey('rank_history_view_team'));
+      await tester.pumpAndSettle();
+      expect(openedRows.single.uid, 'me');
+      expect(openedRows.single.isSelf, isTrue);
+      expect(find.text('viewer page'), findsOneWidget);
+    });
+
+    for (final (label, history) in [
+      ('one week of history', <String, Object?>{
+        'me': {'1': 4},
+      }),
+      ('no RankHistory at all', null),
+    ]) {
+      testWidgets('under two weeks ($label): a short muted note instead of a '
+          'chart', (tester) async {
+        await pumpTab(tester, size: const Size(420, 1000));
+        await emitAll(tester, data: overallWith(history), names: fourNames);
+        await tester.tap(byKey('leaderboard_row_me'));
+        await tester.pumpAndSettle();
+
+        expect(byKey('rank_history_panel'), findsOneWidget);
+        expect(find.text('Your rank this season'), findsOneWidget);
+        expect(byKey('rank_history_chart'), findsNothing);
+        expect(find.textContaining('→'), findsNothing);
+        final note = tester.widget<Text>(byKey('rank_history_note'));
+        expect(note.data, kRankHistoryNote);
+        final context = tester.element(byKey('rank_history_note'));
+        expect(note.style!.color,
+            Theme.of(context).colorScheme.onSurfaceVariant);
+        // View team stays available.
+        expect(byKey('rank_history_view_team'), findsOneWidget);
+      });
+    }
+
+    testWidgets("other managers' rows still open their squad viewer; the "
+        "Gameweek view's own row still opens yours", (tester) async {
+      await pumpTab(tester, size: const Size(420, 1000));
+      await emitAll(
+        tester,
+        data: overallWith(
+          {
+            'me': {'1': 3, '2': 2},
+          },
+          gameweek: {
+            '1': {
+              'u1': {'points': 20, 'rank': 1},
+              'me': {'points': 10, 'rank': 2},
+            },
+          },
+        ),
+        names: fourNames,
+      );
+
+      await tester.tap(byKey('leaderboard_row_u3'));
+      await tester.pumpAndSettle();
+      expect(openedRows.single.uid, 'u3');
+      expect(find.text('viewer page'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(byKey('rank_history_panel'), findsNothing);
+
+      await pickScope(tester, 'Gameweek');
+      await tester.tap(byKey('leaderboard_row_me'));
+      await tester.pumpAndSettle();
+      expect(openedRows.last.uid, 'me');
+      expect(byKey('rank_history_panel'), findsNothing);
+    });
+
+    testWidgets('the PINNED copy of your row expands too', (tester) async {
+      await pumpTab(tester, selfUid: 'u18');
+      await emitAll(
+        tester,
+        data: leaderboardsFromNode({
+          'Overall': {
+            for (var i = 1; i <= 20; i++)
+              'u$i': {'points': 100 - i, 'rank': i},
+          },
+          'RankHistory': {
+            'u18': {'1': 20, '2': 18},
+          },
+        }),
+        names: {for (var i = 1; i <= 20; i++) 'u$i': manager('Team $i')},
+      );
+      final pinned = byKey('pinned_own_row');
+      expect(pinned, findsOneWidget);
+
+      await tester.tap(find.descendant(
+          of: pinned, matching: byKey('leaderboard_row_u18')));
+      await tester.pumpAndSettle();
+      expect(
+          find.descendant(of: pinned, matching: byKey('rank_history_panel')),
+          findsOneWidget);
+      expect(find.descendant(of: pinned, matching: find.text('#20 → #18')),
+          findsOneWidget);
+      expect(openedRows, isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+
+    test('chart geometry: rank 1 at the top, gameweeks left to right', () {
+      final points = rankChartOffsets(
+        [
+          (gameweek: 1, rank: 14),
+          (gameweek: 2, rank: 12),
+          (gameweek: 4, rank: 10),
+        ],
+        const Size(200, 100),
+        inset: 6,
+      );
+      // First week: worst rank (14) at the bottom-left.
+      expect(points.first, const Offset(6, 94));
+      // Latest week: best rank (10) at the top-right.
+      expect(points.last, const Offset(194, 6));
+      // GW2 sits a third of the way (weeks 1..4), rank 12 half-way down.
+      expect(points[1].dx, closeTo(6 + 188 / 3, 1e-9));
+      expect(points[1].dy, 50);
+      // A flat line (same rank every week) runs through the middle.
+      final flat = rankChartOffsets(
+          [(gameweek: 1, rank: 3), (gameweek: 2, rank: 3)],
+          const Size(100, 60),
+          inset: 5);
+      expect(flat.map((o) => o.dy), [30, 30]);
+    });
+  });
+
+  group('extra 2 — biggest climber / faller badges (Overall)', () {
+    final movers = leaderboardsFromNode({
+      'Overall': {
+        'u1': {'points': 50, 'rank': 1, 'movement': 3},
+        'u2': {'points': 45, 'rank': 2, 'movement': 3},
+        'u3': {'points': 40, 'rank': 3, 'movement': -2},
+        'u4': {'points': 35, 'rank': 4, 'movement': -4},
+        'u5': {'points': 30, 'rank': 5},
+      },
+      'Gameweek': {
+        '1': {
+          for (var i = 1; i <= 5; i++) 'u$i': {'points': 10 - i, 'rank': i},
+        },
+      },
+    });
+    final fiveNames = {for (var i = 1; i <= 5; i++) 'u$i': manager('Team $i')};
+
+    for (final brightness in Brightness.values) {
+      testWidgets('flame on the (tied) biggest climbers, down badge on the '
+          'biggest drop, with semantics + tooltips — $brightness',
+          (tester) async {
+        final semantics = tester.ensureSemantics();
+        await pumpTab(tester, brightness: brightness);
+        await emitAll(tester, data: movers, names: fiveNames);
+
+        for (final uid in ['u1', 'u2']) {
+          expect(byKey('climber_badge_$uid'), findsOneWidget);
+          expect(byKey('faller_badge_$uid'), findsNothing);
+        }
+        expect(byKey('faller_badge_u4'), findsOneWidget);
+        expect(byKey('climber_badge_u4'), findsNothing);
+        for (final uid in ['u3', 'u5']) {
+          expect(byKey('climber_badge_$uid'), findsNothing);
+          expect(byKey('faller_badge_$uid'), findsNothing);
+        }
+
+        expect(find.bySemanticsLabel('Biggest climber this week (▲3)'),
+            findsNWidgets(2));
+        expect(find.bySemanticsLabel('Biggest drop this week (▼4)'),
+            findsOneWidget);
+        expect(find.byTooltip('Biggest climber this week (▲3)'),
+            findsNWidgets(2));
+        expect(find.byTooltip('Biggest drop this week (▼4)'), findsOneWidget);
+
+        final context = tester.element(byKey('leaderboard_row_u1'));
+        Icon icon(String key) => tester.widget<Icon>(
+            find.descendant(of: byKey(key), matching: find.byType(Icon)));
+        expect(icon('climber_badge_u1').icon, Icons.local_fire_department);
+        expect(icon('climber_badge_u1').color, fantasyFlameOrange(context));
+        expect(icon('faller_badge_u4').icon, Icons.trending_down);
+        expect(icon('faller_badge_u4').color, fantasyDownRed(context));
+        // The flame never borrows the "down" red.
+        expect(fantasyFlameOrange(context), isNot(fantasyDownRed(context)));
+
+        // Beside the manager name (same line, to its right).
+        final name = tester.getRect(byKey('leaderboard_name_u1'));
+        final badge = tester.getRect(byKey('climber_badge_u1'));
+        expect(badge.left, greaterThanOrEqualTo(name.right - 0.5));
+        expect(badge.center.dy, inInclusiveRange(name.top, name.bottom));
+        semantics.dispose();
+      });
+    }
+
+    testWidgets('no badges when nobody moved; never on the Gameweek view',
+        (tester) async {
+      await pumpTab(tester);
+      await emitAll(
+        tester,
+        data: leaderboardsFromNode({
+          'Overall': {
+            'u1': {'points': 50, 'rank': 1, 'movement': 0},
+            'u2': {'points': 40, 'rank': 2},
+          },
+        }),
+        names: fiveNames,
+      );
+      for (final uid in ['u1', 'u2']) {
+        expect(byKey('climber_badge_$uid'), findsNothing);
+        expect(byKey('faller_badge_$uid'), findsNothing);
+      }
+
+      boards.add(movers);
+      await tester.pumpAndSettle();
+      expect(byKey('climber_badge_u1'), findsOneWidget);
+      await pickScope(tester, 'Gameweek');
+      for (var i = 1; i <= 5; i++) {
+        expect(byKey('climber_badge_u$i'), findsNothing);
+        expect(byKey('faller_badge_u$i'), findsNothing);
+      }
+    });
+  });
+
+  group('extra 3 — Gameweek week summary', () {
+    final weeks = leaderboardsFromNode({
+      'Overall': {
+        'a': {'points': 106, 'rank': 1},
+      },
+      'Gameweek': {
+        '1': {
+          'a': {'points': 96, 'rank': 1},
+          'me': {'points': 52, 'rank': 2},
+          'b': {'points': 45, 'rank': 3},
+          'd': {'points': 0, 'rank': 4},
+        },
+        '2': {
+          'b': {'points': 20, 'rank': 1},
+          'a': {'points': 10, 'rank': 2},
+        },
+      },
+    });
+    final summaryNames = {
+      'a': manager('Sweeper Keepers'),
+      'b': manager('Mid Table Mafia'),
+      'me': manager('My Team'),
+      'd': manager('Bench Warmers United'),
+    };
+
+    testWidgets('average · highest (name) · you, for the SELECTED week; no '
+        '"You" without your row; none on an unscored week or on Overall',
+        (tester) async {
+      await pumpTab(tester);
+      await emitAll(tester, data: weeks, names: summaryNames);
+      expect(byKey('gameweek_summary'), findsNothing); // Overall
+
+      await pickScope(tester, 'Gameweek');
+      // Latest scored week (GW2): 10 + 20 = 30 / 2 = 15; no row for me.
+      expect(find.text('Average 15 pts · Highest 20 (Mid Table Mafia)'),
+          findsOneWidget);
+
+      await tester.tap(byKey('leaderboard_week_1'));
+      await tester.pumpAndSettle();
+      // 96 + 52 + 45 + 0 = 193 / 4 = 48.25 -> 48.
+      expect(
+          find.text('Average 48 pts · Highest 96 (Sweeper Keepers) · You 52'),
+          findsOneWidget);
+      // At the top of the view: under the week chips, above the standings.
+      final summary = tester.getRect(byKey('gameweek_summary'));
+      expect(summary.top,
+          greaterThan(tester.getRect(byKey('leaderboard_week_1')).bottom));
+      expect(summary.bottom,
+          lessThan(tester.getRect(byKey('leaderboard_column_header')).top));
+
+      await tester.tap(byKey('leaderboard_week_3'));
+      await tester.pumpAndSettle();
+      expect(byKey('leaderboard_week_unscored'), findsOneWidget);
+      expect(byKey('gameweek_summary'), findsNothing);
+    });
+
+    testWidgets('a tie for the top score names no one: "(2 managers)"',
+        (tester) async {
+      FantasyLeaderboardsTab.sessionScope = LeaderboardScope.gameweek;
+      await pumpTab(tester);
+      await emitAll(
+        tester,
+        data: leaderboardsFromNode({
+          'Gameweek': {
+            '1': {
+              'a': {'points': 30, 'rank': 1},
+              'b': {'points': 30, 'rank': 1},
+              'me': {'points': 12, 'rank': 3},
+            },
+          },
+        }),
+        names: summaryNames,
+      );
+      expect(
+          find.text('Average 24 pts · Highest 30 (2 managers) · You 12'),
+          findsOneWidget);
+    });
+  });
+
+  group('extras at 360 px — wrap, never overflow (light + dark)', () {
+    const longReal = 'Maximiliano Bartholomew Featherstonehaugh-Smythe';
+    const longTeam = 'The Unbelievably Long Team Name Football Club Of Doom';
+
+    for (final brightness in Brightness.values) {
+      testWidgets('badged long names, the expanded rank panel and the week '
+          'summary — $brightness', (tester) async {
+        await pumpTab(
+          tester,
+          selfUid: 'me',
+          size: const Size(360, 760),
+          brightness: brightness,
+          profiles: {
+            'u1': const PublicProfile(
+                uid: 'u1',
+                firstName: 'Maximiliano',
+                lastName: 'Bartholomew Featherstonehaugh-Smythe'),
+            'me': const PublicProfile(
+                uid: 'me',
+                firstName: 'Maximiliano',
+                lastName: 'Bartholomew Featherstonehaugh-Smythe'),
+          },
+        );
+        await emitAll(
+          tester,
+          data: leaderboardsFromNode({
+            'Overall': {
+              'u1': {'points': 1234, 'rank': 1, 'movement': 12},
+              'me': {'points': 1200, 'rank': 2, 'movement': -9},
+              'u3': {'points': 1100, 'rank': 3, 'movement': 1},
+            },
+            'Gameweek': {
+              '1': {
+                'u1': {'points': 96, 'rank': 1},
+                'me': {'points': 52, 'rank': 2},
+                'u3': {'points': 40, 'rank': 3},
+              },
+            },
+            'RankHistory': {
+              'me': {'1': 120, '2': 45, '3': 2},
+            },
+          }),
+          names: {
+            'u1': manager(longTeam),
+            'me': manager(longTeam),
+            'u3': manager(longTeam),
+          },
+        );
+
+        expect(byKey('climber_badge_u1'), findsOneWidget);
+        expect(byKey('faller_badge_me'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        for (final key in [
+          'climber_badge_u1',
+          'faller_badge_me',
+          'leaderboard_row_u1',
+          'leaderboard_row_me',
+        ]) {
+          final r = tester.getRect(byKey(key));
+          expect(r.left, greaterThanOrEqualTo(0), reason: key);
+          expect(r.right, lessThanOrEqualTo(360), reason: key);
+        }
+        // The long name still wraps (never ellipsized).
+        final name = tester.widget<Text>(byKey('leaderboard_name_u1'));
+        expect(name.overflow, isNot(TextOverflow.ellipsis));
+        expect(name.maxLines, isNull);
+
+        // The wrapped long names push the own row down: bring it into view.
+        await tester.ensureVisible(byKey('leaderboard_row_me'));
+        await tester.pumpAndSettle();
+        await tester.tap(byKey('leaderboard_row_me'));
+        await tester.pumpAndSettle();
+        expect(byKey('rank_history_chart'), findsOneWidget);
+        expect(find.text('#120 → #2'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        for (final key in ['rank_history_panel', 'rank_history_chart']) {
+          final r = tester.getRect(byKey(key));
+          expect(r.left, greaterThanOrEqualTo(0), reason: key);
+          expect(r.right, lessThanOrEqualTo(360), reason: key);
+        }
+
+        await pickScope(tester, 'Gameweek');
+        final summaryText = tester.widget<Text>(byKey('gameweek_summary'));
+        expect(summaryText.overflow, isNot(TextOverflow.ellipsis));
+        expect(summaryText.maxLines, isNull);
+        expect(
+            find.text('Average 63 pts · Highest 96 ($longReal) · You 52'),
+            findsOneWidget);
+        final summary = tester.getRect(byKey('gameweek_summary'));
+        expect(summary.left, greaterThanOrEqualTo(0));
+        expect(summary.right, lessThanOrEqualTo(360));
+        // Wrapped onto several lines rather than clipped.
+        expect(summary.height, greaterThan(40));
+        expect(tester.takeException(), isNull);
+      });
+    }
   });
 }

@@ -273,6 +273,167 @@ void main() {
     });
   });
 
+  // ── Leaderboard extras (follow-up) ──────────────────────────────────────
+
+  LeaderboardRowData row(
+    String uid, {
+    int points = 0,
+    int? movement,
+    String? real,
+    String? team,
+    bool self = false,
+    int rank = 1,
+  }) =>
+      LeaderboardRowData(
+        uid: uid,
+        realName: real,
+        teamName: team,
+        points: points,
+        displayRank: rank,
+        movement: movement,
+        isSelf: self,
+      );
+
+  group('rank over the season (RankHistory)', () {
+    test('rankSeries orders by gameweek; null/empty history → no points', () {
+      expect(rankSeries({3: 2, 1: 14, 2: 9}), [
+        (gameweek: 1, rank: 14),
+        (gameweek: 2, rank: 9),
+        (gameweek: 3, rank: 2),
+      ]);
+      expect(rankSeries(null), isEmpty);
+      expect(rankSeries(const {}), isEmpty);
+    });
+
+    test('journey label "#start → #now"; none under two weeks', () {
+      expect(kRankChartMinWeeks, 2);
+      expect(rankJourneyLabel(rankSeries({1: 14, 5: 12, 8: 10})), '#14 → #10');
+      expect(rankJourneyLabel(rankSeries({1: 3, 2: 7})), '#3 → #7');
+      expect(rankJourneyLabel(rankSeries({4: 3})), isNull);
+      expect(rankJourneyLabel(const []), isNull);
+    });
+
+    test('screen-reader text lists every week', () {
+      expect(rankSeriesSemantics(rankSeries({2: 10, 1: 14})),
+          'Your rank by gameweek: GW1 #14, GW2 #10');
+    });
+  });
+
+  group('weekly movers (biggest climber / biggest drop)', () {
+    test('the largest climb gets the flame, the largest drop the down badge; '
+        'nobody else', () {
+      final movers = weeklyMovers([
+        row('a', movement: 3),
+        row('b', movement: 1),
+        row('c', movement: -2),
+        row('d', movement: -5),
+        row('e'),
+        row('f', movement: 0),
+      ]);
+      expect(movers, {
+        'a': const WeeklyMover(MoverKind.climber, 3),
+        'd': const WeeklyMover(MoverKind.faller, 5),
+      });
+    });
+
+    test('ties: every tied manager gets the badge', () {
+      final movers = weeklyMovers([
+        row('a', movement: 4),
+        row('b', movement: 4),
+        row('c', movement: 2),
+        row('d', movement: -3),
+        row('e', movement: -3),
+      ]);
+      expect(movers.keys.toSet(), {'a', 'b', 'd', 'e'});
+      expect(movers['a'], const WeeklyMover(MoverKind.climber, 4));
+      expect(movers['b'], const WeeklyMover(MoverKind.climber, 4));
+      expect(movers['d'], const WeeklyMover(MoverKind.faller, 3));
+      expect(movers['e'], const WeeklyMover(MoverKind.faller, 3));
+    });
+
+    test('no climb (max ≤ 0) → no flame; no drop (min ≥ 0) → no down badge',
+        () {
+      // Nobody moved (0 / absent — the first week): no badges at all.
+      expect(
+          weeklyMovers([row('a', movement: 0), row('b'), row('c')]), isEmpty);
+      expect(weeklyMovers(const []), isEmpty);
+      // Only drops: just the faller.
+      expect(weeklyMovers([row('a', movement: -1), row('b', movement: 0)]),
+          {'a': const WeeklyMover(MoverKind.faller, 1)});
+      // Only climbs: just the climber.
+      expect(weeklyMovers([row('a', movement: 2), row('b', movement: 0)]),
+          {'a': const WeeklyMover(MoverKind.climber, 2)});
+    });
+
+    test('tooltip / semantics text', () {
+      expect(moverLabel(const WeeklyMover(MoverKind.climber, 3)),
+          'Biggest climber this week (▲3)');
+      expect(moverLabel(const WeeklyMover(MoverKind.faller, 12)),
+          'Biggest drop this week (▼12)');
+    });
+  });
+
+  group('gameweek summary', () {
+    test('average (whole) · highest with the top name · you', () {
+      // 96 + 45 + 52 + 0 = 193 / 4 = 48.25 -> 48.
+      final summary = gameweekSummary([
+        row('a', points: 96, team: 'Sweeper Keepers'),
+        row('b', points: 45, team: 'Mid Table Mafia'),
+        row('me', points: 52, team: 'My Team', self: true),
+        row('d', points: 0, team: 'Bench Warmers United'),
+      ])!;
+      expect(summary.average, 48);
+      expect(summary.highest, 96);
+      expect(summary.topNames, ['Sweeper Keepers']);
+      expect(summary.you, 52);
+      expect(summary.label,
+          'Average 48 pts · Highest 96 (Sweeper Keepers) · You 52');
+    });
+
+    test('the name follows the row rule: real name first, else team name',
+        () {
+      final summary = gameweekSummary([
+        row('a', points: 11, real: 'Zoe Park', team: 'Top Cats'),
+        row('b', points: 10, team: 'Others'),
+      ])!;
+      expect(summary.topNames, ['Zoe Park']);
+      // 10.5 rounds half away from zero -> 11.
+      expect(summary.average, 11);
+      expect(summary.you, isNull);
+      expect(summary.label, 'Average 11 pts · Highest 11 (Zoe Park)');
+    });
+
+    test('a tie for highest → "(N managers)"', () {
+      final summary = gameweekSummary([
+        row('a', points: 30, team: 'A'),
+        row('b', points: 30, team: 'B'),
+        row('c', points: 12, team: 'C'),
+      ])!;
+      expect(summary.topNames, ['A', 'B']);
+      expect(summary.label, 'Average 24 pts · Highest 30 (2 managers)');
+    });
+
+    test('negative and voided (all-zero) weeks', () {
+      // -3 + -4 = -7 / 2 = -3.5 -> -4 (half away from zero).
+      final negative = gameweekSummary([
+        row('a', points: -3, team: 'A'),
+        row('me', points: -4, team: 'Me', self: true),
+      ])!;
+      expect(negative.average, -4);
+      expect(negative.highest, -3);
+      expect(negative.label, 'Average -4 pts · Highest -3 (A) · You -4');
+      final voided = gameweekSummary([
+        row('a', team: 'A'),
+        row('b', team: 'B'),
+      ])!;
+      expect(voided.label, 'Average 0 pts · Highest 0 (2 managers)');
+    });
+
+    test('no rows → no summary', () {
+      expect(gameweekSummary(const []), isNull);
+    });
+  });
+
   group('mini-league codes', () {
     test('generates 6 chars from the unambiguous A-Z0-9 subset', () {
       final rng = math.Random(7);

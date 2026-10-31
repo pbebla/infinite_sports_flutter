@@ -11,11 +11,19 @@
 // wrap — no side-by-side columns), points. The own row carries the gold
 // highlight.
 //
+// Leaderboard extras (follow-up), both opt-in so the Gameweek scope and the
+// mini-league lists are untouched: [RankedLeaderboardList.movers] puts the
+// week's biggest-climber flame / biggest-drop badge beside a manager's name
+// (Overall), and [RankedLeaderboardList.selfPanelBuilder] makes the signed-in
+// manager's row — natural AND pinned copy — expand into a panel ("Your rank
+// this season") instead of opening the squad viewer (Overall).
+//
 // House rules: theme-safe both modes (fantasy accent = gold in dark, primary
 // red in light; movement up = the pitch-green family, down = error); manager
 // names WRAP and are never underlined or ellipsized; list clears the glass
 // navbar; photos never gate rows (FantasyAvatar's initials fallback); the
-// pinned row's appear/disappear is 200ms and zero under reduced motion.
+// pinned row's appear/disappear and the own-row panel's expand are 200ms and
+// zero under reduced motion.
 
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
@@ -38,6 +46,56 @@ Color movementColor(BuildContext context, MovementDirection d) => switch (d) {
       MovementDirection.none => Theme.of(context).colorScheme.onSurfaceVariant,
     };
 
+/// The "biggest climber" flame: a warm orange that reads in both themes
+/// (≥3:1 on the hub's light and dark surfaces) and never borrows the
+/// fantasy "down" red the biggest-drop badge uses.
+Color fantasyFlameOrange(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFFFFA726)
+        : const Color(0xFFE65100);
+
+/// The week's biggest-climber flame / biggest-drop badge beside a manager's
+/// name: icon only, its text in the tooltip and for screen readers.
+class LeaderboardMoverBadge extends StatelessWidget {
+  const LeaderboardMoverBadge({
+    super.key,
+    required this.mover,
+  });
+
+  final WeeklyMover mover;
+
+  @override
+  Widget build(BuildContext context) {
+    final climber = mover.kind == MoverKind.climber;
+    final color =
+        climber ? fantasyFlameOrange(context) : fantasyDownRed(context);
+    final label = moverLabel(mover);
+    return Tooltip(
+      message: label,
+      excludeFromSemantics: true,
+      // Its own semantics node: read as one phrase, not merged into the name.
+      child: Semantics(
+        container: true,
+        label: label,
+        child: ExcludeSemantics(
+          child: Container(
+            padding: const EdgeInsets.all(2),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.14),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              climber ? Icons.local_fire_department : Icons.trending_down,
+              size: 14,
+              color: color,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// One ranked row: rank, movement cell (when the data provides one), avatar,
 /// the two-line manager cell (real name; team name under it), points. The
 /// signed-in manager's row carries the accent highlight.
@@ -47,11 +105,24 @@ class LeaderboardRowTile extends StatelessWidget {
     required this.row,
     this.showMovement = true,
     this.onTap,
+    this.mover,
+    this.expanded,
+    this.footer,
   });
 
   final LeaderboardRowData row;
   final bool showMovement;
   final void Function(LeaderboardRowData row)? onTap;
+
+  /// The week's biggest climber / faller badge beside the name (Overall).
+  final WeeklyMover? mover;
+
+  /// Expandable row (the own row on Overall): null = not expandable (no
+  /// chevron); false/true = the folded/unfolded chevron after the points.
+  final bool? expanded;
+
+  /// Rendered under the row, inside its highlight (the own-row panel slot).
+  final Widget? footer;
 
   @override
   Widget build(BuildContext context) {
@@ -59,6 +130,21 @@ class LeaderboardRowTile extends StatelessWidget {
     final accent = fantasyAccent(context);
     final direction = movementDirection(row.movement);
     final secondary = row.secondaryName;
+    final mover = this.mover;
+    final expanded = this.expanded;
+
+    final nameText = Text(
+      row.name,
+      key: ValueKey('leaderboard_name_${row.uid}'),
+      // Wraps, never underlined or ellipsized (house rules).
+      softWrap: true,
+      style: TextStyle(
+        fontSize: 14,
+        fontWeight: row.isSelf ? FontWeight.w800 : FontWeight.w700,
+        height: 1.25,
+        color: scheme.onSurface,
+      ),
+    );
 
     final content = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -103,18 +189,25 @@ class LeaderboardRowTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  row.name,
-                  key: ValueKey('leaderboard_name_${row.uid}'),
-                  // Wraps, never underlined or ellipsized (house rules).
-                  softWrap: true,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: row.isSelf ? FontWeight.w800 : FontWeight.w700,
-                    height: 1.25,
-                    color: scheme.onSurface,
+                if (mover == null)
+                  nameText
+                else
+                  // The badge follows the name and drops to its own line
+                  // when a long name fills the cell (never squeezes it).
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 2,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      nameText,
+                      LeaderboardMoverBadge(
+                        key: ValueKey(mover.kind == MoverKind.climber
+                            ? 'climber_badge_${row.uid}'
+                            : 'faller_badge_${row.uid}'),
+                        mover: mover,
+                      ),
+                    ],
                   ),
-                ),
                 if (secondary != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 1),
@@ -141,9 +234,56 @@ class LeaderboardRowTile extends StatelessWidget {
               color: row.isSelf ? accent : scheme.onSurface,
             ),
           ),
+          if (expanded != null) ...[
+            const SizedBox(width: 2),
+            Icon(
+              expanded ? Icons.expand_less : Icons.expand_more,
+              key: ValueKey('own_row_chevron_${row.uid}'),
+              size: 18,
+              color: scheme.onSurfaceVariant,
+              semanticLabel: expanded
+                  ? 'Hide your rank this season'
+                  : 'Show your rank this season',
+            ),
+          ],
         ],
       ),
     );
+
+    final selfBorder = BoxDecoration(
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: accent.withValues(alpha: 0.65)),
+    );
+    final footer = this.footer;
+    final Widget body;
+    if (footer == null) {
+      body = InkWell(
+        key: ValueKey('leaderboard_row_${row.uid}'),
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap == null ? null : () => onTap!(row),
+        child: row.isSelf
+            ? Container(decoration: selfBorder, child: content)
+            : content,
+      );
+    } else {
+      // The tappable row with its panel under it, both inside the highlight.
+      final column = Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            key: ValueKey('leaderboard_row_${row.uid}'),
+            borderRadius: BorderRadius.circular(12),
+            onTap: onTap == null ? null : () => onTap!(row),
+            child: content,
+          ),
+          footer,
+        ],
+      );
+      body = row.isSelf
+          ? Container(decoration: selfBorder, child: column)
+          : column;
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
@@ -153,21 +293,7 @@ class LeaderboardRowTile extends StatelessWidget {
             ? accent.withValues(alpha: 0.20)
             : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          key: ValueKey('leaderboard_row_${row.uid}'),
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap == null ? null : () => onTap!(row),
-          child: row.isSelf
-              ? Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border:
-                        Border.all(color: accent.withValues(alpha: 0.65)),
-                  ),
-                  child: content,
-                )
-              : content,
-        ),
+        child: body,
       ),
     );
   }
@@ -229,6 +355,8 @@ class RankedLeaderboardList extends StatefulWidget {
     this.showMovement = true,
     this.onRowTap,
     this.header,
+    this.movers = const {},
+    this.selfPanelBuilder,
   });
 
   final List<LeaderboardRowData> rows;
@@ -237,6 +365,14 @@ class RankedLeaderboardList extends StatefulWidget {
 
   /// Optional widget scrolled above everything (e.g. the week chips).
   final Widget? header;
+
+  /// uid → the week's biggest climber / faller badge (Overall only).
+  final Map<String, WeeklyMover> movers;
+
+  /// When set (Overall), tapping the signed-in manager's row — natural or
+  /// pinned — folds this panel open under it instead of calling [onRowTap];
+  /// the panel carries its own way to the squad viewer.
+  final Widget Function(LeaderboardRowData self)? selfPanelBuilder;
 
   @override
   State<RankedLeaderboardList> createState() => _RankedLeaderboardListState();
@@ -248,6 +384,10 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
   final GlobalKey _ownKey = GlobalKey();
   bool _pinned = false;
 
+  /// The own-row panel is open (shared by the natural row and its pinned
+  /// copy, so both always agree).
+  bool _selfExpanded = false;
+
   @override
   void initState() {
     super.initState();
@@ -257,7 +397,52 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
   @override
   void didUpdateWidget(RankedLeaderboardList old) {
     super.didUpdateWidget(old);
+    // A scope without the panel (the State can be reused across scopes)
+    // starts folded the next time one has it.
+    if (widget.selfPanelBuilder == null) _selfExpanded = false;
     _scheduleCheck();
+  }
+
+  void _toggleSelfPanel() {
+    setState(() => _selfExpanded = !_selfExpanded);
+    // The own row changed height: re-check whether it is still in view.
+    _scheduleCheck();
+  }
+
+  /// A row tile with the opt-in extras: the mover badge, and for the own
+  /// row (when [RankedLeaderboardList.selfPanelBuilder] is set) the
+  /// tap-to-expand panel.
+  Widget _tile(LeaderboardRowData row, {Key? key}) {
+    final builder = row.isSelf ? widget.selfPanelBuilder : null;
+    if (builder == null) {
+      return LeaderboardRowTile(
+        key: key,
+        row: row,
+        showMovement: widget.showMovement,
+        onTap: widget.onRowTap,
+        mover: widget.movers[row.uid],
+      );
+    }
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final panel = _selfExpanded
+        ? builder(row)
+        : const SizedBox(width: double.infinity);
+    return LeaderboardRowTile(
+      key: key,
+      row: row,
+      showMovement: widget.showMovement,
+      onTap: (_) => _toggleSelfPanel(),
+      mover: widget.movers[row.uid],
+      expanded: _selfExpanded,
+      footer: reduceMotion
+          ? panel
+          : AnimatedSize(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+              alignment: Alignment.topCenter,
+              child: panel,
+            ),
+    );
   }
 
   void _scheduleCheck() {
@@ -323,12 +508,7 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
               }
               index--;
               final row = rows[index];
-              return LeaderboardRowTile(
-                key: row.isSelf ? _ownKey : null,
-                row: row,
-                showMovement: widget.showMovement,
-                onTap: widget.onRowTap,
-              );
+              return _tile(row, key: row.isSelf ? _ownKey : null);
             },
           ),
         ),
@@ -355,11 +535,7 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
                             .surfaceContainerHigh,
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: LeaderboardRowTile(
-                        row: selfRow,
-                        showMovement: widget.showMovement,
-                        onTap: widget.onRowTap,
-                      ),
+                      child: _tile(selfRow),
                     ),
                   )
                 : const SizedBox.shrink(key: ValueKey('no_pinned_own_row')),
