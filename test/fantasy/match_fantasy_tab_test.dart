@@ -4,8 +4,10 @@
 // highlighted (YOURS) and the captain's ×2 math; "No returns yet" collapsed
 // until tapped; the earning chip's counter animating ONLY on a genuine
 // increase (re-mounts with the session store never replay the tween); the
-// hub button seam; and (round 3) every points row opening the player's
-// fantasy profile from outside the hub.
+// hub button seam; (round 3) every points row opening the player's
+// fantasy profile from outside the hub; and (Opus audit item 7) the forfeit
+// note row with long team names at 360 px in light AND dark, scrolled end to
+// end with no overflow.
 
 import 'dart:async';
 
@@ -116,11 +118,17 @@ void main() {
     squads.close();
   });
 
-  Future<void> pumpTab(WidgetTester tester) async {
-    tester.view.physicalSize = const Size(420, 900);
+  Future<void> pumpTab(
+    WidgetTester tester, {
+    Size size = const Size(420, 900),
+    Brightness brightness = Brightness.light,
+    Map<String, List<String>>? rosterNames,
+  }) async {
+    tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(useMaterial3: true, brightness: brightness),
       home: Scaffold(
         body: MatchFantasyTab(
           sport: 'Futsal',
@@ -131,7 +139,7 @@ void main() {
             config: FantasyConfig.futsalDefault(),
             lockOverride: FantasyLockOverride.auto,
           ),
-          rosterNamesByTeam: rosters(),
+          rosterNamesByTeam: rosterNames ?? rosters(),
           gameNodeStates: game.stream,
           playersStates: players.stream,
           squadStates: squads.stream,
@@ -277,6 +285,50 @@ void main() {
     // Viewer: Gale 1 + Dana 1 + Alex 1×2 = 4.
     expect(find.text('+4'), findsOneWidget);
   });
+
+  // Opus audit item 7: the forfeit note row (long team names) at 360 px in
+  // both themes, scrolled end to end.
+  for (final brightness in Brightness.values) {
+    testWidgets('360 px: the forfeit note with long team names wraps, no '
+        'overflow when scrolled through — $brightness', (tester) async {
+      const home = 'The Extraordinarily Long-Named Assyrian Futsal Club';
+      const away = 'The Wolves Of The Never Ending Night Futsal Club';
+      await pumpTab(
+        tester,
+        size: const Size(360, 640),
+        brightness: brightness,
+        rosterNames: {
+          home: ['Alex', 'Gale', 'Dana', 'Yara'],
+          away: ['Wren', 'Zed'],
+        },
+      );
+      final node = gameNode(status: 2)
+        ..['team1'] = home
+        ..['team2'] = away
+        ..['team1score'] = 5
+        ..['team2score'] = 0
+        ..['forfeitedBy'] = 2;
+      await emitAll(tester, node: node, viewerSquad: squad());
+      expect(tester.takeException(), isNull);
+      final note = find.byKey(const ValueKey('match_fantasy_forfeit_note'));
+      expect(note, findsOneWidget);
+      expect(find.textContaining('$away forfeited.'), findsOneWidget);
+      final r = tester.getRect(note);
+      expect(r.left, greaterThanOrEqualTo(0));
+      expect(r.right, lessThanOrEqualTo(360));
+
+      final scrollable = find.byType(Scrollable).first;
+      await tester.dragUntilVisible(
+          find.byKey(const ValueKey('match_fantasy_footnote')),
+          scrollable,
+          const Offset(0, -200));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      for (final t in tester.widgetList<Text>(find.byType(Text))) {
+        expect(t.overflow, isNot(TextOverflow.ellipsis), reason: t.data);
+      }
+    });
+  }
 
   testWidgets('no forfeit note on a normal game', (tester) async {
     await pumpTab(tester);

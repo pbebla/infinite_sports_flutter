@@ -2,7 +2,9 @@
 // no prices, nothing editable), points under names, photo lookup from the
 // market, short positions leaving quiet empty slots, and the latest-week
 // default with session persistence. Round 3: a chip tap opens the player's
-// profile through the hub callback (inert without one).
+// profile through the hub callback (inert without one). Opus audit item 7:
+// long names + many week chips + the share button at 360 px in light AND
+// dark, scrolled through with no overflow.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -22,11 +24,15 @@ void main() {
     required Map<int, FantasyDreamTeam> teams,
     List<FantasyPlayer> players = const [],
     void Function(String playerName)? onOpenPlayer,
+    Size size = const Size(420, 1200),
+    Brightness brightness = Brightness.light,
+    String? seasonLabel,
   }) async {
-    tester.view.physicalSize = const Size(420, 1200);
+    tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(useMaterial3: true, brightness: brightness),
       home: Scaffold(
         body: SingleChildScrollView(
           child: DreamTeamCard(
@@ -34,6 +40,7 @@ void main() {
             config: FantasyConfig.futsalDefault(),
             players: players,
             onOpenPlayer: onOpenPlayer,
+            seasonLabel: seasonLabel,
           ),
         ),
       ),
@@ -124,4 +131,57 @@ void main() {
     await tester.pumpAndSettle();
     expect(opened, hasLength(3));
   });
+
+  // Opus audit item 7: 360 px in light AND dark.
+  for (final brightness in Brightness.values) {
+    testWidgets('360 px: long names, twelve week chips and the share button '
+        'fit — no overflow when scrolled through — $brightness',
+        (tester) async {
+      const longGk = 'Maximiliano Bartholomew Featherstonehaugh-Smythe';
+      const longAtt = 'Alessandro Von Grünewald-Montgomery';
+      final teams = dreamTeamsFromNode({
+        for (var w = 1; w <= 12; w++)
+          '$w': {
+            'Players': [
+              {'name': longGk, 'position': 'GK', 'points': 140 + w},
+              {'name': 'Dana Wall', 'position': 'DEF', 'points': 12},
+              {'name': 'Yara Stone', 'position': 'DEF', 'points': 9},
+              {'name': longAtt, 'position': 'ATT', 'points': 11},
+              {'name': 'Bo', 'position': 'ATT', 'points': 8},
+            ],
+          },
+      });
+      await pumpCard(tester,
+          teams: teams,
+          size: const Size(360, 640),
+          brightness: brightness,
+          seasonLabel: 'Futsal Season 15');
+      expect(tester.takeException(), isNull);
+      for (final key in ['dream_team_card', 'dream_team_title',
+          'dream_team_share']) {
+        final r = tester.getRect(find.byKey(ValueKey(key)));
+        expect(r.left, greaterThanOrEqualTo(0), reason: key);
+        expect(r.right, lessThanOrEqualTo(360), reason: key);
+      }
+
+      // Through the week chips (their own horizontal strip) and down the
+      // court to the last chip.
+      final strip = find.ancestor(
+          of: find.byKey(const ValueKey('dream_week_1')),
+          matching: find.byType(Scrollable));
+      await tester.drag(strip.first, const Offset(-600, 0));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.dragUntilVisible(
+          find.byKey(const ValueKey('squad_chip_Bo')),
+          find.byType(Scrollable).first,
+          const Offset(0, -200));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      for (final t in tester.widgetList<Text>(find.byType(Text))) {
+        expect(t.style?.decoration, isNot(TextDecoration.underline),
+            reason: t.data);
+      }
+    });
+  }
 }

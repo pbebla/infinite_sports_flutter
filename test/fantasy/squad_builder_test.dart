@@ -3,7 +3,9 @@
 // over-budget streamed squad disables Save with the money sentence; the
 // captain sheet sets the gold ring; bench chips never offer an armband;
 // removing the captain says so out loud; the locked state disables every
-// edit affordance; the chip toggles stay mutually exclusive.
+// edit affordance; the chip toggles stay mutually exclusive; and (Opus audit
+// item 7) the alert banner + "Needs a new spot" strip at 360 px in light AND
+// dark, scrolled end to end with no overflow.
 
 import 'dart:async';
 
@@ -122,13 +124,17 @@ void main() {
     Set<int> voidedWeeks = const {},
     DateTime Function()? nowUtc,
     void Function(String playerName)? onOpenPlayer,
+    // Default: a tall, phone-wide surface so the whole column (budget bar,
+    // court, bench, chips, save) is on screen and tappable without
+    // scrolling.
+    Size size = const Size(420, 1900),
+    Brightness brightness = Brightness.light,
   }) async {
-    // Tall, phone-wide surface so the whole column (budget bar, court,
-    // bench, chips, save) is on screen and tappable without scrolling.
-    tester.view.physicalSize = const Size(420, 1900);
+    tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(useMaterial3: true, brightness: brightness),
       home: Scaffold(
         body: FantasySquadBuilder(
           config: FantasyConfig.futsalDefault(),
@@ -685,6 +691,64 @@ void main() {
       expect(find.text('Pick a goalkeeper.'), findsOneWidget);
       expect(saveEnabled(tester), isFalse);
     });
+
+    // Opus audit item 7: the errorContainer banner and the strip, with a
+    // long moved player, at 360 px in both themes — scrolled end to end.
+    for (final brightness in Brightness.values) {
+      testWidgets('360 px: alert banner + "Needs a new spot" strip fit, '
+          'no overflow anywhere — $brightness', (tester) async {
+        const longName = 'Maximiliano Bartholomew Featherstonehaugh-Smythe';
+        final squad = FantasySquad(
+          picks: [
+            pick(longName, FantasyPosition.def), // re-labelled GK → DEF
+            pick('Def One', FantasyPosition.def),
+            pick('Def Two', FantasyPosition.def),
+            pick('Att One', FantasyPosition.att),
+            pick('Att Two', FantasyPosition.att),
+            pick('Bench Def', FantasyPosition.def, bench: true),
+            pick('Bench Att', FantasyPosition.att, bench: true),
+          ],
+          captainId: 'Att One',
+          viceId: 'Def One',
+        );
+        await pumpBuilder(
+          tester,
+          size: const Size(360, 760),
+          brightness: brightness,
+          initialSquad: squad,
+          alert: const FantasySquadAlert(gameweek: 4, changes: [
+            FantasyPositionChange(
+                player: longName,
+                from: FantasyPosition.gk,
+                to: FantasyPosition.def),
+          ]),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.byKey(const ValueKey('squad_alert_banner')), findsOneWidget);
+        expect(find.byKey(const ValueKey('unplaced_strip')), findsOneWidget);
+
+        // Scroll the whole builder through: banner, court, strip, chips,
+        // issues, Save.
+        final scrollable = find.byType(Scrollable).first;
+        for (final key in [
+          'squad_alert_banner',
+          'unplaced_strip',
+          'squad_save',
+        ]) {
+          await tester.dragUntilVisible(
+              find.byKey(ValueKey(key)), scrollable, const Offset(0, -200));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull, reason: key);
+          final r = tester.getRect(find.byKey(ValueKey(key)));
+          expect(r.left, greaterThanOrEqualTo(0), reason: key);
+          expect(r.right, lessThanOrEqualTo(360), reason: key);
+        }
+        for (final t in tester.widgetList<Text>(find.byType(Text))) {
+          expect(t.overflow, isNot(TextOverflow.ellipsis), reason: t.data);
+        }
+      });
+    }
 
     testWidgets('locked: the strip shows but Swap/Remove are disabled',
         (tester) async {

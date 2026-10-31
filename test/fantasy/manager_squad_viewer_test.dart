@@ -7,7 +7,9 @@
 // a chip tap opens that player's profile via the hub callback; and
 // (badges, spec 2026-10-30 §5) the manager's badge shelf sits at the top —
 // its feeds join the single reveal, nothing earned shows no shelf, and a
-// failing badge feed never holds the skeleton.
+// failing badge feed never holds the skeleton; (Opus audit item 7) a long
+// badge shelf above the court AND above the unrevealed message at 360 px in
+// light and dark, scrolled end to end with no overflow.
 
 import 'dart:async';
 
@@ -71,16 +73,20 @@ void main() {
     Stream<FantasyBadgeCatalog>? badgeCatalogStates,
     List<FantasyBadgeAward>? initialBadges,
     FantasyBadgeCatalog? initialBadgeCatalog,
+    Size size = const Size(420, 1200),
+    Brightness brightness = Brightness.light,
+    String title = 'Golden Boots',
   }) async {
-    tester.view.physicalSize = const Size(420, 1200);
+    tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(useMaterial3: true, brightness: brightness),
       home: ManagerSquadViewerPage(
         sport: 'Futsal',
         season: '15',
         uid: 'them',
-        title: 'Golden Boots',
+        title: title,
         isSelf: isSelf,
         config: FantasyConfig.futsalDefault(),
         players: const [
@@ -200,6 +206,62 @@ void main() {
       expect(find.byKey(const ValueKey('viewer_content')), findsOneWidget);
       expect(find.byKey(const ValueKey('badge_shelf')), findsNothing);
     });
+
+    // Opus audit item 7: 360 px, light AND dark — a long shelf of
+    // long-named badges above the court, and above the unrevealed message.
+    for (final brightness in Brightness.values) {
+      for (final revealed in [true, false]) {
+        final state = revealed ? 'picks revealed' : 'not revealed yet';
+        testWidgets('360 px: a long badge shelf ($state) fits, no overflow '
+            'when scrolled through — $brightness', (tester) async {
+          const longName =
+              'The Extraordinarily Magnificent Never-Ending Captaincy Award';
+          final catalog = badgeCatalogFromNode({
+            for (var i = 0; i < 6; i++)
+              'long$i': {'Name': '$longName $i', 'Icon': 'bolt', 'Order': i},
+          });
+          await pumpViewer(
+            tester,
+            size: const Size(360, 760),
+            brightness: brightness,
+            title: 'The Extraordinarily Long-Named Assyrian Futsal Club',
+            badgeStates: Stream.value([
+              for (var i = 0; i < 6; i++)
+                for (var gw = 1; gw <= (i % 3) + 1; gw++)
+                  FantasyBadgeAward(
+                      id: 'long${i}_gw$gw', badgeId: 'long$i', gw: gw),
+            ]),
+            badgeCatalogStates: Stream.value(catalog),
+          );
+          published.add(revealed ? {2: squad('Pub Keeper')} : const {});
+          history.add(revealed ? {1: squad('Old Keeper')} : const {});
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          expect(find.byKey(const ValueKey('badge_shelf')), findsOneWidget);
+          final last = revealed ? 'viewer_content' : 'viewer_unrevealed';
+          expect(find.byKey(ValueKey(last)), findsOneWidget);
+
+          final scrollable = find.byType(Scrollable).first;
+          for (var i = 0; i < 6; i++) {
+            final chip = find.byKey(ValueKey('badge_chip_long$i'));
+            await tester.dragUntilVisible(
+                chip, scrollable, const Offset(0, -150));
+            await tester.pumpAndSettle();
+            expect(tester.takeException(), isNull, reason: 'long$i');
+            final r = tester.getRect(chip);
+            expect(r.left, greaterThanOrEqualTo(0), reason: 'long$i');
+            expect(r.right, lessThanOrEqualTo(360), reason: 'long$i');
+          }
+          // And on to the end of the page.
+          await tester.drag(scrollable, const Offset(0, -2000));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          for (final t in tester.widgetList<Text>(find.byType(Text))) {
+            expect(t.overflow, isNot(TextOverflow.ellipsis), reason: t.data);
+          }
+        });
+      }
+    }
 
     testWidgets('seeded badges (from the opener) need no feed to reveal',
         (tester) async {

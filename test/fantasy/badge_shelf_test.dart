@@ -8,9 +8,11 @@
 //   * tapping a chip opens the sheet: name, description, when earned
 //     ("GW3, GW7, GW9" / "Season 15"), "Given by Infinite Sports" + the
 //     owner's notes for manual ones only;
-//   * the count chip: military_tech + N, hidden at 0;
+//   * the count chip: military_tech + N, hidden at 0, one fixed size;
 //   * Review Focus 5: many long-named badges at 360 px, light AND dark —
-//     wrap, never overflow, never ellipsized or underlined.
+//     wrap, never overflow, never ellipsized or underlined; the count chip
+//     (1 / 2 / 3 digits) and the detail sheet scrolled through in both
+//     themes too (Opus audit item 7).
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -390,6 +392,61 @@ void main() {
         final name = tester.widget<Text>(byKey('badge_sheet_name'));
         expect(name.overflow, isNot(TextOverflow.ellipsis));
         expect(tester.getRect(byKey('badge_sheet_name')).right,
+            lessThanOrEqualTo(360));
+      });
+
+      testWidgets('the count chip (1, 42, 128) fits at 360 px — $brightness',
+          (tester) async {
+        await pumpBody(
+          tester,
+          const Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              BadgeCountChip(key: ValueKey('c1'), count: 1),
+              BadgeCountChip(key: ValueKey('c42'), count: 42),
+              BadgeCountChip(key: ValueKey('c128'), count: 128),
+            ],
+          ),
+          size: const Size(360, 400),
+          brightness: brightness,
+        );
+        expect(tester.takeException(), isNull);
+        for (final k in ['c1', 'c42', 'c128']) {
+          final r = tester.getRect(byKey(k));
+          expect(r.size,
+              const Size(kBadgeCountChipWidth, kBadgeCountChipHeight),
+              reason: k);
+          expect(r.right, lessThanOrEqualTo(360), reason: k);
+        }
+      });
+
+      testWidgets('a long manual sheet scrolls through with no overflow — '
+          '$brightness', (tester) async {
+        await pumpBody(
+          tester,
+          BadgeDetailSheet(
+            group: groupBadgeAwards([
+              for (var i = 0; i < 6; i++)
+                award('-N$i', 'mvpOctober',
+                    manual: true,
+                    gw: i + 1,
+                    at: i,
+                    note: 'A very long owner note number $i that should wrap '
+                        'onto several lines on a small phone screen'),
+            ], catalog)
+                .single,
+            season: '15',
+          ),
+          size: const Size(360, 640),
+          brightness: brightness,
+        );
+        expect(tester.takeException(), isNull);
+        await tester.dragUntilVisible(byKey('badge_sheet_note_5'),
+            find.byType(Scrollable).first, const Offset(0, -200));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(tester.getRect(byKey('badge_sheet_note_5')).right,
             lessThanOrEqualTo(360));
       });
     }
