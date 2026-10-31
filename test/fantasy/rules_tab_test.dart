@@ -55,6 +55,13 @@ void main() {
     // DPL threshold cells render as "5+ → +2" / "7+ → +2".
     expect(find.text('5+ → +2'), findsOneWidget);
     expect(find.text('7+ → +2'), findsOneWidget);
+    // Spec §7 stand-in goalkeeper line under the scoring table.
+    expect(
+        find.text('Stepping in goal: if an outfield player plays goalkeeper '
+            'for a game, his saves, clean sheet and goals conceded count as '
+            'a goalkeeper\'s for that game; his goals and assists still '
+            'count at his own position.'),
+        findsOneWidget);
 
     // BPS published weights.
     expect(find.text('Goal +12'), findsOneWidget);

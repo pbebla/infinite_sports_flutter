@@ -109,6 +109,14 @@ class _RulesBody extends StatelessWidget {
                 'team concedes 0 goals in — the same definition as the '
                 'league\'s Clean Sheets stat.',
               ),
+              const SizedBox(height: 8),
+              // Spec §7 stand-in goalkeeper (owner-approved copy).
+              const _Body(
+                'Stepping in goal: if an outfield player plays goalkeeper '
+                'for a game, his saves, clean sheet and goals conceded count '
+                'as a goalkeeper\'s for that game; his goals and assists '
+                'still count at his own position.',
+              ),
             ],
           ),
         ),

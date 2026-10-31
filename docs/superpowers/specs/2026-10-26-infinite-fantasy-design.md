@@ -114,6 +114,28 @@ rather than only the one-active-per-gameweek rule, to avoid confusion.
   definition the league's real Clean Sheets stat already uses. Futsal has no
   per-minute tracking, so presence is the whole condition; the Rules page
   states exactly this and nothing more.
+- **Stand-in goalkeeper (owner decision, 2026-10-29):** when a player listed
+  DEF or ATT plays in goal for a game, for **that game only** his **saves,
+  penalty saves, clean sheet and goals conceded** score at the **GK** rates
+  (+8 CS, +1 per 2 saves, +5 per pen save, −1 per 2 conceded). His **goals
+  and assists stay at his listed position's rates**, and so does everything
+  else (appearance, cards, own goals, penalty misses, DPL). His fantasy
+  position, price, squad slot and formation never change; next game he is
+  back to normal. Listed GKs are unaffected. "In goal" is decided per player
+  per game, automatically: (1) a non-GK with ≥1 Save or Penalty-save recorded
+  in that game (only a keeper makes saves in futsal), or (2) the Manager's
+  attendance-step **"In goal"** switch, stored on the game node as
+  `team1keepers` / `team2keepers` = `{ "<player name>": true }` (same name
+  keys as `team{1,2}attendance`; only `true` counts; it marks a player in
+  goal even with 0 saves). The marker flags players already in the game — it
+  never adds one. Forfeits keep their §8a rules (no stand-in effect). BPS is
+  position-agnostic, so it is unchanged. Same line keys/counts as a listed
+  keeper — only the points move. Engine: `PlayerGameStats.inGoal` (set by
+  stats_mapper), applied in `scorePlayerGame` (TS + Dart twins; golden
+  contract `test/fantasy/fixtures/golden_standin.json`). Rules page copy:
+  *"Stepping in goal: if an outfield player plays goalkeeper for a game, his
+  saves, clean sheet and goals conceded count as a goalkeeper's for that
+  game; his goals and assists still count at his own position."*
 - **Bonus points 3/2/1** to the top three performers per match, ranked by a
   published deterministic formula (weighted goals/assists/saves/DPL/CS, cards
   negative). The formula appears on the Rules page — no black box.
