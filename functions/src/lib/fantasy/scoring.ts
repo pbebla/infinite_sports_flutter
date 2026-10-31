@@ -1,6 +1,13 @@
 // Per-game scoring breakdown + week totals. Faithful port of
 // lib/fantasy/engine/scoring.dart: absent -> zero (empty breakdown), every
 // line's label and points match the Dart engine character for character.
+//
+// STAND-IN GOALKEEPER (spec §7, owner-approved): a DEF/ATT who played in
+// goal (`s.inGoal`) scores his saves, penalty saves, clean sheet and goals
+// conceded at the GK row's rates for THAT game; appearance, goals, assists,
+// pen misses, DPL, cards and own goals stay at his listed position. Keys,
+// counts and labels are the same lines a listed player gets — only the
+// points change. A listed GK is unaffected.
 
 import { FantasyConfig, FantasyPosition } from './fantasy_config';
 import { PlayerGameStats, playedGame } from './player_game_stats';
@@ -53,6 +60,9 @@ export function scorePlayerGame(
       breakdown: [{ label: 'Plays', points: r.plays, key: 'plays', count: 1 }],
     };
   }
+  // The keeper lines (saves / penSaved / cleanSheet / conceded) read the GK
+  // row when a DEF/ATT played in goal this game; everything else reads r.
+  const k = s.inGoal && pos !== 'GK' ? cfg.scoring.GK : r;
   const lines: ScoreLine[] = [
     { label: 'Plays', points: r.plays, key: 'plays', count: 1 },
   ];
@@ -68,21 +78,21 @@ export function scorePlayerGame(
       key: 'assists', count: s.assists,
     });
   }
-  if (s.teamConceded === 0 && r.cleanSheet !== 0) {
+  if (s.teamConceded === 0 && k.cleanSheet !== 0) {
     lines.push({
-      label: 'Clean sheet', points: r.cleanSheet, key: 'cleanSheet', count: 1,
+      label: 'Clean sheet', points: k.cleanSheet, key: 'cleanSheet', count: 1,
     });
   }
-  if (r.per2Saves !== 0 && s.saves >= 2) {
+  if (k.per2Saves !== 0 && s.saves >= 2) {
     lines.push({
       label: `Saves ×${s.saves}`,
-      points: intDiv(s.saves, 2) * r.per2Saves, // Dart: (s.saves ~/ 2)
+      points: intDiv(s.saves, 2) * k.per2Saves, // Dart: (s.saves ~/ 2)
       key: 'saves', count: s.saves,
     });
   }
-  if (s.penSaved > 0 && r.penSave !== 0) {
+  if (s.penSaved > 0 && k.penSave !== 0) {
     lines.push({
-      label: `Penalty saves ×${s.penSaved}`, points: s.penSaved * r.penSave,
+      label: `Penalty saves ×${s.penSaved}`, points: s.penSaved * k.penSave,
       key: 'penSaved', count: s.penSaved,
     });
   }
@@ -92,10 +102,10 @@ export function scorePlayerGame(
       key: 'penMissed', count: s.penMissed,
     });
   }
-  if (r.per2Conceded !== 0 && s.teamConceded >= 2) {
+  if (k.per2Conceded !== 0 && s.teamConceded >= 2) {
     lines.push({
       label: `Conceded ${s.teamConceded}`,
-      points: intDiv(s.teamConceded, 2) * r.per2Conceded, // Dart: ~/ 2
+      points: intDiv(s.teamConceded, 2) * k.per2Conceded, // Dart: ~/ 2
       key: 'conceded', count: s.teamConceded,
     });
   }

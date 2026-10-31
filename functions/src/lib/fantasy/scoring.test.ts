@@ -153,3 +153,112 @@ describe('scoring — forfeits (spec §8a, Option B)', () => {
     expect(twoGames.played).toBe(true);
   });
 });
+
+describe('scoring — stand-in goalkeeper (inGoal, spec §7)', () => {
+  // futsalDefault rows: GK CS +8 / every 2 saves +1 / pen save +5 / every 2
+  // conceded -1; DEF CS +5 / saves - / pen save - / conceded -1; ATT CS +2 /
+  // saves - / pen save - / conceded -. Goals: GK 10, DEF 6, ATT 4; assists
+  // GK 5, DEF 4, ATT 3.
+  const lines = (r: { breakdown: { key: string; count: number; points: number;
+    label: string }[] }) =>
+    r.breakdown.map((l) => [l.key, l.count, l.points, l.label]);
+
+  it('DEF in goal: 3 saves + clean sheet score at GK rates', () => {
+    const r = scorePlayerGame(s({ saves: 3, inGoal: true }), 'DEF', cfg);
+    // plays 1 + CS(GK) 8 + floor(3/2)*1 = 10 (outfield DEF: 1 + 5 = 6)
+    expect(r.total).toBe(10);
+    expect(lines(r)).toEqual([
+      ['plays', 1, 1, 'Plays'],
+      ['cleanSheet', 1, 8, 'Clean sheet'],
+      ['saves', 3, 1, 'Saves ×3'],
+    ]);
+    expect(scorePlayerGame(s({ saves: 3 }), 'DEF', cfg).total).toBe(6);
+  });
+
+  it('ATT in goal with 0 saves conceding 4: GK conceded rate', () => {
+    const r = scorePlayerGame(s({ conceded: 4, inGoal: true }), 'ATT', cfg);
+    // plays 1 + floor(4/2)*-1 = -1 (outfield ATT is never docked: 1)
+    expect(r.total).toBe(-1);
+    expect(lines(r)).toEqual([
+      ['plays', 1, 1, 'Plays'],
+      ['conceded', 4, -2, 'Conceded 4'],
+    ]);
+    expect(scorePlayerGame(s({ conceded: 4 }), 'ATT', cfg).total).toBe(1);
+  });
+
+  it('ATT in goal keeps a clean sheet at the GK rate', () => {
+    // plays 1 + CS(GK) 8 = 9 (outfield ATT: 1 + 2 = 3)
+    expect(scorePlayerGame(s({ inGoal: true }), 'ATT', cfg).total).toBe(9);
+    expect(scorePlayerGame(s(), 'ATT', cfg).total).toBe(3);
+  });
+
+  it('DEF in goal: goals/assists stay at DEF rates, saves/pens/conceded ' +
+    'at GK rates', () => {
+    const st = s({
+      goals: 1, assists: 1, saves: 3, penSaved: 1, conceded: 2, inGoal: true,
+    });
+    const r = scorePlayerGame(st, 'DEF', cfg);
+    // plays 1 + goal(DEF) 6 + assist(DEF) 4 + floor(3/2)*1 + pen save 5
+    // + floor(2/2)*-1 = 16 (listed GK would be 1+10+5+1+5-1 = 21)
+    expect(r.total).toBe(16);
+    expect(lines(r)).toEqual([
+      ['plays', 1, 1, 'Plays'],
+      ['goals', 1, 6, 'Goals ×1'],
+      ['assists', 1, 4, 'Assists ×1'],
+      ['saves', 3, 1, 'Saves ×3'],
+      ['penSaved', 1, 5, 'Penalty saves ×1'],
+      ['conceded', 2, -1, 'Conceded 2'],
+    ]);
+    expect(scorePlayerGame({ ...st, inGoal: false }, 'DEF', cfg).total)
+      .toBe(1 + 6 + 4 - 1);
+  });
+
+  it('appearance, cards, own goals, pen misses and DPL stay at the listed ' +
+    'position', () => {
+    const st = s({
+      dpl: 5, yellows: 1, reds: 1, ownGoals: 1, penMissed: 1, conceded: 1,
+      inGoal: true,
+    });
+    // DEF: plays 1 - pen miss 2 + DPL(5>=5) 2 - yellow 1 - red 3 - OG 2 = -5
+    // (GK has no DPL threshold — a GK row here would give -7)
+    expect(scorePlayerGame(st, 'DEF', cfg).total).toBe(-5);
+    // ATT: DPL needs 7 -> 5 earns nothing: 1 - 2 - 1 - 3 - 2 = -7
+    expect(scorePlayerGame({ ...st, dpl: 7 }, 'ATT', cfg).total).toBe(-5);
+    expect(scorePlayerGame(st, 'ATT', cfg).total).toBe(-7);
+  });
+
+  it('listed GKs are unaffected by the flag', () => {
+    for (const st of [
+      s({ saves: 5, penSaved: 1 }), s({ conceded: 4, goals: 1 }),
+    ]) {
+      expect(scorePlayerGame({ ...st, inGoal: true }, 'GK', cfg))
+        .toEqual(scorePlayerGame({ ...st, inGoal: false }, 'GK', cfg));
+    }
+  });
+
+  it('rates come from the live config GK row, not constants', () => {
+    const custom = futsalDefault();
+    custom.scoring.GK = {
+      ...custom.scoring.GK, cleanSheet: 9, per2Saves: 2, per2Conceded: -3,
+    };
+    // plays 1 + CS 9 + floor(4/2)*2 = 14
+    expect(scorePlayerGame(s({ saves: 4, inGoal: true }), 'DEF', custom)
+      .total).toBe(14);
+    // plays 1 + floor(2/2)*-3 = -2
+    expect(scorePlayerGame(s({ conceded: 2, inGoal: true }), 'ATT', custom)
+      .total).toBe(-2);
+  });
+
+  it('forfeit rules are unchanged for a stand-in', () => {
+    expect(scorePlayerGame(s({ forfeit: 'won', inGoal: true }), 'ATT', cfg))
+      .toEqual({
+        total: 1,
+        breakdown: [{ label: 'Plays', points: 1, key: 'plays', count: 1 }],
+      });
+    expect(scorePlayerGame(
+      s({ forfeit: 'lost', conceded: 5, inGoal: true }), 'DEF', cfg).total)
+      .toBe(0);
+    expect(scorePlayerGame(s({ present: false, saves: 4, inGoal: true }),
+      'DEF', cfg).total).toBe(0);
+  });
+});

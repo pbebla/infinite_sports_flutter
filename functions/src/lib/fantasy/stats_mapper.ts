@@ -31,22 +31,54 @@
 // - Foul, Substitution and unknown/legacy types (e.g. 'Blue') carry no
 //   fantasy counter and are skipped — same as the tally engines.
 // - forfeit comes from the game's `forfeitedBy` marker (see FORFEITS).
+// - inGoal (spec §7 stand-in goalkeeper) is decided per player per game:
+//   >=1 Save or PenSaved on his own team list (only a keeper makes saves in
+//   futsal), OR his name keyed `true` in his side's `team{1,2}keepers`
+//   marker (the Manager's attendance-step "In goal" switch — same name keys
+//   as `team{1,2}attendance`, List/Map coercion tolerated, only a literal
+//   `true` counts). The marker only flags players already in the result —
+//   it never adds one. Position-blind: scoring ignores it for a listed GK.
 //
 // FORFEITS (spec §8a, owner Option B): a game carrying `forfeitedBy: 1|2`
 // (parseForfeitedBy — the Manager's Forfeit button) maps every entry with
 // forfeit 'won' (this team showed up) or 'lost' (this team forfeited), and
 // its activity events are IGNORED ENTIRELY — stray stats recorded on a
 // forfeited game never count, and a player known only from such an event
-// is not in the result at all. The player set is then exactly the
-// attendance keys, so CALLERS MUST PASS THE FULL ROSTER-COMPOSED
-// ATTENDANCE (every rostered player -> true, absentees -> false: the
-// finalizer's fullAttendance) — with no attendance map a forfeit yields no
-// players and nobody gets the appearance point.
+// is not in the result at all (nobody is inGoal: the keepers marker is
+// ignored too — a forfeit scores the appearance point or nothing). The
+// player set is then exactly the attendance keys, so CALLERS MUST PASS THE
+// FULL ROSTER-COMPOSED ATTENDANCE (every rostered player -> true,
+// absentees -> false: the finalizer's fullAttendance) — with no attendance
+// map a forfeit yields no players and nobody gets the appearance point.
 
 import { GameForfeit, PlayerGameStats } from './player_game_stats';
 
 /** Game-node key for the forfeit marker (1 | 2). */
 export const FORFEITED_BY_KEY = 'forfeitedBy';
+
+/** Game-node key of one side's stand-in keeper marker
+ *  (`team1keepers` / `team2keepers` = `{ <player name>: true }`). */
+export function keepersKey(side: 1 | 2): string {
+  return `team${side}keepers`;
+}
+
+/** The names marked in goal by a `team{1,2}keepers` node: keys whose value
+ *  is exactly `true`. A Map is read by key; a List (RTDB coercion of
+ *  numeric-name keys) by index; null padding, empty keys, any other value
+ *  and any other shape are ignored. Dart twin: stats_mapper.dart
+ *  parseKeepers. */
+export function parseKeepers(raw: unknown): Set<string> {
+  const out = new Set<string>();
+  const add = (key: string, value: unknown) => {
+    if (key.length > 0 && value === true) out.add(key);
+  };
+  if (Array.isArray(raw)) {
+    raw.forEach((v, i) => add(String(i), v));
+  } else if (isPlainMap(raw)) {
+    for (const [k, v] of Object.entries(raw)) add(k, v);
+  }
+  return out;
+}
 
 /** `forfeitedBy` as 1 or 2; null for absent / junk / any other number.
  *  Port of lib/misc/forfeit.dart parseForfeitedBy (= the Manager's):
@@ -142,12 +174,15 @@ class Tally {
 
   toStats(
     teamConceded: number, present: boolean, forfeit: GameForfeit = 'none',
+    markedInGoal = false,
   ): PlayerGameStats {
     return {
       goals: this.goals, assists: this.assists, saves: this.saves,
       penSaved: this.penSaved, penMissed: this.penMissed,
       ownGoals: this.ownGoals, yellows: this.yellows, reds: this.reds,
       dpl: this.dpl, teamConceded, present, forfeit,
+      // Only a keeper makes saves (PenSaved bumps saves too).
+      inGoal: this.saves > 0 || this.penSaved > 0 || markedInGoal,
     };
   }
 }
@@ -235,11 +270,16 @@ export function mapGameToStats(
     ...tallies.keys(),
     ...(attendance ? Object.keys(attendance) : []),
   ]);
+  const keepers = parseKeepers(gameNode[keepersKey(side)]);
   const out: Record<string, PlayerGameStats> = {};
   for (const name of names) {
     out[name] = (tallies.get(name) ?? new Tally()).toStats(
       conceded,
       attendance?.[name] ?? true, // spec §8 default: present
+      'none',
+      // Stand-in keeper (spec §7): the Manager's "In goal" marker (a save or
+      // penalty save also puts him in goal — see toStats).
+      keepers.has(name),
     );
   }
   return out;

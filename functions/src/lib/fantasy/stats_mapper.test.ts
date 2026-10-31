@@ -1,7 +1,7 @@
 // Port of test/fantasy/stats_mapper_test.dart — coercion shapes,
 // second-yellow counting, pen-save double-bump, attendance defaults.
 import { describe, expect, it } from 'vitest';
-import { playedGame } from './player_game_stats';
+import { playedGame, playerGameStats } from './player_game_stats';
 import { gameScores, mapGameToStats, parseForfeitedBy } from './stats_mapper';
 
 // Mirrors a REAL `Futsal/<season>/Date/<MMDDYYYY>/<i>` node:
@@ -270,5 +270,91 @@ describe('gameScores (the shared score reader)', () => {
   });
   it('junk or absent scores read 0 (Dart int.tryParse ?? 0)', () => {
     expect(gameScores({ team1score: '2x' })).toEqual({ team1: 0, team2: 0 });
+  });
+});
+
+describe('stats_mapper — stand-in goalkeeper (inGoal, spec §7)', () => {
+  it('a Save or PenSaved event puts that player in goal; nobody else', () => {
+    const sharks = mapGameToStats(gameNode(), { teamName: 'Sharks' });
+    expect(sharks['Sam'].inGoal).toBe(true); // 2 Save + 1 PenSaved
+    expect(sharks['Alex'].inGoal).toBe(false);
+    expect(sharks['Dana'].inGoal).toBe(false);
+    const wolves = mapGameToStats(gameNode(), { teamName: 'Wolves' });
+    expect(wolves['Wes'].inGoal).toBe(true); // 1 Save
+    for (const name of ['Will', 'Wren', 'Wade']) {
+      expect(wolves[name].inGoal, name).toBe(false);
+    }
+  });
+
+  it('a lone PenSaved (no plain Save) is enough', () => {
+    const node: Record<string, unknown> = {
+      team1: 'Sharks', team2: 'Wolves', team1score: 0, team2score: 0,
+      team1activity: { "9'": [{ PenSaved: 'Pat' }, { Goal: 'Alex' }] },
+    };
+    const sharks = mapGameToStats(node, { teamName: 'Sharks' });
+    expect(sharks['Pat'].inGoal).toBe(true);
+    expect(sharks['Alex'].inGoal).toBe(false);
+  });
+
+  it('team{n}keepers marker: own side only, only `true` counts, zero saves ' +
+    'is fine', () => {
+    const node = gameNode();
+    node['team1keepers'] = { Dana: true, Alex: false, Riley: 'true' };
+    node['team2keepers'] = { Alex: true, Will: true };
+    const sharks = mapGameToStats(node, {
+      teamName: 'Sharks', attendance: { Sam: true, Riley: true },
+    });
+    expect(sharks['Dana'].inGoal).toBe(true); // marker, 0 saves
+    expect(sharks['Dana'].saves).toBe(0);
+    expect(sharks['Alex'].inGoal).toBe(false); // false never counts, and
+    // the team2keepers 'Alex' entry is the OTHER side's marker
+    expect(sharks['Riley'].inGoal).toBe(false); // the String 'true' is not true
+    expect(sharks['Sam'].inGoal).toBe(true); // saves still count
+    const wolves = mapGameToStats(node, { teamName: 'Wolves' });
+    expect(wolves['Will'].inGoal).toBe(true);
+    expect(wolves['Wren'].inGoal).toBe(false);
+  });
+
+  it('List-coerced marker (numeric-name keys) is read by index; junk ' +
+    'shapes are ignored', () => {
+    const node: Record<string, unknown> = {
+      team1: 'Sharks', team2: 'Wolves', team1score: 0, team2score: 2,
+      team1keepers: [null, true, false],
+    };
+    const sharks = mapGameToStats(node, {
+      teamName: 'Sharks', attendance: { '1': true, '2': true },
+    });
+    expect(sharks['1'].inGoal).toBe(true);
+    expect(sharks['2'].inGoal).toBe(false);
+    for (const junk of ['Dana', 5, true, null]) {
+      const n = { ...gameNode(), team1keepers: junk };
+      const stats = mapGameToStats(n, { teamName: 'Sharks' });
+      expect(stats['Dana'].inGoal, String(junk)).toBe(false);
+      expect(stats['Sam'].inGoal, String(junk)).toBe(true);
+    }
+  });
+
+  it('the marker never adds a player to the result', () => {
+    const node = { ...gameNode(), team1keepers: { Ghost: true } };
+    expect('Ghost' in mapGameToStats(node, { teamName: 'Sharks' })).toBe(false);
+  });
+
+  it('forfeits: nobody is in goal (events and marker ignored)', () => {
+    const node = {
+      ...gameNode(), team1score: 5, team2score: 0, forfeitedBy: 2,
+      team1keepers: { Sam: true }, team2keepers: { Wes: true },
+    };
+    const sharks = mapGameToStats(node, {
+      teamName: 'Sharks', attendance: { Sam: true },
+    });
+    expect(sharks['Sam'].inGoal).toBe(false);
+    const wolves = mapGameToStats(node, {
+      teamName: 'Wolves', attendance: { Wes: true },
+    });
+    expect(wolves['Wes'].inGoal).toBe(false);
+  });
+
+  it('default factory: not in goal', () => {
+    expect(playerGameStats().inGoal).toBe(false);
   });
 });

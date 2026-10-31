@@ -1,8 +1,9 @@
 // One player's raw stats in one real game — the engine's only input shape.
 // `present` comes from the attendance step; `teamConceded` from the final
-// score; `forfeit` from the game's `forfeitedBy` marker. Everything else
-// from captured activities (always zero on a forfeited game — the mapper
-// ignores its events).
+// score; `forfeit` from the game's `forfeitedBy` marker; `inGoal` from his
+// saves or the game's `team{1,2}keepers` marker. Everything else from
+// captured activities (always zero on a forfeited game — the mapper ignores
+// its events).
 //
 // Faithful port of lib/fantasy/engine/player_game_stats.dart.
 
@@ -31,17 +32,23 @@ export interface PlayerGameStats {
   present: boolean;
   /** Absent = 'none' (the Dart default). */
   forfeit?: GameForfeit;
+  /** He played in goal this game (spec §7 stand-in goalkeeper): >=1 Save /
+   *  PenSaved recorded, or listed `true` in his side's `team{1,2}keepers`
+   *  marker. A fact about the GAME, position-blind — scoring applies it only
+   *  to a DEF/ATT (his saves, penalty saves, clean sheet and goals conceded
+   *  score at the GK rates for this game); a listed GK is unaffected. */
+  inGoal: boolean;
 }
 
 /** Mirrors the Dart const constructor's defaults (all zero, present, no
- *  forfeit). */
+ *  forfeit, not in goal). */
 export function playerGameStats(
   partial: Partial<PlayerGameStats> = {},
 ): PlayerGameStats {
   return {
     goals: 0, assists: 0, saves: 0, penSaved: 0, penMissed: 0,
     ownGoals: 0, yellows: 0, reds: 0, dpl: 0, teamConceded: 0,
-    present: true, forfeit: 'none',
+    present: true, forfeit: 'none', inGoal: false,
     ...partial,
   };
 }
