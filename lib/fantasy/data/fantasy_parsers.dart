@@ -312,6 +312,7 @@ List<String> dateKeysFromNode(Object? node) {
 //   Leaderboards/
 //     Overall/<uid>        = { points: int, rank: int, movement: int }
 //     Gameweek/<gw>/<uid>  = { points: int, rank: int }
+//     RankHistory/<uid>    = { "<gw>": rank, ... }
 //
 // - points:   total fantasy points (Overall = season-to-date across finalized
 //             gameweeks; Gameweek = that week alone).
@@ -321,9 +322,14 @@ List<String> dateKeysFromNode(Object? node) {
 // - movement: places gained on Overall since the PREVIOUS gameweek finalized
 //             (positive = climbed, negative = dropped, 0 = held). Omitted for
 //             brand-new managers — absent/0 renders the neutral "—".
+// - RankHistory: each manager's OVERALL rank after every finalized week
+//             (finalize_core.ts composeRankHistory) — the fan's "Your rank
+//             this season" line. The latest entry is the Overall rank. A
+//             manager has no entries before his first finalized week.
 // - <gw> is the gameweek number (1-based int). RTDB WILL list-coerce the
-//   Gameweek node (small int keys), so the parser accepts a List; uid keys
-//   never coerce but are guarded anyway.
+//   Gameweek node and a uid's RankHistory map (small int keys), so the
+//   parser accepts a List for both; uid keys never coerce but are guarded
+//   anyway.
 // - Node absent entirely = no finalized gameweek yet → the tab's friendly
 //   empty state.
 
@@ -349,7 +355,11 @@ class FantasyLeaderboardEntry {
 /// The whole streamed `Leaderboards` node. Both sides empty = node absent
 /// (no finalized gameweek yet — the tab shows its friendly empty state).
 class FantasyLeaderboards {
-  const FantasyLeaderboards({required this.overall, required this.byWeek});
+  const FantasyLeaderboards({
+    required this.overall,
+    required this.byWeek,
+    this.rankHistory = const {},
+  });
 
   static const FantasyLeaderboards empty =
       FantasyLeaderboards(overall: [], byWeek: {});
@@ -360,6 +370,11 @@ class FantasyLeaderboards {
   /// Gameweek standings by week number, each list sorted the same way.
   final Map<int, List<FantasyLeaderboardEntry>> byWeek;
 
+  /// uid → {gameweek → Overall rank after that week}. Empty until the
+  /// functions write it; a uid with no usable entries is absent.
+  final Map<String, Map<int, int>> rankHistory;
+
+  /// Standings only — a RankHistory with no standings is still "no board".
   bool get isEmpty => overall.isEmpty && byWeek.isEmpty;
 }
 
@@ -393,8 +408,31 @@ List<FantasyLeaderboardEntry> leaderboardEntriesFromNode(Object? node) {
   return out;
 }
 
-/// The whole `Leaderboards` node. Tolerates the Gameweek child arriving as a
-/// List (RTDB small-int-key coercion: index = gameweek number).
+/// One manager's `RankHistory/<uid>` → {gameweek → rank}. Accepts the
+/// List-coerced form (index = gameweek); weeks/ranks below 1 and junk values
+/// are skipped, never crash.
+Map<int, int> rankHistoryFromNode(Object? node) {
+  final out = <int, int>{};
+  void put(Object? gw, Object? raw) {
+    final week = int.tryParse(gw.toString());
+    final rank = raw is Map || raw is List ? null : _optInt(raw);
+    if (week == null || week < 1 || rank == null || rank < 1) return;
+    out[week] = rank;
+  }
+
+  if (node is Map) {
+    node.forEach(put);
+  } else if (node is List) {
+    for (var i = 0; i < node.length; i++) {
+      put(i, node[i]);
+    }
+  }
+  return out;
+}
+
+/// The whole `Leaderboards` node. Tolerates the Gameweek child (and each
+/// uid's RankHistory) arriving as a List (RTDB small-int-key coercion:
+/// index = gameweek number).
 FantasyLeaderboards leaderboardsFromNode(Object? node) {
   if (node is! Map) return FantasyLeaderboards.empty;
   final overall = leaderboardEntriesFromNode(node['Overall']);
@@ -413,7 +451,16 @@ FantasyLeaderboards leaderboardsFromNode(Object? node) {
       if (entries.isNotEmpty) byWeek[i] = entries;
     }
   }
-  return FantasyLeaderboards(overall: overall, byWeek: byWeek);
+  final rankHistory = <String, Map<int, int>>{};
+  final rawHistory = node['RankHistory'];
+  if (rawHistory is Map) {
+    rawHistory.forEach((uid, raw) {
+      final history = rankHistoryFromNode(raw);
+      if (history.isNotEmpty) rankHistory[uid.toString()] = history;
+    });
+  }
+  return FantasyLeaderboards(
+      overall: overall, byWeek: byWeek, rankHistory: rankHistory);
 }
 
 /// The whole `Managers` node → {uid: manager} (leaderboard team names).

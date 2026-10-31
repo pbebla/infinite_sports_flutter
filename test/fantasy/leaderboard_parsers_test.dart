@@ -122,6 +122,92 @@ void main() {
     });
   });
 
+  // Leaderboard extras: Leaderboards/RankHistory/<uid> = {"<gw>": rank} —
+  // each manager's Overall rank after every finalized week (the fan's "Your
+  // rank this season" line). Small int keys, so RTDB may list-coerce a uid's
+  // map.
+  group('RankHistory', () {
+    test('parses uid -> {gameweek: rank}; Overall and Gameweek are unchanged '
+        'by the new key', () {
+      final boards = leaderboardsFromNode({
+        'Overall': {
+          'u1': {'points': 30, 'rank': 1, 'movement': 2},
+        },
+        'Gameweek': {
+          '1': {
+            'u1': {'points': 30, 'rank': 1},
+          },
+        },
+        'RankHistory': {
+          'u1': {'1': 3, '2': 1},
+          'u2': {'2': 4},
+        },
+      });
+      expect(boards.overall.single.uid, 'u1');
+      expect(boards.overall.single.movement, 2);
+      expect(boards.byWeek.keys, [1]);
+      expect(boards.rankHistory, {
+        'u1': {1: 3, 2: 1},
+        'u2': {2: 4},
+      });
+    });
+
+    test("tolerates a uid's LIST-coerced history: index is the gameweek", () {
+      final boards = leaderboardsFromNode({
+        'RankHistory': {
+          'u1': [null, 5, 3, 2],
+          'u2': [null, null, null, 7],
+        },
+      });
+      expect(boards.rankHistory, {
+        'u1': {1: 5, 2: 3, 3: 2},
+        'u2': {3: 7},
+      });
+    });
+
+    test('string numbers accepted; junk weeks/ranks/children skipped; empty '
+        'histories dropped', () {
+      final boards = leaderboardsFromNode({
+        'RankHistory': {
+          'u1': {'1': '4', '2': 'x', 'gw': 2, '3': 0, '4': -1, '5': 2},
+          'u2': 'junk',
+          'u3': <String, Object?>{},
+          'u4': {'1': null},
+        },
+      });
+      expect(boards.rankHistory, {
+        'u1': {1: 4, 5: 2},
+      });
+    });
+
+    test('absent / non-map RankHistory = no history; the board still parses '
+        'and RankHistory alone never makes it non-empty', () {
+      expect(FantasyLeaderboards.empty.rankHistory, isEmpty);
+      final plain = leaderboardsFromNode({
+        'Overall': {
+          'u1': {'points': 3, 'rank': 1},
+        },
+      });
+      expect(plain.rankHistory, isEmpty);
+      expect(plain.overall.single.points, 3);
+      final junk = leaderboardsFromNode({
+        'Overall': {
+          'u1': {'points': 3, 'rank': 1},
+        },
+        'RankHistory': 'junk',
+      });
+      expect(junk.rankHistory, isEmpty);
+      expect(junk.overall.single.points, 3);
+      expect(
+          leaderboardsFromNode({
+            'RankHistory': {
+              'u1': {'1': 1},
+            },
+          }).isEmpty,
+          isTrue);
+    });
+  });
+
   group('managersFromNode', () {
     test('parses the whole node, skipping unusable children', () {
       final managers = managersFromNode({
