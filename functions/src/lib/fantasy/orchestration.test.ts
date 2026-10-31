@@ -448,6 +448,46 @@ describe('Monday repricing (Phase D)', () => {
       .toEqual({ At: NOW.getTime(), Pending: true }); // the claim is not ours to finish
   });
 
+  // Audit M5: a run that died after its claim leaves Repriced/<gw>
+  // {At, Pending:true} forever; later Mondays used to skip it silently.
+  it('a stale Pending claim (> 1 h) warns for the operator and still moves nothing', async () => {
+    const db = repriceWorld();
+    const claimedAt = NOW.getTime() - 60 * 60 * 1000 - 1; // just over an hour
+    await db.write(`${fRoot}/Repriced/1`, { At: claimedAt, Pending: true });
+    db.writes = [];
+    const warns: Array<{ m: string; c?: Record<string, unknown> }> = [];
+    await runMondayReprice(db, NOW, {
+      info: () => undefined,
+      warn: (m, c) => { warns.push({ m, c }); },
+    });
+    expect(warns).toEqual([{
+      m: 'fantasy reprice: stale Pending claim — needs operator attention',
+      c: { sport: 'Futsal', season: '15', gw: 1, At: claimedAt },
+    }]);
+    // Never taken over: prices may be half-moved.
+    expect(db.writes).toEqual([]);
+    expect(await db.read(`${fRoot}/Players/Bo/priceTenths`)).toBe(75);
+    expect(await db.read(`${fRoot}/Repriced/1`)).toEqual({ At: claimedAt, Pending: true });
+  });
+
+  it('a fresh Pending claim (a run in flight) and a done row stand down without a warning', async () => {
+    for (const row of [
+      { At: NOW.getTime() - 60 * 60 * 1000, Pending: true }, // exactly an hour: not yet stale
+      { At: NOW.getTime() - 7 * 86400_000 }, // finished long ago
+      { At: NOW.getTime() - 7 * 86400_000, Manual: true },
+    ]) {
+      const db = repriceWorld();
+      await db.write(`${fRoot}/Repriced/1`, row);
+      db.writes = [];
+      const warns: string[] = [];
+      await runMondayReprice(db, NOW, {
+        info: () => undefined, warn: (m) => { warns.push(m); },
+      });
+      expect(warns, JSON.stringify(row)).toEqual([]);
+      expect(db.writes, JSON.stringify(row)).toEqual([]);
+    }
+  });
+
   it('admin Manual flag stands the job down and marks the week handled', async () => {
     const db = repriceWorld();
     db.data.Fantasy.Futsal['15'].PriceChanges = { 1: { Manual: true } };

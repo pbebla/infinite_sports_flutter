@@ -36,10 +36,12 @@
 //   job's done-flag. Manual:true records "admin had set
 //   PriceChanges/<gw>/Manual, the job stood down"; Voided:true records "the
 //   week was owner-voided, the job skipped it" (un-voiding later does NOT
-//   reprice retroactively — prices have moved on). PriceChanges/<gw> itself
-//   holds only the client contract rows: <name>: { delta:int EFFECTIVE
-//   tenths } (post-clamp; zero moves omitted — a ceiling-clamped riser is
-//   not a riser).
+//   reprice retroactively — prices have moved on). While a run works the
+//   row is its claim { At, Pending:true }; a Pending row over an hour old is
+//   a dead run (warned every later Monday, never taken over — audit M5).
+//   PriceChanges/<gw> itself holds only the client contract rows: <name>:
+//   { delta:int EFFECTIVE tenths } (post-clamp; zero moves omitted — a
+//   ceiling-clamped riser is not a riser) plus the owner's Manual flag.
 //
 // - PlayerWeeks/<gw>/<name> = int (functions-internal; see finalize_core.ts).
 //
@@ -1481,6 +1483,11 @@ export async function sendReminderNow(
 
 // ── Phase D: Monday repricing ──────────────────────────────────────────────
 
+/** How old a `Repriced/<gw> {Pending:true}` claim may get before the
+ *  Monday job warns that its run died mid-way (a healthy run finalizes the
+ *  row within seconds). */
+const STALE_REPRICE_CLAIM_MS = 60 * 60 * 1000;
+
 /** Monday 10:00 league time: reprice the most recent FINALIZED gameweek not
  *  yet repriced. Per position, repriceDeltas over ALL eligible market
  *  players (a player with no PlayerWeeks entry scored 0 that week — absent
@@ -1516,12 +1523,25 @@ export async function runMondayReprice(
       if (weeks.length === 0) continue; // nothing finalized yet
       const gw = Math.max(...weeks);
 
-      if (await db.read(`${root}/Repriced/${gw}`) != null) continue; // done
+      const done = await db.read(`${root}/Repriced/${gw}`);
+      if (done != null) {
+        // Done — or claimed. A claim still Pending an hour after it was
+        // taken is a run that died mid-way (audit M5): say so loudly on
+        // every later Monday, but NEVER take it over — its prices may be
+        // half-moved, and repricing again would move them twice.
+        if (isPlainMap(done) && done['Pending'] === true &&
+          nowUtc.getTime() - toIntLoose(done['At']) > STALE_REPRICE_CLAIM_MS) {
+          log.warn('fantasy reprice: stale Pending claim — needs operator ' +
+            'attention', { ...ctx, gw, At: done['At'] ?? null });
+        }
+        continue;
+      }
       // Once-only CLAIM (transaction): a double-fired schedule or two
       // overlapping runs must never move prices twice. The row is written
       // {At, Pending:true} up front and finalized below; a crash in between
       // leaves the claim (prices untouched or partially moved) for the
-      // operator to clear — logged.
+      // operator to clear — warned on every later run once it is over an
+      // hour old (the done-check above).
       if (!(await db.writeIfAbsent(`${root}/Repriced/${gw}`,
         { At: nowUtc.getTime(), Pending: true }))) {
         log.info('fantasy reprice: claimed by a concurrent run — standing down',
