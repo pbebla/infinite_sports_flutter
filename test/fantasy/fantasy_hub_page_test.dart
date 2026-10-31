@@ -535,6 +535,31 @@ void main() {
     });
   });
 
+  group('badge push (spec 2026-10-30 §4)', () {
+    testWidgets('opens Leaderboards on Overall — where your row and its badge '
+        'count are — even after a Gameweek session scope', (tester) async {
+      FantasyLeaderboardsTab.sessionScope = LeaderboardScope.gameweek;
+      final route = fantasyRouteFromPayload({
+        'type': 'fantasy',
+        'sport': 'Futsal',
+        'season': '15',
+        'badge': 'captainGenius_gw3',
+      })!;
+      await pumpHub(tester, tab: route.initialTab);
+      await land(tester);
+      expect(key('hub'), findsOneWidget);
+      expect(FantasyLeaderboardsTab.sessionScope, LeaderboardScope.overall);
+      expect(find.byType(FantasyLeaderboardsTab), findsOneWidget);
+    });
+
+    testWidgets('any other entry keeps the session scope', (tester) async {
+      FantasyLeaderboardsTab.sessionScope = LeaderboardScope.gameweek;
+      await pumpHub(tester);
+      await land(tester);
+      expect(FantasyLeaderboardsTab.sessionScope, LeaderboardScope.gameweek);
+    });
+  });
+
   group('the shared schedule wiring', () {
     testWidgets(
         'a Config error is logged and the showing hub keeps its last good '

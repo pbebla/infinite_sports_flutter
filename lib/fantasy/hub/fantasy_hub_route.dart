@@ -3,9 +3,12 @@
 // test/fantasy/fantasy_hub_route_test.dart.
 //
 // Every fantasy push carries data `{type:'fantasy', sport, season, gw}`;
-// news-post pushes add `postId`. A postId opens the hub's News tab scrolled
-// to that post; everything else (deadline reminder, weekly recap, position
-// alerts, owner messages) opens My Team.
+// news-post pushes add `postId`, badge pushes (spec 2026-10-30 §4) add
+// `badge: <awardId>`. A postId opens the hub's News tab scrolled to that
+// post; a badge opens Leaderboards (Overall — the own row carries the badge
+// count and its "View team" opens the badge shelf); everything else
+// (deadline reminder, weekly recap, position alerts, owner messages) opens
+// My Team.
 //
 // "Open in Fantasy" (round 3, spec §7) uses the same route value: the Players
 // tab plus [FantasyHubRoute.initialPlayerName], which makes the hub push that
@@ -60,10 +63,15 @@ FantasyHubRoute? fantasyRouteFromPayload(Map<dynamic, dynamic> data) {
   final season = data['season']?.toString().trim() ?? '';
   if (sport.isEmpty || season.isEmpty) return null;
   final postId = data['postId']?.toString().trim() ?? '';
+  final badge = data['badge']?.toString().trim() ?? '';
   return FantasyHubRoute(
     sport: sport,
     season: season,
-    initialTab: postId.isEmpty ? FantasyHubTab.myTeam : FantasyHubTab.news,
+    initialTab: postId.isNotEmpty
+        ? FantasyHubTab.news
+        : badge.isNotEmpty
+            ? FantasyHubTab.leaderboards
+            : FantasyHubTab.myTeam,
     focusPostId: postId.isEmpty ? null : postId,
   );
 }

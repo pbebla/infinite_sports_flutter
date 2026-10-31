@@ -41,6 +41,30 @@ void main() {
       }
     });
 
+    test('a badge push (spec 2026-10-30 §4) opens Leaderboards — the own row '
+        'carries the badge count and opens the badge shelf', () {
+      final route = fantasyRouteFromPayload({
+        'type': 'fantasy',
+        'sport': 'Futsal',
+        'season': '15',
+        'badge': 'captainGenius_gw3',
+      })!;
+      expect(route.sport, 'Futsal');
+      expect(route.season, '15');
+      expect(route.initialTab, FantasyHubTab.leaderboards);
+      expect(route.focusPostId, isNull);
+      // A blank badge id is an ordinary push (My Team).
+      expect(
+          fantasyRouteFromPayload({
+            'type': 'fantasy',
+            'sport': 'Futsal',
+            'season': '15',
+            'badge': ' ',
+          })!
+              .initialTab,
+          FantasyHubTab.myTeam);
+    });
+
     test('missing sport or season → null (the tap does nothing)', () {
       expect(
           fantasyRouteFromPayload(

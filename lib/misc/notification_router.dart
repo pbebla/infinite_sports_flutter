@@ -49,10 +49,11 @@ Future<void> openMatchFromNotification(Map<String, dynamic> data) async {
   }
 
   // Fantasy pushes (deadline reminder, weekly recap, position alerts, owner
-  // messages, news posts) carry {type:'fantasy', sport, season, gw,
-  // postId?}. They also carry sport/season, so this MUST run before the
-  // league-watcher branch below (which would otherwise swallow them and do
-  // nothing). News → the hub's News tab scrolled to the post; else My Team.
+  // messages, news posts, badges) carry {type:'fantasy', sport, season, gw?,
+  // postId?, badge?}. They also carry sport/season, so this MUST run before
+  // the league-watcher branch below (which would otherwise swallow them and
+  // do nothing). News → the hub's News tab scrolled to the post; a badge →
+  // Leaderboards (Overall: the own row with its badge count); else My Team.
   if (type == 'fantasy') {
     final route = fantasyRouteFromPayload(data);
     final fantasyCtx = mainContext;

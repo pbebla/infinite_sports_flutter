@@ -11,7 +11,8 @@
 // .bottom).
 //
 // Push taps (automation spec 2026-10-28 §4.2): [FantasyHubPage.initialTab]
-// opens on News (a news push) or My Team (everything else), and
+// opens on News (a news push), Leaderboards on Overall (a badge push, spec
+// 2026-10-30 §4) or My Team (everything else), and
 // [FantasyHubPage.focusPostId] scrolls the News feed to the tapped post.
 //
 // Player profiles (round 3, spec §4): EVERY player tap inside the hub — News
@@ -243,6 +244,11 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     super.initState();
     _pendingFocusPostId = widget.focusPostId;
     _pendingPlayerName = widget.initialPlayerName;
+    // Only a badge push opens the hub straight onto Leaderboards: show
+    // Overall, where the manager's own row and its badge count are.
+    if (widget.initialTab == FantasyHubTab.leaderboards) {
+      FantasyLeaderboardsTab.sessionScope = LeaderboardScope.overall;
+    }
     FantasyPrefs.hasSeenWalkthrough().then((seen) {
       if (mounted) setState(() => _walkthroughSeen = seen);
     });
