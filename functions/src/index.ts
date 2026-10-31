@@ -382,6 +382,11 @@ export { onFantasyPositionWritten } from './fantasy_positions';
 
 export { onFantasyNewsPublished } from './fantasy_news';
 
+// ---- Infinite Fantasy (spec 2026-10-30 §4): achievement badge push on
+// award creation (auto + manual, once-only) ----
+
+export { onFantasyBadgeAwarded } from './fantasy_badges';
+
 // ---- Infinite Fantasy (spec 2026-10-28 §3, §4.5): Manager AI copy +
 // Message managers ----
 
