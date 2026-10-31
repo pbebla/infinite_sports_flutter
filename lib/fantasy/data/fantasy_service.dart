@@ -16,6 +16,7 @@ import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
+import 'package:infinite_sports_flutter/fantasy/data/per_week_stream.dart';
 import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
@@ -46,6 +47,14 @@ class FantasyService {
   static final Map<String, Map<int, PlayerWeekStats>> _playerWeekStatsCache =
       {};
   static final Map<String, Set<String>> _watchlistCache = {};
+  // The hub's own-user feeds (Opus audit item 3 — the hub's reveal gate
+  // waits on every one of them, so each seeds a revisit), keyed
+  // `<root>|<uid>`. A known-ABSENT node is cached too (null value, present
+  // key): "no alert" / "no squad yet" paints at once on a revisit.
+  static final Map<String, Map<int, ChipHistoryEntry>> _chipHistoryCache = {};
+  static final Map<String, FantasySquadAlert?> _squadAlertCache = {};
+  static final Map<String, FantasySquad?> _mySquadCache = {};
+  static final Map<String, FantasyManager?> _managerByUidCache = {};
   // The league's own season-over flag, keyed `<sport>/<season>`.
   static final Map<String, bool> _seasonFinishedCache = {};
   // Achievement badges: the GLOBAL catalog, a season's whole Badges node
@@ -70,6 +79,10 @@ class FantasyService {
     _allPriceChangesCache.clear();
     _playerWeekStatsCache.clear();
     _watchlistCache.clear();
+    _chipHistoryCache.clear();
+    _squadAlertCache.clear();
+    _mySquadCache.clear();
+    _managerByUidCache.clear();
     _seasonFinishedCache.clear();
     _badgeCatalogCache = null;
     _badgesCache.clear();
@@ -178,54 +191,24 @@ class FantasyService {
   /// One player's weekly records (`PlayerWeekStats/<gw>/<name>`, round 3,
   /// spec §3.1): one onValue listener per gameweek in [weeks] on that small
   /// entry (public read) — never the season's whole record for every player
-  /// (same multi-listener shape as [watchChipHistoryFor]). Emits only once
-  /// EVERY week has answered (no piecemeal pops), then on every change;
+  /// (the shared [perWeekStream], like [watchChipHistoryFor]). Emits only
+  /// once EVERY week has answered (no piecemeal pops), then on every change;
   /// weeks without a record are simply absent from the map. Seeded from the
-  /// session cache so a revisited profile paints instantly. Callers
-  /// resubscribe when the finalized-week list changes.
+  /// session cache (`<root>|<name>`) so a revisited profile paints
+  /// instantly. Callers (FantasyScheduleFeed) pass only weeks up to the
+  /// current gameweek and resubscribe when that list changes.
   static Stream<Map<int, PlayerWeekStats>> watchPlayerWeekStatsFor(
       String sport, String season, String name, List<int> weeks) {
-    final wanted = weeks.toSet();
-    if (wanted.isEmpty) {
-      return Stream<Map<int, PlayerWeekStats>>.value(const {});
-    }
     final root = _root(sport, season);
-    final cacheKey = '$root|$name';
-    final subs = <StreamSubscription<DatabaseEvent>>[];
-    final latest = <int, PlayerWeekStats?>{};
-    late final StreamController<Map<int, PlayerWeekStats>> controller;
-    controller = StreamController<Map<int, PlayerWeekStats>>(
-      onListen: () {
-        final seed = _playerWeekStatsCache[cacheKey];
-        if (seed != null) {
-          controller.add({
-            for (final e in seed.entries)
-              if (wanted.contains(e.key)) e.key: e.value,
-          });
-        }
-        for (final w in wanted) {
-          subs.add(_ref('$root/PlayerWeekStats/$w/$name')
-              .onValue
-              .listen((event) {
-            latest[w] = playerWeekStatsFromNode(event.snapshot.value);
-            if (latest.length < wanted.length) return; // not all answered yet
-            final map = {
-              for (final e in latest.entries)
-                if (e.value != null) e.key: e.value!,
-            };
-            _playerWeekStatsCache[cacheKey] = map;
-            controller.add(map);
-          }, onError: controller.addError));
-        }
-      },
-      onCancel: () async {
-        for (final s in subs) {
-          await s.cancel();
-        }
-        subs.clear();
-      },
+    return perWeekStream<PlayerWeekStats>(
+      weeks: weeks,
+      cache: _playerWeekStatsCache,
+      cacheKey: '$root|$name',
+      watchWeek: (w) => _ref('$root/PlayerWeekStats/$w/$name')
+          .onValue
+          .map((event) => event.snapshot.value),
+      parse: playerWeekStatsFromNode,
     );
-    return controller.stream;
   }
 
   /// Live "season over" flag: the LEAGUE's own `/<sport>/<season>/Finished`
@@ -322,12 +305,19 @@ class FantasyService {
 
   /// Live own squad (`Squads/<uid>`). null until first save. Re-renders on
   /// every save, including this device's own (self-echo safe by design: the
-  /// stream is the single source of truth after a write).
+  /// stream is the single source of truth after a write). Seeded from the
+  /// session cache (`<root>|<uid>`, absent cached as null) so the hub's
+  /// reveal gate opens at once on a revisit.
   static Stream<FantasySquad?> watchMySquad(
-      String sport, String season, String uid) {
-    return _ref('${_root(sport, season)}/Squads/$uid')
-        .onValue
-        .map((event) => squadFromNode(event.snapshot.value));
+      String sport, String season, String uid) async* {
+    final key = '${_root(sport, season)}|$uid';
+    if (_mySquadCache.containsKey(key)) yield _mySquadCache[key];
+    await for (final event
+        in _ref('${_root(sport, season)}/Squads/$uid').onValue) {
+      final squad = squadFromNode(event.snapshot.value);
+      _mySquadCache[key] = squad;
+      yield squad;
+    }
   }
 
   /// Saves the whole squad node (engine FantasySquad.toMap — the exact shape
@@ -355,11 +345,19 @@ class FantasyService {
   /// Live own squad alert (`SquadAlerts/<uid>`, spec §3 holder protection,
   /// functions-written): non-null while a player's position change has
   /// left this manager's formation illegal. Rules: read own uid only.
+  /// Seeded from the session cache (`<root>|<uid>`, "no alert" cached as
+  /// null) — it joins the hub's reveal gate, so a revisit must not wait on
+  /// the network for it.
   static Stream<FantasySquadAlert?> watchMySquadAlert(
-      String sport, String season, String uid) {
-    return _ref('${_root(sport, season)}/SquadAlerts/$uid')
-        .onValue
-        .map((event) => squadAlertFromNode(event.snapshot.value));
+      String sport, String season, String uid) async* {
+    final key = '${_root(sport, season)}|$uid';
+    if (_squadAlertCache.containsKey(key)) yield _squadAlertCache[key];
+    await for (final event
+        in _ref('${_root(sport, season)}/SquadAlerts/$uid').onValue) {
+      final alert = squadAlertFromNode(event.snapshot.value);
+      _squadAlertCache[key] = alert;
+      yield alert;
+    }
   }
 
   /// [watchMySquadAlert] for the signed-in user; a signed-out session
@@ -372,12 +370,18 @@ class FantasyService {
   }
 
   /// Live `Managers/<uid>` entry (spec §10b): team name + moderation flag.
-  /// null until the manager names their team.
+  /// null until the manager names their team. Seeded from the session cache
+  /// (`<root>|<uid>`, unnamed cached as null) for the hub's reveal gate.
   static Stream<FantasyManager?> watchManager(
-      String sport, String season, String uid) {
-    return _ref('${_root(sport, season)}/Managers/$uid')
-        .onValue
-        .map((event) => managerFromNode(event.snapshot.value));
+      String sport, String season, String uid) async* {
+    final key = '${_root(sport, season)}|$uid';
+    if (_managerByUidCache.containsKey(key)) yield _managerByUidCache[key];
+    await for (final event
+        in _ref('${_root(sport, season)}/Managers/$uid').onValue) {
+      final manager = managerFromNode(event.snapshot.value);
+      _managerByUidCache[key] = manager;
+      yield manager;
+    }
   }
 
   /// [watchManager] for the signed-in user; a signed-out session streams a
@@ -483,41 +487,25 @@ class FantasyService {
   /// One manager's finalized chips by gameweek for the chip row's real
   /// counts (chip_usage.dart): one onValue listener per gameweek on the
   /// small `History/<gw>/<uid>` entry (public read) — never the whole
-  /// season's History of every manager. Emits only once EVERY week has
-  /// answered (no piecemeal "1 left" → "Used" pops), then on every change.
-  /// Weeks without an entry are simply absent from the map. Callers
-  /// resubscribe when the schedule's gameweek list changes.
+  /// season's History of every manager (the shared [perWeekStream]). Emits
+  /// only once EVERY week has answered (no piecemeal "1 left" → "Used"
+  /// pops), then on every change; weeks without an entry are simply absent.
+  /// Seeded from the session cache (`<root>|<uid>`) so the hub's reveal gate
+  /// opens at once on a revisit. Callers (FantasyScheduleFeed) pass only
+  /// weeks up to the current gameweek — a future week can't have History —
+  /// and resubscribe when that list changes.
   static Stream<Map<int, ChipHistoryEntry>> watchChipHistoryFor(
       String sport, String season, String uid, List<int> weeks) {
-    if (weeks.isEmpty) {
-      return Stream<Map<int, ChipHistoryEntry>>.value(const {});
-    }
-    final subs = <StreamSubscription<DatabaseEvent>>[];
-    final latest = <int, ChipHistoryEntry?>{};
-    late final StreamController<Map<int, ChipHistoryEntry>> controller;
-    controller = StreamController<Map<int, ChipHistoryEntry>>(
-      onListen: () {
-        for (final w in weeks) {
-          subs.add(_ref('${_root(sport, season)}/History/$w/$uid')
-              .onValue
-              .listen((event) {
-            latest[w] = chipHistoryEntryFromNode(event.snapshot.value);
-            if (latest.length < weeks.length) return; // not all answered yet
-            controller.add({
-              for (final e in latest.entries)
-                if (e.value != null) e.key: e.value!,
-            });
-          }, onError: controller.addError));
-        }
-      },
-      onCancel: () async {
-        for (final s in subs) {
-          await s.cancel();
-        }
-        subs.clear();
-      },
+    final root = _root(sport, season);
+    return perWeekStream<ChipHistoryEntry>(
+      weeks: weeks,
+      cache: _chipHistoryCache,
+      cacheKey: '$root|$uid',
+      watchWeek: (w) => _ref('$root/History/$w/$uid')
+          .onValue
+          .map((event) => event.snapshot.value),
+      parse: chipHistoryEntryFromNode,
     );
-    return controller.stream;
   }
 
   /// [watchChipHistoryFor] for the signed-in user; a signed-out session

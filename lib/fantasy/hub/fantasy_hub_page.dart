@@ -84,6 +84,7 @@ class FantasyHubPage extends StatefulWidget {
     this.newsStates,
     this.leaderboardsFeeds,
     this.profileOpener,
+    this.nowUtc,
   });
 
   final String sport;
@@ -126,6 +127,10 @@ class FantasyHubPage extends StatefulWidget {
   /// Replaces [openFantasyPlayerProfile] (records the call in tests).
   final FantasyProfileOpener? profileOpener;
 
+  /// Clock seam for the schedule feed's "weeks up to the current gameweek"
+  /// chip-history trim (null = real UTC now).
+  final DateTime Function()? nowUtc;
+
   @override
   State<FantasyHubPage> createState() => _FantasyHubPageState();
 }
@@ -138,7 +143,9 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   /// the last good value kept. The chips are the chip row's real "1 left" /
   /// "Used" counts and join the reveal gate (no badge pops after the fade);
   /// they load once the schedule's gameweeks are known, and the same week
-  /// numbers keep the running listeners (no flicker on a re-emit).
+  /// numbers keep the running listeners (no flicker on a re-emit). Only weeks
+  /// up to the current gameweek are listened to (a future week can't have
+  /// History), and the service seeds a revisit from its session cache.
   late final FantasyScheduleFeed<Map<int, ChipHistoryEntry>> _schedule =
       FantasyScheduleFeed(
     sport: widget.sport,
@@ -155,6 +162,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         FantasyService.watchMyChipHistoryAuto(
             widget.sport, widget.season, weeks),
     weekLabel: 'chip history feed',
+    nowUtc: widget.nowUtc,
   );
 
   FantasyConfigState? get _configState => _schedule.config;

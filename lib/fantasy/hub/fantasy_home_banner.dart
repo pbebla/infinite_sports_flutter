@@ -64,6 +64,7 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
     },
     configStates: widget.configStates,
     gameweekStates: widget.gameweeksStates,
+    nowUtc: widget.nowUtc,
   );
   Timer? _ticker;
 

@@ -242,6 +242,9 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
         FantasyService.watchPlayerWeekStatsFor(
             widget.sport, widget.season, widget.playerName, weeks),
     weekLabel: 'week stats feed',
+    // Weeks up to the current gameweek only (the feed's trim) — same clock
+    // as the page.
+    nowUtc: widget.nowUtc,
   );
 
   /// The league games for the Next line, derived with the season start hour

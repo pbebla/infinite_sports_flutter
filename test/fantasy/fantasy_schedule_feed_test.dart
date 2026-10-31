@@ -2,7 +2,9 @@
 // Config → schedule gameweeks (lock-hour resubscribe, a real null Config
 // clears + cancels, errors logged with the last good value kept, the
 // session cache) → one per-gameweek listener (week-number / key
-// resubscribe); and its sibling for the league games behind the "next game"
+// resubscribe; only weeks up to the current gameweek, growing as the season
+// advances — Opus audit items 3 + 11); and its sibling for the league games
+// behind the "next game"
 // lines (start hour → games, the session cache storing the hour the games
 // were DERIVED with so a revisit never shows "0 PM").
 
@@ -105,6 +107,9 @@ void main() {
     FantasyScheduleFeed<Map<int, int>> feed({
       Stream<List<Gameweek>>? gameweekStates,
       bool withWeeks = true,
+      // Default: after every test schedule's last lock day (season over —
+      // every week is listened to).
+      DateTime Function()? nowUtc,
     }) {
       final f = FantasyScheduleFeed<Map<int, int>>(
         sport: 'Futsal',
@@ -116,6 +121,7 @@ void main() {
         gameweeksFor: derived,
         weekFeed: withWeeks ? perWeek : null,
         weekLabel: 'week stats feed',
+        nowUtc: nowUtc ?? () => DateTime.utc(2027, 1, 1),
       );
       addTearDown(f.dispose);
       return f..start();
@@ -336,6 +342,72 @@ void main() {
       config.add(_config(16));
       await pumpEventQueue();
       expect(changes, before);
+    });
+
+    // Opus audit items 3 + 11: History / PlayerWeekStats can't exist for a
+    // week that hasn't locked — future weeks get NO listener.
+    test(
+        'only weeks up to the current gameweek get a listener (future weeks '
+        'none); season over = every week', () async {
+      // _gws: GW n locks Nov n, 22:00 UTC. Nov 2 23:00 = GW1's lock day is
+      // over, GW2 is the current week.
+      feed(nowUtc: () => DateTime.utc(2026, 11, 2, 23));
+      config.add(_config(15));
+      await pumpEventQueue();
+      schedules[0].add(_gws(5));
+      await pumpEventQueue();
+      expect(weekRequests, [
+        [1, 2]
+      ]);
+
+      // Before GW1 even locks: GW1 is current — just its own listener.
+      weekRequests.clear();
+      FantasyScheduleFeed.clearSessionCache();
+      feed(nowUtc: () => DateTime.utc(2026, 10, 20));
+      config.add(_config(15));
+      await pumpEventQueue();
+      schedules.last.add(_gws(5));
+      await pumpEventQueue();
+      expect(weekRequests.last, [1]);
+
+      // The season is over: every week.
+      FantasyScheduleFeed.clearSessionCache();
+      feed(nowUtc: () => DateTime.utc(2027, 1, 1));
+      config.add(_config(15));
+      await pumpEventQueue();
+      schedules.last.add(_gws(5));
+      await pumpEventQueue();
+      expect(weekRequests.last, [1, 2, 3, 4, 5]);
+    });
+
+    testWidgets(
+        'the week list grows when the current week ends — even with no '
+        'schedule re-emit (the boundary timer), the last data kept meanwhile',
+        (tester) async {
+      var now = DateTime.utc(2026, 11, 2, 23); // GW2 current
+      final f = feed(nowUtc: () => now);
+      config.add(_config(15));
+      await tester.pump();
+      schedules[0].add(_gws(5));
+      await tester.pump();
+      expect(weekRequests, [
+        [1, 2]
+      ]);
+      weekFeeds[0].add({1: 4});
+      await tester.pump();
+      expect(f.weekData, {1: 4});
+
+      // GW2's lock day ends Nov 3 22:00 (23 h on): the feed re-syncs itself.
+      now = DateTime.utc(2026, 11, 3, 22, 1);
+      await tester.pump(const Duration(hours: 23));
+      expect(weekRequests.last, [1, 2, 3]);
+      expect(f.weekData, {1: 4}); // kept until the new listener answers
+      expect(f.weekLoaded, isTrue); // no skeleton flash
+
+      f.dispose(); // cancels the next boundary timer too
+      // The file's setUp captures debugPrint; a widget test must hand it
+      // back inside its own body (the binding checks before tearDown runs).
+      debugPrint = originalDebugPrint;
     });
   });
 

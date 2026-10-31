@@ -10,10 +10,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_prefs.dart';
+import 'package:infinite_sports_flutter/fantasy/data/per_week_stream.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
@@ -145,6 +148,10 @@ void main() {
     FantasyHubTab tab = FantasyHubTab.myTeam,
     String? initialPlayerName,
     Size size = const Size(420, 1900),
+    Stream<List<Gameweek>>? gameweekStates,
+    Stream<Map<int, ChipHistoryEntry>> Function(List<int> weeks)?
+        chipHistoryFor,
+    DateTime Function()? nowUtc,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -160,8 +167,9 @@ void main() {
         managerStates: manager.stream,
         squadStates: squad.stream,
         alertStates: alert.stream,
-        gameweekStates: Stream.value(const []),
-        chipHistoryFor: (weeks) => Stream.value(const {}),
+        gameweekStates: gameweekStates ?? Stream.value(const []),
+        chipHistoryFor: chipHistoryFor ?? (weeks) => Stream.value(const {}),
+        nowUtc: nowUtc,
         newsStates: news.stream,
         leaderboardsFeeds: FantasyLeaderboardsFeeds(
           leaderboardsStates: boards.stream,
@@ -203,6 +211,89 @@ void main() {
   }
 
   Finder key(String k) => find.byKey(ValueKey(k));
+
+  // Opus audit item 3: the hub's reveal gate waits on the chip history —
+  // it must neither open listeners for weeks that can't have History yet
+  // nor make a revisit wait on the network.
+  group('chip history (reveal gate)', () {
+    // GW n locks Oct 4 + 7(n-1), 22:00 UTC; "now" (Oct 17) sits in GW3.
+    final gws = [
+      for (var n = 1; n <= 5; n++)
+        Gameweek(
+          number: n,
+          date: '10${(4 + 7 * (n - 1)).toString().padLeft(2, '0')}2026',
+          lockUtc: DateTime.utc(2026, 10, 4 + 7 * (n - 1), 22),
+          opensUtc: null,
+        ),
+    ];
+    DateTime now() => DateTime.utc(2026, 10, 17, 12);
+
+    testWidgets('only weeks up to the current gameweek get a listener — '
+        'future weeks none', (tester) async {
+      final requested = <List<int>>[];
+      await pumpHub(
+        tester,
+        gameweekStates: Stream.value(gws),
+        nowUtc: now,
+        chipHistoryFor: (weeks) {
+          requested.add(weeks);
+          return Stream.value(const {});
+        },
+      );
+      await land(tester);
+      expect(requested, [
+        [1, 2, 3]
+      ]);
+      expect(key('hub'), findsOneWidget);
+    });
+
+    testWidgets('a revisit reveals at once from the session seed — before '
+        'any History week answers', (tester) async {
+      // The REAL per-week wiring (FantasyService.watchChipHistoryFor's
+      // shape) with fake History nodes and a test-owned session cache.
+      final cache = <String, Map<int, ChipHistoryEntry>>{};
+      late Map<int, StreamController<Object?>> history;
+      final listened = <int>[];
+      Stream<Map<int, ChipHistoryEntry>> chips(List<int> weeks) =>
+          perWeekStream<ChipHistoryEntry>(
+            weeks: weeks,
+            cache: cache,
+            cacheKey: 'Fantasy/Futsal/15|me',
+            watchWeek: (w) {
+              listened.add(w);
+              final c = StreamController<Object?>();
+              history[w] = c;
+              addTearDown(c.close);
+              return c.stream;
+            },
+            parse: chipHistoryEntryFromNode,
+          );
+
+      // Visit 1: the gate waits for every History week, then reveals.
+      history = {};
+      await pumpHub(tester,
+          gameweekStates: Stream.value(gws), nowUtc: now, chipHistoryFor: chips);
+      await land(tester);
+      expect(key('hub'), findsNothing); // History hasn't answered yet
+      expect(listened..sort(), [1, 2, 3]); // never GW4 / GW5
+      history[1]!.add({'chip': 'tripleCaptain'});
+      history[2]!.add(null);
+      history[3]!.add(null);
+      await settle(tester);
+      expect(key('hub'), findsOneWidget);
+
+      // Visit 2: History is silent (offline / slow) — the seed reveals.
+      await tester.pumpWidget(const SizedBox());
+      history = {};
+      await pumpHub(tester,
+          gameweekStates: Stream.value(gws), nowUtc: now, chipHistoryFor: chips);
+      await land(tester);
+      expect(key('hub'), findsOneWidget);
+      final usedBadge = find.descendant(
+          of: key('chip_count_tripleCaptain'), matching: find.byType(Text));
+      expect(tester.widget<Text>(usedBadge).data, 'Used');
+    });
+  });
 
   group('News "View player"', () {
     testWidgets('opens the profile with the hub\'s shared draft',

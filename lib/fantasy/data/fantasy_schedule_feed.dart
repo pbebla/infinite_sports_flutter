@@ -26,6 +26,12 @@
 //   • the schedule resubscribes only when the lock hour changes; the
 //     per-week listener only when the week numbers (or its key) change, and
 //     keeps its last data until the new listener answers;
+//   • the per-week listener covers only the weeks UP TO the current
+//     gameweek (`currentGameweek`; all of them once the season is over) —
+//     a week that hasn't locked can't have History / PlayerWeekStats yet, so
+//     listening to it is a wasted read on every open. A timer re-syncs at
+//     the current week's day end, so the list grows as the season advances
+//     even while the screen stays open;
 //   • session caches make a revisit paint at once — the games cache stores
 //     whether the games were DERIVED with a real start hour, so a revisit
 //     after a failed-then-successful hour read never shows "0 PM" (it drops
@@ -89,6 +95,7 @@ class FantasyScheduleFeed<W> {
     this.gameweeksFor,
     Stream<W> Function(List<int> weeks)? weekFeed,
     this.weekLabel = 'week feed',
+    this.nowUtc,
   }) : _weekFeed = weekFeed;
 
   final String sport;
@@ -120,6 +127,16 @@ class FantasyScheduleFeed<W> {
   /// The per-week listener's name in log lines ("week stats feed").
   final String weekLabel;
 
+  /// Clock seam for the "weeks up to the current gameweek" trim (null =
+  /// real UTC now).
+  final DateTime Function()? nowUtc;
+
+  DateTime _now() => (nowUtc ?? () => DateTime.now().toUtc())();
+
+  /// Longest single wait of the week-boundary timer: a far-off boundary is
+  /// re-checked daily instead of one huge timer.
+  static const Duration _maxBoundaryWait = Duration(days: 1);
+
   // ── Session cache: the derived schedule per `<sport>|<season>` ──────────
   static final Map<String, List<Gameweek>> _gameweeksSession = {};
 
@@ -148,6 +165,7 @@ class FantasyScheduleFeed<W> {
   StreamSubscription<FantasyConfigState?>? _configSub;
   StreamSubscription<List<Gameweek>>? _gameweeksSub;
   StreamSubscription<W>? _weekSub;
+  Timer? _weekBoundary; // re-syncs the week list when the current week ends
 
   // ── State ────────────────────────────────────────────────────────────────
 
@@ -223,6 +241,7 @@ class FantasyScheduleFeed<W> {
     _configSub?.cancel();
     _gameweeksSub?.cancel();
     _weekSub?.cancel();
+    _weekBoundary?.cancel();
   }
 
   // ── Internals ────────────────────────────────────────────────────────────
@@ -293,8 +312,27 @@ class FantasyScheduleFeed<W> {
   void _syncWeeks() {
     final make = _weekFeed;
     final gws = _gameweeks;
+    _weekBoundary?.cancel();
+    _weekBoundary = null;
     if (make == null || gws == null || _disposed) return;
-    final weeks = [for (final g in gws) g.number];
+    // Only weeks up to the current one can hold records (none past it has
+    // locked); season over (no current week) = every week.
+    final now = _now();
+    final current = currentGameweek(gws, now);
+    final weeks = [
+      for (final g in gws)
+        if (current == null || g.number <= current.number) g.number,
+    ];
+    if (current != null) {
+      // currentGameweek moves on at the end of the current week's lock day.
+      var wait = current.lockUtc.add(const Duration(hours: 24)).difference(now);
+      if (wait > _maxBoundaryWait) wait = _maxBoundaryWait;
+      if (wait < Duration.zero) wait = Duration.zero;
+      _weekBoundary = Timer(wait, () {
+        _weekBoundary = null;
+        if (!_disposed) _syncWeeks();
+      });
+    }
     if (_weekNumbers != null && listEquals(_weekNumbers, weeks)) return;
     _weekNumbers = weeks;
     _weekSub?.cancel();
