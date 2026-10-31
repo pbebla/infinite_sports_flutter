@@ -2,7 +2,7 @@
 // the real Futsal Season 15 data (2026-10-28).
 //
 // WHAT IT DOES
-//   1. GETs a snapshot of Futsal/15 (Date, Line Ups, Teams) and
+//   1. GETs a snapshot of Futsal/15 (Date, Line Ups, Teams, Finished) and
 //      Fantasy/Futsal/15 (Config, Players, Voided) from the public REST
 //      endpoint, once, and caches it in tools/rehearsal_out/snapshot.json.
 //   2. Seeds an in-memory RTDB emulation (OverlayDb) with it. Config's
@@ -40,6 +40,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { fakeManagerDefs, fakeManagerRow } from './fill_test_season_logic';
+import { pushBadgeAward } from '../src/lib/fantasy/badge_push';
 import { awardBonus, bpsScore } from '../src/lib/fantasy/bps';
 import {
   configFromMap, configToMap, FANTASY_POSITIONS, FantasyConfig, FantasyPosition,
@@ -73,8 +74,12 @@ const SEASON = '15';
 const LEAGUE = `${SPORT}/${SEASON}`;
 const F = `Fantasy/${SPORT}/${SEASON}`;
 export const DB_URL = 'https://infinite-sports-app.firebaseio.com';
+// `${LEAGUE}/Finished` (the league's season-over flag) lets the replay award
+// the season-end badges (spec 2026-10-30 §2). A cached snapshot taken before
+// it was listed simply lacks it: the replay then plays a season that is not
+// flagged over (no season-end badges) — the console says so.
 export const READ_PATHS = [
-  `${LEAGUE}/Date`, `${LEAGUE}/Line Ups`, `${LEAGUE}/Teams`,
+  `${LEAGUE}/Date`, `${LEAGUE}/Line Ups`, `${LEAGUE}/Teams`, `${LEAGUE}/Finished`,
   `${F}/Config`, `${F}/Players`, `${F}/Voided`,
 ];
 const FUNCTIONS_DIR = process.cwd();
@@ -1033,6 +1038,22 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
       await runJob(`trigger:onFantasySquadWritten(${m[1]}, server write)`, t,
         () => recordSquadSave(db, { sport: SPORT, season: SEASON, uid: m[1], log: logger, nowUtc: new Date(t) }));
     }
+    // onFantasyBadgeAwarded is a CREATE trigger on one award row; the engine
+    // creates award rows set-if-absent, one child each — so every WON claim
+    // under Badges/<uid>/<awardId> is one firing. Only with a pusher (the
+    // fill's recording stub): the rehearsal injects none, so — like the
+    // recap/reminder guards — no BadgePushClaims are produced there.
+    const pusher = deps?.pusher;
+    if (pusher) {
+      for (const w of mine) {
+        const b = /^Fantasy\/Futsal\/15\/Badges\/([^/]+)\/([^/]+)$/.exec(w.path);
+        if (!b || w.op !== 'writeIfAbsent' || !w.won) continue;
+        await runJob(`trigger:onFantasyBadgeAwarded(${b[1]}/${b[2]})`, t,
+          () => pushBadgeAward(db, pusher, {
+            sport: SPORT, season: SEASON, uid: b[1], awardId: b[2], nowUtc: new Date(t), log: logger,
+          }));
+      }
+    }
     if (mine.some((w) => /\/(History|Leaderboards|PlayerTotals|DreamTeam|PlayerWeeks)(\/|$)/.test(w.path))) {
       auditState(`${job} @ ${iso(t)}`);
     }
@@ -1378,11 +1399,13 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     preLate = {
       overall: db.get(`${F}/Leaderboards/Overall`), totals: db.get(`${F}/PlayerTotals`),
       history: db.get(`${F}/History`), boards: db.get(`${F}/Leaderboards/Gameweek`),
+      badges: db.get(`${F}/Badges`),
     };
     await fireGameTrigger(gws[0].date, gw1Games[0][0], lateT, 'late correction');
     postLate = {
       overall: db.get(`${F}/Leaderboards/Overall`), totals: db.get(`${F}/PlayerTotals`),
       history: db.get(`${F}/History`), boards: db.get(`${F}/Leaderboards/Gameweek`),
+      badges: db.get(`${F}/Badges`),
     };
   });
 
@@ -1456,6 +1479,7 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     historyUnchanged: canon(preLate?.history) === canon(postLate?.history),
     overallUnchanged: canon(preLate?.overall) === canon(postLate?.overall),
     boardsUnchanged: canon(preLate?.boards) === canon(postLate?.boards),
+    badgesUnchanged: canon(preLate?.badges) === canon(postLate?.badges),
     playerTotalsPointsUnchanged: canon(Object.fromEntries(entriesOf(preLate?.totals).map(([n, r]) => [n, r.points]))) ===
       canon(Object.fromEntries(entriesOf(postLate?.totals).map(([n, r]) => [n, r.points]))),
     ownershipChanged: entriesOf(postLate?.totals)
@@ -1621,6 +1645,41 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     const okSame = b.current === a.current && statusOrder[b.status] > statusOrder[a.status];
     if (!okAdvance && !okSame) fail('gwstate-sequence', `${a.at} ${a.current}/${a.status} -> ${b.at} ${b.current}/${b.status}`);
   }
+  // Nothing outside the season (the global badge catalog excepted) — in
+  // particular no trophy-cabinet write: the replay has no Users node, so a
+  // podium badge for a fake (or real) uid never reaches Users/<uid>/Awards.
+  for (const w of db.pipelineWrites) {
+    if (!w.path.startsWith(`${F}/`) && !w.path.startsWith('Fantasy/BadgeCatalog/')) {
+      fail('writes-in-scope', `${w.job} wrote ${w.path}`);
+    }
+  }
+  // Badges (spec 2026-10-30): every award row is an auto row under its
+  // deterministic id; none for a voided week; Top of the Week == the
+  // Gameweek board's rank-1 managers, week by week (independent of badges.ts).
+  const badgesNode = db.get(`${F}/Badges`);
+  const voidedFinal = new Set(entriesOf(db.get(`${F}/Voided`)).filter(([, v]) => v === true).map(([k]) => Number(k)));
+  const badgeCounts: Record<string, number> = {};
+  const topByWeek: Record<number, string[]> = {};
+  for (const [uid, byId] of entriesOf(badgesNode)) {
+    for (const [id, row] of entriesOf(byId)) {
+      const gwN = intLoose(row?.Gw);
+      const expectId = row?.Gw === undefined ? `${row?.Badge}_season` : `${row?.Badge}_gw${gwN}`;
+      if (row?.Source !== 'auto' || id !== expectId || typeof row?.At !== 'number') {
+        fail('badges', `Badges/${uid}/${id} ${stable(row)}`);
+      }
+      if (row?.Gw !== undefined && voidedFinal.has(gwN)) fail('badges', `Badges/${uid}/${id} for voided GW${gwN}`);
+      badgeCounts[String(row?.Badge)] = (badgeCounts[String(row?.Badge)] ?? 0) + 1;
+      if (row?.Badge === 'topOfTheWeek') (topByWeek[gwN] ??= []).push(uid);
+    }
+  }
+  for (const gw of gws) {
+    if (voidedFinal.has(gw.number) || !isMap(childAt(db.get(`${F}/History`), gw.number))) continue;
+    const top = entriesOf(childAt(db.get(`${F}/Leaderboards/Gameweek`), gw.number))
+      .filter(([, r]) => r?.rank === 1).map(([u]) => u).sort();
+    if (canon(top) !== canon((topByWeek[gw.number] ?? []).sort())) {
+      fail('badges', `GW${gw.number} Top of the Week ${stable(topByWeek[gw.number] ?? [])} != rank-1 ${stable(top)}`);
+    }
+  }
   const finalizeSources = logs.filter((l) => l.message === 'fantasy gameweek finalized').map((l) => (l.context as Json)?.source);
   if (finalizeSources.some((s) => s !== 'publishedPicks')) fail('finalize-source', `sources seen: ${[...new Set(finalizeSources)].join(',')}`);
   for (const v of db.violations) fail('no-nan-undefined', `${v.job} ${v.path}: ${v.problem}`);
@@ -1669,7 +1728,7 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     invariants: Object.fromEntries([
       'history-total', 'gameweek-board', 'overall-sum', 'overall-movement', 'ranks', 'ownership', 'player-totals',
       'dream-team', 'prices', 'price-changes', 'no-nan-undefined', 'lock-snapshot-once', 'lock-positions-once', 'reprice-once',
-      'gwstate-sequence', 'finalize-source', 'no-crash', 'history-shape',
+      'gwstate-sequence', 'finalize-source', 'no-crash', 'history-shape', 'writes-in-scope', 'badges',
     ].map((k) => [k, { pass: !(invariantFailures[k]?.length), failures: invariantFailures[k] ?? [] }])),
     crossChecks: {
       playerWeeks: { compared: pwCompared, mismatches: pwMismatches },
@@ -1721,7 +1780,7 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
 
   const summary = {
     meta, checks, dataQuality: dq,
-    headline: { topPlayers, dreamTeams, movers, overall: overallRows, managers: managerTable, seasonRows,
+    headline: { topPlayers, dreamTeams, movers, overall: overallRows, managers: managerTable, seasonRows, badgeCounts,
       clientSaves, priceChangesByGw,
       weeks: gws.map((g) => ({ gw: g.number, date: g.date, games: indep[g.number].games,
         topScorer: Object.entries(indep[g.number].points).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0],
@@ -1749,6 +1808,9 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     `${dreamTeamNonPlayers.length ? ' ' + stable(dreamTeamNonPlayers) : ''}`);
   const managerOverall = managerTable.map((m) => `${m.name} ${m.overall?.points}/${m.expectedOverall}`).join(', ');
   console.log(`  manager Overall (pipeline/expected): ${managerOverall}`);
+  const finishedKey = `${LEAGUE}/Finished`;
+  console.log(`  badges: ${stable(badgeCounts)}; ${finishedKey} ` +
+    `${finishedKey in snap.values ? stable(snap.values[finishedKey]) : 'not in this snapshot (season-end badges not exercised)'}`);
   console.log(`  outputs: ${OUT_DIR}`);
   return result;
 }

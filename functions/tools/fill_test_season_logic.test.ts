@@ -141,6 +141,33 @@ describe('buildWritePlan', () => {
       .toEqual({ At: 1234, Managers: 2 });
   });
 
+  it('badges: Badges + BadgePushClaims are written, the claims FIRST (the live trigger then pushes nothing)', () => {
+    const state = {
+      ...replayState(),
+      Badges: {
+        [REAL]: { champion_season: { Badge: 'champion', At: 1, Source: 'auto' } },
+        'test-01': { topOfTheWeek_gw3: { Badge: 'topOfTheWeek', Gw: 3, At: 1, Source: 'auto' } },
+      },
+      BadgePushClaims: {
+        [REAL]: { champion_season: { At: 1, Sent: 0 } },
+        'test-01': { topOfTheWeek_gw3: { At: 1, Sent: 0 } },
+      },
+    };
+    const paths = buildWritePlan(state, live, 1).map((e) => e.path);
+    const claims = paths.indexOf(`${ROOT}/BadgePushClaims`);
+    const badges = paths.indexOf(`${ROOT}/Badges`);
+    expect(claims).toBeGreaterThan(0);
+    expect(badges).toBeGreaterThan(claims);
+    // Nothing outside the season: no trophy cabinet, no global catalog.
+    expect(paths.every((p) => p.startsWith(`${ROOT}/`))).toBe(true);
+    for (const outside of ['Users', 'BadgeCatalog']) {
+      expect(() => buildWritePlan({ ...state, [outside]: { x: { y: 1 } } }, live, 1), outside)
+        .toThrow(/allowlist/);
+    }
+    expect(() => assertSafePaths([{ path: 'Fantasy/BadgeCatalog/champion' }])).toThrow();
+    expect(() => assertSafePaths([{ path: `Users/${REAL}/Awards/x` }])).toThrow();
+  });
+
   it('refuses to build a plan while the engine is on auto', () => {
     expect(() => buildWritePlan(replayState(), { ...live, config: { lockOverride: 'auto' } }, 1))
       .toThrow(/auto/i);

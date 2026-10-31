@@ -44,12 +44,22 @@ export const NEVER_WRITTEN_WHOLE: readonly string[] = [
 ];
 
 /** Nodes the spec expects the replay to produce (the dry run warns when one
- *  is missing — any OTHER pipeline-produced node is written too). */
+ *  is missing — any OTHER pipeline-produced node is written too).
+ *
+ *  Badges + BadgePushClaims (spec 2026-10-30 §4): the replay's auto awards
+ *  and the stub pusher's once-only claims for every one of them. The plan
+ *  writes whole nodes in sorted key order, so BadgePushClaims ('P' < 's')
+ *  lands BEFORE Badges: when the live badge trigger fires for the created
+ *  award rows, every claim already exists and nothing is pushed (and the
+ *  trigger never pushes an auto award in a paused season anyway). The
+ *  global Fantasy/BadgeCatalog the replay's sweep seeds and any trophy
+ *  cabinet copy (Users/<uid>/Awards — never produced: the replay has no
+ *  Users node) are outside this season and never part of the plan. */
 export const EXPECTED_NODES: readonly string[] = [
   'Players', 'PlayerTotals', 'PlayerWeeks', 'PlayerWeekStats', 'PriceHistory',
   'PriceChanges', 'Leaderboards', 'History', 'PublishedPicks', 'DreamTeam',
   'TransferState', 'TransferCosts', 'GwState', 'LockedPositions', 'Repriced',
-  'RecapSent', 'NewsDrafted', 'ReminderSent',
+  'RecapSent', 'NewsDrafted', 'ReminderSent', 'Badges', 'BadgePushClaims',
 ];
 
 export interface PlanEntry {
