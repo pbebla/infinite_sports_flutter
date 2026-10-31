@@ -5,6 +5,11 @@
 // iOS parity: on iPad the share sheet is a popover and share_plus REJECTS a
 // share without a non-empty `sharePositionOrigin` inside the root view, so
 // every share here anchors itself to the tapped widget ([shareOriginFor]).
+// The same goes for EVERY other share in the app (text invites, join codes,
+// event flyers, calendar files): build the [ShareParams] with
+// `sharePositionOrigin: shareOriginFor(buttonContext)` and hand them to
+// [openShareSheet] (or an injected [ShareSheet] in tests) — never call
+// SharePlus / Share directly.
 
 import 'dart:io';
 import 'dart:typed_data';
@@ -21,6 +26,18 @@ import 'package:share_plus/share_plus.dart';
 /// ([sharePngWithSystemSheet]); widget tests inject a recorder.
 typedef SharePng = Future<void> Function(
     Uint8List png, String caption, Rect? origin);
+
+/// Hands finished [ShareParams] (text, files, subject AND the iPad popover
+/// anchor `sharePositionOrigin`) to a share sheet. The real one is
+/// [openShareSheet]; widget tests inject a recorder and assert the origin.
+typedef ShareSheet = Future<void> Function(ShareParams params);
+
+/// Opens the system share sheet with [params] — the ONE place (with
+/// [sharePngWithSystemSheet]) the app touches share_plus, so a call site
+/// can't forget the iPad anchor without it being visible in its own params.
+Future<void> openShareSheet(ShareParams params) async {
+  await SharePlus.instance.share(params);
+}
 
 /// The first eight bytes of every PNG file.
 const List<int> kPngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -85,7 +102,7 @@ Future<void> sharePngWithSystemSheet(
   final dir = await getTemporaryDirectory();
   final file = File('${dir.path}/$fileName');
   await file.writeAsBytes(png);
-  await SharePlus.instance.share(
+  await openShareSheet(
     ShareParams(
       files: [XFile(file.path)],
       text: caption,
@@ -112,9 +129,13 @@ Future<void> shareCardImage(
   Duration precacheTimeout = const Duration(seconds: 3),
   SharePng? share,
 }) async {
-  final messenger = ScaffoldMessenger.maybeOf(context);
-  final origin = shareOriginFor(context);
+  ScaffoldMessengerState? messenger;
   try {
+    // Both context lookups sit INSIDE the try (a stale context asserts) and
+    // run NOW, before any await: the messenger outlives the awaits below and
+    // the popover anchors to the tapped widget as it is at tap time.
+    messenger = ScaffoldMessenger.maybeOf(context);
+    final origin = shareOriginFor(context);
     if (precache.isNotEmpty) {
       // .timeout cancels its timer once the images land (no stray timer).
       await Future.wait([

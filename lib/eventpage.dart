@@ -10,6 +10,7 @@ import 'package:infinite_sports_flutter/misc/app_config.dart';
 import 'package:infinite_sports_flutter/misc/event_repo.dart';
 import 'package:infinite_sports_flutter/misc/event_share.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
+import 'package:infinite_sports_flutter/misc/share_card_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/attendee.dart';
@@ -22,17 +23,34 @@ import 'package:infinite_sports_flutter/registration/registration_status_page.da
 import 'package:infinite_sports_flutter/misc/ics.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:share_plus/share_plus.dart' show ShareParams, XFile;
 import 'package:url_launcher/url_launcher.dart';
 
 /// Opens either a legacy event (by Events-list [index]) or an EventsV2
 /// event (by [v2Id]). Exactly one must be provided.
 class EventPage extends StatefulWidget {
-  const EventPage({super.key, this.index, this.v2Id})
-      : assert(index != null || v2Id != null);
+  const EventPage({
+    super.key,
+    this.index,
+    this.v2Id,
+    this.eventStream,
+    this.flyerDownloader,
+    this.tempDirectory,
+    this.shareSheet,
+  }) : assert(index != null || v2Id != null);
 
   final int? index;
   final String? v2Id;
+
+  /// Test seams (mirrors insider_dashboard_page.dart): each defaults to the
+  /// real call (RTDB stream, HTTP flyer download, path_provider temp dir,
+  /// the system share sheet), none of which exist in widget tests.
+  /// [shareSheet] receives the finished [ShareParams] — message, flyer /
+  /// .ics file AND the iPad popover anchor.
+  final Stream<Event?>? eventStream;
+  final Future<File?> Function(String url)? flyerDownloader;
+  final Future<Directory> Function()? tempDirectory;
+  final ShareSheet? shareSheet;
 
   @override
   _EventPageState createState() => _EventPageState();
@@ -51,7 +69,8 @@ class _EventPageState extends State<EventPage> {
   void initState() {
     super.initState();
     _loadReminding();
-    _eventStream = watchEvent(v2Id: widget.v2Id, legacyIndex: widget.index);
+    _eventStream = widget.eventStream ??
+        watchEvent(v2Id: widget.v2Id, legacyIndex: widget.index);
     _users = getAllUsers();
   }
 
@@ -95,7 +114,7 @@ class _EventPageState extends State<EventPage> {
       final response = await request.close();
       if (response.statusCode != 200) return null;
       final bytes = await consolidateHttpClientResponseBytes(response);
-      final dir = await getTemporaryDirectory();
+      final dir = await (widget.tempDirectory ?? getTemporaryDirectory)();
       final ext = url.toLowerCase().contains('.png') ? 'png' : 'jpg';
       final file = File('${dir.path}/flyer_${event.id ?? widget.index}.$ext');
       await file.writeAsBytes(bytes);
@@ -109,13 +128,21 @@ class _EventPageState extends State<EventPage> {
   /// text (custom caption, or an auto invite when none is set). Apps that
   /// keep both (Messages, WhatsApp, email) show flyer + text; image-only
   /// targets still get the flyer.
-  Future<void> share_Clicked() async {
+  ///
+  /// [buttonContext] is the tapped Share button's own context: it anchors the
+  /// iPad share popover (share_plus rejects a share without an origin), and
+  /// is measured NOW, before the awaits below, while the button is on screen.
+  Future<void> share_Clicked(BuildContext buttonContext) async {
+    final origin = shareOriginFor(buttonContext);
+    final sheet = widget.shareSheet ?? openShareSheet;
     final links = await getStoreLinks();
     final message = buildShareMessage(event,
         androidUrl: links.android, iosUrl: links.ios);
     final url = event.imageUrl?.trim() ?? '';
     File? flyer;
-    if (url.isNotEmpty) flyer = await _downloadFlyer(url);
+    if (url.isNotEmpty) {
+      flyer = await (widget.flyerDownloader ?? _downloadFlyer)(url);
+    }
 
     // Copy the message first so that if the chosen app drops attached text
     // (Instagram/Snapchat do), the user can just paste it.
@@ -127,28 +154,42 @@ class _EventPageState extends State<EventPage> {
           duration: Duration(seconds: 4),
         ));
       }
-      await Share.shareXFiles([XFile(flyer.path)],
-          text: message, subject: event.title ?? 'Share Event');
+      await sheet(ShareParams(
+        files: [XFile(flyer.path)],
+        text: message,
+        subject: event.title ?? 'Share Event',
+        sharePositionOrigin: origin,
+      ));
     } else {
-      await Share.share(message, subject: event.title ?? 'Share Event');
+      await sheet(ShareParams(
+        text: message,
+        subject: event.title ?? 'Share Event',
+        sharePositionOrigin: origin,
+      ));
     }
   }
 
   /// Writes a one-event .ics to a temp file and hands it to the OS. On iOS
   /// this opens the Calendar "Add Event" sheet; on Android the calendar app
   /// (or a chooser) offers to add it — the user sets their own alerts there.
-  Future<void> addToCalendar_Clicked() async {
+  /// [buttonContext] anchors the iPad share popover (see [share_Clicked]).
+  Future<void> addToCalendar_Clicked(BuildContext buttonContext) async {
+    final origin = shareOriginFor(buttonContext);
+    final sheet = widget.shareSheet ?? openShareSheet;
     final ics = buildEventIcs(event, stampMs: DateTime.now().millisecondsSinceEpoch);
     if (ics.isEmpty) return;
     try {
-      final dir = await getTemporaryDirectory();
+      final dir = await (widget.tempDirectory ?? getTemporaryDirectory)();
       final safeName = (event.title ?? 'event')
           .replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_')
           .toLowerCase();
       final file = File('${dir.path}/$safeName.ics');
       await file.writeAsString(ics);
-      await Share.shareXFiles([XFile(file.path, mimeType: 'text/calendar')],
-          subject: event.title ?? 'Event');
+      await sheet(ShareParams(
+        files: [XFile(file.path, mimeType: 'text/calendar')],
+        subject: event.title ?? 'Event',
+        sharePositionOrigin: origin,
+      ));
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -421,17 +462,20 @@ class _EventPageState extends State<EventPage> {
                           ),
                         ),
                         Expanded(
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                                shape: const RoundedRectangleBorder(
-                                borderRadius: BorderRadius.all(Radius.circular(10)),
-                              ),),
-                            onPressed: () async {
-                              await share_Clicked();
-                              setState(() {
-                              });
-                            },
-                            child: const Text("Share")
+                          // Builder: the share popover anchors to THIS button.
+                          child: Builder(
+                            builder: (buttonContext) => ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                  shape: const RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.all(Radius.circular(10)),
+                                ),),
+                              onPressed: () async {
+                                await share_Clicked(buttonContext);
+                                setState(() {
+                                });
+                              },
+                              child: const Text("Share")
+                            ),
                           ),
                         ),
                     ],),
@@ -440,17 +484,20 @@ class _EventPageState extends State<EventPage> {
                     padding: const EdgeInsets.only(top: 6),
                     child: SizedBox(
                       width: double.infinity,
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Theme.of(context).colorScheme.primary,
-                          side: BorderSide(color: Theme.of(context).colorScheme.primary),
-                          shape: const RoundedRectangleBorder(
-                            borderRadius: BorderRadius.all(Radius.circular(10)),
+                      // Builder: the share popover anchors to THIS button.
+                      child: Builder(
+                        builder: (buttonContext) => OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Theme.of(context).colorScheme.primary,
+                            side: BorderSide(color: Theme.of(context).colorScheme.primary),
+                            shape: const RoundedRectangleBorder(
+                              borderRadius: BorderRadius.all(Radius.circular(10)),
+                            ),
                           ),
+                          icon: const Icon(Icons.calendar_month),
+                          label: const Text('Add to my calendar'),
+                          onPressed: () => addToCalendar_Clicked(buttonContext),
                         ),
-                        icon: const Icon(Icons.calendar_month),
-                        label: const Text('Add to my calendar'),
-                        onPressed: addToCalendar_Clicked,
                       ),
                     ),
                   ),

@@ -10,6 +10,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/misc/share_card_service.dart';
+import 'package:infinite_sports_flutter/misc/share_match_card_service.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/widgets/share_card_footer.dart';
 import 'package:infinite_sports_flutter/widgets/share_match_card.dart';
@@ -95,6 +96,40 @@ void main() {
     await pumpUntil(tester, () => find.byType(SnackBar).evaluate().isNotEmpty);
     expect(find.text("Couldn't create the share card."), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'never throws even when the tapped context is already gone (stale '
+      'context: the origin / messenger lookups are inside the try)',
+      (tester) async {
+    BuildContext? stale;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Builder(builder: (context) {
+          stale = context;
+          return const SizedBox();
+        }),
+      ),
+    ));
+    await tester.pumpWidget(const SizedBox()); // the page is gone
+    final recorder = ShareRecorder();
+
+    await shareCardImage(stale!, card, caption: 'x', share: recorder.call);
+    await shareMatchCard(
+      stale!,
+      match: const TournamentMatch(
+        id: 'm', stage: 'Final', label: 'F', date: '08272026',
+        team1Id: 'a', team2Id: 'b', team1Score: 0, team2Score: 0,
+        status: 0, bracketPosition: 1,
+      ),
+      team1: null,
+      team2: null,
+      tournamentName: 'Cup',
+      sport: 'Futsal',
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(recorder.calls, isEmpty);
   });
 
   testWidgets('shareOriginFor clips to the screen; nothing on screen = null',

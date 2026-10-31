@@ -31,9 +31,12 @@ Future<void> shareMatchCard(
   required String tournamentName,
   required String sport,
 }) async {
-  final messenger = ScaffoldMessenger.maybeOf(context);
-  final origin = shareOriginFor(context);
+  ScaffoldMessengerState? messenger;
   try {
+    // Both context lookups sit INSIDE the try (a stale context asserts) and
+    // run NOW, before any await — the "never throws" contract has no hole.
+    messenger = ScaffoldMessenger.maybeOf(context);
+    final origin = shareOriginFor(context);
     await Future.wait([
       precacheImage(const AssetImage('assets/goal.png'), context),
       precacheImage(const AssetImage('assets/assist.png'), context),

@@ -11,6 +11,9 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/mini_leagues_view.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
+import 'package:share_plus/share_plus.dart' show ShareParams;
+
+import '../helpers/share_capture.dart';
 
 FantasyMiniLeague league({
   String id = 'L1',
@@ -29,7 +32,7 @@ void main() {
   late List<(String, String)> created;
   late List<String> joined;
   late List<String> copied;
-  late List<String> shared;
+  late List<ShareParams> shared;
   late List<LeaderboardRowData> openedRows;
   String? clipboard;
 
@@ -67,7 +70,7 @@ void main() {
               (name, code) async => created.add((name, code)),
           onJoinLeague: onJoin ?? (id) async => joined.add(id),
           copyText: copied.add,
-          shareText: shared.add,
+          shareText: (params) async => shared.add(params),
           readClipboard: () async => clipboard,
           codeGenerator: () => 'QQ2345',
         ),
@@ -260,8 +263,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(copied.single, 'KX7Q2M');
     await tester.tap(find.byKey(const ValueKey('mini_league_share')));
-    expect(shared.single, contains('KX7Q2M'));
-    expect(shared.single, contains('Sunday Crew'));
+    expect(shared.single.text, contains('KX7Q2M'));
+    expect(shared.single.text, contains('Sunday Crew'));
+    // iPad parity: anchored to the Share button, never origin-less.
+    expectShareAnchoredTo(tester, shared.single,
+        find.byKey(const ValueKey('mini_league_share')));
 
     await tester.tap(find.byKey(const ValueKey('leaderboard_row_zed')));
     await tester.pumpAndSettle();

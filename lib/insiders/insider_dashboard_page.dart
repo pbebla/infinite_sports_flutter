@@ -2,10 +2,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:share_plus/share_plus.dart' show ShareParams;
 
 import 'package:infinite_sports_flutter/insiders/insiders_leaderboard_page.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
+import 'package:infinite_sports_flutter/misc/share_card_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
@@ -40,8 +41,9 @@ class InsiderDashboardPage extends StatefulWidget {
   final Future<void> Function(bool value)? setProfileBadgeOptIn;
 
   /// Test seam replacing the real share-sheet call (SharePlus touches
-  /// platform channels, which aren't available in widget tests).
-  final void Function(String message)? shareInvite;
+  /// platform channels, which aren't available in widget tests). Receives
+  /// the finished [ShareParams] — text plus the iPad popover anchor.
+  final ShareSheet? shareInvite;
 
   /// Test seam replacing the real `Navigator.push(... InsidersLeaderboardPage
   /// ...)` call the "See full leaderboard" button makes (Task F6) — the real
@@ -88,14 +90,14 @@ class _InsiderDashboardPageState extends State<InsiderDashboardPage> {
         .showSnackBar(const SnackBar(content: Text('Code copied.')));
   }
 
-  void _share(String code) {
-    final message = inviteMessage(code);
-    final override = widget.shareInvite;
-    if (override != null) {
-      override(message);
-    } else {
-      SharePlus.instance.share(ShareParams(text: message));
-    }
+  /// [buttonContext] is the tapped Share button's own context: it anchors
+  /// the iPad share popover (share_plus rejects a share without an origin).
+  void _share(BuildContext buttonContext, String code) {
+    final sheet = widget.shareInvite ?? openShareSheet;
+    sheet(ShareParams(
+      text: inviteMessage(code),
+      sharePositionOrigin: shareOriginFor(buttonContext),
+    ));
   }
 
   void _openLeaderboard() {
@@ -317,11 +319,14 @@ class _InsiderDashboardPageState extends State<InsiderDashboardPage> {
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: FilledButton.icon(
-                    key: const ValueKey('insider_dashboard_share_button'),
-                    onPressed: () => _share(insider.code),
-                    icon: const Icon(Icons.share),
-                    label: const Text('Share'),
+                  // Builder: the share popover anchors to THIS button.
+                  child: Builder(
+                    builder: (buttonContext) => FilledButton.icon(
+                      key: const ValueKey('insider_dashboard_share_button'),
+                      onPressed: () => _share(buttonContext, insider.code),
+                      icon: const Icon(Icons.share),
+                      label: const Text('Share'),
+                    ),
                   ),
                 ),
               ],

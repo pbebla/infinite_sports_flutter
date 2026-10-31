@@ -22,7 +22,8 @@ import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:infinite_sports_flutter/misc/share_card_service.dart';
+import 'package:share_plus/share_plus.dart' show ShareParams;
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 
 class MiniLeaguesView extends StatefulWidget {
@@ -59,9 +60,10 @@ class MiniLeaguesView extends StatefulWidget {
   final Future<void> Function(String leagueId) onJoinLeague;
 
   /// Test seams — platform-channel touches (clipboard, share sheet) aren't
-  /// available in widget tests.
+  /// available in widget tests. [shareText] receives the finished
+  /// [ShareParams] (text plus the iPad popover anchor).
   final void Function(String text)? copyText;
-  final void Function(String text)? shareText;
+  final ShareSheet? shareText;
   final Future<String?> Function()? readClipboard;
 
   /// Deterministic code source for tests; production generates fresh ones.
@@ -87,16 +89,17 @@ class _MiniLeaguesViewState extends State<MiniLeaguesView> {
       ..showSnackBar(const SnackBar(content: Text('Code copied.')));
   }
 
-  void _share(FantasyMiniLeague league) {
+  /// [buttonContext] is the tapped Share button's own context: it anchors
+  /// the iPad share popover (share_plus rejects a share without an origin).
+  void _share(BuildContext buttonContext, FantasyMiniLeague league) {
     final message = 'Join my Infinite Fantasy mini-league "${league.name}" '
         'with code ${league.code} — Fantasy › Leaderboards › My Leagues in '
         'the Infinite Sports app!';
-    final override = widget.shareText;
-    if (override != null) {
-      override(message);
-    } else {
-      SharePlus.instance.share(ShareParams(text: message));
-    }
+    final sheet = widget.shareText ?? openShareSheet;
+    sheet(ShareParams(
+      text: message,
+      sharePositionOrigin: shareOriginFor(buttonContext),
+    ));
   }
 
   Future<void> _openCreate() async {
@@ -316,13 +319,16 @@ class _MiniLeaguesViewState extends State<MiniLeaguesView> {
                       size: 18, color: fantasyAccent(context)),
                   onPressed: () => _copy(league.code),
                 ),
-                IconButton(
-                  key: const ValueKey('mini_league_share'),
-                  tooltip: 'Share code',
-                  visualDensity: VisualDensity.compact,
-                  icon: Icon(Icons.share,
-                      size: 18, color: fantasyAccent(context)),
-                  onPressed: () => _share(league),
+                // Builder: the share popover anchors to THIS button.
+                Builder(
+                  builder: (buttonContext) => IconButton(
+                    key: const ValueKey('mini_league_share'),
+                    tooltip: 'Share code',
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(Icons.share,
+                        size: 18, color: fantasyAccent(context)),
+                    onPressed: () => _share(buttonContext, league),
+                  ),
                 ),
               ],
             ),

@@ -156,7 +156,7 @@ class FantasyLeaderboardsTab extends StatefulWidget {
   final Future<void> Function(String name, String code)? createLeague;
   final Future<void> Function(String leagueId)? joinLeague;
   final void Function(String text)? copyText;
-  final void Function(String text)? shareText;
+  final ShareSheet? shareText;
   final Future<String?> Function()? readClipboard;
   final String Function()? codeGenerator;
   final Widget Function(LeaderboardRowData row)? squadViewerBuilder;
