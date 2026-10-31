@@ -59,14 +59,17 @@ import 'package:infinite_sports_flutter/misc/forfeit.dart';
 import 'player_game_stats.dart';
 
 /// Game-node key of one side's stand-in keeper marker
-/// (`team1keepers` / `team2keepers` = `{<player name>: true}`).
-String keepersKey(int side) => 'team${side}keepers';
+/// (`team1keepers` / `team2keepers` = `{<player name>: true}`). Private on
+/// purpose: the Manager twin's importers also see its UI-side
+/// services/attendance.dart parseKeepers, so the engine adds no public name.
+String _keepersKey(int side) => 'team${side}keepers';
 
 /// The names marked in goal by a `team{1,2}keepers` node: keys whose value
 /// is exactly `true`. A Map is read by key; a List (RTDB coercion of
 /// numeric-name keys) by index; null padding, empty keys, any other value
-/// and any other shape are ignored. TS twin: stats_mapper.ts parseKeepers.
-Set<String> parseKeepers(Object? raw) {
+/// and any other shape are ignored. TS twin: stats_mapper.ts
+/// keeperMarkerNames.
+Set<String> _keeperMarkerNames(Object? raw) {
   final out = <String>{};
   void add(String key, Object? value) {
     if (key.isNotEmpty && value == true) out.add(key);
@@ -157,7 +160,7 @@ Map<String, PlayerGameStats> mapGameToStats(
   });
 
   final names = <String>{...tallies.keys, ...?attendance?.keys};
-  final keepers = parseKeepers(gameNode[keepersKey(side)]);
+  final keepers = _keeperMarkerNames(gameNode[_keepersKey(side)]);
   return {
     for (final name in names)
       name: (tallies[name] ?? _Tally()).toStats(

@@ -57,8 +57,9 @@ import { GameForfeit, PlayerGameStats } from './player_game_stats';
 export const FORFEITED_BY_KEY = 'forfeitedBy';
 
 /** Game-node key of one side's stand-in keeper marker
- *  (`team1keepers` / `team2keepers` = `{ <player name>: true }`). */
-export function keepersKey(side: 1 | 2): string {
+ *  (`team1keepers` / `team2keepers` = `{ <player name>: true }`). Module
+ *  private, like the Dart twin's `_keepersKey`. */
+function keepersKey(side: 1 | 2): string {
   return `team${side}keepers`;
 }
 
@@ -66,8 +67,8 @@ export function keepersKey(side: 1 | 2): string {
  *  is exactly `true`. A Map is read by key; a List (RTDB coercion of
  *  numeric-name keys) by index; null padding, empty keys, any other value
  *  and any other shape are ignored. Dart twin: stats_mapper.dart
- *  parseKeepers. */
-export function parseKeepers(raw: unknown): Set<string> {
+ *  _keeperMarkerNames. */
+function keeperMarkerNames(raw: unknown): Set<string> {
   const out = new Set<string>();
   const add = (key: string, value: unknown) => {
     if (key.length > 0 && value === true) out.add(key);
@@ -270,7 +271,7 @@ export function mapGameToStats(
     ...tallies.keys(),
     ...(attendance ? Object.keys(attendance) : []),
   ]);
-  const keepers = parseKeepers(gameNode[keepersKey(side)]);
+  const keepers = keeperMarkerNames(gameNode[keepersKey(side)]);
   const out: Record<string, PlayerGameStats> = {};
   for (const name of names) {
     out[name] = (tallies.get(name) ?? new Tally()).toStats(
