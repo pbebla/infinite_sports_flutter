@@ -6,6 +6,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_session.dart';
 import 'package:infinite_sports_flutter/insiders/insiders_info_page.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
@@ -391,6 +392,10 @@ class _NavBarState extends State<NavBar> {
                             print("Signed out");
                             ProfilePage.clearCareerCache();
                             LeagueService.clearRostersSnapshotCache();
+                            // Every fantasy session cache (shared-phone
+                            // hygiene): one call, so no screen's cache can
+                            // be forgotten here.
+                            clearFantasySessionState();
                             signedIn = false;
                             if (mounted) setState(() {});
                           },
