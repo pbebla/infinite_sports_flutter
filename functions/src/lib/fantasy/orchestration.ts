@@ -700,6 +700,38 @@ export async function finalizeGameweek(
   } else {
     log.warn('fantasy finalize: no manager squads to score', { ...ctx, source });
   }
+
+  // Achievement badges (spec 2026-10-30 §4; badges.ts), right after the
+  // scores they are judged on (History + the boards) — so a later step
+  // failing (totals, Dream Team, rollover, recap, news) can never leave a
+  // finalized week without its badges: week N's auto awards re-settled from
+  // THIS run's outputs (rerun-exact — added and removed; a voided week keeps
+  // none; manual awards never touched), then the season-end awards whenever
+  // the season is over (a late score correction re-settles the placements +
+  // the trophy cabinet). The Team of the Week is this run's (not stored
+  // yet) or, when ours was not computed, the admin-edited node read above;
+  // a voided week has none. A badge failure is logged and never fails the
+  // finalize; the week's next rerun re-settles.
+  if (Object.keys(out.historyByUid).length > 0) {
+    try {
+      await settleWeeklyBadges(db, {
+        sport, season, gw: gw.number,
+        squadsByUid: out.historyByUid,
+        playerWeeks: out.playerWeeks,
+        playedByName: Object.fromEntries(Object.entries(out.playerWeekStats)
+          .map(([name, e]) => [name, e.Played])),
+        dreamTeamNames: dreamTeamNames(voided ? null : out.dreamTeam ?? dreamRaw),
+        gameweekBoard: out.gameweekBoard,
+        voided,
+        nowMs: args.nowUtc.getTime(),
+        log,
+      });
+      await settleSeasonBadges(db, { sport, season, cfg, nowUtc: args.nowUtc, log });
+    } catch (err) {
+      log.warn('fantasy badges: settle failed', { ...ctx, error: String(err) });
+    }
+  }
+
   if (Object.keys(out.playerTotals).length > 0) {
     await db.write(`${root}/PlayerTotals`, out.playerTotals);
   }
@@ -868,37 +900,6 @@ export async function finalizeGameweek(
         log.info('fantasy news: admin heads-up pushed',
           { ...ctx, admins: admins.length, sent, drafted });
       }
-    }
-  }
-
-  // Achievement badges (spec 2026-10-30 §4; badges.ts), last so a badge
-  // problem can never hold up the scores, the recap or the news: week N's
-  // auto awards re-settled from THIS run's outputs (rerun-exact — added and
-  // removed; a voided week keeps none; manual awards never touched), then
-  // the season-end awards whenever the season is over (a late score
-  // correction re-settles the placements + the trophy cabinet). A failure
-  // is logged and never fails the finalize (the sweep's backstop loop and
-  // its later steps must still run); the week's next rerun re-settles.
-  if (Object.keys(out.historyByUid).length > 0) {
-    try {
-      const dreamTeamForBadges = voided
-        ? null
-        : out.dreamTeam ?? await db.read(`${root}/DreamTeam/${gw.number}`);
-      await settleWeeklyBadges(db, {
-        sport, season, gw: gw.number,
-        squadsByUid: out.historyByUid,
-        playerWeeks: out.playerWeeks,
-        playedByName: Object.fromEntries(Object.entries(out.playerWeekStats)
-          .map(([name, e]) => [name, e.Played])),
-        dreamTeamNames: dreamTeamNames(dreamTeamForBadges),
-        gameweekBoard: out.gameweekBoard,
-        voided,
-        nowMs: args.nowUtc.getTime(),
-        log,
-      });
-      await settleSeasonBadges(db, { sport, season, cfg, nowUtc: args.nowUtc, log });
-    } catch (err) {
-      log.warn('fantasy badges: settle failed', { ...ctx, error: String(err) });
     }
   }
 

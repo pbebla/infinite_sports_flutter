@@ -38,7 +38,9 @@ import {
   maybeFinalizeGame, resettleVoidToggle, runLifecycleSweep,
 } from './orchestration';
 import { configFromMap } from './fantasy_config';
-import { AFTER_LOCK2, F_ROOT, FakeDb, GW2_DATE, world2 } from './test_support';
+import {
+  AFTER_LOCK2, F_ROOT, FakeDb, GW1_DATE, GW2_DATE, world2,
+} from './test_support';
 
 const NOW_MS = Date.UTC(2026, 5, 29, 3);
 
@@ -633,6 +635,46 @@ describe('finalize hook: weekly awards (Review Focus 1 + voided weeks)', () => {
     expect(warns).toContain('fantasy badges: settle failed');
   });
 
+  it('a failure in a LATER finalize step (totals, dream team, rollover, news) still leaves the week badges written', async () => {
+    const later = [
+      `${F_ROOT}/PlayerTotals`, `${F_ROOT}/DreamTeam/2`, `${F_ROOT}/Squads/`, `${F_ROOT}/NewsDrafted/2`,
+    ];
+    for (const prefix of later) {
+      class BreaksLater extends FakeDb {
+        async write(path: string, value: unknown): Promise<void> {
+          if (path.startsWith(prefix)) throw new Error(`later step ${prefix}`);
+          return super.write(path, value);
+        }
+      }
+      const db = new BreaksLater(world2());
+      await expect(finalizeGw2(db), prefix).rejects.toThrow('later step');
+      expect(await awardIds(db), prefix).toEqual({
+        alpha: ['benchBoss_gw2'],
+        boost: ['captainGenius_gw2'],
+        churn: ['benchBoss_gw2', 'crystalBall_gw2', 'topOfTheWeek_gw2'],
+      });
+    }
+  });
+
+  it('Crystal Ball reads an admin-edited Team of the Week (the node the hub shows)', async () => {
+    const data = world2();
+    data.Fantasy.Futsal['15'].DreamTeam = {
+      2: {
+        Auto: false,
+        Players: [
+          { name: 'Dana', position: 'DEF', points: 13 },
+          { name: 'Eva', position: 'DEF', points: -3 },
+          { name: 'Alex', position: 'ATT', points: 12 },
+        ],
+      },
+    };
+    const db = new FakeDb(data);
+    await finalizeGw2(db);
+    const ids = await awardIds(db);
+    expect(ids['alpha']).toContain('crystalBall_gw2'); // Dana, Eva, Alex
+    expect(ids['churn']).not.toContain('crystalBall_gw2'); // Dana + bench Eva = 2
+  });
+
   it('a paused season computes no auto awards (Review Focus 4, engine side)', async () => {
     const data = world2();
     data.Fantasy.Futsal['15'].Config.lockOverride = 'locked';
@@ -774,6 +816,67 @@ describe('season end (Finished + every gameweek finalized)', () => {
     // GW3 (friendlies) is never finalized; GW1 + GW2 are the season.
     expect((await awardIds(db))['churn']).toContain('champion_season');
     expect((await awardIds(db))['alpha']).toContain('everPresent_season');
+  });
+
+  it('mid-season start: the season counts from the first finalized week (earlier weeks never filled)', async () => {
+    const data = world2();
+    data.Futsal['15'].Finished = true;
+    // Fantasy switched on after GW1: no lock snapshot, no History for it —
+    // the first-run guard never fabricates GW1, so it stays empty for good.
+    delete data.Fantasy.Futsal['15'].History;
+    delete data.Fantasy.Futsal['15'].PublishedPicks;
+    const db = new FakeDb(data);
+    await finalizeGw2(db);
+    await runLifecycleSweep(db, new Date(Date.UTC(2026, 7, 15))); // backstop: GW1 still skipped
+    expect(await db.read(`${F_ROOT}/History/1`)).toBeNull();
+    // GW2 alone (boost's Bench Boost honored: nothing before it): churn 59,
+    // boost 44, alpha 35.
+    const ids = await awardIds(db);
+    expect(ids['churn']).toContain('champion_season');
+    expect(ids['boost']).toContain('runnerUp_season');
+    expect(ids['alpha']).toContain('thirdPlace_season');
+    for (const uid of ['alpha', 'boost', 'churn']) expect(ids[uid], uid).toContain('everPresent_season');
+  });
+
+  it('a week with no squads writes no History: the season starts after it', async () => {
+    const data = world2();
+    data.Futsal['15'].Finished = true;
+    const f = data.Fantasy.Futsal['15'];
+    delete f.History;
+    delete f.PublishedPicks;
+    const squads = f.Squads;
+    delete f.Squads;
+    const db = new FakeDb(data);
+    // GW1 settles with nobody's squad saved yet (finalize writes no History).
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: GW1_DATE, nowUtc: new Date(Date.UTC(2026, 5, 21, 23)),
+    });
+    expect(await db.read(`${F_ROOT}/PlayerWeeks/1`)).not.toBeNull(); // GW1 did settle
+    expect(await db.read(`${F_ROOT}/History/1`)).toBeNull();
+    db.data.Fantasy.Futsal['15'].Squads = squads;
+    await finalizeGw2(db);
+    const ids = await awardIds(db);
+    expect(ids['churn']).toContain('champion_season');
+    for (const uid of ['alpha', 'boost', 'churn']) expect(ids[uid], uid).toContain('everPresent_season');
+  });
+
+  it('Finished but a lock-passed week never finalized: not over + a warning naming it', async () => {
+    const db = seasonWorld(); // History/1 only
+    const cfg = configFromMap(db.data.Fantasy.Futsal['15'].Config);
+    const warns: Array<{ m: string; c?: Record<string, unknown> }> = [];
+    const log = { info: () => undefined, warn: (m: string, c?: Record<string, unknown>) => { warns.push({ m, c }); } };
+    expect(await settleSeasonBadges(db, { sport: 'Futsal', season: '15', cfg, nowUtc: AFTER_LOCK2, log }))
+      .toBe('notOver');
+    expect(warns).toEqual([{
+      m: 'fantasy badges: season Finished but gameweeks not finalized — season badges wait',
+      c: { sport: 'Futsal', season: '15', missing: [2] },
+    }]);
+    // Before GW2's lock it simply has not been played yet: no warning.
+    warns.length = 0;
+    expect(await settleSeasonBadges(db, {
+      sport: 'Futsal', season: '15', cfg, nowUtc: new Date(Date.UTC(2026, 5, 27)), log,
+    })).toBe('notOver');
+    expect(warns).toEqual([]);
   });
 
   it('seasonWorld fixture sanity: GW1/GW2 nets', () => {

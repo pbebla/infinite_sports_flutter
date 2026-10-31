@@ -47,10 +47,14 @@
 // The season reconcile is the same over `<badgeId>_season` ids.
 //
 // SEASON END (settleSeasonBadges): the league flag `<sport>/<season>/
-// Finished === true` AND every gameweek of the derived schedule is finalized
-// (History/<w> exists). A match day with no scoreable game (friendlies
-// only) can never finalize, so it is not part of the season — neither for
-// the end condition nor for Ever Present. Checked after EVERY finalize
+// Finished === true` AND every gameweek of the fantasy season is finalized
+// (History/<w> exists). The fantasy season = the scoreable gameweeks of the
+// derived schedule FROM the first one with History: a match day with no
+// scoreable game (friendlies only) can never finalize, and a week before
+// the first History never will (fantasy switched on mid-season, or a week
+// nobody had a squad for) — neither counts, for the end condition or for
+// Ever Present. A lock-passed season week still missing while Finished is
+// set is stuck: logged (warn) on every check. Checked after EVERY finalize
 // (so a score correction after the end re-settles placements) and by the
 // sweep; the sweep only settles a season that holds no auto season award
 // yet, so a season badge the owner removed by hand stays removed until a
@@ -660,10 +664,8 @@ export async function settleSeasonBadges(
 
   const dateNode = await db.read(`${sport}/${season}/Date`);
   const dates = new Map(childEntries(dateNode));
-  const allWeeks = deriveGameweeks(dateKeysOf(dateNode), cfg)
-    .filter((g) => gamesOfDate(dates.get(g.date)).length > 0)
-    .map((g) => g.number);
-  if (allWeeks.length === 0) return 'notOver';
+  const scoreable = deriveGameweeks(dateKeysOf(dateNode), cfg)
+    .filter((g) => gamesOfDate(dates.get(g.date)).length > 0);
 
   const finalized = new Set<number>();
   const historyWeeksByUid: Record<string, number[]> = {};
@@ -675,7 +677,29 @@ export async function settleSeasonBadges(
       if (isPlainMap(entry)) (historyWeeksByUid[uid] ??= []).push(week);
     }
   }
-  if (allWeeks.some((w) => !finalized.has(w))) return 'notOver';
+  // The fantasy season starts at its FIRST finalized gameweek: earlier
+  // weeks can never get History (fantasy switched on mid-season — the
+  // first-run guard never fabricates them — or a week nobody had a squad
+  // for), so they are not part of it, neither for the end condition nor
+  // for Ever Present. Nothing finalized at all = nothing to award.
+  const scored = scoreable.filter((g) => finalized.has(g.number));
+  if (scored.length === 0) return 'notOver';
+  const start = Math.min(...scored.map((g) => g.number));
+  const seasonWeeks = scoreable.filter((g) => g.number >= start);
+  const missing = seasonWeeks.filter((g) => !finalized.has(g.number));
+  if (missing.length > 0) {
+    // A missing week whose lock has passed is stuck (games never all Final,
+    // or settled without squads); one still ahead just has not been played.
+    const overdue = missing
+      .filter((g) => g.lockUtc.getTime() <= args.nowUtc.getTime())
+      .map((g) => g.number);
+    if (overdue.length > 0) {
+      log.warn('fantasy badges: season Finished but gameweeks not finalized — ' +
+        'season badges wait', { ...ctx, missing: overdue });
+    }
+    return 'notOver';
+  }
+  const allWeeks = seasonWeeks.map((g) => g.number);
 
   const overallBoard: Record<string, { rank: number }> = {};
   for (const [uid, row] of childEntries(await db.read(`${root}/Leaderboards/Overall`))) {
