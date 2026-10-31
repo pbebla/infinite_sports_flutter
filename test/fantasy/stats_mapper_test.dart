@@ -236,4 +236,97 @@ void main() {
       expect(sharks['Alex']!.goals, 2);
     });
   });
+
+  group('stand-in goalkeeper (inGoal, spec §7)', () {
+    test('a Save or PenSaved event puts that player in goal; nobody else', () {
+      final sharks = mapGameToStats(gameNode(), teamName: 'Sharks');
+      expect(sharks['Sam']!.inGoal, isTrue); // 2 Save + 1 PenSaved
+      expect(sharks['Alex']!.inGoal, isFalse);
+      expect(sharks['Dana']!.inGoal, isFalse);
+      final wolves = mapGameToStats(gameNode(), teamName: 'Wolves');
+      expect(wolves['Wes']!.inGoal, isTrue); // 1 Save
+      for (final name in ['Will', 'Wren', 'Wade']) {
+        expect(wolves[name]!.inGoal, isFalse, reason: name);
+      }
+    });
+
+    test('a lone PenSaved (no plain Save) is enough', () {
+      final node = {
+        'team1': 'Sharks', 'team2': 'Wolves', 'team1score': 0,
+        'team2score': 0,
+        'team1activity': {
+          "9'": [
+            {'PenSaved': 'Pat'},
+            {'Goal': 'Alex'},
+          ],
+        },
+      };
+      final sharks = mapGameToStats(node, teamName: 'Sharks');
+      expect(sharks['Pat']!.inGoal, isTrue);
+      expect(sharks['Alex']!.inGoal, isFalse);
+    });
+
+    test('team{n}keepers marker: own side only, only `true` counts, zero '
+        'saves is fine', () {
+      final node = gameNode()
+        ..['team1keepers'] = {'Dana': true, 'Alex': false, 'Riley': 'true'}
+        ..['team2keepers'] = {'Alex': true, 'Will': true};
+      final sharks = mapGameToStats(node,
+          teamName: 'Sharks', attendance: {'Sam': true, 'Riley': true});
+      expect(sharks['Dana']!.inGoal, isTrue); // marker, 0 saves
+      expect(sharks['Dana']!.saves, 0);
+      // false never counts, and the team2keepers 'Alex' entry is the OTHER
+      // side's marker.
+      expect(sharks['Alex']!.inGoal, isFalse);
+      expect(sharks['Riley']!.inGoal, isFalse); // the String 'true' is not true
+      expect(sharks['Sam']!.inGoal, isTrue); // saves still count
+      final wolves = mapGameToStats(node, teamName: 'Wolves');
+      expect(wolves['Will']!.inGoal, isTrue);
+      expect(wolves['Wren']!.inGoal, isFalse);
+    });
+
+    test('List-coerced marker (numeric-name keys) is read by index; junk '
+        'shapes are ignored', () {
+      final node = {
+        'team1': 'Sharks', 'team2': 'Wolves', 'team1score': 0,
+        'team2score': 2,
+        'team1keepers': [null, true, false],
+      };
+      final sharks = mapGameToStats(node,
+          teamName: 'Sharks', attendance: {'1': true, '2': true});
+      expect(sharks['1']!.inGoal, isTrue);
+      expect(sharks['2']!.inGoal, isFalse);
+      for (final junk in ['Dana', 5, true, null]) {
+        final n = gameNode()..['team1keepers'] = junk;
+        final stats = mapGameToStats(n, teamName: 'Sharks');
+        expect(stats['Dana']!.inGoal, isFalse, reason: '$junk');
+        expect(stats['Sam']!.inGoal, isTrue, reason: '$junk');
+      }
+    });
+
+    test('the marker never adds a player to the result', () {
+      final node = gameNode()..['team1keepers'] = {'Ghost': true};
+      expect(mapGameToStats(node, teamName: 'Sharks').containsKey('Ghost'),
+          isFalse);
+    });
+
+    test('forfeits: nobody is in goal (events and marker ignored)', () {
+      final node = gameNode()
+        ..['team1score'] = 5
+        ..['team2score'] = 0
+        ..['forfeitedBy'] = 2
+        ..['team1keepers'] = {'Sam': true}
+        ..['team2keepers'] = {'Wes': true};
+      final sharks = mapGameToStats(node,
+          teamName: 'Sharks', attendance: {'Sam': true});
+      expect(sharks['Sam']!.inGoal, isFalse);
+      final wolves = mapGameToStats(node,
+          teamName: 'Wolves', attendance: {'Wes': true});
+      expect(wolves['Wes']!.inGoal, isFalse);
+    });
+
+    test('default constructor: not in goal', () {
+      expect(const PlayerGameStats().inGoal, isFalse);
+    });
+  });
 }

@@ -30,6 +30,13 @@ class WeekScore {
   final List<GameScore> games;
 }
 
+/// One game's points + breakdown. STAND-IN GOALKEEPER (spec §7,
+/// owner-approved): a DEF/ATT who played in goal ([PlayerGameStats.inGoal])
+/// scores his saves, penalty saves, clean sheet and goals conceded at the
+/// GK row's rates for THAT game; appearance, goals, assists, pen misses,
+/// DPL, cards and own goals stay at his listed position. Keys, counts and
+/// labels are the same lines a listed player gets — only the points change.
+/// A listed GK is unaffected. TS twin: functions/src/lib/fantasy/scoring.ts.
 GameScore scorePlayerGame(
     PlayerGameStats s, FantasyPosition pos, FantasyConfig cfg) {
   // Absent, or on the team that forfeited (spec §8a): nothing at all — no
@@ -42,6 +49,11 @@ GameScore scorePlayerGame(
     return GameScore(
         r.plays, [ScoreLine('Plays', r.plays, key: 'plays', count: 1)]);
   }
+  // The keeper lines (saves / penSaved / cleanSheet / conceded) read the GK
+  // row when a DEF/ATT played in goal this game; everything else reads r.
+  final k = s.inGoal && pos != FantasyPosition.gk
+      ? cfg.scoring[FantasyPosition.gk]!
+      : r;
   final lines = <ScoreLine>[
     ScoreLine('Plays', r.plays, key: 'plays', count: 1),
     if (s.goals > 0)
@@ -50,20 +62,20 @@ GameScore scorePlayerGame(
     if (s.assists > 0)
       ScoreLine('Assists ×${s.assists}', s.assists * r.assist,
           key: 'assists', count: s.assists),
-    if (s.teamConceded == 0 && r.cleanSheet != 0)
-      ScoreLine('Clean sheet', r.cleanSheet, key: 'cleanSheet', count: 1),
-    if (r.per2Saves != 0 && s.saves >= 2)
-      ScoreLine('Saves ×${s.saves}', (s.saves ~/ 2) * r.per2Saves,
+    if (s.teamConceded == 0 && k.cleanSheet != 0)
+      ScoreLine('Clean sheet', k.cleanSheet, key: 'cleanSheet', count: 1),
+    if (k.per2Saves != 0 && s.saves >= 2)
+      ScoreLine('Saves ×${s.saves}', (s.saves ~/ 2) * k.per2Saves,
           key: 'saves', count: s.saves),
-    if (s.penSaved > 0 && r.penSave != 0)
-      ScoreLine('Penalty saves ×${s.penSaved}', s.penSaved * r.penSave,
+    if (s.penSaved > 0 && k.penSave != 0)
+      ScoreLine('Penalty saves ×${s.penSaved}', s.penSaved * k.penSave,
           key: 'penSaved', count: s.penSaved),
     if (s.penMissed > 0)
       ScoreLine('Penalty misses ×${s.penMissed}', s.penMissed * r.penMiss,
           key: 'penMissed', count: s.penMissed),
-    if (r.per2Conceded != 0 && s.teamConceded >= 2)
+    if (k.per2Conceded != 0 && s.teamConceded >= 2)
       ScoreLine('Conceded ${s.teamConceded}',
-          (s.teamConceded ~/ 2) * r.per2Conceded,
+          (s.teamConceded ~/ 2) * k.per2Conceded,
           key: 'conceded', count: s.teamConceded),
     if (r.dplThreshold != null && s.dpl >= r.dplThreshold!)
       ScoreLine('Defensive plays ${s.dpl}', r.dplBonus,

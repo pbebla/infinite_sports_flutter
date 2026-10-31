@@ -27,6 +27,14 @@
 /// - present comes from the attendance map (spec §8): a missing map or a
 ///   missing player entry defaults to present.
 /// - forfeit comes from the game's `forfeitedBy` marker (see FORFEITS).
+/// - inGoal (spec §7 stand-in goalkeeper) is decided per player per game:
+///   ≥1 Save or PenSaved on his own team list (only a keeper makes saves in
+///   futsal), OR his name keyed `true` in his side's `team{1,2}keepers`
+///   marker (the Manager's attendance-step "In goal" switch — same name
+///   keys as `team{1,2}attendance`, List/Map coercion tolerated, only a
+///   literal `true` counts). The marker only flags players already in the
+///   result — it never adds one. Position-blind: scoring ignores it for a
+///   listed GK.
 /// - Foul, Substitution and unknown/legacy types (e.g. 'Blue') carry no
 ///   fantasy counter and are skipped — same as the tally engines.
 ///
@@ -35,7 +43,9 @@
 /// every entry with [GameForfeit.won] (this team showed up) or
 /// [GameForfeit.lost] (this team forfeited), and its activity events are
 /// IGNORED ENTIRELY — stray stats recorded on a forfeited game never count,
-/// and a player known only from such an event is not in the result at all.
+/// and a player known only from such an event is not in the result at all
+/// (nobody is inGoal: the keepers marker is ignored too — a forfeit scores
+/// the appearance point or nothing).
 /// The player set is then exactly the [attendance] keys, so CALLERS MUST
 /// PASS THE FULL ROSTER-COMPOSED ATTENDANCE (every rostered player → true,
 /// absentees → false: the finalizer's fullAttendance, the match tab's
@@ -47,6 +57,30 @@ import 'package:infinite_sports_flutter/misc/activity_entry.dart';
 import 'package:infinite_sports_flutter/misc/forfeit.dart';
 
 import 'player_game_stats.dart';
+
+/// Game-node key of one side's stand-in keeper marker
+/// (`team1keepers` / `team2keepers` = `{<player name>: true}`).
+String keepersKey(int side) => 'team${side}keepers';
+
+/// The names marked in goal by a `team{1,2}keepers` node: keys whose value
+/// is exactly `true`. A Map is read by key; a List (RTDB coercion of
+/// numeric-name keys) by index; null padding, empty keys, any other value
+/// and any other shape are ignored. TS twin: stats_mapper.ts parseKeepers.
+Set<String> parseKeepers(Object? raw) {
+  final out = <String>{};
+  void add(String key, Object? value) {
+    if (key.isNotEmpty && value == true) out.add(key);
+  }
+
+  if (raw is List) {
+    for (var i = 0; i < raw.length; i++) {
+      add(i.toString(), raw[i]);
+    }
+  } else if (raw is Map) {
+    raw.forEach((k, v) => add(k.toString(), v));
+  }
+  return out;
+}
 
 /// Per-player stats for [teamName]'s side of [gameNode]. The player set is
 /// everyone who has an activity event PLUS everyone keyed in [attendance]
@@ -123,11 +157,15 @@ Map<String, PlayerGameStats> mapGameToStats(
   });
 
   final names = <String>{...tallies.keys, ...?attendance?.keys};
+  final keepers = parseKeepers(gameNode[keepersKey(side)]);
   return {
     for (final name in names)
       name: (tallies[name] ?? _Tally()).toStats(
         teamConceded: conceded,
         present: attendance?[name] ?? true, // spec §8 default: present
+        // Stand-in keeper (spec §7): the Manager's "In goal" marker (a save
+        // or penalty save also puts him in goal — see toStats).
+        markedInGoal: keepers.contains(name),
       ),
   };
 }
@@ -161,10 +199,16 @@ class _Tally {
   int goals = 0, assists = 0, saves = 0, penSaved = 0, penMissed = 0;
   int ownGoals = 0, yellows = 0, reds = 0, dpl = 0;
 
-  PlayerGameStats toStats({required int teamConceded, required bool present}) =>
+  PlayerGameStats toStats({
+    required int teamConceded,
+    required bool present,
+    bool markedInGoal = false,
+  }) =>
       PlayerGameStats(
         goals: goals, assists: assists, saves: saves, penSaved: penSaved,
         penMissed: penMissed, ownGoals: ownGoals, yellows: yellows,
         reds: reds, dpl: dpl, teamConceded: teamConceded, present: present,
+        // Only a keeper makes saves (PenSaved bumps saves too).
+        inGoal: saves > 0 || penSaved > 0 || markedInGoal,
       );
 }

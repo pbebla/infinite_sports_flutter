@@ -260,6 +260,35 @@ void main() {
     });
   });
 
+  group('stand-in goalkeeper (spec §7) — same engine path', () {
+    test('a saving or marked outfielder scores the keeper lines at GK rates; '
+        'goals/assists stay at his position', () {
+      final node = gameNode()
+        ..['team1keepers'] = {'Yara': true}
+        ..['team1activity'] = {
+          ...(gameNode()['team1activity'] as Map),
+          "30'": [
+            {'Save': 'Alex'},
+          ],
+        };
+      final points = matchGamePoints(
+        gameNode: node,
+        rosterNamesByTeam: rosters(),
+        players: market(),
+        config: cfg,
+      );
+      // Alex (ATT, 1 save -> in goal): plays 1 + goal 4 + assist 3 (ATT
+      // rates) + clean sheet 8 (GK rate) = 16 (outfield: 10).
+      expect(points['Alex'], 16);
+      // Yara (DEF, marked in goal, 0 saves): plays 1 + clean sheet 8 (GK
+      // rate) - yellow 1 = 8 (outfield: 5).
+      expect(points['Yara'], 8);
+      // The listed GK and an outfield DEF are unchanged.
+      expect(points['Gale'], 10);
+      expect(points['Dana'], 12);
+    });
+  });
+
   group('forfeits (spec §8a) — same engine path', () {
     /// Wolves forfeited after the timeline above was captured: 5–0 Sharks,
     /// status Final, forfeitedBy 2. Every recorded event is now stray.
