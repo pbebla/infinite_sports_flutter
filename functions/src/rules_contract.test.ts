@@ -1,0 +1,243 @@
+// RULES CONTRACT (audit C1, 2026-10-31): every path the Manager or the fan
+// app WRITES under Fantasy/ must be granted `.write` by the RTDB rules — on
+// the node itself or on some ancestor (RTDB write grants cascade down; a
+// deeper `.write` never grants a write made higher up). The Manager's VOID
+// toggle (Voided/<gw>) and Manual-price flag (PriceChanges/<gw>/Manual)
+// shipped with NO grant anywhere on their chain, so the owner's taps were
+// permission_denied in production and nothing caught it. This test would
+// have.
+//
+// The expected list is hard-coded on purpose, one entry per client write,
+// with where it comes from:
+//   - Manager (InfiniteSportsManagerFlutter): lib/core/constants/
+//     fantasy_paths.dart helpers written by lib/services/firebase/
+//     fantasy_admin_service.dart (`.set(` / `.update(` / `.remove(` /
+//     `runTransaction(` — the race-safe ones go through lib/services/
+//     fantasy_guarded_writes.dart's store seam, which adds no paths of its
+//     own).
+//   - Fan app: lib/fantasy/data/fantasy_service.dart.
+// A NEW client write path must be added here, with its kind; a rules edit
+// that drops a grant fails with the path's name.
+//
+// Kinds:
+//   admin        — some `.write` on the chain is the admin gate
+//                  (root.child('Admins').child(auth.uid)).
+//   own          — some `.write` on the chain compares auth.uid with the
+//                  wildcard bound to the path's UID segment (the writer's own
+//                  uid).
+//   ownerCreate  — some `.write` on the chain requires the NEW row's Owner to
+//                  be auth.uid (mini-league create under a fresh push id).
+//
+// Both rules files are checked: database.rules.stage1.json is what firebase.json
+// deploys today (live), database.rules.json the target posture — a grant must
+// exist in both.
+
+import * as fs from 'fs';
+import * as path from 'path';
+import { describe, expect, it } from 'vitest';
+
+type Json = Record<string, any>;
+type Kind = 'admin' | 'own' | 'ownerCreate';
+
+interface ContractEntry {
+  /** Root-relative RTDB path, as the client writes it. `UID` = the signed-in
+   *  writer's own uid; every other segment is a representative value. */
+  path: string;
+  kind: Kind;
+  /** Who writes it, and how. */
+  note: string;
+}
+
+const S = 'Fantasy/Futsal/16'; // any <sport>/<season>
+
+const CONTRACT: ContractEntry[] = [
+  // ── Manager (admin) — fantasy_admin_service.dart ──────────────────────────
+  { path: `${S}/Config`, kind: 'admin',
+    note: 'setLockOverride: Config update {lockOverride, lockOverrideUntil}' },
+  { path: `${S}/Config/lockHour`, kind: 'admin',
+    note: 'setLockHour: set' },
+  { path: `${S}/Config/Reminder`, kind: 'admin',
+    note: 'saveReminderConfig: set' },
+  { path: `${S}/Config/NewsAutopilot`, kind: 'admin',
+    note: 'saveNewsAutopilot: set' },
+  { path: `${S}/Config/NewsAutopilot/Enabled`, kind: 'admin',
+    note: 'turnNewsAutopilotOff: root multi-path update (also Weekday/Hour)' },
+  { path: `${S}/Config/DreamTeamPost`, kind: 'admin',
+    note: 'saveDreamTeamPostConfig (legacy): set' },
+  { path: `${S}/Players/Some Player/priceTenths`, kind: 'admin',
+    note: 'setPlayerPrice: set' },
+  { path: `${S}/Players/Some Player/eligible`, kind: 'admin',
+    note: 'setPlayerEligible: set' },
+  { path: `${S}/Players/Some Player`, kind: 'admin',
+    note: 'setPlayerPosition: update {position, priceTenths?}' },
+  { path: `${S}/Managers/someUid/NameFlagged`, kind: 'admin',
+    note: 'setNameFlagged: set' },
+  { path: `${S}/Voided/5`, kind: 'admin',
+    note: 'setVoided: set(true) / remove() — spec §15 owner void (C1)' },
+  { path: `${S}/PriceChanges/5/Manual`, kind: 'admin',
+    note: 'setManualReprice: set(true) / remove() — Monday-job stand-down (C1)' },
+  { path: `${S}/ScheduledPushes/-pushId`, kind: 'admin',
+    note: 'scheduleManagerMessage: push().set; cancelScheduledMessage: runTransaction' },
+  { path: `${S}/News/Drafts/-pushId`, kind: 'admin',
+    note: 'saveDraft: push().set / runTransaction edit; discardDraft + publishDraft: root update (null)' },
+  { path: `${S}/News/Drafts/-pushId/AutoPublishAt`, kind: 'admin',
+    note: 'turnNewsAutopilotOff: root multi-path update (null)' },
+  { path: `${S}/News/Published/-pushId`, kind: 'admin',
+    note: 'composePost: push().set; publishDraft/updatePublishedPost/discardDraft: runTransaction; deletePublishedPost: remove' },
+  { path: `${S}/News/Published/-pushId/At`, kind: 'admin',
+    note: 'publishDraft: root update re-stamping the server At' },
+  { path: 'Fantasy/BadgeCatalog/someBadge', kind: 'admin',
+    note: 'createBadge: create-only runTransaction; updateBadge: update' },
+  { path: 'Fantasy/BadgeCatalog/someBadge/ImageUrl', kind: 'admin',
+    note: 'createBadge: set after the picture upload' },
+  { path: 'Fantasy/BadgeCatalog/someBadge/Active', kind: 'admin',
+    note: 'setBadgeActive: set' },
+  { path: `${S}/Badges/someUid/-pushId`, kind: 'admin',
+    note: 'giveBadge: push().set; removeBadgeAward: remove' },
+
+  // ── Fan app (signed-in user) — fantasy_service.dart ───────────────────────
+  { path: `${S}/Squads/UID`, kind: 'own',
+    note: 'saveMySquad: set the whole squad' },
+  { path: `${S}/Managers/UID`, kind: 'own',
+    note: 'saveTeamName: set {TeamName, NameFlagged:false}' },
+  { path: `${S}/Watchlists/UID/Some Player`, kind: 'own',
+    note: 'setWatchlisted: set(true) / remove()' },
+  { path: `${S}/MiniLeagues/-pushId`, kind: 'ownerCreate',
+    note: 'createMiniLeague: push().set {Name, Code, Owner:uid, CreatedAt, Members}' },
+  { path: `${S}/MiniLeagues/-leagueId/Members/UID`, kind: 'own',
+    note: 'joinMiniLeague: set(true)' },
+];
+
+// ── Rules walking ───────────────────────────────────────────────────────────
+
+function repoRoot(): string {
+  let dir = process.cwd();
+  for (; ;) {
+    if (fs.existsSync(path.join(dir, 'pubspec.yaml'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      throw new Error(`Could not find the Flutter repo root above ${process.cwd()}`);
+    }
+    dir = parent;
+  }
+}
+
+function loadRules(file: string): Json {
+  return JSON.parse(fs.readFileSync(path.join(repoRoot(), file), 'utf8'));
+}
+
+interface ChainLink {
+  /** The rules node's location, wildcards as written (e.g. Squads/$uid). */
+  at: string;
+  write: unknown;
+}
+
+/** Every `.write` on [p]'s chain, root first, plus the wildcard bindings
+ *  ($name -> path segment). A literal child wins over a $wildcard sibling,
+ *  as in RTDB; segments past the deepest rules node add nothing. */
+function writeChain(rules: Json, p: string): {
+  links: ChainLink[]; bindings: Record<string, string>;
+} {
+  const links: ChainLink[] = [];
+  const bindings: Record<string, string> = {};
+  let node: Json | undefined = rules['rules'];
+  const at: string[] = [];
+  if (node && '.write' in node) links.push({ at: '/', write: node['.write'] });
+  for (const seg of p.split('/')) {
+    if (!node) break;
+    let next: Json | undefined;
+    if (Object.prototype.hasOwnProperty.call(node, seg) && !seg.startsWith('$') &&
+      !seg.startsWith('.')) {
+      next = node[seg];
+      at.push(seg);
+    } else {
+      const wild = Object.keys(node).find((k) => k.startsWith('$'));
+      if (wild !== undefined) {
+        next = node[wild];
+        bindings[wild] = seg;
+        at.push(wild);
+      }
+    }
+    if (next === undefined) break;
+    node = next;
+    if ('.write' in node) links.push({ at: at.join('/'), write: node['.write'] });
+  }
+  return { links, bindings };
+}
+
+const ADMIN_GATE = "root.child('Admins').child(auth.uid)";
+
+function grants(kind: Kind, link: ChainLink, bindings: Record<string, string>): boolean {
+  const w = link.write;
+  if (typeof w !== 'string') return false; // `false` (or junk) grants nothing
+  switch (kind) {
+    case 'admin':
+      return w.includes(ADMIN_GATE);
+    case 'own': {
+      const re = /auth\.uid\s*={2,3}\s*(\$\w+)|(\$\w+)\s*={2,3}\s*auth\.uid/g;
+      for (const m of w.matchAll(re)) {
+        if (bindings[m[1] ?? m[2]] === 'UID') return true;
+      }
+      return false;
+    }
+    case 'ownerCreate':
+      return /newData\.child\('Owner'\)\.val\(\)\s*={2,3}\s*auth\.uid/.test(w);
+  }
+}
+
+const RULES_FILES = ['database.rules.stage1.json', 'database.rules.json'];
+
+for (const file of RULES_FILES) {
+  describe(`rules contract: ${file}`, () => {
+    const rules = loadRules(file);
+
+    it.each(CONTRACT.map((e) => [e.path, e] as const))(
+      'grants the client write %s', (p, entry) => {
+        const { links, bindings } = writeChain(rules, p);
+        const ok = links.some((l) => grants(entry.kind, l, bindings));
+        expect(ok, `${file}: NO ${entry.kind} .write grant for client write path ` +
+          `"${p}" (${entry.note}); chain .write rules seen: ` +
+          `${JSON.stringify(links)}`).toBe(true);
+      });
+
+    // The C1 shape: the owner may set/remove the VOID flag and the Manual
+    // flag, and nothing else under PriceChanges (the server's
+    // {name: {delta}} rows are functions-only). A grant at PriceChanges/<gw>
+    // or above would let an admin client rewrite the published moves.
+    it('PriceChanges: admin writes ONLY <gw>/Manual (validated true), never the delta rows', () => {
+      for (const p of [`${S}/PriceChanges`, `${S}/PriceChanges/5`, `${S}/PriceChanges/5/Some Player`]) {
+        const { links } = writeChain(rules, p);
+        expect(links.filter((l) => typeof l.write === 'string' && l.write !== 'false'),
+          `${file}: unexpected .write on ${p}`).toEqual([]);
+      }
+      const manual = rules['rules']['Fantasy']['$sport']['$season']['PriceChanges']['$gw']['Manual'];
+      expect(manual['.validate']).toBe('newData.val() === true');
+    });
+
+    it('Voided: public read, admin write, each <gw> validated true', () => {
+      const voided = rules['rules']['Fantasy']['$sport']['$season']['Voided'];
+      expect(voided['.read']).toBe(true);
+      expect(String(voided['.write'])).toContain(ADMIN_GATE);
+      expect(voided['$gw']['.validate']).toBe('newData.val() === true');
+    });
+  });
+}
+
+describe('rules contract: the walker itself', () => {
+  const rules = loadRules('database.rules.json');
+
+  it('a functions-only path has no client grant (the check can fail)', () => {
+    for (const p of [`${S}/History/3/someUid`, `${S}/BadgePushClaims/u/a`,
+      `${S}/TransferState/UID`, `${S}/Repriced/5`]) {
+      const { links, bindings } = writeChain(rules, p);
+      for (const kind of ['admin', 'own', 'ownerCreate'] as const) {
+        expect(links.some((l) => grants(kind, l, bindings)), `${p} ${kind}`).toBe(false);
+      }
+    }
+  });
+
+  it("'own' binds to the writer's uid only — another uid's squad is not granted", () => {
+    const { links, bindings } = writeChain(rules, `${S}/Squads/otherUid`);
+    expect(links.some((l) => grants('own', l, bindings))).toBe(false);
+  });
+});

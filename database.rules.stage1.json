@@ -417,7 +417,20 @@
             ".read": true
           },
           "PriceChanges": {
-            ".read": true
+            ".read": true,
+            "$gw": {
+              "Manual": {
+                ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+                ".validate": "newData.val() === true"
+              }
+            }
+          },
+          "Voided": {
+            ".read": true,
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$gw": {
+              ".validate": "newData.val() === true"
+            }
           },
           "PriceHistory": {
             ".read": true
