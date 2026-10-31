@@ -44,7 +44,9 @@ export const NEVER_WRITTEN_WHOLE: readonly string[] = [
 ];
 
 /** Nodes the spec expects the replay to produce (the dry run warns when one
- *  is missing — any OTHER pipeline-produced node is written too).
+ *  is missing). This list IS the write allowlist: a replay node that is not
+ *  listed here (and is not a Managers/Squads test-NN child or TestFill)
+ *  refuses the whole plan — see assertSafePaths.
  *
  *  Badges + BadgePushClaims (spec 2026-10-30 §4): the replay's auto awards
  *  and the stub pusher's once-only claims for every one of them. The plan

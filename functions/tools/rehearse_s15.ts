@@ -1633,8 +1633,17 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     }
     const p = `${F}/PublishedPicks/${gw.number}`;
     if (publishedClaims[p] !== 1) fail('lock-snapshot-once', `${p} claimed ${publishedClaims[p] ?? 0} times`);
-    const repWrites = db.pipelineWrites.filter((w) => w.path === `${F}/Repriced/${gw.number}`).length;
-    if (repWrites !== 1) fail('reprice-once', `Repriced/${gw.number} written ${repWrites} times`);
+    // Repriced/<gw> is written exactly TWICE by design since 672ff3f: the
+    // once-only claim {At, Pending:true} (a transaction), then the final
+    // {At} row. Prices themselves must move exactly once — that is the real
+    // invariant: one PriceChanges/<gw> row, and the claim must precede it.
+    const repPath = `${F}/Repriced/${gw.number}`;
+    const repWrites = db.pipelineWrites.filter((w) => w.path === repPath);
+    const pcWrites = db.pipelineWrites.filter((w) => w.path === `${F}/PriceChanges/${gw.number}`).length;
+    if (repWrites.length < 1 || repWrites.length > 2) fail('reprice-once', `${repPath} written ${repWrites.length} times`);
+    if (pcWrites > 1) fail('reprice-once', `PriceChanges/${gw.number} written ${pcWrites} times (prices moved twice)`);
+    const finalRep = db.get(repPath) as Json | null;
+    if (finalRep && (finalRep as Record<string, unknown>)['Pending'] === true) fail('reprice-once', `${repPath} left Pending (claim never finalized)`);
   }
   const gwStateSeq = db.pipelineWrites.filter((w) => w.path === `${F}/GwState`).map((w) => ({ at: w.at, ...(w.value as Json) }));
   const statusOrder: Record<string, number> = { open: 0, locked: 1, finalized: 2 };
