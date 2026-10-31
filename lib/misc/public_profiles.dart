@@ -17,6 +17,7 @@
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:infinite_sports_flutter/misc/bounded_read.dart';
 
 /// One user's public identity + career data, as mirrored.
 class PublicProfile {
@@ -121,10 +122,13 @@ class PublicProfiles {
       FirebaseDatabase.instance.ref('PublicProfiles');
 
   /// One-shot {uid: profile} of the whole mirror ({} on error) — the
-  /// search index / event-attendee bulk read.
+  /// search index / event-attendee bulk read, and the fantasy leaderboard's
+  /// names (inside its reveal gate). Bounded ([kRevealReadTimeout]): a cold
+  /// offline `once()` never answers, so no answer by then is {} too (the
+  /// leaderboard then retries on its next mount).
   static Future<Map<String, PublicProfile>> getAllOnce() async {
     try {
-      final event = await _root().once();
+      final event = await _root().once().bounded('PublicProfiles.getAllOnce');
       return publicProfilesFromNode(event.snapshot.value);
     } catch (_) {
       return {};

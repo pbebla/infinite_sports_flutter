@@ -43,6 +43,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/misc/bounded_read.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 
@@ -322,6 +323,12 @@ class FantasyScheduleFeed<W> {
 /// returns 0 for an absent node AND a failed read — 0 = unknown, never
 /// cached, and [startHourKnown] then tells the line to drop a derived time
 /// (`nextGameText`) instead of showing "0 PM".
+///
+/// The hour read is a one-shot `once()` inside the first visit's reveal
+/// gate, and RTDB `once()` never answers on a cold OFFLINE client — so it is
+/// bounded ([kRevealReadTimeout], logged): no answer by then counts as 0
+/// (unknown), the games are derived without it and the line reads
+/// "vs Nimrod · Sun" — never an eternal skeleton.
 class FantasyLeagueGamesFeed {
   FantasyLeagueGamesFeed({
     required this.sport,
@@ -422,7 +429,9 @@ class FantasyLeagueGamesFeed {
         return;
       }
       if (!_gamesLoaded) _hourPending = true;
-      Future<int>.sync(load).then((h) => h, onError: (Object e) {
+      Future<int>.sync(load)
+          .bounded('$owner: start hour', orElse: () => 0)
+          .then((h) => h, onError: (Object e) {
         _logFailure(owner, 'start hour', e);
         return 0;
       }).then(_onHour);

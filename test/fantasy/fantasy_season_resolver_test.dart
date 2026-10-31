@@ -4,6 +4,9 @@
 // Firebase-touching wrapper (resolveCurrentFantasySeason) is not unit-tested
 // (repo convention); the decision logic is, via injected probes.
 
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_season_resolver.dart';
 
@@ -184,6 +187,49 @@ void main() {
         expect(r.season, isNull);
         expect(r.error, isA<StateError>());
       }
+    });
+
+    // Opus audit item 6: a cold OFFLINE once() never answers — a hung read
+    // must FAIL the resolve (logged), never hang it (the profile's shared
+    // in-flight memo would hold it for the whole session) and never be
+    // remembered as "none".
+    test('a read that never answers fails the resolve after the bound',
+        () async {
+      final logs = <String>[];
+      final original = debugPrint;
+      debugPrint = (String? m, {int? wrapWidth}) => logs.add(m ?? '');
+      addTearDown(() => debugPrint = original);
+      Future<T> never<T>() => Completer<T>().future;
+      const bound = Duration(milliseconds: 20);
+
+      final sportHangs = await resolveFantasySeasonWith(
+        readSport: never,
+        readSeason: (sport) async => '15',
+        hasConfig: fake({'Futsal/15'}).probe,
+        readTimeout: bound,
+      );
+      final seasonHangs = await resolveFantasySeasonWith(
+        readSport: () async => 'Futsal',
+        readSeason: (sport) => never(),
+        hasConfig: fake({'Futsal/15'}).probe,
+        readTimeout: bound,
+      );
+      final probeHangs = await resolveFantasySeasonWith(
+        readSport: () async => 'Futsal',
+        readSeason: (sport) async => '16',
+        hasConfig: (_, __) => never(),
+        readTimeout: bound,
+      );
+      for (final r in [sportHangs, seasonHangs, probeHangs]) {
+        expect(r.failed, isTrue);
+        expect(r.isNone, isFalse);
+        expect(r.error, isA<TimeoutException>());
+      }
+      final all = logs.join('\n');
+      expect(all,
+          contains('FantasySeasonResolver: Current League: no answer after'));
+      expect(all, contains('FantasySeasonResolver: Futsal Season'));
+      expect(all, contains('FantasySeasonResolver: Fantasy/Futsal/16/Config'));
     });
   });
 }

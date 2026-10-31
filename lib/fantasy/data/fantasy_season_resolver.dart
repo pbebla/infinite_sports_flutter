@@ -20,6 +20,12 @@
 // is not "there is no fantasy season" — callers that remember a "none" (the
 // profile's Fantasy tab) must only remember the real one and retry an error.
 //
+// Every read is BOUNDED ([kRevealReadTimeout], bounded_read.dart): RTDB
+// `once()` never answers on a cold offline client, and a hung resolve would
+// sit in the profile's shared in-flight memo for the rest of the session. A
+// read with no answer by then is a FAILED resolve (never a remembered
+// "none") — the next open asks again.
+//
 // The decision logic is the pure [pickFantasySeason] / [resolveFantasySeasonWith]
 // (unit-tested with injected reads in
 // test/fantasy/fantasy_season_resolver_test.dart); the Firebase readers in
@@ -29,6 +35,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart'
     show kFantasyReservedRootKeys;
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
+import 'package:infinite_sports_flutter/misc/bounded_read.dart';
 
 /// A resolved fantasy season.
 typedef FantasySeasonKey = ({String sport, String season});
@@ -146,20 +153,29 @@ Future<String> _readPointer(String path) async {
 /// Pure three-way core: [readSport] / [readSeason] read the pointers (a
 /// throw = a failed read), [hasConfig] probes Config nodes (see
 /// [pickFantasySeason]). Never throws: any failure is
-/// [FantasySeasonResolution.failed].
+/// [FantasySeasonResolution.failed]. Each read is bounded by [readTimeout]
+/// — one that never answers (cold offline `once()`) fails the resolve.
 Future<FantasySeasonResolution> resolveFantasySeasonWith({
   required Future<String> Function() readSport,
   required Future<String> Function(String sport) readSeason,
   required Future<bool> Function(String sport, String season) hasConfig,
+  Duration readTimeout = kRevealReadTimeout,
 }) async {
   try {
-    final sport = (await readSport()).trim();
+    final sport = (await readSport().bounded(
+            'FantasySeasonResolver: Current League',
+            timeout: readTimeout))
+        .trim();
     if (!_usableSegment(sport)) return const FantasySeasonResolution.none();
-    final season = await readSeason(sport);
+    final season = await readSeason(sport).bounded(
+        'FantasySeasonResolver: $sport Season',
+        timeout: readTimeout);
     final resolved = await pickFantasySeason(
       sport: sport,
       currentSeason: season,
-      hasConfig: hasConfig,
+      hasConfig: (s, n) => hasConfig(s, n).bounded(
+          'FantasySeasonResolver: Fantasy/$s/$n/Config',
+          timeout: readTimeout),
     );
     return resolved == null
         ? const FantasySeasonResolution.none()

@@ -528,6 +528,57 @@ void main() {
     expect(nextLine(), 'vs Team B · Sun 5 PM');
   });
 
+  testWidgets(
+      'offline first visit (Opus audit item 6): a start-hour read that never '
+      'answers is given up after 8 s — the market reveals with the no-time '
+      'game line, never an eternal skeleton', (tester) async {
+    final logs = <String>[];
+    final original = debugPrint;
+    debugPrint = (String? m, {int? wrapWidth}) => logs.add(m ?? '');
+    // Restored inside the body (the binding checks debug vars before any
+    // tearDown runs).
+    try {
+      final derived = <int, StreamController<List<TournamentMatch>>>{};
+      Stream<List<TournamentMatch>> gamesFor(int hour) {
+        final c = StreamController<List<TournamentMatch>>.broadcast();
+        derived[hour] = c;
+        addTearDown(c.close);
+        return c.stream;
+      }
+
+      // A cold offline once(): no answer, ever.
+      final never = Completer<int>();
+      await pumpTab(tester,
+          loadStartHour: () => never.future, leagueGamesFor: gamesFor);
+      totals.add(null);
+      changes.add(const {});
+      watchlist.add(const {});
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 7));
+      // Every other feed has answered; the games still wait on the hour.
+      expect(
+          find.byKey(const ValueKey('players_market_skeleton')), findsOneWidget);
+      expect(derived, isEmpty);
+
+      await tester.pump(const Duration(seconds: 1)); // the 8 s bound
+      expect(derived.keys, [0]); // derived WITHOUT an hour
+      derived[0]!.add([legacyGame('11082026', 'Team A', 'Team B')]);
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('players_market_skeleton')), findsNothing);
+      expect(
+          tester
+              .widget<Text>(find.byKey(const ValueKey('market_next_Ava Striker')))
+              .data,
+          'vs Team B · Sun');
+      expect(find.textContaining('0 PM'), findsNothing);
+    } finally {
+      debugPrint = original;
+    }
+    expect(logs.join('\n'),
+        contains('FantasyPlayersTab: start hour: no answer after 8s'));
+  });
+
   testWidgets('★ chip filters the market to the watchlist (live)',
       (tester) async {
     await pumpTab(tester);

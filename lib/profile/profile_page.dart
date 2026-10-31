@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/bounded_read.dart';
 import 'package:infinite_sports_flutter/misc/profile_stat_priority.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
 import 'package:infinite_sports_flutter/misc/share_card_service.dart' show SharePng;
@@ -251,7 +252,10 @@ class _ProfilePageState extends State<ProfilePage>
 
   Future<(String, Color, Player)> _extractHelper(
       String sport, String season, String team) async {
-    await getAllTeamLogo();
+    // Logos are cosmetic: a read with no answer (offline) never holds the
+    // career reveal — the stint just has no logo.
+    await getAllTeamLogo()
+        .bounded('ProfilePage: team logos', orElse: () {});
     // Color extraction is deferred — we only decode the CURRENT stint's logo
     // once, after _current is determined. Use a placeholder here so we don't
     // download + decode every logo for every season.
@@ -349,10 +353,15 @@ class _ProfilePageState extends State<ProfilePage>
 
   Future<void> _extractAFCStats() async {
     try {
-      final seasons = await getSoccerSeasons('AFC San Jose');
+      // Bounded one-shot reads (bounded_read.dart): offline, no answer =
+      // no AFC stints, never a held career reveal.
+      final seasons = await getSoccerSeasons('AFC San Jose')
+          .bounded('ProfilePage: AFC seasons');
       // Each season's roster read is independent — fetch them concurrently.
       await Future.wait(seasons.map((season) async {
-        final roster = await getSoccerRoster('AFC San Jose', season);
+        final roster = await getSoccerRoster('AFC San Jose', season).bounded(
+            'ProfilePage: AFC roster $season',
+            orElse: () => <String, SoccerPlayer>{});
         roster.forEach((name, info) {
           if (info.uid == widget.uid) {
             _tableEntries['AFC San Jose'] ??= {};
@@ -949,12 +958,22 @@ class _ProfilePageState extends State<ProfilePage>
     // mirror, which carries the exact same keys this page uses (First/Last
     // Name, ProfileUrl, Information, Played, Awards).
     final ref = FirebaseDatabase.instance.ref();
-    Map rawUser = {};
+    final Map rawUser;
     try {
-      final userSnap =
-          (await ref.child(profileNodePathFor(widget.uid)).once()).snapshot;
+      // Bounded (bounded_read.dart): this read gates the page's first paint
+      // and a cold offline once() never answers. No answer — or a failed
+      // read — keeps whatever identity is already on screen (a cache-hit
+      // refresh must never blank the cached name); a first visit then shows
+      // the empty page instead of a skeleton forever.
+      final userSnap = (await ref
+              .child(profileNodePathFor(widget.uid))
+              .once()
+              .bounded('ProfilePage: profile node'))
+          .snapshot;
       rawUser = userSnap.value as Map? ?? {};
-    } catch (_) {}
+    } catch (_) {
+      return;
+    }
 
     _firstName = (rawUser['First Name'] ?? '').toString();
     _lastName = (rawUser['Last Name'] ?? '').toString();
@@ -1063,6 +1082,8 @@ class _ProfilePageState extends State<ProfilePage>
       // team per (sport, season), so one team node is enough — the shared
       // getAll* caches download the whole season's Line Ups (every team,
       // every player) just to extract this one row.
+      // (A team read with no answer — offline — throws, skipping the
+      // whole-season fallback too: it would hang the same way.)
       final targeted = await _extractFromTeamNode(sport, seasonNum, team);
       if (targeted != null) {
         _tableEntries[sport] ??= {};
@@ -1071,13 +1092,14 @@ class _ProfilePageState extends State<ProfilePage>
       }
       // Fallback (team renamed / legacy data / player transferred): the old
       // whole-season fetch through the shared lineup caches, which also
-      // searches the season's other teams.
+      // searches the season's other teams. Bounded like every career read.
+      final what = 'ProfilePage: $sport $seasonNum Line Ups';
       if (sport == 'Futsal') {
-        await getAllFutsalLineUps(seasonNum);
+        await getAllFutsalLineUps(seasonNum).bounded(what);
       } else if (sport == 'Basketball') {
-        await getAllBasketballLineUps(seasonNum);
+        await getAllBasketballLineUps(seasonNum).bounded(what);
       } else {
-        await getAllFlagFootballLineUps(seasonNum);
+        await getAllFlagFootballLineUps(seasonNum).bounded(what);
       }
       _tableEntries[sport] ??= {};
       _tableEntries[sport]![seasonNum] =
@@ -1087,13 +1109,16 @@ class _ProfilePageState extends State<ProfilePage>
 
   /// Reads `/<Sport>/<season>/Line Ups/<team>` (one team's node) and pulls
   /// this player's row out of it. Returns null when the node is missing or
-  /// the player isn't on it — callers fall back to the whole-season path.
+  /// the player isn't on it — callers fall back to the whole-season path. A
+  /// read with no answer (offline, bounded) THROWS [TimeoutException] so the
+  /// caller skips that fallback too.
   Future<(String, Color, Player)?> _extractFromTeamNode(
       String sport, String season, String team) async {
     try {
       final snap = (await FirebaseDatabase.instance
               .ref('/$sport/$season/Line Ups/$team')
-              .once())
+              .once()
+              .bounded('ProfilePage: $sport $season $team'))
           .snapshot;
       final node = snap.value;
       if (node is! Map) return null;
@@ -1101,7 +1126,8 @@ class _ProfilePageState extends State<ProfilePage>
         final info = e.value;
         if (info is! Map) continue;
         if ((info['UID'] ?? '') != widget.uid) continue;
-        await getAllTeamLogo();
+        await getAllTeamLogo()
+            .bounded('ProfilePage: team logos', orElse: () {});
         final logoUrl = (teamLogos[sport]?[season]?[team])?.toString() ?? '';
         final player =
             _parseLeaguePlayer(sport, e.key.toString(), info, logoUrl);
@@ -1114,6 +1140,8 @@ class _ProfilePageState extends State<ProfilePage>
         return (team, const Color(0xFFD00000), player);
       }
       return null;
+    } on TimeoutException {
+      rethrow;
     } catch (_) {
       return null;
     }
@@ -1192,9 +1220,11 @@ class _ProfilePageState extends State<ProfilePage>
       // nothing at all is fetched in that (common) case.
       // Lockdown B1: own profile reads Users, visited profiles read the
       // PublicProfiles mirror (TournamentsPlayed is mirrored verbatim).
+      // Bounded like every career read: no answer = no appearances.
       final idxSnap = (await FirebaseDatabase.instance
               .ref('${profileNodePathFor(widget.uid)}/TournamentsPlayed')
-              .once())
+              .once()
+              .bounded('ProfilePage: TournamentsPlayed'))
           .snapshot;
       final index = idxSnap.value;
       if (index is! Map) return;
@@ -1205,13 +1235,17 @@ class _ProfilePageState extends State<ProfilePage>
           // One whole-node read per tournament (iOS overlapping-get() fix —
           // see TournamentService.getTournamentBundle). Parallel ACROSS
           // tournaments stays fine: different ids never overlap.
-          final bundle =
-              await TournamentService.getTournamentBundle(id.toString());
+          final bundle = await TournamentService.getTournamentBundle(
+                  id.toString())
+              .bounded('ProfilePage: tournament $id');
           final tournament = bundle.tournament;
           if (tournament == null) return;
           final teams = bundle.teams;
+          // Photos never gate: no answer keeps the rosters as they are.
           final rosters =
-              await TournamentService.enrichRosterPhotos(bundle.rosters);
+              await TournamentService.enrichRosterPhotos(bundle.rosters)
+                  .bounded('ProfilePage: tournament $id photos',
+                      orElse: () => bundle.rosters);
           for (final entry in rosters.entries) {
             for (final player in entry.value) {
               if (player.uid == widget.uid) {
@@ -1250,9 +1284,10 @@ class _ProfilePageState extends State<ProfilePage>
       // Fetch current season ONCE per sport.
       if (!cachedCurrentSeason.containsKey(sport)) {
         try {
-          cachedCurrentSeason[sport] = sport == 'AFC San Jose'
-              ? await getAFCCurrentSeason()
-              : await getCurrentSeason(sport);
+          cachedCurrentSeason[sport] = await (sport == 'AFC San Jose'
+                  ? getAFCCurrentSeason()
+                  : getCurrentSeason(sport))
+              .bounded('ProfilePage: $sport current season');
         } catch (_) {
           cachedCurrentSeason[sport] = '';
         }
@@ -1269,9 +1304,10 @@ class _ProfilePageState extends State<ProfilePage>
         // Only run the finished-check for the one matching season, not all.
         if (currentSeasonForSport == seasonNum) {
           try {
-            isActive = sport == 'AFC San Jose'
-                ? !(await isAFCSeasonFinished(seasonNum))
-                : !(await isSeasonFinished(sport, seasonNum));
+            isActive = !(await (sport == 'AFC San Jose'
+                    ? isAFCSeasonFinished(seasonNum)
+                    : isSeasonFinished(sport, seasonNum))
+                .bounded('ProfilePage: $sport $seasonNum Finished'));
           } catch (_) {}
         }
 
