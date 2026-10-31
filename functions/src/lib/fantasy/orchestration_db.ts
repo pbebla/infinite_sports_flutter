@@ -155,6 +155,32 @@ export function lockOverrideOf(
   return s;
 }
 
+/** A TEST season (audit I5, 2026-10-31): `Fantasy/<sport>/<season>/TestFill`
+ *  = { At, Managers } is the marker tools/fill_test_season.ts writes FIRST
+ *  when it fills a paused season with a replayed, made-up season (fake
+ *  managers test-NN + the real managers' squads replayed into fake History,
+ *  Leaderboards and Badges). Any value there makes the season a test fill,
+ *  and the engine stands down for it entirely — sweep, finalize (and so the
+ *  void re-settle), Monday reprice and the squad-save counter — whatever
+ *  lockOverride says: a Resume Auto, an expired pause or a rerun must never
+ *  settle fake data, and above all never copy a fake podium into a real
+ *  user's trophy cabinet (Users/<uid>/Awards). settleSeasonBadges checks it
+ *  too (badges.ts). The fill tool's --clear removes it; the season is then
+ *  an ordinary one again. The S15 rehearsal/fill REPLAY never seeds it (its
+ *  in-memory overlay holds only the replay's READ_PATHS), so the replay runs
+ *  the real engine unchanged. */
+export const TEST_FILL_NODE = 'TestFill';
+
+/** The stand-down log line every engine entry point emits for a TestFill
+ *  season. */
+export const TEST_FILL_STAND_DOWN = 'fantasy: TestFill season — engine stands down';
+
+/** Whether the season under [root] (fantasyRoot) carries the TestFill
+ *  marker (see TEST_FILL_NODE). */
+export async function isTestFillSeason(db: FantasyDb, root: string): Promise<boolean> {
+  return (await db.read(`${root}/${TEST_FILL_NODE}`)) != null;
+}
+
 /** One `Voided/<gw>` leaf: ONLY a literal boolean true voids the week (the
  *  Manager writes true or removes the node — fantasy_admin_models.dart
  *  voidedGwsFromNode `raw == true` parity); absent/false/junk = counts. */

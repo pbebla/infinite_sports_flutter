@@ -112,6 +112,16 @@
 // reverts an expired override to 'auto' in the DB (spec §2 auto-return) —
 // a compare-and-set on Config, so an owner change made after the sweep's
 // read is never wiped.
+//
+// TestFill (audit I5): a season carrying Fantasy/<sport>/<season>/TestFill
+// (the marker tools/fill_test_season.ts writes with a replayed fake season)
+// stands the same jobs down — sweep, finalize (so the void re-settle too),
+// Monday reprice and the squad-save counter — EVEN when lockOverride is
+// 'auto' (a Resume Auto on the filled test season), logging
+// TEST_FILL_STAND_DOWN. Its fake History holds the real managers' replayed
+// squads, so any rerun could otherwise write fake podiums into real trophy
+// cabinets (badges.ts TEST SEASONS). The replay itself never sees the
+// marker (its in-memory overlay is seeded from READ_PATHS only).
 
 import {
   configFromMap, FANTASY_POSITIONS, FantasyConfig,
@@ -138,10 +148,11 @@ import { sendDueScheduledMessages } from './messages';
 import {
   allGamesFinal, childEntries, dateKeysOf, FantasyDb, fantasyRoot,
   fantasySeasonsOf, fullAttendance, gamesOfDate, isPlainMap,
-  isServerSquadWrite, isVoidFlag, lockedPositionsOf, lockOverrideOf,
-  marketPlayersOf, marketPricesOf, markServerSquadWrite, parseAbsentMap,
-  positionsSnapshotOf, rosterNamesOf, SERVER_WRITE_KEY, toIntLoose,
-  updateIfPresent, voidedWeeksOf, withLockedPositions,
+  isServerSquadWrite, isTestFillSeason, isVoidFlag, lockedPositionsOf,
+  lockOverrideOf, marketPlayersOf, marketPricesOf, markServerSquadWrite,
+  parseAbsentMap, positionsSnapshotOf, rosterNamesOf, SERVER_WRITE_KEY,
+  TEST_FILL_STAND_DOWN, toIntLoose, updateIfPresent, voidedWeeksOf,
+  withLockedPositions,
 } from './orchestration_db';
 import { applyDelta, repriceDeltas } from './pricing';
 import {
@@ -380,6 +391,10 @@ export async function recordSquadSave(
   const configNode = await db.read(`${root}/Config`);
   if (!isPlainMap(configNode)) return; // not fantasy-enabled: stay silent
   if (lockOverrideOf(configNode, nowMs) !== 'auto') return; // frozen machine
+  if (await isTestFillSeason(db, root)) { // fake data: never recount it
+    log.info(TEST_FILL_STAND_DOWN, { ...ctx, job: 'squadSave' });
+    return;
+  }
   const cfg = configFromMap(configNode);
 
   const gwState = await db.read(`${root}/GwState`);
@@ -955,6 +970,10 @@ export async function maybeFinalizeGame(
     log.info('fantasy finalize: lockOverride frozen — standing down', ctx);
     return;
   }
+  if (await isTestFillSeason(db, root)) {
+    log.info(TEST_FILL_STAND_DOWN, { ...ctx, job: 'finalize' });
+    return;
+  }
   const cfg = configFromMap(configNode);
 
   const dates = dateKeysOf(await db.read(`${sport}/${season}/Date`));
@@ -1185,6 +1204,12 @@ async function sweepSeason(
   }
   if (lockOverrideOf(configNode, nowMs) !== 'auto') {
     log.info('fantasy sweep: lockOverride frozen — standing down', ctx);
+    return;
+  }
+  // A TestFill season (orchestration_db.ts TEST_FILL_NODE) stands down even
+  // when auto: its History/Leaderboards/Badges are a replayed fake season.
+  if (await isTestFillSeason(db, root)) {
+    log.info(TEST_FILL_STAND_DOWN, { ...ctx, job: 'sweep' });
     return;
   }
   const cfg = configFromMap(configNode);
@@ -1453,8 +1478,12 @@ export async function runMondayReprice(
         log.info('fantasy reprice: lockOverride frozen — standing down', ctx);
         continue;
       }
-      const cfg = configFromMap(ref.configNode);
       const root = fantasyRoot(sport, season);
+      if (await isTestFillSeason(db, root)) {
+        log.info(TEST_FILL_STAND_DOWN, { ...ctx, job: 'reprice' });
+        continue;
+      }
+      const cfg = configFromMap(ref.configNode);
 
       const weeks = childEntries(await db.read(`${root}/History`))
         .map(([k]) => Number(k))

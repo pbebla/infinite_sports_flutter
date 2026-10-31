@@ -62,6 +62,16 @@
 // Paused seasons (lockOverride open/locked) compute nothing — finalize and
 // the sweep stand down before either step.
 //
+// TEST SEASONS (audit I5, 2026-10-31): a season carrying the TestFill marker
+// (orchestration_db.ts TEST_FILL_NODE — tools/fill_test_season.ts) never
+// settles season badges and NEVER writes a trophy cabinet: its History and
+// Leaderboards are a replayed fake season that also holds the REAL
+// managers' replayed squads, so a podium there must not reach
+// Users/<uid>/Awards. settleSeasonBadges returns 'testFill' before any read
+// of the season (the engine entry points stand down for it as well — this
+// is the belt to that brace). Weekly awards are not gated here: they stay
+// under Fantasy/<sport>/<season>/Badges, and finalize stands down anyway.
+//
 // TROPHY CABINET: every podium award (a badge on the champion / runnerUp /
 // thirdPlace rule) also lands in Users/<uid>/Awards/<id> — the existing
 // Award shape (lib/model/award.dart): TrophyId 'fantasy_<badgeId>', Name
@@ -81,7 +91,7 @@ import { leagueWallClock } from './news';
 import type { FantasyLogger } from './orchestration';
 import {
   childEntries, dateKeysOf, FantasyDb, fantasyRoot, gamesOfDate, isPlainMap,
-  toIntLoose,
+  isTestFillSeason, toIntLoose,
 } from './orchestration_db';
 import { FantasySquad, squadFromMap } from './squad';
 
@@ -645,15 +655,22 @@ function hasAutoSeasonAward(
 
 /** The season-end step (see SEASON END + TROPHY CABINET). 'notOver' when
  *  the league has not flagged Finished or a gameweek is not finalized yet;
- *  'alreadySettled' in sweep mode once a season award exists. */
+ *  'alreadySettled' in sweep mode once a season award exists; 'testFill'
+ *  for a TestFill season (see TEST SEASONS): no season award, no Users/*
+ *  write, nothing read beyond the marker. */
 export async function settleSeasonBadges(
   db: FantasyDb, args: SeasonBadgesArgs,
-): Promise<'notOver' | 'alreadySettled' | 'settled'> {
+): Promise<'notOver' | 'alreadySettled' | 'settled' | 'testFill'> {
   const { sport, season, cfg } = args;
   const log = args.log ?? silent;
   const root = fantasyRoot(sport, season);
   const ctx = { sport, season };
 
+  if (await isTestFillSeason(db, root)) {
+    log.info('fantasy badges: TestFill season — season badges and trophy ' +
+      'cabinet skipped', ctx);
+    return 'testFill';
+  }
   if ((await db.read(`${sport}/${season}/Finished`)) !== true) return 'notOver';
   const existing = badgesByUidOf(await db.read(`${root}/Badges`));
   if (args.onlyIfUnsettled && hasAutoSeasonAward(existing)) return 'alreadySettled';
@@ -713,7 +730,8 @@ export async function settleSeasonBadges(
 
   // Trophy cabinet: every podium award now held gets its copy (set-if-
   // absent, real users only); a podium award taken away loses its copy
-  // while that copy is still ours.
+  // while that copy is still ours. Never reached for a TestFill season (the
+  // early return above): fake podiums never touch Users/*.
   const dateKey = leagueDateKey(args.nowUtc);
   let cabinet = 0;
   for (const uid of Object.keys(desired).sort()) {
