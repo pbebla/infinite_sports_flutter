@@ -157,6 +157,42 @@ describe('open window: relabel + alert + push', () => {
   });
 });
 
+// Audit I5 follow-up: a TestFill season (the replayed fake S15 that also
+// holds the real managers' squads) stands the position trigger down even
+// under 'auto' — no relabel, no alert, no push, nothing deferred.
+describe('TestFill season', () => {
+  it('a position change stands down under auto (paired with the same world unmarked)', async () => {
+    for (const testFill of [true, false]) {
+      const db = world3();
+      if (testFill) db.data.Fantasy.Futsal['15'].TestFill = { At: 1, Managers: 20 };
+      const pusher = new FakePusher();
+      const infos: Array<{ message: string; context?: Record<string, unknown> }> = [];
+      const players = db.data.Fantasy.Futsal['15'].Players;
+      players.Bea.position = 'ATT'; // the Manager's write; the trigger runs
+      const result = await handlePositionWrite(db, {
+        sport: 'Futsal', season: '15', name: 'Bea', before: 'DEF', after: 'ATT',
+        nowUtc: OPEN_NOW, pusher,
+        log: { info: (message, context) => { infos.push({ message, context }); }, warn: () => undefined },
+      });
+      if (testFill) {
+        expect(result).toBe('testFill');
+        expect(db.writes).toEqual([]);
+        expect(pusher.sends).toEqual([]);
+        expect(pickOf(db.data.Fantasy.Futsal['15'].Squads.churn, 'Bea')['position']).toBe('DEF');
+        expect(infos).toContainEqual({
+          message: 'fantasy: TestFill season — engine stands down',
+          context: {
+            sport: 'Futsal', season: '15', player: 'Bea', from: 'DEF', to: 'ATT', job: 'position',
+          },
+        });
+      } else {
+        expect(result).toBe('applied');
+        expect(pusher.sends).toHaveLength(1);
+      }
+    }
+  });
+});
+
 describe('locked window: deferred, applied at the reopen', () => {
   it('records the change, leaves squads alone, and the reopen sweep applies it', async () => {
     const db = world3({ gw2Status: 1 });

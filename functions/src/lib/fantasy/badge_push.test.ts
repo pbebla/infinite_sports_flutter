@@ -93,6 +93,45 @@ describe('pushBadgeAward', () => {
     expect(await db.read(`${C}/u1/a1`)).toEqual({ At: NOW.getTime(), Skipped: 'paused' });
   });
 
+  // Audit I5 follow-up: a TestFill season never pushes — auto or manual,
+  // even under lockOverride auto (a Resume Auto on the filled season).
+  it('TestFill season: no award pushes — claimed as { At, Skipped: testfill }', async () => {
+    for (const award of [
+      { Badge: 'captainGenius', Gw: 3, At: 1, Source: 'auto' },
+      { Badge: 'topOfTheWeek', Gw: 2, At: 1, Source: 'manual', By: 'admin1' },
+    ]) {
+      const db = world({ award });
+      db.data.Fantasy.Futsal['15'].TestFill = { At: 1, Managers: 20 };
+      const pusher = new FakePusher();
+      const infos: Array<{ message: string; context?: Record<string, unknown> }> = [];
+      const log = {
+        info: (message: string, context?: Record<string, unknown>) => { infos.push({ message, context }); },
+        warn: () => undefined,
+      };
+      const run = () => pushBadgeAward(db, pusher, {
+        sport: 'Futsal', season: '15', uid: 'u1', awardId: 'a1', nowUtc: NOW, log,
+      });
+      expect(await run(), award.Source).toBeNull();
+      expect(pusher.sends, award.Source).toEqual([]);
+      expect(await db.read(`${C}/u1/a1`), award.Source)
+        .toEqual({ At: NOW.getTime(), Skipped: 'testfill' });
+      expect(infos, award.Source).toContainEqual({
+        message: 'fantasy: TestFill season — engine stands down',
+        context: { sport: 'Futsal', season: '15', uid: 'u1', awardId: 'a1', job: 'badgePush' },
+      });
+      // Re-fired: still nothing, the claim stays as it was.
+      expect(await run(), award.Source).toBeNull();
+      expect(pusher.sends, award.Source).toEqual([]);
+      expect(await db.read(`${C}/u1/a1`), award.Source)
+        .toEqual({ At: NOW.getTime(), Skipped: 'testfill' });
+
+      // Control: the same award in the same season unmarked pushes once.
+      const unmarked = world({ award });
+      expect(await push(unmarked, pusher), award.Source).toEqual({ sent: 1 });
+      pusher.sends.length = 0;
+    }
+  });
+
   it('a claim that already exists (the fill writes claims before badges) stops the push', async () => {
     const db = world();
     await db.write(`${C}/u1/a1`, { At: 1, Sent: 1 });

@@ -27,13 +27,23 @@
 // reach a real manager's phone. A MANUAL award pushes normally whatever the
 // engine state (Review Focus 4).
 //
+// TESTFILL SEASONS (audit I5 follow-up, 2026-10-31): a season carrying the
+// TestFill marker (orchestration_db.ts TEST_FILL_NODE — a replayed fake
+// season) never pushes a badge, whatever lockOverride says (a Resume Auto
+// included) and whatever the award's Source: every award row there is
+// claimed as { At, Skipped:'testfill' } and logged with the engine's
+// TestFill stand-down line. Checked before the paused rule, so a paused
+// TestFill season records the more specific reason.
+//
 // NODE (functions-internal; rules: no client access):
-//   BadgePushClaims/<uid>/<awardId> = { At:int, Sent?:int, Skipped?:'paused' }
+//   BadgePushClaims/<uid>/<awardId> =
+//     { At:int, Sent?:int, Skipped?:'paused'|'testfill' }
 
 import { BADGE_CATALOG_PATH, BadgeCatalog, catalogOf } from './badges';
 import type { FantasyLogger } from './orchestration';
 import {
-  FantasyDb, fantasyRoot, isPlainMap, lockOverrideOf, toIntLoose,
+  FantasyDb, fantasyRoot, isPlainMap, isTestFillSeason, lockOverrideOf,
+  TEST_FILL_STAND_DOWN, toIntLoose,
 } from './orchestration_db';
 import { FantasyPusher, fantasyPushData } from './pushes';
 
@@ -75,7 +85,8 @@ export interface PushBadgeArgs {
 
 /** Pushes one award once (see the header). Null when nothing was sent: the
  *  row is gone, its claim already exists (pushed before, or another
- *  instance won), or it is an auto award in a paused season. */
+ *  instance won), the season is a TestFill season (any award), or it is an
+ *  auto award in a paused season. */
 export async function pushBadgeAward(
   db: FantasyDb, pusher: FantasyPusher, args: PushBadgeArgs,
 ): Promise<{ sent: number } | null> {
@@ -88,6 +99,12 @@ export async function pushBadgeAward(
 
   const row = await db.read(`${root}/Badges/${uid}/${awardId}`);
   if (!isPlainMap(row)) return null; // removed before we ran
+
+  if (await isTestFillSeason(db, root)) {
+    log.info(TEST_FILL_STAND_DOWN, { ...ctx, job: 'badgePush' });
+    await db.writeIfAbsent(claimPath, { At: nowMs, Skipped: 'testfill' });
+    return null;
+  }
 
   if (row['Source'] !== 'manual' &&
     lockOverrideOf(await db.read(`${root}/Config`), nowMs) !== 'auto') {

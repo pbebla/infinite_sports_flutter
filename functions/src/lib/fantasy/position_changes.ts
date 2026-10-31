@@ -49,7 +49,8 @@ import { currentGameweek, deriveGameweeks } from './gameweeks';
 import type { FantasyLogger } from './orchestration';
 import {
   childEntries, dateKeysOf, FantasyDb, fantasyRoot, isPlainMap,
-  lockOverrideOf, markServerSquadWrite, toIntLoose,
+  isTestFillSeason, lockOverrideOf, markServerSquadWrite,
+  TEST_FILL_STAND_DOWN, toIntLoose,
 } from './orchestration_db';
 import {
   FantasyPusher, FantasyUserPush, fantasyPushData, formatDeadline,
@@ -286,12 +287,17 @@ export interface PositionWriteArgs {
 
 /** The Players/<name>/position trigger entry. Creation, deletion, junk and
  *  no-op writes change nothing; a frozen machine (lockOverride not 'auto')
- *  stands down like every other fantasy job. Open window: applied to the
- *  holders now. Locked: recorded in PendingPositionChanges for the reopen
- *  sweep. Returns what happened, for the caller's log/tests. */
+ *  stands down like every other fantasy job, and so does a TestFill season
+ *  (orchestration_db.ts TEST_FILL_NODE, audit I5 follow-up) even under
+ *  'auto' — its squads are a replayed fake season holding the real
+ *  managers' squads too, so a relabel/alert/push there would reach a real
+ *  manager from fake data ('testFill': nothing written, nothing pushed).
+ *  Open window: applied to the holders now. Locked: recorded in
+ *  PendingPositionChanges for the reopen sweep. Returns what happened, for
+ *  the caller's log/tests. */
 export async function handlePositionWrite(
   db: FantasyDb, args: PositionWriteArgs,
-): Promise<'ignored' | 'frozen' | 'applied' | 'deferred'> {
+): Promise<'ignored' | 'frozen' | 'testFill' | 'applied' | 'deferred'> {
   const { sport, season, name } = args;
   const log = args.log ?? silent;
   const from = positionOrNull(args.before);
@@ -305,6 +311,10 @@ export async function handlePositionWrite(
   if (lockOverrideOf(configNode, args.nowUtc.getTime()) !== 'auto') {
     log.info('fantasy positions: lockOverride frozen — standing down', ctx);
     return 'frozen';
+  }
+  if (await isTestFillSeason(db, root)) {
+    log.info(TEST_FILL_STAND_DOWN, { ...ctx, job: 'position' });
+    return 'testFill';
   }
   const cfg = configFromMap(configNode);
   const gwState = await db.read(`${root}/GwState`);
