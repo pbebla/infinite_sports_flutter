@@ -11,18 +11,23 @@
 // place is scrolled away and released when it scrolls into view; the
 // Gameweek scope's week chips (1..N from the schedule) with per-week empty
 // copy; the friendly empty states; row taps opening the squad viewer (via the
-// builder seam); and 360 px long names + segment labels fitting in light AND
-// dark.
+// builder seam); 360 px long names + segment labels fitting in light AND
+// dark; and (badges, spec 2026-10-30 §5) the badge-count chip beside the
+// manager name on Overall + Gameweek rows — its feed joins the reveal, 0 shows
+// nothing, a failing feed never holds the board, and it wraps with the
+// climber/drop badge at 360 px.
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/badge_shelf.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
@@ -94,6 +99,7 @@ void main() {
     Brightness brightness = Brightness.light,
     String? fontFamily,
     SharePng? shareImage,
+    Stream<Map<String, List<FantasyBadgeAward>>>? badgesStates,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -124,6 +130,9 @@ void main() {
           selfUidOverride: selfUid,
           onOpenPlayer: onOpenPlayer,
           shareImage: shareImage,
+          // Default: nobody has a badge, answered at once.
+          badgesStates: badgesStates ??
+              Stream<Map<String, List<FantasyBadgeAward>>>.value(const {}),
           squadViewerBuilder: (row) {
             openedRows.add(row);
             return Scaffold(
@@ -1465,6 +1474,168 @@ void main() {
           find.text('Average 24 pts · Highest 30 (2 managers) · You 12'),
           findsOneWidget);
     });
+  });
+
+  group('badges (spec 2026-10-30 §5) — the count chip', () {
+    List<FantasyBadgeAward> n(String uid, int count) => [
+          for (var i = 1; i <= count; i++)
+            FantasyBadgeAward(
+                id: 'captainGenius_gw$i', badgeId: 'captainGenius', gw: i),
+        ];
+    final data = leaderboardsFromNode({
+      'Overall': {
+        'u1': {'points': 50, 'rank': 1, 'movement': 3},
+        'u2': {'points': 40, 'rank': 2},
+        'me': {'points': 30, 'rank': 3, 'movement': -2},
+      },
+      'Gameweek': {
+        '1': {
+          'u1': {'points': 10, 'rank': 1},
+          'u2': {'points': 8, 'rank': 2},
+          'me': {'points': 6, 'rank': 3},
+        },
+      },
+    });
+    final names = {
+      'u1': manager('Top Cats'),
+      'u2': manager('Bench Warmers'),
+      'me': manager('My Team'),
+    };
+
+    testWidgets('military_tech + N beside the name on Overall AND Gameweek; '
+        'nothing for a manager with none', (tester) async {
+      await pumpTab(tester,
+          // Wide enough that name + chip share a line in the test font.
+          size: const Size(800, 760),
+          badgesStates: Stream.value({'u1': n('u1', 3), 'me': n('me', 1)}));
+      await emitAll(tester, data: data, names: names);
+
+      Finder chip(String uid) => byKey('badge_count_$uid');
+      expect(chip('u1'), findsOneWidget);
+      expect(chip('me'), findsWidgets); // natural (+ maybe the pinned copy)
+      expect(chip('u2'), findsNothing);
+      expect(
+          find.descendant(of: chip('u1'), matching: find.text('3')),
+          findsOneWidget);
+      expect(
+          tester
+              .widget<Icon>(find.descendant(
+                  of: chip('u1'), matching: find.byType(Icon)))
+              .icon,
+          Icons.military_tech);
+      expect(find.byTooltip('3 badges'), findsOneWidget);
+      // Beside the manager name: same line, to its right.
+      final name = tester.getRect(byKey('leaderboard_name_u1'));
+      final count = tester.getRect(chip('u1'));
+      expect(count.left, greaterThanOrEqualTo(name.right - 0.5));
+      expect(count.center.dy, inInclusiveRange(name.top, name.bottom));
+
+      await pickScope(tester, 'Gameweek');
+      expect(chip('u1'), findsOneWidget);
+      expect(chip('u2'), findsNothing);
+      expect(
+          find.descendant(of: chip('u1'), matching: find.text('3')),
+          findsOneWidget);
+    });
+
+    testWidgets('the badges feed joins the single reveal; live updates '
+        're-count', (tester) async {
+      final badges = StreamController<Map<String, List<FantasyBadgeAward>>>();
+      addTearDown(badges.close);
+      await pumpTab(tester, badgesStates: badges.stream);
+      boards.add(data);
+      managers.add(names);
+      dreams.add(const {});
+      await tester.pump();
+      await tester.pump();
+      expect(byKey('leaderboards_skeleton'), findsOneWidget);
+
+      badges.add(const {});
+      await tester.pumpAndSettle();
+      expect(byKey('leaderboards_ready'), findsOneWidget);
+      expect(byKey('badge_count_u1'), findsNothing);
+
+      badges.add({'u2': n('u2', 2)});
+      await tester.pumpAndSettle();
+      expect(
+          find.descendant(
+              of: byKey('badge_count_u2'), matching: find.text('2')),
+          findsOneWidget);
+    });
+
+    testWidgets('a failing badges feed never holds the board (no chips)',
+        (tester) async {
+      await pumpTab(tester, badgesStates: Stream.error(StateError('denied')));
+      await emitAll(tester, data: data, names: names);
+      expect(byKey('leaderboards_ready'), findsOneWidget);
+      expect(byKey('leaderboard_row_u1'), findsOneWidget);
+      expect(byKey('badge_count_u1'), findsNothing);
+    });
+
+    testWidgets('a mini-league style list (no counts passed) shows no chips',
+        (tester) async {
+      tester.view.physicalSize = const Size(420, 760);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: RankedLeaderboardList(
+            rows: composeLeaderboardRows(
+              entries: data.overall,
+              managers: names,
+              profiles: const {},
+              selfUid: 'me',
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(byKey('leaderboard_row_u1'), findsOneWidget);
+      expect(find.byType(BadgeCountChip), findsNothing);
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('360 px: a long name + count chip + climber badge wrap, '
+          'never overflow — $brightness', (tester) async {
+        const longTeam =
+            'The Unbelievably Long Team Name Football Club Of Doom';
+        await pumpTab(
+          tester,
+          size: const Size(360, 760),
+          brightness: brightness,
+          profiles: {
+            'u1': const PublicProfile(
+                uid: 'u1',
+                firstName: 'Maximiliano',
+                lastName: 'Bartholomew Featherstonehaugh-Smythe'),
+          },
+          badgesStates: Stream.value({'u1': n('u1', 128), 'me': n('me', 7)}),
+        );
+        await emitAll(tester,
+            data: data,
+            names: {'u1': manager(longTeam), 'me': manager(longTeam)});
+        expect(tester.takeException(), isNull);
+        expect(byKey('climber_badge_u1'), findsOneWidget);
+        for (final key in [
+          'badge_count_u1',
+          'climber_badge_u1',
+          'leaderboard_name_u1',
+          'leaderboard_row_u1',
+        ]) {
+          final r = tester.getRect(byKey(key));
+          expect(r.left, greaterThanOrEqualTo(0), reason: key);
+          expect(r.right, lessThanOrEqualTo(360), reason: key);
+        }
+        final name = tester.widget<Text>(byKey('leaderboard_name_u1'));
+        expect(name.overflow, isNot(TextOverflow.ellipsis));
+        expect(name.maxLines, isNull);
+
+        await pickScope(tester, 'Gameweek');
+        expect(tester.takeException(), isNull);
+        final r = tester.getRect(byKey('badge_count_u1'));
+        expect(r.right, lessThanOrEqualTo(360));
+      });
+    }
   });
 
   group('extras at 360 px — wrap, never overflow (light + dark)', () {

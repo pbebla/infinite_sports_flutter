@@ -5,9 +5,12 @@
 // isn't there, which is the anti-copying rule enforced by data, not UI), and
 // earlier weeks from `History`, browsable forever via the week chips.
 // Nothing published yet → "Picks are revealed when the gameweek locks."
+// Badges (spec 2026-10-30 §5): the manager's badge shelf sits at the top
+// (also above the reveal-at-lock message); nothing earned = no shelf.
 //
 // House rules: streams only; single fade reveal (skeleton until every stream
-// has emitted once); theme-safe court (FantasyCourtView, onSlotTap null = no
+// — the badge feeds included; a failing badge feed counts as "none" — has
+// emitted once); theme-safe court (FantasyCourtView, onSlotTap null = no
 // editing; a chip tap opens that player's profile — round 3); captain/vice
 // armbands shown; names wrap; scrolling clears the glass navbar; initials
 // avatar fallback via the court's chips.
@@ -15,11 +18,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/badge_shelf.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
@@ -43,6 +48,10 @@ class ManagerSquadViewerPage extends StatefulWidget {
     this.historyStates,
     this.nowUtc,
     this.onOpenPlayer,
+    this.badgeStates,
+    this.badgeCatalogStates,
+    this.initialBadges,
+    this.initialBadgeCatalog,
   });
 
   final String sport;
@@ -76,6 +85,17 @@ class ManagerSquadViewerPage extends StatefulWidget {
   /// itself stays read-only. null = chips inert.
   final void Function(String playerName)? onOpenPlayer;
 
+  /// Badges (spec 2026-10-30 §5) — null = the real
+  /// `FantasyService.watchBadgesFor(uid)` / `watchBadgeCatalog()` feeds.
+  final Stream<List<FantasyBadgeAward>>? badgeStates;
+  final Stream<FantasyBadgeCatalog>? badgeCatalogStates;
+
+  /// What the opener already holds (the profile tab's source, the
+  /// leaderboard's season badges): the shelf needs no first emission when
+  /// both are given; the live feeds still update it.
+  final List<FantasyBadgeAward>? initialBadges;
+  final FantasyBadgeCatalog? initialBadgeCatalog;
+
   @override
   State<ManagerSquadViewerPage> createState() => _ManagerSquadViewerPageState();
 }
@@ -94,6 +114,13 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
   StreamSubscription<Map<int, FantasySquad>>? _publishedSub;
   StreamSubscription<Map<int, FantasySquad>>? _historySub;
   StreamSubscription<FantasySquad?>? _liveSub;
+
+  /// This manager's awards + the catalog; null until loaded (a failing feed
+  /// loads as "none", never an eternal skeleton).
+  List<FantasyBadgeAward>? _badges;
+  FantasyBadgeCatalog? _badgeCatalog;
+  StreamSubscription<List<FantasyBadgeAward>>? _badgesSub;
+  StreamSubscription<FantasyBadgeCatalog>? _badgeCatalogSub;
 
   DateTime get _now => (widget.nowUtc ?? () => DateTime.now().toUtc())();
 
@@ -129,6 +156,47 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
         _liveLoaded = true;
       }
     }
+    _badges = widget.initialBadges;
+    _badgeCatalog = widget.initialBadgeCatalog;
+    _badgesSub = _listenSoft<List<FantasyBadgeAward>>(
+      () =>
+          widget.badgeStates ??
+          FantasyService.watchBadgesFor(
+              widget.sport, widget.season, widget.uid),
+      (b) => _badges = b,
+      () => _badges ??= const [],
+      'badges',
+    );
+    _badgeCatalogSub = _listenSoft<FantasyBadgeCatalog>(
+      () => widget.badgeCatalogStates ?? FantasyService.watchBadgeCatalog(),
+      (c) => _badgeCatalog = c,
+      () => _badgeCatalog ??= badgeCatalogFromNode(null),
+      'badge catalog',
+    );
+  }
+
+  /// A badge feed that cannot be created or errors degrades to [onFail]
+  /// ("nothing earned" / the starter catalog) — logged, never a skeleton.
+  StreamSubscription<T>? _listenSoft<T>(
+    Stream<T> Function() make,
+    void Function(T value) onData,
+    void Function() onFail,
+    String label,
+  ) {
+    void fail(Object e) {
+      debugPrint('ManagerSquadViewerPage: $label feed failed: $e');
+      if (mounted) setState(onFail);
+    }
+
+    try {
+      return make().listen((v) {
+        if (mounted) setState(() => onData(v));
+      }, onError: fail);
+    } catch (e) {
+      debugPrint('ManagerSquadViewerPage: $label feed failed: $e');
+      onFail();
+      return null;
+    }
   }
 
   @override
@@ -136,13 +204,48 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
     _publishedSub?.cancel();
     _historySub?.cancel();
     _liveSub?.cancel();
+    _badgesSub?.cancel();
+    _badgeCatalogSub?.cancel();
     super.dispose();
   }
 
   bool get _loading =>
       _published == null ||
       _history == null ||
-      (widget.isSelf && !_liveLoaded);
+      (widget.isSelf && !_liveLoaded) ||
+      _badges == null ||
+      _badgeCatalog == null;
+
+  /// The badge shelf (with its label) for the top of the page; null when
+  /// nothing is earned.
+  Widget? _badgeSection(BuildContext context) {
+    final badges = _badges ?? const <FantasyBadgeAward>[];
+    if (badges.isEmpty) return null;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Badges',
+            key: const ValueKey('viewer_badges_label'),
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.8,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 6),
+          BadgeShelf(
+            awards: badges,
+            catalog: _badgeCatalog ?? const {},
+            season: widget.season,
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -170,14 +273,26 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
     final weeks =
         mergeManagerWeeks(history: _history!, published: _published!);
     final sortedWeeks = weeks.keys.toList()..sort();
+    final badgeSection = _badgeSection(context);
 
     // Nothing browsable for another manager = their current week hasn't
     // locked yet (spec §9's anti-copying, enforced by the data itself).
+    // Badges are public whenever earned: the shelf stays above the message.
     if (!widget.isSelf && sortedWeeks.isEmpty) {
-      return const _ViewerMessage(
+      const message = _ViewerMessage(
         key: ValueKey('viewer_unrevealed'),
         icon: Icons.lock_clock,
         message: 'Picks are revealed when the gameweek locks.',
+      );
+      if (badgeSection == null) return message;
+      return SingleChildScrollView(
+        key: const ValueKey('viewer_unrevealed_scroll'),
+        padding: EdgeInsets.fromLTRB(
+            12, 12, 12, 24 + MediaQuery.paddingOf(context).bottom),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [badgeSection, message],
+        ),
       );
     }
 
@@ -218,6 +333,8 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // The manager's badges first (spec 2026-10-30 §5).
+          if (badgeSection != null) badgeSection,
           // Week browser (spec §9: full history, forever). Self gets the
           // extra "Now" chip for the live squad.
           if (widget.isSelf || sortedWeeks.isNotEmpty)

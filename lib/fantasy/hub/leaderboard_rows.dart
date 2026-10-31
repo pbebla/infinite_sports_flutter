@@ -18,6 +18,11 @@
 // manager's row — natural AND pinned copy — expand into a panel ("Your rank
 // this season") instead of opening the squad viewer (Overall).
 //
+// Badges (spec 2026-10-30 §5), opt-in like the extras:
+// [RankedLeaderboardList.badgeCounts] puts the small military_tech + N chip
+// beside a manager's name (Overall and Gameweek — never the mini-league
+// lists); it wraps with the climber/drop badge after a long name.
+//
 // House rules: theme-safe both modes (fantasy accent = gold in dark, primary
 // red in light; movement up = the pitch-green family, down = error); manager
 // names WRAP and are never underlined or ellipsized; list clears the glass
@@ -26,6 +31,8 @@
 // zero under reduced motion.
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/badge_shelf.dart'
+    show BadgeCountChip;
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
@@ -114,6 +121,7 @@ class LeaderboardRowTile extends StatelessWidget {
     this.expanded,
     this.footer,
     this.reserveChevron = false,
+    this.badgeCount = 0,
   });
 
   final LeaderboardRowData row;
@@ -122,6 +130,10 @@ class LeaderboardRowTile extends StatelessWidget {
 
   /// The week's biggest climber / faller badge beside the name (Overall).
   final WeeklyMover? mover;
+
+  /// The manager's achievement-badge count, shown as a chip beside the name
+  /// when > 0 (Overall + Gameweek).
+  final int badgeCount;
 
   /// Expandable row (the own row on Overall): null = not expandable (no
   /// chevron); false/true = the folded/unfolded chevron after the points.
@@ -199,23 +211,29 @@ class LeaderboardRowTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (mover == null)
+                if (mover == null && badgeCount <= 0)
                   nameText
                 else
-                  // The badge follows the name and drops to its own line
-                  // when a long name fills the cell (never squeezes it).
+                  // The badges follow the name and drop to their own line
+                  // when a long name fills the cell (never squeeze it).
                   Wrap(
                     spacing: 6,
                     runSpacing: 2,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       nameText,
-                      LeaderboardMoverBadge(
-                        key: ValueKey(mover.kind == MoverKind.climber
-                            ? 'climber_badge_${row.uid}'
-                            : 'faller_badge_${row.uid}'),
-                        mover: mover,
-                      ),
+                      if (badgeCount > 0)
+                        BadgeCountChip(
+                          key: ValueKey('badge_count_${row.uid}'),
+                          count: badgeCount,
+                        ),
+                      if (mover != null)
+                        LeaderboardMoverBadge(
+                          key: ValueKey(mover.kind == MoverKind.climber
+                              ? 'climber_badge_${row.uid}'
+                              : 'faller_badge_${row.uid}'),
+                          mover: mover,
+                        ),
                     ],
                   ),
                 if (secondary != null)
@@ -379,6 +397,7 @@ class RankedLeaderboardList extends StatefulWidget {
     this.header,
     this.movers = const {},
     this.selfPanelBuilder,
+    this.badgeCounts = const {},
   });
 
   final List<LeaderboardRowData> rows;
@@ -390,6 +409,9 @@ class RankedLeaderboardList extends StatefulWidget {
 
   /// uid → the week's biggest climber / faller badge (Overall only).
   final Map<String, WeeklyMover> movers;
+
+  /// uid → achievement-badge count (Overall + Gameweek; empty elsewhere).
+  final Map<String, int> badgeCounts;
 
   /// When set (Overall), tapping the signed-in manager's row — natural or
   /// pinned — folds this panel open under it instead of calling [onRowTap];
@@ -448,6 +470,7 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
         showMovement: widget.showMovement,
         onTap: widget.onRowTap,
         mover: widget.movers[row.uid],
+        badgeCount: widget.badgeCounts[row.uid] ?? 0,
         reserveChevron: _hasExpandableOwnRow,
       );
     }
@@ -461,6 +484,7 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
       showMovement: widget.showMovement,
       onTap: (_) => _toggleSelfPanel(),
       mover: widget.movers[row.uid],
+      badgeCount: widget.badgeCounts[row.uid] ?? 0,
       expanded: _selfExpanded,
       footer: reduceMotion
           ? panel

@@ -620,6 +620,7 @@ class _HubBody extends StatelessWidget {
                       leaderboardsFeeds?.viewerPublishedStates,
                   viewerHistoryStates: leaderboardsFeeds?.viewerHistoryStates,
                   shareImage: leaderboardsFeeds?.shareImage,
+                  badgesStates: leaderboardsFeeds?.badgesStates,
                   onOpenPlayer: onOpenPlayer,
                 ),
                 // Published league news (P3d) with tagged-player cards and

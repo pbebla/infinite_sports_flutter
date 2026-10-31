@@ -17,6 +17,11 @@
 // rank this season" panel each render a branded story image
 // (fantasy_share.dart) and open the share sheet.
 //
+// Badges (spec 2026-10-30 §5): the season's whole `Badges` node feeds a
+// small military_tech + N chip beside each manager's name on Overall and
+// Gameweek; it joins the reveal gate (a failing feed = no chips, never a
+// held board) and seeds the squad viewer's shelf.
+//
 // My Leagues (the mini-league create/join/share surface) is BUILT but hidden
 // behind [kShowMiniLeagues]: no segment, no MiniLeagues subscription, and it
 // no longer gates the reveal. Flip the constant to bring it back.
@@ -35,6 +40,7 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
@@ -85,6 +91,7 @@ class FantasyLeaderboardsFeeds {
     this.viewerPublishedStates,
     this.viewerHistoryStates,
     this.shareImage,
+    this.badgesStates,
   });
 
   final Stream<FantasyLeaderboards>? leaderboardsStates;
@@ -93,6 +100,9 @@ class FantasyLeaderboardsFeeds {
   final Stream<Map<int, FantasyDreamTeam>>? dreamTeamsStates;
   final Future<Map<String, PublicProfile>> Function()? loadProfiles;
   final String? selfUidOverride;
+
+  /// The season's `Badges` node (uid → awards) — the rows' badge counts.
+  final Stream<Map<String, List<FantasyBadgeAward>>>? badgesStates;
 
   /// The squad viewer's PublishedPicks / History feeds (the tab's default
   /// viewer builder hands them to ManagerSquadViewerPage).
@@ -131,6 +141,7 @@ class FantasyLeaderboardsTab extends StatefulWidget {
     this.viewerPublishedStates,
     this.viewerHistoryStates,
     this.shareImage,
+    this.badgesStates,
   });
 
   final String sport;
@@ -176,6 +187,10 @@ class FantasyLeaderboardsTab extends StatefulWidget {
   /// rendered PNG + caption instead of the system share sheet.
   final SharePng? shareImage;
 
+  /// Test seam: the season's badges (uid → awards); null =
+  /// `FantasyService.watchBadges`.
+  final Stream<Map<String, List<FantasyBadgeAward>>>? badgesStates;
+
   /// Session-persistent scope + gameweek selection (the market-sort
   /// precedent): swiping away and back lands where the manager left off.
   static LeaderboardScope sessionScope = LeaderboardScope.overall;
@@ -195,6 +210,11 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
   List<FantasyMiniLeague>? _leagues;
   Map<String, PublicProfile>? _profiles;
   Map<int, FantasyDreamTeam>? _dreamTeams;
+
+  /// uid → achievement badges this season (the rows' count chips). A failing
+  /// feed loads as "nobody has any" — never a held board.
+  Map<String, List<FantasyBadgeAward>>? _badges;
+  StreamSubscription<Map<String, List<FantasyBadgeAward>>>? _badgesSub;
 
   StreamSubscription<FantasyLeaderboards>? _boardsSub;
   StreamSubscription<Map<String, FantasyManager>>? _managersSub;
@@ -238,6 +258,19 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
         .listen((teams) {
       if (mounted) setState(() => _dreamTeams = teams);
     });
+    try {
+      _badgesSub = (widget.badgesStates ??
+              FantasyService.watchBadges(widget.sport, widget.season))
+          .listen((badges) {
+        if (mounted) setState(() => _badges = badges);
+      }, onError: (Object e) {
+        debugPrint('FantasyLeaderboardsTab: badges feed failed: $e');
+        if (mounted) setState(() => _badges ??= const {});
+      });
+    } catch (e) {
+      debugPrint('FantasyLeaderboardsTab: badges feed failed: $e');
+      _badges = const {};
+    }
     _loadProfiles();
   }
 
@@ -263,6 +296,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
     _managersSub?.cancel();
     _leaguesSub?.cancel();
     _dreamTeamsSub?.cancel();
+    _badgesSub?.cancel();
     super.dispose();
   }
 
@@ -271,7 +305,13 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
       _managers != null &&
       (!kShowMiniLeagues || _leagues != null) &&
       _profiles != null &&
-      _dreamTeams != null;
+      _dreamTeams != null &&
+      _badges != null;
+
+  /// uid → badge count for the Overall / Gameweek rows.
+  Map<String, int> get _badgeCounts => {
+        for (final e in (_badges ?? const {}).entries) e.key: e.value.length,
+      };
 
   void _openManager(LeaderboardRowData row) {
     final builder = widget.squadViewerBuilder ??
@@ -290,6 +330,9 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
               historyStates: widget.viewerHistoryStates,
               nowUtc: widget.nowUtc,
               onOpenPlayer: widget.onOpenPlayer,
+              // The season's badges are already here: the shelf paints
+              // without waiting on its own first emission.
+              initialBadges: _badges?[row.uid] ?? const [],
             );
     Navigator.push(
         context, MaterialPageRoute(builder: (_) => builder(row)));
@@ -457,6 +500,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
       showMovement: true,
       onRowTap: _openManager,
       movers: weeklyMovers(rows),
+      badgeCounts: _badgeCounts,
       // Your own row folds open your season's rank line (the viewer stays
       // one tap away inside the panel).
       selfPanelBuilder: (self) {
@@ -554,6 +598,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
       rows: rows,
       showMovement: false,
       onRowTap: _openManager,
+      badgeCounts: _badgeCounts,
     );
   }
 

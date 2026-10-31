@@ -3,13 +3,17 @@
 // earlier weeks from History (published wins on overlap), browsable via the
 // week chips; nothing published yet → "Picks are revealed when the gameweek
 // locks."; the court is READ-ONLY (no slot edits) with the captain armband
-// shown; the viewer's own squad renders live under the "Now" chip; and
-// (round 3) a chip tap opens that player's profile via the hub callback.
+// shown; the viewer's own squad renders live under the "Now" chip; (round 3)
+// a chip tap opens that player's profile via the hub callback; and
+// (badges, spec 2026-10-30 §5) the manager's badge shelf sits at the top —
+// its feeds join the single reveal, nothing earned shows no shelf, and a
+// failing badge feed never holds the skeleton.
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
@@ -63,6 +67,10 @@ void main() {
     bool isSelf = false,
     FantasySquad? initialSquad,
     void Function(String playerName)? onOpenPlayer,
+    Stream<List<FantasyBadgeAward>>? badgeStates,
+    Stream<FantasyBadgeCatalog>? badgeCatalogStates,
+    List<FantasyBadgeAward>? initialBadges,
+    FantasyBadgeCatalog? initialBadgeCatalog,
   }) async {
     tester.view.physicalSize = const Size(420, 1200);
     tester.view.devicePixelRatio = 1.0;
@@ -91,9 +99,124 @@ void main() {
         historyStates: history.stream,
         nowUtc: testNow,
         onOpenPlayer: onOpenPlayer,
+        // Default: nothing earned, answered at once (a cache-seeded feed).
+        badgeStates:
+            badgeStates ?? Stream<List<FantasyBadgeAward>>.value(const []),
+        badgeCatalogStates: badgeCatalogStates ??
+            Stream<FantasyBadgeCatalog>.value(badgeCatalogFromNode(null)),
+        initialBadges: initialBadges,
+        initialBadgeCatalog: initialBadgeCatalog,
       ),
     ));
   }
+
+  const twoBadges = [
+    FantasyBadgeAward(id: 'captainGenius_gw1', badgeId: 'captainGenius', gw: 1),
+    FantasyBadgeAward(id: 'captainGenius_gw2', badgeId: 'captainGenius', gw: 2),
+  ];
+
+  group('badges (spec 2026-10-30 §5)', () {
+    testWidgets('the shelf sits at the TOP (above the week chips); its feeds '
+        'join the single reveal', (tester) async {
+      final badges = StreamController<List<FantasyBadgeAward>>();
+      final catalog = StreamController<FantasyBadgeCatalog>();
+      addTearDown(badges.close);
+      addTearDown(catalog.close);
+      await pumpViewer(tester,
+          badgeStates: badges.stream, badgeCatalogStates: catalog.stream);
+      published.add({2: squad('Pub Keeper')});
+      history.add({1: squad('Old Keeper')});
+      await tester.pump();
+      // Picks landed, badges not yet: still the skeleton (no piecemeal pop).
+      expect(find.byKey(const ValueKey('viewer_skeleton')), findsOneWidget);
+      badges.add(twoBadges);
+      await tester.pump();
+      expect(find.byKey(const ValueKey('viewer_skeleton')), findsOneWidget);
+      catalog.add(badgeCatalogFromNode(null));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('viewer_skeleton')), findsNothing);
+
+      expect(find.byKey(const ValueKey('badge_shelf')), findsOneWidget);
+      expect(find.text('Captain Genius'), findsOneWidget);
+      expect(find.text('×2'), findsOneWidget);
+      expect(
+          tester.getRect(find.byKey(const ValueKey('badge_shelf'))).bottom,
+          lessThanOrEqualTo(tester
+              .getRect(find.byKey(const ValueKey('viewer_week_1')))
+              .top));
+
+      // Live: a new award re-renders the shelf.
+      badges.add([
+        ...twoBadges,
+        const FantasyBadgeAward(
+            id: 'champion_season', badgeId: 'champion', atMs: 9),
+      ]);
+      await tester.pumpAndSettle();
+      expect(find.text('Champion'), findsOneWidget);
+
+      // A chip opens its sheet.
+      await tester.tap(find.byKey(const ValueKey('badge_chip_captainGenius')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('badge_sheet')), findsOneWidget);
+      expect(find.text('GW1, GW2'), findsOneWidget);
+    });
+
+    testWidgets('nothing earned → no shelf at all', (tester) async {
+      await pumpViewer(tester);
+      published.add({2: squad('Pub Keeper')});
+      history.add(const {});
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('viewer_content')), findsOneWidget);
+      expect(find.byKey(const ValueKey('badge_shelf')), findsNothing);
+      expect(find.byKey(const ValueKey('viewer_badges_label')), findsNothing);
+    });
+
+    testWidgets('picks not revealed yet: the shelf still shows above the '
+        'message', (tester) async {
+      await pumpViewer(tester,
+          badgeStates: Stream.value(twoBadges.take(1).toList()));
+      published.add(const {});
+      history.add(const {});
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('viewer_unrevealed')), findsOneWidget);
+      expect(find.byKey(const ValueKey('badge_shelf')), findsOneWidget);
+      expect(
+          tester.getRect(find.byKey(const ValueKey('badge_shelf'))).bottom,
+          lessThan(tester
+              .getRect(find.byKey(const ValueKey('viewer_unrevealed')))
+              .top));
+    });
+
+    testWidgets('failing badge feeds never hold the skeleton (no shelf)',
+        (tester) async {
+      await pumpViewer(
+        tester,
+        badgeStates: Stream.error(StateError('denied')),
+        badgeCatalogStates: Stream.error(StateError('offline')),
+      );
+      published.add({2: squad('Pub Keeper')});
+      history.add(const {});
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('viewer_content')), findsOneWidget);
+      expect(find.byKey(const ValueKey('badge_shelf')), findsNothing);
+    });
+
+    testWidgets('seeded badges (from the opener) need no feed to reveal',
+        (tester) async {
+      await pumpViewer(
+        tester,
+        badgeStates: const Stream.empty(),
+        badgeCatalogStates: const Stream.empty(),
+        initialBadges: twoBadges,
+        initialBadgeCatalog: badgeCatalogFromNode(null),
+      );
+      published.add({2: squad('Pub Keeper')});
+      history.add(const {});
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('badge_shelf')), findsOneWidget);
+      expect(find.text('×2'), findsOneWidget);
+    });
+  });
 
   testWidgets('skeleton until both streams land; title is the TEAM name',
       (tester) async {
