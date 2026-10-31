@@ -1169,6 +1169,54 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('review fix: the chevron never pushes YOUR points out of the '
+        'points column — every Overall row reserves its width (and the "Pts" '
+        'header sits over it)', (tester) async {
+      await pumpTab(tester, size: const Size(420, 1000));
+      await emitAll(
+        tester,
+        data: overallWith({
+          'me': {'1': 3, '2': 2},
+        }),
+        names: fourNames,
+      );
+      // Only YOUR row carries the chevron.
+      expect(byKey('own_row_chevron_me'), findsOneWidget);
+      expect(byKey('own_row_chevron_u1'), findsNothing);
+
+      final mine = tester.getTopRight(find.text('80 pts')).dx;
+      for (final other in ['90 pts', '70 pts', '60 pts']) {
+        expect(tester.getTopRight(find.text(other)).dx, mine, reason: other);
+      }
+      expect(tester.getTopRight(find.text('Pts')).dx, mine);
+
+      // Still lined up with the panel open (the chevron flips, same width).
+      await tester.tap(byKey('leaderboard_row_me'));
+      await tester.pumpAndSettle();
+      expect(tester.getTopRight(find.text('80 pts')).dx, mine);
+      expect(tester.getTopRight(find.text('90 pts')).dx, mine);
+    });
+
+    testWidgets('review fix: the pinned copy of your row lines up too',
+        (tester) async {
+      await pumpTab(tester, selfUid: 'u18');
+      await emitAll(
+        tester,
+        data: leaderboardsFromNode({
+          'Overall': {
+            for (var i = 1; i <= 20; i++)
+              'u$i': {'points': 100 - i, 'rank': i},
+          },
+        }),
+        names: {for (var i = 1; i <= 20; i++) 'u$i': manager('Team $i')},
+      );
+      final pinned = byKey('pinned_own_row');
+      expect(pinned, findsOneWidget);
+      final pinnedPoints = tester.getTopRight(
+          find.descendant(of: pinned, matching: find.text('82 pts')));
+      expect(pinnedPoints.dx, tester.getTopRight(find.text('99 pts')).dx);
+    });
+
     test('chart geometry: rank 1 at the top, gameweeks left to right', () {
       final points = rankChartOffsets(
         [

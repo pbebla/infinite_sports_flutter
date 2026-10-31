@@ -37,6 +37,11 @@ const double _movementWidth = 36;
 const double _avatarSize = 38;
 const double _afterMovementGap = 6;
 const double _afterAvatarGap = 10;
+// The own row's expand chevron after the points. When a list has one, EVERY
+// row (and the "Pts" header) reserves this width so the points column lines
+// up (review fix).
+const double _chevronGap = 2;
+const double _chevronSize = 18;
 
 /// Movement arrow color for this theme: green up (pitch family — legitimate
 /// in both themes), error down, muted neutral.
@@ -108,6 +113,7 @@ class LeaderboardRowTile extends StatelessWidget {
     this.mover,
     this.expanded,
     this.footer,
+    this.reserveChevron = false,
   });
 
   final LeaderboardRowData row;
@@ -123,6 +129,10 @@ class LeaderboardRowTile extends StatelessWidget {
 
   /// Rendered under the row, inside its highlight (the own-row panel slot).
   final Widget? footer;
+
+  /// A non-expandable row in a list whose own row HAS the chevron: keep its
+  /// width empty after the points so every row's points line up.
+  final bool reserveChevron;
 
   @override
   Widget build(BuildContext context) {
@@ -235,21 +245,25 @@ class LeaderboardRowTile extends StatelessWidget {
             ),
           ),
           if (expanded != null) ...[
-            const SizedBox(width: 2),
+            const SizedBox(width: _chevronGap),
             Icon(
               expanded ? Icons.expand_less : Icons.expand_more,
               key: ValueKey('own_row_chevron_${row.uid}'),
-              size: 18,
+              size: _chevronSize,
               color: scheme.onSurfaceVariant,
               semanticLabel: expanded
                   ? 'Hide your rank this season'
                   : 'Show your rank this season',
             ),
-          ],
+          ] else if (reserveChevron)
+            const SizedBox(width: _chevronGap + _chevronSize),
         ],
       ),
     );
 
+    // Painted OVER the row (foregroundDecoration), never as a decoration: a
+    // decoration's border insets the content by its width, which nudged the
+    // own row's columns 1 px off everyone else's (review fix).
     final selfBorder = BoxDecoration(
       borderRadius: BorderRadius.circular(12),
       border: Border.all(color: accent.withValues(alpha: 0.65)),
@@ -262,7 +276,7 @@ class LeaderboardRowTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         onTap: onTap == null ? null : () => onTap!(row),
         child: row.isSelf
-            ? Container(decoration: selfBorder, child: content)
+            ? Container(foregroundDecoration: selfBorder, child: content)
             : content,
       );
     } else {
@@ -281,7 +295,7 @@ class LeaderboardRowTile extends StatelessWidget {
         ],
       );
       body = row.isSelf
-          ? Container(decoration: selfBorder, child: column)
+          ? Container(foregroundDecoration: selfBorder, child: column)
           : column;
     }
 
@@ -302,9 +316,15 @@ class LeaderboardRowTile extends StatelessWidget {
 /// The mockup's "# · Manager · Pts" header — same paddings and column widths
 /// as [LeaderboardRowTile] so the labels sit over their columns.
 class _LeaderboardColumnHeader extends StatelessWidget {
-  const _LeaderboardColumnHeader({required this.showMovement});
+  const _LeaderboardColumnHeader({
+    required this.showMovement,
+    this.reserveChevron = false,
+  });
 
   final bool showMovement;
+
+  /// Mirrors [LeaderboardRowTile.reserveChevron] so "Pts" sits over points.
+  final bool reserveChevron;
 
   @override
   Widget build(BuildContext context) {
@@ -331,6 +351,8 @@ class _LeaderboardColumnHeader extends StatelessWidget {
                   width: _afterMovementGap + _avatarSize + _afterAvatarGap),
               Expanded(child: Text('Manager', style: style)),
               Text('Pts', style: style),
+              if (reserveChevron)
+                const SizedBox(width: _chevronGap + _chevronSize),
             ],
           ),
         ),
@@ -412,6 +434,11 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
   /// A row tile with the opt-in extras: the mover badge, and for the own
   /// row (when [RankedLeaderboardList.selfPanelBuilder] is set) the
   /// tap-to-expand panel.
+  /// The own row expands (chevron after its points) — so every other row
+  /// and the column header reserve the chevron's width.
+  bool get _hasExpandableOwnRow =>
+      widget.selfPanelBuilder != null && widget.rows.any((r) => r.isSelf);
+
   Widget _tile(LeaderboardRowData row, {Key? key}) {
     final builder = row.isSelf ? widget.selfPanelBuilder : null;
     if (builder == null) {
@@ -421,6 +448,7 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
         showMovement: widget.showMovement,
         onTap: widget.onRowTap,
         mover: widget.movers[row.uid],
+        reserveChevron: _hasExpandableOwnRow,
       );
     }
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
@@ -504,7 +532,9 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
               }
               if (index == 0) {
                 return _LeaderboardColumnHeader(
-                    showMovement: widget.showMovement);
+                  showMovement: widget.showMovement,
+                  reserveChevron: _hasExpandableOwnRow,
+                );
               }
               index--;
               final row = rows[index];
