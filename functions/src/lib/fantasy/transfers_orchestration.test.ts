@@ -59,14 +59,14 @@ describe('recordSquadSave (squad-save trigger entry)', () => {
     });
   });
 
-  it('no-ops while locked, while frozen, and without a Config or GwState', async () => {
+  it("no-ops while locked, while frozen 'locked', and without a Config or GwState", async () => {
     const locked = new FakeDb(world2());
     locked.data.Fantasy.Futsal['15'].GwState.status = 'locked';
     await recordSquadSave(locked, saveArgs('churn'));
     expect(locked.writes).toEqual([]);
 
     const frozen = new FakeDb(world2());
-    frozen.data.Fantasy.Futsal['15'].Config.lockOverride = 'open';
+    frozen.data.Fantasy.Futsal['15'].Config.lockOverride = 'locked';
     await recordSquadSave(frozen, saveArgs('churn'));
     expect(frozen.writes).toEqual([]);
 
@@ -79,6 +79,75 @@ describe('recordSquadSave (squad-save trigger entry)', () => {
     delete noState.data.Fantasy.Futsal['15'].GwState;
     await recordSquadSave(noState, saveArgs('churn'));
     expect(noState.writes).toEqual([]);
+  });
+});
+
+// Audit I4: the owner's routine "Open for 24 h" (lockOverride 'open' with a
+// lockOverrideUntil auto-return) used to stand the counter down, so every
+// transfer made in the window was lost (the next lock charged a stale
+// UsedThisGw) and SavedGw stayed unstamped. Only 'locked' stands it down now.
+describe("recordSquadSave under a paused-Open window (audit I4)", () => {
+  // Saturday before the GW2 lock (GwState open on GW2).
+  const OPEN_NOW = new Date(Date.UTC(2026, 5, 27, 18));
+  const UNTIL = OPEN_NOW.getTime() + 24 * 3_600_000; // "Open for 24 h"
+  const at = (uid: string) => ({ ...saveArgs(uid), nowUtc: OPEN_NOW });
+
+  function paused(lockOverride: 'open' | 'locked'): FakeDb {
+    const db = new FakeDb(world2({ gw2Status: 1 })); // GW2 games live at lock
+    Object.assign(db.data.Fantasy.Futsal['15'].Config,
+      { lockOverride, lockOverrideUntil: UNTIL });
+    return db;
+  }
+
+  it("'open' with an auto-return: saves update UsedThisGw and stamp SavedGw (a recount)", async () => {
+    const db = paused('open');
+    const churn = db.data.Fantasy.Futsal['15'].Squads.churn;
+    churn.picks[0].playerId = 'Wes'; // Bo out
+    churn.picks[4].playerId = 'Alex'; // Ben out
+    await recordSquadSave(db, at('churn'));
+    expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
+      Free: 2, UsedThisGw: 2, SavedGw: 2,
+    });
+    // Undoing one in the window un-counts it, exactly as outside a pause.
+    churn.picks[0].playerId = 'Bo';
+    await recordSquadSave(db, at('churn'));
+    expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
+      Free: 2, UsedThisGw: 1, SavedGw: 2,
+    });
+    // A server write in the window recounts but never stamps SavedGw.
+    db.data.Fantasy.Futsal['15'].TransferState.churn.SavedGw = 1;
+    churn.ServerWriteAt = OPEN_NOW.getTime();
+    await recordSquadSave(db, at('churn'));
+    expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
+      Free: 2, UsedThisGw: 1, SavedGw: 1,
+    });
+  });
+
+  it("'locked' with an auto-return: saves are not counted (zero writes)", async () => {
+    const db = paused('locked');
+    const churn = db.data.Fantasy.Futsal['15'].Squads.churn;
+    churn.picks[0].playerId = 'Wes';
+    await recordSquadSave(db, at('churn'));
+    expect(db.writes).toEqual([]);
+  });
+
+  it('after the auto-return the lock charges the transfers made in the window', async () => {
+    const db = paused('open');
+    db.data.Fantasy.Futsal['15'].TransferState = {
+      churn: { Free: 1, UsedThisGw: 0, RolledGw: 1 },
+    };
+    const churn = db.data.Fantasy.Futsal['15'].Squads.churn;
+    churn.picks[0].playerId = 'Wes';
+    churn.picks[4].playerId = 'Alex';
+    await recordSquadSave(db, at('churn'));
+    // The window expires before the lock; the first sweep after it reverts
+    // to auto and snapshots: 2 used vs 1 free = one extra = 4 points.
+    await runLifecycleSweep(db, AFTER_LOCK2);
+    expect(db.data.Fantasy.Futsal['15'].Config.lockOverride).toBe('auto');
+    expect(await db.read(`${fRoot}/TransferCosts/2`)).toEqual({ churn: 4 });
+    expect(await db.read(`${fRoot}/TransferState/churn`)).toMatchObject({
+      Free: 1, UsedThisGw: 2, SavedGw: 2,
+    });
   });
 });
 

@@ -106,7 +106,9 @@
 //
 // Config.lockOverride: anything but absent/'auto' freezes the machine —
 // sweep, finalize and repricing all stand down for that season (the owner's
-// sandbox escape hatch; the H rehearsal flips a COPY season to 'auto').
+// sandbox escape hatch; the H rehearsal flips a COPY season to 'auto'). The
+// squad-save counter (recordSquadSave) is the one exception: it stands down
+// only for 'locked' and keeps counting under 'open' (audit I4).
 // An optional Config.lockOverrideUntil (epoch ms) bounds it: every check
 // reads the EFFECTIVE value at its job's now (lockOverrideOf), and the sweep
 // reverts an expired override to 'auto' in the DB (spec §2 auto-return) —
@@ -372,8 +374,17 @@ export interface SquadSaveArgs {
  *     or a mid-season joiner) records UsedThisGw 0 — the initial build is
  *     free — but still stamps SavedGw so the deadline reminder knows the
  *     manager acted this week. Recomputed (not incremented) on every save:
- *     undoing a transfer before the deadline un-counts it. Saves while
- *     locked/frozen and squad deletions are never counted.
+ *     undoing a transfer before the deadline un-counts it. Saves while the
+ *     gameweek is locked, under a 'locked' lockOverride, and squad
+ *     deletions are never counted.
+ *     PAUSED-OPEN WINDOW (audit I4, 2026-10-31): an EFFECTIVE 'open'
+ *     lockOverride (the owner's "Open for 24 h" with an auto-return) does
+ *     NOT stand this down — the sweep and the lock are paused, but managers
+ *     are trading, and the recount is pure (the lock is what charges, from
+ *     this ledger). Standing down here lost every transfer made in the
+ *     window (charged from a stale UsedThisGw at the next lock) and left
+ *     SavedGw unstamped (a wrong "untouched squad" reminder). Only 'locked'
+ *     (and a non-fantasy or TestFill season) stands it down.
  *     SERVER-ORIGINATED writes (the node carries SERVER_WRITE_KEY — chip
  *     switch-off, Free Hit restore, position re-labels, incl. this
  *     function's own) are recounted the same way but NEVER stamp SavedGw:
@@ -390,7 +401,9 @@ export async function recordSquadSave(
 
   const configNode = await db.read(`${root}/Config`);
   if (!isPlainMap(configNode)) return; // not fantasy-enabled: stay silent
-  if (lockOverrideOf(configNode, nowMs) !== 'auto') return; // frozen machine
+  // A 'locked' override freezes the market: nothing to count. An 'open' one
+  // (the owner's routine "Open for 24 h") keeps counting — see the doc.
+  if (lockOverrideOf(configNode, nowMs) === 'locked') return;
   if (await isTestFillSeason(db, root)) { // fake data: never recount it
     log.info(TEST_FILL_STAND_DOWN, { ...ctx, job: 'squadSave' });
     return;

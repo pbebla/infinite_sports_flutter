@@ -3,8 +3,9 @@
 // (epoch ms) is effective only while now < until. The 15-minute sweep reverts
 // an expired one in the DB (lockOverride 'auto', until removed, logged) and
 // runs the season normally in the SAME sweep; every other stand-down check
-// (squad-save counter, finalize, void re-settle, Monday reprice, position
-// trigger) reads the effective value at its own job's now. Built on the
+// (squad-save counter — 'locked' only since audit I4 —, finalize, void
+// re-settle, Monday reprice, position trigger) reads the effective value at
+// its own job's now. Built on the
 // two-gameweek world (GW1 finalized, GW2 open, lock 2026-06-28 22:00Z).
 
 import { describe, expect, it } from 'vitest';
@@ -184,8 +185,8 @@ describe('every other stand-down check reads the effective override at its own n
     expect(future.writes).toEqual([]);
   });
 
-  it('squad-save counter: expired counts the save, future stays silent', async () => {
-    const expired = overridden('open', OPEN_NOW.getTime() - 1);
+  it('squad-save counter: expired counts the save, a future LOCKED stays silent', async () => {
+    const expired = overridden('locked', OPEN_NOW.getTime() - 1);
     await recordSquadSave(expired, {
       sport: 'Futsal', season: '15', uid: 'churn', nowUtc: OPEN_NOW,
     });
@@ -193,11 +194,21 @@ describe('every other stand-down check reads the effective override at its own n
       Free: 2, UsedThisGw: 0, SavedGw: 2,
     });
 
-    const future = overridden('open', OPEN_NOW.getTime() + HOUR_MS);
+    const future = overridden('locked', OPEN_NOW.getTime() + HOUR_MS);
     await recordSquadSave(future, {
       sport: 'Futsal', season: '15', uid: 'churn', nowUtc: OPEN_NOW,
     });
     expect(future.writes).toEqual([]);
+  });
+
+  it('squad-save counter: a future OPEN override keeps counting (audit I4)', async () => {
+    const future = overridden('open', OPEN_NOW.getTime() + HOUR_MS);
+    await recordSquadSave(future, {
+      sport: 'Futsal', season: '15', uid: 'churn', nowUtc: OPEN_NOW,
+    });
+    expect(await future.read(`${F_ROOT}/TransferState/churn`)).toEqual({
+      Free: 2, UsedThisGw: 0, SavedGw: 2,
+    });
   });
 
   it('position trigger: expired applies the move, future is frozen', async () => {
