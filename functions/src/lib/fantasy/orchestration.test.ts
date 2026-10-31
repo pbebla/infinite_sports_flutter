@@ -435,6 +435,19 @@ describe('Monday repricing (Phase D)', () => {
     expect(db.snapshot()).toBe(before);
   });
 
+  it('a concurrent run that already claimed the week moves nothing (double-fire)', async () => {
+    // Cloud Scheduler can double-fire; a second run must see the first
+    // run's Repriced claim (even mid-flight, Pending:true) and stand down —
+    // prices move exactly once.
+    const db = repriceWorld();
+    await db.write(`${fRoot}/Repriced/1`, { At: NOW.getTime(), Pending: true });
+    await runMondayReprice(db, NOW);
+    expect(await db.read(`${fRoot}/Players/Bo/priceTenths`)).toBe(75); // untouched
+    expect(await db.read(`${fRoot}/PriceChanges/1`)).toBeNull();
+    expect(await db.read(`${fRoot}/Repriced/1`))
+      .toEqual({ At: NOW.getTime(), Pending: true }); // the claim is not ours to finish
+  });
+
   it('admin Manual flag stands the job down and marks the week handled', async () => {
     const db = repriceWorld();
     db.data.Fantasy.Futsal['15'].PriceChanges = { 1: { Manual: true } };

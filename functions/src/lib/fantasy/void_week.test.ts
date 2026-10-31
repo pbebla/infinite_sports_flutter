@@ -363,7 +363,9 @@ describe('Monday repricing skips a voided week', () => {
     const NOW = new Date(Date.UTC(2026, 5, 29, 17)); // Monday 10:00 PDT
 
     await runMondayReprice(db, NOW);
-    expect(db.writes).toEqual([`${F_ROOT}/Repriced/2`]);
+    // Only the done-flag is touched: the once-only claim, then the final
+    // {At, Voided:true} row — no player price, no PriceChanges.
+    expect(new Set(db.writes)).toEqual(new Set([`${F_ROOT}/Repriced/2`]));
     expect(await db.read(`${F_ROOT}/Repriced/2`))
       .toEqual({ At: NOW.getTime(), Voided: true });
     expect(await db.read(`${F_ROOT}/PriceChanges`)).toBeNull();

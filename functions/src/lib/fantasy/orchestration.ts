@@ -1463,6 +1463,17 @@ export async function runMondayReprice(
       const gw = Math.max(...weeks);
 
       if (await db.read(`${root}/Repriced/${gw}`) != null) continue; // done
+      // Once-only CLAIM (transaction): a double-fired schedule or two
+      // overlapping runs must never move prices twice. The row is written
+      // {At, Pending:true} up front and finalized below; a crash in between
+      // leaves the claim (prices untouched or partially moved) for the
+      // operator to clear — logged.
+      if (!(await db.writeIfAbsent(`${root}/Repriced/${gw}`,
+        { At: nowUtc.getTime(), Pending: true }))) {
+        log.info('fantasy reprice: claimed by a concurrent run — standing down',
+          { ...ctx, gw });
+        continue;
+      }
       if (isVoidFlag(await db.read(`${root}/Voided/${gw}`))) {
         // An owner-voided week moves no prices (spec §15); flagged done so
         // it never re-evaluates.
