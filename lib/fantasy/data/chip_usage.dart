@@ -8,12 +8,15 @@
 // manager's finalized History/<gw>/<uid> carries it in a gameweek of that
 // set EARLIER than the one being edited. Set 1 = GW1..config.chipSet1EndGw,
 // set 2 = the rest of the season incl. playoffs, so a chip used in set 1 is
-// a fresh "1 left" again in set 2. A chip played in an owner-VOIDED week
-// (its History entry carries Voided:true) is REFUNDED — exactly the
-// server's Voided/<gw> refund, which the finalizer mirrors into that flag.
-// History only ever holds HONORED chips (a set-repeat is stripped from the
-// lock snapshot before History is written), so every chip it shows was
-// really consumed.
+// a fresh "1 left" again in set 2. A chip played in an owner-VOIDED week is
+// REFUNDED. The server (transfer_state.ts priorChipsOfUid) reads the
+// `Voided/<gw>` node itself, so the client does too ([voidedWeeksFromNode],
+// streamed by FantasyService.watchVoidedWeeks — Opus audit item 4): a week
+// voided AFTER its finalize refunds at once, not only once the void
+// trigger's re-finalize has mirrored `Voided: true` into History. Either
+// source refunds (the History mirror stays honoured too). History only ever
+// holds HONORED chips (a set-repeat is stripped from the lock snapshot
+// before History is written), so every chip it shows was really consumed.
 //
 // Documented limit: between a week's lock and its finalize the chip lives
 // only in PublishedPicks/the live squad (History not written yet), so the
@@ -63,6 +66,29 @@ ChipHistoryEntry? chipHistoryEntryFromNode(Object? node) {
   );
 }
 
+/// The owner-voided gameweeks out of the season's `Voided` node
+/// (`Voided/<gw> = true`, orchestration_db.ts voidedWeeksOf parity): ONLY a
+/// literal `true` voids (the Manager writes true or removes the node);
+/// absent / false / junk counts. Gameweek keys are small ints, so RTDB WILL
+/// list-coerce the node (index = gameweek, holes null) — a List and an
+/// int-keyed Map both parse; non-positive / non-int keys are skipped.
+Set<int> voidedWeeksFromNode(Object? node) {
+  final out = <int>{};
+  void take(Object? key, Object? value) {
+    final gw = key is int ? key : int.tryParse(key.toString());
+    if (gw != null && gw > 0 && value == true) out.add(gw);
+  }
+
+  if (node is List) {
+    for (var i = 0; i < node.length; i++) {
+      take(i, node[i]);
+    }
+  } else if (node is Map) {
+    node.forEach(take);
+  }
+  return out;
+}
+
 /// Chip set of a gameweek (transfer_state.ts chipSetOf parity).
 int chipSetOf(int gw, FantasyConfig config) =>
     gw <= config.chipSet1EndGw ? 1 : 2;
@@ -99,18 +125,22 @@ String chipAvailabilityLabel(ChipAvailability a) => switch (a) {
 /// it consumed (not voided) in a gameweek EARLIER than [editingGw] inside
 /// the same set; else Active when it is [armedChip]; else available. A
 /// spent chip stays Used even if armed again — the server would void that
-/// replay at lock.
+/// replay at lock. A week is voided — its chip refunded — when it is in
+/// [voidedWeeks] (the `Voided` node, what the server reads) OR its History
+/// entry carries the `Voided` mirror.
 Map<String, ChipAvailability> chipAvailability({
   required Map<int, ChipHistoryEntry> historyByWeek,
   required int editingGw,
   required String? armedChip,
   required FantasyConfig config,
+  Set<int> voidedWeeks = const {},
 }) {
   final set = chipSetOf(editingGw, config);
   final spent = <String>{};
   historyByWeek.forEach((week, entry) {
     final chip = entry.chip;
-    if (chip == null || entry.voided) return; // none, or refunded
+    // None, or refunded (either source says the week was voided).
+    if (chip == null || entry.voided || voidedWeeks.contains(week)) return;
     if (week < editingGw && chipSetOf(week, config) == set) spent.add(chip);
   });
   return {

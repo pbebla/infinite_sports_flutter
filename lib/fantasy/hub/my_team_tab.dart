@@ -37,6 +37,7 @@ class FantasyMyTeamTab extends StatelessWidget {
     this.alertStates,
     this.initialAlert,
     this.chipHistory,
+    this.voidedWeeks = const {},
     this.onOpenPlayer,
   });
 
@@ -47,6 +48,10 @@ class FantasyMyTeamTab extends StatelessWidget {
   /// The manager's finalized chips by gameweek (the hub's
   /// FantasyService.watchChipHistoryFor feed) — the chip row's real counts.
   final Map<int, ChipHistoryEntry>? chipHistory;
+
+  /// The season's owner-voided gameweeks (the hub's
+  /// FantasyService.watchVoidedWeeks feed) — their chips are refunded.
+  final Set<int> voidedWeeks;
 
   /// Re-listen-safe broadcast of FantasyService.watchMySquadAlert (spec §3
   /// holder protection) + its latest value: drives the "your team needs
@@ -130,6 +135,7 @@ class FantasyMyTeamTab extends StatelessWidget {
               nowUtc: nowUtc,
               alert: alert,
               chipHistory: chipHistory,
+              voidedWeeks: voidedWeeks,
               onOpenPlayer: onOpenPlayer,
             );
         final alerts = alertStates;

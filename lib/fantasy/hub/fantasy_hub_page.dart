@@ -81,6 +81,7 @@ class FantasyHubPage extends StatefulWidget {
     this.alertStates,
     this.gameweekStates,
     this.chipHistoryFor,
+    this.voidedWeeksStates,
     this.newsStates,
     this.leaderboardsFeeds,
     this.profileOpener,
@@ -117,6 +118,9 @@ class FantasyHubPage extends StatefulWidget {
   /// The manager's chip history for the schedule's gameweek numbers.
   final Stream<Map<int, ChipHistoryEntry>> Function(List<int> weeks)?
       chipHistoryFor;
+
+  /// The season's owner-voided gameweeks (`FantasyService.watchVoidedWeeks`).
+  final Stream<Set<int>>? voidedWeeksStates;
 
   /// Forwarded to the News tab.
   final Stream<List<FantasyNewsPost>>? newsStates;
@@ -191,6 +195,14 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   FantasySquadAlert? _alert;
   bool _alertLoaded = false;
 
+  /// The season's owner-voided gameweeks (`Voided/<gw>`, what the server's
+  /// chip refund reads — Opus audit item 4): a chip played in one is
+  /// refunded on the chip row at once. Joins the reveal gate so a refund
+  /// never flips "Used" → "1 left" after the fade; a failing feed loads as
+  /// "none voided" (the History mirror still refunds).
+  Set<int> _voidedWeeks = const {};
+  bool _voidedLoaded = false;
+
   /// First-open walkthrough (spec §10a): null while the prefs flag loads,
   /// false = show the intro, true = straight to the hub.
   bool? _walkthroughSeen;
@@ -226,6 +238,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   StreamSubscription<FantasyManager?>? _managerSub;
   StreamSubscription<FantasySquad?>? _squadSub;
   StreamSubscription<FantasySquadAlert?>? _alertSub;
+  StreamSubscription<Set<int>>? _voidedSub;
 
   /// The push-tapped news post still to focus; cleared once the News tab
   /// has resolved it so a remounted tab (far tab swipes) never re-focuses.
@@ -245,7 +258,8 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
       _managerLoaded &&
       _squadLoaded &&
       _alertLoaded &&
-      _chipsLoaded;
+      _chipsLoaded &&
+      _voidedLoaded;
 
   @override
   void initState() {
@@ -311,6 +325,24 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
       // no banner — never an eternal skeleton.
       if (mounted) setState(() => _alertLoaded = true);
     });
+    try {
+      _voidedSub = (widget.voidedWeeksStates ??
+              FantasyService.watchVoidedWeeks(widget.sport, widget.season))
+          .listen((weeks) {
+        if (!mounted) return;
+        setState(() {
+          _voidedWeeks = weeks;
+          _voidedLoaded = true;
+        });
+      }, onError: (Object e) {
+        debugPrint('FantasyHubPage: voided weeks feed failed: $e');
+        // The last good set stays; none = nothing voided.
+        if (mounted) setState(() => _voidedLoaded = true);
+      });
+    } catch (e) {
+      debugPrint('FantasyHubPage: voided weeks feed failed: $e');
+      _voidedLoaded = true;
+    }
   }
 
   /// Every real Config emission: the ONE shared draft is created on the
@@ -335,6 +367,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _managerSub?.cancel();
     _squadSub?.cancel();
     _alertSub?.cancel();
+    _voidedSub?.cancel();
     _configForRules.close();
     _managerForTabs.close();
     _squadForTabs.close();
@@ -427,6 +460,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         alert: _alert,
         alertStates: _alertForTabs.stream,
         chipHistory: _chipHistory,
+        voidedWeeks: _voidedWeeks,
         draft: _draft!,
         saveTeamName: (name) =>
             FantasyService.saveTeamName(widget.sport, widget.season, name),
@@ -494,6 +528,7 @@ class _HubBody extends StatelessWidget {
     required this.alert,
     required this.alertStates,
     required this.chipHistory,
+    required this.voidedWeeks,
     required this.draft,
     required this.saveTeamName,
     required this.saveSquad,
@@ -522,6 +557,9 @@ class _HubBody extends StatelessWidget {
 
   /// The manager's finalized chips by gameweek — the chip row's counts.
   final Map<int, ChipHistoryEntry> chipHistory;
+
+  /// The season's owner-voided gameweeks — their chips are refunded.
+  final Set<int> voidedWeeks;
 
   /// The hub-owned shared draft both the court and the market edit (P3c).
   final SquadDraftController draft;
@@ -602,6 +640,7 @@ class _HubBody extends StatelessWidget {
                   alertStates: alertStates,
                   initialAlert: alert,
                   chipHistory: chipHistory,
+                  voidedWeeks: voidedWeeks,
                   onOpenPlayer: onOpenPlayer,
                 ),
                 // The market (P3c) — edits the SAME shared draft as above;

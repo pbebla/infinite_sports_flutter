@@ -49,6 +49,7 @@ class FantasySquadBuilder extends StatefulWidget {
     this.nowUtc,
     this.alert,
     this.chipHistory,
+    this.voidedWeeks = const {},
     this.onOpenPlayer,
   });
 
@@ -63,6 +64,12 @@ class FantasySquadBuilder extends StatefulWidget {
   /// "1 left" / "Used" / "Active" badges (chip_usage.dart). null = unknown
   /// (signed out / not loaded): nothing counts as spent.
   final Map<int, ChipHistoryEntry>? chipHistory;
+
+  /// The season's owner-voided gameweeks (`Voided/<gw>`, via
+  /// FantasyService.watchVoidedWeeks — the node the server's refund reads):
+  /// a chip played in one is refunded, even before the re-finalize mirrors
+  /// `Voided` into History. The hub's reveal gate waits for it.
+  final Set<int> voidedWeeks;
 
   /// The manager's live squad alert (spec §3 holder protection,
   /// FantasyService.watchMySquadAlert): shown as a banner at the top while
@@ -404,6 +411,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
               editingGw: chipEditingGameweek(widget.gameweeks, _now),
               armedChip: _draft.chip,
               config: widget.config,
+              voidedWeeks: widget.voidedWeeks,
             ),
           ),
           if (editable && issues.isNotEmpty) ...[

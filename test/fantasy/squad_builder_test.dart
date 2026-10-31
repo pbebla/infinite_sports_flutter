@@ -119,6 +119,7 @@ void main() {
     FantasySquadAlert? alert,
     List<Gameweek> gameweeks = const [],
     Map<int, ChipHistoryEntry>? chipHistory,
+    Set<int> voidedWeeks = const {},
     DateTime Function()? nowUtc,
     void Function(String playerName)? onOpenPlayer,
   }) async {
@@ -142,6 +143,7 @@ void main() {
               },
           alert: alert,
           chipHistory: chipHistory,
+          voidedWeeks: voidedWeeks,
           nowUtc: nowUtc,
           onOpenPlayer: onOpenPlayer,
         ),
@@ -423,6 +425,25 @@ void main() {
       expect(badge(tester, 'tripleCaptain'), '1 left');
       expect(badge(tester, 'benchBoost'), 'Used');
       expect(badge(tester, 'wildcard'), '1 left');
+    });
+
+    testWidgets(
+        'a week voided in the Voided node refunds its chip before the '
+        're-finalize mirrors it into History (Opus audit item 4)',
+        (tester) async {
+      await pumpBuilder(
+        tester,
+        gameweeks: gws,
+        nowUtc: () => DateTime.utc(2026, 1, 3, 23), // editing GW4
+        // GW2's History still says nothing about the void...
+        chipHistory: {2: const ChipHistoryEntry(chip: 'tripleCaptain')},
+        // ...but the owner voided GW2 — what the server reads.
+        voidedWeeks: const {2},
+      );
+      expect(badge(tester, 'tripleCaptain'), '1 left');
+      await tester.tap(find.byKey(const ValueKey('fantasy_chip_tripleCaptain')));
+      await tester.pumpAndSettle();
+      expect(badge(tester, 'tripleCaptain'), 'Active'); // armable again
     });
 
     testWidgets('the chip armed on the live squad reads Active',

@@ -151,6 +151,7 @@ void main() {
     Stream<List<Gameweek>>? gameweekStates,
     Stream<Map<int, ChipHistoryEntry>> Function(List<int> weeks)?
         chipHistoryFor,
+    Stream<Set<int>>? voidedWeeksStates,
     DateTime Function()? nowUtc,
   }) async {
     tester.view.physicalSize = size;
@@ -169,6 +170,7 @@ void main() {
         alertStates: alert.stream,
         gameweekStates: gameweekStates ?? Stream.value(const []),
         chipHistoryFor: chipHistoryFor ?? (weeks) => Stream.value(const {}),
+        voidedWeeksStates: voidedWeeksStates ?? Stream.value(const <int>{}),
         nowUtc: nowUtc,
         newsStates: news.stream,
         leaderboardsFeeds: FantasyLeaderboardsFeeds(
@@ -292,6 +294,30 @@ void main() {
       final usedBadge = find.descendant(
           of: key('chip_count_tripleCaptain'), matching: find.byType(Text));
       expect(tester.widget<Text>(usedBadge).data, 'Used');
+    });
+
+    // Opus audit item 4: the chip row reads Voided/<gw> like the server.
+    testWidgets('the Voided feed joins the reveal gate and refunds a chip '
+        'History still shows as spent', (tester) async {
+      final voided = StreamController<Set<int>>();
+      addTearDown(voided.close);
+      await pumpHub(
+        tester,
+        gameweekStates: Stream.value(gws),
+        nowUtc: now,
+        chipHistoryFor: (weeks) =>
+            Stream.value({1: const ChipHistoryEntry(chip: 'tripleCaptain')}),
+        voidedWeeksStates: voided.stream,
+      );
+      await land(tester);
+      expect(key('hub'), findsNothing); // the refund source hasn't answered
+
+      voided.add({1}); // the owner voided GW1 (not mirrored into History yet)
+      await settle(tester);
+      expect(key('hub'), findsOneWidget);
+      final badge = find.descendant(
+          of: key('chip_count_tripleCaptain'), matching: find.byType(Text));
+      expect(tester.widget<Text>(badge).data, '1 left');
     });
   });
 

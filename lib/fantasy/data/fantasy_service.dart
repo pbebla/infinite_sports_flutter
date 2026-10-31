@@ -55,6 +55,8 @@ class FantasyService {
   static final Map<String, FantasySquadAlert?> _squadAlertCache = {};
   static final Map<String, FantasySquad?> _mySquadCache = {};
   static final Map<String, FantasyManager?> _managerByUidCache = {};
+  // The season's owner-voided gameweeks (`Voided`), keyed `<root>`.
+  static final Map<String, Set<int>> _voidedWeeksCache = {};
   // The league's own season-over flag, keyed `<sport>/<season>`.
   static final Map<String, bool> _seasonFinishedCache = {};
   // Achievement badges: the GLOBAL catalog, a season's whole Badges node
@@ -83,6 +85,7 @@ class FantasyService {
     _squadAlertCache.clear();
     _mySquadCache.clear();
     _managerByUidCache.clear();
+    _voidedWeeksCache.clear();
     _seasonFinishedCache.clear();
     _badgeCatalogCache = null;
     _badgesCache.clear();
@@ -506,6 +509,24 @@ class FantasyService {
           .map((event) => event.snapshot.value),
       parse: chipHistoryEntryFromNode,
     );
+  }
+
+  /// Live owner-voided gameweeks (`Voided/<gw> = true`, public read, spec
+  /// §15) — the node the server's chip refund reads (transfer_state.ts
+  /// priorChipsOfUid), so the chip row refunds a voided week's chip at once
+  /// instead of waiting for the re-finalize to mirror it into History (Opus
+  /// audit item 4). Absent = empty (still emits). Seeded from the session
+  /// cache (`<root>`) — it joins the hub's reveal gate.
+  static Stream<Set<int>> watchVoidedWeeks(
+      String sport, String season) async* {
+    final key = _root(sport, season);
+    final seed = _voidedWeeksCache[key];
+    if (seed != null) yield seed;
+    await for (final event in _ref('$key/Voided').onValue) {
+      final weeks = voidedWeeksFromNode(event.snapshot.value);
+      _voidedWeeksCache[key] = weeks;
+      yield weeks;
+    }
   }
 
   /// [watchChipHistoryFor] for the signed-in user; a signed-out session

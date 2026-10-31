@@ -120,5 +120,58 @@ void main() {
       expect(chipAvailabilityLabel(ChipAvailability.used), 'Used');
       expect(chipAvailabilityLabel(ChipAvailability.active), 'Active');
     });
+
+    // Opus audit item 4: the server refunds from Voided/<gw> directly.
+    test('a week in the Voided node refunds its chip even before the '
+        're-finalize mirrors Voided into History; either source refunds', () {
+      final history = {
+        2: const ChipHistoryEntry(chip: 'tripleCaptain'), // not mirrored yet
+        3: const ChipHistoryEntry(chip: 'benchBoost', voided: true),
+        4: const ChipHistoryEntry(chip: 'wildcard'),
+      };
+      final a = chipAvailability(
+        historyByWeek: history,
+        editingGw: 5,
+        armedChip: null,
+        config: cfg,
+        voidedWeeks: {2},
+      );
+      expect(a['tripleCaptain'], ChipAvailability.available); // Voided node
+      expect(a['benchBoost'], ChipAvailability.available); // History mirror
+      expect(a['wildcard'], ChipAvailability.used); // not voided anywhere
+
+      // Without the node the un-mirrored week still counts as spent.
+      expect(
+          avail(history, editingGw: 5)['tripleCaptain'], ChipAvailability.used);
+    });
+  });
+
+  group('voidedWeeksFromNode (orchestration_db.ts voidedWeeksOf parity)', () {
+    test('absent / malformed: none', () {
+      expect(voidedWeeksFromNode(null), isEmpty);
+      expect(voidedWeeksFromNode('junk'), isEmpty);
+      expect(voidedWeeksFromNode(true), isEmpty);
+    });
+
+    test('a list-coerced node: index = gameweek, holes and index 0 skipped',
+        () {
+      expect(voidedWeeksFromNode([null, null, true, null, true]), {2, 4});
+      expect(voidedWeeksFromNode([true, true]), {1}); // index 0 is no week
+    });
+
+    test('a map node: int keys only, literal true only', () {
+      expect(
+          voidedWeeksFromNode({
+            '3': true,
+            '5': false,
+            '6': 'true',
+            '7': 1,
+            'x': true,
+            '0': true,
+            '-2': true,
+            '9': true,
+          }),
+          {3, 9});
+    });
   });
 }
