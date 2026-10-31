@@ -4,7 +4,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/match_tabs/box_score_columns.dart';
 import 'package:infinite_sports_flutter/match_tabs/team_box_score_tab.dart';
-import 'package:infinite_sports_flutter/misc/share_match_card_service.dart';
 import 'package:infinite_sports_flutter/misc/single_match_tallies.dart'
     show MatchPlayerTally, leagueMatchLeaderCategories, singleMatchPlayerTallies;
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
@@ -18,6 +17,7 @@ import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart'
     show isBadgeLeagueSport;
 import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
 import 'package:infinite_sports_flutter/widgets/live_clock.dart';
+import 'package:infinite_sports_flutter/widgets/match_share_button.dart';
 import 'package:infinite_sports_flutter/widgets/score_text.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -310,17 +310,13 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                 actionsIconTheme: IconThemeData(
                     color: TournamentColors.headerForeground(context)),
                 actions: [
-                  IconButton(
-                    icon: const Icon(Icons.ios_share),
-                    tooltip: 'Share match',
-                    onPressed: () => shareMatchCard(
-                      context,
-                      match: _match,
-                      team1: team1,
-                      team2: team2,
-                      tournamentName: _tournamentName,
-                      sport: widget.sport,
-                    ),
+                  // Its own widget: the iPad share popover anchors to the icon.
+                  MatchShareButton(
+                    match: _match,
+                    team1: team1,
+                    team2: team2,
+                    tournamentName: _tournamentName,
+                    sport: widget.sport,
                   ),
                   if (_match.link != null && _match.link!.isNotEmpty)
                     IconButton(

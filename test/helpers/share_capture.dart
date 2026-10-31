@@ -40,8 +40,12 @@ class ShareSheetRecorder {
 /// it is the rect of the tapped [button] (not the whole page), so the popover
 /// points at the button. [button] must be fully on screen.
 void expectShareAnchoredTo(
-    WidgetTester tester, ShareParams params, Finder button) {
-  final origin = params.sharePositionOrigin;
+        WidgetTester tester, ShareParams params, Finder button) =>
+    expectOriginAnchoredTo(tester, params.sharePositionOrigin, button);
+
+/// Same check on a bare origin (the PNG-card [SharePng] seam hands the
+/// popover anchor as a `Rect?`, not a [ShareParams]).
+void expectOriginAnchoredTo(WidgetTester tester, Rect? origin, Finder button) {
   expect(origin, isNotNull,
       reason: 'share_plus rejects an iPad share with no sharePositionOrigin');
   expect(origin!.isEmpty, isFalse);

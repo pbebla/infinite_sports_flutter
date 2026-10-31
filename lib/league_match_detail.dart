@@ -14,7 +14,6 @@ import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
 import 'package:infinite_sports_flutter/misc/schedule_display.dart';
-import 'package:infinite_sports_flutter/misc/share_match_card_service.dart';
 import 'package:infinite_sports_flutter/misc/single_match_tallies.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -25,6 +24,7 @@ import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_facts_tab.dart';
 import 'package:infinite_sports_flutter/widgets/forfeit_chip.dart';
 import 'package:infinite_sports_flutter/widgets/live_clock.dart';
+import 'package:infinite_sports_flutter/widgets/match_share_button.dart';
 import 'package:infinite_sports_flutter/widgets/score_text.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
@@ -437,18 +437,13 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
                 actionsIconTheme: IconThemeData(
                     color: TournamentColors.headerForeground(context)),
                 actions: [
-                  IconButton(
-                    icon: const Icon(Icons.ios_share),
-                    tooltip: 'Share match',
-                    onPressed: () => shareMatchCard(
-                      context,
-                      match: match,
-                      team1: team1,
-                      team2: team2,
-                      tournamentName:
-                          '${widget.sport} Season ${widget.season}',
-                      sport: widget.sport,
-                    ),
+                  // Its own widget: the iPad share popover anchors to the icon.
+                  MatchShareButton(
+                    match: match,
+                    team1: team1,
+                    team2: team2,
+                    tournamentName: '${widget.sport} Season ${widget.season}',
+                    sport: widget.sport,
                   ),
                   if (match.link != null && match.link!.isNotEmpty)
                     IconButton(

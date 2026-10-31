@@ -4,6 +4,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/profile_stat_priority.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
+import 'package:infinite_sports_flutter/misc/share_card_service.dart' show SharePng;
 import 'package:infinite_sports_flutter/misc/share_profile_service.dart';
 import 'package:infinite_sports_flutter/misc/single_match_tallies.dart'
     show catchPercentage;
@@ -85,12 +86,18 @@ class ProfilePage extends StatefulWidget {
   /// A limited profile never has a Fantasy tab, so it takes none.
   final FantasyProfileSeams? fantasySeams;
 
+  /// Test seam: replaces the system share sheet behind the app-bar Share
+  /// icon (it receives the PNG, the caption and the icon's iPad popover
+  /// anchor). null = the real share sheet.
+  final SharePng? share;
+
   const ProfilePage(
       {super.key,
       required this.uid,
       this.loadOverride,
       this.careerLoadOverride,
-      this.fantasySeams})
+      this.fantasySeams,
+      this.share})
       : _isLimited = false,
         _limitedName = '';
 
@@ -101,7 +108,8 @@ class ProfilePage extends StatefulWidget {
         _limitedName = name,
         loadOverride = null,
         careerLoadOverride = null,
-        fantasySeams = null;
+        fantasySeams = null,
+        share = null;
 
   /// Clears the session career cache (mirrors
   /// TournamentService.clearProfileUrlCache). Call after a sign-out or when
@@ -730,16 +738,21 @@ class _ProfilePageState extends State<ProfilePage>
       actions: (widget._isLimited || _fantasyTabSelected)
           ? null
           : [
-              IconButton(
-                icon: const Icon(Icons.ios_share),
-                tooltip: 'Share',
-                onPressed: () => _onShareTap(context),
+              // Builder: the iPad share popover anchors to THIS icon.
+              Builder(
+                builder: (buttonContext) => IconButton(
+                  icon: const Icon(Icons.ios_share),
+                  tooltip: 'Share',
+                  onPressed: () => _onShareTap(buttonContext),
+                ),
               ),
             ],
     );
   }
 
   /// Builds and shares the appropriate profile card for the active tab.
+  /// [context] is the tapped Share icon's own context (the iPad popover
+  /// anchor — never the page's).
   Future<void> _onShareTap(BuildContext context) async {
     final fullName =
         '$_firstName $_lastName'.trim().isNotEmpty
@@ -765,6 +778,7 @@ class _ProfilePageState extends State<ProfilePage>
         shareText:
             "$fullName's trophy cabinet — $n ${n == 1 ? 'trophy' : 'trophies'}"
             ' on Infinite Sports',
+        share: widget.share,
       );
     } else {
       // ── Career tab → Stats card for currently selected competition ──────
@@ -804,6 +818,7 @@ class _ProfilePageState extends State<ProfilePage>
         ),
         shareText:
             "$fullName · ${comp.label} — Infinite Sports",
+        share: widget.share,
       );
     }
   }

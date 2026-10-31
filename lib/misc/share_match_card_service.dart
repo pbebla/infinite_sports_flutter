@@ -22,7 +22,8 @@ String buildShareText({
 
 /// Renders [ShareMatchCard] offscreen to a PNG and opens the system share sheet
 /// (the shared pipeline in share_card_service.dart, anchored to [context] for
-/// the iPad popover). Never throws; shows a SnackBar on failure.
+/// the iPad popover — pass the tapped button's context). [share] replaces the
+/// system sheet (tests). Never throws; shows a SnackBar on failure.
 Future<void> shareMatchCard(
   BuildContext context, {
   required TournamentMatch match,
@@ -30,6 +31,7 @@ Future<void> shareMatchCard(
   required TournamentTeam? team2,
   required String tournamentName,
   required String sport,
+  SharePng? share,
 }) async {
   ScaffoldMessengerState? messenger;
   try {
@@ -70,12 +72,14 @@ Future<void> shareMatchCard(
       tournamentName: tournamentName,
     );
 
-    await sharePngWithSystemSheet(
-      bytes,
-      caption: text,
-      fileName: 'match_card_${match.id}.png',
-      origin: origin,
-    );
+    final sink = share ??
+        (png, caption, anchor) => sharePngWithSystemSheet(
+              png,
+              caption: caption,
+              fileName: 'match_card_${match.id}.png',
+              origin: anchor,
+            );
+    await sink(bytes, text, origin);
   } catch (_) {
     messenger?.showSnackBar(
       const SnackBar(content: Text("Couldn't create the share card.")),
