@@ -197,6 +197,12 @@ describe('lifecycle sweep (Phase B)', () => {
       boost: { points: 44, rank: 2 },
       churn: { points: 59, rank: 1 },
     });
+    // RankHistory (whole node, next to Overall): rank after GW1 = Overall.
+    expect(await db.read(`${fRoot}/Leaderboards/RankHistory`)).toEqual({
+      alpha: { '1': 3 },
+      boost: { '1': 2 },
+      churn: { '1': 1 },
+    });
     expect(await db.read(`${fRoot}/PlayerWeeks/1`)).toEqual(WEEK_POINTS);
     // PlayerWeekStats/1: the whole week node, Games from Players/<n>/teamName
     // (hand math: Dana = plays 1 + goal 6 + assist 4 + bonus 2; Ezra was
@@ -346,6 +352,7 @@ describe('match-day finalize trigger entry (Phase C)', () => {
     });
     // Managers churn their live squads after the week settled...
     db.data.Fantasy.Futsal['15'].Squads = {};
+    expect(await db.read(`${fRoot}/Leaderboards/RankHistory`)).not.toBeNull();
     const before = db.snapshot();
     // ...and a rerun still reproduces the identical week.
     await maybeFinalizeGame(db, {

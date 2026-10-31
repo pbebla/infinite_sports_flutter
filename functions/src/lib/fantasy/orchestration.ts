@@ -686,6 +686,7 @@ export async function finalizeGameweek(
     await db.write(`${root}/History/${gw.number}`, out.historyByUid);
     await db.write(`${root}/Leaderboards/Gameweek/${gw.number}`, out.gameweekBoard);
     await db.write(`${root}/Leaderboards/Overall`, out.overallBoard);
+    await db.write(`${root}/Leaderboards/RankHistory`, out.rankHistory);
   } else {
     log.warn('fantasy finalize: no manager squads to score', { ...ctx, source });
   }

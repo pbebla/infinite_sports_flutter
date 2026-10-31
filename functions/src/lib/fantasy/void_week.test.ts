@@ -112,6 +112,13 @@ const NORMAL_WEEK2 = {
   boost: { points: 45, rank: 2 },
   churn: { points: 55, rank: 1 },
 };
+// Rank after each week (voided or not, the places never change here: GW1
+// 35/44/59 -> 3/2/1; normal GW2 70/89/114 -> 3/2/1; voided GW2 +0 -> 3/2/1).
+const RANK_HISTORY = {
+  alpha: { '1': 3, '2': 3 },
+  boost: { '1': 2, '2': 2 },
+  churn: { '1': 1, '2': 1 },
+};
 
 describe('void BEFORE finalize (the week settles voided first time)', () => {
   it('zeros + Voided markers; Overall/PlayerTotals exclude the week; no DreamTeam/recap/news', async () => {
@@ -134,6 +141,7 @@ describe('void BEFORE finalize (the week settles voided first time)', () => {
 
     expect(await db.read(`${F_ROOT}/Leaderboards/Gameweek/2`)).toEqual(ZERO_WEEK);
     expect(await db.read(`${F_ROOT}/Leaderboards/Overall`)).toEqual(VOIDED_OVERALL);
+    expect(await db.read(`${F_ROOT}/Leaderboards/RankHistory`)).toEqual(RANK_HISTORY);
     expect(await db.read(`${F_ROOT}/PlayerWeeks/2`)).toEqual(WEEK_POINTS); // real
     const totals = await db.read(`${F_ROOT}/PlayerTotals`) as Json;
     expect(totals['Bea']).toEqual(
@@ -193,6 +201,7 @@ describe('void BEFORE finalize (the week settles voided first time)', () => {
     expect('Voided' in history['alpha']).toBe(false);
     expect(await db.read(`${F_ROOT}/Leaderboards/Gameweek/2`)).toEqual(NORMAL_WEEK2);
     expect(await db.read(`${F_ROOT}/Leaderboards/Overall`)).toEqual(NORMAL_OVERALL);
+    expect(await db.read(`${F_ROOT}/Leaderboards/RankHistory`)).toEqual(RANK_HISTORY);
     expect(((await db.read(`${F_ROOT}/DreamTeam/2`)) as Json)['Players'])
       .toEqual(GOLDEN_DREAM_PLAYERS);
     // Documented choice: the void path's guards hold — no late sends.

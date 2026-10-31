@@ -31,6 +31,16 @@
 //   prevRank - rank against the standings BEFORE the latest finalized week
 //   (positive = climbed); omitted for managers with no earlier finalized week.
 //
+//   Leaderboards/RankHistory/<uid> = { "<gw>": rank, ... }
+//   each manager's OVERALL rank after every finalized week (the fan's "Your
+//   rank this season" line): rank after week w = the competition rank of the
+//   cumulative whole points through w, over every manager with a History
+//   entry in a week <= w (same truncation + void rules as Overall, so the
+//   latest entry IS the Overall rank and movement = the previous entry -
+//   rank). A manager's first entry is his first finalized week — nothing
+//   before it. Rebuilt whole from History on every finalize (rerun-
+//   identical). Small int keys: RTDB may list-coerce a uid's map on read.
+//
 // - History/<gw>/<uid> = engine FantasySquad.toMap (squadFromMap-compatible:
 //   picks/captainId/viceId/chip — the client's squadsByWeekForUid reads just
 //   these) PLUS { TotalTenths:int, Breakdown:[{playerId, countedTenths,
@@ -216,6 +226,8 @@ export interface FinalizeOutput {
   gameweekBoard: Record<string, { points: number; rank: number }>;
   /** Leaderboards/Overall */
   overallBoard: Record<string, { points: number; rank: number; movement?: number }>;
+  /** Leaderboards/RankHistory: uid -> { "<gw>": Overall rank after gw } */
+  rankHistory: Record<string, Record<string, number>>;
   /** PlayerWeekStats/<gw> (a voided week: Pts 0, Voided, no Lines) */
   playerWeekStats: Record<string, PlayerWeekStatsEntry>;
   /** PlayerTotals */
@@ -285,6 +297,31 @@ export function composeOverallBoard(
       // finalized week) — the client renders the neutral "—".
       ...(prev !== undefined ? { movement: prev - ranks[uid] } : {}),
     };
+  }
+  return out;
+}
+
+/** Leaderboards/RankHistory from History net tenths (week -> uid ->
+ *  tenths; voided weeks already zeroed by the caller, as for
+ *  composeOverallBoard): uid -> { "<gw>": rank }. Weeks run in numeric
+ *  order; after each one every manager seen so far is ranked (competition
+ *  style) on his running sum of WHOLE weekly points — a week he has no
+ *  entry for adds nothing but still ranks him. Pure + deterministic. */
+export function composeRankHistory(
+  historyTenthsByWeek: Record<number, Record<string, number>>,
+): Record<string, Record<string, number>> {
+  const weeks = Object.keys(historyTenthsByWeek).map(Number)
+    .filter((w) => Number.isFinite(w))
+    .sort((a, b) => a - b);
+  const totals: Record<string, number> = {};
+  const out: Record<string, Record<string, number>> = {};
+  for (const w of weeks) {
+    for (const [uid, tenths] of Object.entries(historyTenthsByWeek[w] ?? {})) {
+      totals[uid] = (totals[uid] ?? 0) + wholePoints(tenths);
+    }
+    for (const [uid, rank] of Object.entries(competitionRanks(totals))) {
+      (out[uid] ??= {})[String(w)] = rank;
+    }
   }
   return out;
 }
@@ -492,6 +529,7 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
       : byUid;
   }
   const overallBoard = composeOverallBoard(historyTenths);
+  const rankHistory = composeRankHistory(historyTenths);
 
   // ── Stage 6: PlayerTotals (season sum incl. bonus over NON-voided weeks
   // + the LATEST finalized week's ownership) ──
@@ -570,6 +608,7 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
     historyByUid,
     gameweekBoard,
     overallBoard,
+    rankHistory,
     playerTotals,
     dreamTeam,
     removeAutoDreamTeam: voided && input.dreamTeamAuto === true,

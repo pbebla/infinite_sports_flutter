@@ -13,8 +13,9 @@
 import { describe, expect, it } from 'vitest';
 import { futsalDefault, parsePosition } from './fantasy_config';
 import {
-  competitionRanks, composeOverallBoard, computeGameweekFinalize,
-  FinalizeGame, FinalizeInput, MarketPlayer, pickDreamTeam, wholePoints,
+  competitionRanks, composeOverallBoard, composeRankHistory,
+  computeGameweekFinalize, FinalizeGame, FinalizeInput, MarketPlayer,
+  pickDreamTeam, wholePoints,
 } from './finalize_core';
 import { clone, Json, loadGoldenFixture } from './golden_fixture';
 
@@ -138,6 +139,116 @@ describe('composeOverallBoard', () => {
 
   it('empty history = empty board', () => {
     expect(composeOverallBoard({})).toEqual({});
+  });
+});
+
+// Leaderboards/RankHistory/<uid> = { "<gw>": rank } (leaderboard extras
+// follow-up): each manager's OVERALL rank after every finalized week.
+// Hand math in each test; never copied from output.
+describe('composeRankHistory', () => {
+  it("single week: every manager gets that week's Overall rank", () => {
+    expect(composeRankHistory({ 1: { alpha: 350, boost: 440, churn: 555 } }))
+      .toEqual({
+        alpha: { '1': 3 },
+        boost: { '1': 2 },
+        churn: { '1': 1 },
+      });
+  });
+
+  it('rank after week w = competition rank of the cumulative whole points through w', () => {
+    // Week 1: a 35 (r3), b 44 (r2), c 55 (r1).
+    // Week 2 cumulative: a 35+60=95 (r1), b 44+10=54 (r3), c 55+20=75 (r2),
+    // d 40 (r4, joined in week 2).
+    expect(composeRankHistory({
+      1: { a: 350, b: 440, c: 555 },
+      2: { a: 600, b: 100, c: 200, d: 400 },
+    })).toEqual({
+      a: { '1': 3, '2': 1 },
+      b: { '1': 2, '2': 3 },
+      c: { '1': 1, '2': 2 },
+      d: { '2': 4 },
+    });
+  });
+
+  it('agrees with the Overall board: latest entry = rank, movement = previous entry - rank', () => {
+    const history = {
+      1: { a: 350, b: 440, c: 555 },
+      2: { a: 600, b: 100, c: 200, d: 400 },
+      3: { a: 0, b: 900, c: 100, d: 50 },
+    };
+    const board = composeOverallBoard(history);
+    const ranks = composeRankHistory(history);
+    expect(Object.keys(ranks).sort()).toEqual(Object.keys(board).sort());
+    for (const [uid, row] of Object.entries(board)) {
+      expect(ranks[uid]['3'], uid).toBe(row.rank);
+      if (row.movement !== undefined) {
+        expect(ranks[uid]['2'] - row.rank, uid).toBe(row.movement);
+      }
+    }
+  });
+
+  it('ties share the smaller rank (1,1,3) — also when only the TRUNCATED points tie', () => {
+    // Week 1: x 10, y 10, z 5 -> x 1, y 1, z 3.
+    // Week 2 cumulative: x 10, y 11, z 11 -> y 1, z 1, x 3.
+    expect(composeRankHistory({
+      1: { x: 100, y: 100, z: 50 },
+      2: { x: 0, y: 10, z: 60 },
+    })).toEqual({
+      x: { '1': 1, '2': 3 },
+      y: { '1': 1, '2': 1 },
+      z: { '1': 3, '2': 1 },
+    });
+    // 109 and 101 tenths are both 10 whole points; -155 / -150 both -15.
+    expect(composeRankHistory({ 1: { p: 109, q: 101 } }))
+      .toEqual({ p: { '1': 1 }, q: { '1': 1 } });
+    expect(composeRankHistory({ 1: { m: -155, n: -150 } }))
+      .toEqual({ m: { '1': 1 }, n: { '1': 1 } });
+  });
+
+  it('a manager who joined in week 3 has no entries before week 3', () => {
+    // Week 1: a 10, b 20 -> b 1, a 2. Week 2: a 20, b 20 -> both 1.
+    // Week 3: a 20, b 20, n 50 -> n 1, a 2, b 2.
+    const ranks = composeRankHistory({
+      1: { a: 100, b: 200 },
+      2: { a: 100, b: 0 },
+      3: { a: 0, b: 0, n: 500 },
+    });
+    expect(ranks).toEqual({
+      a: { '1': 2, '2': 1, '3': 2 },
+      b: { '1': 1, '2': 1, '3': 2 },
+      n: { '3': 1 },
+    });
+    expect(Object.keys(ranks['n'])).toEqual(['3']);
+  });
+
+  it('a week a manager skipped still ranks him on his running total', () => {
+    // Week 2 has no entry for a (no squad that week): a keeps 30 and is
+    // still ranked after week 2 (b 10+25=35 r1, a 30 r2).
+    expect(composeRankHistory({
+      1: { a: 300, b: 100 },
+      2: { b: 250 },
+    })).toEqual({
+      a: { '1': 1, '2': 2 },
+      b: { '1': 2, '2': 1 },
+    });
+  });
+
+  it('weeks run in NUMERIC order (week 10 after week 9) and reruns are identical', () => {
+    const history = {
+      10: { a: 0, b: 300 },
+      9: { a: 200, b: 100 },
+    };
+    // Week 9: a 20 r1, b 10 r2. Week 10: a 20 r2, b 40 r1.
+    const expected = {
+      a: { '9': 1, '10': 2 },
+      b: { '9': 2, '10': 1 },
+    };
+    expect(composeRankHistory(history)).toEqual(expected);
+    expect(composeRankHistory(history)).toEqual(composeRankHistory(history));
+  });
+
+  it('empty history = empty node', () => {
+    expect(composeRankHistory({})).toEqual({});
   });
 });
 
@@ -525,6 +636,61 @@ describe('computeGameweekFinalize edges', () => {
     expect(out.dreamTeam).toEqual(plain.dreamTeam);
   });
 
+  it('rankHistory: a VOIDED current week holds every rank (it counts zero)', () => {
+    // Stored week 1: alpha 10, boost 20, churn 5 -> boost 1, alpha 2,
+    // churn 3. Week 2 voided -> +0 for all -> the same ranks after week 2.
+    const input = baseInput();
+    input.gw = 2;
+    input.transferCostPointsByUid = {};
+    input.historyTenthsByWeek = { 1: { alpha: 100, boost: 200, churn: 50 } };
+    input.voidedWeeks = [2];
+    expect(computeGameweekFinalize(input).rankHistory).toEqual({
+      alpha: { '1': 2, '2': 2 },
+      boost: { '1': 1, '2': 1 },
+      churn: { '1': 3, '2': 3 },
+    });
+    // Not voided: week 2 nets 350/440/595 -> 35/44/59, cumulative alpha 45,
+    // boost 64, churn 64 -> boost 1, churn 1 (tied), alpha 3.
+    input.voidedWeeks = [];
+    expect(computeGameweekFinalize(input).rankHistory).toEqual({
+      alpha: { '1': 2, '2': 3 },
+      boost: { '1': 1, '2': 1 },
+      churn: { '1': 3, '2': 1 },
+    });
+  });
+
+  it('rankHistory: an EARLIER voided week counts zero whatever its stored tenths say', () => {
+    // Week 1 stored 350/440/555 but voided -> all 0 -> everyone rank 1.
+    // Week 2 (no costs) 35/44/59 -> alpha 3, boost 2, churn 1 — the same
+    // places the Overall board's movement -2/-1/0 implies.
+    const input = baseInput();
+    input.gw = 2;
+    input.transferCostPointsByUid = {};
+    input.historyTenthsByWeek = { 1: { alpha: 350, boost: 440, churn: 555 } };
+    input.voidedWeeks = [1];
+    expect(computeGameweekFinalize(input).rankHistory).toEqual({
+      alpha: { '1': 1, '2': 3 },
+      boost: { '1': 1, '2': 2 },
+      churn: { '1': 1, '2': 1 },
+    });
+  });
+
+  it('rankHistory: rerun-identical, and a rerun of an OLDER week rebuilds the whole season', () => {
+    // Golden week 1 (nets 350/440/555) re-scored after week 2 stored
+    // 600/100/200: the history covers both weeks exactly as composing the
+    // two weeks directly would. Week 1: alpha 3, boost 2, churn 1.
+    // Week 2 cumulative: alpha 95 r1, boost 54 r3, churn 75 r2.
+    const input = baseInput();
+    input.historyTenthsByWeek = { 2: { alpha: 600, boost: 100, churn: 200 } };
+    const out = computeGameweekFinalize(input);
+    expect(out.rankHistory).toEqual({
+      alpha: { '1': 3, '2': 1 },
+      boost: { '1': 2, '2': 3 },
+      churn: { '1': 1, '2': 2 },
+    });
+    expect(computeGameweekFinalize(input).rankHistory).toEqual(out.rankHistory);
+  });
+
   it('zero managers: boards empty, player data still computed', () => {
     const input = baseInput();
     input.squadsByUid = {};
@@ -532,6 +698,7 @@ describe('computeGameweekFinalize edges', () => {
     expect(out.historyByUid).toEqual({});
     expect(out.gameweekBoard).toEqual({});
     expect(out.overallBoard).toEqual({});
+    expect(out.rankHistory).toEqual({});
     expect(out.playerWeeks).toEqual(WEEK_POINTS);
     expect(out.playerTotals['Bea']).toEqual(
       { points: 15, ownershipPct: 0, form: 150, ppg: 150, games: 1 });
