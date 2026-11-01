@@ -3,6 +3,7 @@
 // the usual RTDB Map/List-coercion tolerance. FantasyService wraps these in
 // onValue streams.
 
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_access.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
@@ -23,14 +24,23 @@ enum FantasyLockOverride {
 }
 
 /// The streamed `Fantasy/<sport>/<season>/Config` node: the engine config the
-/// Rules page renders from (spec §10a) plus the lock override.
+/// Rules page renders from (spec §10a) plus the lock override — and the
+/// paid-access block (`Config/Access`, spec 2026-11-01 §3), which rides the
+/// same subscription so the hub's gate needs no second listener.
 class FantasyConfigState {
-  const FantasyConfigState({required this.config, required this.lockOverride});
+  const FantasyConfigState({
+    required this.config,
+    required this.lockOverride,
+    this.access = FantasyAccessConfig.free,
+  });
   final FantasyConfig config;
 
   /// The EFFECTIVE override (automation spec 2026-10-28 §2): an open/locked
   /// override whose `lockOverrideUntil` has passed already counts as auto.
   final FantasyLockOverride lockOverride;
+
+  /// Free / season pass (absent block = free, today's behaviour).
+  final FantasyAccessConfig access;
 }
 
 /// null when the node is absent/malformed — absence is meaningful: it gates
@@ -41,6 +51,7 @@ FantasyConfigState? configStateFromNode(Object? node, {DateTime? now}) {
   return FantasyConfigState(
     config: FantasyConfig.fromMap(node),
     lockOverride: _effectiveLockOverride(node, now ?? DateTime.now()),
+    access: accessConfigFromNode(node['Access']),
   );
 }
 

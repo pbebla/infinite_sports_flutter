@@ -10,9 +10,12 @@
 
 import 'dart:async';
 
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart';
 import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_access.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
@@ -55,6 +58,10 @@ class FantasyService {
   static final Map<String, FantasySquadAlert?> _squadAlertCache = {};
   static final Map<String, FantasySquad?> _mySquadCache = {};
   static final Map<String, FantasyManager?> _managerByUidCache = {};
+  // Paid access (spec 2026-11-01 §6): the own `Access/<uid>` record, keyed
+  // `<root>|<uid>` — it joins the hub's reveal gate, so a revisit must not
+  // wait on the network for it. A known-absent record caches as none.
+  static final Map<String, FantasyAccessState> _accessCache = {};
   // The season's owner-voided gameweeks (`Voided`), keyed `<root>`.
   static final Map<String, Set<int>> _voidedWeeksCache = {};
   // The league's own season-over flag, keyed `<sport>/<season>`.
@@ -85,6 +92,7 @@ class FantasyService {
     _squadAlertCache.clear();
     _mySquadCache.clear();
     _managerByUidCache.clear();
+    _accessCache.clear();
     _voidedWeeksCache.clear();
     _seasonFinishedCache.clear();
     _badgeCatalogCache = null;
@@ -408,6 +416,76 @@ class FantasyService {
     }
     return _ref('${_root(sport, season)}/Managers/$uid')
         .set({'TeamName': name.trim(), 'NameFlagged': false});
+  }
+
+  // ── Paid access (season pass, spec 2026-11-01 §4/§6) ───────────────────
+
+  /// Live own `Access/<uid>` record (rules: read own uid or admin). Emits a
+  /// [FantasyAccessState]: none / pending / active / revoked. Seeded from
+  /// the session cache (`<root>|<uid>`) so the hub's reveal gate opens at
+  /// once on a revisit. Error ≠ fact: a failed read keeps the last known
+  /// value; with none known it emits none WITH `degraded` so the card shows
+  /// a retry line rather than the pay methods as if unpaid. A signed-out
+  /// session streams a single none (the auth wall keeps that theoretical).
+  static Stream<FantasyAccessState> watchMyAccess(
+      String sport, String season) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      return Stream<FantasyAccessState>.value(FantasyAccessState.none);
+    }
+    return watchAccess(sport, season, uid);
+  }
+
+  /// [watchMyAccess] for an explicit uid.
+  static Stream<FantasyAccessState> watchAccess(
+      String sport, String season, String uid) async* {
+    final key = '${_root(sport, season)}|$uid';
+    final seed = _accessCache[key];
+    if (seed != null) yield seed;
+    try {
+      await for (final event
+          in _ref('${_root(sport, season)}/Access/$uid').onValue) {
+        final state = accessStateFromNode(event.snapshot.value);
+        _accessCache[key] = state;
+        yield state;
+      }
+    } catch (e) {
+      debugPrint('FantasyService: access feed failed: $e');
+      yield _accessCache[key] ?? const FantasyAccessState(degraded: true);
+    }
+  }
+
+  /// "I sent it": one push under `AccessClaims/<uid>` with the shape the
+  /// rules validate (create-only by the owner uid; `At` is the server
+  /// clock). The server's claim trigger flips `Access/<uid>` to pending —
+  /// the live stream above shows it; nothing here polls.
+  static Future<void> submitAccessClaim(
+    String sport,
+    String season, {
+    required FantasyAccessMethod method,
+    required double amountDollars,
+    required String note,
+  }) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Future.error(StateError('Not signed in'));
+    return _ref('${_root(sport, season)}/AccessClaims/$uid').push().set(
+        accessClaimPayload(
+            method: method,
+            amountDollars: amountDollars,
+            note: note,
+            at: ServerValue.timestamp));
+  }
+
+  /// "Pay by card": asks the server for a Stripe Checkout link
+  /// (`createFantasyCheckoutSession`, the amount is the SERVER's). null =
+  /// already active (the card dismisses on its own). Throws on failure —
+  /// the card shows a friendly line + retry.
+  static Future<Uri?> createCheckoutUrl(String sport, String season) async {
+    final callable = FirebaseFunctions.instance
+        .httpsCallable('createFantasyCheckoutSession');
+    final result = await callable
+        .call<Object?>({'sport': sport, 'season': season});
+    return checkoutUrlFromResult(result.data);
   }
 
   // ── Leaderboards, transparency, mini-leagues, news (P3d) ──────────────

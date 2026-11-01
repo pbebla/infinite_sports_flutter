@@ -34,6 +34,31 @@ void main() {
     expect(MatchFantasyTab.sessionEarnings, isEmpty);
   });
 
+  test('every FantasyService snapshot cache is cleared by '
+      'FantasyService.clearSessionCaches', () {
+    // A new `_xxxCache` static (e.g. the paid-access record) must be wired
+    // into the service's own clear — otherwise sign-out leaves the previous
+    // user's snapshot to seed the next user's hub.
+    final src = File('lib/fantasy/data/fantasy_service.dart')
+        .readAsStringSync();
+    final declared = RegExp(r'static (?:final )?[\w<>, ?]+ (_\w+Cache)\b')
+        .allMatches(src)
+        .map((m) => m.group(1)!)
+        .toSet();
+    expect(declared, isNotEmpty);
+    final clearBody =
+        RegExp(r'static void clearSessionCaches\(\) \{([\s\S]*?)\n  \}')
+            .firstMatch(src)!
+            .group(1)!;
+    final missing = declared
+        .where((c) =>
+            !clearBody.contains('$c.clear()') &&
+            !clearBody.contains('$c = null'))
+        .toList();
+    expect(missing, isEmpty,
+        reason: 'clear these in FantasyService.clearSessionCaches(): $missing');
+  });
+
   test('every static session cache in lib/ is reached from fantasy_session',
       () {
     final session = File('lib/fantasy/data/fantasy_session.dart')
