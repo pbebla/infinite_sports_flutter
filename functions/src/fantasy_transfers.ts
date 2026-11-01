@@ -15,6 +15,7 @@ import { onValueWritten } from 'firebase-functions/v2/database';
 import type { Reference } from 'firebase-admin/database';
 import { fantasyLogger, rtdbFantasyDb } from './fantasy_adapter';
 import { recordSquadSave } from './lib/fantasy/orchestration';
+import { writeTimeOf } from './lib/fantasy/orchestration_db';
 
 export const onFantasySquadWritten = onValueWritten(
   '/Fantasy/{sport}/{season}/Squads/{uid}',
@@ -31,6 +32,9 @@ export const onFantasySquadWritten = onValueWritten(
       // Who wrote is judged on THIS event's value: a server write
       // (ServerWriteAt) never stamps SavedGw, a manager save always does.
       after: event.data.after.val(),
+      // WHEN is judged on the write's own time, not the trigger's (audit
+      // I3): a save accepted at 2:59:59 is counted even if this runs 3:00:02.
+      nowUtc: writeTimeOf(event.time, new Date()),
     });
   },
 );

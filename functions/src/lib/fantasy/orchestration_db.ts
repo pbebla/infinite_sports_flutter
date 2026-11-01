@@ -119,6 +119,16 @@ export function childEntries(node: unknown): Array<[string, unknown]> {
 /** Squads/<uid> field stamped by every server-originated squad write. */
 export const SERVER_WRITE_KEY = 'ServerWriteAt';
 
+/** The instant an RTDB trigger's write happened: the CloudEvent `time`
+ *  (RFC 3339) when it parses, else [fallback] (the run's now). Judging the
+ *  write's own time keeps a save made just before the lock counted even
+ *  when its trigger runs just after it (audit I3). */
+export function writeTimeOf(eventTime: unknown, fallback: Date): Date {
+  if (typeof eventTime !== 'string' || eventTime.length === 0) return fallback;
+  const ms = Date.parse(eventTime);
+  return Number.isFinite(ms) ? new Date(ms) : fallback;
+}
+
 /** Whether a Squads/<uid> value was written by the server (see above). */
 export function isServerSquadWrite(squadNode: unknown): boolean {
   return isPlainMap(squadNode) && squadNode[SERVER_WRITE_KEY] != null;

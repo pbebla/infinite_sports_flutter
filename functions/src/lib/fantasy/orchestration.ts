@@ -423,7 +423,9 @@ export interface SquadSaveArgs {
   season: string;
   uid: string;
   log?: FantasyLogger;
-  /** Clock for the position-window check (default: real now). */
+  /** When the save happened (the trigger passes the event time —
+   *  writeTimeOf): the position-window, lockOverride and post-lock checks
+   *  all judge it. Default: real now. */
   nowUtc?: Date;
   /** The triggering write's after-value (event.data.after.val()) — WHO
    *  wrote is judged on it (SERVER_WRITE_KEY), so a manager save that races
@@ -454,6 +456,15 @@ export interface SquadSaveArgs {
  *     undoing a transfer before the deadline un-counts it. Saves while the
  *     gameweek is locked, under a 'locked' lockOverride, and squad
  *     deletions are never counted.
+ *     POST-LOCK SAVES (audit I3, 2026-11-01): a save at or after
+ *     GwState.lockAtUtc is not counted even while GwState still says
+ *     'open' (the sweep flips it up to 15 minutes later) — logged at info.
+ *     Belt-and-braces: the Squads/<uid> rule already rejects such a client
+ *     write by the server clock; this catches a write that slipped past a
+ *     stale GwState. [nowUtc] is the WRITE's time (the trigger passes the
+ *     event time), so a save accepted at 2:59:59 whose trigger runs at
+ *     3:00:02 still counts. Under an effective 'open' lockOverride the
+ *     owner has extended the window, so it keeps counting (I4 below).
  *     PAUSED-OPEN WINDOW (audit I4, 2026-10-31): an EFFECTIVE 'open'
  *     lockOverride (the owner's "Open for 24 h" with an auto-return) does
  *     NOT stand this down — the sweep and the lock are paused, but managers
@@ -547,6 +558,14 @@ export async function recordSquadSave(
   if (!isPlainMap(gwState) || String(gwState['status'] ?? '') !== 'open') return;
   const gw = toIntLoose(gwState['current']);
   if (gw <= 0) return;
+  // Audit I3: the lock instant is the deadline, whatever the stale status.
+  const lockAt = toIntLoose(gwState['lockAtUtc']);
+  if (lockAt > 0 && nowMs >= lockAt &&
+    lockOverrideOf(configNode, nowMs) === 'auto') {
+    log.info('fantasy transfers: save after the lock — not counted',
+      { ...ctx, gw, lockAtUtc: lockAt, savedAtMs: nowMs, serverWrite });
+    return;
+  }
 
   const state = parseTransferState(
     await db.read(`${root}/TransferState/${uid}`), cfg);
@@ -620,6 +639,10 @@ async function newsCardBuilder(
     }
   };
 }
+
+/** A first finalize this long after the lock with no PublishedPicks
+ *  snapshot warns (the sweep runs every 15 minutes, so two missed sweeps). */
+export const FIRST_FINALIZE_SNAPSHOT_GRACE_MS = 30 * 60 * 1000;
 
 export interface FinalizeArgs {
   sport: string;
@@ -699,6 +722,21 @@ export async function finalizeGameweek(
   if (Object.keys(squadsByUid).length === 0) {
     squadsByUid = mapChildren(await db.read(`${root}/Squads`));
     source = 'squadsFallback';
+  }
+  // Audit I3: live Squads are only trustworthy as "the locked squads" when
+  // read right at the lock (the rule freezes them from the lock instant on,
+  // but only while GwState says 'open'). A FIRST finalize long after the
+  // lock with no snapshot means the sweep was down through the lock — say
+  // so loudly rather than silently scoring whatever is live now.
+  const sinceLockMs = args.nowUtc.getTime() - gw.lockUtc.getTime();
+  if (firstRun && source === 'squadsFallback' &&
+    Object.keys(squadsByUid).length > 0 &&
+    sinceLockMs > FIRST_FINALIZE_SNAPSHOT_GRACE_MS) {
+    log.warn('fantasy finalize: first finalize without a lock snapshot — ' +
+      'squads read live', {
+      ...ctx, minutesAfterLock: Math.round(sinceLockMs / 60000),
+      squads: Object.keys(squadsByUid).length,
+    });
   }
 
   // ── Phase E: the week's frozen transfer costs. The lock step persisted

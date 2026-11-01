@@ -10,18 +10,26 @@ import { clone, Json } from './golden_fixture';
 import {
   FantasyLogger, maybeFinalizeGame, recordSquadSave, runLifecycleSweep,
 } from './orchestration';
+import { writeTimeOf } from './orchestration_db';
 import {
-  AFTER_LOCK2, F_ROOT, FakeDb, fixtureSquad, GW2_DATE, world2,
+  AFTER_LOCK2, F_ROOT, FakeDb, fixtureSquad, GW2_DATE, LOCK2_MS, world2,
 } from './test_support';
 
 const fRoot = F_ROOT;
 const NOW = AFTER_LOCK2.getTime();
 
-function capture(): { log: FantasyLogger; warns: Array<{ m: string; c?: Json }> } {
+function capture(): {
+  log: FantasyLogger; warns: Array<{ m: string; c?: Json }>;
+  infos: Array<{ m: string; c?: Json }>;
+} {
   const warns: Array<{ m: string; c?: Json }> = [];
+  const infos: Array<{ m: string; c?: Json }> = [];
   return {
-    warns,
-    log: { info: () => undefined, warn: (m, c) => { warns.push({ m, c }); } },
+    warns, infos,
+    log: {
+      info: (m, c) => { infos.push({ m, c }); },
+      warn: (m, c) => { warns.push({ m, c }); },
+    },
   };
 }
 
@@ -233,5 +241,100 @@ describe('the integrity alert lifecycle', () => {
     await recordSquadSave(db, { sport: 'Futsal', season: '15', uid: 'alpha',
       nowUtc: new Date(AFTER_LOCK2.getTime() - 2 * 3600 * 1000) });
     expect(await db.read(`${fRoot}/SquadAlerts/alpha`)).toBeNull();
+  });
+});
+
+describe('post-lock saves (audit I3)', () => {
+  const MIN = 60 * 1000;
+  const save = (db: FakeDb, at: number, log?: FantasyLogger) => recordSquadSave(db,
+    { sport: 'Futsal', season: '15', uid: 'churn', nowUtc: new Date(at), log });
+  /** churn sells Bo for Wes (one transfer) — GwState still says 'open'. */
+  const transfer = (db: FakeDb) => { f(db).Squads.churn.picks[0].playerId = 'Wes'; };
+
+  it('a save before the lock is counted', async () => {
+    const db = new FakeDb(world2());
+    transfer(db);
+    await save(db, LOCK2_MS - MIN);
+    expect(await db.read(`${fRoot}/TransferState/churn`))
+      .toEqual({ Free: 2, UsedThisGw: 1, SavedGw: 2 });
+  });
+
+  it('a save AT or after lockAtUtc is not counted, even while GwState says open', async () => {
+    for (const at of [LOCK2_MS, LOCK2_MS + 7 * MIN]) {
+      const db = new FakeDb(world2());
+      transfer(db);
+      const { log, infos } = capture();
+      await save(db, at, log);
+      expect(await db.read(`${fRoot}/TransferState/churn`), String(at)).toBeNull();
+      expect(infos.some((i) => i.m.includes('after the lock') &&
+        i.c?.['gw'] === 2 && i.c?.['lockAtUtc'] === LOCK2_MS)).toBe(true);
+    }
+  });
+
+  it("a post-lock save made earlier keeps its count — a late one doesn't re-count", async () => {
+    const db = new FakeDb(world2());
+    transfer(db);
+    await save(db, LOCK2_MS - MIN); // counted: 1 transfer
+    f(db).Squads.churn.picks[4].playerId = 'Alex'; // a second sale, after the lock
+    await save(db, LOCK2_MS + MIN);
+    expect(await db.read(`${fRoot}/TransferState/churn`))
+      .toEqual({ Free: 2, UsedThisGw: 1, SavedGw: 2 });
+  });
+
+  it("under the owner's effective 'open' override the window is extended: counted", async () => {
+    const db = new FakeDb(world2());
+    f(db).Config.lockOverride = 'open';
+    f(db).Config.lockOverrideUntil = LOCK2_MS + 60 * MIN;
+    transfer(db);
+    await save(db, LOCK2_MS + 7 * MIN);
+    expect(await db.read(`${fRoot}/TransferState/churn`))
+      .toEqual({ Free: 2, UsedThisGw: 1, SavedGw: 2 });
+    // Once the override has expired, the lock instant rules again.
+    const late = new FakeDb(world2());
+    f(late).Config.lockOverride = 'open';
+    f(late).Config.lockOverrideUntil = LOCK2_MS + 5 * MIN;
+    transfer(late);
+    await save(late, LOCK2_MS + 7 * MIN);
+    expect(await db.read(`${fRoot}/TransferState/churn`)).not.toBeNull();
+    expect(await late.read(`${fRoot}/TransferState/churn`)).toBeNull();
+  });
+
+  it('the trigger judges the WRITE time (event.time), not when it runs', () => {
+    const fallback = new Date(LOCK2_MS + 3000);
+    expect(writeTimeOf('2026-06-28T21:59:59.000Z', fallback).getTime())
+      .toBe(LOCK2_MS - 1000);
+    expect(writeTimeOf(undefined, fallback)).toBe(fallback);
+    expect(writeTimeOf('', fallback)).toBe(fallback);
+    expect(writeTimeOf('not a date', fallback)).toBe(fallback);
+  });
+});
+
+describe('a first finalize without a lock snapshot warns when late (audit I3)', () => {
+  const MIN = 60 * 1000;
+  const finalizeAt = async (db: FakeDb, at: number) => {
+    const { log, warns } = capture();
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: GW2_DATE, nowUtc: new Date(at), log,
+    });
+    return warns.filter((w) => w.m.includes('without a lock snapshot'));
+  };
+
+  it('more than 30 minutes after the lock: a loud warn (squads read live)', async () => {
+    const warns = await finalizeAt(new FakeDb(world2()), LOCK2_MS + 31 * MIN);
+    expect(warns).toHaveLength(1);
+    expect(warns[0].c).toMatchObject({ gw: 2, minutesAfterLock: 31, squads: 3 });
+  });
+
+  it('within 30 minutes: no warn (the sweep may simply not have run yet)', async () => {
+    expect(await finalizeAt(new FakeDb(world2()), LOCK2_MS + 29 * MIN)).toEqual([]);
+  });
+
+  it('with the lock snapshot present: no warn, however late', async () => {
+    const db = new FakeDb(world2({ gw2Status: 1 })); // games not final at the sweep
+    await runLifecycleSweep(db, new Date(LOCK2_MS + 5 * MIN)); // snapshot only
+    expect(await db.read(`${fRoot}/PublishedPicks/2`)).not.toBeNull();
+    for (const g of db.data.Futsal['15'].Date[GW2_DATE]) g.status = 2;
+    expect(await finalizeAt(db, LOCK2_MS + 300 * MIN)).toEqual([]);
+    expect(await db.read(`${fRoot}/History/2`)).not.toBeNull();
   });
 });

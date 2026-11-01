@@ -25,7 +25,9 @@ const GW3_DATE = '07052026'; // the Sunday after GW2
 const GW3_OPEN = new Date(Date.UTC(2026, 5, 29, 23));
 // One hour after GW3's lock (2026-07-05 22:00Z).
 const AFTER_LOCK3 = new Date(Date.UTC(2026, 6, 5, 23));
-const saveArgs = { sport: 'Futsal', season: '15', uid: 'churn' };
+// Saves happen while GW3 is open (the counter judges the write's time
+// against GwState.lockAtUtc — audit I3).
+const saveArgs = { sport: 'Futsal', season: '15', uid: 'churn', nowUtc: GW3_OPEN };
 
 /** world2 + a GW3 match day whose games are still scheduled (status 0). */
 function world3(opts: Parameters<typeof world2>[0] = {}): FakeDb {
@@ -126,7 +128,7 @@ describe('S15 rehearsal finding: chips are one-week', () => {
     await runLifecycleSweep(db, GW3_OPEN);
     // The manager taps Triple Captain again for GW3 (set 2).
     db.data.Fantasy.Futsal['15'].Squads.boost.chip = 'tripleCaptain';
-    await recordSquadSave(db, { sport: 'Futsal', season: '15', uid: 'boost' });
+    await recordSquadSave(db, { sport: 'Futsal', season: '15', uid: 'boost', nowUtc: GW3_OPEN });
     await runLifecycleSweep(db, AFTER_LOCK3);
     expect((await db.read(`${F_ROOT}/PublishedPicks/3`) as Json)['boost']['chip'])
       .toBe('tripleCaptain');
@@ -153,7 +155,7 @@ describe('S15 rehearsal finding: chips are one-week', () => {
     await runLifecycleSweep(db, GW3_OPEN); // GW3 opens before GW2 settles
     // boost arms a DIFFERENT chip for GW3; churn re-saves with the same one.
     f.Squads.boost.chip = 'benchBoost';
-    await recordSquadSave(db, { sport: 'Futsal', season: '15', uid: 'boost' });
+    await recordSquadSave(db, { sport: 'Futsal', season: '15', uid: 'boost', nowUtc: GW3_OPEN });
     await recordSquadSave(db, saveArgs);
     // GW2's games finally go final: the late first finalize + rollover.
     for (const g of db.data.Futsal['15'].Date[GW2_DATE]) g.status = 2;

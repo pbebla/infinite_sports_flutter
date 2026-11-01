@@ -16,7 +16,11 @@ import {
 } from './test_support';
 
 const fRoot = F_ROOT;
-const saveArgs = (uid: string) => ({ sport: 'Futsal', season: '15', uid });
+// Saves happen while GW2 is open: the counter judges the write's own time
+// against GwState.lockAtUtc (audit I3), so the clock is explicit.
+const GW2_OPEN_NOW = new Date(Date.UTC(2026, 5, 27, 18));
+const saveArgs = (uid: string) =>
+  ({ sport: 'Futsal', season: '15', uid, nowUtc: GW2_OPEN_NOW });
 
 describe('recordSquadSave (squad-save trigger entry)', () => {
   it('counts players not in the previous locked squad; a re-save recounts', async () => {
