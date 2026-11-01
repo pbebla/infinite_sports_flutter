@@ -7,6 +7,12 @@
 // Nothing published yet → "Picks are revealed when the gameweek locks."
 // Badges (spec 2026-10-30 §5): the manager's badge shelf sits at the top
 // (also above the reveal-at-lock message); nothing earned = no shelf.
+// Your OWN team page (isSelf) also carries the "Your rank this season" card
+// (rank_history_chart.dart — the line chart + "Share my rank"; it used to
+// fold open under your own leaderboard row) just under the shelf. Its data
+// is handed in by the opener (the leaderboard tab already holds
+// Leaderboards/RankHistory), so it is part of the first paint — it joins the
+// same single reveal, never pops in after it.
 //
 // House rules: streams only; single fade reveal (skeleton until every stream
 // — the badge feeds included; a failing badge feed counts as "none" — has
@@ -28,6 +34,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/badge_shelf.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/rank_history_chart.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
@@ -52,6 +59,8 @@ class ManagerSquadViewerPage extends StatefulWidget {
     this.badgeCatalogStates,
     this.initialBadges,
     this.initialBadgeCatalog,
+    this.rankSeries,
+    this.onShareRank,
   });
 
   final String sport;
@@ -95,6 +104,17 @@ class ManagerSquadViewerPage extends StatefulWidget {
   /// both are given; the live feeds still update it.
   final List<FantasyBadgeAward>? initialBadges;
   final FantasyBadgeCatalog? initialBadgeCatalog;
+
+  /// Your season's Overall rank by gameweek (the opener's
+  /// `rankSeries(Leaderboards/RankHistory[uid])`). When [isSelf] and not
+  /// null, the page opens with the "Your rank this season" card (an empty /
+  /// one-week series = the card's muted "after your second scored
+  /// gameweek" note). Ignored for anyone else's page; null = no card.
+  final List<RankPoint>? rankSeries;
+
+  /// "Share my rank" on that card — renders + shares your rank story, given
+  /// the button's context (the iPad share anchor). null = no share action.
+  final Future<void> Function(BuildContext buttonContext)? onShareRank;
 
   @override
   State<ManagerSquadViewerPage> createState() => _ManagerSquadViewerPageState();
@@ -247,6 +267,20 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
     );
   }
 
+  /// The "Your rank this season" card for the top of YOUR page; null on
+  /// anyone else's, or when the opener passed no series.
+  Widget? _rankSection() {
+    final series = widget.rankSeries;
+    if (!widget.isSelf || series == null) return null;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: RankHistoryPanel(
+        series: series,
+        onShare: widget.onShareRank,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final Widget body;
@@ -274,6 +308,7 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
         mergeManagerWeeks(history: _history!, published: _published!);
     final sortedWeeks = weeks.keys.toList()..sort();
     final badgeSection = _badgeSection(context);
+    final rankSection = _rankSection();
 
     // Nothing browsable for another manager = their current week hasn't
     // locked yet (spec §9's anti-copying, enforced by the data itself).
@@ -333,8 +368,10 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // The manager's badges first (spec 2026-10-30 §5).
+          // The manager's badges first (spec 2026-10-30 §5), then (your own
+          // page only) your rank this season.
           if (badgeSection != null) badgeSection,
+          if (rankSection != null) rankSection,
           // Week browser (spec §9: full history, forever). Self gets the
           // extra "Now" chip for the live squad.
           if (widget.isSelf || sortedWeeks.isNotEmpty)

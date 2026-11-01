@@ -4,8 +4,11 @@
 // 9:16 story size (360x640 logical -> 1080x1920 at the pixel ratio the share
 // uses), always in the fixed DARK brand style whatever the app theme, with
 // the logo, the season label and the shared "Follow Infinite Sports" footer;
-// long names wrap and never overflow; the captions; and the Team of the Week
-// card's Share button only where the Leaderboards tab asks for one.
+// long names wrap and never overflow; the captions; the Team of the Week
+// card's Share button only where the Leaderboards tab asks for one; and
+// "Share my rank" on YOUR team page (the squad viewer — the rank card moved
+// there from the own leaderboard row) still renders the PNG + caption through
+// the same pipeline, anchored to its button.
 //
 // Owner previews: run with
 //   --dart-define=FANTASY_SHARE_PNG_DIR=<folder>
@@ -16,13 +19,16 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_share.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/manager_squad_viewer.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/rank_history_chart.dart';
 import 'package:infinite_sports_flutter/widgets/share_card_footer.dart';
 
@@ -386,6 +392,87 @@ void main() {
         findsNothing);
     expect(find.descendant(of: button, matching: find.byIcon(Icons.ios_share)),
         findsOneWidget);
+  });
+
+  group('My rank share from your team page (the squad viewer)', () {
+    const gk = SquadPick(
+        playerId: 'Live Keeper', position: FantasyPosition.gk, priceTenths: 50);
+
+    /// The viewer exactly as the Leaderboards tab builds it for your own row:
+    /// the series + a share action over [shareMyRankStory].
+    Future<ShareRecorder> pumpViewer(WidgetTester tester,
+        {required bool isSelf}) async {
+      final shares = ShareRecorder();
+      tester.view.physicalSize = const Size(420, 1400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+        home: ManagerSquadViewerPage(
+          sport: 'Futsal',
+          season: '15',
+          uid: 'me',
+          title: 'Sweeper Keepers',
+          isSelf: isSelf,
+          config: FantasyConfig.futsalDefault(),
+          players: const [],
+          gameweeks: const [],
+          initialSquad: const FantasySquad(
+              picks: [gk], captainId: 'Live Keeper', viceId: 'Live Keeper'),
+          publishedStates: Stream.value(const {}),
+          historyStates: Stream.value(const {}),
+          nowUtc: () => DateTime.utc(2026, 1, 15),
+          badgeStates: Stream.value(const []),
+          badgeCatalogStates: Stream.value(badgeCatalogFromNode(null)),
+          rankSeries: season,
+          onShareRank: (buttonContext) => shareMyRankStory(
+            buttonContext,
+            row: me(),
+            managerCount: 21,
+            series: season,
+            seasonLabel: fantasySeasonLabel('Futsal', '15'),
+            share: shares.call,
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      return shares;
+    }
+
+    testWidgets(
+        '"Share my rank" renders the 1080x1920 story PNG and hands it + the '
+        'caption to the share seam, anchored to the button', (tester) async {
+      final shares = await pumpViewer(tester, isSelf: true);
+      final button = find.byKey(const ValueKey('rank_history_share'));
+      expect(button, findsOneWidget);
+      expect(find.byKey(const ValueKey('rank_history_view_team')),
+          findsNothing);
+
+      await tester.tap(button);
+      await pumpUntil(tester, () => shares.calls.isNotEmpty);
+      final call = shares.calls.single;
+      expect(isPng(call.png), isTrue);
+      expect(pngSize(call.png), const Size(1080, 1920));
+      expect(call.caption,
+          'Infinite Fantasy · My rank · #10 of 21 · 512 pts (Futsal Season 15)');
+      expectOriginAnchoredTo(tester, call.origin, button);
+
+      // Done sharing: the button is back (no spinner), the page unchanged.
+      await tester.pumpAndSettle();
+      expect(
+          find.descendant(
+              of: button, matching: find.byType(CircularProgressIndicator)),
+          findsNothing);
+      expect(find.byType(ManagerSquadViewerPage), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets("someone else's team page offers no rank share",
+        (tester) async {
+      final shares = await pumpViewer(tester, isSelf: false);
+      expect(find.byKey(const ValueKey('rank_history_panel')), findsNothing);
+      expect(find.byKey(const ValueKey('rank_history_share')), findsNothing);
+      expect(shares.calls, isEmpty);
+    });
   });
 
   group('owner previews (only with --dart-define=FANTASY_SHARE_PNG_DIR)', () {

@@ -9,7 +9,11 @@
 // its feeds join the single reveal, nothing earned shows no shelf, and a
 // failing badge feed never holds the skeleton; (Opus audit item 7) a long
 // badge shelf above the court AND above the unrevealed message at 360 px in
-// light and dark, scrolled end to end with no overflow.
+// light and dark, scrolled end to end with no overflow; and (own-row
+// decision) YOUR page — only yours — opens with the "Your rank this season"
+// card (chart + "Share my rank", the opener's series; under two weeks the
+// muted note) under the badge shelf, inside the same single reveal, fitting
+// at 360 px in light and dark.
 
 import 'dart:async';
 
@@ -21,8 +25,10 @@ import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/manager_squad_viewer.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/rank_history_chart.dart';
 
 FantasySquad squad(String gk, {String? chip}) => FantasySquad(
       picks: [
@@ -76,6 +82,8 @@ void main() {
     Size size = const Size(420, 1200),
     Brightness brightness = Brightness.light,
     String title = 'Golden Boots',
+    List<RankPoint>? rankSeries,
+    Future<void> Function(BuildContext buttonContext)? onShareRank,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -112,6 +120,8 @@ void main() {
             Stream<FantasyBadgeCatalog>.value(badgeCatalogFromNode(null)),
         initialBadges: initialBadges,
         initialBadgeCatalog: initialBadgeCatalog,
+        rankSeries: rankSeries,
+        onShareRank: onShareRank,
       ),
     ));
   }
@@ -120,6 +130,270 @@ void main() {
     FantasyBadgeAward(id: 'captainGenius_gw1', badgeId: 'captainGenius', gw: 1),
     FantasyBadgeAward(id: 'captainGenius_gw2', badgeId: 'captainGenius', gw: 2),
   ];
+
+  const season = <RankPoint>[
+    (gameweek: 1, rank: 14),
+    (gameweek: 2, rank: 12),
+    (gameweek: 3, rank: 10),
+  ];
+
+  Finder byKey(String key) => find.byKey(ValueKey(key));
+
+  group('your rank this season (own team page, isSelf only)', () {
+    /// Lands every feed so the page reveals (the live squad answers through
+    /// [initialSquad]).
+    Future<void> land(WidgetTester tester) async {
+      published.add(const {});
+      history.add({1: squad('Old Keeper')});
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('your page opens with the card — title, "#14 → #10", the '
+        'chart and "Share my rank" — ABOVE the week chips and the court',
+        (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpViewer(tester,
+          isSelf: true,
+          initialSquad: squad('Live Keeper'),
+          rankSeries: season,
+          onShareRank: (_) async {});
+      await land(tester);
+
+      expect(byKey('viewer_content'), findsOneWidget);
+      expect(byKey('rank_history_panel'), findsOneWidget);
+      expect(find.text('Your rank this season'), findsOneWidget);
+      expect(find.text('#14 → #10'), findsOneWidget);
+      expect(byKey('rank_history_chart'), findsOneWidget);
+      expect(byKey('rank_history_note'), findsNothing);
+      expect(find.bySemanticsLabel('Your rank by gameweek: GW1 #14, GW2 #12, '
+          'GW3 #10'), findsOneWidget);
+      expect(byKey('rank_history_share'), findsOneWidget);
+      expect(find.text('Share my rank'), findsOneWidget);
+      // You are already on your team: no "View team" action.
+      expect(byKey('rank_history_view_team'), findsNothing);
+      expect(find.text('View team'), findsNothing);
+
+      final panel = tester.getRect(byKey('rank_history_panel'));
+      expect(panel.bottom,
+          lessThanOrEqualTo(tester.getTopLeft(byKey('viewer_week_now')).dy));
+      expect(panel.bottom,
+          lessThan(tester.getTopLeft(byKey('squad_chip_Live Keeper')).dy));
+      // It is a card on a scheme surface (both themes), not the old panel
+      // folded under a leaderboard row.
+      final box = tester
+          .widget<DecoratedBox>(byKey('rank_history_panel'))
+          .decoration as BoxDecoration;
+      final scheme = Theme.of(tester.element(byKey('rank_history_panel')))
+          .colorScheme;
+      expect(box.color, scheme.surfaceContainerHigh);
+      semantics.dispose();
+    });
+
+    testWidgets('with badges: the card sits just BELOW the shelf and above '
+        'the week chips', (tester) async {
+      await pumpViewer(tester,
+          isSelf: true,
+          initialSquad: squad('Live Keeper'),
+          badgeStates: Stream.value(twoBadges),
+          rankSeries: season);
+      await land(tester);
+
+      final shelf = tester.getRect(byKey('badge_shelf'));
+      final panel = tester.getRect(byKey('rank_history_panel'));
+      expect(shelf.bottom, lessThanOrEqualTo(panel.top));
+      expect(panel.bottom,
+          lessThanOrEqualTo(tester.getTopLeft(byKey('viewer_week_now')).dy));
+    });
+
+    testWidgets('the card is part of the SINGLE reveal: never in the skeleton, '
+        'present in the very first content frame', (tester) async {
+      await pumpViewer(tester,
+          isSelf: true,
+          initialSquad: squad('Live Keeper'),
+          rankSeries: season);
+      expect(byKey('viewer_skeleton'), findsOneWidget);
+      expect(byKey('rank_history_panel'), findsNothing);
+
+      published.add(const {});
+      await tester.pump();
+      // Picks are in, the history isn't: still the skeleton, still no card.
+      expect(byKey('viewer_skeleton'), findsOneWidget);
+      expect(byKey('rank_history_panel'), findsNothing);
+
+      history.add(const {});
+      // ONE frame after the last feed: the reveal starts with the card
+      // already inside it — nothing pops in afterwards.
+      await tester.pump();
+      expect(byKey('viewer_content'), findsOneWidget);
+      expect(byKey('rank_history_panel'), findsOneWidget);
+      expect(byKey('rank_history_chart'), findsOneWidget);
+      await tester.pumpAndSettle();
+      expect(byKey('viewer_skeleton'), findsNothing);
+      expect(byKey('rank_history_panel'), findsOneWidget);
+    });
+
+    testWidgets("someone else's page never shows it, even if a series is "
+        'handed in', (tester) async {
+      await pumpViewer(tester,
+          rankSeries: season, onShareRank: (_) async {});
+      published.add({2: squad('Pub Keeper')});
+      history.add(const {});
+      await tester.pumpAndSettle();
+      expect(byKey('viewer_content'), findsOneWidget);
+      expect(byKey('rank_history_panel'), findsNothing);
+      expect(byKey('rank_history_share'), findsNothing);
+      expect(find.text('Your rank this season'), findsNothing);
+    });
+
+    testWidgets('your page without a series (none passed) shows no card',
+        (tester) async {
+      await pumpViewer(tester,
+          isSelf: true, initialSquad: squad('Live Keeper'));
+      await land(tester);
+      expect(byKey('viewer_content'), findsOneWidget);
+      expect(byKey('rank_history_panel'), findsNothing);
+    });
+
+    for (final (label, series) in [
+      ('no history at all', const <RankPoint>[]),
+      ('one week of history', const <RankPoint>[(gameweek: 1, rank: 4)]),
+    ]) {
+      testWidgets('under two weeks ($label): the card is the short muted '
+          'note, no chart, sharing still offered', (tester) async {
+        await pumpViewer(tester,
+            isSelf: true,
+            initialSquad: squad('Live Keeper'),
+            rankSeries: series,
+            onShareRank: (_) async {});
+        await land(tester);
+
+        expect(byKey('rank_history_panel'), findsOneWidget);
+        expect(find.text('Your rank this season'), findsOneWidget);
+        expect(byKey('rank_history_chart'), findsNothing);
+        expect(find.textContaining('→'), findsNothing);
+        final note = tester.widget<Text>(byKey('rank_history_note'));
+        expect(note.data, kRankHistoryNote);
+        final context = tester.element(byKey('rank_history_note'));
+        expect(note.style!.color,
+            Theme.of(context).colorScheme.onSurfaceVariant);
+        expect(byKey('rank_history_share'), findsOneWidget);
+      });
+    }
+
+    testWidgets('the card stays put while you browse weeks (it is not '
+        'tied to the selected squad)', (tester) async {
+      await pumpViewer(tester,
+          isSelf: true,
+          initialSquad: squad('Live Keeper'),
+          rankSeries: season);
+      await land(tester);
+      final before = tester.getRect(byKey('rank_history_panel'));
+
+      await tester.tap(byKey('viewer_week_1'));
+      await tester.pumpAndSettle();
+      expect(find.text('Gameweek 1 squad'), findsOneWidget);
+      expect(byKey('rank_history_panel'), findsOneWidget);
+      expect(tester.getRect(byKey('rank_history_panel')), before);
+    });
+
+    testWidgets('"Share my rank" calls the opener\'s share once, with the '
+        'button\'s own context (the iPad anchor)', (tester) async {
+      final contexts = <BuildContext>[];
+      await pumpViewer(tester,
+          isSelf: true,
+          initialSquad: squad('Live Keeper'),
+          rankSeries: season,
+          onShareRank: (ctx) async => contexts.add(ctx));
+      await land(tester);
+
+      await tester.tap(byKey('rank_history_share'));
+      await tester.pumpAndSettle();
+      expect(contexts, hasLength(1));
+      final box = contexts.single.findRenderObject()! as RenderBox;
+      expect(box.localToGlobal(Offset.zero) & box.size,
+          tester.getRect(byKey('rank_history_share')));
+    });
+
+    testWidgets('no onShareRank = the card without a share button',
+        (tester) async {
+      await pumpViewer(tester,
+          isSelf: true,
+          initialSquad: squad('Live Keeper'),
+          rankSeries: season);
+      await land(tester);
+      expect(byKey('rank_history_panel'), findsOneWidget);
+      expect(byKey('rank_history_share'), findsNothing);
+    });
+
+    // 360 px, light AND dark: a long team name, a long badge shelf and the
+    // card (chart, and the muted note), scrolled end to end.
+    for (final brightness in Brightness.values) {
+      for (final (label, series) in [
+        (
+          'chart',
+          const <RankPoint>[
+            (gameweek: 1, rank: 1234),
+            (gameweek: 2, rank: 987),
+            (gameweek: 5, rank: 1),
+          ]
+        ),
+        ('note', const <RankPoint>[]),
+      ]) {
+        testWidgets('360 px: long title + badges + the card ($label) fit, no '
+            'overflow when scrolled through — $brightness', (tester) async {
+          const longName =
+              'The Extraordinarily Magnificent Never-Ending Captaincy Award';
+          final catalog = badgeCatalogFromNode({
+            for (var i = 0; i < 3; i++)
+              'long$i': {'Name': '$longName $i', 'Icon': 'bolt', 'Order': i},
+          });
+          await pumpViewer(
+            tester,
+            isSelf: true,
+            initialSquad: squad('Live Keeper'),
+            size: const Size(360, 760),
+            brightness: brightness,
+            title: 'The Extraordinarily Long-Named Assyrian Futsal Club',
+            badgeStates: Stream.value([
+              for (var i = 0; i < 3; i++)
+                FantasyBadgeAward(
+                    id: 'long${i}_gw1', badgeId: 'long$i', gw: 1),
+            ]),
+            badgeCatalogStates: Stream.value(catalog),
+            rankSeries: series,
+            onShareRank: (_) async {},
+          );
+          published.add(const {});
+          history.add({1: squad('Old Keeper')});
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          expect(byKey('rank_history_panel'), findsOneWidget);
+          expect(byKey('rank_history_chart'),
+              label == 'chart' ? findsOneWidget : findsNothing);
+
+          final scrollable = find.byType(Scrollable).first;
+          for (final key in [
+            'rank_history_panel',
+            if (label == 'chart') 'rank_history_chart',
+            'rank_history_share',
+          ]) {
+            await tester.dragUntilVisible(
+                byKey(key), scrollable, const Offset(0, -150));
+            await tester.pumpAndSettle();
+            final r = tester.getRect(byKey(key));
+            expect(r.left, greaterThanOrEqualTo(0), reason: key);
+            expect(r.right, lessThanOrEqualTo(360), reason: key);
+          }
+          await tester.drag(scrollable, const Offset(0, -2000));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          for (final t in tester.widgetList<Text>(find.byType(Text))) {
+            expect(t.overflow, isNot(TextOverflow.ellipsis), reason: t.data);
+          }
+        });
+      }
+    }
+  });
 
   group('badges (spec 2026-10-30 §5)', () {
     testWidgets('the shelf sits at the TOP (above the week chips); its feeds '

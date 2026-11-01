@@ -11,7 +11,10 @@
 // place is scrolled away and released when it scrolls into view; the
 // Gameweek scope's week chips (1..N from the schedule) with per-week empty
 // copy; the friendly empty states; row taps opening the squad viewer (via the
-// builder seam); 360 px long names + segment labels fitting in light AND
+// builder seam) — YOUR own row (natural and pinned) included, with no
+// expanding panel and no chevron: "Your rank this season" + "Share my rank"
+// live on your own team page (the real viewer, handed the series by the
+// tab); 360 px long names + segment labels fitting in light AND
 // dark; and (badges, spec 2026-10-30 §5) the badge-count chip beside the
 // manager name on Overall + Gameweek rows — its feed does NOT gate the reveal
 // (Opus audit item 1: every row reserves the chip's fixed slot until the
@@ -35,6 +38,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/manager_squad_viewer.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/mini_leagues_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/rank_history_chart.dart';
@@ -68,6 +72,8 @@ void main() {
   late StreamController<List<FantasyMiniLeague>> leagues;
   late StreamController<FantasySquad?> squads;
   late StreamController<Map<int, FantasyDreamTeam>> dreams;
+  late StreamController<Map<int, FantasySquad>> viewerPublished;
+  late StreamController<Map<int, FantasySquad>> viewerHistory;
   late List<LeaderboardRowData> openedRows;
 
   setUp(() {
@@ -80,6 +86,8 @@ void main() {
     leagues = StreamController<List<FantasyMiniLeague>>.broadcast();
     squads = StreamController<FantasySquad?>.broadcast();
     dreams = StreamController<Map<int, FantasyDreamTeam>>.broadcast();
+    viewerPublished = StreamController<Map<int, FantasySquad>>.broadcast();
+    viewerHistory = StreamController<Map<int, FantasySquad>>.broadcast();
     openedRows = [];
   });
 
@@ -89,6 +97,8 @@ void main() {
     leagues.close();
     squads.close();
     dreams.close();
+    viewerPublished.close();
+    viewerHistory.close();
   });
 
   Future<void> pumpTab(
@@ -102,6 +112,9 @@ void main() {
     String? fontFamily,
     SharePng? shareImage,
     Stream<Map<String, List<FantasyBadgeAward>>>? badgesStates,
+    // true = no squadViewerBuilder seam: rows open the REAL
+    // ManagerSquadViewerPage (fed by viewerPublished / viewerHistory / squads).
+    bool realViewer = false,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -135,11 +148,15 @@ void main() {
           // Default: nobody has a badge, answered at once.
           badgesStates: badgesStates ??
               Stream<Map<String, List<FantasyBadgeAward>>>.value(const {}),
-          squadViewerBuilder: (row) {
-            openedRows.add(row);
-            return Scaffold(
-                appBar: AppBar(), body: const Text('viewer page'));
-          },
+          viewerPublishedStates: viewerPublished.stream,
+          viewerHistoryStates: viewerHistory.stream,
+          squadViewerBuilder: realViewer
+              ? null
+              : (row) {
+                  openedRows.add(row);
+                  return Scaffold(
+                      appBar: AppBar(), body: const Text('viewer page'));
+                },
         ),
       ),
     ));
@@ -1036,11 +1053,22 @@ void main() {
 
   Finder byKey(String key) => find.byKey(ValueKey(key));
 
-  group('extra 1 — your rank this season (own row, Overall)', () {
-    testWidgets('tapping YOUR row expands "Your rank this season" — the line '
-        'chart and "#start → #now" — instead of the viewer; tapping again '
-        'folds it', (tester) async {
-      final semantics = tester.ensureSemantics();
+  group('extra 1 — your own row opens your team (rank card lives there)', () {
+    /// Taps [uid]'s row, lets the REAL viewer mount (realViewer pump) and
+    /// lands its feeds — the squad stream too when it is your own page.
+    Future<void> openRealViewer(WidgetTester tester, String uid,
+        {bool self = false}) async {
+      await tester.tap(byKey('leaderboard_row_$uid'));
+      await tester.pump(); // the route's first frame: the viewer subscribes
+      await tester.pump(const Duration(milliseconds: 400));
+      viewerPublished.add(const {});
+      viewerHistory.add(const {});
+      if (self) squads.add(null);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('tapping YOUR row opens your team exactly like any other row '
+        '— no expanding panel, no chevron in the list', (tester) async {
       await pumpTab(tester, size: const Size(420, 1000));
       await emitAll(
         tester,
@@ -1049,86 +1077,36 @@ void main() {
         }),
         names: fourNames,
       );
+      // No chevron anywhere (not on your row, not reserved on the others).
+      expect(byKey('own_row_chevron_me'), findsNothing);
+      expect(byKey('own_row_chevron_u1'), findsNothing);
+      expect(find.byIcon(Icons.expand_more), findsNothing);
+      expect(find.byIcon(Icons.expand_less), findsNothing);
       expect(byKey('rank_history_panel'), findsNothing);
 
       await tester.tap(byKey('leaderboard_row_me'));
       await tester.pumpAndSettle();
-      expect(byKey('rank_history_panel'), findsOneWidget);
-      expect(find.text('Your rank this season'), findsOneWidget);
-      expect(byKey('rank_history_chart'), findsOneWidget);
-      expect(find.text('#14 → #10'), findsOneWidget);
-      expect(byKey('rank_history_note'), findsNothing);
-      expect(find.bySemanticsLabel('Your rank by gameweek: GW1 #14, GW2 #12, '
-          'GW3 #10'), findsOneWidget);
-      // Rank 1 at the top: the best rank's axis label sits above the worst;
-      // the gameweeks run left to right.
-      expect(tester.getTopLeft(find.text('#10')).dy,
-          lessThan(tester.getTopLeft(find.text('#14')).dy));
-      expect(tester.getTopLeft(find.text('GW1')).dx,
-          lessThan(tester.getTopLeft(find.text('GW3')).dx));
-      // The panel opens UNDER the own row, inside its highlight.
-      expect(tester.getTopLeft(byKey('rank_history_panel')).dy,
-          greaterThanOrEqualTo(
-              tester.getBottomLeft(byKey('leaderboard_row_me')).dy - 0.5));
-      // The squad viewer did NOT open.
-      expect(openedRows, isEmpty);
-      expect(find.text('viewer page'), findsNothing);
-
-      await tester.tap(byKey('leaderboard_row_me'));
-      await tester.pumpAndSettle();
-      expect(byKey('rank_history_panel'), findsNothing);
-      expect(openedRows, isEmpty);
-      semantics.dispose();
-    });
-
-    testWidgets('"View team" inside the panel still opens your own squad '
-        'viewer', (tester) async {
-      await pumpTab(tester, size: const Size(420, 1000));
-      await emitAll(
-        tester,
-        data: overallWith({
-          'me': {'1': 3, '2': 2},
-        }),
-        names: fourNames,
-      );
-      await tester.tap(byKey('leaderboard_row_me'));
-      await tester.pumpAndSettle();
-      await tester.tap(byKey('rank_history_view_team'));
-      await tester.pumpAndSettle();
+      // The squad viewer opened for YOUR row (isSelf), nothing folded open.
       expect(openedRows.single.uid, 'me');
       expect(openedRows.single.isSelf, isTrue);
       expect(find.text('viewer page'), findsOneWidget);
+      expect(byKey('rank_history_panel'), findsNothing);
+
+      // Back on the list: still no panel under your row, and a second tap
+      // is a plain tap (opens the viewer again), not a fold toggle.
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(byKey('rank_history_panel'), findsNothing);
+      expect(find.text('viewer page'), findsNothing);
+      await tester.tap(byKey('leaderboard_row_me'));
+      await tester.pumpAndSettle();
+      expect(openedRows.map((r) => r.uid), ['me', 'me']);
+      expect(byKey('rank_history_panel'), findsNothing);
     });
 
-    for (final (label, history) in [
-      ('one week of history', <String, Object?>{
-        'me': {'1': 4},
-      }),
-      ('no RankHistory at all', null),
-    ]) {
-      testWidgets('under two weeks ($label): a short muted note instead of a '
-          'chart', (tester) async {
-        await pumpTab(tester, size: const Size(420, 1000));
-        await emitAll(tester, data: overallWith(history), names: fourNames);
-        await tester.tap(byKey('leaderboard_row_me'));
-        await tester.pumpAndSettle();
-
-        expect(byKey('rank_history_panel'), findsOneWidget);
-        expect(find.text('Your rank this season'), findsOneWidget);
-        expect(byKey('rank_history_chart'), findsNothing);
-        expect(find.textContaining('→'), findsNothing);
-        final note = tester.widget<Text>(byKey('rank_history_note'));
-        expect(note.data, kRankHistoryNote);
-        final context = tester.element(byKey('rank_history_note'));
-        expect(note.style!.color,
-            Theme.of(context).colorScheme.onSurfaceVariant);
-        // View team stays available.
-        expect(byKey('rank_history_view_team'), findsOneWidget);
-      });
-    }
-
-    testWidgets("other managers' rows still open their squad viewer; the "
-        "Gameweek view's own row still opens yours", (tester) async {
+    testWidgets("other managers' rows open their squad viewer; the Gameweek "
+        "view's own row opens yours — none of them grows a panel",
+        (tester) async {
       await pumpTab(tester, size: const Size(420, 1000));
       await emitAll(
         tester,
@@ -1155,13 +1133,16 @@ void main() {
       expect(byKey('rank_history_panel'), findsNothing);
 
       await pickScope(tester, 'Gameweek');
+      expect(byKey('own_row_chevron_me'), findsNothing);
       await tester.tap(byKey('leaderboard_row_me'));
       await tester.pumpAndSettle();
       expect(openedRows.last.uid, 'me');
+      expect(openedRows.last.isSelf, isTrue);
       expect(byKey('rank_history_panel'), findsNothing);
     });
 
-    testWidgets('the PINNED copy of your row expands too', (tester) async {
+    testWidgets('the PINNED copy of your row opens your team too — no panel, '
+        'no chevron', (tester) async {
       await pumpTab(tester, selfUid: 'u18');
       await emitAll(
         tester,
@@ -1178,64 +1159,155 @@ void main() {
       );
       final pinned = byKey('pinned_own_row');
       expect(pinned, findsOneWidget);
+      expect(
+          find.descendant(of: pinned, matching: byKey('own_row_chevron_u18')),
+          findsNothing);
 
       await tester.tap(find.descendant(
           of: pinned, matching: byKey('leaderboard_row_u18')));
       await tester.pumpAndSettle();
-      expect(
-          find.descendant(of: pinned, matching: byKey('rank_history_panel')),
-          findsOneWidget);
-      expect(find.descendant(of: pinned, matching: find.text('#20 → #18')),
-          findsOneWidget);
-      expect(openedRows, isEmpty);
+      expect(openedRows.single.uid, 'u18');
+      expect(openedRows.single.isSelf, isTrue);
+      expect(find.text('viewer page'), findsOneWidget);
+      expect(byKey('rank_history_panel'), findsNothing);
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('share: "Share my rank" sits in the panel beside "View team"; '
-        'tapping it renders the 1080x1920 story PNG and hands it + the '
-        'caption to the share sheet', (tester) async {
+    testWidgets('your own team page (the real viewer) carries "Your rank this '
+        'season" + "Share my rank"; another manager\'s page carries neither',
+        (tester) async {
+      final semantics = tester.ensureSemantics();
       final shares = ShareRecorder();
       await pumpTab(tester,
-          size: const Size(420, 1000), shareImage: shares.call);
+          size: const Size(420, 1400),
+          realViewer: true,
+          shareImage: shares.call);
       await emitAll(
         tester,
         data: overallWith({
-          'me': {'1': 3, '2': 2},
+          'me': {'1': 14, '2': 12, '3': 10},
         }),
         names: fourNames,
       );
-      expect(byKey('rank_history_share'), findsNothing);
-      await tester.tap(byKey('leaderboard_row_me'));
-      await tester.pumpAndSettle();
+      expect(byKey('rank_history_panel'), findsNothing);
 
-      final button = byKey('rank_history_share');
-      expect(button, findsOneWidget);
+      await openRealViewer(tester, 'me', self: true);
+      expect(find.byType(ManagerSquadViewerPage), findsOneWidget);
+      expect(byKey('viewer_content'), findsOneWidget);
+      expect(byKey('rank_history_panel'), findsOneWidget);
+      expect(find.text('Your rank this season'), findsOneWidget);
+      expect(byKey('rank_history_chart'), findsOneWidget);
+      expect(find.text('#14 → #10'), findsOneWidget);
+      expect(byKey('rank_history_note'), findsNothing);
+      expect(find.bySemanticsLabel('Your rank by gameweek: GW1 #14, GW2 #12, '
+          'GW3 #10'), findsOneWidget);
+      // No "View team": you are already on it.
+      expect(byKey('rank_history_view_team'), findsNothing);
+      expect(find.text('View team'), findsNothing);
+      // Rank 1 at the top of the chart; gameweeks run left to right.
+      expect(tester.getTopLeft(find.text('#10')).dy,
+          lessThan(tester.getTopLeft(find.text('#14')).dy));
+      expect(tester.getTopLeft(find.text('GW1')).dx,
+          lessThan(tester.getTopLeft(find.text('GW3')).dx));
+      // The card sits at the TOP: above the week chips and the court.
+      expect(tester.getBottomLeft(byKey('rank_history_panel')).dy,
+          lessThanOrEqualTo(tester.getTopLeft(byKey('viewer_week_now')).dy));
+
+      // "Share my rank" renders the story PNG and hands it + the caption to
+      // the same share seam, anchored to the tapped button.
+      final share = byKey('rank_history_share');
+      expect(share, findsOneWidget);
       expect(find.text('Share my rank'), findsOneWidget);
-      expect(byKey('rank_history_view_team'), findsOneWidget);
-      expect(
-          find.descendant(
-              of: byKey('rank_history_panel'), matching: button),
-          findsOneWidget);
-
-      await tester.tap(button);
+      await tester.tap(share);
       await pumpUntil(tester, () => shares.calls.isNotEmpty);
       final call = shares.calls.single;
       expect(isPng(call.png), isTrue);
       expect(pngSize(call.png), const Size(1080, 1920));
       expect(call.caption,
           'Infinite Fantasy · My rank · #2 of 4 · 80 pts (Futsal Season 15)');
-      expect(call.origin, tester.getRect(button));
+      expect(call.origin, tester.getRect(share));
       await tester.pumpAndSettle();
-      // The panel stays open; nothing navigated.
-      expect(byKey('rank_history_panel'), findsOneWidget);
-      expect(openedRows, isEmpty);
+      // Nothing navigated; the page is still your team.
+      expect(find.byType(ManagerSquadViewerPage), findsOneWidget);
       expect(find.byType(SnackBar), findsNothing);
       expect(tester.takeException(), isNull);
+
+      // Another manager's page: no card, no share.
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await openRealViewer(tester, 'u3');
+      expect(find.byType(ManagerSquadViewerPage), findsOneWidget);
+      expect(byKey('rank_history_panel'), findsNothing);
+      expect(byKey('rank_history_share'), findsNothing);
+      expect(find.text('Your rank this season'), findsNothing);
+      expect(shares.calls, hasLength(1));
+      semantics.dispose();
     });
 
-    testWidgets('review fix: the chevron never pushes YOUR points out of the '
-        'points column — every Overall row reserves its width (and the "Pts" '
-        'header sits over it)', (tester) async {
+    testWidgets('the rank card shares your OVERALL row even when you opened '
+        'your team from the Gameweek scope', (tester) async {
+      final shares = ShareRecorder();
+      await pumpTab(tester,
+          size: const Size(420, 1400),
+          realViewer: true,
+          shareImage: shares.call);
+      await emitAll(
+        tester,
+        data: overallWith(
+          {
+            'me': {'1': 3, '2': 2},
+          },
+          gameweek: {
+            '1': {
+              'u1': {'points': 20, 'rank': 1},
+              'me': {'points': 10, 'rank': 2},
+            },
+          },
+        ),
+        names: fourNames,
+      );
+      await pickScope(tester, 'Gameweek');
+      await openRealViewer(tester, 'me', self: true);
+      expect(byKey('rank_history_panel'), findsOneWidget);
+      expect(find.text('#3 → #2'), findsOneWidget);
+
+      await tester.tap(byKey('rank_history_share'));
+      await pumpUntil(tester, () => shares.calls.isNotEmpty);
+      // The season's rank + points (80), not the week's (10).
+      expect(shares.calls.single.caption,
+          'Infinite Fantasy · My rank · #2 of 4 · 80 pts (Futsal Season 15)');
+      await tester.pumpAndSettle();
+    });
+
+    for (final (label, history) in [
+      ('one week of history', <String, Object?>{
+        'me': {'1': 4},
+      }),
+      ('no RankHistory at all', null),
+    ]) {
+      testWidgets('under two weeks ($label): your team page shows a short '
+          'muted note instead of a chart', (tester) async {
+        await pumpTab(tester, size: const Size(420, 1400), realViewer: true);
+        await emitAll(tester, data: overallWith(history), names: fourNames);
+        await openRealViewer(tester, 'me', self: true);
+
+        expect(byKey('rank_history_panel'), findsOneWidget);
+        expect(find.text('Your rank this season'), findsOneWidget);
+        expect(byKey('rank_history_chart'), findsNothing);
+        expect(find.textContaining('→'), findsNothing);
+        final note = tester.widget<Text>(byKey('rank_history_note'));
+        expect(note.data, kRankHistoryNote);
+        final context = tester.element(byKey('rank_history_note'));
+        expect(note.style!.color,
+            Theme.of(context).colorScheme.onSurfaceVariant);
+        // Sharing your rank still works from here.
+        expect(byKey('rank_history_share'), findsOneWidget);
+      });
+    }
+
+    testWidgets('review fix: your points never move out of the points column '
+        '— the list is the plain layout (no reserved chevron width), and the '
+        '"Pts" header sits over it', (tester) async {
       await pumpTab(tester, size: const Size(420, 1000));
       await emitAll(
         tester,
@@ -1244,21 +1316,13 @@ void main() {
         }),
         names: fourNames,
       );
-      // Only YOUR row carries the chevron.
-      expect(byKey('own_row_chevron_me'), findsOneWidget);
-      expect(byKey('own_row_chevron_u1'), findsNothing);
-
+      // Outer 10 + inner 12 = 22 px from the right edge, on EVERY row.
       final mine = tester.getTopRight(find.text('80 pts')).dx;
+      expect(mine, closeTo(420 - 22, 0.01));
       for (final other in ['90 pts', '70 pts', '60 pts']) {
         expect(tester.getTopRight(find.text(other)).dx, mine, reason: other);
       }
       expect(tester.getTopRight(find.text('Pts')).dx, mine);
-
-      // Still lined up with the panel open (the chevron flips, same width).
-      await tester.tap(byKey('leaderboard_row_me'));
-      await tester.pumpAndSettle();
-      expect(tester.getTopRight(find.text('80 pts')).dx, mine);
-      expect(tester.getTopRight(find.text('90 pts')).dx, mine);
     });
 
     testWidgets('review fix: the pinned copy of your row lines up too',
@@ -1279,6 +1343,7 @@ void main() {
       final pinnedPoints = tester.getTopRight(
           find.descendant(of: pinned, matching: find.text('82 pts')));
       expect(pinnedPoints.dx, tester.getTopRight(find.text('99 pts')).dx);
+      expect(pinnedPoints.dx, closeTo(420 - 22, 0.01));
     });
 
     test('chart geometry: rank 1 at the top, gameweeks left to right', () {
@@ -1713,8 +1778,8 @@ void main() {
     const longTeam = 'The Unbelievably Long Team Name Football Club Of Doom';
 
     for (final brightness in Brightness.values) {
-      testWidgets('badged long names, the expanded rank panel and the week '
-          'summary — $brightness', (tester) async {
+      testWidgets('badged long names and the week summary — $brightness',
+          (tester) async {
         await pumpTab(
           tester,
           selfUid: 'me',
@@ -1776,23 +1841,17 @@ void main() {
         expect(name.maxLines, isNull);
 
         // The wrapped long names push the own row down: bring it into view.
+        // It opens your team (the rank card is on THAT page), never a panel.
         await tester.ensureVisible(byKey('leaderboard_row_me'));
         await tester.pumpAndSettle();
+        expect(byKey('own_row_chevron_me'), findsNothing);
         await tester.tap(byKey('leaderboard_row_me'));
         await tester.pumpAndSettle();
-        expect(byKey('rank_history_chart'), findsOneWidget);
-        expect(find.text('#120 → #2'), findsOneWidget);
+        expect(openedRows.single.uid, 'me');
+        expect(byKey('rank_history_panel'), findsNothing);
         expect(tester.takeException(), isNull);
-        for (final key in [
-          'rank_history_panel',
-          'rank_history_chart',
-          'rank_history_share',
-          'rank_history_view_team',
-        ]) {
-          final r = tester.getRect(byKey(key));
-          expect(r.left, greaterThanOrEqualTo(0), reason: key);
-          expect(r.right, lessThanOrEqualTo(360), reason: key);
-        }
+        await tester.pageBack();
+        await tester.pumpAndSettle();
 
         await pickScope(tester, 'Gameweek');
         final summaryText = tester.widget<Text>(byKey('gameweek_summary'));

@@ -11,12 +11,13 @@
 // wrap — no side-by-side columns), points. The own row carries the gold
 // highlight.
 //
-// Leaderboard extras (follow-up), both opt-in so the Gameweek scope and the
+// Leaderboard extra (follow-up), opt-in so the Gameweek scope and the
 // mini-league lists are untouched: [RankedLeaderboardList.movers] puts the
 // week's biggest-climber flame / biggest-drop badge beside a manager's name
-// (Overall), and [RankedLeaderboardList.selfPanelBuilder] makes the signed-in
-// manager's row — natural AND pinned copy — expand into a panel ("Your rank
-// this season") instead of opening the squad viewer (Overall).
+// (Overall). Every row — the signed-in manager's own included, natural AND
+// pinned copy — is a plain tap target ([RankedLeaderboardList.onRowTap]);
+// the own row's "Your rank this season" chart lives on your team page (the
+// squad viewer), not in the list.
 //
 // Badges (spec 2026-10-30 §5), opt-in like the extras:
 // [RankedLeaderboardList.badgeCounts] puts the small military_tech + N chip
@@ -31,8 +32,7 @@
 // red in light; movement up = the pitch-green family, down = error); manager
 // names WRAP and are never underlined or ellipsized; list clears the glass
 // navbar; photos never gate rows (FantasyAvatar's initials fallback); the
-// pinned row's appear/disappear and the own-row panel's expand are 200ms and
-// zero under reduced motion.
+// pinned row's appear/disappear is 200ms and zero under reduced motion.
 
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/badge_shelf.dart'
@@ -48,11 +48,6 @@ const double _movementWidth = 36;
 const double _avatarSize = 38;
 const double _afterMovementGap = 6;
 const double _afterAvatarGap = 10;
-// The own row's expand chevron after the points. When a list has one, EVERY
-// row (and the "Pts" header) reserves this width so the points column lines
-// up (review fix).
-const double _chevronGap = 2;
-const double _chevronSize = 18;
 
 /// Movement arrow color for this theme: green up (pitch family — legitimate
 /// in both themes), error down, muted neutral.
@@ -122,9 +117,6 @@ class LeaderboardRowTile extends StatelessWidget {
     this.showMovement = true,
     this.onTap,
     this.mover,
-    this.expanded,
-    this.footer,
-    this.reserveChevron = false,
     this.badgeCount = 0,
   });
 
@@ -141,17 +133,6 @@ class LeaderboardRowTile extends StatelessWidget {
   /// without moving anything.
   final int? badgeCount;
 
-  /// Expandable row (the own row on Overall): null = not expandable (no
-  /// chevron); false/true = the folded/unfolded chevron after the points.
-  final bool? expanded;
-
-  /// Rendered under the row, inside its highlight (the own-row panel slot).
-  final Widget? footer;
-
-  /// A non-expandable row in a list whose own row HAS the chevron: keep its
-  /// width empty after the points so every row's points line up.
-  final bool reserveChevron;
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -159,7 +140,6 @@ class LeaderboardRowTile extends StatelessWidget {
     final direction = movementDirection(row.movement);
     final secondary = row.secondaryName;
     final mover = this.mover;
-    final expanded = this.expanded;
     final badgeCount = this.badgeCount;
     final reserveBadge = badgeCount == null;
     final showBadge = badgeCount != null && badgeCount > 0;
@@ -277,19 +257,6 @@ class LeaderboardRowTile extends StatelessWidget {
               color: row.isSelf ? accent : scheme.onSurface,
             ),
           ),
-          if (expanded != null) ...[
-            const SizedBox(width: _chevronGap),
-            Icon(
-              expanded ? Icons.expand_less : Icons.expand_more,
-              key: ValueKey('own_row_chevron_${row.uid}'),
-              size: _chevronSize,
-              color: scheme.onSurfaceVariant,
-              semanticLabel: expanded
-                  ? 'Hide your rank this season'
-                  : 'Show your rank this season',
-            ),
-          ] else if (reserveChevron)
-            const SizedBox(width: _chevronGap + _chevronSize),
         ],
       ),
     );
@@ -301,36 +268,14 @@ class LeaderboardRowTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       border: Border.all(color: accent.withValues(alpha: 0.65)),
     );
-    final footer = this.footer;
-    final Widget body;
-    if (footer == null) {
-      body = InkWell(
-        key: ValueKey('leaderboard_row_${row.uid}'),
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap == null ? null : () => onTap!(row),
-        child: row.isSelf
-            ? Container(foregroundDecoration: selfBorder, child: content)
-            : content,
-      );
-    } else {
-      // The tappable row with its panel under it, both inside the highlight.
-      final column = Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          InkWell(
-            key: ValueKey('leaderboard_row_${row.uid}'),
-            borderRadius: BorderRadius.circular(12),
-            onTap: onTap == null ? null : () => onTap!(row),
-            child: content,
-          ),
-          footer,
-        ],
-      );
-      body = row.isSelf
-          ? Container(foregroundDecoration: selfBorder, child: column)
-          : column;
-    }
+    final body = InkWell(
+      key: ValueKey('leaderboard_row_${row.uid}'),
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap == null ? null : () => onTap!(row),
+      child: row.isSelf
+          ? Container(foregroundDecoration: selfBorder, child: content)
+          : content,
+    );
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
@@ -349,15 +294,9 @@ class LeaderboardRowTile extends StatelessWidget {
 /// The mockup's "# · Manager · Pts" header — same paddings and column widths
 /// as [LeaderboardRowTile] so the labels sit over their columns.
 class _LeaderboardColumnHeader extends StatelessWidget {
-  const _LeaderboardColumnHeader({
-    required this.showMovement,
-    this.reserveChevron = false,
-  });
+  const _LeaderboardColumnHeader({required this.showMovement});
 
   final bool showMovement;
-
-  /// Mirrors [LeaderboardRowTile.reserveChevron] so "Pts" sits over points.
-  final bool reserveChevron;
 
   @override
   Widget build(BuildContext context) {
@@ -384,8 +323,6 @@ class _LeaderboardColumnHeader extends StatelessWidget {
                   width: _afterMovementGap + _avatarSize + _afterAvatarGap),
               Expanded(child: Text('Manager', style: style)),
               Text('Pts', style: style),
-              if (reserveChevron)
-                const SizedBox(width: _chevronGap + _chevronSize),
             ],
           ),
         ),
@@ -411,7 +348,6 @@ class RankedLeaderboardList extends StatefulWidget {
     this.onRowTap,
     this.header,
     this.movers = const {},
-    this.selfPanelBuilder,
     this.badgeCounts = const {},
   });
 
@@ -435,11 +371,6 @@ class RankedLeaderboardList extends StatefulWidget {
     return counts == null ? null : (counts[uid] ?? 0);
   }
 
-  /// When set (Overall), tapping the signed-in manager's row — natural or
-  /// pinned — folds this panel open under it instead of calling [onRowTap];
-  /// the panel carries its own way to the squad viewer.
-  final Widget Function(LeaderboardRowData self)? selfPanelBuilder;
-
   @override
   State<RankedLeaderboardList> createState() => _RankedLeaderboardListState();
 }
@@ -450,10 +381,6 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
   final GlobalKey _ownKey = GlobalKey();
   bool _pinned = false;
 
-  /// The own-row panel is open (shared by the natural row and its pinned
-  /// copy, so both always agree).
-  bool _selfExpanded = false;
-
   @override
   void initState() {
     super.initState();
@@ -463,61 +390,19 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
   @override
   void didUpdateWidget(RankedLeaderboardList old) {
     super.didUpdateWidget(old);
-    // A scope without the panel (the State can be reused across scopes)
-    // starts folded the next time one has it.
-    if (widget.selfPanelBuilder == null) _selfExpanded = false;
     _scheduleCheck();
   }
 
-  void _toggleSelfPanel() {
-    setState(() => _selfExpanded = !_selfExpanded);
-    // The own row changed height: re-check whether it is still in view.
-    _scheduleCheck();
-  }
-
-  /// A row tile with the opt-in extras: the mover badge, and for the own
-  /// row (when [RankedLeaderboardList.selfPanelBuilder] is set) the
-  /// tap-to-expand panel.
-  /// The own row expands (chevron after its points) — so every other row
-  /// and the column header reserve the chevron's width.
-  bool get _hasExpandableOwnRow =>
-      widget.selfPanelBuilder != null && widget.rows.any((r) => r.isSelf);
-
-  Widget _tile(LeaderboardRowData row, {Key? key}) {
-    final builder = row.isSelf ? widget.selfPanelBuilder : null;
-    if (builder == null) {
-      return LeaderboardRowTile(
+  /// A row tile with the opt-in extras (mover badge, badge-count chip). The
+  /// own row is tapped like every other row.
+  Widget _tile(LeaderboardRowData row, {Key? key}) => LeaderboardRowTile(
         key: key,
         row: row,
         showMovement: widget.showMovement,
         onTap: widget.onRowTap,
         mover: widget.movers[row.uid],
         badgeCount: widget._badgeCountFor(row.uid),
-        reserveChevron: _hasExpandableOwnRow,
       );
-    }
-    final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final panel = _selfExpanded
-        ? builder(row)
-        : const SizedBox(width: double.infinity);
-    return LeaderboardRowTile(
-      key: key,
-      row: row,
-      showMovement: widget.showMovement,
-      onTap: (_) => _toggleSelfPanel(),
-      mover: widget.movers[row.uid],
-      badgeCount: widget._badgeCountFor(row.uid),
-      expanded: _selfExpanded,
-      footer: reduceMotion
-          ? panel
-          : AnimatedSize(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOut,
-              alignment: Alignment.topCenter,
-              child: panel,
-            ),
-    );
-  }
 
   void _scheduleCheck() {
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkOwnRow());
@@ -579,7 +464,6 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
               if (index == 0) {
                 return _LeaderboardColumnHeader(
                   showMovement: widget.showMovement,
-                  reserveChevron: _hasExpandableOwnRow,
                 );
               }
               index--;

@@ -1,18 +1,19 @@
-// "Your rank this season" (leaderboard extras follow-up): the panel the
-// signed-in manager's OWN Overall row expands into — a small line chart of
-// his Overall rank after every finalized gameweek (Leaderboards/RankHistory,
-// written by the functions' finalize) with rank 1 at the TOP, the "#start →
-// #now" journey label, and a "View team" action (the own row used to open the
-// squad viewer directly; it stays one tap away here). Share follow-up: a
-// "Share my rank" action beside it renders your season as a branded story
-// image (fantasy_share.dart) for Instagram stories / group chats.
+// "Your rank this season" (leaderboard extras follow-up): the card at the top
+// of the signed-in manager's OWN team page (the squad viewer, isSelf only) —
+// a small line chart of his Overall rank after every finalized gameweek
+// (Leaderboards/RankHistory, written by the functions' finalize) with rank 1
+// at the TOP and the "#start → #now" journey label. (It used to fold open
+// under the own leaderboard row; that row now opens the team page like every
+// other row, and the card lives here.) Share follow-up: a "Share my rank"
+// action renders your season as a branded story image (fantasy_share.dart)
+// for Instagram stories / group chats.
 //
 // Plain widgets + CustomPaint (no chart package — house rule). Under two
 // weeks of history there is no line to draw: a short muted note instead.
 //
 // House rules: theme-safe both modes (the line is the fantasy accent — gold
-// in dark, primary red in light — on scheme surfaces); labels scale down
-// rather than overflow at 360 px; screen readers get every week's rank.
+// in dark, primary red in light — on a scheme surface card); labels scale
+// down rather than overflow at 360 px; screen readers get every week's rank.
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
@@ -50,18 +51,16 @@ List<Offset> rankChartOffsets(List<RankPoint> series, Size size,
   ];
 }
 
-/// The expanded own-row panel: title + journey label, the chart (or the
-/// note), and "Share my rank" + "View team".
+/// The own-team-page card: title + journey label, the chart (or the note),
+/// and "Share my rank".
 class RankHistoryPanel extends StatelessWidget {
   const RankHistoryPanel({
     super.key,
     required this.series,
-    this.onViewTeam,
     this.onShare,
   });
 
   final List<RankPoint> series;
-  final VoidCallback? onViewTeam;
 
   /// Renders + shares your rank story (given the button's context, the
   /// iPad share anchor). null = no "Share my rank" action.
@@ -72,83 +71,77 @@ class RankHistoryPanel extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final accent = fantasyAccent(context);
     final journey = rankJourneyLabel(series);
-    return Padding(
+    return DecoratedBox(
       key: const ValueKey('rank_history_panel'),
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Divider(
-              height: 1, thickness: 1, color: accent.withValues(alpha: 0.35)),
-          const SizedBox(height: 8),
-          Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
-            runSpacing: 2,
-            children: [
-              Text(
-                'Your rank this season',
-                softWrap: true,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  color: scheme.onSurface,
-                ),
-              ),
-              if (journey != null)
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.6)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 2,
+              children: [
                 Text(
-                  journey,
-                  key: const ValueKey('rank_history_journey'),
+                  'Your rank this season',
+                  softWrap: true,
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w800,
-                    color: accent,
+                    color: scheme.onSurface,
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (journey != null)
-            RankHistoryChart(series: series)
-          else
-            Text(
-              kRankHistoryNote,
-              key: const ValueKey('rank_history_note'),
-              softWrap: true,
-              style: TextStyle(
-                fontSize: 12.5,
-                height: 1.35,
-                color: scheme.onSurfaceVariant,
-              ),
+                if (journey != null)
+                  Text(
+                    journey,
+                    key: const ValueKey('rank_history_journey'),
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: accent,
+                    ),
+                  ),
+              ],
             ),
-          // Right-aligned; wraps onto two lines rather than overflow.
-          Wrap(
-            alignment: WrapAlignment.end,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 4,
-            children: [
-              if (onShare != null)
-                FantasyShareButton(
-                  key: const ValueKey('rank_history_share'),
-                  label: 'Share my rank',
-                  tooltip: 'Share my rank',
-                  onShare: onShare!,
+            const SizedBox(height: 8),
+            if (journey != null)
+              RankHistoryChart(series: series)
+            else
+              Text(
+                kRankHistoryNote,
+                key: const ValueKey('rank_history_note'),
+                softWrap: true,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  height: 1.35,
+                  color: scheme.onSurfaceVariant,
                 ),
-              TextButton.icon(
-                key: const ValueKey('rank_history_view_team'),
-                onPressed: onViewTeam,
-                style: TextButton.styleFrom(
-                  foregroundColor: accent,
-                  visualDensity: VisualDensity.compact,
-                ),
-                icon: const Icon(Icons.groups_outlined, size: 18),
-                label: const Text('View team'),
               ),
-            ],
-          ),
-        ],
+            // Right-aligned; wraps rather than overflow.
+            if (onShare != null)
+              Wrap(
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 4,
+                children: [
+                  FantasyShareButton(
+                    key: const ValueKey('rank_history_share'),
+                    label: 'Share my rank',
+                    tooltip: 'Share my rank',
+                    onShare: onShare!,
+                  ),
+                ],
+              ),
+          ],
+        ),
       ),
     );
   }

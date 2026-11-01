@@ -4,17 +4,17 @@
 // on Overall only, the manager's real name with the team name under it — with
 // the signed-in manager's row pinned when scrolled away; the Gameweek scope
 // adds week chips (1..N from the real schedule's gameweeks). Tapping ANY
-// manager opens their squad viewer (spec §9 transparency) — except your OWN
-// row on Overall (natural or pinned), which folds open "Your rank this
-// season" (rank_history_chart.dart, from Leaderboards/RankHistory) with a
-// "View team" action to your viewer. Overall also badges the week's biggest
-// climber(s) (flame) and biggest drop(s); Gameweek opens with the selected
-// week's summary ("Average · Highest (name) · You"). Team of the week
-// is the Dream Team card (dream_team_card.dart) as the ONLY content of its
-// own view — it no longer floats above the two lists (switching those looked
-// like a no-op). The selected week carries between Gameweek and Team of the
-// week. Share (owner follow-up): the Team of the Week header and the "Your
-// rank this season" panel each render a branded story image
+// manager — your OWN row (natural or pinned) included — opens their squad
+// viewer (spec §9 transparency). Your own team page carries the "Your rank
+// this season" card (rank_history_chart.dart, from Leaderboards/RankHistory,
+// handed to the viewer here) with "Share my rank". Overall also badges the
+// week's biggest climber(s) (flame) and biggest drop(s); Gameweek opens with
+// the selected week's summary ("Average · Highest (name) · You"). Team of the
+// week is the Dream Team card (dream_team_card.dart) as the ONLY content of
+// its own view — it no longer floats above the two lists (switching those
+// looked like a no-op). The selected week carries between Gameweek and Team
+// of the week. Share (owner follow-up): the Team of the Week header and the
+// "Your rank this season" card each render a branded story image
 // (fantasy_share.dart) and open the share sheet.
 //
 // Badges (spec 2026-10-30 §5): the season's whole `Badges` node feeds a
@@ -59,7 +59,6 @@ import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/manager_squad_viewer.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/mini_leagues_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
-import 'package:infinite_sports_flutter/fantasy/hub/rank_history_chart.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
 import 'package:infinite_sports_flutter/misc/share_card_service.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
@@ -334,7 +333,42 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
       _profiles != null &&
       _dreamTeams != null;
 
+  /// Your season rank card's inputs for your own team page: the Overall
+  /// rank-by-gameweek series + the "Share my rank" action (it shares your
+  /// OVERALL row — "#2 of 4 · 80 pts" — whichever scope you tapped from).
+  /// null when you have no Overall row yet (nothing to chart or share).
+  ({List<RankPoint> series, Future<void> Function(BuildContext) share})?
+      _selfRankCard() {
+    final boards = _boards;
+    final managers = _managers;
+    final profiles = _profiles;
+    if (boards == null || managers == null || profiles == null) return null;
+    final rows = composeLeaderboardRows(
+      entries: boards.overall,
+      managers: managers,
+      profiles: profiles,
+      selfUid: _selfUid,
+    );
+    final self = rows.where((r) => r.isSelf).firstOrNull;
+    if (self == null) return null;
+    final series = rankSeries(boards.rankHistory[self.uid]);
+    return (
+      series: series,
+      share: (buttonContext) => shareMyRankStory(
+            buttonContext,
+            row: self,
+            managerCount: rows.length,
+            series: series,
+            seasonLabel: _seasonLabel,
+            share: widget.shareImage,
+          ),
+    );
+  }
+
   void _openManager(LeaderboardRowData row) {
+    // Only YOUR team page carries the rank card (the viewer also gates on
+    // isSelf); computed once here, from data already on screen.
+    final rankCard = row.isSelf ? _selfRankCard() : null;
     final builder = widget.squadViewerBuilder ??
         (row) => ManagerSquadViewerPage(
               sport: widget.sport,
@@ -355,6 +389,8 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
               // waiting on its own first emission (null: it waits for it).
               initialBadges:
                   _badges == null ? null : (_badges![row.uid] ?? const []),
+              rankSeries: rankCard?.series,
+              onShareRank: rankCard?.share,
             );
     Navigator.push(
         context, MaterialPageRoute(builder: (_) => builder(row)));
@@ -523,23 +559,6 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
       onRowTap: _openManager,
       movers: weeklyMovers(rows),
       badgeCounts: _badgeCounts,
-      // Your own row folds open your season's rank line (the viewer stays
-      // one tap away inside the panel).
-      selfPanelBuilder: (self) {
-        final series = rankSeries(_boards!.rankHistory[self.uid]);
-        return RankHistoryPanel(
-          series: series,
-          onViewTeam: () => _openManager(self),
-          onShare: (buttonContext) => shareMyRankStory(
-            buttonContext,
-            row: self,
-            managerCount: rows.length,
-            series: series,
-            seasonLabel: _seasonLabel,
-            share: widget.shareImage,
-          ),
-        );
-      },
     );
   }
 
