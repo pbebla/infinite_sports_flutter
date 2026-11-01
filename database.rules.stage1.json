@@ -369,7 +369,17 @@
             ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
             "$uid": {
               ".read": "auth != null && auth.uid == $uid",
-              ".write": "auth != null && auth.uid == $uid"
+              ".write": "auth != null && auth.uid == $uid",
+              ".validate": "newData.hasChildren(['picks', 'captainId', 'viceId']) && newData.child('captainId').isString() && newData.child('captainId').val().length <= 60 && newData.child('viceId').isString() && newData.child('viceId').val().length <= 60 && (!root.child('Fantasy/' + $sport + '/' + $season + '/GwState').exists() || root.child('Fantasy/' + $sport + '/' + $season + '/GwState/status').val() !== 'open' || now < root.child('Fantasy/' + $sport + '/' + $season + '/GwState/lockAtUtc').val() || (root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverride').val() === 'open' && (!root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverrideUntil').isNumber() || now < root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverrideUntil').val())))",
+              "picks": {
+                ".validate": "newData.hasChildren()",
+                "$i": {
+                  ".validate": "$i.matches(/^[0-6]$/) && newData.hasChildren(['playerId', 'position', 'priceTenths', 'bench']) && newData.child('playerId').isString() && newData.child('playerId').val().length > 0 && newData.child('playerId').val().length <= 60 && newData.child('position').isString() && newData.child('position').val().matches(/^(GK|DEF|ATT)$/) && newData.child('priceTenths').isNumber() && newData.child('bench').isBoolean()"
+                }
+              },
+              "chip": {
+                ".validate": "newData.isString()"
+              }
             }
           },
           "TransferState": {

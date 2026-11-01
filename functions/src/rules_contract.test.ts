@@ -35,6 +35,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { describe, expect, it } from 'vitest';
+import { configFromMap, squadSize } from './lib/fantasy/fantasy_config';
 
 type Json = Record<string, any>;
 type Kind = 'admin' | 'own' | 'ownerCreate';
@@ -212,6 +213,49 @@ for (const file of RULES_FILES) {
       }
       const manual = rules['rules']['Fantasy']['$sport']['$season']['PriceChanges']['$gw']['Manual'];
       expect(manual['.validate']).toBe('newData.val() === true');
+    });
+
+    // SQUAD HARDENING (audit I2/I3, owner-approved 2026-11-01): a client
+    // save of Squads/<uid> must be squad-SHAPED (picks + captainId + viceId,
+    // each pick playerId <= 60 / priceTenths number / bench bool, at most
+    // squadSize picks) and must land BEFORE the lock by Firebase's SERVER
+    // clock (`now`) — so a skewed phone clock or a REST write can't edit a
+    // locked week. No GwState yet, or a status other than 'open' (the
+    // engine opens the next week), still accepts saves, as does the owner's
+    // effective 'open' lockOverride (the engine keeps counting under it).
+    // Deletion (null) skips .validate. Admin SDK writes (functions) bypass
+    // rules entirely, so the Free Hit restore / chip switch-off still land.
+    //
+    // KEEP IN SYNC WITH CONFIG: the pick-key regex hard-codes the squad
+    // size (keys 0..squadSize-1 — RTDB lists are index-keyed, and rules have
+    // no child count). It is pinned here against the futsal default
+    // squadSize(Config); a Config formation change that grows the squad
+    // must widen `$i.matches(/^[0-N]$/)` in BOTH rules files (single digit:
+    // up to 10 picks).
+    it('Squads/$uid: .validate pins the squad shape and the server-clock deadline', () => {
+      const uidNode = rules['rules']['Fantasy']['$sport']['$season']['Squads']['$uid'];
+      // The owner-only read/write grants are unchanged.
+      expect(uidNode['.read']).toBe('auth != null && auth.uid == $uid');
+      expect(uidNode['.write']).toBe('auth != null && auth.uid == $uid');
+
+      const v = String(uidNode['.validate'] ?? '');
+      expect(v, `${file}: Squads/$uid has no .validate`).not.toBe('');
+      expect(v).toContain("newData.hasChildren(['picks', 'captainId', 'viceId'])");
+      expect(v).toContain("newData.child('captainId').isString()");
+      expect(v).toContain("newData.child('viceId').isString()");
+      const gw = "root.child('Fantasy/' + $sport + '/' + $season + '/GwState";
+      expect(v).toContain(`!${gw}').exists()`);
+      expect(v).toContain(`${gw}/status').val() !== 'open'`);
+      expect(v).toContain(`now < ${gw}/lockAtUtc').val()`);
+
+      const pick = String(uidNode['picks']?.['$i']?.['.validate'] ?? '');
+      const n = squadSize(configFromMap({}));
+      expect(n).toBeLessThanOrEqual(10); // the single-digit key regex
+      expect(pick).toContain(`$i.matches(/^[0-${n - 1}]$/)`);
+      expect(pick).toContain("newData.child('playerId').isString()");
+      expect(pick).toContain("newData.child('playerId').val().length <= 60");
+      expect(pick).toContain("newData.child('priceTenths').isNumber()");
+      expect(pick).toContain("newData.child('bench').isBoolean()");
     });
 
     it('Voided: public read, admin write, each <gw> validated true', () => {
