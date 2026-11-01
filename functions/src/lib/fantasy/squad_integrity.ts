@@ -9,6 +9,14 @@
 // PublishedPicks snapshot, and a FIRST finalize's live-Squads fallback):
 //
 //   tooManyPlayers   — more picks than squadSize(Config)
+//   tooManyStarters  — more non-bench picks than the formation's starters
+//                      (startersGk + startersDef + startersAtt): the engine
+//                      scores EVERY non-bench pick at full points, so a
+//                      REST write flagging the bench as starters would be
+//                      "Bench Boost every week" — rules can't count
+//                      children, the judge can. A legitimate client never
+//                      saves more starters than the formation, and an owner
+//                      position change never touches bench flags.
 //   duplicatePlayer  — the same player twice
 //   unknownPlayer    — a NEW pick (see below) that is not a usable entry of
 //                      the market (Fantasy/<sport>/<season>/Players)
@@ -60,19 +68,21 @@
 // Players entry.
 
 import { FantasyConfig, squadSize } from './fantasy_config';
-import { FantasySquad, squadFromMap, validateSquad } from './squad';
+import {
+  FantasySquad, squadFromMap, squadStarters, validateSquad,
+} from './squad';
 import {
   childEntries, isPlainMap, marketPlayersOf, marketPricesOf,
 } from './orchestration_db';
 
 export type SquadIntegrityIssue =
-  | 'tooManyPlayers' | 'duplicatePlayer' | 'unknownPlayer'
-  | 'ineligiblePlayer' | 'overBudget';
+  | 'tooManyPlayers' | 'tooManyStarters' | 'duplicatePlayer'
+  | 'unknownPlayer' | 'ineligiblePlayer' | 'overBudget';
 
 /** Stable report order (the alert's sentence follows it). */
 export const SQUAD_INTEGRITY_ISSUES: readonly SquadIntegrityIssue[] = [
-  'tooManyPlayers', 'duplicatePlayer', 'unknownPlayer', 'ineligiblePlayer',
-  'overBudget',
+  'tooManyPlayers', 'tooManyStarters', 'duplicatePlayer', 'unknownPlayer',
+  'ineligiblePlayer', 'overBudget',
 ];
 
 /** The marker key on PublishedPicks/<gw>/<uid> and History/<gw>/<uid>. */
@@ -187,6 +197,8 @@ export function squadIntegrityIssues(
 ): SquadIntegrityIssue[] {
   const found = new Set<SquadIntegrityIssue>();
   if (squad.picks.length > squadSize(cfg)) found.add('tooManyPlayers');
+  const startersTotal = cfg.startersGk + cfg.startersDef + cfg.startersAtt;
+  if (squadStarters(squad).length > startersTotal) found.add('tooManyStarters');
 
   const heldIds = new Set((previous?.picks ?? []).map((p) => p.playerId));
   for (const p of squad.picks) {

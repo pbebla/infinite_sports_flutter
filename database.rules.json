@@ -369,7 +369,7 @@
             ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
             "$uid": {
               ".read": "auth != null && auth.uid == $uid",
-              ".write": "auth != null && auth.uid == $uid",
+              ".write": "auth != null && auth.uid == $uid && (newData.exists() || (!root.child('Fantasy/' + $sport + '/' + $season + '/GwState').exists() || root.child('Fantasy/' + $sport + '/' + $season + '/GwState/status').val() !== 'open' || now < root.child('Fantasy/' + $sport + '/' + $season + '/GwState/lockAtUtc').val() || (root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverride').val() === 'open' && (!root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverrideUntil').isNumber() || now < root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverrideUntil').val()))))",
               ".validate": "newData.hasChildren(['picks', 'captainId', 'viceId']) && newData.child('captainId').isString() && newData.child('captainId').val().length <= 60 && newData.child('viceId').isString() && newData.child('viceId').val().length <= 60 && (!root.child('Fantasy/' + $sport + '/' + $season + '/GwState').exists() || root.child('Fantasy/' + $sport + '/' + $season + '/GwState/status').val() !== 'open' || now < root.child('Fantasy/' + $sport + '/' + $season + '/GwState/lockAtUtc').val() || (root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverride').val() === 'open' && (!root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverrideUntil').isNumber() || now < root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverrideUntil').val())))",
               "picks": {
                 ".validate": "newData.hasChildren()",

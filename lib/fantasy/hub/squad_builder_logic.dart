@@ -220,6 +220,7 @@ String squadInvalidAlertText({
 }) {
   const words = {
     'tooManyPlayers': 'too many players',
+    'tooManyStarters': 'too many starters',
     'duplicatePlayer': 'duplicate player',
     'unknownPlayer': 'unknown player',
     'ineligiblePlayer': 'ineligible player',

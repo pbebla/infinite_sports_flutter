@@ -57,9 +57,23 @@ describe('squadIntegrityIssues: the judge', () => {
 
   it('formation and badCaptain are NOT integrity issues (tolerated as today)', () => {
     const s = alpha();
-    s.picks[5].bench = false; // 6 starters: illegal formation
+    s.picks[0].bench = true; // the GK benched, a DEF started: still 5
+    s.picks[5].bench = false; // starters, but an illegal formation
     s.captainId = 'Nobody'; // badCaptain
     expect(squadIntegrityIssues(sq(s), cfg, market, null, {})).toEqual([]);
+  });
+
+  it('tooManyStarters: more non-bench picks than the formation (a REST '
+    + '"Bench Boost every week") — 6 or 7 starters, never 5', () => {
+    const s = alpha();
+    s.picks[5].bench = false; // 6 starters
+    expect(squadIntegrityIssues(sq(s), cfg, market, null, {}))
+      .toEqual(['tooManyStarters']);
+    s.picks[6].bench = false; // all 7
+    expect(squadIntegrityIssues(sq(s), cfg, market, null, {}))
+      .toEqual(['tooManyStarters']);
+    const five = alpha(); // the legal 5 + 2 is clean
+    expect(squadIntegrityIssues(sq(five), cfg, market, null, {})).toEqual([]);
   });
 
   it('too few picks is a formation problem, not an integrity one', () => {

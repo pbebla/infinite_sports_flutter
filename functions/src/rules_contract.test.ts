@@ -223,8 +223,12 @@ for (const file of RULES_FILES) {
     // locked week. No GwState yet, or a status other than 'open' (the
     // engine opens the next week), still accepts saves, as does the owner's
     // effective 'open' lockOverride (the engine keeps counting under it).
-    // Deletion (null) skips .validate. Admin SDK writes (functions) bypass
-    // rules entirely, so the Free Hit restore / chip switch-off still land.
+    // A delete (null) skips .validate, so the SAME deadline sits on .write
+    // for deletes only (`newData.exists() || <open window>`): nobody wipes
+    // a squad between the lock and the sweep's snapshot (the client never
+    // deletes a squad; the server's own deletes bypass rules). Admin SDK
+    // writes (functions) bypass rules entirely, so the Free Hit restore /
+    // chip switch-off still land.
     //
     // KEEP IN SYNC WITH CONFIG: the pick-key regex hard-codes the squad
     // size (keys 0..squadSize-1 — RTDB lists are index-keyed, and rules have
@@ -234,9 +238,12 @@ for (const file of RULES_FILES) {
     // up to 10 picks).
     it('Squads/$uid: .validate pins the squad shape and the server-clock deadline', () => {
       const uidNode = rules['rules']['Fantasy']['$sport']['$season']['Squads']['$uid'];
-      // The owner-only read/write grants are unchanged.
+      // The owner-only read grant is unchanged; the write grant is the
+      // owner's, plus the deadline for deletes (a null write skips
+      // .validate).
       expect(uidNode['.read']).toBe('auth != null && auth.uid == $uid');
-      expect(uidNode['.write']).toBe('auth != null && auth.uid == $uid');
+      const w = String(uidNode['.write'] ?? '');
+      expect(w.startsWith('auth != null && auth.uid == $uid && (newData.exists() || ')).toBe(true);
 
       const v = String(uidNode['.validate'] ?? '');
       expect(v, `${file}: Squads/$uid has no .validate`).not.toBe('');
@@ -247,6 +254,9 @@ for (const file of RULES_FILES) {
       expect(v).toContain(`!${gw}').exists()`);
       expect(v).toContain(`${gw}/status').val() !== 'open'`);
       expect(v).toContain(`now < ${gw}/lockAtUtc').val()`);
+      // The delete gate is the validate's deadline group, verbatim.
+      const deadline = v.slice(v.indexOf(`(!${gw}').exists()`));
+      expect(w).toBe(`auth != null && auth.uid == $uid && (newData.exists() || ${deadline})`);
 
       const pick = String(uidNode['picks']?.['$i']?.['.validate'] ?? '');
       const n = squadSize(configFromMap({}));

@@ -501,6 +501,11 @@ void main() {
               gameweek: 2, issues: ['unknownPlayer', 'ineligiblePlayer']),
           "Your Gameweek 2 team didn't count: unknown player and ineligible "
           'player. Fix it before the next deadline.');
+      expect(
+          squadInvalidAlertText(
+              gameweek: 5, issues: ['overBudget', 'tooManyStarters']),
+          "Your Gameweek 5 team didn't count: too many starters and over "
+          'budget. Fix it before the next deadline.');
     });
 
     test('no known issue / no gameweek still reads as a sentence', () {
