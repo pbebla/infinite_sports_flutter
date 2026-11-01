@@ -2,6 +2,7 @@
 // picker filtering, armband reassignment, lock state and the human sentences
 // rendered from the engine's validateSquad.
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
@@ -480,6 +481,63 @@ void main() {
       expect(initialsFor('Pelé'), 'P');
       expect(initialsFor('  '), '?');
       expect(initialsFor('Jean Claude van Damme'), 'JD');
+    });
+  });
+
+  // Squad hardening (audit I2/I3).
+  group('integrity alert sentence', () {
+    test('one issue, several issues (fixed order), unknown names dropped', () {
+      expect(squadInvalidAlertText(gameweek: 3, issues: ['overBudget']),
+          "Your Gameweek 3 team didn't count: over budget. "
+          'Fix it before the next deadline.');
+      expect(
+          squadInvalidAlertText(gameweek: 4, issues: [
+            'overBudget', 'duplicatePlayer', 'somethingNew', 'tooManyPlayers',
+          ]),
+          "Your Gameweek 4 team didn't count: too many players, duplicate "
+          'player and over budget. Fix it before the next deadline.');
+      expect(
+          squadInvalidAlertText(
+              gameweek: 2, issues: ['unknownPlayer', 'ineligiblePlayer']),
+          "Your Gameweek 2 team didn't count: unknown player and ineligible "
+          'player. Fix it before the next deadline.');
+    });
+
+    test('no known issue / no gameweek still reads as a sentence', () {
+      expect(squadInvalidAlertText(gameweek: 0, issues: const []),
+          "Your team didn't count: it broke the squad rules. "
+          'Fix it before the next deadline.');
+    });
+  });
+
+  group('isSaveRefusedByRules', () {
+    test('the database permission-denied (both platforms) is a refusal', () {
+      expect(
+          isSaveRefusedByRules(FirebaseException(
+              plugin: 'firebase_database',
+              code: 'permission-denied',
+              message:
+                  "Client doesn't have permission to access the desired data.")),
+          isTrue);
+      expect(isSaveRefusedByRules(StateError('PERMISSION_DENIED')), isTrue);
+    });
+
+    test('anything else is not (network, unknown)', () {
+      expect(
+          isSaveRefusedByRules(FirebaseException(
+              plugin: 'firebase_database',
+              code: 'unavailable',
+              message: 'The service is currently unavailable.')),
+          isFalse);
+      expect(isSaveRefusedByRules(StateError('Not signed in')), isFalse);
+      expect(isSaveRefusedByRules(Exception('timeout')), isFalse);
+    });
+
+    test('the locked copy (owner wording)', () {
+      expect(
+          squadSaveLockedMessage,
+          "The deadline passed while you were editing — this week's team is "
+          "locked. Your changes weren't saved.");
     });
   });
 }

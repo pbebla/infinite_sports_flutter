@@ -872,6 +872,18 @@ Map<int, FantasyDreamTeam> dreamTeamsFromNode(Object? node) {
 //
 // Present while a position change has left this manager's formation
 // illegal; the server clears it on the next save whose formation is legal.
+//
+// The SAME node carries the server's integrity verdict (squad hardening,
+// audit I2 — functions/src/lib/fantasy/squad_integrity.ts):
+//
+//   SquadAlerts/<uid> = { Gw: int, Kind: 'invalid',
+//                         Issues: ['duplicatePlayer'|'tooManyPlayers'|
+//                                  'unknownPlayer'|'ineligiblePlayer'|
+//                                  'overBudget', ...], CreatedAt: int }
+//
+// "Your Gameweek Gw team didn't count" — the lock judged the squad invalid
+// and scored it zero; cleared by the next clean save or the next clean
+// lock. Lower-case field names (kind/issues/gameweek) are tolerated too.
 
 /// One position change behind a squad alert.
 class FantasyPositionChange {
@@ -886,13 +898,36 @@ class FantasyPositionChange {
   final FantasyPosition to;
 }
 
-/// "Your team needs rearranging" — the hub banner's source.
-class FantasySquadAlert {
-  const FantasySquadAlert({required this.gameweek, required this.changes});
+/// Which of the two alerts sharing `SquadAlerts/<uid>` this is.
+enum FantasySquadAlertKind {
+  /// A position change broke the formation (spec §3 holder protection).
+  positionChange,
 
-  /// The gameweek the alert (and its free swap) is for.
+  /// The lock judged the squad invalid; that gameweek scored zero.
+  invalid,
+}
+
+/// "Your team needs rearranging" / "Your Gameweek N team didn't count" —
+/// the hub banner's source.
+class FantasySquadAlert {
+  const FantasySquadAlert({
+    required this.gameweek,
+    this.changes = const [],
+    this.kind = FantasySquadAlertKind.positionChange,
+    this.issues = const [],
+  });
+
+  /// The gameweek the alert is for (the free swap's week; the zeroed week
+  /// for an integrity alert).
   final int gameweek;
   final List<FantasyPositionChange> changes;
+  final FantasySquadAlertKind kind;
+
+  /// Integrity alerts only: the server's issue names, as written (unknown
+  /// names kept — the banner words the ones it knows).
+  final List<String> issues;
+
+  bool get isInvalid => kind == FantasySquadAlertKind.invalid;
 }
 
 /// `SquadAlerts/<uid>` → alert; null when absent or carrying no usable
@@ -900,6 +935,24 @@ class FantasySquadAlert {
 /// shape RTDB hands back for a holed Changes list.
 FantasySquadAlert? squadAlertFromNode(Object? node) {
   if (node is! Map) return null;
+  final kind = (node['Kind'] ?? node['kind'])?.toString().trim();
+  if (kind == 'invalid') {
+    // An integrity verdict: shown even with no recognisable issue name
+    // (the banner then says "it broke the squad rules").
+    final rawIssues = node['Issues'] ?? node['issues'];
+    final issues = <String>[
+      for (final v in [
+        if (rawIssues is List) ...rawIssues,
+        if (rawIssues is Map) ...rawIssues.values,
+      ])
+        if (v is String && v.trim().isNotEmpty) v.trim(),
+    ];
+    return FantasySquadAlert(
+      gameweek: _optInt(node['Gw'] ?? node['gameweek']) ?? 0,
+      kind: FantasySquadAlertKind.invalid,
+      issues: issues,
+    );
+  }
   final raw = node['Changes'];
   final children = <Object?>[
     if (raw is List) ...raw,

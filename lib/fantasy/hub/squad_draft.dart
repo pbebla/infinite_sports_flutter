@@ -29,6 +29,7 @@ class SquadDraftController extends ChangeNotifier {
   SquadDraftController({required FantasyConfig config, FantasySquad? initial})
       : _config = config {
     _slots = buildSlots(config);
+    _stored = initial;
     _adopt(initial);
   }
 
@@ -43,6 +44,11 @@ class SquadDraftController extends ChangeNotifier {
 
   /// The user toggled the chip since the last clean adoption/save.
   bool _chipTouched = false;
+
+  /// The squad as last STORED (the latest stream value — adopted or, while
+  /// dirty, only remembered — or our own successful save): what
+  /// [revertToStored] goes back to.
+  FantasySquad? _stored;
 
   FantasyConfig get config => _config;
   List<SquadSlot> get slots => _slots;
@@ -110,6 +116,7 @@ class SquadDraftController extends ChangeNotifier {
   /// when the user hasn't toggled it in this draft (the server switching a
   /// spent chip off must not be undone by a stale draft's next save).
   void adoptFromStream(FantasySquad? squad) {
+    _stored = squad;
     if (_dirty) {
       if (!_chipTouched && squad?.chip != _chip) {
         _chip = squad?.chip;
@@ -136,8 +143,17 @@ class SquadDraftController extends ChangeNotifier {
   /// A successful save marks the draft clean: the write's stream echo then
   /// adopts as a no-op (identical content — no flicker, no double-apply).
   void markSaved() {
+    _stored = squad;
     _dirty = false;
     _chipTouched = false;
+    notifyListeners();
+  }
+
+  /// A save the server REFUSED (the deadline passed while editing — squad
+  /// hardening, audit I3): the edits are dropped and the draft goes back to
+  /// the stored squad (the live stream's latest value), clean.
+  void revertToStored() {
+    _adopt(_stored);
     notifyListeners();
   }
 

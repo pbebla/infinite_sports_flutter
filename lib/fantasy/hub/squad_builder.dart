@@ -285,6 +285,10 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
   /// (the current gameweek; the alert's own when none is current), and the
   /// free-swap promise only while it still holds (the alert's gameweek).
   String _alertText(FantasySquadAlert alert) {
+    if (alert.isInvalid) {
+      return squadInvalidAlertText(
+          gameweek: alert.gameweek, issues: alert.issues);
+    }
     final current = currentGameweek(widget.gameweeks, _now);
     Gameweek? target = current;
     if (target == null) {
@@ -323,9 +327,21 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
         ..hideCurrentSnackBar()
         ..showSnackBar(
             const SnackBar(content: Text('Squad saved — good luck!')));
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
       setState(() => _saving = false);
+      if (isSaveRefusedByRules(error)) {
+        // The rules refuse a save from the lock instant on by the SERVER's
+        // clock (audit I3): this week is locked. Say so kindly, drop the
+        // edits and show the team as stored.
+        _draft.revertToStored();
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(
+              key: ValueKey('squad_save_locked'),
+              content: Text(squadSaveLockedMessage)));
+        return;
+      }
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
@@ -362,9 +378,15 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Holder protection (spec §3): a position change broke this
-          // squad's formation — say so first, until the server clears it.
+          // squad's formation — or the lock judged it invalid (audit I2) —
+          // say so first, until the server clears it.
           if (alert != null) ...[
-            _SquadAlertBanner(text: _alertText(alert)),
+            _SquadAlertBanner(
+              text: _alertText(alert),
+              icon: alert.isInvalid
+                  ? Icons.error_outline_rounded
+                  : Icons.swap_horiz_rounded,
+            ),
             const SizedBox(height: 12),
           ],
           // Same layout both states: only this header swaps (spec §10).
@@ -559,12 +581,15 @@ class _LockedLiveStrip extends StatelessWidget {
 
 /// The holder-protection alert (spec §3): "Ann moved to DEF — your team
 /// needs rearranging before Sun, Oct 19 · 3:00 PM. Swapping him out is
-/// free this week." The error-container pair is a Material 3 scheme role, so it reads
+/// free this week." — or the integrity alert (audit I2): "Your Gameweek 3
+/// team didn't count: over budget. Fix it before the next deadline." The
+/// error-container pair is a Material 3 scheme role, so it reads
 /// correctly in both light and dark mode.
 class _SquadAlertBanner extends StatelessWidget {
-  const _SquadAlertBanner({required this.text});
+  const _SquadAlertBanner({required this.text, required this.icon});
 
   final String text;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
@@ -579,8 +604,7 @@ class _SquadAlertBanner extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.swap_horiz_rounded,
-              size: 20, color: scheme.onErrorContainer),
+          Icon(icon, size: 20, color: scheme.onErrorContainer),
           const SizedBox(width: 10),
           Expanded(
             child: Text(

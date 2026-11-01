@@ -448,6 +448,52 @@ void main() {
       expect(squadAlertFromNode(null), isNull);
       expect(squadAlertFromNode({'Gw': 2, 'Changes': []}), isNull);
     });
+
+    // Squad hardening (audit I2): the server's integrity verdict shares the
+    // node — {Gw, Kind:'invalid', Issues:[...], CreatedAt}.
+    test('integrity alert (Kind invalid) → an invalid alert with its issues', () {
+      final alert = squadAlertFromNode({
+        'Gw': 3,
+        'Kind': 'invalid',
+        'Issues': ['duplicatePlayer', 'overBudget'],
+        'CreatedAt': 1761660000000,
+      })!;
+      expect(alert.isInvalid, isTrue);
+      expect(alert.kind, FantasySquadAlertKind.invalid);
+      expect(alert.gameweek, 3);
+      expect(alert.issues, ['duplicatePlayer', 'overBudget']);
+      expect(alert.changes, isEmpty);
+    });
+
+    test('integrity alert: lower-case fields, index-keyed issues, junk skipped, '
+        'no issues still an alert', () {
+      final lower = squadAlertFromNode({
+        'gameweek': '5',
+        'kind': 'invalid',
+        'issues': {'0': 'tooManyPlayers', '1': '', '2': 7, '3': 'somethingNew'},
+      })!;
+      expect(lower.isInvalid, isTrue);
+      expect(lower.gameweek, 5);
+      expect(lower.issues, ['tooManyPlayers', 'somethingNew']);
+
+      final bare = squadAlertFromNode({'Gw': 2, 'Kind': 'invalid'})!;
+      expect(bare.isInvalid, isTrue);
+      expect(bare.issues, isEmpty);
+    });
+
+    test('a position alert is unchanged (no Kind) and is never "invalid"', () {
+      final alert = squadAlertFromNode({
+        'Gw': 4,
+        'Changes': [
+          {'player': 'Ann', 'from': 'GK', 'to': 'DEF'},
+        ],
+      })!;
+      expect(alert.isInvalid, isFalse);
+      expect(alert.kind, FantasySquadAlertKind.positionChange);
+      expect(alert.issues, isEmpty);
+      // An unknown future Kind falls back to the position shape.
+      expect(squadAlertFromNode({'Gw': 4, 'Kind': 'other'}), isNull);
+    });
   });
 
   group('dateKeysFromNode', () {

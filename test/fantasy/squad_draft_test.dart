@@ -246,4 +246,48 @@ void main() {
     expect(draft.playerIds, contains('GK New'));
     expect(draft.dirty, isTrue);
   });
+
+  // Squad hardening (audit I3): a save the server refused after the lock.
+  group('revertToStored', () {
+    test('drops the edits and goes back to the stored squad, clean', () {
+      final d = SquadDraftController(config: cfg, initial: fullSquad());
+      d.makeCaptain('Att One');
+      d.removeAt(4); // Att Two out
+      expect(d.dirty, isTrue);
+      d.revertToStored();
+      expect(d.dirty, isFalse);
+      expect(d.captainId, 'GK One');
+      expect(d.playerIds, contains('Att Two'));
+    });
+
+    test('goes back to the LATEST stored squad (a remote emit while dirty)', () {
+      final d = SquadDraftController(config: cfg, initial: fullSquad());
+      d.makeCaptain('Att One');
+      // The stored squad changed meanwhile (another device saved): the
+      // dirty draft keeps the edit, but remembers what is stored.
+      d.adoptFromStream(fullSquad(captainId: 'Def Two', viceId: 'Att Two'));
+      expect(d.captainId, 'Att One');
+      d.revertToStored();
+      expect(d.captainId, 'Def Two');
+      expect(d.viceId, 'Att Two');
+      expect(d.dirty, isFalse);
+    });
+
+    test('after a successful save, the saved squad is the stored one', () {
+      final d = SquadDraftController(config: cfg, initial: fullSquad());
+      d.makeCaptain('Att One');
+      d.markSaved();
+      d.makeCaptain('Def Two');
+      d.revertToStored();
+      expect(d.captainId, 'Att One');
+    });
+
+    test('nothing stored yet (first squad): back to an empty draft', () {
+      final d = SquadDraftController(config: cfg);
+      d.addPlayer(player('Gus Glove', FantasyPosition.gk, 45));
+      d.revertToStored();
+      expect(d.playerIds, isEmpty);
+      expect(d.dirty, isFalse);
+    });
+  });
 }

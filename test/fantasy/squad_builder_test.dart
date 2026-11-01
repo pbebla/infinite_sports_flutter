@@ -9,6 +9,7 @@
 
 import 'dart:async';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
@@ -769,5 +770,132 @@ void main() {
               .onPressed,
           isNull);
     });
+  });
+
+  // Squad hardening (audit I2/I3).
+  group('squad hardening', () {
+    /// Makes the draft dirty + valid: Def Two takes the vice armband.
+    Future<void> editVice(WidgetTester tester) async {
+      await tester.tap(find.byKey(const ValueKey('squad_chip_Def Two')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('action_make_vice')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('vice_badge_Def Two')), findsOneWidget);
+      expect(saveEnabled(tester), isTrue);
+    }
+
+    testWidgets('a save refused after the deadline: kind message, edits '
+        'dropped, the stored squad shown again', (tester) async {
+      await pumpBuilder(tester,
+          initialSquad: fullSquad(),
+          onSave: (_) async => throw FirebaseException(
+              plugin: 'firebase_database',
+              code: 'permission-denied',
+              message:
+                  "Client doesn't have permission to access the desired data."));
+      await editVice(tester);
+      await tester.tap(find.byKey(const ValueKey('squad_save')));
+      await tester.pumpAndSettle();
+
+      expect(
+          find.text("The deadline passed while you were editing — this week's "
+              "team is locked. Your changes weren't saved."),
+          findsOneWidget);
+      expect(find.text("Couldn't save — try again."), findsNothing);
+      // Back to the stored squad: Def One wears the vice armband again and
+      // there is nothing left to save.
+      expect(find.byKey(const ValueKey('vice_badge_Def One')), findsOneWidget);
+      expect(find.byKey(const ValueKey('vice_badge_Def Two')), findsNothing);
+      expect(saveEnabled(tester), isFalse);
+    });
+
+    testWidgets('the refusal re-reads the LATEST stored squad from the stream',
+        (tester) async {
+      await pumpBuilder(tester,
+          initialSquad: fullSquad(),
+          onSave: (_) async => throw FirebaseException(
+              plugin: 'firebase_database', code: 'permission-denied'));
+      await editVice(tester);
+      // Another device saved meanwhile (captain Att One, vice Att Two).
+      squads.add(fullSquad(captainId: 'Att One', viceId: 'Att Two'));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('vice_badge_Def Two')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('squad_save')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('captain_ring_Att One')), findsOneWidget);
+      expect(find.byKey(const ValueKey('vice_badge_Att Two')), findsOneWidget);
+    });
+
+    testWidgets('any other failure keeps the edits and says try again',
+        (tester) async {
+      await pumpBuilder(tester,
+          initialSquad: fullSquad(),
+          onSave: (_) async => throw FirebaseException(
+              plugin: 'firebase_database', code: 'unavailable'));
+      await editVice(tester);
+      await tester.tap(find.byKey(const ValueKey('squad_save')));
+      await tester.pumpAndSettle();
+      expect(find.text("Couldn't save — try again."), findsOneWidget);
+      expect(find.byKey(const ValueKey('vice_badge_Def Two')), findsOneWidget);
+      expect(saveEnabled(tester), isTrue);
+    });
+
+    const invalid = FantasySquadAlert(
+      gameweek: 3,
+      kind: FantasySquadAlertKind.invalid,
+      issues: ['duplicatePlayer', 'overBudget'],
+    );
+
+    testWidgets("the integrity alert renders in the banner: 'didn't count'",
+        (tester) async {
+      await pumpBuilder(tester, initialSquad: fullSquad(), alert: invalid);
+      expect(find.byKey(const ValueKey('squad_alert_banner')), findsOneWidget);
+      expect(
+          find.text("Your Gameweek 3 team didn't count: duplicate player and "
+              'over budget. Fix it before the next deadline.'),
+          findsOneWidget);
+      expect(
+          find.descendant(
+              of: find.byKey(const ValueKey('squad_alert_banner')),
+              matching: find.byIcon(Icons.error_outline_rounded)),
+          findsOneWidget);
+      // The position alert keeps its own icon.
+      await pumpBuilder(tester,
+          initialSquad: fullSquad(),
+          alert: const FantasySquadAlert(gameweek: 4, changes: [
+            FantasyPositionChange(
+                player: 'GK One',
+                from: FantasyPosition.gk,
+                to: FantasyPosition.def),
+          ]));
+      expect(
+          find.descendant(
+              of: find.byKey(const ValueKey('squad_alert_banner')),
+              matching: find.byIcon(Icons.swap_horiz_rounded)),
+          findsOneWidget);
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('360 px: the integrity banner fits, no overflow — $brightness',
+          (tester) async {
+        await pumpBuilder(tester,
+            size: const Size(360, 760),
+            brightness: brightness,
+            initialSquad: fullSquad(),
+            alert: const FantasySquadAlert(
+              gameweek: 12,
+              kind: FantasySquadAlertKind.invalid,
+              issues: [
+                'tooManyPlayers', 'duplicatePlayer', 'unknownPlayer',
+                'ineligiblePlayer', 'overBudget',
+              ],
+            ));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        final r = tester.getRect(find.byKey(const ValueKey('squad_alert_banner')));
+        expect(r.left, greaterThanOrEqualTo(0));
+        expect(r.right, lessThanOrEqualTo(360));
+      });
+    }
   });
 }

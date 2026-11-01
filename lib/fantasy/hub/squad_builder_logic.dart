@@ -209,6 +209,55 @@ String squadAlertText({
   return '$head — your team needs rearranging before $deadline.$free';
 }
 
+/// The integrity alert's sentence (squad hardening, audit I2): "Your
+/// Gameweek 3 team didn't count: duplicate player and over budget. Fix it
+/// before the next deadline." Known server issue names in plain words, in a
+/// fixed order, duplicates and unknown names dropped; none known = "it
+/// broke the squad rules".
+String squadInvalidAlertText({
+  required int gameweek,
+  required List<String> issues,
+}) {
+  const words = {
+    'tooManyPlayers': 'too many players',
+    'duplicatePlayer': 'duplicate player',
+    'unknownPlayer': 'unknown player',
+    'ineligiblePlayer': 'ineligible player',
+    'overBudget': 'over budget',
+  };
+  final parts = [
+    for (final e in words.entries)
+      if (issues.contains(e.key)) e.value,
+  ];
+  final why = parts.isEmpty
+      ? 'it broke the squad rules'
+      : parts.length == 1
+          ? parts.single
+          : '${parts.sublist(0, parts.length - 1).join(', ')} and ${parts.last}';
+  final team = gameweek > 0 ? 'Gameweek $gameweek team' : 'team';
+  return "Your $team didn't count: $why. Fix it before the next deadline.";
+}
+
+/// Shown when a squad save is refused after the deadline (squad hardening,
+/// audit I3): the database rules reject a Squads write from the lock
+/// instant on by the SERVER's clock, so a phone whose clock runs slow can
+/// still be editing when the real deadline passes.
+const String squadSaveLockedMessage =
+    "The deadline passed while you were editing — this week's team is "
+    "locked. Your changes weren't saved.";
+
+/// Whether a failed squad save was refused by the database rules
+/// (`permission-denied` — FirebaseException's text is
+/// "[firebase_database/permission-denied] Client doesn't have permission…"
+/// on Android and iOS alike). The only rule a squad the builder lets you
+/// save can still break is the deadline, so this reads as "locked".
+bool isSaveRefusedByRules(Object error) {
+  final text = error.toString().toLowerCase();
+  return text.contains('permission-denied') ||
+      text.contains('permission_denied') ||
+      text.contains("doesn't have permission");
+}
+
 /// The engine squad a draft saves as — empty slots skipped, a missing
 /// armband written as '' (which validateSquad flags as badCaptain).
 FantasySquad draftToSquad({
