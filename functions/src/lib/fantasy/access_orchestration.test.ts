@@ -72,7 +72,7 @@ function deps(db: FakeDb, over: Partial<AccessDeps> = {}): AccessDeps & {
   const log = new CapturingLog();
   return {
     db, pusher, mailer, log, nowMs: NOW,
-    auth: { emailOf: async (uid) => emails[uid] ?? null },
+    auth: { emailOf: async (uid: string) => emails[uid] ?? null },
     ...over,
   } as never;
 }
