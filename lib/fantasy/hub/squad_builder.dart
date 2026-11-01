@@ -51,7 +51,19 @@ class FantasySquadBuilder extends StatefulWidget {
     this.chipHistory,
     this.voidedWeeks = const {},
     this.onOpenPlayer,
+    this.readOnly = false,
+    this.header,
   });
+
+  /// Paid access (spec 2026-11-01 §5): an existing manager without an
+  /// active season pass sees their court but cannot edit it — no budget
+  /// bar / locked strip (the [header] explains), picker and chips inert,
+  /// Save hidden. The rules refuse their saves anyway; this keeps the UI
+  /// honest. Viewing a player's profile from a filled chip still works.
+  final bool readOnly;
+
+  /// Rendered first, above the court (the pay card in read-only mode).
+  final Widget? header;
 
   /// Opens a player's fantasy profile (the hub's one opener, bound to its
   /// sport/season/shared draft): the chip action sheet's first item, and —
@@ -115,7 +127,9 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
 
   DateTime get _now => (widget.nowUtc ?? () => DateTime.now().toUtc())();
 
-  bool get _editable => squadEditable(
+  bool get _editable =>
+      !widget.readOnly &&
+      squadEditable(
         lockOverride: widget.lockOverride,
         gameweeks: widget.gameweeks,
         nowUtc: _now,
@@ -377,6 +391,11 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
         key: const ValueKey('my_team_ready'),
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Read-only (no season pass): the pay card sits above the court.
+          if (widget.header != null) ...[
+            widget.header!,
+            const SizedBox(height: 12),
+          ],
           // Holder protection (spec §3): a position change broke this
           // squad's formation — or the lock judged it invalid (audit I2) —
           // say so first, until the server clears it.
@@ -390,12 +409,16 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
             const SizedBox(height: 12),
           ],
           // Same layout both states: only this header swaps (spec §10).
-          if (editable)
-            _BudgetBar(
-                spent: _draft.spentTenths, budget: widget.config.budgetTenths)
-          else
-            const _LockedLiveStrip(),
-          const SizedBox(height: 12),
+          // Read-only mode has neither — the header above says why.
+          if (!widget.readOnly) ...[
+            if (editable)
+              _BudgetBar(
+                  spent: _draft.spentTenths,
+                  budget: widget.config.budgetTenths)
+            else
+              const _LockedLiveStrip(),
+            const SizedBox(height: 12),
+          ],
           FantasyCourtView(
             config: widget.config,
             slots: _draft.slots,

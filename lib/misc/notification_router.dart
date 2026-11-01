@@ -54,7 +54,9 @@ Future<void> openMatchFromNotification(Map<String, dynamic> data) async {
   // the league-watcher branch below (which would otherwise swallow them and
   // do nothing). News → the hub's News tab scrolled to the post; a badge →
   // Leaderboards (Overall: the own row with its badge count); else My Team.
-  if (type == 'fantasy') {
+  // Paid-access pushes ({type:'fantasyAccess'}: payment noted / you're in /
+  // access removed) land on My Team too.
+  if (kFantasyPushTypes.contains(type)) {
     final route = fantasyRouteFromPayload(data);
     final fantasyCtx = mainContext;
     if (route == null || fantasyCtx == null) return;

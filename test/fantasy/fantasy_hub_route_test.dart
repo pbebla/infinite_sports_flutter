@@ -122,4 +122,39 @@ void main() {
       expect(route.focusPostId, isNull);
     });
   });
+
+
+  group('fantasyAccess pushes (paid access, spec 2026-11-01 §7)', () {
+    test('payment noted / you\'re in / access removed land on My Team', () {
+      final route = fantasyRouteFromPayload({
+        'type': 'fantasyAccess',
+        'sport': 'Futsal',
+        'season': '16',
+      })!;
+      expect(route.sport, 'Futsal');
+      expect(route.season, '16');
+      expect(route.initialTab, FantasyHubTab.myTeam);
+      expect(route.focusPostId, isNull);
+      expect(route.initialPlayerName, isNull);
+    });
+
+    test('a stray postId or badge on an access push is ignored', () {
+      final route = fantasyRouteFromPayload({
+        'type': 'fantasyAccess',
+        'sport': 'Futsal',
+        'season': '16',
+        'postId': 'p1',
+        'badge': 'b1',
+      })!;
+      expect(route.initialTab, FantasyHubTab.myTeam);
+      expect(route.focusPostId, isNull);
+    });
+
+    test('missing sport / season → null; the type set is pinned', () {
+      expect(
+          fantasyRouteFromPayload({'type': 'fantasyAccess', 'season': '16'}),
+          isNull);
+      expect(kFantasyPushTypes, {'fantasy', 'fantasyAccess'});
+    });
+  });
 }

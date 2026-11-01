@@ -11,6 +11,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_access.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_prefs.dart';
@@ -18,11 +19,13 @@ import 'package:infinite_sports_flutter/fantasy/data/per_week_stream.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/access_pay_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
+import 'package:infinite_sports_flutter/registration/payment_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// One recorded call of the hub's profile opener.
@@ -72,7 +75,14 @@ void main() {
   late StreamController<Map<int, FantasyDreamTeam>> dreams;
   late StreamController<Map<int, FantasySquad>> published;
   late StreamController<Map<int, FantasySquad>> history;
+  late StreamController<FantasyAccessState> access;
   late List<_Opened> opened;
+
+  // Paid-access seam recorders.
+  late int checkoutCalls;
+  late List<Uri> launched;
+  late List<({FantasyAccessMethod method, double amount, String note})> claims;
+  final checkoutUri = Uri.parse('https://checkout.stripe.com/c/pay/cs_1');
 
   final market = [
     _player('Alan Keeper', FantasyPosition.gk, 50),
@@ -113,6 +123,10 @@ void main() {
     dreams = StreamController<Map<int, FantasyDreamTeam>>.broadcast();
     published = StreamController<Map<int, FantasySquad>>.broadcast();
     history = StreamController<Map<int, FantasySquad>>.broadcast();
+    access = StreamController<FantasyAccessState>.broadcast();
+    checkoutCalls = 0;
+    launched = [];
+    claims = [];
     FantasyLeaderboardsTab.sessionScope = LeaderboardScope.overall;
     FantasyLeaderboardsTab.sessionWeek = null;
     DreamTeamCard.sessionWeek = null;
@@ -132,6 +146,7 @@ void main() {
     dreams.close();
     published.close();
     history.close();
+    access.close();
   });
 
   /// Lets the feeds land and the 300ms reveal fade finish. Never
@@ -153,11 +168,13 @@ void main() {
         chipHistoryFor,
     Stream<Set<int>>? voidedWeeksStates,
     DateTime Function()? nowUtc,
+    Brightness brightness = Brightness.light,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(useMaterial3: true, brightness: brightness),
       home: FantasyHubPage(
         sport: 'Futsal',
         season: '15',
@@ -172,6 +189,19 @@ void main() {
         chipHistoryFor: chipHistoryFor ?? (weeks) => Stream.value(const {}),
         voidedWeeksStates: voidedWeeksStates ?? Stream.value(const <int>{}),
         nowUtc: nowUtc,
+        accessStates: access.stream,
+        createCheckoutUrl: () async {
+          checkoutCalls++;
+          return checkoutUri;
+        },
+        launchExternal: (uri) async {
+          launched.add(uri);
+          return true;
+        },
+        submitAccessClaim: (method, amount, note) async {
+          claims.add((method: method, amount: amount, note: note));
+        },
+        displayName: () => 'Golden Fan',
         newsStates: news.stream,
         leaderboardsFeeds: FantasyLeaderboardsFeeds(
           leaderboardsStates: boards.stream,
@@ -201,14 +231,29 @@ void main() {
     WidgetTester tester, {
     FantasyLockOverride lock = FantasyLockOverride.open,
     bool withSquad = true,
+    FantasyAccessConfig accessConfig = FantasyAccessConfig.free,
+    bool withManager = true,
+    bool withAccess = true,
+    FantasyAccessState accessState = FantasyAccessState.none,
+    // A user with no squad yet: the feed answers null (withSquad: false
+    // keeps the feed SILENT to hold the reveal).
+    bool squadNull = false,
   }) async {
     config.add(FantasyConfigState(
-        config: FantasyConfig.futsalDefault(), lockOverride: lock));
+        config: FantasyConfig.futsalDefault(),
+        lockOverride: lock,
+        access: accessConfig));
     players.add(market);
-    manager.add(
-        const FantasyManager(teamName: 'Golden Boots', nameFlagged: false));
+    manager.add(withManager
+        ? const FantasyManager(teamName: 'Golden Boots', nameFlagged: false)
+        : null);
     alert.add(null);
-    if (withSquad) squad.add(mySquad);
+    if (withAccess) access.add(accessState);
+    if (squadNull) {
+      squad.add(null);
+    } else if (withSquad) {
+      squad.add(mySquad);
+    }
     await settle(tester);
   }
 
@@ -701,5 +746,241 @@ void main() {
           contains('FantasyHubPage: config feed failed: Bad state: '
               'permission-denied'));
     });
+  });
+
+
+  // Paid access (spec 2026-11-01 §5/§6): the hub's gate, live.
+  group('paid access gate', () {
+    final pass = accessConfigFromNode({
+      'Mode': 'pass',
+      'AmountDollars': 10,
+      'Methods': {'Venmo': true, 'Zelle': false, 'Card': true},
+    });
+    FantasyAccessState status(String s) =>
+        accessStateFromNode({'Status': s, 'Via': 'venmo'});
+
+    testWidgets('free mode: no card — the name step shows as today',
+        (tester) async {
+      await pumpHub(tester);
+      await land(tester, withManager: false, squadNull: true);
+      expect(key('hub'), findsOneWidget);
+      expect(key('my_team_name_prompt'), findsOneWidget);
+      expect(key('access_pay_card'), findsNothing);
+      expect(key('my_team_pay_gate'), findsNothing);
+    });
+
+    testWidgets('pass + no record: the pay card replaces the name step',
+        (tester) async {
+      await pumpHub(tester);
+      await land(tester,
+          accessConfig: pass, withManager: false, squadNull: true);
+      expect(key('hub'), findsOneWidget);
+      expect(key('my_team_pay_gate'), findsOneWidget);
+      expect(key('access_pay_card'), findsOneWidget);
+      expect(key('access_pay_card_cta'), findsOneWidget);
+      expect(key('my_team_name_prompt'), findsNothing);
+      expect(find.text('Name your team'), findsNothing);
+      expect(find.text('Join Infinite Fantasy'), findsOneWidget);
+    });
+
+    testWidgets('pass + pending: the waiting copy', (tester) async {
+      await pumpHub(tester);
+      await land(tester,
+          accessConfig: pass,
+          withManager: false,
+          squadNull: true,
+          accessState: status('pending'));
+      expect(key('access_pay_card_pending'), findsOneWidget);
+      expect(find.text(kAccessPendingText), findsOneWidget);
+      expect(key('my_team_name_prompt'), findsNothing);
+    });
+
+    testWidgets('pass + active: the normal name step, no card',
+        (tester) async {
+      await pumpHub(tester);
+      await land(tester,
+          accessConfig: pass,
+          withManager: false,
+          squadNull: true,
+          accessState: status('active'));
+      expect(key('my_team_name_prompt'), findsOneWidget);
+      expect(key('access_pay_card'), findsNothing);
+    });
+
+    testWidgets('an existing manager without access (revoked): the card '
+        'above a READ-ONLY court — no Save, no budget bar, chips inert, '
+        'profiles still open', (tester) async {
+      await pumpHub(tester);
+      await land(tester, accessConfig: pass, accessState: status('revoked'));
+      expect(key('hub'), findsOneWidget);
+      expect(key('access_pay_card'), findsOneWidget);
+      expect(key('access_pay_card_revoked'), findsOneWidget);
+      expect(key('my_team_ready'), findsOneWidget);
+      expect(key('squad_save'), findsNothing);
+      expect(key('budget_bar'), findsNothing);
+      expect(key('locked_live_strip'), findsNothing);
+      // The card sits ABOVE the court.
+      final card = tester.getRect(key('access_pay_card'));
+      final chip = tester.getRect(key('squad_chip_Deb Rock'));
+      expect(card.bottom, lessThanOrEqualTo(chip.top));
+      // A filled chip opens the profile (viewing is never locked); the
+      // chip action sheet (edit affordances) never opens.
+      await tester.tap(key('squad_chip_Deb Rock'));
+      await tester.pumpAndSettle();
+      expect(opened.map((o) => o.name), ['Deb Rock']);
+      expect(key('action_make_captain'), findsNothing);
+    });
+
+    testWidgets('the gate flips live: paying reveals the editable court; a '
+        'revoke locks it again — nothing polls', (tester) async {
+      await pumpHub(tester);
+      await land(tester, accessConfig: pass);
+      expect(key('access_pay_card'), findsOneWidget);
+      expect(key('squad_save'), findsNothing);
+
+      access.add(status('active')); // the server activated the pass
+      await settle(tester);
+      expect(key('access_pay_card'), findsNothing);
+      expect(key('squad_save'), findsOneWidget);
+      expect(key('budget_bar'), findsOneWidget);
+
+      access.add(status('revoked')); // a refund
+      await settle(tester);
+      expect(key('access_pay_card_revoked'), findsOneWidget);
+      expect(key('squad_save'), findsNothing);
+    });
+
+    testWidgets('the reveal waits for the Access feed (single fade — the '
+        'card never pops in after the hub shows)', (tester) async {
+      await pumpHub(tester);
+      await land(tester, accessConfig: pass, withAccess: false);
+      expect(key('hub'), findsNothing);
+      access.add(FantasyAccessState.none);
+      await settle(tester);
+      expect(key('hub'), findsOneWidget);
+      expect(key('access_pay_card'), findsOneWidget);
+    });
+
+    testWidgets('an Access read error before any value: the hub reveals '
+        'with the retry line, never the pay methods; Try again '
+        're-subscribes', (tester) async {
+      final logs = <String>[];
+      final original = debugPrint;
+      debugPrint =
+          (String? message, {int? wrapWidth}) => logs.add(message ?? '');
+      try {
+        await pumpHub(tester);
+        await land(tester,
+            accessConfig: pass, withManager: false, squadNull: true,
+            withAccess: false);
+        access.addError(StateError('permission-denied'));
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+        expect(key('hub'), findsOneWidget);
+        expect(key('access_pay_card_degraded'), findsOneWidget);
+        expect(key('access_pay_card_cta'), findsNothing);
+        expect(key('access_pay_card_venmo'), findsNothing);
+
+        await tester.tap(key('access_pay_card_retry_access'));
+        await settle(tester);
+        access.add(FantasyAccessState.none); // the re-subscribe answers
+        await settle(tester);
+        expect(key('access_pay_card_degraded'), findsNothing);
+        expect(key('access_pay_card_cta'), findsOneWidget);
+      } finally {
+        debugPrint = original;
+      }
+      expect(logs.join('\n'),
+          contains('FantasyHubPage: access feed failed: Bad state: '
+              'permission-denied'));
+    });
+
+    testWidgets('a known record survives a later feed error (error ≠ fact)',
+        (tester) async {
+      await pumpHub(tester);
+      await land(tester, accessConfig: pass, accessState: status('active'));
+      expect(key('squad_save'), findsOneWidget);
+      access.addError(StateError('network'));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(key('squad_save'), findsOneWidget);
+      expect(key('access_pay_card'), findsNothing);
+    });
+
+    testWidgets('card tap → the callable seam + the launch seam; Venmo → '
+        'the shared link; I sent it → the claim seam with the hub\'s '
+        'sport/season/name in the note', (tester) async {
+      await pumpHub(tester);
+      await land(tester,
+          accessConfig: pass, withManager: false, squadNull: true);
+      await tester.tap(key('access_pay_card_cta'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(key('access_pay_card_card'));
+      await tester.pumpAndSettle();
+      expect(checkoutCalls, 1);
+      expect(launched, [checkoutUri]);
+      expect(find.text(kAccessBrowserText), findsOneWidget);
+
+      await tester.tap(key('access_pay_card_venmo'));
+      await tester.pumpAndSettle();
+      expect(launched.last,
+          venmoPayUri(amount: 10, note: 'Fantasy Futsal S15 Golden Fan'));
+
+      await tester.tap(key('access_pay_card_sent'));
+      await tester.pumpAndSettle();
+      expect(claims, hasLength(1));
+      expect(claims.single.method, FantasyAccessMethod.venmo);
+      expect(claims.single.amount, 10.0);
+      expect(claims.single.note, 'Fantasy Futsal S15 Golden Fan');
+      expect(key('access_pay_card_pending'), findsOneWidget);
+    });
+
+    testWidgets('a push of type fantasyAccess opens the hub on My Team',
+        (tester) async {
+      final route = fantasyRouteFromPayload({
+        'type': 'fantasyAccess',
+        'sport': 'Futsal',
+        'season': '15',
+      })!;
+      expect(route.initialTab, FantasyHubTab.myTeam);
+      await pumpHub(tester, tab: route.initialTab);
+      await land(tester,
+          accessConfig: pass, withManager: false, squadNull: true);
+      expect(key('access_pay_card'), findsOneWidget);
+    });
+
+    // Owner rule: 360 px in BOTH themes — the card above the read-only
+    // court, scrolled through, no overflow.
+    for (final brightness in Brightness.values) {
+      testWidgets('360 px: the card above the read-only court fits — '
+          '$brightness', (tester) async {
+        await pumpHub(tester,
+            size: const Size(360, 1600), brightness: brightness);
+        await land(tester,
+            accessConfig: pass, accessState: status('revoked'));
+        expect(tester.takeException(), isNull);
+        await tester.tap(key('access_pay_card_venmo'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        for (final k in [
+          'access_pay_card',
+          'access_pay_card_revoked',
+          'access_pay_card_card',
+          'access_pay_card_venmo',
+          'access_pay_card_sent',
+          'squad_chip_Deb Rock',
+        ]) {
+          final r = tester.getRect(key(k));
+          expect(r.left, greaterThanOrEqualTo(0), reason: k);
+          expect(r.right, lessThanOrEqualTo(360), reason: k);
+        }
+        for (final t in tester.widgetList<Text>(find.byType(Text))) {
+          expect(t.style?.decoration ?? TextDecoration.none,
+              TextDecoration.none,
+              reason: t.data);
+        }
+      });
+    }
   });
 }

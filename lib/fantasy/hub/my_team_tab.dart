@@ -5,16 +5,25 @@
 // the court squad builder (P3b). The gate wraps WHATEVER the ready face is —
 // a flagged manager never reaches the builder.
 //
+// Paid access (spec 2026-11-01 §5): in pass mode without an active
+// `Access/<uid>` the season-pass pay card takes the name step's place
+// (no manager yet) or sits above a READ-ONLY court (an existing manager —
+// grandfathering declined, or revoked). Both are live: the moment the
+// Access stream turns active the card is gone and the normal face shows.
+// Free mode: nothing changes.
+//
 // House rules: theme-safe via colorScheme (gold accent in dark, primary red
 // in light — the deadline chip's pairing), glass-navbar bottom clearance,
 // stream-driven (no one-shot reads), names wrap.
 
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_access.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/access_pay_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/team_name_dialog.dart';
@@ -39,7 +48,26 @@ class FantasyMyTeamTab extends StatelessWidget {
     this.chipHistory,
     this.voidedWeeks = const {},
     this.onOpenPlayer,
+    this.sport = '',
+    this.season = '',
+    this.accessConfig = FantasyAccessConfig.free,
+    this.accessStates,
+    this.initialAccess,
+    this.accessActions,
+    this.displayName = '',
   });
+
+  /// Paid access (spec 2026-11-01): the live `Config/Access` block, the
+  /// hub's re-listen-safe broadcast of FantasyService.watchMyAccess + its
+  /// latest value, the pay card's side effects and the claim note's name.
+  /// Defaults = free mode (standalone / tests): no gate at all.
+  final String sport;
+  final String season;
+  final FantasyAccessConfig accessConfig;
+  final Stream<FantasyAccessState>? accessStates;
+  final FantasyAccessState? initialAccess;
+  final FantasyAccessActions? accessActions;
+  final String displayName;
 
   /// The hub's one profile opener (squad builder: the chip sheet's "Player
   /// profile", and a locked chip's direct tap). null = no profile taps.
@@ -98,57 +126,120 @@ class FantasyMyTeamTab extends StatelessWidget {
       stream: managerStates,
       builder: (context, snapshot) {
         final manager = snapshot.data;
-        if (manager == null) {
-          return _MessageCard(
-            key: const ValueKey('my_team_name_prompt'),
-            icon: Icons.badge_outlined,
-            title: 'Name your team',
-            message: 'Every manager plays under a team name — it shows on '
-                'leaderboards next to your score. Pick yours to get started.',
-            buttonLabel: 'Choose a name',
-            onPressed: () => _openNameDialog(context),
-          );
+        final accessFeed = accessStates;
+        if (accessFeed == null) {
+          return _face(
+              context, manager, initialAccess ?? FantasyAccessState.none);
         }
-        if (manager.nameFlagged) {
-          return _MessageCard(
-            key: const ValueKey('my_team_flag_gate'),
-            icon: Icons.flag_outlined,
-            title: 'Team name flagged',
-            message: 'Your team name was flagged by the league. Choose a '
-                'new name to continue.',
-            buttonLabel: 'Choose a new name',
-            onPressed: () =>
-                _openNameDialog(context, initialName: manager.teamName),
-          );
-        }
-        // Named and clean: the P3b court squad builder (it carries the
-        // 'my_team_ready' key on its root), with the live squad alert.
-        Widget builder(FantasySquadAlert? alert) => FantasySquadBuilder(
-              config: configState.config,
-              lockOverride: configState.lockOverride,
-              gameweeks: gameweeks,
-              players: players,
-              squadStates: squadStates,
-              initialSquad: initialSquad,
-              onSaveSquad: onSaveSquad,
-              draft: draft,
-              nowUtc: nowUtc,
-              alert: alert,
-              chipHistory: chipHistory,
-              voidedWeeks: voidedWeeks,
-              onOpenPlayer: onOpenPlayer,
-            );
-        final alerts = alertStates;
-        if (alerts == null) return builder(initialAlert);
-        return StreamBuilder<FantasySquadAlert?>(
-          initialData: initialAlert,
-          stream: alerts,
-          builder: (context, alertSnap) => builder(alertSnap.data),
+        return StreamBuilder<FantasyAccessState>(
+          initialData: initialAccess ?? FantasyAccessState.none,
+          stream: accessFeed,
+          builder: (context, accessSnap) => _face(
+              context, manager, accessSnap.data ?? FantasyAccessState.none),
         );
       },
     );
   }
+
+  /// The pay card for a gated fan (inert actions standalone / in tests
+  /// that never tap it).
+  Widget _payCard(FantasyAccessState access) => AccessPayCard(
+        sport: sport,
+        season: season,
+        config: accessConfig,
+        access: access,
+        displayName: displayName,
+        actions: accessActions ?? _inertAccessActions,
+      );
+
+  Widget _face(
+      BuildContext context, FantasyManager? manager, FantasyAccessState access) {
+    // Named and clean: the P3b court squad builder (it carries the
+    // 'my_team_ready' key on its root), with the live squad alert.
+    Widget builder(FantasySquadAlert? alert,
+            {bool readOnly = false, Widget? header}) =>
+        FantasySquadBuilder(
+          config: configState.config,
+          lockOverride: configState.lockOverride,
+          gameweeks: gameweeks,
+          players: players,
+          squadStates: squadStates,
+          initialSquad: initialSquad,
+          onSaveSquad: onSaveSquad,
+          draft: draft,
+          nowUtc: nowUtc,
+          alert: alert,
+          chipHistory: chipHistory,
+          voidedWeeks: voidedWeeks,
+          onOpenPlayer: onOpenPlayer,
+          readOnly: readOnly,
+          header: header,
+        );
+    Widget withAlerts(Widget Function(FantasySquadAlert? alert) build) {
+      final alerts = alertStates;
+      if (alerts == null) return build(initialAlert);
+      return StreamBuilder<FantasySquadAlert?>(
+        initialData: initialAlert,
+        stream: alerts,
+        builder: (context, alertSnap) => build(alertSnap.data),
+      );
+    }
+
+    // Pass mode without an active pass: the pay card, alone (no manager
+    // yet) or above the read-only court (an existing manager — the flag
+    // gate, if any, waits until they're in).
+    if (accessConfig.isPass && !access.isActive) {
+      final card = _payCard(access);
+      if (manager == null) {
+        return SingleChildScrollView(
+          key: const ValueKey('my_team_pay_gate'),
+          padding: EdgeInsets.fromLTRB(
+              12, 12, 12, 24 + MediaQuery.paddingOf(context).bottom),
+          child: card,
+        );
+      }
+      return withAlerts(
+          (alert) => builder(alert, readOnly: true, header: card));
+    }
+
+    if (manager == null) {
+      return _MessageCard(
+        key: const ValueKey('my_team_name_prompt'),
+        icon: Icons.badge_outlined,
+        title: 'Name your team',
+        message: 'Every manager plays under a team name — it shows on '
+            'leaderboards next to your score. Pick yours to get started.',
+        buttonLabel: 'Choose a name',
+        onPressed: () => _openNameDialog(context),
+      );
+    }
+    if (manager.nameFlagged) {
+      return _MessageCard(
+        key: const ValueKey('my_team_flag_gate'),
+        icon: Icons.flag_outlined,
+        title: 'Team name flagged',
+        message: 'Your team name was flagged by the league. Choose a '
+            'new name to continue.',
+        buttonLabel: 'Choose a new name',
+        onPressed: () =>
+            _openNameDialog(context, initialName: manager.teamName),
+      );
+    }
+    return withAlerts(builder);
+  }
 }
+
+Future<Uri?> _noCheckout() async => null;
+Future<bool> _noLaunch(Uri _) async => false;
+Future<void> _noClaim(FantasyAccessMethod _, double __, String ___) async {}
+
+/// Standalone (no hub) the card can't pay — the hub always injects the
+/// real actions.
+const FantasyAccessActions _inertAccessActions = FantasyAccessActions(
+  createCheckoutUrl: _noCheckout,
+  launch: _noLaunch,
+  submitClaim: _noClaim,
+);
 
 /// Shared face for the name prompt and the moderation gate: centered icon,
 /// title, copy and a single action.

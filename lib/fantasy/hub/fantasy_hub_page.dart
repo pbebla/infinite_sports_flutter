@@ -15,6 +15,13 @@
 // 2026-10-30 §4) or My Team (everything else), and
 // [FantasyHubPage.focusPostId] scrolls the News feed to the tapped post.
 //
+// Paid access (spec 2026-11-01 §5): the own `Access/<uid>` stream joins the
+// reveal gate (session-seeded, so a revisit is instant) and, in pass mode
+// without an active pass, the My Team tab shows the season-pass pay card
+// instead of the name step (or above a read-only court). Card payments open
+// Stripe Checkout in the phone's browser; the stream flips the card the
+// moment the server activates the pass — nothing polls.
+//
 // Player profiles (round 3, spec §4): EVERY player tap inside the hub — News
 // "View player" and compact rows, the My Team court (chip sheet's "Player
 // profile"; a locked court's chip tap), the Leaderboards tab's Team of the
@@ -25,8 +32,10 @@
 
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_access.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_prefs.dart';
@@ -35,6 +44,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/access_pay_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
@@ -48,6 +58,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/team_name_dialog.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_page.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 export 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart'
     show FantasyHubTab;
@@ -86,6 +97,11 @@ class FantasyHubPage extends StatefulWidget {
     this.leaderboardsFeeds,
     this.profileOpener,
     this.nowUtc,
+    this.accessStates,
+    this.createCheckoutUrl,
+    this.launchExternal,
+    this.submitAccessClaim,
+    this.displayName,
   });
 
   final String sport;
@@ -134,6 +150,25 @@ class FantasyHubPage extends StatefulWidget {
   /// Clock seam for the schedule feed's "weeks up to the current gameweek"
   /// chip-history trim (null = real UTC now).
   final DateTime Function()? nowUtc;
+
+  // ── Paid-access seams (spec 2026-11-01) — null = the real wiring ───────
+
+  /// Replaces `FantasyService.watchMyAccess`.
+  final Stream<FantasyAccessState>? accessStates;
+
+  /// Replaces `FantasyService.createCheckoutUrl` (the Checkout callable).
+  final Future<Uri?> Function()? createCheckoutUrl;
+
+  /// Replaces `launchUrl(uri, mode: LaunchMode.externalApplication)`.
+  final Future<bool> Function(Uri uri)? launchExternal;
+
+  /// Replaces `FantasyService.submitAccessClaim` ("I sent it").
+  final Future<void> Function(
+      FantasyAccessMethod method, double amountDollars, String note)?
+      submitAccessClaim;
+
+  /// Replaces the signed-in user's display name (the claim note's tail).
+  final String Function()? displayName;
 
   @override
   State<FantasyHubPage> createState() => _FantasyHubPageState();
@@ -203,6 +238,13 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   Set<int> _voidedWeeks = const {};
   bool _voidedLoaded = false;
 
+  /// The signed-in user's paid-access state (spec 2026-11-01 §4): none /
+  /// pending / active / revoked, or degraded when the read failed before
+  /// any value was known. Joins the reveal gate so the pay card never pops
+  /// in (or away) after the fade; the service seeds a revisit.
+  FantasyAccessState _access = FantasyAccessState.none;
+  bool _accessLoaded = false;
+
   /// First-open walkthrough (spec §10a): null while the prefs flag loads,
   /// false = show the intro, true = straight to the hub.
   bool? _walkthroughSeen;
@@ -234,11 +276,16 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   final StreamController<FantasySquadAlert?> _alertForTabs =
       StreamController<FantasySquadAlert?>.broadcast();
 
+  /// And for the My Team pay card (paid access).
+  final StreamController<FantasyAccessState> _accessForTabs =
+      StreamController<FantasyAccessState>.broadcast();
+
   StreamSubscription<List<FantasyPlayer>>? _playersSub;
   StreamSubscription<FantasyManager?>? _managerSub;
   StreamSubscription<FantasySquad?>? _squadSub;
   StreamSubscription<FantasySquadAlert?>? _alertSub;
   StreamSubscription<Set<int>>? _voidedSub;
+  StreamSubscription<FantasyAccessState>? _accessSub;
 
   /// The push-tapped news post still to focus; cleared once the News tab
   /// has resolved it so a remounted tab (far tab swipes) never re-focuses.
@@ -259,7 +306,8 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
       _squadLoaded &&
       _alertLoaded &&
       _chipsLoaded &&
-      _voidedLoaded;
+      _voidedLoaded &&
+      _accessLoaded;
 
   @override
   void initState() {
@@ -343,6 +391,66 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
       debugPrint('FantasyHubPage: voided weeks feed failed: $e');
       _voidedLoaded = true;
     }
+    _subscribeAccess();
+  }
+
+  /// Listens to the own Access record (also the degraded face's "Try
+  /// again": a re-subscribe). Error ≠ fact: a failed read keeps the last
+  /// known record; with none known the card shows a retry line, never the
+  /// pay methods as if unpaid — and the hub still reveals.
+  void _subscribeAccess() {
+    _accessSub?.cancel();
+    void degrade(Object e) {
+      debugPrint('FantasyHubPage: access feed failed: $e');
+      if (!mounted) return;
+      setState(() {
+        if (_access.record == null) {
+          _access = const FantasyAccessState(degraded: true);
+        }
+        _accessLoaded = true;
+      });
+      _accessForTabs.add(_access);
+    }
+
+    try {
+      _accessSub = (widget.accessStates ??
+              FantasyService.watchMyAccess(widget.sport, widget.season))
+          .listen((a) {
+        if (!mounted) return;
+        setState(() {
+          _access = a;
+          _accessLoaded = true;
+        });
+        _accessForTabs.add(a);
+      }, onError: degrade);
+    } catch (e) {
+      degrade(e);
+    }
+  }
+
+  /// The pay card's side effects: the Checkout callable, the external
+  /// browser, the claim write, the feed retry — seams first.
+  FantasyAccessActions get _accessActions => FantasyAccessActions(
+        createCheckoutUrl: widget.createCheckoutUrl ??
+            () => FantasyService.createCheckoutUrl(widget.sport, widget.season),
+        launch: widget.launchExternal ??
+            (uri) => launchUrl(uri, mode: LaunchMode.externalApplication),
+        submitClaim: widget.submitAccessClaim ??
+            (method, amount, note) => FantasyService.submitAccessClaim(
+                widget.sport, widget.season,
+                method: method, amountDollars: amount, note: note),
+        retryAccess: _subscribeAccess,
+      );
+
+  /// The claim note's tail (seam first; never throws in a widget test).
+  String _displayName() {
+    final seam = widget.displayName;
+    if (seam != null) return seam();
+    try {
+      return FirebaseAuth.instance.currentUser?.displayName ?? '';
+    } catch (_) {
+      return '';
+    }
   }
 
   /// Every real Config emission: the ONE shared draft is created on the
@@ -368,10 +476,12 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _squadSub?.cancel();
     _alertSub?.cancel();
     _voidedSub?.cancel();
+    _accessSub?.cancel();
     _configForRules.close();
     _managerForTabs.close();
     _squadForTabs.close();
     _alertForTabs.close();
+    _accessForTabs.close();
     _draft?.dispose();
     super.dispose();
   }
@@ -461,6 +571,10 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         alertStates: _alertForTabs.stream,
         chipHistory: _chipHistory,
         voidedWeeks: _voidedWeeks,
+        access: _access,
+        accessStates: _accessForTabs.stream,
+        accessActions: _accessActions,
+        displayName: _displayName(),
         draft: _draft!,
         saveTeamName: (name) =>
             FantasyService.saveTeamName(widget.sport, widget.season, name),
@@ -529,6 +643,10 @@ class _HubBody extends StatelessWidget {
     required this.alertStates,
     required this.chipHistory,
     required this.voidedWeeks,
+    required this.access,
+    required this.accessStates,
+    required this.accessActions,
+    required this.displayName,
     required this.draft,
     required this.saveTeamName,
     required this.saveSquad,
@@ -560,6 +678,14 @@ class _HubBody extends StatelessWidget {
 
   /// The season's owner-voided gameweeks — their chips are refunded.
   final Set<int> voidedWeeks;
+
+  /// Paid access: the live own Access state + its re-listen-safe feed, the
+  /// pay card's actions and the claim note's name (the config's `.access`
+  /// block says whether the gate applies at all).
+  final FantasyAccessState access;
+  final Stream<FantasyAccessState> accessStates;
+  final FantasyAccessActions accessActions;
+  final String displayName;
 
   /// The hub-owned shared draft both the court and the market edit (P3c).
   final SquadDraftController draft;
@@ -642,6 +768,15 @@ class _HubBody extends StatelessWidget {
                   chipHistory: chipHistory,
                   voidedWeeks: voidedWeeks,
                   onOpenPlayer: onOpenPlayer,
+                  // Paid access (spec 2026-11-01 §5): the pay card in pass
+                  // mode until this fan's record is active.
+                  sport: sport,
+                  season: season,
+                  accessConfig: configState.access,
+                  accessStates: accessStates,
+                  initialAccess: access,
+                  accessActions: accessActions,
+                  displayName: displayName,
                 ),
                 // The market (P3c) — edits the SAME shared draft as above;
                 // saving stays on My Team.

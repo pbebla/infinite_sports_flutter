@@ -7,6 +7,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_access.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
@@ -248,5 +249,85 @@ void main() {
       expect(t.style?.decoration ?? TextDecoration.none, TextDecoration.none,
           reason: '"${t.data}" must not be underlined');
     }
+  });
+
+
+  // Paid access (spec 2026-11-01 §5) at the tab level: the gate's three
+  // faces with the flag gate waiting behind the pay card.
+  group('paid access gate', () {
+    final pass = accessConfigFromNode({'Mode': 'pass', 'AmountDollars': 10});
+    late StreamController<FantasyAccessState> access;
+
+    setUp(() => access = StreamController<FantasyAccessState>.broadcast());
+    tearDown(() => access.close());
+
+    Future<void> pumpGated(WidgetTester tester,
+        {FantasyManager? manager, FantasySquad? squad}) {
+      tester.view.physicalSize = const Size(420, 1900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      return tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: FantasyMyTeamTab(
+            managerStates: managers.stream,
+            initialManager: manager,
+            onSaveName: (_) async {},
+            configState: FantasyConfigState(
+              config: FantasyConfig.futsalDefault(),
+              lockOverride: FantasyLockOverride.open,
+              access: pass,
+            ),
+            players: const [],
+            gameweeks: const [],
+            squadStates: squads.stream,
+            initialSquad: squad,
+            onSaveSquad: (_) async {},
+            sport: 'Futsal',
+            season: '16',
+            accessConfig: pass,
+            accessStates: access.stream,
+            initialAccess: FantasyAccessState.none,
+            displayName: 'Ava',
+          ),
+        ),
+      ));
+    }
+
+    testWidgets('no manager → the card alone; active → the name prompt',
+        (tester) async {
+      await pumpGated(tester);
+      expect(find.byKey(const ValueKey('my_team_pay_gate')), findsOneWidget);
+      expect(find.byKey(const ValueKey('access_pay_card')), findsOneWidget);
+      expect(find.byKey(const ValueKey('my_team_name_prompt')), findsNothing);
+
+      access.add(accessStateFromNode({'Status': 'active', 'Via': 'card'}));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('access_pay_card')), findsNothing);
+      expect(find.byKey(const ValueKey('my_team_name_prompt')), findsOneWidget);
+    });
+
+    testWidgets('a flagged manager without access: the card above the '
+        'read-only court — the flag gate waits until they are in',
+        (tester) async {
+      await pumpGated(tester,
+          manager:
+              const FantasyManager(teamName: 'Bad Name', nameFlagged: true));
+      expect(find.byKey(const ValueKey('access_pay_card')), findsOneWidget);
+      expect(find.byKey(const ValueKey('my_team_ready')), findsOneWidget);
+      expect(find.byKey(const ValueKey('my_team_flag_gate')), findsNothing);
+      expect(find.byKey(const ValueKey('squad_save')), findsNothing);
+      expect(find.byKey(const ValueKey('budget_bar')), findsNothing);
+      expect(find.byKey(const ValueKey('locked_live_strip')), findsNothing);
+      // The empty slots are inert (no picker opens).
+      await tester.tap(find.byKey(const ValueKey('empty_slot_0')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('picker_row_Alan Keeper')),
+          findsNothing);
+
+      access.add(accessStateFromNode({'Status': 'active', 'Via': 'venmo'}));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('access_pay_card')), findsNothing);
+      expect(find.byKey(const ValueKey('my_team_flag_gate')), findsOneWidget);
+    });
   });
 }

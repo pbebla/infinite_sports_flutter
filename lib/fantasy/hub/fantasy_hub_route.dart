@@ -13,6 +13,10 @@
 // "Open in Fantasy" (round 3, spec §7) uses the same route value: the Players
 // tab plus [FantasyHubRoute.initialPlayerName], which makes the hub push that
 // player's profile (with the hub's shared draft) once it is ready.
+//
+// Paid-access pushes (spec 2026-11-01 §7: payment noted / you're in /
+// access removed) carry `{type:'fantasyAccess', sport, season}` and always
+// land on My Team — where the pay card, or the freshly unlocked court, is.
 
 /// The hub's tabs, in TabBar order (the index IS the tab position).
 enum FantasyHubTab { myTeam, players, leaderboards, news, rules }
@@ -54,14 +58,22 @@ FantasyHubRoute fantasyRouteForPlayer({
       initialPlayerName: playerName,
     );
 
+/// The push `type` values that open the hub.
+const Set<String> kFantasyPushTypes = {'fantasy', 'fantasyAccess'};
+
 /// null when [data] is not a fantasy push or lacks sport/season (the tap
 /// then does nothing — it must never crash the app). FCM data values are
 /// strings; anything else is stringified.
 FantasyHubRoute? fantasyRouteFromPayload(Map<dynamic, dynamic> data) {
-  if (data['type']?.toString() != 'fantasy') return null;
+  final type = data['type']?.toString();
+  if (type == null || !kFantasyPushTypes.contains(type)) return null;
   final sport = data['sport']?.toString().trim() ?? '';
   final season = data['season']?.toString().trim() ?? '';
   if (sport.isEmpty || season.isEmpty) return null;
+  if (type == 'fantasyAccess') {
+    return FantasyHubRoute(
+        sport: sport, season: season, initialTab: FantasyHubTab.myTeam);
+  }
   final postId = data['postId']?.toString().trim() ?? '';
   final badge = data['badge']?.toString().trim() ?? '';
   return FantasyHubRoute(
