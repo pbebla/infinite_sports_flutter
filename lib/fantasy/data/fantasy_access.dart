@@ -54,6 +54,11 @@ class FantasyAccessConfig {
   /// placeholders (filled by [headlineFor] / [bodyFor] / [buttonFor]).
   final String headline;
   final String body;
+
+  /// The label of the CARD button (the primary action — Stripe Checkout in
+  /// the browser). Only used when `Methods/Card` is on; with Card off
+  /// nothing shows it (Venmo keeps "Pay with Venmo", Zelle its
+  /// instructions card). The Manager's editor hint says the same.
   final String button;
 
   /// The gate applies: pass mode (the rules gate on `Mode` alone).

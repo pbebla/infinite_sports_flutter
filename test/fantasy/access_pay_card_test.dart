@@ -129,8 +129,9 @@ void main() {
   }
 
   group('none (unpaid)', () {
-    testWidgets('headline, body, price and the owner\'s CTA — methods only '
-        'after the tap', (tester) async {
+    testWidgets('headline, body, price line, then the enabled methods at '
+        'once — the owner\'s Button copy labels the card button',
+        (tester) async {
       await pumpCard(tester);
       expect(key('access_pay_card'), findsOneWidget);
       expect(find.text('Join Infinite Fantasy'), findsOneWidget);
@@ -139,18 +140,25 @@ void main() {
               'play the whole season.'),
           findsOneWidget);
       expect(find.text('\$10'), findsOneWidget);
-      expect(find.text('Get my season pass'), findsOneWidget);
-      expect(key('access_pay_card_card'), findsNothing);
-      expect(key('access_pay_card_venmo'), findsNothing);
-      expect(key('access_pay_card_pending'), findsNothing);
-      expectNoForbiddenWords(tester);
-
-      await tester.tap(key('access_pay_card_cta'));
-      await tester.pumpAndSettle();
-      expect(key('access_pay_card_cta'), findsNothing);
       expect(key('access_pay_card_card'), findsOneWidget);
+      expect(
+          find.descendant(
+              of: key('access_pay_card_card'),
+              matching: find.text('Get my season pass')),
+          findsOneWidget);
+      expect(find.text('Pay by card'), findsNothing);
       expect(key('access_pay_card_venmo'), findsOneWidget);
+      expect(find.text('Pay with Venmo'), findsOneWidget);
       expect(key('access_pay_card_zelle'), findsNothing, reason: 'Zelle off');
+      expect(key('access_pay_card_pending'), findsNothing);
+      // Spec §6 order: headline, body, price, then the methods.
+      final headline = tester.getRect(find.text('Join Infinite Fantasy'));
+      final price = tester.getRect(key('access_pay_card_price'));
+      final card = tester.getRect(key('access_pay_card_card'));
+      final venmo = tester.getRect(key('access_pay_card_venmo'));
+      expect(headline.bottom, lessThanOrEqualTo(price.top));
+      expect(price.bottom, lessThanOrEqualTo(card.top));
+      expect(card.bottom, lessThanOrEqualTo(venmo.top));
       expectNoForbiddenWords(tester);
     });
 
@@ -169,22 +177,23 @@ void main() {
       expect(find.text('Season 16 is here'), findsOneWidget);
       expect(find.text('\$12.50 gets you Futsal Season 16.'), findsOneWidget);
       expect(find.text('\$12.50'), findsOneWidget);
-      expect(find.text('Pay now'), findsOneWidget);
+      expect(
+          find.descendant(
+              of: key('access_pay_card_card'), matching: find.text('Pay now')),
+          findsOneWidget);
     });
 
-    testWidgets('only the enabled methods show', (tester) async {
+    testWidgets('only the enabled methods show; with Card off nothing '
+        'uses the Button copy', (tester) async {
       await pumpCard(tester, config: passConfig(card: false, zelle: true));
-      await tester.tap(key('access_pay_card_cta'));
-      await tester.pumpAndSettle();
       expect(key('access_pay_card_card'), findsNothing);
+      expect(find.text('Get my season pass'), findsNothing);
       expect(key('access_pay_card_venmo'), findsOneWidget);
       expect(key('access_pay_card_zelle'), findsOneWidget);
       expect(find.text(kZelleNumber), findsOneWidget);
       expect(find.textContaining(kZelleDisplayName), findsOneWidget);
 
       await pumpCard(tester, config: passConfig(venmo: false), fresh: true);
-      await tester.tap(key('access_pay_card_cta'));
-      await tester.pumpAndSettle();
       expect(key('access_pay_card_venmo'), findsNothing);
       expect(key('access_pay_card_card'), findsOneWidget);
     });
@@ -195,8 +204,6 @@ void main() {
         'browser line; Open again re-launches without a new session',
         (tester) async {
       await pumpCard(tester);
-      await tester.tap(key('access_pay_card_cta'));
-      await tester.pumpAndSettle();
       expect(key('access_pay_card_browser'), findsNothing);
 
       await tester.tap(key('access_pay_card_card'));
@@ -218,8 +225,6 @@ void main() {
       for (final brightness in Brightness.values) {
         checkout = () async => throw Exception('internal');
         await pumpCard(tester, brightness: brightness, fresh: true);
-        await tester.tap(key('access_pay_card_cta'));
-        await tester.pumpAndSettle();
         await tester.tap(key('access_pay_card_card'));
         await tester.pumpAndSettle();
         expect(launched, isEmpty);
@@ -245,8 +250,6 @@ void main() {
         'stream dismisses the card', (tester) async {
       checkout = () async => null;
       await pumpCard(tester);
-      await tester.tap(key('access_pay_card_cta'));
-      await tester.pumpAndSettle();
       await tester.tap(key('access_pay_card_card'));
       await tester.pumpAndSettle();
       expect(checkoutCalls, 1);
@@ -262,8 +265,6 @@ void main() {
         (tester) async {
       launchOk = false;
       await pumpCard(tester);
-      await tester.tap(key('access_pay_card_cta'));
-      await tester.pumpAndSettle();
       await tester.tap(key('access_pay_card_card'));
       await tester.pumpAndSettle();
       expect(find.text(kAccessOpenErrorText), findsOneWidget);
@@ -276,8 +277,6 @@ void main() {
         '"I sent it" row writes the claim shape and shows pending at once',
         (tester) async {
       await pumpCard(tester);
-      await tester.tap(key('access_pay_card_cta'));
-      await tester.pumpAndSettle();
       expect(key('access_pay_card_sent'), findsNothing);
 
       await tester.tap(key('access_pay_card_venmo'));
@@ -307,8 +306,6 @@ void main() {
     testWidgets('a blank display name leaves the note without a tail',
         (tester) async {
       await pumpCard(tester, displayName: '');
-      await tester.tap(key('access_pay_card_cta'));
-      await tester.pumpAndSettle();
       await tester.tap(key('access_pay_card_venmo'));
       await tester.pumpAndSettle();
       expect(launched.single.queryParameters['note'], 'Fantasy Futsal S16');
@@ -318,8 +315,6 @@ void main() {
         (tester) async {
       launchOk = false;
       await pumpCard(tester);
-      await tester.tap(key('access_pay_card_cta'));
-      await tester.pumpAndSettle();
       await tester.tap(key('access_pay_card_venmo'));
       await tester.pumpAndSettle();
       expect(find.text(kAccessVenmoErrorText), findsOneWidget);
@@ -330,8 +325,6 @@ void main() {
         (tester) async {
       claimImpl = (_, __, ___) async => throw Exception('permission-denied');
       await pumpCard(tester);
-      await tester.tap(key('access_pay_card_cta'));
-      await tester.pumpAndSettle();
       await tester.tap(key('access_pay_card_venmo'));
       await tester.pumpAndSettle();
       await tester.tap(key('access_pay_card_sent'));
@@ -347,8 +340,6 @@ void main() {
     testWidgets('the instructions carry their own I sent it → a zelle claim',
         (tester) async {
       await pumpCard(tester, config: passConfig(zelle: true));
-      await tester.tap(key('access_pay_card_cta'));
-      await tester.pumpAndSettle();
       expect(find.text('Sent \$10 by Zelle?'), findsOneWidget);
       await tester.tap(key('access_pay_card_zelle_sent'));
       await tester.pumpAndSettle();
@@ -360,8 +351,6 @@ void main() {
 
     testWidgets('copy number → a SnackBar', (tester) async {
       await pumpCard(tester, config: passConfig(zelle: true));
-      await tester.tap(key('access_pay_card_cta'));
-      await tester.pumpAndSettle();
       await tester.tap(key('access_pay_card_zelle_copy'));
       await tester.pump();
       expect(find.text('Zelle number copied.'), findsOneWidget);
@@ -374,15 +363,13 @@ void main() {
       await pumpCard(tester, access: state('pending'));
       expect(key('access_pay_card_pending'), findsOneWidget);
       expect(find.text(kAccessPendingText), findsOneWidget);
-      expect(key('access_pay_card_cta'), findsNothing);
       expect(key('access_pay_card_venmo'), findsNothing);
+      expect(key('access_pay_card_card'), findsNothing);
       expectNoForbiddenWords(tester);
 
       await tester.tap(key('access_pay_card_change'));
       await tester.pumpAndSettle();
       expect(key('access_pay_card_pending'), findsNothing);
-      expect(key('access_pay_card_cta'), findsNothing,
-          reason: 'straight to the methods');
       expect(key('access_pay_card_venmo'), findsOneWidget);
       expect(key('access_pay_card_card'), findsOneWidget);
 
@@ -397,8 +384,6 @@ void main() {
     testWidgets('a local claim, then the stream says pending, then none '
         '(rejected) → back to the pay face', (tester) async {
       await pumpCard(tester);
-      await tester.tap(key('access_pay_card_cta'));
-      await tester.pumpAndSettle();
       await tester.tap(key('access_pay_card_venmo'));
       await tester.pumpAndSettle();
       await tester.tap(key('access_pay_card_sent'));
@@ -410,7 +395,8 @@ void main() {
 
       await pumpCard(tester); // the record was deleted (Reject)
       expect(key('access_pay_card_pending'), findsNothing);
-      expect(key('access_pay_card_cta'), findsOneWidget);
+      expect(key('access_pay_card_venmo'), findsOneWidget);
+      expect(key('access_pay_card_card'), findsOneWidget);
     });
   });
 
@@ -424,7 +410,6 @@ void main() {
         final context = tester.element(find.text(kAccessRevokedText));
         expect(tester.widget<Text>(find.text(kAccessRevokedText)).style?.color,
             fantasyDownRed(context));
-        expect(key('access_pay_card_cta'), findsNothing);
         expect(key('access_pay_card_card'), findsOneWidget);
         expect(key('access_pay_card_venmo'), findsOneWidget);
         expectNoForbiddenWords(tester);
@@ -445,7 +430,6 @@ void main() {
           access: const FantasyAccessState(degraded: true));
       expect(key('access_pay_card_degraded'), findsOneWidget);
       expect(find.text(kAccessDegradedText), findsOneWidget);
-      expect(key('access_pay_card_cta'), findsNothing);
       expect(key('access_pay_card_venmo'), findsNothing);
       expect(key('access_pay_card_card'), findsNothing);
       await tester.tap(key('access_pay_card_retry_access'));
@@ -481,8 +465,6 @@ void main() {
             size: const Size(360, 1600),
             displayName: 'Maximiliano Bartholomew Featherstonehaugh');
         expect(tester.takeException(), isNull);
-        await tester.tap(key('access_pay_card_cta'));
-        await tester.pumpAndSettle();
         await tester.tap(key('access_pay_card_card'));
         await tester.pumpAndSettle();
         await tester.tap(key('access_pay_card_venmo'));

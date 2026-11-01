@@ -777,7 +777,9 @@ void main() {
       expect(key('hub'), findsOneWidget);
       expect(key('my_team_pay_gate'), findsOneWidget);
       expect(key('access_pay_card'), findsOneWidget);
-      expect(key('access_pay_card_cta'), findsOneWidget);
+      expect(key('access_pay_card_card'), findsOneWidget);
+      expect(find.text('Get my season pass'), findsOneWidget);
+      expect(key('access_pay_card_venmo'), findsOneWidget);
       expect(key('my_team_name_prompt'), findsNothing);
       expect(find.text('Name your team'), findsNothing);
       expect(find.text('Join Infinite Fantasy'), findsOneWidget);
@@ -878,7 +880,7 @@ void main() {
         expect(tester.takeException(), isNull);
         expect(key('hub'), findsOneWidget);
         expect(key('access_pay_card_degraded'), findsOneWidget);
-        expect(key('access_pay_card_cta'), findsNothing);
+        expect(key('access_pay_card_card'), findsNothing);
         expect(key('access_pay_card_venmo'), findsNothing);
 
         await tester.tap(key('access_pay_card_retry_access'));
@@ -886,7 +888,7 @@ void main() {
         access.add(FantasyAccessState.none); // the re-subscribe answers
         await settle(tester);
         expect(key('access_pay_card_degraded'), findsNothing);
-        expect(key('access_pay_card_cta'), findsOneWidget);
+        expect(key('access_pay_card_venmo'), findsOneWidget);
       } finally {
         debugPrint = original;
       }
@@ -913,8 +915,6 @@ void main() {
       await pumpHub(tester);
       await land(tester,
           accessConfig: pass, withManager: false, squadNull: true);
-      await tester.tap(key('access_pay_card_cta'));
-      await tester.pumpAndSettle();
 
       await tester.tap(key('access_pay_card_card'));
       await tester.pumpAndSettle();

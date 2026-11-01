@@ -2,10 +2,10 @@
 // Team tab shows in pass mode until this fan's `Access/<uid>` is active.
 // Every state is LIVE from the hub's Access stream (nothing polls):
 //
-//   none      headline · body · price, then the owner's CTA (Copy.Button)
-//             which opens the enabled methods: card (Stripe Checkout in the
-//             phone's browser), Venmo (deep link + "I sent it"), Zelle
-//             (instructions + "I sent it");
+//   none      headline · body · price line, then the enabled methods at
+//             once: card (Stripe Checkout in the phone's browser; the
+//             button's label is the owner's Copy.Button), Venmo (deep link
+//             + "I sent it"), Zelle (instructions + "I sent it");
 //   pending   "Got it — Zaya will confirm…" + Change payment method;
 //   revoked   "Your access was removed…" + the methods straight away;
 //   active    nothing — the hub shows the normal name step / court;
@@ -101,8 +101,9 @@ class AccessPayCard extends StatefulWidget {
 }
 
 class _AccessPayCardState extends State<AccessPayCard> {
-  /// The methods are open (the CTA, Change payment method, or revoked).
-  bool _expanded = false;
+  /// "Change payment method" on the pending face: the methods show again
+  /// while the stream still says pending; a new claim returns to pending.
+  bool _changingMethod = false;
 
   bool _cardBusy = false;
 
@@ -203,7 +204,7 @@ class _AccessPayCardState extends State<AccessPayCard> {
       setState(() {
         _claimBusy = false;
         _claimedLocally = true;
-        _expanded = false;
+        _changingMethod = false;
         _venmoOpened = false;
       });
     } catch (e) {
@@ -217,7 +218,7 @@ class _AccessPayCardState extends State<AccessPayCard> {
   }
 
   void _changeMethod() => setState(() {
-        _expanded = true;
+        _changingMethod = true;
         _claimedLocally = false;
       });
 
@@ -235,7 +236,7 @@ class _AccessPayCardState extends State<AccessPayCard> {
     }
     final pending =
         access.status == FantasyAccessStatus.pending || _claimedLocally;
-    if (pending && !_expanded) {
+    if (pending && !_changingMethod) {
       return _Shell(
         key: const ValueKey('access_pay_card'),
         child: _PendingFace(onChangeMethod: _changeMethod),
@@ -254,7 +255,6 @@ class _AccessPayCardState extends State<AccessPayCard> {
     final cfg = widget.config;
     final sport = widget.sport;
     final season = widget.season;
-    final showMethods = _expanded || revoked;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -316,14 +316,8 @@ class _AccessPayCardState extends State<AccessPayCard> {
           ),
         ],
         const SizedBox(height: 16),
-        if (!showMethods)
-          _AccentButton(
-            key: const ValueKey('access_pay_card_cta'),
-            label: cfg.buttonFor(sport: sport, season: season),
-            onPressed: () => setState(() => _expanded = true),
-          )
-        else
-          ..._methods(context),
+        // Spec §6: the enabled methods are visible straight away.
+        ..._methods(context),
       ],
     );
   }
@@ -335,10 +329,13 @@ class _AccessPayCardState extends State<AccessPayCard> {
     final out = <Widget>[];
 
     if (cfg.card) {
+      // The primary action, labelled by the owner's Copy.Button.
       out.add(_AccentButton(
         key: const ValueKey('access_pay_card_card'),
         icon: Icons.credit_card,
-        label: _cardBusy ? 'Opening…' : 'Pay by card',
+        label: _cardBusy
+            ? 'Opening…'
+            : cfg.buttonFor(sport: widget.sport, season: widget.season),
         busy: _cardBusy,
         onPressed: _cardBusy ? null : _payByCard,
       ));
