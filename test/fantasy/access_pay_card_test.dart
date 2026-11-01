@@ -40,13 +40,14 @@ void main() {
   FantasyAccessConfig passConfig({
     bool venmo = true,
     bool zelle = false,
+    bool cash = false,
     bool card = true,
     double amount = 10,
   }) =>
       accessConfigFromNode({
         'Mode': 'pass',
         'AmountDollars': amount,
-        'Methods': {'Venmo': venmo, 'Zelle': zelle, 'Card': card},
+        'Methods': {'Venmo': venmo, 'Zelle': zelle, 'Cash': cash, 'Card': card},
       });
 
   FantasyAccessState state(String status) =>
@@ -144,7 +145,7 @@ void main() {
       expect(
           find.descendant(
               of: key('access_pay_card_card'),
-              matching: find.text('Get my season pass')),
+              matching: find.text('Pay with card')),
           findsOneWidget);
       expect(find.text('Pay by card'), findsNothing);
       expect(key('access_pay_card_venmo'), findsOneWidget);
@@ -187,7 +188,7 @@ void main() {
         'uses the Button copy', (tester) async {
       await pumpCard(tester, config: passConfig(card: false, zelle: true));
       expect(key('access_pay_card_card'), findsNothing);
-      expect(find.text('Get my season pass'), findsNothing);
+      expect(find.text('Pay with card'), findsNothing);
       expect(key('access_pay_card_venmo'), findsOneWidget);
       expect(key('access_pay_card_zelle'), findsOneWidget);
       expect(find.text(kZelleNumber), findsOneWidget);
@@ -347,6 +348,21 @@ void main() {
       expect(claims.single.amount, 10.0);
       expect(claims.single.note, 'Fantasy Futsal S16 Ava');
       expect(key('access_pay_card_pending'), findsOneWidget);
+    });
+
+    testWidgets('cash on: the Cash box shows and "I paid cash" writes a cash '
+        'claim', (tester) async {
+      await pumpCard(tester, config: passConfig(cash: true));
+      expect(find.byKey(const ValueKey('access_pay_card_cash')), findsOneWidget);
+      expect(find.text('Cash'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('access_pay_card_cash_sent')));
+      await tester.pump();
+      expect(claims.single.method, FantasyAccessMethod.cash);
+    });
+
+    testWidgets('cash off (default): no Cash box', (tester) async {
+      await pumpCard(tester, config: passConfig());
+      expect(find.byKey(const ValueKey('access_pay_card_cash')), findsNothing);
     });
 
     testWidgets('copy number → a SnackBar', (tester) async {

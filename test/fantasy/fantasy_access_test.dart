@@ -22,7 +22,7 @@ void main() {
         expect(cfg.headline, 'Join Infinite Fantasy');
         expect(cfg.body,
             'A season pass for {season} is {amount}. Pay once, play the whole season.');
-        expect(cfg.button, 'Get my season pass');
+        expect(cfg.button, 'Pay with card');
       }
       expect(FantasyAccessConfig.free.isPass, isFalse);
     });

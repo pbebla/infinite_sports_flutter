@@ -778,7 +778,7 @@ void main() {
       expect(key('my_team_pay_gate'), findsOneWidget);
       expect(key('access_pay_card'), findsOneWidget);
       expect(key('access_pay_card_card'), findsOneWidget);
-      expect(find.text('Get my season pass'), findsOneWidget);
+      expect(find.text('Pay with card'), findsOneWidget);
       expect(key('access_pay_card_venmo'), findsOneWidget);
       expect(key('my_team_name_prompt'), findsNothing);
       expect(find.text('Name your team'), findsNothing);

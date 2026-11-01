@@ -326,7 +326,7 @@ for (const file of RULES_FILES) {
         .toBe('auth != null && auth.uid == $uid && !data.exists() && newData.exists()');
       const v = String(claims['$uid']['$key']['.validate']);
       expect(v).toContain("newData.hasChildren(['Method', 'AmountDollars', 'At'])");
-      expect(v).toContain("newData.child('Method').val().matches(/^(venmo|zelle)$/)");
+      expect(v).toContain("newData.child('Method').val().matches(/^(venmo|zelle|cash)$/)");
       expect(v).toContain("newData.child('AmountDollars').isNumber()");
       expect(v).toContain("newData.child('AmountDollars').val() >= 0");
       expect(v).toContain("newData.child('At').isNumber()");

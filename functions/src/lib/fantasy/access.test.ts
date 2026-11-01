@@ -19,7 +19,7 @@ describe('accessConfigFrom', () => {
       expect(cfg).toEqual({
         mode: 'free',
         amountDollars: 0,
-        methods: { venmo: true, zelle: false, card: true },
+        methods: { venmo: true, zelle: false, cash: false, card: true },
         registeredPlayersFree: false,
         copy: COPY_DEFAULTS,
       });
@@ -38,7 +38,7 @@ describe('accessConfigFrom', () => {
     expect(cfg).toEqual({
       mode: 'pass',
       amountDollars: 12.5,
-      methods: { venmo: false, zelle: true, card: true },
+      methods: { venmo: false, zelle: true, cash: false, card: true },
       registeredPlayersFree: true,
       copy: { headline: 'H', body: 'B', button: 'Go' },
     });
@@ -52,14 +52,14 @@ describe('accessConfigFrom', () => {
     });
     expect(cfg.mode).toBe('free'); // only the literal 'pass' is pass mode
     expect(cfg.amountDollars).toBe(0);
-    expect(cfg.methods).toEqual({ venmo: true, zelle: false, card: true });
+    expect(cfg.methods).toEqual({ venmo: true, zelle: false, cash: false, card: true });
     expect(cfg.registeredPlayersFree).toBe(false);
     expect(cfg.copy).toEqual(COPY_DEFAULTS); // blank + non-string -> defaults
   });
 
   it('a method switch is read as exactly true/false; junk keeps the default', () => {
     expect(accessConfigFrom({ Methods: { Venmo: 'no', Zelle: 1, Card: false } }).methods)
-      .toEqual({ venmo: true, zelle: false, card: false });
+      .toEqual({ venmo: true, zelle: false, cash: false, card: false });
   });
 
   it('negative / NaN amounts read 0', () => {
@@ -106,47 +106,39 @@ describe('templates', () => {
       'claimReceived', 'claimAdmin', 'activatedPaid', 'activatedGranted', 'revoked',
     ]);
     expect(TEMPLATE_DEFAULTS.claimReceived).toEqual({
-      pushTitle: 'Payment noted',
-      pushBody: "Thanks {name} — we'll confirm your {method} payment shortly.",
-      emailSubject: 'Infinite Fantasy — payment noted',
-      emailBody: 'Hi {name}, we received your note that you paid {amount} by {method} ' +
-        "for {season}. Zaya will confirm it shortly and you'll get a message the " +
-        "moment you're in.",
+      pushTitle: "Payment noted",
+      pushBody: "Thanks {name} — we'll confirm your {method} payment for {season} Fantasy shortly.",
+      emailSubject: "{season} Fantasy — payment noted",
+      emailBody: "Hi {name}, we received your note that you paid {amount} by {method} for {season} Fantasy access. Zaya will confirm it shortly and you'll get a message the moment you're in.",
     });
     expect(TEMPLATE_DEFAULTS.claimAdmin).toEqual({
-      pushTitle: 'Fantasy payment to confirm',
-      pushBody: '{name} says they paid {amount} by {method} for {season}.',
-      emailSubject: 'Fantasy payment to confirm — {name}',
-      emailBody: '{name} says they paid {amount} by {method} for {season}.\n\n' +
-        'Open the Manager → Fantasy → Access & payments to approve.',
+      pushTitle: "Fantasy access — {method} payment to confirm",
+      pushBody: "{name} says they paid {amount} by {method} for {season} Fantasy access.",
+      emailSubject: "Fantasy access — {method} payment to confirm — {name}",
+      emailBody: "{name} says they paid {amount} by {method} for {season} Fantasy access.\n\nOpen the Manager → Fantasy → Access & payments to approve.",
     });
     expect(TEMPLATE_DEFAULTS.activatedPaid).toEqual({
       pushTitle: "You're in!",
-      pushBody: 'Your {season} season pass is active. Build your team!',
-      emailSubject: 'Receipt — Infinite Fantasy {season}',
-      emailBody: 'Hi {name}, your season pass is active.\n\nAmount: {amount}\n' +
-        'Method: {method}\nDate: {date}\nSeason: {season}\n\nOpen the app → ' +
-        'Fantasy → My Team to name your team and build your squad. Good luck!',
+      pushBody: "Your {season} Fantasy season pass is active. Build your team!",
+      emailSubject: "Receipt — {season} Fantasy season pass",
+      emailBody: "Hi {name}, your {season} Fantasy season pass is active.\n\nAmount: {amount}\nMethod: {method}\nDate: {date}\nSeason: {season}\n\nOpen the app → Fantasy → My Team to name your team and build your squad. Good luck!",
     });
     expect(TEMPLATE_DEFAULTS.activatedGranted).toEqual({
       pushTitle: "You're in!",
-      pushBody: 'Your {season} fantasy access is active. Build your team!',
-      emailSubject: "You're in — Infinite Fantasy {season}",
-      emailBody: 'Hi {name}, your access to Infinite Fantasy for {season} is active. ' +
-        'Open the app → Fantasy → My Team to build your squad.',
+      pushBody: "Your {season} Fantasy access is active. Build your team!",
+      emailSubject: "You're in — {season} Fantasy",
+      emailBody: "Hi {name}, your access to {season} Fantasy is active. Open the app → Fantasy → My Team to build your squad.",
     });
     expect(TEMPLATE_DEFAULTS.revoked).toEqual({
-      pushTitle: 'Fantasy access removed',
-      pushBody: 'Your {season} fantasy access was removed. Pay again in the app to keep playing.',
-      emailSubject: 'Infinite Fantasy — access removed',
-      emailBody: 'Hi {name}, your access to Infinite Fantasy for {season} was removed on ' +
-        "{date}. You can pay again from the app's Fantasy tab to keep playing. Reply " +
-        'to this email if you think this is a mistake.',
+      pushTitle: "Fantasy access removed",
+      pushBody: "Your {season} Fantasy access was removed. Pay again in the app to keep playing.",
+      emailSubject: "{season} Fantasy — access removed",
+      emailBody: "Hi {name}, your {season} Fantasy access was removed on {date}. You can pay again from the app's Fantasy tab to keep playing. Reply to this email if you think this is a mistake.",
     });
     expect(COPY_DEFAULTS).toEqual({
       headline: 'Join Infinite Fantasy',
       body: 'A season pass for {season} is {amount}. Pay once, play the whole season.',
-      button: 'Get my season pass',
+      button: 'Pay with card',
     });
     expect(ADMIN_EMAIL_DEFAULT).toBe('support@infinitesports.org');
   });
@@ -216,6 +208,7 @@ describe('labels', () => {
     expect(methodLabel('card')).toBe('card');
     expect(methodLabel('venmo')).toBe('Venmo');
     expect(methodLabel('zelle')).toBe('Zelle');
+    expect(methodLabel('cash')).toBe('cash');
     expect(methodLabel('granted')).toBe('');
   });
 

@@ -425,7 +425,7 @@
               ".read": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())",
               "$key": {
                 ".write": "auth != null && auth.uid == $uid && !data.exists() && newData.exists()",
-                ".validate": "newData.hasChildren(['Method', 'AmountDollars', 'At']) && newData.child('Method').isString() && newData.child('Method').val().matches(/^(venmo|zelle)$/) && newData.child('AmountDollars').isNumber() && newData.child('AmountDollars').val() >= 0 && newData.child('At').isNumber() && (!newData.hasChild('Note') || (newData.child('Note').isString() && newData.child('Note').val().length <= 120)) && (root.child('Admins').child(auth.uid).exists() || (!newData.hasChild('Resolved') && !newData.hasChild('ResolvedAt') && !newData.hasChild('ResolvedBy') && !newData.hasChild('Reason') && !newData.hasChild('Notified')))"
+                ".validate": "newData.hasChildren(['Method', 'AmountDollars', 'At']) && newData.child('Method').isString() && newData.child('Method').val().matches(/^(venmo|zelle|cash)$/) && newData.child('AmountDollars').isNumber() && newData.child('AmountDollars').val() >= 0 && newData.child('At').isNumber() && (!newData.hasChild('Note') || (newData.child('Note').isString() && newData.child('Note').val().length <= 120)) && (root.child('Admins').child(auth.uid).exists() || (!newData.hasChild('Resolved') && !newData.hasChild('ResolvedAt') && !newData.hasChild('ResolvedBy') && !newData.hasChild('Reason') && !newData.hasChild('Notified')))"
               }
             }
           },

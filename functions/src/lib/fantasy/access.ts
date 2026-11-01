@@ -49,7 +49,7 @@ export interface AccessConfig {
   mode: AccessMode;
   /** Whole dollars or .50; the server charges exactly this (§3). */
   amountDollars: number;
-  methods: { venmo: boolean; zelle: boolean; card: boolean };
+  methods: { venmo: boolean; zelle: boolean; cash: boolean; card: boolean };
   registeredPlayersFree: boolean;
   copy: AccessCopy;
 }
@@ -58,7 +58,7 @@ export interface AccessConfig {
 export const COPY_DEFAULTS: AccessCopy = {
   headline: 'Join Infinite Fantasy',
   body: 'A season pass for {season} is {amount}. Pay once, play the whole season.',
-  button: 'Get my season pass',
+  button: 'Pay with card',
 };
 
 function nonBlank(v: unknown): string | null {
@@ -84,6 +84,7 @@ export function accessConfigFrom(raw: unknown): AccessConfig {
     methods: {
       venmo: boolOr(methods['Venmo'], true),
       zelle: boolOr(methods['Zelle'], false),
+      cash: boolOr(methods['Cash'], false),
       card: boolOr(methods['Card'], true),
     },
     registeredPlayersFree: m['RegisteredPlayersFree'] === true,
@@ -103,12 +104,12 @@ export function isPassMode(cfg: AccessConfig): boolean {
 
 export type AccessStatus = 'active' | 'pending' | 'revoked';
 export type AccessVia =
-  'card' | 'venmo' | 'zelle' | 'granted' | 'player' | 'grandfathered';
+  'card' | 'venmo' | 'zelle' | 'cash' | 'granted' | 'player' | 'grandfathered';
 
-const VIAS: AccessVia[] = ['card', 'venmo', 'zelle', 'granted', 'player', 'grandfathered'];
+const VIAS: AccessVia[] = ['card', 'venmo', 'zelle', 'cash', 'granted', 'player', 'grandfathered'];
 
 /** The vias that carry money — their activation email is the receipt. */
-export const PAID_VIAS: ReadonlyArray<AccessVia> = ['card', 'venmo', 'zelle'];
+export const PAID_VIAS: ReadonlyArray<AccessVia> = ['card', 'venmo', 'zelle', 'cash'];
 
 export interface AccessRecord {
   status: AccessStatus;
@@ -211,7 +212,7 @@ export function notifyKeyFor(status: 'active' | 'revoked', rec: AccessRecord): s
 
 // ── AccessClaims/<uid>/<key> ────────────────────────────────────────────────
 
-export type ClaimMethod = 'venmo' | 'zelle';
+export type ClaimMethod = 'venmo' | 'zelle' | 'cash';
 
 export interface AccessClaim {
   method: ClaimMethod;
@@ -226,7 +227,7 @@ export interface AccessClaim {
 export function claimFrom(raw: unknown): AccessClaim | null {
   if (!isPlainMap(raw)) return null;
   const method = raw['Method'];
-  if (method !== 'venmo' && method !== 'zelle') return null;
+  if (method !== 'venmo' && method !== 'zelle' && method !== 'cash') return null;
   const amount = numOrNull(raw['AmountDollars']);
   const resolved = raw['Resolved'];
   return {
@@ -264,39 +265,39 @@ export interface AccessTemplate {
 export const TEMPLATE_DEFAULTS: Record<TemplateKey, AccessTemplate> = {
   claimReceived: {
     pushTitle: 'Payment noted',
-    pushBody: "Thanks {name} — we'll confirm your {method} payment shortly.",
-    emailSubject: 'Infinite Fantasy — payment noted',
+    pushBody: "Thanks {name} — we'll confirm your {method} payment for {season} Fantasy shortly.",
+    emailSubject: '{season} Fantasy — payment noted',
     emailBody: 'Hi {name}, we received your note that you paid {amount} by {method} ' +
-      "for {season}. Zaya will confirm it shortly and you'll get a message the " +
-      "moment you're in.",
+      "for {season} Fantasy access. Zaya will confirm it shortly and you'll get a " +
+      "message the moment you're in.",
   },
   claimAdmin: {
-    pushTitle: 'Fantasy payment to confirm',
-    pushBody: '{name} says they paid {amount} by {method} for {season}.',
-    emailSubject: 'Fantasy payment to confirm — {name}',
-    emailBody: '{name} says they paid {amount} by {method} for {season}.\n\n' +
+    pushTitle: 'Fantasy access — {method} payment to confirm',
+    pushBody: '{name} says they paid {amount} by {method} for {season} Fantasy access.',
+    emailSubject: 'Fantasy access — {method} payment to confirm — {name}',
+    emailBody: '{name} says they paid {amount} by {method} for {season} Fantasy access.\n\n' +
       'Open the Manager → Fantasy → Access & payments to approve.',
   },
   activatedPaid: {
     pushTitle: "You're in!",
-    pushBody: 'Your {season} season pass is active. Build your team!',
-    emailSubject: 'Receipt — Infinite Fantasy {season}',
-    emailBody: 'Hi {name}, your season pass is active.\n\nAmount: {amount}\n' +
+    pushBody: 'Your {season} Fantasy season pass is active. Build your team!',
+    emailSubject: 'Receipt — {season} Fantasy season pass',
+    emailBody: 'Hi {name}, your {season} Fantasy season pass is active.\n\nAmount: {amount}\n' +
       'Method: {method}\nDate: {date}\nSeason: {season}\n\nOpen the app → ' +
       'Fantasy → My Team to name your team and build your squad. Good luck!',
   },
   activatedGranted: {
     pushTitle: "You're in!",
-    pushBody: 'Your {season} fantasy access is active. Build your team!',
-    emailSubject: "You're in — Infinite Fantasy {season}",
-    emailBody: 'Hi {name}, your access to Infinite Fantasy for {season} is active. ' +
+    pushBody: 'Your {season} Fantasy access is active. Build your team!',
+    emailSubject: "You're in — {season} Fantasy",
+    emailBody: 'Hi {name}, your access to {season} Fantasy is active. ' +
       'Open the app → Fantasy → My Team to build your squad.',
   },
   revoked: {
     pushTitle: 'Fantasy access removed',
-    pushBody: 'Your {season} fantasy access was removed. Pay again in the app to keep playing.',
-    emailSubject: 'Infinite Fantasy — access removed',
-    emailBody: 'Hi {name}, your access to Infinite Fantasy for {season} was removed on ' +
+    pushBody: 'Your {season} Fantasy access was removed. Pay again in the app to keep playing.',
+    emailSubject: '{season} Fantasy — access removed',
+    emailBody: 'Hi {name}, your {season} Fantasy access was removed on ' +
       "{date}. You can pay again from the app's Fantasy tab to keep playing. Reply " +
       'to this email if you think this is a mistake.',
   },
@@ -384,6 +385,7 @@ export function methodLabel(via: AccessVia | ClaimMethod | string): string {
     case 'card': return 'card';
     case 'venmo': return 'Venmo';
     case 'zelle': return 'Zelle';
+    case 'cash': return 'cash';
     default: return '';
   }
 }

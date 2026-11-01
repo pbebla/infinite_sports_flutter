@@ -424,6 +424,15 @@ class _AccessPayCardState extends State<AccessPayCard> {
       out.add(const SizedBox(height: 10));
     }
 
+    if (cfg.cash) {
+      out.add(_CashBox(
+        price: price,
+        busy: _claimBusy,
+        onSent: () => _sendClaim(FantasyAccessMethod.cash),
+      ));
+      out.add(const SizedBox(height: 10));
+    }
+
     if (_claimError != null) {
       out.add(_InlineLine(
         key: const ValueKey('access_pay_card_claim_error'),
@@ -749,6 +758,73 @@ class _ZelleBox extends StatelessWidget {
           _SentRow(
             sentKey: const ValueKey('access_pay_card_zelle_sent'),
             question: 'Sent $price by Zelle?',
+            busy: busy,
+            onSent: onSent,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Cash in person: a short instruction and its own "I paid cash" (the owner
+/// confirms it in the Manager, exactly like a Venmo claim).
+class _CashBox extends StatelessWidget {
+  const _CashBox({
+    required this.price,
+    required this.busy,
+    required this.onSent,
+  });
+
+  final String price;
+  final bool busy;
+  final VoidCallback onSent;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const ValueKey('access_pay_card_cash'),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.payments_outlined, size: 20, color: scheme.onSurface),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Cash',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: scheme.onSurface,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Pay $price in person at the game, then tap below so it can be '
+            'confirmed.',
+            softWrap: true,
+            style: TextStyle(
+              fontSize: 12.5,
+              height: 1.35,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _SentRow(
+            sentKey: const ValueKey('access_pay_card_cash_sent'),
+            question: 'Paid $price in cash?',
             busy: busy,
             onSent: onSent,
           ),

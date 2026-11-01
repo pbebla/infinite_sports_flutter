@@ -222,23 +222,23 @@ describe('handleAccessClaimCreated', () => {
     expect(d.pusher.sends).toHaveLength(2);
     const adminPush = d.pusher.sends[0];
     expect(adminPush.map((m) => m.uid)).toEqual(['adm1', 'adm2']);
-    expect(adminPush[0].title).toBe('Fantasy payment to confirm');
-    expect(adminPush[0].body).toBe('Zed United says they paid $10.00 by Venmo for Futsal Season 16.');
+    expect(adminPush[0].title).toBe('Fantasy access — Venmo payment to confirm');
+    expect(adminPush[0].body).toBe('Zed United says they paid $10.00 by Venmo for Futsal Season 16 Fantasy access.');
     expect(adminPush[0].data).toEqual({ type: 'fantasyAccess', sport: 'Futsal', season: '16' });
     // (c) the fan pushed.
     expect(d.pusher.sends[1]).toEqual([{
       uid: 'u1', title: 'Payment noted',
-      body: "Thanks Zed United — we'll confirm your Venmo payment shortly.",
+      body: "Thanks Zed United — we'll confirm your Venmo payment for Futsal Season 16 Fantasy shortly.",
       data: { type: 'fantasyAccess', sport: 'Futsal', season: '16' },
     }]);
     // (b) admin email to the default inbox, (c) fan email.
     expect(d.mailer.mails).toHaveLength(2);
     expect(d.mailer.mails[0].to).toBe('support@infinitesports.org');
-    expect(d.mailer.mails[0].subject).toBe('Fantasy payment to confirm — Zed United');
-    expect(d.mailer.mails[0].html).toContain('<p>Zed United says they paid $10.00 by Venmo for Futsal Season 16.</p>');
+    expect(d.mailer.mails[0].subject).toBe('Fantasy access — Venmo payment to confirm — Zed United');
+    expect(d.mailer.mails[0].html).toContain('<p>Zed United says they paid $10.00 by Venmo for Futsal Season 16 Fantasy access.</p>');
     expect(d.mailer.mails[0].html).toContain('Open the Manager');
     expect(d.mailer.mails[1].to).toBe('zed@example.com');
-    expect(d.mailer.mails[1].subject).toBe('Infinite Fantasy — payment noted');
+    expect(d.mailer.mails[1].subject).toBe('Futsal Season 16 Fantasy — payment noted');
     expect(d.mailer.mails[1].html).toContain('you paid $10.00 by Venmo for Futsal Season 16');
 
     // Once: a re-fire sends nothing more.
@@ -255,8 +255,8 @@ describe('handleAccessClaimCreated', () => {
     const d = deps(db);
     const r = await handleAccessClaimCreated(d, { sport: 'Futsal', season: '16', uid: 'u1', key: 'k1' });
     expect(r).toEqual({ pending: true, adminPushes: 2, adminEmailed: true, fanEmailed: false });
-    expect(d.pusher.sends[0][0].body).toBe('Zed Fan says they paid $12.50 by Zelle for Futsal Season 16.');
-    expect(d.pusher.sends[1][0].body).toBe("Thanks Zed — we'll confirm your Zelle payment shortly.");
+    expect(d.pusher.sends[0][0].body).toBe('Zed Fan says they paid $12.50 by Zelle for Futsal Season 16 Fantasy access.');
+    expect(d.pusher.sends[1][0].body).toBe("Thanks Zed — we'll confirm your Zelle payment for Futsal Season 16 Fantasy shortly.");
     expect(d.mailer.mails).toHaveLength(1); // admin only
     expect(d.log.has('no email on file')).toBe(true);
   });
@@ -265,7 +265,7 @@ describe('handleAccessClaimCreated', () => {
     const db = new FakeDb(world({ claims: { u9: { k1: claim() } }, profiles: {} }));
     const d = deps(db);
     await handleAccessClaimCreated(d, { sport: 'Futsal', season: '16', uid: 'u9', key: 'k1' });
-    expect(d.pusher.sends[0][0].body).toBe('a manager says they paid $10.00 by Venmo for Futsal Season 16.');
+    expect(d.pusher.sends[0][0].body).toBe('a manager says they paid $10.00 by Venmo for Futsal Season 16 Fantasy access.');
   });
 
   it('owner templates + AdminEmail override the defaults; blank fields fall back (warned)', async () => {
@@ -279,7 +279,7 @@ describe('handleAccessClaimCreated', () => {
     const d = deps(db);
     await handleAccessClaimCreated(d, { sport: 'Futsal', season: '16', uid: 'u1', key: 'k1' });
     expect(d.pusher.sends[0][0].title).toBe('Cash!');
-    expect(d.pusher.sends[0][0].body).toBe('Zed Fan says they paid $10.00 by Venmo for Futsal Season 16.');
+    expect(d.pusher.sends[0][0].body).toBe('Zed Fan says they paid $10.00 by Venmo for Futsal Season 16 Fantasy access.');
     expect(d.mailer.mails[0].to).toBe('zaya@infinitesports.org');
     expect(d.mailer.mails[0].subject).toBe('Zed Fan paid $10.00');
     expect(d.mailer.mails[0].html).toContain('<p>Check Venmo.</p>');
@@ -372,13 +372,13 @@ describe('handleAccessStatusWritten', () => {
     expect(await db.read(`${ROOT}/Access/u1/Notified/active_${NOW}`)).toBe(true);
     expect(d.pusher.sends).toEqual([[{
       uid: 'u1', title: "You're in!",
-      body: 'Your Futsal Season 16 season pass is active. Build your team!',
+      body: 'Your Futsal Season 16 Fantasy season pass is active. Build your team!',
       data: { type: 'fantasyAccess', sport: 'Futsal', season: '16' },
     }]]);
     expect(d.mailer.mails).toHaveLength(1);
     expect(d.mailer.mails[0].to).toBe('zed@example.com');
-    expect(d.mailer.mails[0].subject).toBe('Receipt — Infinite Fantasy Futsal Season 16');
-    expect(d.mailer.mails[0].html).toContain('<p>Hi Zed United, your season pass is active.</p>');
+    expect(d.mailer.mails[0].subject).toBe('Receipt — Futsal Season 16 Fantasy season pass');
+    expect(d.mailer.mails[0].html).toContain('<p>Hi Zed United, your Futsal Season 16 Fantasy season pass is active.</p>');
     expect(d.mailer.mails[0].html).toContain(
       '<p>Amount: $10.00<br>Method: Venmo<br>Date: Nov 1, 2026<br>Season: Futsal Season 16</p>');
 
@@ -394,9 +394,9 @@ describe('handleAccessStatusWritten', () => {
       const d = deps(db);
       const r = await handleAccessStatusWritten(d, { sport: 'Futsal', season: '16', uid: 'u1', before: null, after: 'active' });
       expect(r?.template).toBe('activatedGranted');
-      expect(d.pusher.sends[0][0].body).toBe('Your Futsal Season 16 fantasy access is active. Build your team!');
-      expect(d.mailer.mails[0].subject).toBe("You're in — Infinite Fantasy Futsal Season 16");
-      expect(d.mailer.mails[0].html).toContain('<p>Hi Zed, your access to Infinite Fantasy for Futsal Season 16 is active.');
+      expect(d.pusher.sends[0][0].body).toBe('Your Futsal Season 16 Fantasy access is active. Build your team!');
+      expect(d.mailer.mails[0].subject).toBe("You're in — Futsal Season 16 Fantasy");
+      expect(d.mailer.mails[0].html).toContain('<p>Hi Zed, your access to Futsal Season 16 Fantasy is active.');
       const all = `${d.pusher.sends[0][0].title} ${d.pusher.sends[0][0].body} ${d.mailer.mails[0].subject} ${d.mailer.mails[0].html}`.toLowerCase();
       expect(all).not.toMatch(/grant|free|admin|\$0/);
     });
@@ -414,7 +414,7 @@ describe('handleAccessStatusWritten', () => {
     const r = await handleAccessStatusWritten(d, { sport: 'Futsal', season: '16', uid: 'u1', before: 'active', after: 'revoked' });
     expect(r).toEqual({ template: 'revoked', pushed: 1, emailed: true });
     expect(d.pusher.sends[0][0].title).toBe('Fantasy access removed');
-    expect(d.mailer.mails[0].subject).toBe('Infinite Fantasy — access removed');
+    expect(d.mailer.mails[0].subject).toBe('Futsal Season 16 Fantasy — access removed');
     expect(d.mailer.mails[0].html).toContain('was removed on Nov 1, 2026');
     expect(await db.read(`${ROOT}/Access/u1/Notified`)).toEqual({ [`active_${NOW}`]: true, [`revoked_${NOW + 5}`]: true });
 
@@ -567,12 +567,12 @@ describe('sendAccessTestMessage', () => {
     expect(r).toEqual({ pushed: true, emailed: true });
     expect(d.pusher.sends).toEqual([[{
       uid: 'adm1', title: "You're in!",
-      body: 'Your Futsal Season 16 season pass is active. Build your team!',
+      body: 'Your Futsal Season 16 Fantasy season pass is active. Build your team!',
       data: { type: 'fantasyAccess', sport: 'Futsal', season: '16' },
     }]]);
     expect(d.mailer.mails[0].to).toBe('zaya@example.com');
-    expect(d.mailer.mails[0].subject).toBe('[Test] Receipt — Infinite Fantasy Futsal Season 16');
-    expect(d.mailer.mails[0].html).toContain('<p>Hi Zaya A, your season pass is active.</p>');
+    expect(d.mailer.mails[0].subject).toBe('[Test] Receipt — Futsal Season 16 Fantasy season pass');
+    expect(d.mailer.mails[0].html).toContain('<p>Hi Zaya A, your Futsal Season 16 Fantasy season pass is active.</p>');
     expect(d.mailer.mails[0].html).toContain('Amount: $12.50<br>Method: Venmo<br>Date: Nov 1, 2026');
   });
 

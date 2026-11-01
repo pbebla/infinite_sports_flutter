@@ -239,8 +239,8 @@ describe('sendFantasyAccessTest', () => {
     expect(r).toEqual({ pushed: true, emailed: true });
     expect(mails).toHaveLength(1);
     expect(mails[0].to).toBe('zaya@example.com');
-    expect(mails[0].subject).toBe('[Test] Receipt — Infinite Fantasy Futsal Season 16');
-    expect(mails[0].html).toContain('<p>Hi Zaya Arami, your season pass is active.</p>');
+    expect(mails[0].subject).toBe('[Test] Receipt — Futsal Season 16 Fantasy season pass');
+    expect(mails[0].html).toContain('<p>Hi Zaya Arami, your Futsal Season 16 Fantasy season pass is active.</p>');
     expect(mails[0].html).toContain('Amount: $10.00<br>Method: Venmo');
     expect(h.tree.Support?.MailLog?.['-pushed']?.Ok).toBe(true); // sendSupportMail logged it
   });

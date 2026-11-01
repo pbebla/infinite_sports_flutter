@@ -18,7 +18,7 @@ enum FantasyAccessMode { free, pass }
 const String kAccessHeadlineDefault = 'Join Infinite Fantasy';
 const String kAccessBodyDefault =
     'A season pass for {season} is {amount}. Pay once, play the whole season.';
-const String kAccessButtonDefault = 'Get my season pass';
+const String kAccessButtonDefault = 'Pay with card';
 
 /// The longest claim note the rules accept (`Note` string ≤ 120).
 const int kAccessClaimNoteMaxLength = 120;
@@ -31,6 +31,7 @@ class FantasyAccessConfig {
     this.amountDollars = 0,
     this.venmo = true,
     this.zelle = false,
+    this.cash = false,
     this.card = true,
     this.headline = kAccessHeadlineDefault,
     this.body = kAccessBodyDefault,
@@ -45,9 +46,12 @@ class FantasyAccessConfig {
   /// Whole dollars or .50 (the Manager validates > 0 in pass mode).
   final double amountDollars;
 
-  /// `Methods/{Venmo,Zelle,Card}` — which pay buttons the card shows.
+  /// `Methods/{Venmo,Zelle,Cash,Card}` — which pay buttons the card shows.
   final bool venmo;
   final bool zelle;
+
+  /// Cash in person ("I paid cash" claim, approved by the owner like Venmo).
+  final bool cash;
   final bool card;
 
   /// `Copy/{Headline,Body,Button}` with `{season}` / `{amount}`
@@ -107,6 +111,7 @@ FantasyAccessConfig accessConfigFromNode(Object? node) {
     amountDollars: _dollars(node['AmountDollars']),
     venmo: method('Venmo', true),
     zelle: method('Zelle', false),
+    cash: method('Cash', false),
     card: method('Card', true),
     headline: text('Headline', kAccessHeadlineDefault),
     body: text('Body', kAccessBodyDefault),
@@ -192,7 +197,8 @@ FantasyAccessState accessStateFromNode(Object? node) =>
 /// The outside-the-app methods a fan can claim ("I sent it").
 enum FantasyAccessMethod {
   venmo('venmo', 'Venmo'),
-  zelle('zelle', 'Zelle');
+  zelle('zelle', 'Zelle'),
+  cash('cash', 'Cash');
 
   const FantasyAccessMethod(this.key, this.label);
 
@@ -202,7 +208,7 @@ enum FantasyAccessMethod {
 }
 
 /// The `AccessClaims/<uid>/<pushKey>` node an "I sent it" tap writes (spec
-/// §6; rules: Method ∈ {venmo, zelle}, AmountDollars number ≥ 0, At number,
+/// §6; rules: Method ∈ {venmo, zelle, cash}, AmountDollars number ≥ 0, At number,
 /// Note string ≤ 120). [at] is `ServerValue.timestamp` in production.
 /// Whole dollars write as an integer.
 Map<String, Object?> accessClaimPayload({
