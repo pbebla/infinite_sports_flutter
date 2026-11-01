@@ -94,6 +94,7 @@ import {
   isTestFillSeason, toIntLoose,
 } from './orchestration_db';
 import { FantasySquad, squadFromMap } from './squad';
+import { isInvalidRow } from './squad_integrity';
 
 const silent: FantasyLogger = { info: () => undefined, warn: () => undefined };
 
@@ -286,7 +287,10 @@ export interface WeeklyAwardsInput {
 }
 
 /** Each weekly rule's winners (sorted uids). Squads that fail squadFromMap
- *  are skipped (finalize logged them already). Starters = picks with bench
+ *  are skipped (finalize logged them already), and so are squads judged
+ *  INVALID at the lock (History `Invalid` — squad_integrity.ts): a team
+ *  that scored zero for breaking the squad rules earns nothing, nor counts
+ *  toward Hidden Gem ownership. Starters = picks with bench
  *  false (the named starting five; an auto-subbed-in bench player is still
  *  bench for the rules). */
 export function weeklyRuleWinners(
@@ -296,7 +300,7 @@ export function weeklyRuleWinners(
   const played = (id: string) => input.playedByName[id] === true;
   const squads: Array<[string, FantasySquad]> = [];
   for (const [uid, raw] of Object.entries(input.squadsByUid)) {
-    if (!isPlainMap(raw)) continue;
+    if (!isPlainMap(raw) || isInvalidRow(raw)) continue;
     try {
       squads.push([uid, squadFromMap(raw)]);
     } catch {
@@ -691,7 +695,11 @@ export async function settleSeasonBadges(
     if (!Number.isInteger(week)) continue;
     finalized.add(week);
     for (const [uid, entry] of childEntries(byUid)) {
-      if (isPlainMap(entry)) (historyWeeksByUid[uid] ??= []).push(week);
+      // A week judged invalid (scored zero for breaking the squad rules) is
+      // not a scored team for Ever Present.
+      if (isPlainMap(entry) && !isInvalidRow(entry)) {
+        (historyWeeksByUid[uid] ??= []).push(week);
+      }
     }
   }
   // The fantasy season starts at its FIRST finalized gameweek: earlier

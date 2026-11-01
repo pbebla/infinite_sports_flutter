@@ -34,6 +34,9 @@
 import { FantasyConfig } from './fantasy_config';
 import { childEntries, isPlainMap, toIntLoose } from './orchestration_db';
 import { FantasySquad, squadFromMap } from './squad';
+import {
+  INVALID_KEY, integrityVerdictOf, IntegrityInputs, SquadIntegrityIssue,
+} from './squad_integrity';
 import { rolloverFreeTransfers, transferCost } from './transfers';
 
 export interface TransferState {
@@ -179,6 +182,48 @@ export interface LockAccounting {
   chipPlayedByUid: Record<string, string | null>;
   /** Voided chips, for the caller's log. */
   voided: Array<{ uid: string; chip: string }>;
+  /** Squads judged invalid (audit I2; squad_integrity.ts) — their
+   *  cleanSquads entry carries `Invalid: issues`. Only when the caller
+   *  passed [integrity]. */
+  invalid: Array<{ uid: string; issues: SquadIntegrityIssue[] }>;
+  /** Parseable squads judged clean (only with [integrity]) — the caller
+   *  clears a stale integrity alert for them. */
+  valid: string[];
+}
+
+/** The integrity pass on its own (audit I2): every parseable squad judged
+ *  against [inputs]; an invalid one gains `Invalid: [issues]` (the squad
+ *  itself stays verbatim), a clean one loses any `Invalid` key it carried
+ *  (only the server ever writes the marker). Malformed squads pass through
+ *  untouched. Used by lockAccounting and by a first finalize's live-Squads
+ *  fallback that skips the accounting. */
+export function annotateSquadIntegrity(
+  squadsByUid: Record<string, unknown>, cfg: FantasyConfig,
+  inputs: IntegrityInputs,
+): Pick<LockAccounting, 'invalid' | 'valid'> & {
+  squads: Record<string, unknown>;
+} {
+  const squads: Record<string, unknown> = {};
+  const invalid: Array<{ uid: string; issues: SquadIntegrityIssue[] }> = [];
+  const valid: string[] = [];
+  for (const [uid, raw] of Object.entries(squadsByUid)) {
+    squads[uid] = raw;
+    const issues = integrityVerdictOf(raw, uid, cfg, inputs);
+    if (issues === null) continue; // malformed: existing handling
+    const node = { ...(raw as Record<string, unknown>) };
+    if (issues.length > 0) {
+      node[INVALID_KEY] = issues;
+      invalid.push({ uid, issues });
+      squads[uid] = node;
+    } else {
+      valid.push(uid);
+      if (INVALID_KEY in node) {
+        delete node[INVALID_KEY];
+        squads[uid] = node;
+      }
+    }
+  }
+  return { squads, invalid, valid };
 }
 
 /** The whole lock-time transfer accounting, pure: per manager, void a chip
@@ -189,7 +234,16 @@ export interface LockAccounting {
  *  owner-voided weeks ([voidedWeeks]) never count as used (refund — see
  *  priorChipsOfUid). The cost is still frozen for a voided week: finalize
  *  waives it while the week stays voided, and an un-void re-settle charges
- *  exactly what the lock froze. */
+ *  exactly what the lock froze.
+ *
+ *  INTEGRITY (audit I2, squad hardening 2026-11-01): with [integrity] (the
+ *  market, each manager's previous locked squad and last week's prices —
+ *  orchestration.ts loadIntegrityInputs) every squad is first judged by
+ *  squad_integrity.ts; an invalid one is snapshotted verbatim plus
+ *  `Invalid: [issues]` and finalize scores it zero. Its chip/cost
+ *  accounting runs as for any squad (the chip it locked is consumed; the
+ *  cost is moot — the week nets zero). Without [integrity] nothing is
+ *  judged (a snapshot that already carries a marker keeps it verbatim). */
 export function lockAccounting(args: {
   squadsByUid: Record<string, unknown>;
   statesByUid: Record<string, unknown>;
@@ -197,14 +251,24 @@ export function lockAccounting(args: {
   cfg: FantasyConfig;
   gw: number;
   voidedWeeks?: readonly number[];
+  integrity?: IntegrityInputs;
 }): LockAccounting {
   const { cfg, gw } = args;
+  let squadsByUid = args.squadsByUid;
+  let invalid: LockAccounting['invalid'] = [];
+  let valid: string[] = [];
+  if (args.integrity !== undefined) {
+    const judged = annotateSquadIntegrity(squadsByUid, cfg, args.integrity);
+    squadsByUid = judged.squads;
+    invalid = judged.invalid;
+    valid = judged.valid;
+  }
   const cleanSquads: Record<string, unknown> = {};
   const costPointsByUid: Record<string, number> = {};
   const chipPlayedByUid: Record<string, string | null> = {};
   const voided: Array<{ uid: string; chip: string }> = [];
 
-  for (const [uid, raw] of Object.entries(args.squadsByUid)) {
+  for (const [uid, raw] of Object.entries(squadsByUid)) {
     cleanSquads[uid] = raw;
     if (!isPlainMap(raw)) continue;
     let squad: FantasySquad;
@@ -238,7 +302,9 @@ export function lockAccounting(args: {
     });
     if (cost > 0) costPointsByUid[uid] = cost;
   }
-  return { cleanSquads, costPointsByUid, chipPlayedByUid, voided };
+  return {
+    cleanSquads, costPointsByUid, chipPlayedByUid, voided, invalid, valid,
+  };
 }
 
 /** The post-finalize rollover of one manager's state: next week's Free per

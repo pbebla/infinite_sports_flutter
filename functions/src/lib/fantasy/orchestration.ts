@@ -22,6 +22,14 @@
 //   spec §9 anti-copy reveal. Written ONCE via a set-if-absent claim the
 //   first time the sweep sees the current gameweek locked — never
 //   overwritten, so late sweeps after downtime still snapshot exactly once.
+//   SQUAD INTEGRITY (audit I2, 2026-11-01): the same claim judges every
+//   squad (squad_integrity.ts — too many players, duplicates, unknown /
+//   guest NEW picks, over budget at TRUSTED prices); an invalid one is
+//   snapshotted verbatim plus `Invalid: [issues]`, scores zero (finalize),
+//   and its manager gets SquadAlerts/<uid> = { Gw, Kind:'invalid', Issues,
+//   CreatedAt } (the fan banner; cleared by the next clean save or the next
+//   clean lock). A FIRST finalize reading live Squads (no snapshot) judges
+//   them the same way. Snapshots and History rows are never re-judged.
 //
 // - LockedPositions/<gw> = { <name>: 'GK'|'DEF'|'ATT' } — every market
 //   player's position at the lock (spec §3 revision 2026-10-28: positions
@@ -170,10 +178,14 @@ import {
 import {
   FantasySquad, squadFromMap, squadToMap, validateSquad,
 } from './squad';
+import {
+  integrityMarketOf, IntegrityInputs, invalidAlertNode, isInvalidAlert,
+  judgeSquad, priceSnapshotOf, sameInvalidAlert, SquadIntegrityIssue,
+} from './squad_integrity';
 import { parseForfeitedBy } from './stats_mapper';
 import {
-  lockAccounting, parseTransferState, rolloverState, transferStateToNode,
-  usedAfterFreeSwaps,
+  annotateSquadIntegrity, lockAccounting, parseTransferState, rolloverState,
+  transferStateToNode, usedAfterFreeSwaps,
 } from './transfer_state';
 
 /** Injected logging seam (firebase-functions/logger in production, a spy or
@@ -267,6 +279,60 @@ async function effectiveSquadAfterWeek(
   return locked;
 }
 
+// ── Squad integrity (audit I2, squad hardening 2026-11-01) ─────────────────
+
+/** Everything squad_integrity.ts needs to judge the squads of [uids] for
+ *  gameweek [gw]: the market (Players), each manager's EFFECTIVE previous
+ *  squad (effectiveSquadAfterWeek(gw-1) — the transfer counter's baseline,
+ *  so "held" means the same thing to both) and the prices during gw-1
+ *  (PriceHistory/<gw-1>). */
+async function loadIntegrityInputs(
+  db: FantasyDb, root: string, uids: string[], gw: number,
+): Promise<IntegrityInputs> {
+  const previousByUid: Record<string, unknown> = {};
+  for (const uid of uids) {
+    const prev = await effectiveSquadAfterWeek(db, root, uid, gw - 1);
+    if (prev !== null) previousByUid[uid] = prev;
+  }
+  return {
+    market: integrityMarketOf(await db.read(`${root}/Players`)),
+    previousByUid,
+    previousWeekPrices: gw > 1
+      ? priceSnapshotOf(await db.read(`${root}/PriceHistory/${gw - 1}`)) : {},
+  };
+}
+
+/** After an integrity pass for gameweek [gw]: each invalid squad's manager
+ *  gets the SquadAlerts/<uid> integrity alert (rewritten only when it
+ *  differs — reruns write nothing) and a warn; a clean squad whose manager
+ *  still carries an integrity alert from an earlier week has it cleared
+ *  (this week counts). A position-change alert is never touched here. */
+async function settleIntegrityAlerts(
+  db: FantasyDb, root: string, gw: number,
+  verdict: {
+    invalid: Array<{ uid: string; issues: SquadIntegrityIssue[] }>;
+    valid: string[];
+  },
+  nowMs: number, log: FantasyLogger, ctx: Record<string, unknown>,
+): Promise<void> {
+  if (verdict.invalid.length === 0 && verdict.valid.length === 0) return;
+  const alertsNode = await db.read(`${root}/SquadAlerts`);
+  const alerts: Record<string, unknown> = isPlainMap(alertsNode) ? alertsNode : {};
+  for (const { uid, issues } of verdict.invalid) {
+    log.warn('fantasy lock: invalid squad — scored zero this week',
+      { ...ctx, gw, uid, issues });
+    if (sameInvalidAlert(alerts[uid], gw, issues)) continue;
+    await db.write(`${root}/SquadAlerts/${uid}`,
+      invalidAlertNode(gw, issues, nowMs));
+  }
+  for (const uid of verdict.valid) {
+    if (!isInvalidAlert(alerts[uid])) continue;
+    await db.write(`${root}/SquadAlerts/${uid}`, null);
+    log.info('fantasy lock: squad valid again — integrity alert cleared',
+      { ...ctx, gw, uid });
+  }
+}
+
 /** Chips are ONE-WEEK (S15 rehearsal Bug 2, owner decision 2026-10-28):
  *  once a gameweek settles, whatever chip the live squad still carries is
  *  switched off (Squads/<uid>/chip removed), so next week starts chipless.
@@ -341,6 +407,15 @@ async function settleTransfersAfterFinalize(
     await db.write(`${root}/TransferState/${uid}`,
       transferStateToNode(rolloverState(state, cfg, gw)));
   }
+}
+
+/** The gameweek the NEXT lock will judge, from GwState: the current one
+ *  while it is 'open', else the one after it; no GwState = GW1. */
+function nextLockGwOf(gwState: unknown): number {
+  if (!isPlainMap(gwState)) return 1;
+  const current = toIntLoose(gwState['current']);
+  if (current <= 0) return 1;
+  return String(gwState['status'] ?? '') === 'open' ? current : current + 1;
 }
 
 export interface SquadSaveArgs {
@@ -450,7 +525,19 @@ export async function recordSquadSave(
         { ...ctx, relabels });
     }
   }
-  if ((await db.read(`${root}/SquadAlerts/${uid}`)) != null &&
+  const alertNode = await db.read(`${root}/SquadAlerts/${uid}`);
+  if (isInvalidAlert(alertNode)) {
+    // An integrity alert ("your GW n team didn't count", audit I2) clears
+    // once the saved squad would pass the NEXT lock's judge — the same
+    // inputs the lock will use (its gameweek's baseline and prices).
+    const target = nextLockGwOf(gwState);
+    const inputs = await loadIntegrityInputs(db, root, [uid], target);
+    if (judgeSquad(squad, uid, cfg, inputs).length === 0) {
+      await db.write(`${root}/SquadAlerts/${uid}`, null);
+      log.info('fantasy integrity: clean squad saved — alert cleared',
+        { ...ctx, gw: target });
+    }
+  } else if (alertNode != null &&
     !validateSquad(squad, cfg).includes('formation')) {
     await db.write(`${root}/SquadAlerts/${uid}`, null);
     log.info('fantasy positions: formation legal — squad alert cleared', ctx);
@@ -620,6 +707,15 @@ export async function finalizeGameweek(
   // accounting now, over whatever squad source resolved above, and persists
   // it so reruns stay deterministic. Reruns of weeks with no persisted
   // costs (pre-accounting weeks) read zeros, exactly as they settled. ──
+  //
+  // Squad integrity (audit I2): a FIRST run reading LIVE squads (no lock
+  // snapshot, no History) judges them exactly as the lock would have — an
+  // invalid squad scores zero, its verdict lands in History, its manager is
+  // alerted. A snapshot or History source is never re-judged (its marker,
+  // if any, is the law), so reruns are deterministic.
+  const integrity = firstRun && source === 'squadsFallback'
+    ? await loadIntegrityInputs(db, root, Object.keys(squadsByUid), gw.number)
+    : undefined;
   let costsRaw = await db.read(`${root}/TransferCosts/${gw.number}`);
   if (costsRaw == null && firstRun) {
     const acc = lockAccounting({
@@ -629,6 +725,7 @@ export async function finalizeGameweek(
       cfg,
       gw: gw.number,
       voidedWeeks,
+      integrity,
     });
     squadsByUid = acc.cleanSquads;
     for (const v of acc.voided) {
@@ -640,6 +737,15 @@ export async function finalizeGameweek(
     }
     await freezeChipPlayed(db, root, cfg, acc.chipPlayedByUid);
     costsRaw = acc.costPointsByUid;
+    if (integrity !== undefined) {
+      await settleIntegrityAlerts(
+        db, root, gw.number, acc, args.nowUtc.getTime(), log, ctx);
+    }
+  } else if (integrity !== undefined) {
+    const judged = annotateSquadIntegrity(squadsByUid, cfg, integrity);
+    squadsByUid = judged.squads;
+    await settleIntegrityAlerts(
+      db, root, gw.number, judged, args.nowUtc.getTime(), log, ctx);
   }
   const transferCostPointsByUid: Record<string, number> = {};
   for (const [u, v] of childEntries(costsRaw)) {
@@ -1141,10 +1247,16 @@ async function snapshotPriceHistory(
  *  VOIDED (stripped from the snapshot itself, so finalize and the public
  *  reveal agree), the effective chip is frozen into
  *  TransferState.ChipPlayed, and the week's transfer cost points are
- *  persisted to TransferCosts/<gw> for finalize. */
+ *  persisted to TransferCosts/<gw> for finalize. The integrity pass rides
+ *  it too (audit I2): every squad is judged (squad_integrity.ts), an invalid
+ *  one is published with its `Invalid` verdict and its manager alerted.
+ *  Squads are read LIVE here, which is right: the Squads/<uid> rule
+ *  rejects client saves from the lock instant on (server clock, while
+ *  GwState says 'open'), and the sweep writes the snapshot BEFORE it flips
+ *  GwState to 'locked' (step 3) — keep that order. */
 async function snapshotPublishedPicks(
   db: FantasyDb, root: string, cfg: FantasyConfig, gw: number,
-  log: FantasyLogger, ctx: Record<string, unknown>,
+  nowMs: number, log: FantasyLogger, ctx: Record<string, unknown>,
 ): Promise<void> {
   if (await db.read(`${root}/PublishedPicks/${gw}`) != null) return;
   const squads = mapChildren(await db.read(`${root}/Squads`));
@@ -1160,6 +1272,8 @@ async function snapshotPublishedPicks(
     gw,
     // Chips from owner-voided weeks are refunded (spec §15).
     voidedWeeks: voidedWeeksOf(await db.read(`${root}/Voided`)),
+    // Audit I2: judge every squad before it becomes the law.
+    integrity: await loadIntegrityInputs(db, root, Object.keys(squads), gw),
   });
   const won = await db.writeIfAbsent(`${root}/PublishedPicks/${gw}`, acc.cleanSquads);
   if (!won) return; // a concurrent sweep won the claim and did the rest
@@ -1171,6 +1285,8 @@ async function snapshotPublishedPicks(
     await db.write(`${root}/TransferCosts/${gw}`, acc.costPointsByUid);
   }
   await freezeChipPlayed(db, root, cfg, acc.chipPlayedByUid);
+  // Alerts last: the snapshot + accounting above are what scoring needs.
+  await settleIntegrityAlerts(db, root, gw, acc, nowMs, log, ctx);
   log.info('fantasy lock: picks published', {
     ...ctx, gw, managers: Object.keys(acc.cleanSquads).length,
   });
@@ -1253,7 +1369,7 @@ async function sweepSeason(
   if (current && gameweekStatusAt(current, nowUtc) === 'locked') {
     await snapshotLockedPositions(db, root, current.number, log, ctx);
     await snapshotPriceHistory(db, root, current.number, log, ctx);
-    await snapshotPublishedPicks(db, root, cfg, current.number, log, ctx);
+    await snapshotPublishedPicks(db, root, cfg, current.number, nowMs, log, ctx);
   }
 
   // 2. Finalize backstop: any lock-passed gameweek whose match day is

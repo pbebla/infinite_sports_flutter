@@ -61,6 +61,9 @@ import {
   FantasySquad, spentTenths, squadFromMap, squadToMap, validateSquad,
 } from '../src/lib/fantasy/squad';
 import { PlayerWeek, scoreSquadWeek, totalTenths } from '../src/lib/fantasy/squad_week';
+import {
+  integrityMarketOf, squadIntegrityIssues,
+} from '../src/lib/fantasy/squad_integrity';
 import { mapGameToStats } from '../src/lib/fantasy/stats_mapper';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -1268,6 +1271,17 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     if (unknown.length > 0) return reject(`not in the market: ${unknown.join(', ')}`);
     const issues = validateSquad(squad, cfg);
     if (issues.length > 0) return reject(`invalid squad: ${issues.join(', ')}`);
+    // The server's lock-time judge too (audit I2, squad_integrity.ts): a
+    // first squad's picks must be affordable at the replay's OWN opening
+    // prices. A real squad saved at other prices (e.g. a dry run over an
+    // already-filled season, whose Players hold end-of-season prices) would
+    // be scored zero every week — skipped instead, never repaired.
+    const serverIssues = squadIntegrityIssues(
+      squad, cfg, integrityMarketOf(db.get(`${F}/Players`)), null, {});
+    if (serverIssues.length > 0) {
+      return reject('the server would judge it invalid at the replay ' +
+        `opening prices: ${serverIssues.join(', ')}`);
+    }
     db.nowMs = t;
     db.job = `client:${uid}`;
     db.simWrite(`${F}/Squads/${uid}`, squadToMap(squad));

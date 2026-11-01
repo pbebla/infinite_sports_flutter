@@ -56,6 +56,7 @@ import {
   FantasyPusher, FantasyUserPush, fantasyPushData, formatDeadline,
 } from './pushes';
 import { squadFromMap, validateSquad } from './squad';
+import { isInvalidAlert } from './squad_integrity';
 import { parseTransferState, transferStateToNode } from './transfer_state';
 
 const silent: FantasyLogger = { info: () => undefined, warn: () => undefined };
@@ -92,8 +93,13 @@ export function positionWindowOf(gwState: unknown, nowMs: number): 'open' | 'loc
   return lockAt > 0 && nowMs >= lockAt ? 'locked' : 'open';
 }
 
+/** A position-change alert; null when absent — or when the node is the
+ *  OTHER alert kind sharing SquadAlerts/<uid>, an integrity verdict
+ *  (Kind 'invalid', squad_integrity.ts): a position change that leaves the
+ *  formation legal must not clear it (it is about a judged week), and an
+ *  illegal one overwrites it with this actionable alert. */
 export function parseSquadAlert(raw: unknown): SquadAlert | null {
-  if (!isPlainMap(raw)) return null;
+  if (!isPlainMap(raw) || isInvalidAlert(raw)) return null;
   const changes: PositionChange[] = [];
   for (const [, c] of childEntries(raw['Changes'])) {
     if (!isPlainMap(c)) continue;

@@ -112,12 +112,27 @@
 // - DreamTeam/<gw> is not computed; an existing Auto:true node is removed
 //   (removeAutoDreamTeam), an admin-edited one (Auto not true) is left alone.
 // Un-voiding is just a rerun without the flag: everything re-settles back.
+//
+// INVALID SQUADS (audit I2, squad hardening 2026-11-01; squad_integrity.ts):
+// a squad map carrying `Invalid: [issues]` — the marker the lock's integrity
+// pass puts on PublishedPicks/<gw>/<uid> (or a first finalize's live-Squads
+// fallback), carried into History on every rerun — scores ZERO for the
+// week: History/<gw>/<uid> = the squad + { TotalTenths: 0, Invalid: [same
+// issues] } (+ Voided when the week is voided) with NO Breakdown (nothing
+// counted; RTDB would drop an empty list anyway), weekly board points 0.
+// It still appears on the boards (a played-but-void week, like a voided
+// one) and its transfer cost is moot (the week nets zero). Invalid squads
+// count toward neither ownership (holders / managers) nor the badge rules.
+// A squad WITHOUT the marker is scored exactly as before (the golden
+// fixtures pin that byte for byte). The engine never re-judges here: the
+// marker on the snapshot is the law, so reruns are deterministic.
 
 import { awardBonus, bpsScore } from './bps';
 import { FantasyConfig, FantasyPosition } from './fantasy_config';
 import { PlayerGameStats } from './player_game_stats';
 import { scorePlayerWeek, WeekScore } from './scoring';
 import { squadFromMap, squadToMap } from './squad';
+import { INVALID_KEY, invalidIssuesOf, isInvalidRow } from './squad_integrity';
 import { PlayerWeek, scoreSquadWeek, totalTenths } from './squad_week';
 import { gameScores, mapGameToStats, parseForfeitedBy } from './stats_mapper';
 
@@ -468,6 +483,7 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
   const historyByUid: Record<string, Record<string, unknown>> = {};
   const weekTenthsByUid: Record<string, number> = {};
   const holders: Record<string, number> = {};
+  let scoredValid = 0; // ownership's denominator: invalid squads excluded
   const skippedSquadUids: string[] = [];
   for (const [uid, raw] of Object.entries(input.squadsByUid)) {
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -479,6 +495,18 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
       squad = squadFromMap(raw as Record<string, unknown>);
     } catch {
       skippedSquadUids.push(uid);
+      continue;
+    }
+    const invalid = invalidIssuesOf(raw);
+    if (invalid !== null) {
+      // Judged invalid at the lock: scored zero, the verdict kept.
+      weekTenthsByUid[uid] = 0;
+      historyByUid[uid] = {
+        ...squadToMap(squad),
+        TotalTenths: 0,
+        ...(voided ? { Voided: true } : {}),
+        [INVALID_KEY]: invalid,
+      };
       continue;
     }
     const result = scoreSquadWeek(squad, week, cfg);
@@ -498,6 +526,7 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
         autoSubbedIn: s.autoSubbedIn,
       })),
     };
+    scoredValid++;
     for (const pick of squad.picks) {
       holders[pick.playerId] = (holders[pick.playerId] ?? 0) + 1;
     }
@@ -538,7 +567,7 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
     [gw]: playerWeeks,
   };
   let ownHolders = holders;
-  let managers = Object.keys(weekTenthsByUid).length;
+  let managers = scoredValid;
   if (input.ownershipSquadsByUid !== undefined) {
     // An older week re-ran: ownership stays the latest week's holdings
     // (malformed squads skipped exactly as that week's own finalize did).
@@ -546,6 +575,7 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
     managers = 0;
     for (const raw of Object.values(input.ownershipSquadsByUid)) {
       if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      if (isInvalidRow(raw)) continue; // a zeroed squad owns nobody
       let squad;
       try {
         squad = squadFromMap(raw as Record<string, unknown>);
