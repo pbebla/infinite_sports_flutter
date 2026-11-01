@@ -24,10 +24,22 @@
 //   -> { pushed:boolean, emailed:boolean }   that template, filled with
 //                                            sample values, to the CALLER
 //   Errors: unauthenticated / permission-denied / invalid-argument.
+//
+// onFantasyAccessClaimCreated   AccessClaims/{uid}/{key} created (a fan's
+//   "I sent it"): Access/<uid> -> pending unless active; once-only
+//   Notified on the claim; pushes every /Admins uid + emails AdminEmail
+//   (claimAdmin) and pushes + emails the fan (claimReceived).
+// onFantasyAccessStatusWritten  Access/{uid}/Status written -> 'active' /
+//   'revoked': once per PaidAt / RefundedAt, push + email the fan with
+//   activatedPaid (the receipt) / activatedGranted / revoked.
+// onRegistrationPaidGrantFantasy  Registrations/{regId}/Submissions/{uid}/Paid
+//   written -> true: grants {active, player} when the matching fantasy
+//   season is pass mode with RegisteredPlayersFree and the uid is not active.
 
 import * as admin from 'firebase-admin';
 import * as logger from 'firebase-functions/logger';
 import type { Reference } from 'firebase-admin/database';
+import { onValueCreated, onValueWritten } from 'firebase-functions/v2/database';
 import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https';
 import Stripe from 'stripe';
 import { stripeSecretKey } from './createRegistrationPaymentIntent';
@@ -35,7 +47,8 @@ import { fantasyLogger, rtdbFantasyDb, rtdbFantasyPusher } from './fantasy_adapt
 import { requireAdmin } from './fantasy_messages';
 import {
   AccessConfig, accessConfigFrom, AccessDeps, accessRecordFrom, checkoutLineItem,
-  checkoutUrls, dollarsToCents, HOSTING_BASE, isActive, isPassMode, isTemplateKey,
+  checkoutUrls, dollarsToCents, grantFantasyAccessForRegistration, handleAccessClaimCreated,
+  handleAccessStatusWritten, HOSTING_BASE, isActive, isPassMode, isTemplateKey,
   sendAccessTestMessage,
 } from './lib/fantasy/access';
 import { fantasyRoot } from './lib/fantasy/orchestration_db';
@@ -207,6 +220,54 @@ export const sendFantasyAccessTest = onCall(
     return sendAccessTestMessage(accessDeps(root, Date.now()), {
       sport, season, uid, template,
       displayName: tokenString(request, 'name') ?? '',
+    });
+  },
+);
+
+// ── Triggers ────────────────────────────────────────────────────────────────
+//
+// The Fantasy/ prefix keeps the wildcards off the busy league paths
+// (fantasy_badges.ts convention); the same-instance root matters in the
+// emulator (index.ts dbRoot parity). Every handler is pure and tested in
+// lib/fantasy/access_orchestration.test.ts; these only hand it the event.
+
+export const onFantasyAccessClaimCreated = onValueCreated(
+  { ref: '/Fantasy/{sport}/{season}/AccessClaims/{uid}/{key}', secrets: SUPPORT_MAIL_SECRETS },
+  async (event) => {
+    const root = event.data.ref.root as Reference;
+    await handleAccessClaimCreated(accessDeps(root, Date.now()), {
+      sport: String(event.params['sport']),
+      season: String(event.params['season']),
+      uid: String(event.params['uid']),
+      key: String(event.params['key']),
+    });
+  },
+);
+
+export const onFantasyAccessStatusWritten = onValueWritten(
+  { ref: '/Fantasy/{sport}/{season}/Access/{uid}/Status', secrets: SUPPORT_MAIL_SECRETS },
+  async (event) => {
+    const root = event.data.before.ref.root as Reference;
+    await handleAccessStatusWritten(accessDeps(root, Date.now()), {
+      sport: String(event.params['sport']),
+      season: String(event.params['season']),
+      uid: String(event.params['uid']),
+      before: event.data.before.val(),
+      after: event.data.after.val(),
+    });
+  },
+);
+
+export const onRegistrationPaidGrantFantasy = onValueWritten(
+  '/Registrations/{regId}/Submissions/{uid}/Paid',
+  async (event) => {
+    const root = event.data.before.ref.root as Reference;
+    await grantFantasyAccessForRegistration(rtdbFantasyDb(root), {
+      regId: String(event.params['regId']),
+      uid: String(event.params['uid']),
+      paid: event.data.after.val(),
+      nowMs: Date.now(),
+      log: fantasyLogger,
     });
   },
 );

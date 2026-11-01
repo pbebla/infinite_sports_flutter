@@ -58,7 +58,9 @@ vi.mock('firebase-admin', () => ({
 }));
 
 import {
-  __setStripeForTests, checkoutSessionParams, createFantasyCheckoutSession, sendFantasyAccessTest,
+  __setStripeForTests, checkoutSessionParams, createFantasyCheckoutSession,
+  onFantasyAccessClaimCreated, onFantasyAccessStatusWritten, onRegistrationPaidGrantFantasy,
+  sendFantasyAccessTest,
 } from './fantasy_access';
 import { accessConfigFrom } from './lib/fantasy/access';
 import { __setMailerForTests } from './support_mail';
@@ -258,5 +260,41 @@ describe('sendFantasyAccessTest', () => {
     h.getUser = async () => { throw Object.assign(new Error('quota'), { code: 'auth/quota-exceeded' }); };
     expect(await call(sendFantasyAccessTest, { sport: 'Futsal', season: '16', template: 'revoked' }, { uid: 'adm' }))
       .toEqual({ pushed: true, emailed: false });
+  });
+});
+
+// The trigger wiring (plan A4): the ref patterns are the contract the fan
+// app (claims) and the Manager (Access writes) are built against, and the
+// two mail-sending triggers must bind the SMTP secrets or email is off.
+describe('trigger contract', () => {
+  const endpoint = (fn: unknown) => (fn as { __endpoint: any }).__endpoint;
+  const secretsOf = (fn: unknown): string[] =>
+    ((endpoint(fn).secretEnvironmentVariables ?? []) as Array<{ key: string }>).map((s) => s.key).sort();
+  const MAIL = ['SUPPORT_SMTP_HOST', 'SUPPORT_SMTP_PASS', 'SUPPORT_SMTP_PORT', 'SUPPORT_SMTP_USER'];
+
+  it('onFantasyAccessClaimCreated: created on AccessClaims/{uid}/{key}, mail secrets bound', () => {
+    const e = endpoint(onFantasyAccessClaimCreated).eventTrigger;
+    expect(e.eventType).toBe('google.firebase.database.ref.v1.created');
+    expect(e.eventFilterPathPatterns.ref).toBe('Fantasy/{sport}/{season}/AccessClaims/{uid}/{key}');
+    expect(secretsOf(onFantasyAccessClaimCreated)).toEqual(MAIL);
+  });
+
+  it('onFantasyAccessStatusWritten: written on Access/{uid}/Status, mail secrets bound', () => {
+    const e = endpoint(onFantasyAccessStatusWritten).eventTrigger;
+    expect(e.eventType).toBe('google.firebase.database.ref.v1.written');
+    expect(e.eventFilterPathPatterns.ref).toBe('Fantasy/{sport}/{season}/Access/{uid}/Status');
+    expect(secretsOf(onFantasyAccessStatusWritten)).toEqual(MAIL);
+  });
+
+  it('onRegistrationPaidGrantFantasy: written on the submission Paid leaf, no secrets', () => {
+    const e = endpoint(onRegistrationPaidGrantFantasy).eventTrigger;
+    expect(e.eventType).toBe('google.firebase.database.ref.v1.written');
+    expect(e.eventFilterPathPatterns.ref).toBe('Registrations/{regId}/Submissions/{uid}/Paid');
+    expect(secretsOf(onRegistrationPaidGrantFantasy)).toEqual([]);
+  });
+
+  it('the callables bind their secrets (Stripe key / SMTP)', () => {
+    expect(secretsOf(createFantasyCheckoutSession)).toEqual(['STRIPE_SECRET_KEY']);
+    expect(secretsOf(sendFantasyAccessTest)).toEqual(MAIL);
   });
 });

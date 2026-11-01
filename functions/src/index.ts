@@ -396,3 +396,11 @@ export { sendFantasyMessage, writeFantasyCopy } from './fantasy_messages';
 // sign-in methods for a manager's Manager-app fantasy profile ----
 
 export { getUserContact } from './user_contact';
+
+// Infinite Fantasy paid access (spec 2026-11-01): the Checkout link + the
+// admin template test, the claim / status / registration-grant triggers.
+// stripeWebhook (above) carries the card activation + refund revoke.
+export {
+  createFantasyCheckoutSession, onFantasyAccessClaimCreated, onFantasyAccessStatusWritten,
+  onRegistrationPaidGrantFantasy, sendFantasyAccessTest,
+} from './fantasy_access';
