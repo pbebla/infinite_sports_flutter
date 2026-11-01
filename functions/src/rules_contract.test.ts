@@ -107,7 +107,29 @@ const CONTRACT: ContractEntry[] = [
     note: 'createMiniLeague: push().set {Name, Code, Owner:uid, CreatedAt, Members}' },
   { path: `${S}/MiniLeagues/-leagueId/Members/UID`, kind: 'own',
     note: 'joinMiniLeague: set(true)' },
+
+  // ── Paid access (spec 2026-11-01) ─────────────────────────────────────────
+  { path: `${S}/AccessClaims/UID/-pushId`, kind: 'own',
+    note: 'fan submitAccessClaim: push().set {Method, AmountDollars, Note, At} (create-only)' },
+  { path: `${S}/Config/Access`, kind: 'admin',
+    note: 'Manager saveConfig: multi-path update (+ grandfathered Access rows)' },
+  { path: `${S}/Access/someUid`, kind: 'admin',
+    note: 'Manager grant / approve / reject / revoke: transaction + multi-path update' },
+  { path: `${S}/AccessClaims/someUid/-pushId/Resolved`, kind: 'admin',
+    note: 'Manager approve / reject: claim Resolved patch' },
+  { path: 'Fantasy/Templates/Access/claimAdmin', kind: 'admin',
+    note: 'Manager saveTemplate: set; resetTemplate: remove' },
+  { path: 'Fantasy/Templates/Access/AdminEmail', kind: 'admin',
+    note: 'Manager saveAdminEmail: set' },
 ];
+
+/** The paid-access gate (spec §5) appended to the Squads/$uid and
+ *  Managers/$uid .write expressions: a client save needs the season NOT in
+ *  pass mode, or an active Access record for that uid. Admin SDK writes
+ *  (functions) bypass rules. */
+const ACCESS_GATE =
+  "(root.child('Fantasy/' + $sport + '/' + $season + '/Config/Access/Mode').val() !== 'pass' || " +
+  "root.child('Fantasy/' + $sport + '/' + $season + '/Access/' + $uid + '/Status').val() === 'active')";
 
 // ── Rules walking ───────────────────────────────────────────────────────────
 
@@ -254,9 +276,11 @@ for (const file of RULES_FILES) {
       expect(v).toContain(`!${gw}').exists()`);
       expect(v).toContain(`${gw}/status').val() !== 'open'`);
       expect(v).toContain(`now < ${gw}/lockAtUtc').val()`);
-      // The delete gate is the validate's deadline group, verbatim.
+      // The delete gate is the validate's deadline group, verbatim, then the
+      // paid-access gate (spec 2026-11-01 §5).
       const deadline = v.slice(v.indexOf(`(!${gw}').exists()`));
-      expect(w).toBe(`auth != null && auth.uid == $uid && (newData.exists() || ${deadline})`);
+      expect(w).toBe(
+        `auth != null && auth.uid == $uid && (newData.exists() || ${deadline}) && ${ACCESS_GATE}`);
 
       const pick = String(uidNode['picks']?.['$i']?.['.validate'] ?? '');
       const n = squadSize(configFromMap({}));
@@ -266,6 +290,55 @@ for (const file of RULES_FILES) {
       expect(pick).toContain("newData.child('playerId').val().length <= 60");
       expect(pick).toContain("newData.child('priceTenths').isNumber()");
       expect(pick).toContain("newData.child('bench').isBoolean()");
+    });
+
+    // PAID ACCESS (spec 2026-11-01 §4–§6, plan A5): the Squads/Managers gate
+    // on both nodes; Access = admin-written, own-or-admin read; AccessClaims =
+    // fan create-only with a validated shape, admin resolve; Templates/Access
+    // = admin only. The fan app and the Manager are built against these.
+    it('paid access: Squads/$uid and Managers/$uid .write end with the Mode/Status gate', () => {
+      const season = rules['rules']['Fantasy']['$sport']['$season'];
+      expect(String(season['Squads']['$uid']['.write']).endsWith(` && ${ACCESS_GATE}`)).toBe(true);
+      expect(season['Managers']['$uid']['.write'])
+        .toBe(`auth != null && auth.uid == $uid && ${ACCESS_GATE}`);
+      // The gate never leaks into .validate (validate binds admins too; an
+      // admin client write to Managers/<uid>/NameFlagged must still land).
+      expect(String(season['Managers']['$uid']['.validate'])).not.toContain('Config/Access');
+      expect(String(season['Squads']['$uid']['.validate'])).not.toContain('Config/Access');
+    });
+
+    it('paid access: Access is admin-written, whole-node admin read, own-or-admin per uid', () => {
+      const access = rules['rules']['Fantasy']['$sport']['$season']['Access'];
+      expect(String(access['.read'])).toContain(ADMIN_GATE);
+      expect(String(access['.write'])).toContain(ADMIN_GATE);
+      expect(access['$uid']['.read'])
+        .toBe("auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())");
+      expect(access['$uid']['.write']).toBeUndefined(); // the fan never writes their own record
+    });
+
+    it('paid access: AccessClaims — fan create-only own claim, validated; admin resolves', () => {
+      const claims = rules['rules']['Fantasy']['$sport']['$season']['AccessClaims'];
+      expect(String(claims['.read'])).toContain(ADMIN_GATE);
+      expect(String(claims['.write'])).toContain(ADMIN_GATE);
+      expect(claims['$uid']['.read'])
+        .toBe("auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())");
+      expect(claims['$uid']['$key']['.write'])
+        .toBe('auth != null && auth.uid == $uid && !data.exists() && newData.exists()');
+      const v = String(claims['$uid']['$key']['.validate']);
+      expect(v).toContain("newData.hasChildren(['Method', 'AmountDollars', 'At'])");
+      expect(v).toContain("newData.child('Method').val().matches(/^(venmo|zelle)$/)");
+      expect(v).toContain("newData.child('AmountDollars').isNumber()");
+      expect(v).toContain("newData.child('AmountDollars').val() >= 0");
+      expect(v).toContain("newData.child('At').isNumber()");
+      expect(v).toContain("(!newData.hasChild('Note') || (newData.child('Note').isString() && newData.child('Note').val().length <= 120))");
+      // Only an admin may write the resolution / notification fields.
+      expect(v).toContain(`(${ADMIN_GATE}.exists() || (!newData.hasChild('Resolved')`);
+    });
+
+    it('paid access: Fantasy/Templates/Access is admin read + write (a literal child, not a $sport)', () => {
+      const templates = rules['rules']['Fantasy']['Templates']['Access'];
+      expect(String(templates['.read'])).toContain(ADMIN_GATE);
+      expect(String(templates['.write'])).toContain(ADMIN_GATE);
     });
 
     it('Voided: public read, admin write, each <gw> validated true', () => {
@@ -287,6 +360,13 @@ describe('rules contract: the walker itself', () => {
       for (const kind of ['admin', 'own', 'ownerCreate'] as const) {
         expect(links.some((l) => grants(kind, l, bindings)), `${p} ${kind}`).toBe(false);
       }
+    }
+  });
+
+  it("paid access: a fan has no 'own' grant on their Access record or another uid's claims", () => {
+    for (const p of [`${S}/Access/UID`, `${S}/AccessClaims/otherUid/-pushId`]) {
+      const { links, bindings } = writeChain(rules, p);
+      expect(links.some((l) => grants('own', l, bindings)), p).toBe(false);
     }
   });
 

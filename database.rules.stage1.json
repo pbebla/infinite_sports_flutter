@@ -354,6 +354,12 @@
         ".read": true,
         ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
       },
+      "Templates": {
+        "Access": {
+          ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+          ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+        }
+      },
       "$sport": {
         "$season": {
           "Config": {
@@ -369,7 +375,7 @@
             ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
             "$uid": {
               ".read": "auth != null && auth.uid == $uid",
-              ".write": "auth != null && auth.uid == $uid && (newData.exists() || (!root.child('Fantasy/' + $sport + '/' + $season + '/GwState').exists() || root.child('Fantasy/' + $sport + '/' + $season + '/GwState/status').val() !== 'open' || now < root.child('Fantasy/' + $sport + '/' + $season + '/GwState/lockAtUtc').val() || (root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverride').val() === 'open' && (!root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverrideUntil').isNumber() || now < root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverrideUntil').val()))))",
+              ".write": "auth != null && auth.uid == $uid && (newData.exists() || (!root.child('Fantasy/' + $sport + '/' + $season + '/GwState').exists() || root.child('Fantasy/' + $sport + '/' + $season + '/GwState/status').val() !== 'open' || now < root.child('Fantasy/' + $sport + '/' + $season + '/GwState/lockAtUtc').val() || (root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverride').val() === 'open' && (!root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverrideUntil').isNumber() || now < root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverrideUntil').val())))) && (root.child('Fantasy/' + $sport + '/' + $season + '/Config/Access/Mode').val() !== 'pass' || root.child('Fantasy/' + $sport + '/' + $season + '/Access/' + $uid + '/Status').val() === 'active')",
               ".validate": "newData.hasChildren(['picks', 'captainId', 'viceId']) && newData.child('captainId').isString() && newData.child('captainId').val().length <= 60 && newData.child('viceId').isString() && newData.child('viceId').val().length <= 60 && (!root.child('Fantasy/' + $sport + '/' + $season + '/GwState').exists() || root.child('Fantasy/' + $sport + '/' + $season + '/GwState/status').val() !== 'open' || now < root.child('Fantasy/' + $sport + '/' + $season + '/GwState/lockAtUtc').val() || (root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverride').val() === 'open' && (!root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverrideUntil').isNumber() || now < root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverrideUntil').val())))",
               "picks": {
                 ".validate": "newData.hasChildren()",
@@ -401,8 +407,26 @@
             ".read": true,
             ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
             "$uid": {
-              ".write": "auth != null && auth.uid == $uid",
+              ".write": "auth != null && auth.uid == $uid && (root.child('Fantasy/' + $sport + '/' + $season + '/Config/Access/Mode').val() !== 'pass' || root.child('Fantasy/' + $sport + '/' + $season + '/Access/' + $uid + '/Status').val() === 'active')",
               ".validate": "newData.child('TeamName').isString() && newData.child('TeamName').val().length >= 3 && newData.child('TeamName').val().length <= 30 && (root.child('Admins').child(auth.uid).exists() || !newData.child('NameFlagged').exists() || newData.child('NameFlagged').val() == false && (!data.child('NameFlagged').exists() || data.child('NameFlagged').val() != true || newData.child('TeamName').val() != data.child('TeamName').val()))"
+            }
+          },
+          "Access": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$uid": {
+              ".read": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())"
+            }
+          },
+          "AccessClaims": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$uid": {
+              ".read": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())",
+              "$key": {
+                ".write": "auth != null && auth.uid == $uid && !data.exists() && newData.exists()",
+                ".validate": "newData.hasChildren(['Method', 'AmountDollars', 'At']) && newData.child('Method').isString() && newData.child('Method').val().matches(/^(venmo|zelle)$/) && newData.child('AmountDollars').isNumber() && newData.child('AmountDollars').val() >= 0 && newData.child('At').isNumber() && (!newData.hasChild('Note') || (newData.child('Note').isString() && newData.child('Note').val().length <= 120)) && (root.child('Admins').child(auth.uid).exists() || (!newData.hasChild('Resolved') && !newData.hasChild('ResolvedAt') && !newData.hasChild('ResolvedBy') && !newData.hasChild('Reason') && !newData.hasChild('Notified')))"
+              }
             }
           },
           "PublishedPicks": {
