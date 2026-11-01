@@ -157,6 +157,10 @@ class _ProfilePageState extends State<ProfilePage>
   /// Phase 2 (career) done — career-dependent sections swap their skeletons
   /// for real content once this flips.
   bool _careerLoaded = false;
+  /// Set when any bounded career read timed out (offline). A degraded
+  /// career is shown for this visit but NEVER cached — the next open
+  /// refetches instead of restoring an empty career for the session.
+  bool _careerDegraded = false;
 
   // ── Share state ──────────────────────────────────────────────────────────
   /// Tracks which competition is currently selected in the Career tab, so the
@@ -370,6 +374,8 @@ class _ProfilePageState extends State<ProfilePage>
           }
         });
       }));
+    } on TimeoutException {
+      _careerDegraded = true;
     } catch (_) {}
   }
 
@@ -971,6 +977,9 @@ class _ProfilePageState extends State<ProfilePage>
               .bounded('ProfilePage: profile node'))
           .snapshot;
       rawUser = userSnap.value as Map? ?? {};
+    } on TimeoutException {
+      _careerDegraded = true;
+      return;
     } catch (_) {
       return;
     }
@@ -1030,7 +1039,13 @@ class _ProfilePageState extends State<ProfilePage>
       ok = false;
       _careerCache.remove(widget.uid);
     }
-    if (ok) {
+    if (ok && _careerDegraded) {
+      // Shown, but not remembered: a timed-out read means this career is
+      // incomplete (offline first visit); caching it would restore an empty
+      // career for the rest of the session.
+      _careerCache.remove(widget.uid);
+    }
+    if (ok && !_careerDegraded) {
       _careerCache[widget.uid] = _snapshotCareer();
       if (color == null && colorFuture != null) {
         // Too late for this visit's reveal, but cache hits render the tint
@@ -1104,6 +1119,8 @@ class _ProfilePageState extends State<ProfilePage>
       _tableEntries[sport] ??= {};
       _tableEntries[sport]![seasonNum] =
           await _extractPlayerStats(sport, seasonNum, team);
+    } on TimeoutException {
+      _careerDegraded = true;
     } catch (_) {}
   }
 
@@ -1268,6 +1285,8 @@ class _ProfilePageState extends State<ProfilePage>
           }
         } catch (_) {}
       }));
+    } on TimeoutException {
+      _careerDegraded = true;
     } catch (_) {}
   }
 
