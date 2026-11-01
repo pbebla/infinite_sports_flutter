@@ -227,6 +227,11 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
   StreamSubscription<Map<String, List<FantasyBadgeAward>>>? _badgesSub;
 
   StreamSubscription<FantasyLeaderboards>? _boardsSub;
+
+  /// Re-listen-safe copy of the boards feed for the pages this tab opens
+  /// (your team page's live rank card) — one upstream subscription, however
+  /// many pages are pushed.
+  final _boardsForViewer = StreamController<FantasyLeaderboards>.broadcast();
   StreamSubscription<Map<String, FantasyManager>>? _managersSub;
   StreamSubscription<List<FantasyMiniLeague>>? _leaguesSub;
   StreamSubscription<Map<int, FantasyDreamTeam>>? _dreamTeamsSub;
@@ -250,6 +255,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
             FantasyService.watchLeaderboards(widget.sport, widget.season))
         .listen((boards) {
       if (mounted) setState(() => _boards = boards);
+      _boardsForViewer.add(boards);
     });
     _managersSub = (widget.managersStates ??
             FantasyService.watchManagers(widget.sport, widget.season))
@@ -317,6 +323,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
   @override
   void dispose() {
     _boardsSub?.cancel();
+    _boardsForViewer.close();
     _managersSub?.cancel();
     _leaguesSub?.cancel();
     _dreamTeamsSub?.cancel();
@@ -367,7 +374,9 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
 
   void _openManager(LeaderboardRowData row) {
     // Only YOUR team page carries the rank card (the viewer also gates on
-    // isSelf); computed once here, from data already on screen.
+    // isSelf). The opening series comes from data already on screen; the
+    // card then follows the boards feed, and a share taken later renders
+    // the rank as it is THEN (this tab's state stays live underneath).
     final rankCard = row.isSelf ? _selfRankCard() : null;
     final builder = widget.squadViewerBuilder ??
         (row) => ManagerSquadViewerPage(
@@ -390,7 +399,14 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
               initialBadges:
                   _badges == null ? null : (_badges![row.uid] ?? const []),
               rankSeries: rankCard?.series,
-              onShareRank: rankCard?.share,
+              rankStates: rankCard == null
+                  ? null
+                  : _boardsForViewer.stream
+                      .map((b) => rankSeries(b.rankHistory[row.uid])),
+              onShareRank: rankCard == null
+                  ? null
+                  : (buttonContext) =>
+                      (_selfRankCard() ?? rankCard).share(buttonContext),
             );
     Navigator.push(
         context, MaterialPageRoute(builder: (_) => builder(row)));

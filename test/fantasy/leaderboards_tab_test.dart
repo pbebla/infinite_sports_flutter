@@ -1244,6 +1244,35 @@ void main() {
       semantics.dispose();
     });
 
+    testWidgets("your team page's rank card is LIVE off the tab's boards "
+        'feed: a finalize while the page is open moves the chart',
+        (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpTab(tester, size: const Size(420, 1400), realViewer: true);
+      await emitAll(
+        tester,
+        data: overallWith({
+          'me': {'1': 14, '2': 12, '3': 10},
+        }),
+        names: fourNames,
+      );
+      await openRealViewer(tester, 'me', self: true);
+      expect(find.text('#14 → #10'), findsOneWidget);
+
+      // GW4 finalizes underneath the open page.
+      boards.add(overallWith({
+        'me': {'1': 14, '2': 12, '3': 10, '4': 7},
+      }));
+      await tester.pumpAndSettle();
+      expect(find.byType(ManagerSquadViewerPage), findsOneWidget);
+      expect(find.text('#14 → #7'), findsOneWidget);
+      expect(find.text('#14 → #10'), findsNothing);
+      expect(find.bySemanticsLabel('Your rank by gameweek: GW1 #14, GW2 #12, '
+          'GW3 #10, GW4 #7'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      semantics.dispose();
+    });
+
     testWidgets('the rank card shares your OVERALL row even when you opened '
         'your team from the Gameweek scope', (tester) async {
       final shares = ShareRecorder();

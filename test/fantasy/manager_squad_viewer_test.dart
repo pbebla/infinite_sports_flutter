@@ -83,6 +83,7 @@ void main() {
     Brightness brightness = Brightness.light,
     String title = 'Golden Boots',
     List<RankPoint>? rankSeries,
+    Stream<List<RankPoint>>? rankStates,
     Future<void> Function(BuildContext buttonContext)? onShareRank,
   }) async {
     tester.view.physicalSize = size;
@@ -121,6 +122,7 @@ void main() {
         initialBadges: initialBadges,
         initialBadgeCatalog: initialBadgeCatalog,
         rankSeries: rankSeries,
+        rankStates: rankStates,
         onShareRank: onShareRank,
       ),
     ));
@@ -186,6 +188,43 @@ void main() {
       final scheme = Theme.of(tester.element(byKey('rank_history_panel')))
           .colorScheme;
       expect(box.color, scheme.surfaceContainerHigh);
+      semantics.dispose();
+    });
+
+    testWidgets('the card is LIVE: a gameweek finalizing while your page is '
+        'open moves the chart (seeded by the opener, then the feed)',
+        (tester) async {
+      final semantics = tester.ensureSemantics();
+      final rank = StreamController<List<RankPoint>>.broadcast();
+      addTearDown(rank.close);
+      await pumpViewer(tester,
+          isSelf: true,
+          initialSquad: squad('Live Keeper'),
+          rankSeries: season,
+          rankStates: rank.stream,
+          onShareRank: (_) async {});
+      await land(tester);
+      expect(find.text('#14 → #10'), findsOneWidget);
+
+      // GW4 finalizes: RankHistory gains a week, you climbed to #7.
+      rank.add(const [...season, (gameweek: 4, rank: 7)]);
+      await tester.pumpAndSettle();
+      expect(find.text('#14 → #7'), findsOneWidget);
+      expect(find.text('#14 → #10'), findsNothing);
+      expect(find.bySemanticsLabel('Your rank by gameweek: GW1 #14, GW2 #12, '
+          'GW3 #10, GW4 #7'), findsOneWidget);
+      // Still one card, still above the court, share still there.
+      expect(byKey('rank_history_panel'), findsOneWidget);
+      expect(byKey('rank_history_share'), findsOneWidget);
+      expect(tester.getRect(byKey('rank_history_panel')).bottom,
+          lessThan(tester.getTopLeft(byKey('squad_chip_Live Keeper')).dy));
+
+      // A feed that errors keeps the series as last seen — no skeleton,
+      // no exception.
+      rank.addError(StateError('rules'));
+      await tester.pumpAndSettle();
+      expect(find.text('#14 → #7'), findsOneWidget);
+      expect(tester.takeException(), isNull);
       semantics.dispose();
     });
 

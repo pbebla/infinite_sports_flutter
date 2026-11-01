@@ -60,6 +60,7 @@ class ManagerSquadViewerPage extends StatefulWidget {
     this.initialBadges,
     this.initialBadgeCatalog,
     this.rankSeries,
+    this.rankStates,
     this.onShareRank,
   });
 
@@ -112,6 +113,12 @@ class ManagerSquadViewerPage extends StatefulWidget {
   /// gameweek" note). Ignored for anyone else's page; null = no card.
   final List<RankPoint>? rankSeries;
 
+  /// Live updates to [rankSeries] (the opener's Leaderboards feed mapped to
+  /// your RankHistory): a gameweek finalizing while your page is open moves
+  /// the chart. Seeded by [rankSeries] for the first paint; a feed that
+  /// fails keeps the series as opened. null = the series stays as opened.
+  final Stream<List<RankPoint>>? rankStates;
+
   /// "Share my rank" on that card — renders + shares your rank story, given
   /// the button's context (the iPad share anchor). null = no share action.
   final Future<void> Function(BuildContext buttonContext)? onShareRank;
@@ -141,6 +148,11 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
   FantasyBadgeCatalog? _badgeCatalog;
   StreamSubscription<List<FantasyBadgeAward>>? _badgesSub;
   StreamSubscription<FantasyBadgeCatalog>? _badgeCatalogSub;
+
+  /// Your season rank line (isSelf only) — seeded from the opener, then
+  /// live from [ManagerSquadViewerPage.rankStates].
+  List<RankPoint>? _rankSeries;
+  StreamSubscription<List<RankPoint>>? _rankSub;
 
   DateTime get _now => (widget.nowUtc ?? () => DateTime.now().toUtc())();
 
@@ -193,6 +205,24 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
       () => _badgeCatalog ??= badgeCatalogFromNode(null),
       'badge catalog',
     );
+    _rankSeries = widget.rankSeries;
+    final rankStates = widget.rankStates;
+    if (widget.isSelf && rankStates != null) {
+      _rankSub = _listenSoft<List<RankPoint>>(
+        () => rankStates.where((s) => !_sameSeries(_rankSeries, s)),
+        (s) => _rankSeries = s,
+        () {},
+        'rank history',
+      );
+    }
+  }
+
+  static bool _sameSeries(List<RankPoint>? a, List<RankPoint> b) {
+    if (a == null || a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   /// A badge feed that cannot be created or errors degrades to [onFail]
@@ -224,6 +254,7 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
     _publishedSub?.cancel();
     _historySub?.cancel();
     _liveSub?.cancel();
+    _rankSub?.cancel();
     _badgesSub?.cancel();
     _badgeCatalogSub?.cancel();
     super.dispose();
@@ -270,7 +301,7 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
   /// The "Your rank this season" card for the top of YOUR page; null on
   /// anyone else's, or when the opener passed no series.
   Widget? _rankSection() {
-    final series = widget.rankSeries;
+    final series = _rankSeries;
     if (!widget.isSelf || series == null) return null;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
