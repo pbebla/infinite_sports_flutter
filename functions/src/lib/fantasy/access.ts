@@ -57,7 +57,7 @@ export interface AccessConfig {
 /** Spec §9 `Copy` row — the paywall text the fan app shows (verbatim). */
 export const COPY_DEFAULTS: AccessCopy = {
   headline: 'Join Infinite Fantasy',
-  body: 'A season pass for {season} is {amount}. Pay once, play the whole season.',
+  body: 'A season pass for {season} Fantasy is {amount}. Pay once, play the whole season.',
   button: 'Pay with card',
 };
 

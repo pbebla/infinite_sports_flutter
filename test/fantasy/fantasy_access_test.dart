@@ -21,7 +21,7 @@ void main() {
         expect(cfg.card, isTrue);
         expect(cfg.headline, 'Join Infinite Fantasy');
         expect(cfg.body,
-            'A season pass for {season} is {amount}. Pay once, play the whole season.');
+            'A season pass for {season} Fantasy is {amount}. Pay once, play the whole season.');
         expect(cfg.button, 'Pay with card');
       }
       expect(FantasyAccessConfig.free.isPass, isFalse);
@@ -319,7 +319,7 @@ void main() {
       final cfg = accessConfigFromNode({'Mode': 'pass', 'AmountDollars': 10});
       expect(cfg.priceLabel, r'$10');
       expect(cfg.bodyFor(sport: 'Futsal', season: '16'),
-          r'A season pass for Futsal Season 16 is $10. Pay once, play the whole season.');
+          r'A season pass for Futsal Season 16 Fantasy is $10. Pay once, play the whole season.');
       expect(cfg.headlineFor(sport: 'Futsal', season: '16'),
           'Join Infinite Fantasy');
     });

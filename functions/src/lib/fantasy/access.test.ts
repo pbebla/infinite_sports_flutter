@@ -137,7 +137,7 @@ describe('templates', () => {
     });
     expect(COPY_DEFAULTS).toEqual({
       headline: 'Join Infinite Fantasy',
-      body: 'A season pass for {season} is {amount}. Pay once, play the whole season.',
+      body: 'A season pass for {season} Fantasy is {amount}. Pay once, play the whole season.',
       button: 'Pay with card',
     });
     expect(ADMIN_EMAIL_DEFAULT).toBe('support@infinitesports.org');

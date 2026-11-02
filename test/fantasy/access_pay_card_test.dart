@@ -137,7 +137,7 @@ void main() {
       expect(key('access_pay_card'), findsOneWidget);
       expect(find.text('Join Infinite Fantasy'), findsOneWidget);
       expect(
-          find.text('A season pass for Futsal Season 16 is \$10. Pay once, '
+          find.text('A season pass for Futsal Season 16 Fantasy is \$10. Pay once, '
               'play the whole season.'),
           findsOneWidget);
       expect(find.text('\$10'), findsOneWidget);
@@ -472,7 +472,7 @@ void main() {
               'Copy': {
                 'Headline': 'A deliberately long headline for the season '
                     'pass that has to wrap on a small phone',
-                'Body': 'A season pass for {season} is {amount}. Pay once, '
+                'Body': 'A season pass for {season} Fantasy is {amount}. Pay once, '
                     'play the whole season — and this sentence keeps going '
                     'to make sure wrapping works everywhere.',
               },

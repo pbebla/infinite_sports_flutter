@@ -17,7 +17,7 @@ enum FantasyAccessMode { free, pass }
 /// stored copy is absent or blank.
 const String kAccessHeadlineDefault = 'Join Infinite Fantasy';
 const String kAccessBodyDefault =
-    'A season pass for {season} is {amount}. Pay once, play the whole season.';
+    'A season pass for {season} Fantasy is {amount}. Pay once, play the whole season.';
 const String kAccessButtonDefault = 'Pay with card';
 
 /// The longest claim note the rules accept (`Note` string ≤ 120).
