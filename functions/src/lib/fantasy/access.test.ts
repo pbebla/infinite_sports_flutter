@@ -8,7 +8,7 @@ import {
   accessConfigFrom, accessRecordFrom, activationFor, ADMIN_EMAIL_DEFAULT,
   checkoutLineItem, checkoutUrls, claimFrom, COPY_DEFAULTS, dollarsToCents,
   emailHtml, fillTemplate, formatAccessDate, formatAmount, HOSTING_BASE,
-  isActive, isPassMode, methodLabel, notifyKeyFor, pendingFor, revokedPatch,
+  isActive, isPassMode, methodLabel, notifyKeyFor, PAID_VIAS, pendingFor, revokedPatch,
   seasonLabel, TEMPLATE_DEFAULTS, TEMPLATE_KEYS, templateFrom,
 } from './access';
 
@@ -19,7 +19,7 @@ describe('accessConfigFrom', () => {
       expect(cfg).toEqual({
         mode: 'free',
         amountDollars: 0,
-        methods: { venmo: true, zelle: false, cash: false, card: true },
+        methods: { venmo: true, zelle: false, card: true },
         registeredPlayersFree: false,
         copy: COPY_DEFAULTS,
       });
@@ -38,7 +38,7 @@ describe('accessConfigFrom', () => {
     expect(cfg).toEqual({
       mode: 'pass',
       amountDollars: 12.5,
-      methods: { venmo: false, zelle: true, cash: false, card: true },
+      methods: { venmo: false, zelle: true, card: true },
       registeredPlayersFree: true,
       copy: { headline: 'H', body: 'B', button: 'Go' },
     });
@@ -52,14 +52,20 @@ describe('accessConfigFrom', () => {
     });
     expect(cfg.mode).toBe('free'); // only the literal 'pass' is pass mode
     expect(cfg.amountDollars).toBe(0);
-    expect(cfg.methods).toEqual({ venmo: true, zelle: false, cash: false, card: true });
+    expect(cfg.methods).toEqual({ venmo: true, zelle: false, card: true });
     expect(cfg.registeredPlayersFree).toBe(false);
     expect(cfg.copy).toEqual(COPY_DEFAULTS); // blank + non-string -> defaults
   });
 
   it('a method switch is read as exactly true/false; junk keeps the default', () => {
     expect(accessConfigFrom({ Methods: { Venmo: 'no', Zelle: 1, Card: false } }).methods)
-      .toEqual({ venmo: true, zelle: false, cash: false, card: false });
+      .toEqual({ venmo: true, zelle: false, card: false });
+  });
+
+  it('a stray Methods/Cash switch is ignored: cash is not a fan method', () => {
+    const m = accessConfigFrom({ Methods: { Cash: true } }).methods as Record<string, unknown>;
+    expect(m).not.toHaveProperty('cash');
+    expect(m).toEqual({ venmo: true, zelle: false, card: true });
   });
 
   it('negative / NaN amounts read 0', () => {
@@ -272,6 +278,15 @@ describe('claimFrom', () => {
     expect(claimFrom({ AmountDollars: 10, At: 3 })).toBeNull();
     expect(claimFrom(null)).toBeNull();
     expect(claimFrom('venmo')).toBeNull();
+  });
+
+  it('a fan cannot claim cash (2026-11-02: cash is recorded by an admin only)', () => {
+    expect(claimFrom({ Method: 'cash', AmountDollars: 10, Note: 'n', At: 3 })).toBeNull();
+    // ...but cash stays a valid PAID record an admin writes to Access/<uid>.
+    expect(PAID_VIAS).toContain('cash');
+    expect(methodLabel('cash')).toBe('cash');
+    expect(accessRecordFrom({ Status: 'active', Via: 'cash', AmountCents: 1000, PaidAt: 5, By: 'adm' })?.via)
+      .toBe('cash');
   });
 
   it('tolerates a bad amount / note / at', () => {

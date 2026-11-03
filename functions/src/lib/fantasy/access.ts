@@ -49,7 +49,7 @@ export interface AccessConfig {
   mode: AccessMode;
   /** Whole dollars or .50; the server charges exactly this (§3). */
   amountDollars: number;
-  methods: { venmo: boolean; zelle: boolean; cash: boolean; card: boolean };
+  methods: { venmo: boolean; zelle: boolean; card: boolean };
   registeredPlayersFree: boolean;
   copy: AccessCopy;
 }
@@ -84,7 +84,6 @@ export function accessConfigFrom(raw: unknown): AccessConfig {
     methods: {
       venmo: boolOr(methods['Venmo'], true),
       zelle: boolOr(methods['Zelle'], false),
-      cash: boolOr(methods['Cash'], false),
       card: boolOr(methods['Card'], true),
     },
     registeredPlayersFree: m['RegisteredPlayersFree'] === true,
@@ -212,7 +211,9 @@ export function notifyKeyFor(status: 'active' | 'revoked', rec: AccessRecord): s
 
 // ── AccessClaims/<uid>/<key> ────────────────────────────────────────────────
 
-export type ClaimMethod = 'venmo' | 'zelle' | 'cash';
+/** What a FAN may claim. Cash is deliberately absent: an admin records cash
+ *  by writing Access/<uid> with Via 'cash' (still a valid AccessVia / paid via). */
+export type ClaimMethod = 'venmo' | 'zelle';
 
 export interface AccessClaim {
   method: ClaimMethod;
@@ -227,7 +228,7 @@ export interface AccessClaim {
 export function claimFrom(raw: unknown): AccessClaim | null {
   if (!isPlainMap(raw)) return null;
   const method = raw['Method'];
-  if (method !== 'venmo' && method !== 'zelle' && method !== 'cash') return null;
+  if (method !== 'venmo' && method !== 'zelle') return null;
   const amount = numOrNull(raw['AmountDollars']);
   const resolved = raw['Resolved'];
   return {
