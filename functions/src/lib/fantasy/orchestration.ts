@@ -24,8 +24,11 @@
 //   overwritten, so late sweeps after downtime still snapshot exactly once.
 //   SQUAD INTEGRITY (audit I2, 2026-11-01): the same claim judges every
 //   squad (squad_integrity.ts — too many players, duplicates, unknown /
-//   guest NEW picks, over budget at TRUSTED prices); an invalid one is
-//   snapshotted verbatim plus `Invalid: [issues]`, scores zero (finalize),
+//   guest NEW picks, over budget at TRUSTED prices + the FPL selling rule's
+//   realizedTenths); a valid one is snapshotted at its judged prices with
+//   its `realizedTenths` (every other key kept); an invalid one is
+//   snapshotted verbatim plus `Invalid: [issues]` and the baseline's
+//   `realizedTenths` (no sale credited), scores zero (finalize),
 //   and its manager gets SquadAlerts/<uid> = { Gw, Kind:'invalid', Issues,
 //   CreatedAt } (the fan banner; cleared by the next clean save or the next
 //   clean lock). A FIRST finalize reading live Squads (no snapshot) judges
@@ -543,7 +546,7 @@ export async function recordSquadSave(
     // inputs the lock will use (its gameweek's baseline and prices).
     const target = nextLockGwOf(gwState);
     const inputs = await loadIntegrityInputs(db, root, [uid], target);
-    if (judgeSquad(squad, uid, cfg, inputs).length === 0) {
+    if (judgeSquad(squad, uid, cfg, inputs).issues.length === 0) {
       await db.write(`${root}/SquadAlerts/${uid}`, null);
       log.info('fantasy integrity: clean squad saved — alert cleared',
         { ...ctx, gw: target });

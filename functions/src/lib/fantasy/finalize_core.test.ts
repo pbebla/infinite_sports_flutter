@@ -443,6 +443,26 @@ describe('computeGameweekFinalize edges', () => {
       .toEqual(['alpha', 'boost', 'churn']);
   });
 
+  it('History rows copy realizedTenths in both branches (scored and invalid)', () => {
+    const input = baseInput();
+    const sq = input.squadsByUid as Record<string, Record<string, unknown>>;
+    sq['alpha']['realizedTenths'] = 12; // scored
+    sq['boost']['realizedTenths'] = -4;
+    sq['boost']['Invalid'] = ['overBudget']; // invalid
+    sq['churn']['realizedTenths'] = 'nope'; // not a number: not copied
+    const out = computeGameweekFinalize(input);
+    expect(out.historyByUid['alpha']['realizedTenths']).toBe(12);
+    expect(Array.isArray(out.historyByUid['alpha']['Breakdown'])).toBe(true);
+    expect(out.historyByUid['boost']).toMatchObject(
+      { TotalTenths: 0, Invalid: ['overBudget'], realizedTenths: -4 });
+    expect('realizedTenths' in out.historyByUid['churn']).toBe(false);
+    // A rerun from the History rows keeps them.
+    const again = computeGameweekFinalize(
+      { ...baseInput(), squadsByUid: out.historyByUid });
+    expect(again.historyByUid['alpha']['realizedTenths']).toBe(12);
+    expect(again.historyByUid['boost']['realizedTenths']).toBe(-4);
+  });
+
   it('admin-edited dream team (Auto false) is preserved (null output)', () => {
     const input = baseInput();
     input.dreamTeamAuto = false;

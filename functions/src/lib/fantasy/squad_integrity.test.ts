@@ -10,8 +10,8 @@ import { parseSquadAlert } from './position_changes';
 import { FantasySquad, squadFromMap } from './squad';
 import {
   baselineSquadOf, IntegrityInputs, integrityMarketOf, integrityVerdictOf,
-  invalidAlertNode, invalidIssuesOf, isInvalidAlert, priceSnapshotOf,
-  sameInvalidAlert, squadIntegrityIssues, trustedPrices,
+  invalidAlertNode, invalidIssuesOf, isInvalidAlert, judgeSale, judgeSquad,
+  priceSnapshotOf, sameInvalidAlert, squadIntegrityIssues,
 } from './squad_integrity';
 import { annotateSquadIntegrity, lockAccounting } from './transfer_state';
 
@@ -133,7 +133,7 @@ describe('squadIntegrityIssues: the judge', () => {
   it('negative client prices are floored at zero / the market', () => {
     const s = alpha();
     s.picks[0] = pick('Ghost', 'GK', -10000);
-    expect(trustedPrices(sq(s), market, null, {})[0]).toBe(0);
+    expect(judgeSale(sq(s), market, null, 0, {}).prices[0]).toBe(0);
     expect(squadIntegrityIssues(sq(s), cfg, market, null, {}))
       .toEqual(['unknownPlayer']);
   });
@@ -152,26 +152,29 @@ describe('squadIntegrityIssues: the judge', () => {
     const s = alpha();
     s.picks[4] = pick('Alex', 'ATT', 0); // held at 95 last week
     s.picks[1] = pick('Bea', 'DEF', 75); // Dana out: real 480 - 80 + 75 = 475
-    expect(trustedPrices(sq(s), market, sq(alpha()), {})[4]).toBe(95);
+    expect(judgeSale(sq(s), market, sq(alpha()), 0, {}).prices[4]).toBe(95);
     expect(squadIntegrityIssues(sq(s), cfg, market, sq(alpha()), {})).toEqual([]);
     s.picks[0] = pick('Sam', 'GK', 55); // Eli out for Sam (85): 505
     expect(squadIntegrityIssues(sq(s), cfg, market, sq(alpha()), {}))
       .toEqual(['overBudget']);
   });
 
-  it('a HELD player whose price FELL may be re-bought at the lower price (remove + re-add)', () => {
+  it('a HELD player whose price FELL stays at the price paid (FPL: removing '
+    + 'and re-adding him before the deadline is no sale, no cheaper re-buy)', () => {
     const fallen = integrityMarketOf({
       ...MARKET_NODE, Dana: { position: 'DEF', priceTenths: 70, eligible: true },
     });
     const s = alpha();
-    s.picks[1] = pick('Dana', 'DEF', 70); // held at 80, re-added at today's 70
-    s.picks[2] = pick('Bea', 'DEF', 75); // the freed 10 + Eva's 50 buy Bea: 495
-    expect(trustedPrices(sq(s), fallen, sq(alpha()), { Dana: 80 })[1]).toBe(70);
+    s.picks[1] = pick('Dana', 'DEF', 70); // held at 80, "re-added" at today's 70
+    s.picks[2] = pick('Bea', 'DEF', 75); // Eva (50, sold at 50) out for Bea
+    const sale = judgeSale(sq(s), fallen, sq(alpha()), 0, { Dana: 80 });
+    expect(sale.prices[1]).toBe(80);
+    expect(sale.realizedTenths).toBe(0);
+    // 480 - 50 + 75 = 505: the 10 Dana fell by is NOT freed.
     expect(squadIntegrityIssues(sq(s), cfg, fallen, sq(alpha()), { Dana: 80 }))
-      .toEqual([]);
-    // ...but never below that fallen price.
+      .toEqual(['overBudget']);
     s.picks[1] = pick('Dana', 'DEF', 0);
-    expect(trustedPrices(sq(s), fallen, sq(alpha()), { Dana: 80 })[1]).toBe(70);
+    expect(judgeSale(sq(s), fallen, sq(alpha()), 0, { Dana: 80 }).prices[1]).toBe(80);
   });
 
   it("a Monday-morning buy at LAST week's price (before the reprice) is legal", () => {
@@ -185,7 +188,7 @@ describe('squadIntegrityIssues: the judge', () => {
       .toEqual(['overBudget']);
     // Claiming LESS than either price still counts the lower real one.
     s.picks[2] = pick('Bea', 'DEF', 1);
-    expect(trustedPrices(sq(s), market, sq(alpha()), { Bea: 70 })[2]).toBe(70);
+    expect(judgeSale(sq(s), market, sq(alpha()), 0, { Bea: 70 }).prices[2]).toBe(70);
   });
 
   it('an INVALID previous squad is no baseline: its forged prices are re-judged', () => {
@@ -197,18 +200,120 @@ describe('squadIntegrityIssues: the judge', () => {
     const inputs: IntegrityInputs = {
       market, previousByUid: { u: forged }, previousWeekPrices: {},
     };
-    expect(integrityVerdictOf(s, 'u', cfg, inputs)).toEqual(['overBudget']);
+    expect(integrityVerdictOf(s, 'u', cfg, inputs)?.issues).toEqual(['overBudget']);
     // The same forged squad WITHOUT a verdict would have been trusted.
     const trusted = { ...forged };
     delete (trusted as Raw)['Invalid'];
     expect(integrityVerdictOf(s, 'u', cfg,
-      { ...inputs, previousByUid: { u: trusted } })).toEqual([]);
+      { ...inputs, previousByUid: { u: trusted } })?.issues).toEqual([]);
   });
 
   it('a malformed squad gets no verdict (existing handling)', () => {
     const inputs: IntegrityInputs = { market, previousByUid: {}, previousWeekPrices: {} };
     expect(integrityVerdictOf({ picks: 'nope' }, 'u', cfg, inputs)).toBeNull();
     expect(integrityVerdictOf(null, 'u', cfg, inputs)).toBeNull();
+  });
+});
+
+describe('judgeSale', () => {
+  /** A squad of bare picks (judgeSale never looks at formation/captains). */
+  const bare = (...ps: Array<[string, number]>): FantasySquad => ({
+    picks: ps.map(([playerId, priceTenths]) =>
+      ({ playerId, position: 'ATT' as const, priceTenths, bench: false })),
+    captainId: '', viceId: '', chip: null,
+  });
+  /** name -> price, every entry a usable eligible ATT. */
+  const mkt = (prices: Record<string, number>) => integrityMarketOf(
+    Object.fromEntries(Object.entries(prices).map(([name, priceTenths]) =>
+      [name, { position: 'ATT', priceTenths, eligible: true }])));
+
+  it('held keeps the baseline price whatever the client sent', () => {
+    const baseline = bare(['A', 80]);
+    const m = mkt({ A: 90 });
+    for (const client of [80, 90, 10]) {
+      expect(judgeSale(bare(['A', client]), m, baseline, 0, {}), String(client))
+        .toEqual({ prices: [80], realizedTenths: 0 });
+    }
+  });
+
+  it('sold riser credits half the rise', () => {
+    // A bought at 80, now 90: sells for 85 -> +5.
+    expect(judgeSale(bare(['B', 50]), mkt({ A: 90, B: 50 }), bare(['A', 80]), 0, {}))
+      .toEqual({ prices: [50], realizedTenths: 5 });
+  });
+
+  it('sold faller costs the full drop', () => {
+    // A bought at 80, now 70: sells for 70 -> -10, even though he was still
+    // 80 during the previous gameweek (no max(current, last week)).
+    expect(judgeSale(bare(['B', 50]), mkt({ A: 70, B: 50 }), bare(['A', 80]), 0,
+      { A: 80 })).toEqual({ prices: [50], realizedTenths: -10 });
+  });
+
+  it('a sold player missing from the market adds 0', () => {
+    expect(judgeSale(bare(['B', 50]), mkt({ B: 50 }), bare(['A', 80]), 0, {}))
+      .toEqual({ prices: [50], realizedTenths: 0 });
+    // ...and the baseline's own realized still carries.
+    expect(judgeSale(bare(['B', 50]), mkt({ B: 50 }), bare(['A', 80]), 3, {})
+      .realizedTenths).toBe(3);
+  });
+
+  it('new pick keeps the market floor', () => {
+    // No baseline, market 85, PriceHistory/gw-1 80, client 70 -> 80.
+    expect(judgeSale(bare(['A', 70]), mkt({ A: 85 }), null, 0, { A: 80 }))
+      .toEqual({ prices: [80], realizedTenths: 0 });
+  });
+
+  it('invalid baseline: picks are NEW, realized carries', () => {
+    // Last week was judged Invalid with Alex forged at 10 and realized 7.
+    const forged: Raw = { ...alpha(), Invalid: ['overBudget'], realizedTenths: 7 };
+    forged.picks[4] = pick('Alex', 'ATT', 10);
+    const s = alpha();
+    s.picks[4] = pick('Alex', 'ATT', 10);
+    const v = integrityVerdictOf(s, 'u', cfg,
+      { market, previousByUid: { u: forged }, previousWeekPrices: {} });
+    // Alex is NEW (no held picks): at market 95, not the forged 10. No
+    // sales either (an Invalid baseline has no trusted picks to sell).
+    expect(v).toEqual({
+      issues: [], prices: [55, 80, 50, 65, 95, 60, 75], realizedTenths: 7,
+    });
+  });
+
+  it('overBudget uses realized', () => {
+    // Alex bought at 95, now 105: selling him banks +5. His replacement Max
+    // (ATT, 120 at market) makes the picks sum 480 - 95 + 120 = 505.
+    const risen = integrityMarketOf({
+      ...MARKET_NODE,
+      Alex: { position: 'ATT', priceTenths: 105, eligible: true },
+      Max: { position: 'ATT', priceTenths: 120, eligible: true },
+    });
+    const inputs: IntegrityInputs = {
+      market: risen, previousByUid: { u: alpha() }, previousWeekPrices: {},
+    };
+    const s = alpha();
+    s.picks[4] = pick('Max', 'ATT', 120);
+    expect(integrityVerdictOf(s, 'u', cfg, inputs))
+      .toMatchObject({ issues: [], realizedTenths: 5 });
+    s.picks[4] = pick('Max', 'ATT', 121); // 506 > 500 + 5
+    expect(integrityVerdictOf(s, 'u', cfg, inputs))
+      .toMatchObject({ issues: ['overBudget'], realizedTenths: 5 });
+  });
+
+  it("a malformed baseline's realizedTenths is never believed (the server "
+    + 'never judged — never wrote — it; a client can write any extra key)', () => {
+    const malformed = { picks: { 0: pick('Eli', 'GK', 55) }, realizedTenths: 9999,
+      captainId: 'Eli', viceId: 'Eli' };
+    expect(judgeSquad(sq(alpha()), 'u', cfg,
+      { market, previousByUid: { u: malformed }, previousWeekPrices: {} })
+      .realizedTenths).toBe(0);
+  });
+
+  it('judgeSquad: the verdict for a parsed squad (the save trigger reads .issues)', () => {
+    const s = alpha();
+    s.picks[0] = pick('Sam', 'GK', 10); // really 85: 510
+    expect(judgeSquad(sq(s), 'u', cfg,
+      { market, previousByUid: {}, previousWeekPrices: {} })).toEqual({
+      issues: ['overBudget'], prices: [85, 80, 50, 65, 95, 60, 75], realizedTenths: 0,
+    });
   });
 });
 
@@ -249,16 +354,18 @@ describe('markers + alert nodes', () => {
 describe('lockAccounting with integrity', () => {
   const inputs: IntegrityInputs = { market, previousByUid: {}, previousWeekPrices: {} };
 
-  it('marks the invalid squad verbatim + Invalid, leaves the valid one untouched', () => {
+  it('marks the invalid squad verbatim + Invalid, the valid one at its judged '
+    + 'prices; both carry realizedTenths', () => {
     const bad = alpha();
     bad.picks[0] = pick('Sam', 'GK', 10);
-    const good = alpha();
+    const good = alpha(); // bought at market: judged prices == its own
     const acc = lockAccounting({
       squadsByUid: { bad, good, junk: { picks: 'x' } },
       statesByUid: {}, historyRaw: null, cfg, gw: 1, integrity: inputs,
     });
-    expect(acc.cleanSquads['bad']).toEqual({ ...bad, Invalid: ['overBudget'] });
-    expect(acc.cleanSquads['good']).toEqual(good);
+    expect(acc.cleanSquads['bad'])
+      .toEqual({ ...bad, Invalid: ['overBudget'], realizedTenths: 0 });
+    expect(acc.cleanSquads['good']).toEqual({ ...good, realizedTenths: 0 });
     expect(acc.cleanSquads['junk']).toEqual({ picks: 'x' }); // malformed: verbatim
     expect(acc.invalid).toEqual([{ uid: 'bad', issues: ['overBudget'] }]);
     expect(acc.valid).toEqual(['good']);
@@ -269,7 +376,7 @@ describe('lockAccounting with integrity', () => {
   it('a client-written Invalid key on a CLEAN squad is dropped (server-only marker)', () => {
     const sneaky = { ...alpha(), Invalid: ['overBudget'] };
     const out = annotateSquadIntegrity({ sneaky }, cfg, inputs);
-    expect(out.squads['sneaky']).toEqual(alpha());
+    expect(out.squads['sneaky']).toEqual({ ...alpha(), realizedTenths: 0 });
     expect(out.valid).toEqual(['sneaky']);
   });
 

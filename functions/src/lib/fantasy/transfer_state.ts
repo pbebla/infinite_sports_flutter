@@ -35,7 +35,8 @@ import { FantasyConfig } from './fantasy_config';
 import { childEntries, isPlainMap, toIntLoose } from './orchestration_db';
 import { FantasySquad, squadFromMap } from './squad';
 import {
-  INVALID_KEY, integrityVerdictOf, IntegrityInputs, SquadIntegrityIssue,
+  baselineRealizedOf, INVALID_KEY, integrityVerdictOf, IntegrityInputs,
+  picksAtJudgedPrices, REALIZED_KEY, SquadIntegrityIssue,
 } from './squad_integrity';
 import { rolloverFreeTransfers, transferCost } from './transfers';
 
@@ -192,11 +193,20 @@ export interface LockAccounting {
 }
 
 /** The integrity pass on its own (audit I2): every parseable squad judged
- *  against [inputs]; an invalid one gains `Invalid: [issues]` (the squad
- *  itself stays verbatim), a clean one loses any `Invalid` key it carried
- *  (only the server ever writes the marker). Malformed squads pass through
- *  untouched. Used by lockAccounting and by a first finalize's live-Squads
- *  fallback that skips the accounting. */
+ *  against [inputs] and turned into the node the lock snapshots
+ *  (PublishedPicks/<gw>/<uid>; FPL selling, spec §4 — squad_integrity.ts
+ *  TRUSTED PRICES):
+ *  - VALID: its picks re-priced at the verdict's trusted prices (every
+ *    other key kept), `realizedTenths` = the verdict's, and any `Invalid`
+ *    key dropped (only the server ever writes the marker) — next week's
+ *    held prices and realized money are the judge's own, never the
+ *    client's.
+ *  - INVALID: verbatim (so the manager sees exactly what was judged) plus
+ *    `Invalid: [issues]` and `realizedTenths` = the baseline's (no sale
+ *    credited for a week that didn't count).
+ *  A `realizedTenths` the client wrote is replaced either way. Malformed
+ *  squads pass through untouched. Used by lockAccounting and by a first
+ *  finalize's live-Squads fallback that skips the accounting. */
 export function annotateSquadIntegrity(
   squadsByUid: Record<string, unknown>, cfg: FantasyConfig,
   inputs: IntegrityInputs,
@@ -208,20 +218,20 @@ export function annotateSquadIntegrity(
   const valid: string[] = [];
   for (const [uid, raw] of Object.entries(squadsByUid)) {
     squads[uid] = raw;
-    const issues = integrityVerdictOf(raw, uid, cfg, inputs);
-    if (issues === null) continue; // malformed: existing handling
+    const verdict = integrityVerdictOf(raw, uid, cfg, inputs);
+    if (verdict === null) continue; // malformed: existing handling
     const node = { ...(raw as Record<string, unknown>) };
-    if (issues.length > 0) {
-      node[INVALID_KEY] = issues;
-      invalid.push({ uid, issues });
-      squads[uid] = node;
+    if (verdict.issues.length > 0) {
+      node[INVALID_KEY] = verdict.issues;
+      node[REALIZED_KEY] = baselineRealizedOf(inputs.previousByUid[uid]);
+      invalid.push({ uid, issues: verdict.issues });
     } else {
+      delete node[INVALID_KEY];
+      node['picks'] = picksAtJudgedPrices(node['picks'], verdict.prices);
+      node[REALIZED_KEY] = verdict.realizedTenths;
       valid.push(uid);
-      if (INVALID_KEY in node) {
-        delete node[INVALID_KEY];
-        squads[uid] = node;
-      }
     }
+    squads[uid] = node;
   }
   return { squads, invalid, valid };
 }

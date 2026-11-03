@@ -6,10 +6,11 @@
 import { describe, expect, it } from 'vitest';
 import { futsalDefault } from './fantasy_config';
 import { FantasySquad } from './squad';
+import { IntegrityInputs, integrityMarketOf } from './squad_integrity';
 import {
-  chipSetOf, isUnlimitedChip, lockAccounting, parseTransferState,
-  priorChipsOfUid, rolloverState, shouldVoidChip, transferStateToNode,
-  usedTransfers,
+  annotateSquadIntegrity, chipSetOf, isUnlimitedChip, lockAccounting,
+  parseTransferState, priorChipsOfUid, rolloverState, shouldVoidChip,
+  transferStateToNode, usedTransfers,
 } from './transfer_state';
 
 const cfg = futsalDefault();
@@ -208,6 +209,65 @@ describe('lockAccounting', () => {
     expect(acc.cleanSquads).toEqual({ bad: { picks: 'nope' } });
     expect(acc.costPointsByUid).toEqual({});
     expect(acc.chipPlayedByUid).toEqual({});
+  });
+});
+
+describe('annotateSquadIntegrity: the snapshot node (FPL selling, spec §4)', () => {
+  // Last week's locked squad A..G (all bought at 50), carrying realized 3.
+  // Since then G rose to 70 (sells for 60: +10); H costs 60.
+  const at = (priceTenths: number) =>
+    ({ position: 'ATT', priceTenths, eligible: true });
+  const market = integrityMarketOf({
+    A: at(50), B: at(50), C: at(50), D: at(50), E: at(50), F: at(50),
+    G: at(70), H: at(60),
+  });
+  const inputs: IntegrityInputs = {
+    market,
+    previousByUid: {
+      u: { ...mkSquadMap(['A', 'B', 'C', 'D', 'E', 'F', 'G']), realizedTenths: 3 },
+    },
+    previousWeekPrices: {},
+  };
+
+  it("a valid node carries the verdict's prices and realizedTenths, other keys kept", () => {
+    // G sold for H; the client lowballs held A (10) and new H (55), and
+    // writes its own realizedTenths.
+    const raw: any = {
+      ...mkSquadMap(['A', 'B', 'C', 'D', 'E', 'F', 'H']),
+      Unrelated: 'kept', realizedTenths: 9999,
+    };
+    raw.picks[0].priceTenths = 10;
+    raw.picks[6].priceTenths = 55;
+    const out = annotateSquadIntegrity({ u: raw }, cfg, inputs);
+    expect(out.valid).toEqual(['u']);
+    expect(out.squads['u']).toEqual({
+      ...raw,
+      // Held A at the 50 paid; new H at its market floor 60.
+      picks: raw.picks.map((p: any, i: number) =>
+        ({ ...p, priceTenths: [50, 50, 50, 50, 50, 50, 60][i] })),
+      realizedTenths: 13, // 3 + (60 - 50)
+    });
+    expect(raw.picks[0].priceTenths).toBe(10); // the input is never mutated
+  });
+
+  it("an invalid node keeps the client's prices and carries the baseline's realized", () => {
+    // A twice (duplicatePlayer); B and G sold — no sale is credited.
+    const raw: any = {
+      ...mkSquadMap(['A', 'A', 'C', 'D', 'E', 'F', 'H']), realizedTenths: 9999,
+    };
+    raw.picks[0].priceTenths = 10;
+    const out = annotateSquadIntegrity({ u: raw }, cfg, inputs);
+    expect(out.invalid).toEqual([{ uid: 'u', issues: ['duplicatePlayer'] }]);
+    expect(out.squads['u']).toEqual(
+      { ...raw, Invalid: ['duplicatePlayer'], realizedTenths: 3 });
+  });
+
+  it('a malformed node is untouched', () => {
+    const raw = { picks: 'nope', realizedTenths: 9999 };
+    const out = annotateSquadIntegrity({ u: raw }, cfg, inputs);
+    expect(out.squads['u']).toBe(raw);
+    expect(out.valid).toEqual([]);
+    expect(out.invalid).toEqual([]);
   });
 });
 

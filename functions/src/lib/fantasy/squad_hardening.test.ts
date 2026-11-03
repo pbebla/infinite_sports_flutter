@@ -90,13 +90,15 @@ describe('lock + finalize: an invalid squad scores zero, snapshot kept, alerted'
       const { log, warns } = capture();
       await runLifecycleSweep(db, AFTER_LOCK2, log);
 
-      // Snapshot: verbatim + the verdict.
+      // Snapshot: verbatim + the verdict + the baseline's realizedTenths
+      // (GW1 carried none: 0; no sale is credited for an invalid week).
       expect(await db.read(`${fRoot}/PublishedPicks/2/alpha`))
-        .toEqual({ ...submitted, Invalid: c.issues });
+        .toEqual({ ...submitted, Invalid: c.issues, realizedTenths: 0 });
       // Finalize: zero, the verdict kept, the squad visible, no Breakdown.
       const row = await db.read(`${fRoot}/History/2/alpha`) as Json;
       expect(row['TotalTenths']).toBe(0);
       expect(row['Invalid']).toEqual(c.issues);
+      expect(row['realizedTenths']).toBe(0);
       expect(row['picks']).toEqual(submitted.picks);
       expect('Breakdown' in row).toBe(false);
       expect(await db.read(`${fRoot}/Leaderboards/Gameweek/2/alpha`))
@@ -163,6 +165,35 @@ describe('lock + finalize: an invalid squad scores zero, snapshot kept, alerted'
       expect('Invalid' in (await db.read(`${fRoot}/PublishedPicks/2/${uid}`) as Json), uid)
         .toBe(false);
     }
+  });
+
+  it('FPL selling: the snapshot stores the judged prices + realizedTenths, '
+    + 'and History carries it', async () => {
+    const db = new FakeDb(world2());
+    f(db).PublishedPicks[1].alpha.realizedTenths = 3; // earlier sales
+    // alpha sells Alex (bought at 95, now 115: sells for 105, +10) for Ben
+    // (85), and lowballs held Dana (paid 80) — the client's price for a
+    // held player is ignored.
+    f(db).Players.Alex.priceTenths = 115;
+    f(db).Squads.alpha.picks[4] =
+      { playerId: 'Ben', position: 'ATT', priceTenths: 85, bench: false };
+    f(db).Squads.alpha.viceId = 'Ben';
+    f(db).Squads.alpha.picks[1].priceTenths = 10;
+    const submitted = clone(f(db).Squads.alpha);
+    await runLifecycleSweep(db, AFTER_LOCK2);
+
+    const judged = clone(submitted);
+    judged.picks[1].priceTenths = 80;
+    expect(await db.read(`${fRoot}/PublishedPicks/2/alpha`))
+      .toEqual({ ...judged, realizedTenths: 13 }); // 3 + 10
+    const row = await db.read(`${fRoot}/History/2/alpha`) as Json;
+    expect(row['realizedTenths']).toBe(13);
+    expect(row['picks'][1]['priceTenths']).toBe(80);
+    expect('Invalid' in row).toBe(false);
+    expect(row['TotalTenths']).not.toBe(0);
+    // Unchanged squads carry their (absent = 0) realized forward too.
+    expect((await db.read(`${fRoot}/PublishedPicks/2/boost`) as Json)['realizedTenths'])
+      .toBe(0);
   });
 
   it('a Monday-morning buy at last week\'s price (PriceHistory/<gw-1>) is legal', async () => {

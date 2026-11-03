@@ -46,7 +46,9 @@
 //   these) PLUS { TotalTenths:int, Breakdown:[{playerId, countedTenths,
 //   multiplier, autoSubbedIn}] }. TotalTenths is the NET squad-week tenths
 //   (gross countedTenths sum minus transferCost*10) — the single source the
-//   Overall board resums from on later reruns.
+//   Overall board resums from on later reruns. A source node carrying a
+//   numeric realizedTenths (the lock judge's running sale profit/loss, FPL
+//   selling — squad_integrity.ts) passes it on, invalid rows included.
 //
 // - PlayerTotals/<name> = { points:int, ownershipPct:int, form:int, ppg:int,
 //   games:int } — points = season
@@ -132,7 +134,10 @@ import { FantasyConfig, FantasyPosition } from './fantasy_config';
 import { PlayerGameStats } from './player_game_stats';
 import { scorePlayerWeek, WeekScore } from './scoring';
 import { squadFromMap, squadToMap } from './squad';
-import { INVALID_KEY, invalidIssuesOf, isInvalidRow } from './squad_integrity';
+import { realizedOf } from './selling';
+import {
+  INVALID_KEY, invalidIssuesOf, isInvalidRow, REALIZED_KEY,
+} from './squad_integrity';
 import { PlayerWeek, scoreSquadWeek, totalTenths } from './squad_week';
 import { gameScores, mapGameToStats, parseForfeitedBy } from './stats_mapper';
 
@@ -425,6 +430,16 @@ export function pickDreamTeam(
   };
 }
 
+/** `{ realizedTenths }` when the source node (lock snapshot or History
+ *  row) carries a numeric one — the lock judge's running sale profit/loss
+ *  (squad_integrity.ts, FPL selling spec §4) — else nothing: History keeps
+ *  it so a later baseline read from History still has it. */
+function realizedFieldOf(raw: Record<string, unknown>): Record<string, number> {
+  const v = raw[REALIZED_KEY];
+  return typeof v === 'number' && Number.isFinite(v)
+    ? { [REALIZED_KEY]: realizedOf(raw) } : {};
+}
+
 /** The whole finalize pipeline for one gameweek, pure: games -> stats ->
  *  base+BPS+bonus -> player weeks -> squad weeks -> boards/totals/dream
  *  team. Deterministic and rerunnable: same inputs, same outputs — a
@@ -498,6 +513,8 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
       continue;
     }
     const invalid = invalidIssuesOf(raw);
+    // The lock judge's running sale profit/loss rides along (both branches).
+    const realized = realizedFieldOf(raw as Record<string, unknown>);
     if (invalid !== null) {
       // Judged invalid at the lock: scored zero, the verdict kept.
       weekTenthsByUid[uid] = 0;
@@ -506,6 +523,7 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
         TotalTenths: 0,
         ...(voided ? { Voided: true } : {}),
         [INVALID_KEY]: invalid,
+        ...realized,
       };
       continue;
     }
@@ -519,6 +537,7 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
       ...squadToMap(squad),
       TotalTenths: net,
       ...(voided ? { Voided: true } : {}),
+      ...realized,
       Breakdown: result.slots.map((s) => ({
         playerId: s.playerId,
         countedTenths: s.countedTenths,

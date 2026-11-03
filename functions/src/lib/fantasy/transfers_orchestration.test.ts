@@ -168,8 +168,10 @@ describe('lock step: chip void + cost freeze ride the snapshot', () => {
     expect('chip' in published['boost']).toBe(false);
     const expectedBoost = fixtureSquad('boost');
     delete expectedBoost['chip'];
-    expect(published['boost']).toEqual(expectedBoost);
-    expect(published['alpha']).toEqual(fixtureSquad('alpha')); // verbatim
+    // Valid squads are snapshotted at their judged prices (== the prices
+    // paid here: every player held) + realizedTenths (no sales: 0).
+    expect(published['boost']).toEqual({ ...expectedBoost, realizedTenths: 0 });
+    expect(published['alpha']).toEqual({ ...fixtureSquad('alpha'), realizedTenths: 0 });
     expect(await db.read(`${fRoot}/TransferState/boost`)).toEqual({
       Free: 2, UsedThisGw: 0, // no ChipPlayed: the void consumed nothing
     });
