@@ -9,11 +9,15 @@ import { FantasySquad } from './squad';
 import { IntegrityInputs, integrityMarketOf } from './squad_integrity';
 import {
   annotateSquadIntegrity, chipSetOf, isUnlimitedChip, LockAccounting,
-  lockAccounting, parseTransferState, priorChipsOfUid, rolloverState,
-  shouldVoidChip, transferStateToNode, usedTransfers,
+  lockAccounting, parseTransferState, pickIdsOf, priorChipsOfUid,
+  rolloverState, shouldVoidChip, transferStateToNode, usedTransfers,
 } from './transfer_state';
 
 const cfg = futsalDefault();
+
+// The rollover's per-manager basis: scored in a normal week, with a squad
+// held coming in (not a first week) and nothing to publish as the baseline.
+const held = { firstWeek: false, countFromIds: null, scored: true };
 
 function mkSquad(ids: string[], chip: string | null = null): FantasySquad {
   return {
@@ -67,8 +71,59 @@ describe('parseTransferState', () => {
     expect(parseTransferState({ FreeSwaps: [], FreeSwapsGw: 3 }, cfg).freeSwaps)
       .toBeUndefined();
     // Rollover keeps swaps only when granted for a LATER gameweek.
-    expect(rolloverState(s, cfg, 3).freeSwaps).toBeUndefined();
-    expect(rolloverState(s, cfg, 2).freeSwaps).toEqual(s.freeSwaps);
+    expect(rolloverState(s, cfg, 3, held).freeSwaps).toBeUndefined();
+    expect(rolloverState(s, cfg, 2, held).freeSwaps).toEqual(s.freeSwaps);
+  });
+
+  // The transfer baseline the rollover publishes for the fan app (CountFrom /
+  // CountFromGw). CountFromGw present with CountFrom absent = "no squad to
+  // count from: a first team"; both absent = no basis published; a
+  // CountFrom without its CountFromGw is half-written and reads as none.
+  it('CountFrom / CountFromGw round-trip through the node', () => {
+    const s = {
+      free: 2, usedThisGw: 0, chipPlayed: null, savedGw: null, rolledGw: 2,
+      countFrom: { gw: 3, ids: ['A', 'B', 'C'] },
+    };
+    const node = transferStateToNode(s);
+    expect(node).toMatchObject({ CountFromGw: 3, CountFrom: ['A', 'B', 'C'] });
+    expect(parseTransferState(node, cfg)).toEqual(s);
+  });
+
+  it('CountFromGw alone reads as a first team: {gw, ids: null}, and writes back alone', () => {
+    const parsed = parseTransferState({ Free: 2, UsedThisGw: 0, CountFromGw: 3 }, cfg);
+    expect(parsed.countFrom).toEqual({ gw: 3, ids: null });
+    const node = transferStateToNode(parsed);
+    expect(node['CountFromGw']).toBe(3);
+    expect('CountFrom' in node).toBe(false); // RTDB drops empty arrays anyway
+  });
+
+  it('a half-written baseline (one field without the other) reads as none', () => {
+    expect(parseTransferState({ CountFrom: ['A', 'B'] }, cfg).countFrom)
+      .toBeUndefined();
+    expect(parseTransferState({ CountFrom: ['A'], CountFromGw: 0 }, cfg).countFrom)
+      .toBeUndefined();
+    expect(parseTransferState({ CountFromGw: 'nope' }, cfg).countFrom)
+      .toBeUndefined();
+    // Absent baseline: nothing written for it either.
+    const bare = transferStateToNode(parseTransferState({ Free: 3 }, cfg));
+    expect('CountFromGw' in bare || 'CountFrom' in bare).toBe(false);
+  });
+
+  it('CountFrom keeps only usable ids (RTDB null-padded arrays, junk entries)', () => {
+    const parsed = parseTransferState({
+      CountFromGw: 4, CountFrom: ['A', null, '', 7, 'B'],
+    }, cfg);
+    expect(parsed.countFrom).toEqual({ gw: 4, ids: ['A', 'B'] });
+  });
+});
+
+describe('pickIdsOf', () => {
+  it("lists a squad node's pick ids in pick order; null when there are none", () => {
+    expect(pickIdsOf(mkSquadMap(['A', 'B', 'C']))).toEqual(['A', 'B', 'C']);
+    expect(pickIdsOf(null)).toBeNull();
+    expect(pickIdsOf({ picks: 'nope' })).toBeNull();
+    expect(pickIdsOf({ picks: [] })).toBeNull();
+    expect(pickIdsOf({ picks: [{ playerId: '' }, { position: 'GK' }] })).toBeNull();
   });
 });
 
@@ -407,25 +462,52 @@ describe('rolloverState', () => {
   };
 
   it('banks unused transfers (+2/week, cap 7), resets the counter, stamps RolledGw', () => {
-    expect(rolloverState(base, cfg, 3)).toEqual({
+    expect(rolloverState(base, cfg, 3, held)).toEqual({
       free: 4, usedThisGw: 0, chipPlayed: null, savedGw: null, rolledGw: 3,
+      countFrom: { gw: 4, ids: null },
     });
-    expect(rolloverState({ ...base, free: 7 }, cfg, 3).free).toBe(7); // cap
-    expect(rolloverState({ ...base, free: 2, usedThisGw: 3 }, cfg, 3).free)
+    expect(rolloverState({ ...base, free: 7 }, cfg, 3, held).free).toBe(7); // cap
+    expect(rolloverState({ ...base, free: 2, usedThisGw: 3 }, cfg, 3, held).free)
       .toBe(2); // overspent week: remaining clamps to 0
   });
 
   it('a wildcard/freeHit week never consumes the bank, and ChipPlayed clears', () => {
     const s = { ...base, free: 5, usedThisGw: 9, chipPlayed: 'freeHit' };
-    expect(rolloverState(s, cfg, 4)).toEqual({
+    expect(rolloverState(s, cfg, 4, held)).toEqual({
       free: 7, usedThisGw: 0, chipPlayed: null, savedGw: null, rolledGw: 4,
+      countFrom: { gw: 5, ids: null },
     });
   });
 
   it('a save already made for a LATER gameweek survives a delayed finalize', () => {
     const s = { ...base, usedThisGw: 2, savedGw: 4 };
-    expect(rolloverState(s, cfg, 3).usedThisGw).toBe(2);
-    expect(rolloverState({ ...base, usedThisGw: 2, savedGw: 3 }, cfg, 3)
+    expect(rolloverState(s, cfg, 3, held).usedThisGw).toBe(2);
+    expect(rolloverState({ ...base, usedThisGw: 2, savedGw: 3 }, cfg, 3, held)
       .usedThisGw).toBe(0);
+  });
+
+  it('publishes the baseline for NEXT week: countFrom.gw = gw + 1 with the given ids', () => {
+    const ids = ['A', 'B', 'C'];
+    expect(rolloverState(base, cfg, 2, { ...held, countFromIds: ids }).countFrom)
+      .toEqual({ gw: 3, ids });
+    expect(rolloverState(base, cfg, 7, held).countFrom).toEqual({ gw: 8, ids: null });
+  });
+
+  it("a manager's first week never banks: next week is the weekly grant", () => {
+    const first = { ...held, firstWeek: true };
+    expect(rolloverState(base, cfg, 1, first).free).toBe(2); // not 2 + 2
+    expect(rolloverState({ ...base, free: 7 }, cfg, 1, first).free).toBe(2);
+    expect(rolloverState({ ...base, chipPlayed: 'wildcard' }, cfg, 1, first).free)
+      .toBe(2);
+  });
+
+  it('a manager not scored this week rolls as if nothing was used', () => {
+    // 3 transfers counted earlier in the open week, then the squad was
+    // deleted before the lock: nothing was charged, so nothing is spent.
+    const s = { ...base, free: 2, usedThisGw: 3 };
+    expect(rolloverState(s, cfg, 2, { ...held, scored: false }).free).toBe(4);
+    expect(rolloverState(s, cfg, 2, held).free).toBe(2); // scored: overspent
+    // The counter still resets (only a later week's save survives).
+    expect(rolloverState(s, cfg, 2, { ...held, scored: false }).usedThisGw).toBe(0);
   });
 });

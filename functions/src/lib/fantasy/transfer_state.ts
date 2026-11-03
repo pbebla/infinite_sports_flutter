@@ -21,11 +21,27 @@
 //     RolledGw?:int,    // last gameweek whose post-finalize rollover ran
 //                       //   (once-only guard for rollover + freeHit restore)
 //     FreeSwaps?:[name], // holder protection (spec §3): players whose
-//     FreeSwapsGw?:int }  //   position change broke this squad's formation
+//     FreeSwapsGw?:int,   //   position change broke this squad's formation
 //                       //   — selling one of them in gameweek FreeSwapsGw
 //                       //   costs no transfer (recordSquadSave discounts
 //                       //   it); dropped at that week's rollover. Both
 //                       //   present or both absent.
+//     CountFromGw?:int,  // the TRANSFER BASELINE the fan app counts a
+//     CountFrom?:[playerId] } //   week's transfers against: CountFrom =
+//                       //   the player ids of the squad the manager
+//                       //   effectively held coming in to gameweek
+//                       //   CountFromGw (effectiveSquadAfterWeek(gw-1), Free
+//                       //   Hit aware — the very squad recordSquadSave and
+//                       //   the lock count against, so the app's live
+//                       //   counter and the server's can never disagree).
+//                       //   CountFromGw present with CountFrom ABSENT = "no
+//                       //   squad to count from: a first team" (RTDB drops
+//                       //   an empty array, so null ids are never written
+//                       //   as []). Both absent = no baseline published
+//                       //   (an older node); CountFrom without CountFromGw
+//                       //   is half-written and reads as none. Written by
+//                       //   the rollover (for gw + 1) and by every counted
+//                       //   save (for the open gw); the lock freeze keeps it.
 //
 // SavedGw and RolledGw extend the spec'd {Free, UsedThisGw, ChipPlayed}
 // shape: SavedGw is the measurable "squad save this gw" rule the deadline
@@ -51,6 +67,10 @@ export interface TransferState {
   rolledGw: number | null;
   /** Holder-protection free swaps (FreeSwaps + FreeSwapsGw); absent = none. */
   freeSwaps?: { gw: number; players: string[] };
+  /** The transfer baseline (CountFromGw + CountFrom): the squad ids gameweek
+   *  [gw]'s transfers count against. ids null = no squad to count from (a
+   *  first team: nothing counts). Absent = no baseline published. */
+  countFrom?: { gw: number; ids: string[] | null };
 }
 
 /** Tolerant node parse. An absent node is a manager who never transferred:
@@ -66,6 +86,10 @@ export function parseTransferState(
   const swaps = childEntries(m['FreeSwaps'])
     .map(([, v]) => v)
     .filter((v): v is string => typeof v === 'string' && v.length > 0);
+  const countFromGw = toIntLoose(m['CountFromGw']);
+  const countFromIds = childEntries(m['CountFrom'])
+    .map(([, v]) => v)
+    .filter((v): v is string => typeof v === 'string' && v.length > 0);
   return {
     free: typeof m['Free'] === 'number'
       ? Math.trunc(m['Free']) : cfg.freeTransfersPerWeek,
@@ -75,6 +99,13 @@ export function parseTransferState(
     rolledGw: rolledGw > 0 ? rolledGw : null,
     ...(swapsGw > 0 && swaps.length > 0
       ? { freeSwaps: { gw: swapsGw, players: swaps } } : {}),
+    // CountFromGw is the anchor: with it, no CountFrom = a first team; a
+    // CountFrom without it is half-written and reads as none.
+    ...(countFromGw > 0 ? {
+      countFrom: {
+        gw: countFromGw, ids: countFromIds.length > 0 ? countFromIds : null,
+      },
+    } : {}),
   };
 }
 
@@ -89,7 +120,27 @@ export function transferStateToNode(s: TransferState): Record<string, unknown> {
     out['FreeSwaps'] = [...s.freeSwaps.players];
     out['FreeSwapsGw'] = s.freeSwaps.gw;
   }
+  if (s.countFrom) {
+    out['CountFromGw'] = s.countFrom.gw;
+    // No ids = "a first team": only CountFromGw is written (never []).
+    if (s.countFrom.ids !== null && s.countFrom.ids.length > 0) {
+      out['CountFrom'] = [...s.countFrom.ids];
+    }
+  }
   return out;
+}
+
+/** The player ids of a squad node's picks, in pick order — what
+ *  TransferState.CountFrom publishes. null when [squadRaw] is not a map or
+ *  holds no usable pick id (RTDB drops an empty array, so "none" is always
+ *  null, never []). Tolerant like every node reader here: no squad parse,
+ *  so an unreadable-but-present squad still yields the ids it has. */
+export function pickIdsOf(squadRaw: unknown): string[] | null {
+  if (!isPlainMap(squadRaw)) return null;
+  const ids = childEntries(squadRaw['picks'])
+    .map(([, pick]) => (isPlainMap(pick) ? pick['playerId'] : null))
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+  return ids.length > 0 ? ids : null;
 }
 
 /** Used transfers after holder protection: each FREE-SWAP player (spec §3 —
@@ -361,27 +412,51 @@ export function lockAccounting(args: {
   };
 }
 
+/** What the rollover needs to know about ONE manager beyond his stored
+ *  state — all read from the locked squads by the caller
+ *  (orchestration.ts settleTransfersAfterFinalize). */
+export interface RolloverBasis {
+  /** The week just finished was his FIRST team: no locked squad the week
+   *  before (effectiveSquadAfterWeek(gw-1) is null). Building a first team
+   *  is free, so nothing banks — next week is the plain weekly grant. */
+  firstWeek: boolean;
+  /** The player ids of the squad he effectively held after this week
+   *  (effectiveSquadAfterWeek(gw), Free Hit aware): next week's transfer
+   *  baseline. null = he held none (squad deleted before the lock — his next
+   *  squad is a first team). */
+  countFromIds: string[] | null;
+  /** He was scored this week. false = no locked squad (e.g. deleted before
+   *  the lock): nothing was charged, so the week rolls as if he used
+   *  nothing — whatever a mid-week save counted — and the bank keeps
+   *  growing instead of freezing on him. */
+  scored: boolean;
+}
+
 /** The post-finalize rollover of one manager's state: next week's Free per
- *  the engine (a wildcard/freeHit week doesn't consume the bank), counter
- *  reset, ChipPlayed cleared, RolledGw stamped. UsedThisGw survives only
- *  when the manager already saved for a LATER gameweek (a delayed finalize
- *  must not erase next week's running count); free swaps likewise survive
- *  only when granted for a LATER gameweek. */
+ *  the engine (a wildcard/freeHit week doesn't consume the bank; a first
+ *  team never banks — see [basis]), counter reset, ChipPlayed cleared,
+ *  RolledGw stamped, and next week's transfer baseline published
+ *  (countFrom = { gw + 1, ids }). UsedThisGw survives only when the manager
+ *  already saved for a LATER gameweek (a delayed finalize must not erase next
+ *  week's running count); free swaps likewise survive only when granted for
+ *  a LATER gameweek. */
 export function rolloverState(
-  state: TransferState, cfg: FantasyConfig, gw: number,
+  state: TransferState, cfg: FantasyConfig, gw: number, basis: RolloverBasis,
 ): TransferState {
   return {
     free: rolloverFreeTransfers({
       free: state.free,
-      used: state.usedThisGw,
+      used: basis.scored ? state.usedThisGw : 0,
       cfg,
       unlimited: isUnlimitedChip(state.chipPlayed),
+      firstWeek: basis.firstWeek,
     }),
     usedThisGw:
       state.savedGw !== null && state.savedGw > gw ? state.usedThisGw : 0,
     chipPlayed: null,
     savedGw: state.savedGw,
     rolledGw: gw,
+    countFrom: { gw: gw + 1, ids: basis.countFromIds },
     ...(state.freeSwaps && state.freeSwaps.gw > gw
       ? { freeSwaps: state.freeSwaps } : {}),
   };

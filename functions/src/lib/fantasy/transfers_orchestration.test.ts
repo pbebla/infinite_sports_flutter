@@ -13,8 +13,10 @@ import {
   FantasyLogger, maybeFinalizeGame, recordSquadSave, runLifecycleSweep,
 } from './orchestration';
 import {
-  AFTER_LOCK2, F_ROOT, FakeDb, fixtureSquad, GW2_DATE, world2,
+  AFTER_LOCK2, F_ROOT, FakeDb, fixtureIds, fixtureSquad, GW1_DATE, GW2_DATE,
+  world2,
 } from './test_support';
+import { pickIdsOf } from './transfer_state';
 
 const fRoot = F_ROOT;
 // Saves happen while GW2 is open: the counter judges the write's own time
@@ -32,6 +34,7 @@ describe('recordSquadSave (squad-save trigger entry)', () => {
     await recordSquadSave(db, saveArgs('churn'));
     expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
       Free: 2, UsedThisGw: 2, SavedGw: 2,
+      CountFromGw: 2, CountFrom: fixtureIds('churn'),
     });
 
     // Undoing one transfer before the deadline un-counts it.
@@ -39,6 +42,7 @@ describe('recordSquadSave (squad-save trigger entry)', () => {
     await recordSquadSave(db, saveArgs('churn'));
     expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
       Free: 2, UsedThisGw: 1, SavedGw: 2,
+      CountFromGw: 2, CountFrom: fixtureIds('churn'),
     });
   });
 
@@ -46,8 +50,9 @@ describe('recordSquadSave (squad-save trigger entry)', () => {
     const db = new FakeDb(world2());
     db.data.Fantasy.Futsal['15'].Squads.newbie = fixtureSquad('alpha');
     await recordSquadSave(db, saveArgs('newbie'));
+    // CountFromGw alone = "no squad to count from: a first team".
     expect(await db.read(`${fRoot}/TransferState/newbie`)).toEqual({
-      Free: 2, UsedThisGw: 0, SavedGw: 2,
+      Free: 2, UsedThisGw: 0, SavedGw: 2, CountFromGw: 2,
     });
   });
 
@@ -61,6 +66,7 @@ describe('recordSquadSave (squad-save trigger entry)', () => {
     await recordSquadSave(db, saveArgs('churn'));
     expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
       Free: 4, UsedThisGw: 1, SavedGw: 2, RolledGw: 1,
+      CountFromGw: 2, CountFrom: fixtureIds('churn'),
     });
   });
 
@@ -112,12 +118,14 @@ describe("recordSquadSave under a paused-Open window (audit I4)", () => {
     await recordSquadSave(db, at('churn'));
     expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
       Free: 2, UsedThisGw: 2, SavedGw: 2,
+      CountFromGw: 2, CountFrom: fixtureIds('churn'),
     });
     // Undoing one in the window un-counts it, exactly as outside a pause.
     churn.picks[0].playerId = 'Bo';
     await recordSquadSave(db, at('churn'));
     expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
       Free: 2, UsedThisGw: 1, SavedGw: 2,
+      CountFromGw: 2, CountFrom: fixtureIds('churn'),
     });
     // A server write in the window recounts but never stamps SavedGw.
     db.data.Fantasy.Futsal['15'].TransferState.churn.SavedGw = 1;
@@ -125,6 +133,7 @@ describe("recordSquadSave under a paused-Open window (audit I4)", () => {
     await recordSquadSave(db, at('churn'));
     expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
       Free: 2, UsedThisGw: 1, SavedGw: 1,
+      CountFromGw: 2, CountFrom: fixtureIds('churn'),
     });
   });
 
@@ -221,11 +230,14 @@ describe('finalize: cost application + rollover (once only)', () => {
     });
 
     // Rollover: churn overspent (remaining 0) -> 2; the others bank to 4.
+    // Each publishes the squad it locked as next week's transfer baseline.
     expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
       Free: 2, UsedThisGw: 0, SavedGw: 2, RolledGw: 2,
+      CountFromGw: 3, CountFrom: fixtureIds('churn'),
     });
     expect(await db.read(`${fRoot}/TransferState/alpha`)).toEqual({
       Free: 4, UsedThisGw: 0, RolledGw: 2,
+      CountFromGw: 3, CountFrom: fixtureIds('alpha'),
     });
 
     // Resweep + rerun: byte-identical (costs re-read from TransferCosts,
@@ -261,6 +273,7 @@ describe('finalize: cost application + rollover (once only)', () => {
     // Rollover never consumed the bank on a freeHit week.
     expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
       Free: 4, UsedThisGw: 0, SavedGw: 2, RolledGw: 2,
+      CountFromGw: 3, CountFrom: fixtureIds('churn'),
     });
 
     // A post-restore edit for next week survives a finalize rerun (the
@@ -290,8 +303,11 @@ describe('finalize: cost application + rollover (once only)', () => {
     delete liveAlpha['chip'];
     expect(await db.read(`${fRoot}/Squads/alpha`))
       .toEqual({ ...liveAlpha, ServerWriteAt: now.getTime() });
+    // GW1 is alpha's FIRST week: nothing banks (2, not 2 + 2). A GW1 Free Hit
+    // has no earlier squad to return to, so its own squad is the baseline.
     expect(await db.read(`${fRoot}/TransferState/alpha`)).toEqual({
-      Free: 4, UsedThisGw: 0, RolledGw: 1,
+      Free: 2, UsedThisGw: 0, RolledGw: 1,
+      CountFromGw: 2, CountFrom: fixtureIds('alpha'),
     });
   });
 });
@@ -346,6 +362,8 @@ describe('the lock recount is persisted (uncounted saves)', () => {
     // Without the persisted recount this banked 2 - 0 + 2 = 4.
     expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
       Free: 0 + futsalDefault().freeTransfersPerWeek, UsedThisGw: 0, RolledGw: 2,
+      CountFromGw: 3,
+      CountFrom: pickIdsOf(await db.read(`${fRoot}/PublishedPicks/2/churn`)),
     });
   });
 
@@ -372,6 +390,8 @@ describe('the lock recount is persisted (uncounted saves)', () => {
       .toEqual([expect.objectContaining({ uid: 'churn', gw: 2, stored: 0, recounted: 3 })]);
     expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
       Free: 2, UsedThisGw: 0, RolledGw: 2,
+      CountFromGw: 3,
+      CountFrom: pickIdsOf(await db.read(`${fRoot}/History/2/churn`)),
     });
   });
 
@@ -387,6 +407,236 @@ describe('the lock recount is persisted (uncounted saves)', () => {
     expect(infos.filter((i) => i.m === RECOUNT_MSG)).toEqual([]);
     expect(await db.read(`${fRoot}/TransferState/churn`)).toMatchObject({
       UsedThisGw: 1, SavedGw: 3, RolledGw: 2,
+    });
+  });
+});
+
+// Fantasy transfers in-app, Task 1. A manager's FIRST team is free to build,
+// so it has no unused allowance to bank: the week after it he gets the plain
+// weekly grant (D1). And every rollover publishes the squad it locked as the
+// baseline the fan app counts next week's transfers against (CountFromGw +
+// CountFrom; D1/D1b/D1c) — CountFromGw alone means "no squad to count from: a
+// first team". Exact ids/values below are hand-derived from the golden world.
+describe('first team never banks; the rollover publishes the transfer baseline', () => {
+  const GW1_NOW = new Date(Date.UTC(2026, 5, 21, 23)); // just after GW1's lock
+  const GW3_DATE = '07052026'; // Sunday; lock 22:00Z
+  const LOCK3_MS = Date.UTC(2026, 6, 5, 22);
+  const AFTER_LOCK3 = new Date(Date.UTC(2026, 6, 5, 23));
+  const GW3_OPEN_NOW = new Date(Date.UTC(2026, 6, 4, 18)); // Saturday before
+  const f = (db: FakeDb) => db.data.Fantasy.Futsal['15'];
+
+  /** world2 rewound to GW1: no history, no snapshot, GW1 under test. */
+  function gw1World(): FakeDb {
+    const db = new FakeDb(world2());
+    delete f(db).History;
+    delete f(db).PublishedPicks;
+    delete db.data.Futsal['15'].Date[GW2_DATE];
+    return db;
+  }
+
+  /** world2 plus a finalized GW2 (same golden squads) and GW3 open. */
+  function gw3World(): FakeDb {
+    const w = world2();
+    const root = w.Fantasy.Futsal['15'];
+    w.Futsal['15'].Date[GW3_DATE] = clone(w.Futsal['15'].Date[GW2_DATE]);
+    root.History[2] = clone(root.History[1]);
+    root.PublishedPicks[2] = clone(root.PublishedPicks[1]);
+    root.GwState = {
+      current: 3, status: 'open', lockAtUtc: LOCK3_MS, date: GW3_DATE,
+    };
+    return new FakeDb(w);
+  }
+
+  const gw3Save = (uid: string) =>
+    ({ sport: 'Futsal', season: '15', uid, nowUtc: GW3_OPEN_NOW });
+
+  it('(a) GW1 squad, GW1 finalized: Free resets to 2 (not 4) and CountFrom is the GW1 locked squad', async () => {
+    const db = gw1World();
+    await runLifecycleSweep(db, GW1_NOW);
+    expect(await db.read(`${fRoot}/History/1`)).not.toBeNull();
+    for (const uid of ['alpha', 'boost', 'churn']) {
+      expect(await db.read(`${fRoot}/TransferState/${uid}`), uid).toEqual({
+        Free: 2, UsedThisGw: 0, RolledGw: 1,
+        CountFromGw: 2, CountFrom: fixtureIds(uid),
+      });
+    }
+    // The once-only guard still holds: a rerun re-rolls nothing.
+    const before = db.snapshot();
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: GW1_DATE, nowUtc: GW1_NOW,
+    });
+    expect(db.snapshot()).toBe(before);
+  });
+
+  it('(b) a manager whose first squad is GW3: Free is 2 after GW3, while a GW2 veteran banks to 4', async () => {
+    const db = gw3World();
+    f(db).Squads.late = fixtureSquad('alpha'); // no GW1/GW2 squad at all
+    await recordSquadSave(db, gw3Save('late'));
+    await runLifecycleSweep(db, AFTER_LOCK3); // GW3 lock + backstop finalize
+    expect(await db.read(`${fRoot}/History/3/late`)).not.toBeNull(); // scored
+    expect(await db.read(`${fRoot}/TransferState/late`)).toEqual({
+      Free: 2, UsedThisGw: 0, SavedGw: 3, RolledGw: 3,
+      CountFromGw: 4, CountFrom: fixtureIds('alpha'),
+    });
+    expect(await db.read(`${fRoot}/TransferState/alpha`)).toEqual({
+      Free: 4, UsedThisGw: 0, RolledGw: 3,
+      CountFromGw: 4, CountFrom: fixtureIds('alpha'),
+    });
+  });
+
+  it('(c) GW1 squad, no save in GW2: a real bank still banks (Free 4)', async () => {
+    const db = new FakeDb(world2());
+    // What GW1's rollover left: the weekly grant, baseline = the GW1 squad.
+    f(db).TransferState = {
+      alpha: {
+        Free: 2, UsedThisGw: 0, RolledGw: 1,
+        CountFromGw: 2, CountFrom: fixtureIds('alpha'),
+      },
+    };
+    await runLifecycleSweep(db, AFTER_LOCK2);
+    expect(await db.read(`${fRoot}/TransferState/alpha`)).toEqual({
+      Free: 4, UsedThisGw: 0, RolledGw: 2,
+      CountFromGw: 3, CountFrom: fixtureIds('alpha'),
+    });
+  });
+
+  it('(d) a Free Hit in GW2: CountFrom is the GW1 squad the restore put back, not the Free Hit squad', async () => {
+    const db = new FakeDb(world2());
+    const churn = f(db).Squads.churn;
+    churn.picks[0].playerId = 'Wes';
+    churn.picks[4].playerId = 'Alex';
+    churn.chip = 'freeHit';
+    await runLifecycleSweep(db, AFTER_LOCK2);
+
+    const restored = await db.read(`${fRoot}/Squads/churn`);
+    expect(pickIdsOf(restored)).toEqual(fixtureIds('churn')); // the GW1 squad
+    const state = await db.read(`${fRoot}/TransferState/churn`) as Json;
+    expect(state['CountFromGw']).toBe(3);
+    expect(state['CountFrom']).toEqual(pickIdsOf(restored)); // == the restore
+    expect(state['CountFrom']).not.toContain('Wes'); // never the Free Hit squad
+  });
+
+  describe('(e) the lock freeze and a counted save', () => {
+    const stale = { CountFromGw: 1, CountFrom: ['Zed', 'Yan'] };
+
+    it('the lock freeze leaves CountFrom / CountFromGw as they were', async () => {
+      const db = new FakeDb(world2({ gw2Status: 1 })); // games live: lock only
+      f(db).TransferState = {
+        churn: { Free: 2, UsedThisGw: 3, SavedGw: 2, ...stale },
+      };
+      await runLifecycleSweep(db, AFTER_LOCK2);
+      expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
+        Free: 2, UsedThisGw: 3, SavedGw: 2, ...stale,
+      });
+    });
+
+    it('a counted save rewrites them from its own baseline', async () => {
+      const db = new FakeDb(world2());
+      f(db).TransferState = {
+        churn: { Free: 2, UsedThisGw: 3, SavedGw: 2, ...stale },
+      };
+      f(db).Squads.churn.picks[0].playerId = 'Wes'; // Bo out
+      await recordSquadSave(db, saveArgs('churn'));
+      expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
+        Free: 2, UsedThisGw: 1, SavedGw: 2,
+        CountFromGw: 2, CountFrom: fixtureIds('churn'),
+      });
+    });
+  });
+
+  it('(f) deleting the squad and saving a new one inside an open week is NOT a first team: all 5 new players count', async () => {
+    const db = new FakeDb(world2());
+    delete f(db).Squads.churn;
+    await recordSquadSave(db, saveArgs('churn')); // a deletion counts nothing
+    expect(db.writes).toEqual([]);
+
+    // GW1's churn was Bo Dana Bea Ezra Ben Eva Wren; five of these are new.
+    const pick = (playerId: string, position: string, priceTenths: number,
+      bench = false) => ({ playerId, position, priceTenths, bench });
+    f(db).Squads.churn = {
+      picks: [
+        pick('Wes', 'GK', 65), pick('Dana', 'DEF', 80), pick('Will', 'DEF', 60),
+        pick('Alex', 'ATT', 95), pick('Ezra', 'ATT', 65),
+        pick('Eli', 'GK', 55, true), pick('Sam', 'GK', 85, true),
+      ],
+      captainId: 'Alex', viceId: 'Wes',
+    };
+    await recordSquadSave(db, saveArgs('churn'));
+    // Last week's locked squad still exists, so the save counts against it
+    // (not a first team): Wes, Will, Alex, Eli, Sam are all new.
+    expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
+      Free: 2, UsedThisGw: 5, SavedGw: 2,
+      CountFromGw: 2, CountFrom: fixtureIds('churn'),
+    });
+  });
+
+  it('(g) scored in GW1, squad deleted before the GW2 lock: rolls as if used 0, next baseline is "first team"', async () => {
+    const db = new FakeDb(world2());
+    // alpha made (and counted) 3 transfers in the open week, then deleted
+    // the squad: nothing was locked, nothing charged, nothing spent.
+    f(db).TransferState = {
+      alpha: {
+        Free: 2, UsedThisGw: 3, SavedGw: 2, RolledGw: 1,
+        CountFromGw: 2, CountFrom: fixtureIds('alpha'),
+      },
+    };
+    delete f(db).Squads.alpha;
+    await runLifecycleSweep(db, AFTER_LOCK2);
+
+    expect(await db.read(`${fRoot}/History/2/alpha`)).toBeNull(); // not scored
+    expect(await db.read(`${fRoot}/History/2/churn`)).not.toBeNull();
+    expect(await db.read(`${fRoot}/TransferState/alpha`)).toEqual({
+      Free: 4, UsedThisGw: 0, SavedGw: 2, RolledGw: 2, CountFromGw: 3,
+    });
+
+    // GW3: he saves a squad again. There is no GW2 locked squad to count
+    // against, so it is free (a first team).
+    f(db).GwState = {
+      current: 3, status: 'open', lockAtUtc: LOCK3_MS, date: GW3_DATE,
+    };
+    f(db).Squads.alpha = fixtureSquad('alpha');
+    await recordSquadSave(db, gw3Save('alpha'));
+    expect(await db.read(`${fRoot}/TransferState/alpha`)).toEqual({
+      Free: 4, UsedThisGw: 0, SavedGw: 3, RolledGw: 2, CountFromGw: 3,
+    });
+  });
+
+  it("(h) a brand-new manager's first save in an open week: CountFromGw is the week, no CountFrom", async () => {
+    const db = new FakeDb(world2());
+    f(db).Squads.newbie = fixtureSquad('alpha');
+    await recordSquadSave(db, saveArgs('newbie'));
+    const state = await db.read(`${fRoot}/TransferState/newbie`) as Json;
+    expect(state['CountFromGw']).toBe(2);
+    expect('CountFrom' in state).toBe(false);
+    expect(state['UsedThisGw']).toBe(0);
+  });
+
+  // The rollover audience now includes managers who were not scored, so a
+  // rerun of an OLD week (a score edit, an un-void) can reach one who joined
+  // after it. Rolling him for that week would overwrite the baseline his own
+  // save just published — a manager already past gw + 1 is left alone.
+  it('a manager already working on a later week is not rolled by an older one', async () => {
+    const db = new FakeDb(world2());
+    const latecomer = { Free: 2, UsedThisGw: 1, SavedGw: 4, CountFromGw: 4 };
+    f(db).TransferState = { latecomer: { ...latecomer } };
+    await runLifecycleSweep(db, AFTER_LOCK2); // GW2 lock + finalize
+    expect(await db.read(`${fRoot}/TransferState/latecomer`)).toEqual(latecomer);
+  });
+
+  it('the Free Hit restore and the chip switch-off stay scored-only', async () => {
+    const db = new FakeDb(world2());
+    // A manager with a GW1 locked squad and a stale Free Hit marker, but no
+    // squad at the GW2 lock (not scored): nothing may be restored for him.
+    f(db).PublishedPicks[1].ghost = fixtureSquad('alpha');
+    f(db).TransferState = {
+      ghost: { Free: 2, UsedThisGw: 0, ChipPlayed: 'freeHit', RolledGw: 1 },
+    };
+    await runLifecycleSweep(db, AFTER_LOCK2);
+    expect(await db.read(`${fRoot}/History/2/ghost`)).toBeNull();
+    expect(await db.read(`${fRoot}/Squads/ghost`)).toBeNull(); // no restore
+    // He still rolls (Free 2 + 2, next baseline = the squad after GW2: none).
+    expect(await db.read(`${fRoot}/TransferState/ghost`)).toEqual({
+      Free: 4, UsedThisGw: 0, RolledGw: 2, CountFromGw: 3,
     });
   });
 });

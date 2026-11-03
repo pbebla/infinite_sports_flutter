@@ -1418,7 +1418,15 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     };
     e.rows[gw] = row;
     const remaining = unlimited ? e.free : Math.min(Math.max(e.free - used, 0), e.free);
-    e.free = Math.min(Math.max(remaining + cfg.freeTransfersPerWeek, 0), cfg.maxBankedTransfers);
+    // A manager's FIRST locked week (no squad locked before it) never banks:
+    // the first team is free to build, so there is no unused allowance to
+    // carry and next week is the plain weekly grant (transfers.ts
+    // rolloverFreeTransfers firstWeek). Spec-side, from the ledger's own
+    // history — not read from the pipeline.
+    const firstLockedWeek = e.lastLocked === null;
+    e.free = firstLockedWeek
+      ? cfg.freeTransfersPerWeek
+      : Math.min(Math.max(remaining + cfg.freeTransfersPerWeek, 0), cfg.maxBankedTransfers);
     if (effective) e.honored[gw] = effective;
     const prevLocked = e.lastLocked;
     // Spec §6: a Free Hit squad lasts one week, the previous squad returns —

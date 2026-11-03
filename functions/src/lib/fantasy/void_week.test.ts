@@ -36,7 +36,7 @@ import {
   resettleVoidToggle, runLifecycleSweep, runMondayReprice,
 } from './orchestration';
 import {
-  AFTER_LOCK2, F_ROOT, FakeDb, FakePusher, GW2_DATE, world2,
+  AFTER_LOCK2, F_ROOT, FakeDb, FakePusher, fixtureIds, GW2_DATE, world2,
 } from './test_support';
 
 const WEEK_POINTS: Record<string, number> = {
@@ -178,9 +178,11 @@ describe('void BEFORE finalize (the week settles voided first time)', () => {
     // Rollover exactly as an unvoided week: neither punished nor rewarded.
     expect(await db.read(`${F_ROOT}/TransferState/churn`)).toEqual({
       Free: 2, UsedThisGw: 0, SavedGw: 2, RolledGw: 2,
+      CountFromGw: 3, CountFrom: fixtureIds('churn'),
     });
     expect(await db.read(`${F_ROOT}/TransferState/alpha`)).toEqual({
       Free: 4, UsedThisGw: 0, RolledGw: 2,
+      CountFromGw: 3, CountFrom: fixtureIds('alpha'),
     });
   });
 
@@ -254,6 +256,7 @@ describe('void AFTER finalize (the Voided/<gw> toggle re-settles)', () => {
       .toEqual({ At: AFTER_LOCK2.getTime() });
     expect(await db.read(`${F_ROOT}/TransferState/churn`)).toEqual({
       Free: 2, UsedThisGw: 0, SavedGw: 2, RolledGw: 2,
+      CountFromGw: 3, CountFrom: fixtureIds('churn'),
     });
 
     // Owner un-voids: back to the normal settle.

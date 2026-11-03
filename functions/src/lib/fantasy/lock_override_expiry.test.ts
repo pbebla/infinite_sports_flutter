@@ -17,7 +17,7 @@ import {
 } from './orchestration';
 import { handlePositionWrite } from './position_changes';
 import {
-  AFTER_LOCK2, F_ROOT, FakeDb, GW2_DATE, LOCK2_MS, world2,
+  AFTER_LOCK2, F_ROOT, FakeDb, fixtureIds, GW2_DATE, LOCK2_MS, world2,
 } from './test_support';
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -192,6 +192,7 @@ describe('every other stand-down check reads the effective override at its own n
     });
     expect(await expired.read(`${F_ROOT}/TransferState/churn`)).toEqual({
       Free: 2, UsedThisGw: 0, SavedGw: 2,
+      CountFromGw: 2, CountFrom: fixtureIds('churn'),
     });
 
     const future = overridden('locked', OPEN_NOW.getTime() + HOUR_MS);
@@ -208,6 +209,7 @@ describe('every other stand-down check reads the effective override at its own n
     });
     expect(await future.read(`${F_ROOT}/TransferState/churn`)).toEqual({
       Free: 2, UsedThisGw: 0, SavedGw: 2,
+      CountFromGw: 2, CountFrom: fixtureIds('churn'),
     });
   });
 

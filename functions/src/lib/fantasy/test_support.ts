@@ -6,6 +6,7 @@
 import { clone, Json, loadGoldenFixture } from './golden_fixture';
 import { FantasyDb, FantasyTxResult } from './orchestration_db';
 import { FantasyPusher, FantasyUserPush } from './pushes';
+import { pickIdsOf } from './transfer_state';
 
 export const fixture = loadGoldenFixture();
 
@@ -115,6 +116,13 @@ export class FakePusher implements FantasyPusher {
 export function fixtureSquad(name: string): Json {
   const s = (fixture['squads'] as Json[]).find((x) => x['name'] === name)!;
   return clone(s['squad']);
+}
+
+/** A golden manager's pick ids, in pick order — the transfer baseline
+ *  (TransferState.CountFrom) a week's save or rollover publishes when that
+ *  squad was the one locked. */
+export function fixtureIds(name: string): string[] {
+  return pickIdsOf(fixtureSquad(name))!;
 }
 
 /** Two gameweeks: GW1 finalized (History + PublishedPicks seeded from the

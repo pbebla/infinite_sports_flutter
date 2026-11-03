@@ -12,7 +12,8 @@ import {
 } from './orchestration';
 import { writeTimeOf } from './orchestration_db';
 import {
-  AFTER_LOCK2, F_ROOT, FakeDb, fixtureSquad, GW2_DATE, LOCK2_MS, world2,
+  AFTER_LOCK2, F_ROOT, FakeDb, fixtureIds, fixtureSquad, GW2_DATE, LOCK2_MS,
+  world2,
 } from './test_support';
 
 const fRoot = F_ROOT;
@@ -286,8 +287,10 @@ describe('post-lock saves (audit I3)', () => {
     const db = new FakeDb(world2());
     transfer(db);
     await save(db, LOCK2_MS - MIN);
-    expect(await db.read(`${fRoot}/TransferState/churn`))
-      .toEqual({ Free: 2, UsedThisGw: 1, SavedGw: 2 });
+    expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
+      Free: 2, UsedThisGw: 1, SavedGw: 2,
+      CountFromGw: 2, CountFrom: fixtureIds('churn'),
+    });
   });
 
   it('a save AT or after lockAtUtc is not counted, even while GwState says open', async () => {
@@ -308,8 +311,10 @@ describe('post-lock saves (audit I3)', () => {
     await save(db, LOCK2_MS - MIN); // counted: 1 transfer
     f(db).Squads.churn.picks[4].playerId = 'Alex'; // a second sale, after the lock
     await save(db, LOCK2_MS + MIN);
-    expect(await db.read(`${fRoot}/TransferState/churn`))
-      .toEqual({ Free: 2, UsedThisGw: 1, SavedGw: 2 });
+    expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
+      Free: 2, UsedThisGw: 1, SavedGw: 2,
+      CountFromGw: 2, CountFrom: fixtureIds('churn'),
+    });
   });
 
   it("under the owner's effective 'open' override the window is extended: counted", async () => {
@@ -318,8 +323,10 @@ describe('post-lock saves (audit I3)', () => {
     f(db).Config.lockOverrideUntil = LOCK2_MS + 60 * MIN;
     transfer(db);
     await save(db, LOCK2_MS + 7 * MIN);
-    expect(await db.read(`${fRoot}/TransferState/churn`))
-      .toEqual({ Free: 2, UsedThisGw: 1, SavedGw: 2 });
+    expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
+      Free: 2, UsedThisGw: 1, SavedGw: 2,
+      CountFromGw: 2, CountFrom: fixtureIds('churn'),
+    });
     // Once the override has expired, the lock instant rules again.
     const late = new FakeDb(world2());
     f(late).Config.lockOverride = 'open';

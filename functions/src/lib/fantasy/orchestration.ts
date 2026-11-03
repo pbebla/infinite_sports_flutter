@@ -68,11 +68,12 @@
 //   other weeks' GP feed PlayerTotals games/ppg on every (re)run.
 //
 // - TransferState/<uid> = { Free:int, UsedThisGw:int, ChipPlayed?:string,
-//   SavedGw?:int, RolledGw?:int } — the Phase E transfer ledger; the
-//   field-by-field contract lives in transfer_state.ts. Written by the
-//   Squads/<uid> trigger (recordSquadSave), the lock step (ChipPlayed
-//   freeze) and the post-finalize rollover. Rules: read own + admin, no
-//   client write (functions only).
+//   SavedGw?:int, RolledGw?:int, CountFromGw?:int, CountFrom?:[playerId] }
+//   — the Phase E transfer ledger plus the transfer baseline the fan app
+//   counts against; the field-by-field contract lives in transfer_state.ts.
+//   Written by the Squads/<uid> trigger (recordSquadSave), the lock step
+//   (ChipPlayed freeze) and the post-finalize rollover. Rules: read own +
+//   admin, no client write (functions only).
 //
 // - Baselines/<uid> = { ForGw:int, RealizedTenths:int, Prices: { <playerId>:
 //   tenths } } — FPL selling (spec §4): the manager's effective squad after
@@ -220,7 +221,7 @@ import {
 import { parseForfeitedBy } from './stats_mapper';
 import {
   annotateSquadIntegrity, LockAccounting, lockAccounting, parseTransferState,
-  rolloverState, transferStateToNode, usedAfterFreeSwaps,
+  pickIdsOf, rolloverState, transferStateToNode, usedAfterFreeSwaps,
 } from './transfer_state';
 
 /** Injected logging seam (firebase-functions/logger in production, a spy or
@@ -596,22 +597,49 @@ async function switchOffSpentChip(
  *  week. The restored squad is the engine round-trip of the manager's
  *  effective squad before the Free Hit (effectiveSquadAfterWeek(gw-1)) with
  *  NO chip — a restore never re-arms a chip. A GW1 Free Hit has nothing to
- *  restore (logged); its chip is still switched off. */
+ *  restore (logged); its chip is still switched off.
+ *
+ *  THE ROLLOVER AUDIENCE: [scoredUids] (this finalize's History/<gw> keys)
+ *  UNION every manager who already has a TransferState node. A manager who
+ *  was not scored this week — his squad was deleted before the lock — still
+ *  needs next week's Free and baseline; leaving him out froze his Free and
+ *  left his stale CountFrom for the app to count against. He rolls as if he
+ *  used nothing (nothing was charged), and the Free Hit restore and chip
+ *  switch-off below stay scored-only (they act on a locked squad he does not
+ *  have). An unscored manager already working on a week beyond gw + 1
+ *  (a manager who joined after this week, reached by a rerun of an old week)
+ *  is skipped: rolling him for gw would overwrite his own baseline.
+ *
+ *  Per manager: [firstWeek] = no effective squad the week before (his first
+ *  team: free to build, so nothing banks — rolloverFreeTransfers), and the
+ *  published baseline for next week is the effective squad AFTER this week
+ *  (a Free Hit week's is the week before — the one the restore put back, so
+ *  the two can never disagree). RolledGw is checked first so a rerun never
+ *  re-rolls. */
 async function settleTransfersAfterFinalize(
   db: FantasyDb, root: string, cfg: FantasyConfig, gw: number,
-  uids: string[], nowMs: number,
+  scoredUids: string[], nowMs: number,
   log: FantasyLogger, ctx: Record<string, unknown>,
 ): Promise<void> {
+  const scored = new Set(scoredUids);
+  const uids = new Set(scoredUids);
+  for (const [uid] of childEntries(await db.read(`${root}/TransferState`))) {
+    uids.add(uid);
+  }
   for (const uid of uids) {
     const state = parseTransferState(
       await db.read(`${root}/TransferState/${uid}`), cfg);
     if (state.rolledGw !== null && state.rolledGw >= gw) continue;
-    if (state.chipPlayed === 'freeHit') {
-      const prevRaw = await effectiveSquadAfterWeek(db, root, uid, gw - 1);
+    const wasScored = scored.has(uid);
+    // A latecomer an old week's rerun reaches: his own baseline stands.
+    const workingOn = Math.max(state.savedGw ?? 0, state.countFrom?.gw ?? 0);
+    if (!wasScored && workingOn > gw + 1) continue;
+    const before = await effectiveSquadAfterWeek(db, root, uid, gw - 1);
+    if (wasScored && state.chipPlayed === 'freeHit') {
       let restored: Record<string, unknown> | null = null;
-      if (isPlainMap(prevRaw)) {
+      if (isPlainMap(before)) {
         try {
-          restored = squadToMap({ ...squadFromMap(prevRaw), chip: null });
+          restored = squadToMap({ ...squadFromMap(before), chip: null });
         } catch { /* unreadable previous squad — warn below */ }
       }
       if (restored !== null) {
@@ -625,9 +653,16 @@ async function settleTransfersAfterFinalize(
           { ...ctx, gw, uid });
       }
     }
-    await switchOffSpentChip(db, root, uid, gw, state.savedGw, nowMs, log, ctx);
+    if (wasScored) {
+      await switchOffSpentChip(db, root, uid, gw, state.savedGw, nowMs, log, ctx);
+    }
+    const after = await effectiveSquadAfterWeek(db, root, uid, gw);
     await db.write(`${root}/TransferState/${uid}`,
-      transferStateToNode(rolloverState(state, cfg, gw)));
+      transferStateToNode(rolloverState(state, cfg, gw, {
+        firstWeek: !isPlainMap(before),
+        countFromIds: pickIdsOf(after),
+        scored: wasScored,
+      })));
   }
 }
 
@@ -679,7 +714,13 @@ export interface SquadSaveArgs {
  *     manager acted this week. Recomputed (not incremented) on every save:
  *     undoing a transfer before the deadline un-counts it. Saves while the
  *     gameweek is locked, under a 'locked' lockOverride, and squad
- *     deletions are never counted.
+ *     deletions are never counted. Deleting a squad and saving a new one
+ *     inside the open week is NOT a first team: last week's locked squad is
+ *     still the baseline, so every new player counts.
+ *     THE BASELINE the count used is published in the same write
+ *     (CountFromGw = this gameweek, CountFrom = the baseline squad's player
+ *     ids; ids absent = no baseline squad, the "first team" marker) — the
+ *     fan app counts its live draft against exactly it.
  *     POST-LOCK SAVES (audit I3, 2026-11-01): a save at or after
  *     GwState.lockAtUtc is not counted even while GwState still says
  *     'open' (the sweep flips it up to 15 minutes later) — logged at info.
@@ -808,6 +849,7 @@ export async function recordSquadSave(
 
   await db.write(`${root}/TransferState/${uid}`, transferStateToNode({
     ...state, usedThisGw: used, savedGw: serverWrite ? state.savedGw : gw,
+    countFrom: { gw, ids: pickIdsOf(prevRaw) },
   }));
   log.info(serverWrite
     ? 'fantasy transfers: server squad write recounted (not a manager save)'

@@ -29,4 +29,23 @@ describe('transfers', () => {
     expect(rolloverFreeTransfers({ free: 5, used: 9, cfg, unlimited: true }))
       .toBe(7);
   });
+  // A manager's FIRST team is free to build, so it has no unused allowance
+  // to bank (FPL: the first squad costs nothing and carries nothing).
+  it('rollover after a first week resets to the weekly grant — nothing banks', () => {
+    expect(rolloverFreeTransfers({ free: 2, used: 0, cfg, firstWeek: true }))
+      .toBe(2);
+    expect(rolloverFreeTransfers({ free: 7, used: 0, cfg, firstWeek: true }))
+      .toBe(2);
+  });
+  it('rollover after a first week is the grant even on a wildcard/free-hit week', () => {
+    expect(rolloverFreeTransfers({
+      free: 5, used: 9, cfg, unlimited: true, firstWeek: true,
+    })).toBe(2);
+  });
+  it('rollover when not the first week is unchanged (bank, cap 7)', () => {
+    expect(rolloverFreeTransfers({ free: 2, used: 0, cfg, firstWeek: false }))
+      .toBe(4);
+    expect(rolloverFreeTransfers({ free: 6, used: 0, cfg, firstWeek: false }))
+      .toBe(7);
+  });
 });
