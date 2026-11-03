@@ -18,6 +18,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_prefs.dart';
 import 'package:infinite_sports_flutter/fantasy/data/per_week_stream.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/access_pay_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
@@ -76,6 +77,7 @@ void main() {
   late StreamController<Map<int, FantasySquad>> published;
   late StreamController<Map<int, FantasySquad>> history;
   late StreamController<FantasyAccessState> access;
+  late StreamController<SaleBaselineState> sale;
   late List<_Opened> opened;
 
   // Paid-access seam recorders.
@@ -124,6 +126,7 @@ void main() {
     published = StreamController<Map<int, FantasySquad>>.broadcast();
     history = StreamController<Map<int, FantasySquad>>.broadcast();
     access = StreamController<FantasyAccessState>.broadcast();
+    sale = StreamController<SaleBaselineState>.broadcast();
     checkoutCalls = 0;
     launched = [];
     claims = [];
@@ -147,6 +150,7 @@ void main() {
     published.close();
     history.close();
     access.close();
+    sale.close();
   });
 
   /// Lets the feeds land and the 300ms reveal fade finish. Never
@@ -190,6 +194,7 @@ void main() {
         voidedWeeksStates: voidedWeeksStates ?? Stream.value(const <int>{}),
         nowUtc: nowUtc,
         accessStates: access.stream,
+        saleBaselineStates: sale.stream,
         createCheckoutUrl: () async {
           checkoutCalls++;
           return checkoutUri;
@@ -719,6 +724,127 @@ void main() {
       await pumpHub(tester);
       await land(tester);
       expect(FantasyLeaderboardsTab.sessionScope, LeaderboardScope.gameweek);
+    });
+  });
+
+  // FPL selling (spec §4): the own `Baselines/<uid>` feed prices the shared
+  // draft — and never holds the single fade reveal.
+  group('sale baseline feed', () {
+    // GW n locks Oct 4 + 7(n-1), 22:00 UTC; "now" (Oct 17) edits GW3.
+    final gws = [
+      for (var n = 1; n <= 5; n++)
+        Gameweek(
+          number: n,
+          date: '10${(4 + 7 * (n - 1)).toString().padLeft(2, '0')}2026',
+          lockUtc: DateTime.utc(2026, 10, 4 + 7 * (n - 1), 22),
+          opensUtc: null,
+        ),
+    ];
+
+    SaleBaselineState baseline(int forGw) => SaleBaselineState(
+          baseline: SaleBaseline(
+              forGw: forGw,
+              prices: const {'Ava Striker': 60, 'Dana Wall': 60},
+              realizedTenths: 5),
+          loaded: true,
+        );
+
+    /// The hub revealed WITHOUT any baseline answer, and its shared draft
+    /// (reached through "Open in Fantasy", which hands the opener the draft).
+    Future<SquadDraftController> hubDraft(WidgetTester tester,
+        {FantasyLockOverride lock = FantasyLockOverride.auto,
+        DateTime? now}) async {
+      final at = now ?? DateTime.utc(2026, 10, 17, 12);
+      await pumpHub(tester,
+          tab: FantasyHubTab.rules,
+          initialPlayerName: 'Ava Striker',
+          gameweekStates: Stream.value(gws),
+          nowUtc: () => at);
+      await land(tester, lock: lock);
+      expect(key('hub'), findsOneWidget);
+      return opened.single.draft!;
+    }
+
+    testWidgets('never holds the reveal; its emits price the shared draft',
+        (tester) async {
+      final draft = await hubDraft(tester);
+      expect(draft.moneyReady, isFalse); // nothing answered yet
+
+      sale.add(baseline(3));
+      await settle(tester);
+      expect(draft.moneyReady, isTrue);
+      expect(draft.realizedTenths, 5);
+      // Ava was saved at 70 but is held at her baseline 60.
+      expect(draft.spentTenths, 410 - 10);
+      expect(draft.availableTenths, 505);
+      // Today's prices come from the live market: 60 -> 70 sells 65.
+      expect(draft.sellPriceOf('Ava Striker'), 65);
+      players.add([
+        for (final p in market)
+          p.name == 'Ava Striker'
+              ? _player('Ava Striker', FantasyPosition.att, 80)
+              : p,
+      ]);
+      await settle(tester);
+      expect(draft.sellPriceOf('Ava Striker'), 70);
+
+      // A baseline for another week is not this week's money.
+      sale.add(baseline(2));
+      await settle(tester);
+      expect(draft.moneyReady, isFalse);
+
+      // No node = a first squad: ready, nothing held, nothing sold.
+      sale.add(const SaleBaselineState(loaded: true));
+      await settle(tester);
+      expect(draft.moneyReady, isTrue);
+      expect(draft.realizedTenths, 0);
+      expect(draft.spentTenths, 410);
+    });
+
+    testWidgets('a read error before any value: degraded, never ready — the '
+        'hub still shows; a known baseline survives a later error',
+        (tester) async {
+      final logs = <String>[];
+      final original = debugPrint;
+      debugPrint =
+          (String? message, {int? wrapWidth}) => logs.add(message ?? '');
+      try {
+        final draft = await hubDraft(tester);
+        sale.addError(StateError('permission-denied'));
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+        expect(key('hub'), findsOneWidget);
+        expect(draft.moneyReady, isFalse);
+      } finally {
+        debugPrint = original;
+      }
+      expect(logs.join('\n'),
+          contains('FantasyHubPage: sale baseline feed failed: Bad state: '
+              'permission-denied'));
+    });
+
+    testWidgets('a known baseline survives a later feed error (error ≠ fact)',
+        (tester) async {
+      final draft = await hubDraft(tester);
+      sale.add(baseline(3));
+      await settle(tester);
+      expect(draft.moneyReady, isTrue);
+      sale.addError(StateError('network'));
+      await settle(tester);
+      expect(tester.takeException(), isNull);
+      expect(draft.moneyReady, isTrue);
+      expect(draft.realizedTenths, 5);
+    });
+
+    testWidgets('the open override past the clock deadline: the stored '
+        'baseline is still this week\'s money', (tester) async {
+      // Oct 19: GW3's lock (Oct 18 22:00) has passed by the clock, but the
+      // owner's open override stands the lock sweep down.
+      final draft = await hubDraft(tester,
+          lock: FantasyLockOverride.open, now: DateTime.utc(2026, 10, 19, 12));
+      sale.add(baseline(3));
+      await settle(tester);
+      expect(draft.moneyReady, isTrue);
     });
   });
 

@@ -46,6 +46,9 @@ void main() {
         .map((m) => m.group(1)!)
         .toSet();
     expect(declared, isNotEmpty);
+    // FPL selling: the own `Baselines/<uid>` snapshot (the draft's money)
+    // must never seed the next user's hub.
+    expect(declared, contains('_saleBaselineCache'));
     final clearBody =
         RegExp(r'static void clearSessionCaches\(\) \{([\s\S]*?)\n  \}')
             .firstMatch(src)!

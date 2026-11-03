@@ -23,6 +23,7 @@ import 'package:infinite_sports_flutter/fantasy/data/per_week_stream.dart';
 import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 
 class FantasyService {
@@ -62,6 +63,10 @@ class FantasyService {
   // `<root>|<uid>` — it joins the hub's reveal gate, so a revisit must not
   // wait on the network for it. A known-absent record caches as none.
   static final Map<String, FantasyAccessState> _accessCache = {};
+  // FPL selling (spec §4): the own `Baselines/<uid>` state, keyed
+  // `<root>|<uid>` — the squad draft's money. A known-absent node (a first
+  // squad) caches as loaded-with-no-baseline.
+  static final Map<String, SaleBaselineState> _saleBaselineCache = {};
   // The season's owner-voided gameweeks (`Voided`), keyed `<root>`.
   static final Map<String, Set<int>> _voidedWeeksCache = {};
   // The league's own season-over flag, keyed `<sport>/<season>`.
@@ -93,6 +98,7 @@ class FantasyService {
     _mySquadCache.clear();
     _managerByUidCache.clear();
     _accessCache.clear();
+    _saleBaselineCache.clear();
     _voidedWeeksCache.clear();
     _seasonFinishedCache.clear();
     _badgeCatalogCache = null;
@@ -343,6 +349,46 @@ class FantasyService {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return Stream<FantasySquad?>.value(null);
     return watchMySquad(sport, season, uid);
+  }
+
+  /// Live own sale baseline (`Baselines/<uid>`, functions-written at each
+  /// lock: `{ForGw, RealizedTenths, Prices}` — last week's locked purchase
+  /// prices and the running sale profit/loss; rules: read own uid only).
+  /// Absent = a first squad (`baseline: null, loaded: true`). Seeded from
+  /// the session cache (`<root>|<uid>`). Error ≠ fact: a failed read keeps
+  /// the last known state; with none known it emits `degraded` and the
+  /// draft never claims a budget. A signed-out session streams a single
+  /// "no baseline" (nothing to sell).
+  static Stream<SaleBaselineState> watchMySaleBaseline(
+      String sport, String season) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      return Stream<SaleBaselineState>.value(
+          const SaleBaselineState(loaded: true));
+    }
+    return watchSaleBaseline(sport, season, uid);
+  }
+
+  /// [watchMySaleBaseline] for an explicit uid.
+  static Stream<SaleBaselineState> watchSaleBaseline(
+      String sport, String season, String uid) async* {
+    final key = '${_root(sport, season)}|$uid';
+    final seed = _saleBaselineCache[key];
+    if (seed != null) yield seed;
+    try {
+      await for (final event
+          in _ref('${_root(sport, season)}/Baselines/$uid').onValue) {
+        final state = saleBaselineStateFromNode(event.snapshot.value);
+        if (state.degraded) {
+          debugPrint('FantasyService: unreadable Baselines/$uid node');
+        }
+        _saleBaselineCache[key] = state;
+        yield state;
+      }
+    } catch (e) {
+      debugPrint('FantasyService: sale baseline feed failed: $e');
+      yield _saleBaselineCache[key] ?? const SaleBaselineState(degraded: true);
+    }
   }
 
   /// [saveMySquad] for the signed-in user (the squad builder's save path).

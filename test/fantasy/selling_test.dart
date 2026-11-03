@@ -61,6 +61,40 @@ void main() {
     });
   });
 
+  group('saleBaselineStateFromNode', () {
+    test('absent node: a first squad — loaded, no baseline, not degraded', () {
+      final s = saleBaselineStateFromNode(null);
+      expect(s.loaded, isTrue);
+      expect(s.baseline, isNull);
+      expect(s.degraded, isFalse);
+    });
+    test('a readable node: loaded with its baseline', () {
+      final s = saleBaselineStateFromNode({
+        'ForGw': 4,
+        'Prices': {'A': 80},
+        'RealizedTenths': -3,
+      });
+      expect(s.loaded, isTrue);
+      expect(s.degraded, isFalse);
+      expect(s.baseline!.forGw, 4);
+      expect(s.baseline!.prices, {'A': 80});
+      expect(s.baseline!.realizedTenths, -3);
+    });
+    test('a present but unreadable node is degraded, never "no sales"', () {
+      for (final node in <Object>[
+        'junk',
+        {
+          'Prices': {'A': 80}
+        },
+      ]) {
+        final s = saleBaselineStateFromNode(node);
+        expect(s.degraded, isTrue, reason: '$node');
+        expect(s.loaded, isFalse, reason: '$node');
+        expect(s.baseline, isNull, reason: '$node');
+      }
+    });
+  });
+
   group('realizedNowTenths', () {
     const b =
         SaleBaseline(forGw: 3, prices: {'A': 80, 'B': 60}, realizedTenths: 5);
@@ -80,6 +114,13 @@ void main() {
     });
     test('a sold player missing from current prices adds 0', () {
       expect(realizedNowTenths(b, ['B'], const {'B': 50}), 5);
+    });
+    test(
+        'a sold player priced 0 or below adds 0 (server judgeSale parity: '
+        'no usable price, never a "sale at 0")', () {
+      expect(realizedNowTenths(b, ['B'], const {'A': 0, 'B': 50}), 5);
+      expect(realizedNowTenths(b, ['B'], const {'A': -10, 'B': 50}), 5);
+      expect(realizedNowTenths(b, const <String>[], const {'A': 0, 'B': 0}), 5);
     });
     test('ids outside the baseline never count', () {
       expect(realizedNowTenths(b, ['A', 'B', 'Z'], current), 5);

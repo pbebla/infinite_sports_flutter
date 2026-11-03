@@ -15,15 +15,51 @@
 //   adopts it too unless the user toggled the chip in this draft, so a
 //   draft left dirty since before the lock can't quietly re-arm the chip.
 //
+// FPL selling (spec §4, selling.dart): the hub feeds [setSaleContext] the
+// own `Baselines/<uid>` state, today's market prices and the gameweek being
+// edited, and the draft charges what the server's lock judge will charge —
+// a baseline player kept (or re-added) costs his BASELINE price whatever
+// the pick says; a sold one banks his FPL sell price into [realizedTenths];
+// the room is budget + realized − spent. Error ≠ fact: [moneyReady] is
+// false until a current baseline (or a known first squad) has loaded, and
+// the UI must not present the money as real before then.
+//
 // Pure-ish: flutter/foundation only (ChangeNotifier), all placement/armband
 // math delegated to squad_builder_logic.dart; unit-tested in
 // test/fantasy/squad_draft_test.dart.
 
 import 'package:flutter/foundation.dart';
+import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
+
+/// The gameweek whose money the draft shows (the `editingGw` the hub hands
+/// [SquadDraftController.setSaleContext]): the first gameweek whose lock is
+/// still ahead ([chipEditingGameweek]; `Baselines/<uid>.ForGw` names the
+/// same week once the server has locked the previous one). null while the
+/// schedule is unknown — a baseline can't be judged current then.
+///
+/// Under the owner's OPEN override the lock sweep stands down entirely
+/// (orchestration.ts), so no lock can move the stored baseline even after
+/// the clock deadline: the stored node IS the week being edited — saves are
+/// still accepted then, and a clock-based week would block them as stale.
+int? saleEditingGameweek({
+  required List<Gameweek>? gameweeks,
+  required FantasyLockOverride lockOverride,
+  required SaleBaseline? baseline,
+  required DateTime nowUtc,
+}) {
+  if (lockOverride == FantasyLockOverride.open && baseline != null) {
+    return baseline.forGw;
+  }
+  if (gameweeks == null) return null;
+  return chipEditingGameweek(gameweeks, nowUtc);
+}
 
 class SquadDraftController extends ChangeNotifier {
   SquadDraftController({required FantasyConfig config, FantasySquad? initial})
@@ -50,6 +86,13 @@ class SquadDraftController extends ChangeNotifier {
   /// [revertToStored] goes back to.
   FantasySquad? _stored;
 
+  // ── FPL selling context ([setSaleContext]) ─────────────────────────────
+  SaleBaselineState? _sale;
+  Map<String, int> _currentPrices = const {};
+  int? _editingGw;
+
+  SaleBaseline? get _baseline => _sale?.baseline;
+
   FantasyConfig get config => _config;
   List<SquadSlot> get slots => _slots;
   List<SquadPick?> get picks => _picks;
@@ -72,10 +115,98 @@ class SquadDraftController extends ChangeNotifier {
         for (final p in _unplaced) p.playerId,
       };
 
-  /// Everything owned is paid for — unplaced picks included.
-  int get spentTenths =>
-      draftSpentTenths(_picks) +
-      _unplaced.fold<int>(0, (a, p) => a + p.priceTenths);
+  /// Everything owned is paid for — unplaced picks included — each at
+  /// [priceOfPick] (a held baseline player at his baseline price).
+  int get spentTenths => _ownedPicks.fold<int>(0, (a, p) => a + priceOfPick(p));
+
+  /// Every owned pick: the slots' plus the unplaced.
+  Iterable<SquadPick> get _ownedPicks =>
+      [..._picks.whereType<SquadPick>(), ..._unplaced];
+
+  // ── FPL selling money (spec §4) ────────────────────────────────────────
+
+  /// The hub's feed: the own `Baselines/<uid>` state ([sale]; null = not
+  /// answered yet), today's market prices by player id ([currentPrices])
+  /// and the gameweek being edited ([editingGw], see
+  /// [saleEditingGameweek]; null = the schedule is unknown). Notifies only
+  /// when something changed.
+  void setSaleContext({
+    SaleBaselineState? sale,
+    Map<String, int> currentPrices = const {},
+    int? editingGw,
+  }) {
+    if (identical(sale, _sale) &&
+        editingGw == _editingGw &&
+        mapEquals(currentPrices, _currentPrices)) {
+      return;
+    }
+    _sale = sale;
+    _currentPrices = Map.unmodifiable(currentPrices);
+    _editingGw = editingGw;
+    notifyListeners();
+  }
+
+  /// What [p] costs the squad: his baseline price when he is a baseline
+  /// player (HELD — the server ignores the pick's own price), else the
+  /// price on the pick (what it was bought at this window).
+  int priceOfPick(SquadPick p) =>
+      _baseline?.prices[p.playerId] ?? p.priceTenths;
+
+  /// The profit/loss the lock would book for this draft: the carried total
+  /// plus every baseline player no longer owned (unplaced picks still are),
+  /// sold at today's price.
+  int get realizedTenths => realizedNowTenths(
+      _baseline, _ownedPicks.map((p) => p.playerId), _currentPrices);
+
+  /// The money to spend: budget + realized sales.
+  int get availableTenths => _config.budgetTenths + realizedTenths;
+
+  /// The room left (negative = over budget).
+  int get remainingTenths => availableTenths - spentTenths;
+
+  /// The room after removing the owned [pick] (a swap's outgoing player):
+  /// his price back, and — a baseline player — his sale booked.
+  int remainingIfRemovedTenths(SquadPick pick) {
+    final ids = [for (final p in _ownedPicks) p.playerId];
+    ids.remove(pick.playerId); // one copy only
+    final realized = realizedNowTenths(_baseline, ids, _currentPrices);
+    return _config.budgetTenths + realized - (spentTenths - priceOfPick(pick));
+  }
+
+  /// What adding [p] costs: a baseline player is bought back at his
+  /// baseline price (no sale, no transfer), anyone else at today's price.
+  int buyPriceOf(FantasyPlayer p) =>
+      buyPriceTenths(_baseline, p.name, p.priceTenths);
+
+  /// The ONE way a pick is made from a market player (market add, picker,
+  /// the Needs-a-new-spot swap), priced by [buyPriceOf].
+  SquadPick newPick(FantasyPlayer p, {required bool bench}) => SquadPick(
+        playerId: p.name,
+        position: p.position,
+        priceTenths: buyPriceOf(p),
+        bench: bench,
+      );
+
+  /// What selling [playerId] banks (the FPL rule); null unless he is a
+  /// baseline player. With no usable market price (gone, or ≤ 0) he sells
+  /// for what was paid — the server adds 0 for him.
+  int? sellPriceOf(String playerId) {
+    final paid = _baseline?.prices[playerId];
+    if (paid == null) return null;
+    final current = _currentPrices[playerId];
+    if (current == null || current <= 0) return paid;
+    return sellPriceTenths(purchaseTenths: paid, currentTenths: current);
+  }
+
+  /// The money above is real: the baseline feed has loaded (not degraded)
+  /// and is for the week being edited. A known-absent node (a first squad)
+  /// is always ready.
+  bool get moneyReady {
+    final sale = _sale;
+    if (sale == null || !sale.loaded || sale.degraded) return false;
+    final b = sale.baseline;
+    return b == null || b.forGw == _editingGw;
+  }
 
   /// The first empty slot (where a moved player's swap-in lands), or null.
   int? get firstEmptySlot {
@@ -218,12 +349,7 @@ class SquadDraftController extends ChangeNotifier {
   bool addPlayer(FantasyPlayer player) {
     for (var i = 0; i < _slots.length; i++) {
       if (_slots[i].position == player.position && _picks[i] == null) {
-        _picks[i] = SquadPick(
-          playerId: player.name,
-          position: player.position,
-          priceTenths: player.priceTenths,
-          bench: _slots[i].bench,
-        );
+        _picks[i] = newPick(player, bench: _slots[i].bench);
         _dirty = true;
         notifyListeners();
         return true;

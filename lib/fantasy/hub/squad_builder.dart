@@ -228,13 +228,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
     );
     if (player == null || !mounted) return;
     final message = _draft.setPickAt(
-        i,
-        SquadPick(
-          playerId: player.name,
-          position: player.position,
-          priceTenths: player.priceTenths,
-          bench: _draft.slots[i].bench,
-        ));
+        i, _draft.newPick(player, bench: _draft.slots[i].bench));
     _announceArmbandLoss(message);
   }
 
@@ -284,15 +278,8 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       remainingTenths: remaining,
     );
     if (player == null || !mounted) return;
-    _announceArmbandLoss(_draft.swapUnplaced(
-        pick.playerId,
-        slot,
-        SquadPick(
-          playerId: player.name,
-          position: player.position,
-          priceTenths: player.priceTenths,
-          bench: _draft.slots[slot].bench,
-        )));
+    _announceArmbandLoss(_draft.swapUnplaced(pick.playerId, slot,
+        _draft.newPick(player, bench: _draft.slots[slot].bench)));
   }
 
   /// The alert banner sentence: the deadline the manager is editing for

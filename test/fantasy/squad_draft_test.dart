@@ -4,8 +4,11 @@
 // saved-clean cycle.
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 
@@ -288,6 +291,273 @@ void main() {
       d.revertToStored();
       expect(d.playerIds, isEmpty);
       expect(d.dirty, isFalse);
+    });
+  });
+
+  // FPL selling (spec §4): the draft charges what the server will charge.
+  // Last week's squad is fullSquad() with Att One bought at 80; today Att
+  // One trades at 90 (a riser) and Att Two at 40 (a faller, bought at 50).
+  group('FPL selling money', () {
+    const paid = {
+      'GK One': 50,
+      'Def One': 50,
+      'Def Two': 50,
+      'Att One': 80,
+      'Att Two': 50,
+      'Bench Def': 50,
+      'Bench Att': 50,
+    };
+    const current = {
+      'GK One': 50,
+      'Def One': 50,
+      'Def Two': 50,
+      'Att One': 90,
+      'Att Two': 40,
+      'Bench Def': 50,
+      'Bench Att': 50,
+      'New Guy': 70,
+    };
+
+    FantasySquad heldSquad({int attOnePrice = 80}) => FantasySquad(
+          picks: [
+            pick('GK One', FantasyPosition.gk),
+            pick('Def One', FantasyPosition.def),
+            pick('Def Two', FantasyPosition.def),
+            pick('Att One', FantasyPosition.att, price: attOnePrice),
+            pick('Att Two', FantasyPosition.att),
+            pick('Bench Def', FantasyPosition.def, bench: true),
+            pick('Bench Att', FantasyPosition.att, bench: true),
+          ],
+          captainId: 'GK One',
+          viceId: 'Def One',
+        );
+
+    SaleBaselineState sale({int forGw = 5, int realized = 0}) =>
+        SaleBaselineState(
+          baseline: SaleBaseline(
+              forGw: forGw, prices: paid, realizedTenths: realized),
+          loaded: true,
+        );
+
+    SquadDraftController draftWith({
+      FantasySquad? squad,
+      SaleBaselineState? state,
+      int? editingGw = 5,
+    }) {
+      final d =
+          SquadDraftController(config: cfg, initial: squad ?? heldSquad());
+      d.setSaleContext(
+          sale: state ?? sale(), currentPrices: current, editingGw: editingGw);
+      return d;
+    }
+
+    SquadPick owned(SquadDraftController d, String id) =>
+        [...d.picks.whereType<SquadPick>(), ...d.unplaced]
+            .firstWhere((p) => p.playerId == id);
+
+    test('re-adding a sold baseline player restores his baseline price', () {
+      final d = draftWith(state: sale(realized: 7));
+      expect(d.realizedTenths, 7);
+      d.removePlayer('Att One'); // sold at 85: +5
+      expect(d.realizedTenths, 12);
+      expect(d.addPlayer(player('Att One', FantasyPosition.att, 90)), isTrue);
+      expect(owned(d, 'Att One').priceTenths, 80);
+      expect(d.realizedTenths, 7); // no sale, no profit
+      expect(d.spentTenths, 380);
+    });
+
+    test('a held pick saved at another price counts at the baseline price',
+        () {
+      final d = draftWith(squad: heldSquad(attOnePrice: 90));
+      expect(owned(d, 'Att One').priceTenths, 90); // as stored
+      expect(d.priceOfPick(owned(d, 'Att One')), 80);
+      expect(d.spentTenths, 6 * 50 + 80);
+      // A pick that is not in the baseline keeps its own price.
+      expect(
+          d.priceOfPick(pick('New Guy', FantasyPosition.att, price: 70)), 70);
+    });
+
+    test('selling a riser grows the room', () {
+      final d = draftWith();
+      expect(d.availableTenths, 500);
+      final before = d.remainingTenths;
+      expect(before, 500 - 380);
+      d.removePlayer('Att One');
+      expect(d.remainingTenths, before + 85); // his 80 back + half the rise
+      expect(d.availableTenths, 505);
+    });
+
+    test('selling a faller takes the full drop', () {
+      final d = draftWith();
+      final before = d.remainingTenths;
+      d.removePlayer('Att Two');
+      expect(d.realizedTenths, -10);
+      expect(d.remainingTenths, before + 40);
+    });
+
+    test('remainingIfRemovedTenths matches remove-then-read', () {
+      for (final id in ['Att One', 'Att Two', 'GK One']) {
+        final d = draftWith();
+        final predicted = d.remainingIfRemovedTenths(owned(d, id));
+        d.removePlayer(id);
+        expect(d.remainingTenths, predicted, reason: id);
+      }
+      // A pick bought this week (no baseline price): his price comes back,
+      // and nobody is sold.
+      final d = draftWith();
+      d.removePlayer('Att Two');
+      d.addPlayer(player('New Guy', FantasyPosition.att, 70));
+      final predicted = d.remainingIfRemovedTenths(owned(d, 'New Guy'));
+      d.removePlayer('New Guy');
+      expect(d.remainingTenths, predicted);
+      // No baseline at all (a first squad): the plain budget math.
+      final first = SquadDraftController(config: cfg, initial: fullSquad());
+      first.setSaleContext(
+          sale: const SaleBaselineState(loaded: true),
+          currentPrices: current,
+          editingGw: 5);
+      final p = owned(first, 'Att One');
+      final room = first.remainingIfRemovedTenths(p);
+      expect(room, 500 - 300);
+      first.removePlayer('Att One');
+      expect(first.remainingTenths, room);
+    });
+
+    test('stale baseline is not moneyReady', () {
+      expect(
+          draftWith(state: sale(forGw: 4), editingGw: 5).moneyReady, isFalse);
+      expect(draftWith(state: sale(forGw: 5), editingGw: 5).moneyReady, isTrue);
+      // The schedule is not known yet: a baseline can't be judged current.
+      expect(draftWith(editingGw: null).moneyReady, isFalse);
+      // Absent node + loaded = a first squad: never blocked.
+      expect(
+          draftWith(state: const SaleBaselineState(loaded: true), editingGw: 5)
+              .moneyReady,
+          isTrue);
+      expect(
+          draftWith(
+                  state: const SaleBaselineState(loaded: true), editingGw: null)
+              .moneyReady,
+          isTrue);
+      // Degraded (the read failed with nothing known) or not loaded yet.
+      expect(
+          draftWith(
+                  state: const SaleBaselineState(degraded: true), editingGw: 5)
+              .moneyReady,
+          isFalse);
+      expect(
+          draftWith(state: const SaleBaselineState(), editingGw: 5).moneyReady,
+          isFalse);
+      // No sale context at all (nothing fed yet).
+      expect(SquadDraftController(config: cfg).moneyReady, isFalse);
+    });
+
+    test('a new player costs today\'s price', () {
+      final d = draftWith();
+      final guy = player('New Guy', FantasyPosition.att, 70);
+      expect(d.buyPriceOf(guy), 70);
+      final p = d.newPick(guy, bench: true);
+      expect(p.playerId, 'New Guy');
+      expect(p.position, FantasyPosition.att);
+      expect(p.priceTenths, 70);
+      expect(p.bench, isTrue);
+      // A baseline player is bought back at his baseline price.
+      expect(d.buyPriceOf(player('Att One', FantasyPosition.att, 90)), 80);
+      expect(
+          d.newPick(player('Att One', FantasyPosition.att, 90), bench: false)
+              .priceTenths,
+          80);
+      // No baseline (first squad / not loaded): always today's price.
+      final first = SquadDraftController(config: cfg);
+      expect(first.buyPriceOf(player('Att One', FantasyPosition.att, 90)), 90);
+    });
+
+    test('sellPriceOf: the FPL sell price, only for a baseline player', () {
+      final d = draftWith();
+      expect(d.sellPriceOf('Att One'), 85); // 80 -> 90 sells 85
+      expect(d.sellPriceOf('Att Two'), 40); // 50 -> 40 sells 40
+      expect(d.sellPriceOf('GK One'), 50);
+      expect(d.sellPriceOf('New Guy'), isNull);
+      // Gone from the market (or priced <= 0): sells for what was paid —
+      // the server adds 0 for him.
+      d.setSaleContext(
+          sale: sale(), currentPrices: const {'Att One': 0}, editingGw: 5);
+      expect(d.sellPriceOf('Att One'), 80);
+      expect(d.sellPriceOf('Att Two'), 50);
+    });
+
+    test('setSaleContext notifies once per change, not on a repeat', () {
+      final d = SquadDraftController(config: cfg, initial: heldSquad());
+      var notified = 0;
+      d.addListener(() => notified++);
+      final s = sale();
+      d.setSaleContext(sale: s, currentPrices: current, editingGw: 5);
+      expect(notified, 1);
+      d.setSaleContext(sale: s, currentPrices: Map.of(current), editingGw: 5);
+      expect(notified, 1);
+      d.setSaleContext(sale: s, currentPrices: current, editingGw: 6);
+      expect(notified, 2);
+    });
+  });
+
+  group('saleEditingGameweek', () {
+    // GW n locks Oct 4 + 7(n-1), 22:00 UTC.
+    final gws = [
+      for (var n = 1; n <= 4; n++)
+        Gameweek(
+          number: n,
+          date: '10${(4 + 7 * (n - 1)).toString().padLeft(2, '0')}2026',
+          lockUtc: DateTime.utc(2026, 10, 4 + 7 * (n - 1), 22),
+          opensUtc: null,
+        ),
+    ];
+    const b = SaleBaseline(forGw: 3, prices: {'A': 80}, realizedTenths: 0);
+
+    test('auto: the first gameweek whose lock is still ahead', () {
+      // Oct 19 is past GW3's lock (Oct 18 22:00): editing GW4.
+      expect(
+          saleEditingGameweek(
+              gameweeks: gws,
+              lockOverride: FantasyLockOverride.auto,
+              baseline: b,
+              nowUtc: DateTime.utc(2026, 10, 19, 12)),
+          4);
+      expect(
+          saleEditingGameweek(
+              gameweeks: gws,
+              lockOverride: FantasyLockOverride.locked,
+              baseline: b,
+              nowUtc: DateTime.utc(2026, 10, 17, 12)),
+          3);
+    });
+
+    test('schedule unknown: null (a baseline is not judged current)', () {
+      expect(
+          saleEditingGameweek(
+              gameweeks: null,
+              lockOverride: FantasyLockOverride.auto,
+              baseline: b,
+              nowUtc: DateTime.utc(2026, 10, 17, 12)),
+          isNull);
+    });
+
+    test('the owner\'s open override: the stored baseline is the week being '
+        'edited (the lock sweep stands down, so nothing can move it)', () {
+      expect(
+          saleEditingGameweek(
+              gameweeks: gws,
+              lockOverride: FantasyLockOverride.open,
+              baseline: b,
+              nowUtc: DateTime.utc(2026, 10, 19, 12)),
+          3);
+      // No baseline: the clock's week (nothing to judge anyway).
+      expect(
+          saleEditingGameweek(
+              gameweeks: gws,
+              lockOverride: FantasyLockOverride.open,
+              baseline: null,
+              nowUtc: DateTime.utc(2026, 10, 19, 12)),
+          4);
     });
   });
 }

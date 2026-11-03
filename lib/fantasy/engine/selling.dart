@@ -60,10 +60,44 @@ SaleBaseline? saleBaselineFromNode(Object? node) {
   );
 }
 
+/// What the fan app's own `Baselines/<uid>` feed emits
+/// (FantasyService.watchMySaleBaseline). Error ≠ fact: [degraded] means the
+/// read failed (or the node could not be read) with nothing known — the
+/// squad draft then never claims a budget ([loaded] false).
+class SaleBaselineState {
+  const SaleBaselineState({
+    this.baseline,
+    this.loaded = false,
+    this.degraded = false,
+  });
+
+  /// null with [loaded] = no node: a first squad (nothing held, nothing
+  /// sold yet).
+  final SaleBaseline? baseline;
+
+  /// The node's value is known (a real read answered).
+  final bool loaded;
+
+  /// The read failed before any value was known.
+  final bool degraded;
+}
+
+/// One `Baselines/<uid>` read as a feed state: absent → a first squad
+/// (`baseline: null, loaded: true`); present but unreadable (not a map, no
+/// `ForGw`) → degraded — a corrupt node is never taken for "no sales".
+SaleBaselineState saleBaselineStateFromNode(Object? node) {
+  if (node == null) return const SaleBaselineState(loaded: true);
+  final baseline = saleBaselineFromNode(node);
+  if (baseline == null) return const SaleBaselineState(degraded: true);
+  return SaleBaselineState(baseline: baseline, loaded: true);
+}
+
 /// The realized profit/loss the server will book if this squad locks now:
 /// the carried [SaleBaseline.realizedTenths] plus, for every baseline player
 /// NOT in [squadIds], the sale at the current price minus the price paid.
-/// A sold player missing from [currentPrices] adds 0. Null baseline -> 0.
+/// A sold player missing from [currentPrices], or priced 0 or below there,
+/// adds 0 (server parity, squad_integrity.ts judgeSale: no usable price is
+/// never a "sale at 0"). Null baseline -> 0.
 int realizedNowTenths(
   SaleBaseline? b,
   Iterable<String> squadIds,
@@ -74,7 +108,8 @@ int realizedNowTenths(
   var total = b.realizedTenths;
   b.prices.forEach((id, paid) {
     if (kept.contains(id)) return;
-    final current = currentPrices[id] ?? paid;
+    final current = currentPrices[id];
+    if (current == null || current <= 0) return;
     total +=
         sellPriceTenths(purchaseTenths: paid, currentTenths: current) - paid;
   });

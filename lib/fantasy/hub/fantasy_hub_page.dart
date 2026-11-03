@@ -22,6 +22,11 @@
 // Stripe Checkout in the phone's browser; the stream flips the card the
 // moment the server activates the pass — nothing polls.
 //
+// FPL selling (spec §4): the own `Baselines/<uid>` stream feeds the shared
+// draft's money (SquadDraftController.setSaleContext) together with the live
+// market prices and the gameweek being edited. It does NOT join the reveal
+// gate — until it answers the draft simply isn't moneyReady.
+//
 // Player profiles (round 3, spec §4): EVERY player tap inside the hub — News
 // "View player" and compact rows, the My Team court (chip sheet's "Player
 // profile"; a locked court's chip tap), the Leaderboards tab's Team of the
@@ -43,6 +48,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart'
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/access_pay_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart';
@@ -98,6 +104,7 @@ class FantasyHubPage extends StatefulWidget {
     this.profileOpener,
     this.nowUtc,
     this.accessStates,
+    this.saleBaselineStates,
     this.createCheckoutUrl,
     this.launchExternal,
     this.submitAccessClaim,
@@ -156,6 +163,9 @@ class FantasyHubPage extends StatefulWidget {
   /// Replaces `FantasyService.watchMyAccess`.
   final Stream<FantasyAccessState>? accessStates;
 
+  /// Replaces `FantasyService.watchMySaleBaseline` (FPL selling).
+  final Stream<SaleBaselineState>? saleBaselineStates;
+
   /// Replaces `FantasyService.createCheckoutUrl` (the Checkout callable).
   final Future<Uri?> Function()? createCheckoutUrl;
 
@@ -191,7 +201,9 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     season: widget.season,
     owner: 'FantasyHubPage',
     onChanged: () {
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      setState(() {});
+      _feedSaleContext(); // the schedule moves the week being edited
     },
     onConfig: _onConfig,
     configStates: widget.configStates,
@@ -245,6 +257,15 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   FantasyAccessState _access = FantasyAccessState.none;
   bool _accessLoaded = false;
 
+  /// The signed-in user's sale baseline (FPL selling, `Baselines/<uid>`):
+  /// null until the feed answers. NOT part of the reveal gate — the shared
+  /// draft just isn't moneyReady until it lands.
+  SaleBaselineState? _sale;
+
+  /// Re-feeds the draft's sale context when the clock crosses the next
+  /// lock: the week being edited moves on then even if no feed emits.
+  Timer? _saleBoundary;
+
   /// First-open walkthrough (spec §10a): null while the prefs flag loads,
   /// false = show the intro, true = straight to the hub.
   bool? _walkthroughSeen;
@@ -286,6 +307,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   StreamSubscription<FantasySquadAlert?>? _alertSub;
   StreamSubscription<Set<int>>? _voidedSub;
   StreamSubscription<FantasyAccessState>? _accessSub;
+  StreamSubscription<SaleBaselineState>? _saleSub;
 
   /// The push-tapped news post still to focus; cleared once the News tab
   /// has resolved it so a remounted tab (far tab swipes) never re-focuses.
@@ -326,7 +348,9 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _playersSub = (widget.playersStates ??
             FantasyService.watchPlayers(widget.sport, widget.season))
         .listen((p) {
-      if (mounted) setState(() => _players = p);
+      if (!mounted) return;
+      setState(() => _players = p);
+      _feedSaleContext(); // today's prices price the sales
     });
     _managerSub = (widget.managerStates ??
             FantasyService.watchMyManager(widget.sport, widget.season))
@@ -359,6 +383,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
       // an eternal skeleton.
       if (mounted) setState(() => _squadLoaded = true);
     });
+    _subscribeSaleBaseline();
     _alertSub = (widget.alertStates ??
             FantasyService.watchMySquadAlertAuto(widget.sport, widget.season))
         .listen((a) {
@@ -428,6 +453,67 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     }
   }
 
+  /// Listens to the own sale baseline (FPL selling). Error ≠ fact: a failed
+  /// read keeps the last known state; with none known the draft gets a
+  /// degraded state (never moneyReady). Never part of the reveal gate.
+  void _subscribeSaleBaseline() {
+    _saleSub?.cancel();
+    void degrade(Object e) {
+      debugPrint('FantasyHubPage: sale baseline feed failed: $e');
+      if (!mounted) return;
+      if (_sale?.loaded ?? false) return; // the last known state stays
+      _sale = const SaleBaselineState(degraded: true);
+      _feedSaleContext();
+    }
+
+    try {
+      _saleSub = (widget.saleBaselineStates ??
+              FantasyService.watchMySaleBaseline(widget.sport, widget.season))
+          .listen((s) {
+        if (!mounted) return;
+        _sale = s;
+        _feedSaleContext();
+      }, onError: degrade);
+    } catch (e) {
+      degrade(e);
+    }
+  }
+
+  DateTime _nowUtc() => (widget.nowUtc ?? () => DateTime.now().toUtc())();
+
+  /// Hands the shared draft its money context: the sale baseline, today's
+  /// market prices and the week being edited (saleEditingGameweek). Called
+  /// on every baseline / players / schedule / config change, and again at
+  /// the next lock (the clock moves the edited week on by itself).
+  void _feedSaleContext() {
+    _saleBoundary?.cancel();
+    _saleBoundary = null;
+    final draft = _draft;
+    if (draft == null || !mounted) return;
+    final now = _nowUtc();
+    final gws = _schedule.gameweeks;
+    draft.setSaleContext(
+      sale: _sale,
+      currentPrices: {
+        for (final p in _players ?? const <FantasyPlayer>[])
+          p.name: p.priceTenths,
+      },
+      editingGw: saleEditingGameweek(
+        gameweeks: gws,
+        lockOverride: _configState?.lockOverride ?? FantasyLockOverride.auto,
+        baseline: _sale?.baseline,
+        nowUtc: now,
+      ),
+    );
+    for (final g in gws ?? const <Gameweek>[]) {
+      if (!now.isBefore(g.lockUtc)) continue;
+      var wait = g.lockUtc.difference(now);
+      if (wait > const Duration(days: 1)) wait = const Duration(days: 1);
+      _saleBoundary = Timer(wait, _feedSaleContext);
+      break;
+    }
+  }
+
   /// The pay card's side effects: the Checkout callable, the external
   /// browser, the claim write, the feed retry — seams first.
   FantasyAccessActions get _accessActions => FantasyAccessActions(
@@ -464,6 +550,9 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
       } else {
         _draft!.syncConfig(s.config);
       }
+      // A new draft needs the money context (the baseline may have landed
+      // first); a changed lock override moves the week being edited.
+      _feedSaleContext();
     }
     _configForRules.add(s);
   }
@@ -477,6 +566,8 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _alertSub?.cancel();
     _voidedSub?.cancel();
     _accessSub?.cancel();
+    _saleSub?.cancel();
+    _saleBoundary?.cancel();
     _configForRules.close();
     _managerForTabs.close();
     _squadForTabs.close();
