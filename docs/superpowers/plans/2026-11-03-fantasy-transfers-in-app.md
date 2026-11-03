@@ -42,7 +42,7 @@
 - TS and Dart engine twins change together (`transfers.ts` ↔ `lib/fantasy/engine/transfers.dart`).
 - Both rules files change together and `functions/src/rules_contract.test.ts` pins every new rule.
 - Deploy order: rules → functions → app. Never `--apply` the fill tool. Never push.
-- Deploy before the first rollover of Season 16 (end of S16 GW1).
+- Deploy before Season 16 opens for saving (final review: deploying before the first rollover alone would let GW1 saves land without a transfer baseline).
 
 ## Review Focus
 
