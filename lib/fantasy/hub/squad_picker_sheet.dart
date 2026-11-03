@@ -27,7 +27,9 @@ import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 /// [remainingTenths] is the shared draft's room for this pick (a swap: the
 /// room after the outgoing player leaves) and [priceOf] what a candidate
 /// takes from it (SquadDraftController.addCostOf) — the price each row
-/// shows and is judged affordable by (FPL selling, spec §4).
+/// shows and is judged affordable by (FPL selling, spec §4). While
+/// [moneyReady] is false (SquadDraftController.moneyReady) the header
+/// claims no room ("— left"); the rows still use the draft's numbers.
 Future<FantasyPlayer?> showSquadPickerSheet(
   BuildContext context, {
   required FantasyPosition position,
@@ -35,6 +37,7 @@ Future<FantasyPlayer?> showSquadPickerSheet(
   required Set<String> excludeIds,
   required int remainingTenths,
   required int Function(FantasyPlayer player) priceOf,
+  required bool moneyReady,
 }) {
   return showModalBottomSheet<FantasyPlayer>(
     context: context,
@@ -47,6 +50,7 @@ Future<FantasyPlayer?> showSquadPickerSheet(
       excludeIds: excludeIds,
       remainingTenths: remainingTenths,
       priceOf: priceOf,
+      moneyReady: moneyReady,
     ),
   );
 }
@@ -58,6 +62,7 @@ class _PickerSheet extends StatefulWidget {
     required this.excludeIds,
     required this.remainingTenths,
     required this.priceOf,
+    required this.moneyReady,
   });
 
   final FantasyPosition position;
@@ -65,6 +70,7 @@ class _PickerSheet extends StatefulWidget {
   final Set<String> excludeIds;
   final int remainingTenths;
   final int Function(FantasyPlayer player) priceOf;
+  final bool moneyReady;
 
   @override
   State<_PickerSheet> createState() => _PickerSheetState();
@@ -116,11 +122,14 @@ class _PickerSheetState extends State<_PickerSheet> {
                     ),
                   ),
                   Text(
-                    '${formatMoneyTenths(widget.remainingTenths)} left',
+                    widget.moneyReady
+                        ? '${formatMoneyTenths(widget.remainingTenths)} left'
+                        : '— left',
+                    key: const ValueKey('picker_left'),
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w600,
-                      color: widget.remainingTenths < 0
+                      color: widget.moneyReady && widget.remainingTenths < 0
                           ? fantasyDownRed(context)
                           : scheme.onSurfaceVariant,
                     ),

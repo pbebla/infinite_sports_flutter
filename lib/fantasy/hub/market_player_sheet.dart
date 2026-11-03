@@ -320,9 +320,11 @@ class _SheetAction extends StatelessWidget {
     final addable = availability == MarketAddAvailability.addable;
     final reason = marketAddReason(availability, player.position);
     // FPL selling (spec §4): an owned baseline player's Remove says what he
-    // was bought at and what selling him banks.
-    final bought = inSquad ? draft.boughtPriceOf(player.name) : null;
-    final sells = inSquad ? draft.sellPriceOf(player.name) : null;
+    // was bought at and what selling him banks — only once the draft's
+    // money is real (never a stale or made-up sell price).
+    final showSale = inSquad && draft.moneyReady;
+    final bought = showSale ? draft.boughtPriceOf(player.name) : null;
+    final sells = showSale ? draft.sellPriceOf(player.name) : null;
 
     void onPressed() {
       if (inSquad) {

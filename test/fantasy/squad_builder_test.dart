@@ -1193,43 +1193,146 @@ void main() {
       expect(savedSquads, hasLength(1));
     });
 
+    const pendingText =
+        'Your budget is still updating — try again in a few minutes.';
+
+    String? leftText(WidgetTester tester, String key) =>
+        tester.widget<Text>(find.byKey(ValueKey(key))).data;
+
+    Future<void> makeAttOneCaptain(WidgetTester tester) async {
+      await tester.tap(find.byKey(const ValueKey('squad_chip_Att One')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('action_make_captain')));
+      await tester.pumpAndSettle();
+    }
+
+    /// Every [keys] widget is on screen inside 360 px (scrolled to), and no
+    /// text anywhere is ellipsized.
+    Future<void> expectFits360(WidgetTester tester, List<String> keys) async {
+      final scrollable = find.byType(Scrollable).first;
+      for (final key in keys) {
+        await tester.dragUntilVisible(
+            find.byKey(ValueKey(key)), scrollable, const Offset(0, -200));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull, reason: key);
+        final r = tester.getRect(find.byKey(ValueKey(key)));
+        expect(r.left, greaterThanOrEqualTo(0), reason: key);
+        expect(r.right, lessThanOrEqualTo(360), reason: key);
+      }
+      for (final t in tester.widgetList<Text>(find.byType(Text))) {
+        expect(t.overflow, isNot(TextOverflow.ellipsis), reason: t.data);
+      }
+    }
+
     for (final brightness in Brightness.values) {
-      testWidgets('360 px: the realized line and the money-pending sentence '
-          'fit, no overflow — $brightness', (tester) async {
-        // A stale baseline with a loss: the line shows, Save is gated.
-        final draft = draftWith(sale: baseline(realized: -125, forGw: 2));
+      testWidgets('360 px: the realized line fits, no overflow — $brightness',
+          (tester) async {
+        final draft = draftWith(sale: baseline(realized: -125));
         await pumpBuilder(tester,
             draft: draft,
             brightness: brightness,
             size: const Size(360, 760));
         await tester.pump();
-        await tester.tap(find.byKey(const ValueKey('squad_chip_Att One')));
-        await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const ValueKey('action_make_captain')));
-        await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
+        expect(leftText(tester, 'budget_left'), '\$2.5M left');
         expect(realizedLine(tester).data, 'Includes −\$12.5M from sales');
         expect(realizedLine(tester).style?.color, red(brightness));
+        await expectFits360(tester, ['budget_bar', 'budget_realized']);
+      });
 
-        final scrollable = find.byType(Scrollable).first;
-        for (final key in ['budget_bar', 'budget_realized', 'squad_save']) {
-          await tester.dragUntilVisible(
-              find.byKey(ValueKey(key)), scrollable, const Offset(0, -200));
-          await tester.pumpAndSettle();
-          expect(tester.takeException(), isNull, reason: key);
-          final r = tester.getRect(find.byKey(ValueKey(key)));
-          expect(r.left, greaterThanOrEqualTo(0), reason: key);
-          expect(r.right, lessThanOrEqualTo(360), reason: key);
-        }
-        final pending = find.text(
-            'Your budget is still updating — try again in a few minutes.');
-        expect(pending, findsOneWidget);
-        final r = tester.getRect(pending);
+      // Error ≠ fact: last week's baseline is not this week's money — the
+      // bar keeps what is spent but claims no room, no sales and no
+      // over-budget verdict; an edit is told the budget is still updating.
+      testWidgets('360 px, money not ready (a stale baseline): "— left", no '
+          'realized line, no over-budget sentence — only "still updating" '
+          '— $brightness', (tester) async {
+        // If it were this week's money: $30.0M available, $35.0M spent —
+        // "$5.0M over" with a −$20.0M line. None of it may show.
+        final draft = draftWith(sale: baseline(realized: -200, forGw: 2));
+        await pumpBuilder(tester,
+            draft: draft,
+            brightness: brightness,
+            size: const Size(360, 760));
+        await tester.pump();
+        expect(draft.moneyReady, isFalse);
+        expect(find.text('\$35.0M spent'), findsOneWidget);
+        expect(leftText(tester, 'budget_left'), '— left');
+        expect(find.byKey(const ValueKey('budget_realized')), findsNothing);
+        expect(find.textContaining(RegExp(r'\bover\b')), findsNothing);
+        final bar = tester.widget<LinearProgressIndicator>(find.descendant(
+            of: find.byKey(const ValueKey('budget_bar')),
+            matching: find.byType(LinearProgressIndicator)));
+        expect(bar.value, 0); // no total implied
+        // Clean: Save is off anyway — no sentence yet.
+        expect(find.text(pendingText), findsNothing);
+
+        await makeAttOneCaptain(tester);
+        expect(tester.takeException(), isNull);
+        expect(find.text(pendingText), findsOneWidget);
+        expect(find.textContaining('over budget'), findsNothing);
+        expect(saveEnabled(tester), isFalse);
+        await expectFits360(tester, ['budget_bar', 'squad_save']);
+        final r = tester.getRect(find.text(pendingText));
+        expect(r.left, greaterThanOrEqualTo(0));
         expect(r.right, lessThanOrEqualTo(360));
-        for (final t in tester.widgetList<Text>(find.byType(Text))) {
-          expect(t.overflow, isNot(TextOverflow.ellipsis), reason: t.data);
-        }
       });
     }
+
+    testWidgets('not ready + dirty + over budget: the pending sentence only; '
+        'ready again: the numbers come back', (tester) async {
+      // 7 × $8.0M = $56.0M against $50.0M — but nothing has loaded yet.
+      final draft = draftWith(squad: fullSquad(price: 80), withContext: false);
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      expect(find.text('\$56.0M spent'), findsOneWidget);
+      expect(leftText(tester, 'budget_left'), '— left');
+      expect(find.text('\$6.0M over'), findsNothing);
+
+      await makeAttOneCaptain(tester);
+      expect(find.text(pendingText), findsOneWidget);
+      expect(find.textContaining('over budget'), findsNothing);
+      expect(find.text('Choose a captain.'), findsNothing);
+      expect(saveEnabled(tester), isFalse);
+
+      // The money lands (a first squad at today's market): the real
+      // verdict replaces the pending sentence.
+      draft.setSaleContext(
+          sale: const SaleBaselineState(loaded: true),
+          currentPrices: market(),
+          editingGw: 3);
+      await tester.pump();
+      expect(find.text(pendingText), findsNothing);
+      expect(find.text("You're \$6.0M over budget."), findsOneWidget);
+      expect(leftText(tester, 'budget_left'), '\$6.0M over');
+      expect(saveEnabled(tester), isFalse);
+    });
+
+    testWidgets('the picker claims no room while the money is not ready',
+        (tester) async {
+      final draft = draftWith(withContext: false);
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      Future<void> openSwap() async {
+        await tester.tap(find.byKey(const ValueKey('squad_chip_Att One')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('action_swap')));
+        await tester.pumpAndSettle();
+      }
+
+      await openSwap();
+      expect(leftText(tester, 'picker_left'), '— left');
+      await tester.tapAt(const Offset(10, 10)); // dismiss the sheet
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('picker_left')), findsNothing);
+
+      draft.setSaleContext(
+          sale: const SaleBaselineState(loaded: true),
+          currentPrices: market(),
+          editingGw: 3);
+      await tester.pump();
+      await openSwap();
+      // $50.0M − $35.0M + his $5.0M back.
+      expect(leftText(tester, 'picker_left'), '\$20.0M left');
+    });
   });
 }

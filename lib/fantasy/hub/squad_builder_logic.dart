@@ -258,10 +258,10 @@ const String squadSaveLockedMessage =
     "The deadline passed while you were editing — this week's team is "
     "locked. Your changes weren't saved.";
 
-/// Shown under the issues while Save waits for the money (FPL selling, spec
-/// §4): the shared draft is not moneyReady — the market prices or this
-/// week's `Baselines/<uid>` haven't loaded, or the read failed — so its
-/// budget can't be trusted yet.
+/// Shown with the issues while Save waits for the money (FPL selling, spec
+/// §4) — whenever the draft has unsaved edits and is not moneyReady (the
+/// market prices or this week's `Baselines/<uid>` haven't loaded, or the
+/// read failed), so its budget can't be trusted yet.
 const String squadMoneyPendingMessage =
     'Your budget is still updating — try again in a few minutes.';
 
@@ -395,6 +395,10 @@ bool squadEditable({
 /// charged prices, SquadDraftController.spentTenths) above
 /// [availableTenths] (budget + realized sales,
 /// SquadDraftController.availableTenths) — the same figures as the bar.
+/// [moneyReady] false (SquadDraftController.moneyReady: the market or this
+/// week's baseline hasn't loaded, or the read failed) drops the over-budget
+/// sentence — an over-budget fact is never asserted from unready money; the
+/// builder says "still updating" instead.
 List<String> issueSentences({
   required List<SquadSlot> slots,
   required List<SquadPick?> slotPicks,
@@ -405,6 +409,7 @@ List<String> issueSentences({
   List<SquadPick> unplaced = const [],
   required int spentTenths,
   required int availableTenths,
+  required bool moneyReady,
 }) {
   final squad = draftToSquad(
       slotPicks: slotPicks, captainId: captainId, viceId: viceId, chip: chip);
@@ -446,8 +451,9 @@ List<String> issueSentences({
   }
 
   // The engine's own overBudget (pick prices vs the bare budget) is NOT
-  // read: the draft's figures are the ones the server will judge.
-  if (spentTenths > availableTenths) {
+  // read: the draft's figures are the ones the server will judge — and
+  // only once they are real.
+  if (moneyReady && spentTenths > availableTenths) {
     final over = spentTenths - availableTenths;
     out.add("You're ${formatMoneyTenths(over)} over budget.");
   }

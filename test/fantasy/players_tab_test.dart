@@ -1205,6 +1205,34 @@ void main() {
       });
     }
 
+    testWidgets('money not ready: no line; ready again: the line comes back',
+        (tester) async {
+      // Last week's baseline (ForGw 2 while GW3 is edited): never a stale
+      // "Sells for" presented as this week's.
+      draft.setSaleContext(
+        sale: const SaleBaselineState(
+          baseline: SaleBaseline(
+              forGw: 2, prices: {'Ava Striker': 80}, realizedTenths: 0),
+          loaded: true,
+        ),
+        currentPrices: {for (final p in players) p.name: p.priceTenths},
+        editingGw: 3,
+      );
+      draft.addPlayer(players[4]); // Ava, held at her $8.0M
+      await pumpSheet(tester, players[4]);
+      expect(draft.moneyReady, isFalse);
+      expect(find.byKey(const ValueKey('sheet_remove')), findsOneWidget);
+      expect(find.byKey(const ValueKey('sheet_sells_for')), findsNothing);
+
+      feedBaseline();
+      await tester.pump();
+      expect(
+          tester
+              .widget<Text>(find.byKey(const ValueKey('sheet_sells_for')))
+              .data,
+          'Bought \$8.0M · Sells for \$7.0M');
+    });
+
     testWidgets('an owned player bought this week, or one not owned: no line',
         (tester) async {
       feedBaseline();

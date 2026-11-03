@@ -253,6 +253,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       excludeIds: _draft.playerIds,
       remainingTenths: remaining,
       priceOf: _draft.addCostOf,
+      moneyReady: _draft.moneyReady,
     );
     if (player == null || !mounted) return;
     final message = _draft.setPickAt(
@@ -303,6 +304,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       // The moved player leaves: his money back, his sale booked.
       remainingTenths: _draft.remainingIfRemovedTenths(pick),
       priceOf: _draft.addCostOf,
+      moneyReady: _draft.moneyReady,
     );
     if (player == null || !mounted) return;
     _announceArmbandLoss(_draft.swapUnplaced(pick.playerId, slot,
@@ -389,6 +391,10 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       for (final p in widget.players)
         if (p.photoUrl != null) p.name: p.photoUrl,
     };
+    // FPL selling (spec §4): the draft's money is shown as fact — the room,
+    // the sales line, an over-budget verdict — only once it is real; until
+    // then Save waits (error ≠ fact).
+    final moneyReady = _draft.moneyReady;
     final issues = issueSentences(
       slots: _draft.slots,
       slotPicks: _draft.picks,
@@ -399,14 +405,14 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       unplaced: _draft.unplaced,
       spentTenths: _draft.spentTenths,
       availableTenths: _draft.availableTenths,
+      moneyReady: moneyReady,
     );
     final valid = issues.isEmpty;
-    // FPL selling (spec §4): Save waits until the draft's money is real.
-    // Said only when it is the ONE thing holding a save back (a valid,
-    // changed draft) — a clean draft can't save anyway, so the baseline
-    // landing just after the reveal never flashes the sentence.
-    final moneyReady = _draft.moneyReady;
-    final moneyPending = valid && _draft.dirty && !moneyReady;
+    // Said whenever there are unsaved edits (valid or not — an unready
+    // draft never gets an over-budget verdict, so this is its only money
+    // sentence). A clean draft can't save anyway, so the baseline landing
+    // just after the reveal never flashes it.
+    final moneyPending = _draft.dirty && !moneyReady;
     final shownIssues = [
       ...issues,
       if (moneyPending) squadMoneyPendingMessage,
@@ -450,6 +456,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
                 spent: _draft.spentTenths,
                 available: _draft.availableTenths,
                 realized: _draft.realizedTenths,
+                moneyReady: moneyReady,
               )
             else
               const _LockedLiveStrip(),
@@ -540,25 +547,36 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
 /// and a second line says so whenever that isn't zero: "Includes +$0.5M
 /// from sales" (muted) / "Includes −$0.5M from sales" (the bright fantasy
 /// down red, both themes).
+///
+/// Error ≠ fact: while the draft's money isn't real ([moneyReady] false —
+/// the market or this week's baseline hasn't loaded, or the read failed)
+/// the bar keeps "$X spent" but claims nothing else: "— left" in the same
+/// style, no sales line, no over state, and an empty track (no total
+/// implied).
 class _BudgetBar extends StatelessWidget {
   const _BudgetBar({
     required this.spent,
     required this.available,
     required this.realized,
+    required this.moneyReady,
   });
 
   final int spent;
   final int available;
   final int realized;
+  final bool moneyReady;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final green = fantasyPitchGreen(context);
-    final over = spent > available;
+    final over = moneyReady && spent > available;
     final remaining = available - spent;
-    final fill =
-        available <= 0 ? 1.0 : (spent / available).clamp(0.0, 1.0);
+    final fill = !moneyReady
+        ? 0.0
+        : available <= 0
+            ? 1.0
+            : (spent / available).clamp(0.0, 1.0);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
 
     return Container(
@@ -583,9 +601,12 @@ class _BudgetBar extends StatelessWidget {
                 ),
               ),
               Text(
-                over
-                    ? '${formatMoneyTenths(-remaining)} over'
-                    : '${formatMoneyTenths(remaining)} left',
+                !moneyReady
+                    ? '— left'
+                    : over
+                        ? '${formatMoneyTenths(-remaining)} over'
+                        : '${formatMoneyTenths(remaining)} left',
+                key: const ValueKey('budget_left'),
                 style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.w800,
@@ -596,7 +617,7 @@ class _BudgetBar extends StatelessWidget {
               ),
             ],
           ),
-          if (realized != 0) ...[
+          if (moneyReady && realized != 0) ...[
             const SizedBox(height: 2),
             Text(
               realizedSalesLine(realized),

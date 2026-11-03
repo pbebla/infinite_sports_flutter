@@ -728,6 +728,30 @@ void main() {
         expect(key('profile_sells_for'), findsNothing);
       });
 
+      testWidgets('money not ready (last week\'s baseline): no line; ready '
+          'again: the line comes back', (tester) async {
+        draft.setSaleContext(
+          sale: const SaleBaselineState(
+            baseline: SaleBaseline(
+                forGw: 2, prices: {_name: 70}, realizedTenths: 0),
+            loaded: true,
+          ),
+          currentPrices: {for (final p in market) p.name: p.priceTenths},
+          editingGw: 3,
+        );
+        draft.addPlayer(market.first);
+        await pumpPage(tester);
+        await emitAll(tester);
+        expect(draft.moneyReady, isFalse);
+        expect(key('profile_remove'), findsOneWidget);
+        expect(key('profile_sells_for'), findsNothing);
+
+        feedBaseline();
+        await tester.pumpAndSettle();
+        expect(tester.widget<Text>(key('profile_sells_for')).data,
+            'Bought \$7.0M · Sells for \$7.2M');
+      });
+
       testWidgets('an owned player bought this week: no line',
           (tester) async {
         feedBaseline();

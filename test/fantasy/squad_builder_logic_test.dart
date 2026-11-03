@@ -222,6 +222,7 @@ void main() {
         unplaced: [pick('Moved Keeper', FantasyPosition.def)],
         spentTenths: 350,
         availableTenths: 500,
+        moneyReady: true,
       );
       expect(out.first,
           'Find Moved Keeper a new spot — swap him out or remove him.');
@@ -366,6 +367,7 @@ void main() {
         cfg: cfg,
         spentTenths: 0,
         availableTenths: 500,
+        moneyReady: true,
       );
       expect(out, contains('Pick a goalkeeper.'));
       expect(out, contains('Pick 2 defenders — you have 0.'));
@@ -386,6 +388,7 @@ void main() {
         cfg: cfg,
         spentTenths: 50,
         availableTenths: 500,
+        moneyReady: true,
       );
       expect(out, contains('Pick 2 defenders — you have 1.'));
     });
@@ -409,6 +412,7 @@ void main() {
         cfg: cfg,
         spentTenths: 350,
         availableTenths: 500,
+        moneyReady: true,
       );
       expect(out, ['Choose a captain and vice-captain.']);
 
@@ -420,6 +424,7 @@ void main() {
         cfg: cfg,
         spentTenths: 350,
         availableTenths: 500,
+        moneyReady: true,
       );
       expect(onlyVice, ['Choose a captain.']);
     });
@@ -434,6 +439,7 @@ void main() {
         cfg: cfg,
         spentTenths: 560,
         availableTenths: 500,
+        moneyReady: true,
       );
       expect(out, ["You're \$6.0M over budget."]);
     });
@@ -451,6 +457,7 @@ void main() {
             cfg: cfg,
             spentTenths: spent,
             availableTenths: available,
+            moneyReady: true,
           ).where((s) => s.contains('over budget')).firstOrNull;
 
       // $50.5M spent: legal with +$0.5M from sales, $0.5M over without.
@@ -465,6 +472,33 @@ void main() {
           "You're \$1.5M over budget.");
     });
 
+    test('unready money never asserts an over-budget fact', () {
+      final out = issueSentences(
+        slots: slots,
+        slotPicks: fullPicks(price: 80),
+        captainId: 'GK One',
+        viceId: 'Def One',
+        cfg: cfg,
+        spentTenths: 560,
+        availableTenths: 500,
+        moneyReady: false,
+      );
+      expect(out, isEmpty);
+      // The other sentences don't depend on the money.
+      final partial = issueSentences(
+        slots: slots,
+        slotPicks: List.filled(slots.length, null),
+        captainId: null,
+        viceId: null,
+        cfg: cfg,
+        spentTenths: 600,
+        availableTenths: 500,
+        moneyReady: false,
+      );
+      expect(partial, contains('Pick a goalkeeper.'));
+      expect(partial.any((s) => s.contains('over budget')), isFalse);
+    });
+
     test('a valid squad has no sentences', () {
       final out = issueSentences(
         slots: slots,
@@ -474,6 +508,7 @@ void main() {
         cfg: cfg,
         spentTenths: 350,
         availableTenths: 500,
+        moneyReady: true,
       );
       expect(out, isEmpty);
     });

@@ -864,8 +864,10 @@ class _DraftAction extends StatelessWidget {
     final reason = marketAddReason(availability, player.position);
     // An owned baseline player's Remove says what he was bought at and
     // what selling him banks; anyone bought this week has no such line.
-    final bought = inSquad ? draft.boughtPriceOf(player.name) : null;
-    final sells = inSquad ? draft.sellPriceOf(player.name) : null;
+    // Only once the draft's money is real (never a stale sell price).
+    final showSale = inSquad && draft.moneyReady;
+    final bought = showSale ? draft.boughtPriceOf(player.name) : null;
+    final sells = showSale ? draft.sellPriceOf(player.name) : null;
 
     void onPressed() {
       if (inSquad) {

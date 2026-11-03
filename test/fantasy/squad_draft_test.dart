@@ -606,6 +606,12 @@ void main() {
       faller.addPlayer(attTwo);
       expect(faller.remainingTenths, room - 40);
     });
+
+    test('addCostOf: the player must not already be owned', () {
+      final d = draftWith();
+      expect(() => d.addCostOf(player('Att One', FantasyPosition.att, 90)),
+          throwsA(isA<AssertionError>()));
+    });
   });
 
   group('saleEditingGameweek', () {

@@ -816,16 +816,35 @@ void main() {
       expect(draft.spentTenths, 410);
     });
 
-    testWidgets('a price history read error is logged; the floor falls back '
-        'to today\'s price', (tester) async {
+    testWidgets('a price history read error is logged and keeps the last '
+        'known history (error ≠ fact)', (tester) async {
       final logs = <String>[];
       final original = debugPrint;
       debugPrint =
           (String? message, {int? wrapWidth}) => logs.add(message ?? '');
       try {
         final draft = await hubDraft(tester);
+        // A first squad: every pick NEW. Ava was saved at 70; last week she
+        // was 70; today she is 80 → her floor is min(80, 70) = 70.
         sale.add(const SaleBaselineState(loaded: true));
+        priceHistory.add(const {
+          2: {'Ava Striker': 70},
+        });
+        final dearAva = [
+          for (final p in market)
+            p.name == 'Ava Striker'
+                ? _player('Ava Striker', FantasyPosition.att, 80)
+                : p,
+        ];
+        players.add(dearAva);
+        await settle(tester);
+        expect(draft.spentTenths, 410);
+
         priceHistory.addError(StateError('network'));
+        await settle(tester);
+        // The next feed (a market re-emit) still prices her from the last
+        // known history — a wiped history would charge today's 80 (420).
+        players.add([...dearAva]);
         await settle(tester);
         expect(tester.takeException(), isNull);
         expect(key('hub'), findsOneWidget);

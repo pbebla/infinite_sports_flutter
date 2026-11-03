@@ -25,8 +25,9 @@
 // room is budget + realized − spent. Every UI money figure (the budget bar,
 // the picker, the market's add controls, the over-budget sentence) reads
 // it from here. Error ≠ fact: [moneyReady] is false until the market and a
-// current baseline (or a known first squad) have loaded, and Save waits
-// for it.
+// current baseline (or a known first squad) have loaded; until then the UI
+// shows no room, sales line, sell price or over-budget verdict as fact, and
+// Save waits.
 //
 // Pure-ish: flutter/foundation only (ChangeNotifier), all placement/armband
 // math delegated to squad_builder_logic.dart; unit-tested in
@@ -220,12 +221,17 @@ class SquadDraftController extends ChangeNotifier {
   int buyPriceOf(FantasyPlayer p) =>
       buyPriceTenths(_baseline, p.name, p.priceTenths);
 
-  /// What adding [p] (not owned) takes from [remainingTenths] — the number
-  /// every add/pick control compares with the room: his charged price
+  /// What adding [p] takes from [remainingTenths] — the number every
+  /// add/pick control compares with the room: his charged price
   /// ([priceOfPick] of [newPick]) plus any sale his return undoes. A new
   /// player: today's price. A sold baseline player: what selling him
-  /// banked ([sellPriceOf]) — taking him back un-books that sale.
+  /// banked ([sellPriceOf]) — taking him back un-books that sale. [p] must
+  /// NOT be owned by the draft already (the market shows Remove for him,
+  /// the picker excludes him); anything else is a caller bug (asserted in
+  /// debug builds).
   int addCostOf(FantasyPlayer p) {
+    assert(!_ownedPicks.any((q) => q.playerId == p.name),
+        'addCostOf: ${p.name} is already in the draft');
     final ids = [for (final q in _ownedPicks) q.playerId];
     final before = _realizedFor(ids);
     final after = _realizedFor([...ids, p.name]);
