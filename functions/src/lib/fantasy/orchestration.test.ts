@@ -9,9 +9,13 @@ import { describe, expect, it } from 'vitest';
 import { STARTER_CATALOG } from './badges';
 import { clone, Json, loadGoldenFixture } from './golden_fixture';
 import {
-  maybeFinalizeGame, runLifecycleSweep, runMondayReprice,
+  maybeFinalizeGame, publishSaleBaselines, runLifecycleSweep, runMondayReprice,
 } from './orchestration';
 import { FantasyDb, FantasyTxResult } from './orchestration_db';
+import {
+  AFTER_LOCK2, F_ROOT, FakeDb as ColdFakeDb, fixtureSquad, GW1_DATE, GW2_DATE,
+  world2,
+} from './test_support';
 
 const fixture = loadGoldenFixture();
 
@@ -656,5 +660,219 @@ describe('PriceHistory at lock (round 3 spec 3.2)', () => {
     const empty = new FakeDb(seed);
     await runLifecycleSweep(empty, AFTER_LOCK);
     expect(await empty.read(`${fRoot}/PriceHistory`)).toBeNull();
+  });
+});
+
+// FPL selling rule (spec §4), Task 3: Baselines/<uid> = { ForGw,
+// RealizedTenths, Prices } — the last locked prices + the running sale
+// total, written for EVERY manager at the lock and re-checked by every
+// finalize, so the fan app shows the money the next lock will charge.
+// Two-gameweek world (test_support.ts world2: GW1 finalized with the golden
+// squads, GW2 the week under test) on the cold-transaction FakeDb.
+describe('Baselines/<uid> (FPL selling: last locked prices + realized)', () => {
+  const t = (db: ColdFakeDb) => db.data.Fantasy.Futsal['15'];
+  /** GW2 games still live: the sweep locks, nothing finalizes. */
+  const lockOnly = () => new ColdFakeDb(world2({ gw2Status: 1 }));
+  const LATER2 = new Date(AFTER_LOCK2.getTime() + 15 * 60_000);
+  const finalizeGw = (db: ColdFakeDb, dateKey: string) => maybeFinalizeGame(db, {
+    sport: 'Futsal', season: '15', dateKey, nowUtc: AFTER_LOCK2,
+  });
+  const baselineWrites = (db: ColdFakeDb) =>
+    db.writes.filter((w) => w.includes('/Baselines/'));
+  // The golden GW1 squads' prices (golden_gameweek.json).
+  const GW1_ALPHA = { Eli: 55, Dana: 80, Eva: 50, Ezra: 65, Alex: 95, Will: 60, Wren: 75 };
+  const GW1_BOOST = { Sam: 85, Bea: 70, Will: 60, Ben: 85, Wren: 75, Eva: 50, Ezra: 65 };
+  const GW1_CHURN = { Bo: 75, Dana: 80, Bea: 70, Ezra: 65, Ben: 85, Eva: 50, Wren: 75 };
+
+  it('(a) the lock writes ForGw = gw + 1 for every snapshotted manager', async () => {
+    const db = lockOnly();
+    // alpha sells Alex (bought 95, now 105: sells for 95 + 5 = 100, +5) for
+    // Ben (85 at market).
+    t(db).Players.Alex.priceTenths = 105;
+    t(db).Squads.alpha.picks[4] =
+      { playerId: 'Ben', position: 'ATT', priceTenths: 85, bench: false };
+    t(db).Squads.alpha.viceId = 'Ben';
+    await runLifecycleSweep(db, AFTER_LOCK2);
+
+    expect(await db.read(`${F_ROOT}/PublishedPicks/2/alpha/realizedTenths`)).toBe(5);
+    expect(await db.read(`${F_ROOT}/Baselines/alpha`)).toEqual({
+      ForGw: 3, RealizedTenths: 5,
+      Prices: { Eli: 55, Dana: 80, Eva: 50, Ezra: 65, Ben: 85, Will: 60, Wren: 75 },
+    });
+    expect(await db.read(`${F_ROOT}/Baselines/boost`))
+      .toEqual({ ForGw: 3, RealizedTenths: 0, Prices: GW1_BOOST });
+    expect(await db.read(`${F_ROOT}/Baselines/churn`))
+      .toEqual({ ForGw: 3, RealizedTenths: 0, Prices: GW1_CHURN });
+  });
+
+  it('(b) a manager with no squad at the lock still gets a fresh baseline', async () => {
+    const db = lockOnly();
+    t(db).Managers = { alpha: { TeamName: 'Alpha FC' }, dave: { TeamName: 'Dave XI' } };
+    await runLifecycleSweep(db, AFTER_LOCK2);
+    expect(await db.read(`${F_ROOT}/PublishedPicks/2/dave`)).toBeNull();
+    expect(await db.read(`${F_ROOT}/Baselines/dave`))
+      .toEqual({ ForGw: 3, RealizedTenths: 0, Prices: {} });
+  });
+
+  it('deleting or breaking the squad before a lock never wipes a loss: the '
+    + 'running total carries (Prices do not)', async () => {
+    const db = lockOnly();
+    t(db).Baselines = {
+      alpha: { ForGw: 2, RealizedTenths: -15, Prices: GW1_ALPHA },
+      churn: { ForGw: 2, RealizedTenths: 7, Prices: GW1_CHURN },
+    };
+    // Even with no Managers row: an existing Baselines/<uid> is rolled too.
+    delete t(db).Squads.alpha;
+    t(db).Squads.churn = { picks: 'junk', captainId: 'x', viceId: 'x', realizedTenths: 999 };
+    await runLifecycleSweep(db, AFTER_LOCK2);
+    expect(await db.read(`${F_ROOT}/Baselines/alpha`))
+      .toEqual({ ForGw: 3, RealizedTenths: -15, Prices: {} });
+    expect(await db.read(`${F_ROOT}/Baselines/churn`))
+      .toEqual({ ForGw: 3, RealizedTenths: 7, Prices: {} });
+  });
+
+  it('the lock judge takes the realized money from Baselines/<uid> when it is '
+    + 'for the judged week — even with NO previous squad', async () => {
+    const db = lockOnly();
+    // dave: no GW1 squad, -15 carried into GW2. Eli claimed at 61 (> market
+    // 55) counts at 61: the squad spends 486 = 500 - 15 + 1.
+    const dave = fixtureSquad('alpha');
+    dave['picks'][0]['priceTenths'] = 61;
+    t(db).Squads.dave = dave;
+    t(db).Baselines = { dave: { ForGw: 2, RealizedTenths: -15 } };
+    await runLifecycleSweep(db, AFTER_LOCK2);
+    expect(await db.read(`${F_ROOT}/PublishedPicks/2/dave`))
+      .toMatchObject({ Invalid: ['overBudget'], realizedTenths: -15 });
+    expect(await db.read(`${F_ROOT}/SquadAlerts/dave`))
+      .toMatchObject({ Gw: 2, Kind: 'invalid', Issues: ['overBudget'] });
+    // The Invalid week passes the running total on, with no trusted prices.
+    expect(await db.read(`${F_ROOT}/Baselines/dave`))
+      .toEqual({ ForGw: 3, RealizedTenths: -15, Prices: {} });
+
+    // At 485 (Eli at 60) the same manager is clean, still at -15.
+    const clean = lockOnly();
+    const dave485 = fixtureSquad('alpha');
+    dave485['picks'][0]['priceTenths'] = 60;
+    t(clean).Squads.dave = dave485;
+    t(clean).Baselines = { dave: { ForGw: 2, RealizedTenths: -15 } };
+    await runLifecycleSweep(clean, AFTER_LOCK2);
+    const snap = await clean.read(`${F_ROOT}/PublishedPicks/2/dave`) as Json;
+    expect(snap['Invalid']).toBeUndefined();
+    expect(snap['realizedTenths']).toBe(-15);
+  });
+
+  it('a Baselines node for ANOTHER week is not believed: the previous squad decides', async () => {
+    const db = lockOnly();
+    const dave = fixtureSquad('alpha');
+    dave['picks'][0]['priceTenths'] = 61; // 486
+    t(db).Squads.dave = dave;
+    t(db).Baselines = { dave: { ForGw: 1, RealizedTenths: -15 } }; // stale
+    await runLifecycleSweep(db, AFTER_LOCK2);
+    const snap = await db.read(`${F_ROOT}/PublishedPicks/2/dave`) as Json;
+    expect(snap['Invalid']).toBeUndefined(); // judged at realized 0
+    expect(snap['realizedTenths']).toBe(0);
+  });
+
+  it('(c) a Free Hit week\'s baseline is the week-before node (its sales were '
+    + 'temporary): prices + realized', async () => {
+    const db = lockOnly();
+    t(db).PublishedPicks[1].boost.realizedTenths = 4;
+    t(db).History[1].boost.realizedTenths = 4;
+    // boost plays a Free Hit in GW2: Sam (85 -> 95: sells for 90, +5) out
+    // for Bo (75). GW1's chip was a Bench Boost, so the Free Hit stands.
+    t(db).Players.Sam.priceTenths = 95;
+    t(db).Squads.boost.chip = 'freeHit';
+    t(db).Squads.boost.picks[0] =
+      { playerId: 'Bo', position: 'GK', priceTenths: 75, bench: false };
+    await runLifecycleSweep(db, AFTER_LOCK2);
+    expect(await db.read(`${F_ROOT}/PublishedPicks/2/boost`))
+      .toMatchObject({ chip: 'freeHit', realizedTenths: 9 });
+    expect(await db.read(`${F_ROOT}/Baselines/boost`))
+      .toEqual({ ForGw: 3, RealizedTenths: 4, Prices: GW1_BOOST });
+  });
+
+  it('(d) re-finalizing gameweek 3 when Baselines/<uid>.ForGw is 10 writes nothing', async () => {
+    const db = new ColdFakeDb({ Fantasy: { Futsal: { '15': {
+      Managers: { alpha: { TeamName: 'Alpha FC' } },
+      PublishedPicks: { 3: { alpha: { ...fixtureSquad('alpha'), realizedTenths: 0 } } },
+      Baselines: { alpha: { ForGw: 10, RealizedTenths: -20, Prices: { Sam: 85 } } },
+    } } } });
+    const before = db.snapshot();
+    await publishSaleBaselines(db, F_ROOT, 3);
+    expect(db.writes).toEqual([]);
+    expect(db.snapshot()).toBe(before);
+  });
+
+  it('(d) end to end: a score-edit rerun of an older week leaves the newer '
+    + 'baselines alone', async () => {
+    const db = lockOnly();
+    await runLifecycleSweep(db, AFTER_LOCK2); // Baselines ForGw 3
+    const before = JSON.stringify(t(db).Baselines);
+    db.writes = [];
+    await finalizeGw(db, GW1_DATE); // GW1 re-settles (History/1 rewritten)
+    expect(db.writes).toContain(`${F_ROOT}/History/1`);
+    expect(baselineWrites(db)).toEqual([]);
+    expect(JSON.stringify(t(db).Baselines)).toBe(before);
+  });
+
+  it('never backwards even in a race: the write is a guarded transaction', async () => {
+    const db = new ColdFakeDb({ Fantasy: { Futsal: { '15': {
+      Managers: { alpha: { TeamName: 'Alpha FC' } },
+      PublishedPicks: { 3: { alpha: { ...fixtureSquad('alpha'), realizedTenths: 0 } } },
+      Baselines: { alpha: { ForGw: 10, RealizedTenths: -20, Prices: { Sam: 85 } } },
+    } } } });
+    // The pre-check read sees no node yet (a newer write lands right after).
+    const realRead = db.read.bind(db);
+    let calls = 0;
+    db.read = async (p: string) =>
+      p.endsWith('/Baselines/alpha') && calls++ === 0 ? null : realRead(p);
+    await publishSaleBaselines(db, F_ROOT, 3);
+    expect(t(db).Baselines.alpha)
+      .toEqual({ ForGw: 10, RealizedTenths: -20, Prices: { Sam: 85 } });
+  });
+
+  it('(e) a rerun with identical data writes nothing (resweep, direct call, '
+    + 'RTDB-pruned empty Prices)', async () => {
+    const db = lockOnly();
+    t(db).Managers = { dave: { TeamName: 'Dave XI' } };
+    await runLifecycleSweep(db, AFTER_LOCK2);
+    expect(baselineWrites(db).sort()).toEqual(['alpha', 'boost', 'churn', 'dave']
+      .map((u) => `${F_ROOT}/Baselines/${u}`));
+    // RTDB never stores an empty map: dave's node comes back without Prices.
+    delete t(db).Baselines.dave.Prices;
+    db.writes = [];
+    await publishSaleBaselines(db, F_ROOT, 2);
+    await runLifecycleSweep(db, LATER2);
+    expect(baselineWrites(db)).toEqual([]);
+  });
+
+  it('(f) a first finalize on the live-Squads fallback writes the baselines '
+    + 'after its History write', async () => {
+    const db = new ColdFakeDb(world2()); // GW2 final, no sweep ever ran
+    await finalizeGw(db, GW2_DATE);
+    expect(await db.read(`${F_ROOT}/PublishedPicks/2`)).toBeNull();
+    expect(await db.read(`${F_ROOT}/Baselines/alpha`))
+      .toEqual({ ForGw: 3, RealizedTenths: 0, Prices: GW1_ALPHA });
+    expect(await db.read(`${F_ROOT}/Baselines/churn`))
+      .toEqual({ ForGw: 3, RealizedTenths: 0, Prices: GW1_CHURN });
+    const history = db.writes.indexOf(`${F_ROOT}/History/2`);
+    expect(history).toBeGreaterThanOrEqual(0);
+    expect(db.writes.findIndex((w) => w.includes('/Baselines/')))
+      .toBeGreaterThan(history);
+  });
+
+  it('every finalize run heals a baseline the lock failed to write', async () => {
+    const db = lockOnly();
+    await runLifecycleSweep(db, AFTER_LOCK2);
+    delete t(db).Baselines; // the lock-time write was lost
+    for (const g of db.data.Futsal['15'].Date[GW2_DATE]) g.status = 2;
+    await finalizeGw(db, GW2_DATE);
+    expect(await db.read(`${F_ROOT}/Baselines/alpha`))
+      .toEqual({ ForGw: 3, RealizedTenths: 0, Prices: GW1_ALPHA });
+    // ...and a later rerun (score edit) heals again.
+    delete t(db).Baselines.alpha;
+    await finalizeGw(db, GW2_DATE);
+    expect(await db.read(`${F_ROOT}/Baselines/alpha`))
+      .toEqual({ ForGw: 3, RealizedTenths: 0, Prices: GW1_ALPHA });
   });
 });

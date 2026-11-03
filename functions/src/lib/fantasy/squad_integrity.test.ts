@@ -6,12 +6,14 @@ import { describe, expect, it } from 'vitest';
 import { weeklyRuleWinners } from './badges';
 import { configFromMap } from './fantasy_config';
 import { computeGameweekFinalize } from './finalize_core';
+import { clone } from './golden_fixture';
 import { parseSquadAlert } from './position_changes';
 import { FantasySquad, squadFromMap } from './squad';
 import {
-  baselineSquadOf, IntegrityInputs, integrityMarketOf, integrityVerdictOf,
-  invalidAlertNode, invalidIssuesOf, isInvalidAlert, judgeSale, judgeSquad,
-  picksAtJudgedPrices, priceSnapshotOf, sameInvalidAlert, squadIntegrityIssues,
+  baselineForGwOf, baselineNodeOf, baselineRealizedFor, baselineSquadOf,
+  IntegrityInputs, integrityMarketOf, integrityVerdictOf, invalidAlertNode,
+  invalidIssuesOf, isInvalidAlert, judgeSale, judgeSquad, picksAtJudgedPrices,
+  priceSnapshotOf, sameBaselineNode, sameInvalidAlert, squadIntegrityIssues,
 } from './squad_integrity';
 import { annotateSquadIntegrity, lockAccounting } from './transfer_state';
 
@@ -345,6 +347,149 @@ describe('judgeSale', () => {
       { market, previousByUid: {}, previousWeekPrices: {} })).toEqual({
       issues: ['overBudget'], prices: [85, 80, 50, 65, 95, 60, 75], realizedTenths: 0,
     });
+  });
+});
+
+describe('Baselines/<uid>: baselineNodeOf', () => {
+  const ALPHA_PRICES = {
+    Eli: 55, Dana: 80, Eva: 50, Ezra: 65, Alex: 95, Will: 60, Wren: 75,
+  };
+
+  it('a valid node: its (judged) prices by id + its realizedTenths', () => {
+    expect(baselineNodeOf({ ...alpha(), realizedTenths: 7 }, 5)).toEqual({
+      ForGw: 5, RealizedTenths: 7, Prices: ALPHA_PRICES,
+    });
+    // A valid node from before the selling rule (no realizedTenths) reads 0.
+    expect(baselineNodeOf(alpha(), 5).RealizedTenths).toBe(0);
+  });
+
+  it('an Invalid node: no trusted prices, but its realizedTenths carries', () => {
+    expect(baselineNodeOf(
+      { ...alpha(), Invalid: ['overBudget'], realizedTenths: -3 }, 5,
+    )).toEqual({ ForGw: 5, RealizedTenths: -3, Prices: {} });
+  });
+
+  it('no node (no squad at the lock) and no previous baseline: a fresh start', () => {
+    expect(baselineNodeOf(null, 5)).toEqual({ ForGw: 5, RealizedTenths: 0, Prices: {} });
+    expect(baselineNodeOf(undefined, 5, null))
+      .toEqual({ ForGw: 5, RealizedTenths: 0, Prices: {} });
+  });
+
+  it('an ABSENT node carries the previous baseline\'s RealizedTenths (deleting '
+    + 'the squad before a lock never wipes a loss); its Prices are not carried', () => {
+    expect(baselineNodeOf(null, 5,
+      { ForGw: 4, RealizedTenths: -15, Prices: { Alex: 95 } }))
+      .toEqual({ ForGw: 5, RealizedTenths: -15, Prices: {} });
+  });
+
+  it('a MALFORMED node carries the previous baseline too — its own '
+    + 'realizedTenths is the client\'s writing, never believed', () => {
+    const malformed = { picks: 'junk', captainId: 'x', viceId: 'x', realizedTenths: 999 };
+    expect(baselineNodeOf(malformed, 5, { ForGw: 4, RealizedTenths: 7 }))
+      .toEqual({ ForGw: 5, RealizedTenths: 7, Prices: {} });
+    expect(baselineNodeOf('nope', 5, { ForGw: 4, RealizedTenths: 7 }).RealizedTenths)
+      .toBe(7);
+  });
+
+  it('a parseable node ignores the previous baseline (the node is the truth)', () => {
+    expect(baselineNodeOf({ ...alpha(), realizedTenths: 2 }, 5,
+      { ForGw: 4, RealizedTenths: -40 }).RealizedTenths).toBe(2);
+  });
+
+  it('a junk previous RealizedTenths reads 0 (finite numbers only, truncated)', () => {
+    for (const junk of ['5', NaN, Infinity, null, true]) {
+      expect(baselineNodeOf(null, 5, { RealizedTenths: junk }).RealizedTenths,
+        String(junk)).toBe(0);
+    }
+    expect(baselineNodeOf(null, 5, { RealizedTenths: -7.9 }).RealizedTenths).toBe(-7);
+    expect(baselineNodeOf(null, 5, 'nope').RealizedTenths).toBe(0);
+  });
+
+  it('an RTDB null-padded picks list prices the real picks only', () => {
+    const raw: Raw = { ...alpha(), realizedTenths: 1 };
+    raw.picks = [raw.picks[0], null, ...raw.picks.slice(1)];
+    expect(baselineNodeOf(raw, 5).Prices).toEqual(ALPHA_PRICES);
+  });
+
+  it('a player id RTDB cannot store as a key never reaches Prices', () => {
+    const raw: Raw = { ...alpha() };
+    raw.picks = [...raw.picks, pick('J.Doe', 'ATT', 40, true), pick('a/b', 'ATT', 40, true)];
+    expect(Object.keys(baselineNodeOf(raw, 5).Prices).sort())
+      .toEqual(Object.keys(ALPHA_PRICES).sort());
+  });
+
+  it('sameBaselineNode: what RTDB hands back (empty Prices dropped) equals '
+    + 'the node we would write', () => {
+    const node = { ForGw: 5, RealizedTenths: 0, Prices: {} };
+    expect(sameBaselineNode({ ForGw: 5, RealizedTenths: 0 }, node)).toBe(true);
+    expect(sameBaselineNode({ ForGw: 5, RealizedTenths: 0, Prices: {} }, node)).toBe(true);
+    const full = baselineNodeOf({ ...alpha(), realizedTenths: 7 }, 5);
+    expect(sameBaselineNode(clone(full), full)).toBe(true);
+    expect(sameBaselineNode({ ...clone(full), ForGw: 6 }, full)).toBe(false);
+    expect(sameBaselineNode({ ...clone(full), RealizedTenths: 8 }, full)).toBe(false);
+    expect(sameBaselineNode(
+      { ...clone(full), Prices: { ...ALPHA_PRICES, Alex: 96 } }, full)).toBe(false);
+    expect(sameBaselineNode(
+      { ...clone(full), Prices: { ...ALPHA_PRICES, Extra: 1 } }, full)).toBe(false);
+    expect(sameBaselineNode(null, node)).toBe(false);
+  });
+
+  it('baselineForGwOf: a finite ForGw, else null', () => {
+    expect(baselineForGwOf({ ForGw: 10 })).toBe(10);
+    expect(baselineForGwOf({ ForGw: '10' })).toBeNull();
+    expect(baselineForGwOf({})).toBeNull();
+    expect(baselineForGwOf(null)).toBeNull();
+  });
+});
+
+describe('the judge reads its realized money from Baselines/<uid> (one source)', () => {
+  // Alpha bought at market is 480; Eli claimed at 61 (> market 55) counts
+  // at 61 as a NEW pick, so the squad spends 486 = 500 - 15 + 1.
+  const spend486 = (): Raw => {
+    const s = alpha();
+    s.picks[0] = pick('Eli', 'GK', 61);
+    return s;
+  };
+
+  it('baselineRealizedByUid wins when present, even with NO previous squad', () => {
+    const inputs: IntegrityInputs = {
+      market, previousByUid: {}, previousWeekPrices: {},
+      baselineRealizedByUid: { u: -15 },
+    };
+    expect(baselineRealizedFor(inputs, 'u')).toBe(-15);
+    expect(judgeSquad(sq(spend486()), 'u', cfg, inputs))
+      .toMatchObject({ issues: ['overBudget'], realizedTenths: -15 });
+    const s = spend486();
+    s.picks[0] = pick('Eli', 'GK', 60); // 485: exactly the budget
+    expect(judgeSquad(sq(s), 'u', cfg, inputs))
+      .toMatchObject({ issues: [], realizedTenths: -15 });
+  });
+
+  it('absent from baselineRealizedByUid: the previous squad\'s realizedTenths '
+    + '(baselineRealizedOf — malformed reads 0)', () => {
+    const inputs: IntegrityInputs = {
+      market, previousWeekPrices: {}, baselineRealizedByUid: { other: -50 },
+      previousByUid: {
+        u: { ...alpha(), realizedTenths: 4 },
+        junk: { picks: 'x', captainId: 'a', viceId: 'b', realizedTenths: 9999 },
+      },
+    };
+    expect(baselineRealizedFor(inputs, 'u')).toBe(4);
+    expect(baselineRealizedFor(inputs, 'junk')).toBe(0);
+    expect(baselineRealizedFor(inputs, 'nobody')).toBe(0);
+    expect(baselineRealizedFor(
+      { market, previousByUid: { u: { ...alpha(), realizedTenths: 4 } },
+        previousWeekPrices: {} }, 'u')).toBe(4);
+  });
+
+  it('an INVALID squad is snapshotted with the same realized the judge used', () => {
+    const inputs: IntegrityInputs = {
+      market, previousByUid: {}, previousWeekPrices: {},
+      baselineRealizedByUid: { bad: -15 },
+    };
+    const out = annotateSquadIntegrity({ bad: spend486() }, cfg, inputs);
+    expect(out.squads['bad']).toEqual(
+      { ...spend486(), Invalid: ['overBudget'], realizedTenths: -15 });
   });
 });
 

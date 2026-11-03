@@ -63,6 +63,10 @@
 //     player missing from the market — or priced <= 0 there (no usable
 //     price) — adds 0.
 // realizedTenths = the baseline's realizedTenths + every sale this week.
+// The STARTING total has one source with the fan app: Baselines/<uid>
+// (baselineNodeOf, below) when it was written FOR the judged week (ForGw ===
+// gw) — it carries the total through a week with no readable squad — else
+// the previous squad node's own (baselineRealizedOf; see baselineRealizedFor).
 // A previous squad that was itself judged Invalid has no trusted picks (its
 // prices were never judged): every pick is then NEW and nothing is sold, so
 // a forged price can't be carried forward by one zeroed week — but its
@@ -136,6 +140,11 @@ export interface IntegrityInputs {
   previousByUid: Record<string, unknown>;
   /** PriceHistory/<gw-1>: the prices DURING the previous gameweek. */
   previousWeekPrices: Record<string, number>;
+  /** uid -> Baselines/<uid>.RealizedTenths, only for a node written FOR the
+   *  gameweek being judged (ForGw === gw) — the one source of the running
+   *  sale total the fan app shows. A uid absent here falls back to
+   *  baselineRealizedOf(previousByUid[uid]) (see baselineRealizedFor). */
+  baselineRealizedByUid?: Record<string, number>;
 }
 
 /** Players node -> the judge's market (usable entries only). */
@@ -178,15 +187,20 @@ export function isInvalidRow(raw: unknown): boolean {
   return invalidIssuesOf(raw) !== null;
 }
 
-/** The previous locked squad as a price baseline: null when absent,
- *  unreadable, or itself judged Invalid (see TRUSTED PRICES). */
-export function baselineSquadOf(raw: unknown): FantasySquad | null {
-  if (!isPlainMap(raw) || isInvalidRow(raw)) return null;
+/** A squad node parsed (squadFromMap), or null when absent / malformed. */
+function parseableSquadOf(raw: unknown): FantasySquad | null {
+  if (!isPlainMap(raw)) return null;
   try {
     return squadFromMap(raw);
   } catch {
     return null;
   }
+}
+
+/** The previous locked squad as a price baseline: null when absent,
+ *  unreadable, or itself judged Invalid (see TRUSTED PRICES). */
+export function baselineSquadOf(raw: unknown): FantasySquad | null {
+  return isInvalidRow(raw) ? null : parseableSquadOf(raw);
 }
 
 /** The realizedTenths a baseline node carries forward: realizedOf(raw) for
@@ -195,13 +209,110 @@ export function baselineSquadOf(raw: unknown): FantasySquad | null {
  *  own) — else 0: absent, or malformed (snapshotted verbatim, so any
  *  realizedTenths on it was written by the client). */
 export function baselineRealizedOf(raw: unknown): number {
-  if (!isPlainMap(raw)) return 0;
-  try {
-    squadFromMap(raw);
-  } catch {
-    return 0;
+  return parseableSquadOf(raw) === null ? 0 : realizedOf(raw);
+}
+
+/** The realizedTenths the judge starts [uid] from (ONE source with the fan
+ *  app): Baselines/<uid>.RealizedTenths when that node is for the judged
+ *  gameweek (inputs.baselineRealizedByUid — orchestration.ts
+ *  loadIntegrityInputs), else baselineRealizedOf(previousByUid[uid]). */
+export function baselineRealizedFor(inputs: IntegrityInputs, uid: string): number {
+  const fromBaselines = inputs.baselineRealizedByUid;
+  if (fromBaselines !== undefined &&
+    Object.prototype.hasOwnProperty.call(fromBaselines, uid)) {
+    return fromBaselines[uid];
   }
-  return realizedOf(raw);
+  return baselineRealizedOf(inputs.previousByUid[uid]);
+}
+
+// ── Baselines/<uid> (FPL selling, spec §4) ─────────────────────────────────
+//
+// Fantasy/<sport>/<season>/Baselines/<uid> = { ForGw, RealizedTenths,
+// Prices: { <playerId>: tenths } } — the manager's effective squad after the
+// last lock (orchestration.ts effectiveSquadAfterWeek, Free Hit aware) as
+// the fan app needs it: the prices this judge settled (a held player's
+// price next week) and the running sale total. ForGw = the gameweek whose
+// window it prices (lock of gw writes gw + 1). Server-written only
+// (orchestration.ts publishSaleBaselines); the lock judge reads
+// RealizedTenths back when ForGw is the week it judges, so the app and the
+// server count the same money. Read by lib/fantasy/engine/selling.dart
+// saleBaselineFromNode.
+
+/** One Baselines/<uid> node as the server writes it. */
+export interface SaleBaselineNode {
+  ForGw: number;
+  RealizedTenths: number;
+  Prices: Record<string, number>;
+}
+
+/** A finite number truncated toward zero (Dart `.toInt()`), else null. */
+function finiteIntOf(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : null;
+}
+
+/** A Baselines/<uid> node's ForGw; null when absent or not a number. */
+export function baselineForGwOf(node: unknown): number | null {
+  return isPlainMap(node) ? finiteIntOf(node['ForGw']) : null;
+}
+
+/** A Baselines/<uid> node's RealizedTenths (finite numbers only), else 0. */
+export function baselineRealizedTenthsOf(node: unknown): number {
+  return isPlainMap(node) ? finiteIntOf(node['RealizedTenths']) ?? 0 : 0;
+}
+
+/** RTDB keys may not be empty or contain . # $ [ ] / (a write with one
+ *  fails whole). Market names are keys already (Players/<name>), so only a
+ *  legacy/forged id could; it is left out of Prices. */
+function isRtdbKey(id: string): boolean {
+  return id.length > 0 && !/[.#$[\]/]/.test(id);
+}
+
+/** The Baselines/<uid> node for [effectiveRaw] (the manager's effective
+ *  squad after the lock), FOR gameweek [forGw]:
+ *  - a parseable node (valid OR Invalid — the server judged both):
+ *    RealizedTenths = realizedOf(node); Prices = its picks' prices by id
+ *    for a valid node (a duplicated legacy id keeps its dearest copy, as
+ *    judgeSale), {} for an Invalid one (its prices were never judged);
+ *  - absent or malformed (no squad at the lock, or a squad the server could
+ *    not read — its realizedTenths would be the client's writing):
+ *    RealizedTenths = [previousBaseline]'s (the stored Baselines/<uid>;
+ *    none = 0), Prices {}. Carrying it means deleting or breaking a squad
+ *    before a lock can never reset a negative running total. */
+export function baselineNodeOf(
+  effectiveRaw: unknown, forGw: number, previousBaseline?: unknown,
+): SaleBaselineNode {
+  const squad = parseableSquadOf(effectiveRaw);
+  if (squad === null) {
+    return {
+      ForGw: forGw,
+      RealizedTenths: baselineRealizedTenthsOf(previousBaseline),
+      Prices: {},
+    };
+  }
+  const prices: Record<string, number> = {};
+  if (!isInvalidRow(effectiveRaw)) {
+    for (const p of squad.picks) {
+      if (!isRtdbKey(p.playerId)) continue;
+      prices[p.playerId] = Math.max(prices[p.playerId] ?? 0, p.priceTenths);
+    }
+  }
+  return { ForGw: forGw, RealizedTenths: realizedOf(effectiveRaw), Prices: prices };
+}
+
+/** Whether a stored Baselines/<uid> node already says exactly [node] (a
+ *  rerun writes nothing). RTDB never stores an empty map, so a stored node
+ *  without Prices equals Prices {}. */
+export function sameBaselineNode(stored: unknown, node: SaleBaselineNode): boolean {
+  if (!isPlainMap(stored)) return false;
+  if (stored['ForGw'] !== node.ForGw ||
+    stored['RealizedTenths'] !== node.RealizedTenths) {
+    return false;
+  }
+  const have = childEntries(stored['Prices']);
+  const want = Object.entries(node.Prices);
+  if (have.length !== want.length) return false;
+  const haveById = new Map(have);
+  return want.every(([id, price]) => haveById.get(id) === price);
 }
 
 /** The FPL selling rule at a lock (see TRUSTED PRICES): the trusted price
@@ -315,14 +426,15 @@ export function integrityVerdictOf(
 }
 
 /** The verdict for [uid]'s parsed squad against [inputs]: its baseline is
- *  the RAW previousByUid[uid] node (baselineSquadOf for the trusted picks,
- *  baselineRealizedOf for the realized money it carries). */
+ *  the RAW previousByUid[uid] node (baselineSquadOf for the trusted picks)
+ *  and the realized money baselineRealizedFor gives (Baselines/<uid> when
+ *  it is for this week, else the previous node's own). */
 export function judgeSquad(
   squad: FantasySquad, uid: string, cfg: FantasyConfig, inputs: IntegrityInputs,
 ): LockVerdict {
-  const baselineRaw = inputs.previousByUid[uid];
-  return lockVerdict(squad, cfg, inputs.market, baselineSquadOf(baselineRaw),
-    baselineRealizedOf(baselineRaw), inputs.previousWeekPrices);
+  return lockVerdict(squad, cfg, inputs.market,
+    baselineSquadOf(inputs.previousByUid[uid]),
+    baselineRealizedFor(inputs, uid), inputs.previousWeekPrices);
 }
 
 /** A parseable squad node's `picks` list re-priced at a verdict's [prices]:

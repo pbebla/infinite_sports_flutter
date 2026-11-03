@@ -70,6 +70,18 @@
 //   freeze) and the post-finalize rollover. Rules: read own + admin, no
 //   client write (functions only).
 //
+// - Baselines/<uid> = { ForGw:int, RealizedTenths:int, Prices: { <playerId>:
+//   tenths } } — FPL selling (spec §4): the manager's effective squad after
+//   the last lock (effectiveSquadAfterWeek, Free Hit aware) as the fan app
+//   prices it — a held player's price and the running sale total. Written
+//   by publishSaleBaselines for EVERY manager (Managers ∪ Squads ∪
+//   PublishedPicks/<gw> ∪ existing Baselines) at the lock of gw (ForGw =
+//   gw + 1) and re-checked by every finalize run (never backwards, no-op
+//   when unchanged). No squad, or an unreadable one, carries the previous
+//   RealizedTenths with Prices {}. The lock judge reads RealizedTenths back
+//   when ForGw is the week it judges (loadIntegrityInputs). Rules: read own
+//   + admin, no client write (like TransferState).
+//
 // - TransferCosts/<gw>/<uid> = int points (functions-internal, like
 //   PlayerWeeks): the week's transfer charge frozen at lock — the
 //   transferCostPointsByUid seam's source on every finalize (re)run, so a
@@ -184,8 +196,10 @@ import {
   FantasySquad, squadFromMap, squadToMap, validateSquad,
 } from './squad';
 import {
+  baselineForGwOf, baselineNodeOf, baselineRealizedTenthsOf,
   integrityMarketOf, IntegrityInputs, invalidAlertNode, isInvalidAlert,
-  judgeSquad, priceSnapshotOf, sameInvalidAlert, SquadIntegrityIssue,
+  judgeSquad, priceSnapshotOf, sameBaselineNode, sameInvalidAlert,
+  SquadIntegrityIssue,
 } from './squad_integrity';
 import { parseForfeitedBy } from './stats_mapper';
 import {
@@ -289,22 +303,89 @@ async function effectiveSquadAfterWeek(
 /** Everything squad_integrity.ts needs to judge the squads of [uids] for
  *  gameweek [gw]: the market (Players), each manager's EFFECTIVE previous
  *  squad (effectiveSquadAfterWeek(gw-1) — the transfer counter's baseline,
- *  so "held" means the same thing to both) and the prices during gw-1
- *  (PriceHistory/<gw-1>). */
+ *  so "held" means the same thing to both), the prices during gw-1
+ *  (PriceHistory/<gw-1>), and the running sale total of every manager whose
+ *  Baselines/<uid> was written FOR this gameweek (ForGw === gw — the one
+ *  source the fan app shows; squad_integrity.ts baselineRealizedFor). */
 async function loadIntegrityInputs(
   db: FantasyDb, root: string, uids: string[], gw: number,
 ): Promise<IntegrityInputs> {
   const previousByUid: Record<string, unknown> = {};
+  const baselineRealizedByUid: Record<string, number> = {};
   for (const uid of uids) {
     const prev = await effectiveSquadAfterWeek(db, root, uid, gw - 1);
     if (prev !== null) previousByUid[uid] = prev;
+    const baseline = await db.read(`${root}/Baselines/${uid}`);
+    if (baselineForGwOf(baseline) === gw) {
+      baselineRealizedByUid[uid] = baselineRealizedTenthsOf(baseline);
+    }
   }
   return {
     market: integrityMarketOf(await db.read(`${root}/Players`)),
     previousByUid,
     previousWeekPrices: gw > 1
       ? priceSnapshotOf(await db.read(`${root}/PriceHistory/${gw - 1}`)) : {},
+    baselineRealizedByUid,
   };
+}
+
+/** Writes Fantasy/<sport>/<season>/Baselines/<uid> (squad_integrity.ts
+ *  baselineNodeOf) = the manager's effective squad after gameweek [gw]
+ *  (effectiveSquadAfterWeek — a Free Hit week's is the week before), FOR
+ *  gameweek gw + 1, for EVERY manager: Managers ∪ Squads ∪
+ *  PublishedPicks/<gw> ∪ the uids that already have a Baselines node (so
+ *  a manager who deletes his Managers row and his squad still has his
+ *  running total rolled forward). A manager with no squad at the lock gets
+ *  {ForGw: gw + 1, RealizedTenths: carried (0 for a first-timer), Prices:
+ *  {}} — the judge treats his next squad as a fresh start, and the app can
+ *  still save.
+ *
+ *  Called by the lock (snapshotPublishedPicks, after its claim) and by
+ *  EVERY finalize run after History/<gw> (self-heals a lost lock-time
+ *  write). Never backwards: a stored node FOR a later gameweek than gw + 1
+ *  is left alone (a score-edit rerun of an old week), and a stored node
+ *  that already says the same is not rewritten (reruns write nothing). The
+ *  check runs again inside a transaction, so a newer baseline landing in
+ *  between survives. One manager's failure is logged and never stops the
+ *  others. */
+export async function publishSaleBaselines(
+  db: FantasyDb, root: string, gw: number,
+  log: FantasyLogger = silent, ctx: Record<string, unknown> = {},
+): Promise<void> {
+  const uids = new Set<string>();
+  for (const node of [
+    await db.read(`${root}/Managers`),
+    await db.read(`${root}/Squads`),
+    await db.read(`${root}/PublishedPicks/${gw}`),
+    await db.read(`${root}/Baselines`),
+  ]) {
+    for (const [uid] of childEntries(node)) uids.add(uid);
+  }
+  const forGw = gw + 1;
+  let written = 0;
+  for (const uid of [...uids].sort()) {
+    const path = `${root}/Baselines/${uid}`;
+    try {
+      const effective = await effectiveSquadAfterWeek(db, root, uid, gw);
+      // undefined = leave the stored node alone (newer, or already equal).
+      // A first (cold) run sees null and proposes the node — never aborts.
+      const next = (stored: unknown): unknown => {
+        const storedFor = baselineForGwOf(stored);
+        if (storedFor !== null && storedFor > forGw) return undefined;
+        const node = baselineNodeOf(effective, forGw, stored);
+        return sameBaselineNode(stored, node) ? undefined : node;
+      };
+      if (next(await db.read(path)) === undefined) continue;
+      if ((await db.transaction(path, next)).committed) written++;
+    } catch (err) {
+      log.warn('fantasy baselines: write failed — retried by the next ' +
+        'finalize or lock',
+        { ...ctx, gw, uid, error: String(err) });
+    }
+  }
+  if (written > 0) {
+    log.info('fantasy baselines: published', { ...ctx, gw, forGw, written });
+  }
 }
 
 /** After an integrity pass for gameweek [gw]: each invalid squad's manager
@@ -880,6 +961,18 @@ export async function finalizeGameweek(
     log.warn('fantasy finalize: no manager squads to score', { ...ctx, source });
   }
 
+  // FPL selling (spec §4): Baselines/<uid> for gw + 1, on EVERY run — the
+  // lock wrote them already; this heals a lost lock-time write (and a FIRST
+  // finalize on the live-Squads fallback writes them here, from the History
+  // just written). Never backwards (a rerun of an old week leaves the newer
+  // baselines alone) and a no-op when nothing changed. Like the badges, a
+  // failure is logged and never fails the finalize.
+  try {
+    await publishSaleBaselines(db, root, gw.number, log, ctx);
+  } catch (err) {
+    log.warn('fantasy baselines: publish failed', { ...ctx, error: String(err) });
+  }
+
   // Achievement badges (spec 2026-10-30 §4; badges.ts), right after the
   // scores they are judged on (History + the boards) — so a later step
   // failing (totals, Dream Team, rollover, recap, news) can never leave a
@@ -1328,11 +1421,20 @@ async function snapshotPublishedPicks(
     await db.write(`${root}/TransferCosts/${gw}`, acc.costPointsByUid);
   }
   await freezeChipPlayed(db, root, cfg, acc.chipPlayedByUid);
-  // Alerts last: the snapshot + accounting above are what scoring needs.
+  // Alerts next: the snapshot + accounting above are what scoring needs.
   await settleIntegrityAlerts(db, root, gw, acc, nowMs, log, ctx);
   log.info('fantasy lock: picks published', {
     ...ctx, gw, managers: Object.keys(acc.cleanSquads).length,
   });
+  // FPL selling (spec §4): every manager's Baselines/<uid> for gw + 1, from
+  // the snapshot just claimed. Best-effort here — every finalize of this
+  // week re-checks it — so a failure never fails the sweep.
+  try {
+    await publishSaleBaselines(db, root, gw, log, ctx);
+  } catch (err) {
+    log.warn('fantasy baselines: lock-time publish failed — finalize heals',
+      { ...ctx, gw, error: String(err) });
+  }
 }
 
 async function sweepSeason(

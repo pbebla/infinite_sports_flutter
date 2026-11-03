@@ -343,6 +343,23 @@ for (const file of RULES_FILES) {
       expect(String(templates['.write'])).toContain(ADMIN_GATE);
     });
 
+    // FPL SELLING (spec §4, plan Task 3): Baselines/<uid> = { ForGw,
+    // RealizedTenths, Prices } is the server's own money record (written
+    // by functions at each lock + finalize). A fan reads his own (the squad
+    // builder's budget), an admin reads the node, NOBODY writes — exactly
+    // TransferState's shape. A client write here would forge the budget
+    // the app shows.
+    it('Baselines: admin reads the node, a fan reads only his own, no client write', () => {
+      const season = rules['rules']['Fantasy']['$sport']['$season'];
+      const b = season['Baselines'];
+      expect(b, `${file}: no Baselines rules`).toBeDefined();
+      expect(b['.read']).toBe("auth != null && root.child('Admins').child(auth.uid).exists()");
+      expect(b['$uid']['.read']).toBe('auth != null && auth.uid == $uid');
+      expect(b['.write']).toBeUndefined();
+      expect(b['$uid']['.write']).toBeUndefined();
+      expect(b).toEqual(season['TransferState']);
+    });
+
     it('Voided: public read, admin write, each <gw> validated true', () => {
       const voided = rules['rules']['Fantasy']['$sport']['$season']['Voided'];
       expect(voided['.read']).toBe(true);
@@ -357,7 +374,8 @@ describe('rules contract: the walker itself', () => {
 
   it('a functions-only path has no client grant (the check can fail)', () => {
     for (const p of [`${S}/History/3/someUid`, `${S}/BadgePushClaims/u/a`,
-      `${S}/TransferState/UID`, `${S}/Repriced/5`]) {
+      `${S}/TransferState/UID`, `${S}/Repriced/5`, `${S}/Baselines/UID`,
+      `${S}/Baselines/UID/RealizedTenths`]) {
       const { links, bindings } = writeChain(rules, p);
       for (const kind of ['admin', 'own', 'ownerCreate'] as const) {
         expect(links.some((l) => grants(kind, l, bindings)), `${p} ${kind}`).toBe(false);

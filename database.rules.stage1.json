@@ -394,6 +394,12 @@
               ".read": "auth != null && auth.uid == $uid"
             }
           },
+          "Baselines": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$uid": {
+              ".read": "auth != null && auth.uid == $uid"
+            }
+          },
           "SquadAlerts": {
             ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
             "$uid": {

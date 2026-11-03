@@ -36,7 +36,7 @@ import { childEntries, isPlainMap, toIntLoose } from './orchestration_db';
 import { REALIZED_KEY } from './selling';
 import { FantasySquad, squadFromMap } from './squad';
 import {
-  baselineRealizedOf, INVALID_KEY, integrityVerdictOf, IntegrityInputs,
+  baselineRealizedFor, INVALID_KEY, integrityVerdictOf, IntegrityInputs,
   picksAtJudgedPrices, SquadIntegrityIssue,
 } from './squad_integrity';
 import { rolloverFreeTransfers, transferCost } from './transfers';
@@ -203,8 +203,9 @@ export interface LockAccounting {
  *    held prices and realized money are the judge's own, never the
  *    client's.
  *  - INVALID: verbatim (so the manager sees exactly what was judged) plus
- *    `Invalid: [issues]` and `realizedTenths` = the baseline's (no sale
- *    credited for a week that didn't count).
+ *    `Invalid: [issues]` and `realizedTenths` = the total the judge started
+ *    from (baselineRealizedFor — no sale credited for a week that didn't
+ *    count).
  *  A `realizedTenths` the client wrote is replaced either way. Malformed
  *  squads pass through untouched. Used by lockAccounting and by a first
  *  finalize's live-Squads fallback that skips the accounting. */
@@ -224,7 +225,7 @@ export function annotateSquadIntegrity(
     const node = { ...(raw as Record<string, unknown>) };
     if (verdict.issues.length > 0) {
       node[INVALID_KEY] = verdict.issues;
-      node[REALIZED_KEY] = baselineRealizedOf(inputs.previousByUid[uid]);
+      node[REALIZED_KEY] = baselineRealizedFor(inputs, uid); // the judge's own
       invalid.push({ uid, issues: verdict.issues });
     } else {
       delete node[INVALID_KEY];
