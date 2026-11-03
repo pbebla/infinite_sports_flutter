@@ -776,7 +776,7 @@ export interface StatusWrittenResult {
 
 /** Status became 'active' or 'revoked': once per PaidAt / RefundedAt
  *  (Access/<uid>/Notified/<key>), push + email the fan with activatedPaid
- *  (card/venmo/zelle — the receipt) / activatedGranted (the rest) /
+ *  (card/venmo/zelle/cash — the receipt) / activatedGranted (the rest) /
  *  revoked. No email on file -> push only. */
 export async function handleAccessStatusWritten(
   deps: AccessDeps, args: StatusWrittenArgs,

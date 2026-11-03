@@ -246,7 +246,6 @@ void main() {
     });
 
     test('a fan can only claim Venmo or Zelle (cash is Manager-only)', () {
-      // The brief spells the accessor `db`; the enum's field is `key`.
       expect(FantasyAccessMethod.values.map((m) => m.key), ['venmo', 'zelle']);
     });
 

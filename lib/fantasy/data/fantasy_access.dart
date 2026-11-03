@@ -138,8 +138,8 @@ class FantasyAccessRecord {
 
   final FantasyAccessStatus status;
 
-  /// 'card' | 'venmo' | 'zelle' | 'granted' | 'player' | 'grandfathered'
-  /// ('' when absent). Never shown to the fan.
+  /// 'card' | 'venmo' | 'zelle' | 'cash' | 'granted' | 'player' |
+  /// 'grandfathered' ('' when absent). Never shown to the fan.
   final String via;
   final int amountCents;
 
