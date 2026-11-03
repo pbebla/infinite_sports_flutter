@@ -67,6 +67,11 @@ class FantasyService {
   // `<root>|<uid>` — the squad draft's money. A known-absent node (a first
   // squad) caches as loaded-with-no-baseline.
   static final Map<String, SaleBaselineState> _saleBaselineCache = {};
+  // Transfers (plan 2026-11-03): the own `TransferState/<uid>` view, keyed
+  // `<root>|<uid>` — the draft's transfers line, so a revisit must not
+  // flash "Transfer count updating…". A known-ABSENT node (a first team)
+  // caches as null (present key); a failed read caches nothing.
+  static final Map<String, TransferStateView?> _transferStateCache = {};
   // The season's owner-voided gameweeks (`Voided`), keyed `<root>`.
   static final Map<String, Set<int>> _voidedWeeksCache = {};
   // The league's own season-over flag, keyed `<sport>/<season>`.
@@ -99,6 +104,7 @@ class FantasyService {
     _managerByUidCache.clear();
     _accessCache.clear();
     _saleBaselineCache.clear();
+    _transferStateCache.clear();
     _voidedWeeksCache.clear();
     _seasonFinishedCache.clear();
     _badgeCatalogCache = null;
@@ -424,6 +430,45 @@ class FantasyService {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return Stream<FantasySquadAlert?>.value(null);
     return watchMySquadAlert(sport, season, uid);
+  }
+
+  /// Live own transfer state (`TransferState/<uid>`, spec §5, functions-
+  /// written: `{Free, UsedThisGw, FreeSwaps?, CountFrom?, CountFromGw?, …}`;
+  /// rules: read own uid only). Emits the parsed view, or null while the
+  /// node is ABSENT (a first team). Seeded from the session cache
+  /// (`<root>|<uid>`, absent cached as null).
+  ///
+  /// Error ≠ fact: a failed read ERRORS the stream — it never emits null,
+  /// because a failed read is not a first team. The consumer treats an
+  /// error (and the time before the first emission) as "not answered" —
+  /// `transferPreview(answered: false)` then says "Transfer count
+  /// updating…" instead of hiding a real cost. Live `onValue` only, never
+  /// a one-shot get (iOS parity).
+  static Stream<TransferStateView?> watchMyTransferState(
+      String sport, String season, String uid) async* {
+    final key = '${_root(sport, season)}|$uid';
+    if (_transferStateCache.containsKey(key)) yield _transferStateCache[key];
+    try {
+      await for (final event
+          in _ref('${_root(sport, season)}/TransferState/$uid').onValue) {
+        final view = parseTransferState(event.snapshot.value);
+        _transferStateCache[key] = view;
+        yield view;
+      }
+    } catch (e) {
+      debugPrint('FantasyService: transfer state feed failed: $e');
+      rethrow;
+    }
+  }
+
+  /// [watchMyTransferState] for the signed-in user; a signed-out session
+  /// streams a single null (same convention as [watchMySquadAlertAuto] — a
+  /// signed-out user has no team to count).
+  static Stream<TransferStateView?> watchMyTransferStateAuto(
+      String sport, String season) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream<TransferStateView?>.value(null);
+    return watchMyTransferState(sport, season, uid);
   }
 
   /// Live `Managers/<uid>` entry (spec §10b): team name + moderation flag.

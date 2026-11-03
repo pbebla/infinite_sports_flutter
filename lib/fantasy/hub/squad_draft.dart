@@ -29,6 +29,14 @@
 // shows no room, sales line, sell price or over-budget verdict as fact, and
 // Save waits.
 //
+// Transfers (plan 2026-11-03, transfer_preview.dart): the hub also feeds
+// [setTransferContext] the own `TransferState/<uid>` view (and whether the
+// feed has answered) and the same edited gameweek, and [transferPreview]
+// recounts the draft's CURRENT picks and chip against the squad the manager
+// came into the week with — the transfers line and the points-hit confirm
+// read it. Error ≠ fact: until the feed has answered (or after it failed)
+// the preview is notReady, never a free first team.
+//
 // Pure-ish: flutter/foundation only (ChangeNotifier), all placement/armband
 // math delegated to squad_builder_logic.dart; unit-tested in
 // test/fantasy/squad_draft_test.dart.
@@ -44,6 +52,8 @@ import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/transfer_preview.dart'
+    as transfers;
 
 /// The gameweek whose money the draft shows (the `editingGw` the hub hands
 /// [SquadDraftController.setSaleContext]): the first gameweek whose lock is
@@ -104,6 +114,15 @@ class SquadDraftController extends ChangeNotifier {
   /// today's price, as the server's is with no history).
   Map<String, int>? _lastWeekPrices;
   int? _editingGw;
+
+  // ── Transfer context ([setTransferContext]) ────────────────────────────
+  TransferStateView? _transferState;
+
+  /// The `TransferState` feed has really answered (null state then means
+  /// the node is absent). False before its first emission and after an
+  /// error — the preview is then notReady.
+  bool _transferAnswered = false;
+  int? _transferEditingGw;
 
   SaleBaseline? get _baseline => _sale?.baseline;
 
@@ -166,6 +185,43 @@ class SquadDraftController extends ChangeNotifier {
     _editingGw = editingGw;
     notifyListeners();
   }
+
+  // ── Transfers (spec §5) ────────────────────────────────────────────────
+
+  /// The hub's feed: the own `TransferState/<uid>` view ([state]; null = the
+  /// node is ABSENT, only meaningful when [answered]), whether the feed has
+  /// really [answered] (false before its first emission and after it
+  /// failed — never a first team) and the gameweek being edited
+  /// ([editingGw], the same week as [setSaleContext]'s; null = unknown).
+  /// Notifies only when something changed — a stream emit builds a fresh but
+  /// equal view each time.
+  void setTransferContext({
+    TransferStateView? state,
+    required bool answered,
+    int? editingGw,
+  }) {
+    if (state == _transferState &&
+        answered == _transferAnswered &&
+        editingGw == _transferEditingGw) {
+      return;
+    }
+    _transferState = state;
+    _transferAnswered = answered;
+    _transferEditingGw = editingGw;
+    notifyListeners();
+  }
+
+  /// What this draft's transfers use and cost this week: the draft's
+  /// CURRENT picks (unplaced included — still owned) and chip counted
+  /// against the baseline, exactly as the server counts them.
+  transfers.TransferPreview get transferPreview => transfers.transferPreview(
+        draftIds: [for (final p in _ownedPicks) p.playerId],
+        state: _transferState,
+        answered: _transferAnswered,
+        editingGw: _transferEditingGw,
+        chip: _chip,
+        cfg: _config,
+      );
 
   /// What [p] costs the squad — exactly what the server's lock judge
   /// charges (squad_integrity.ts judgeSale): his baseline price when he is

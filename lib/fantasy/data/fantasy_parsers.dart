@@ -1018,6 +1018,118 @@ FantasySquadAlert? squadAlertFromNode(Object? node) {
   );
 }
 
+/// The own `TransferState/<uid>` node as the fan app reads it (spec §5,
+/// functions-written; the server's TransferState in transfer_state.ts — the
+/// SAME fields, so the app's live counter and the lock's recount can never
+/// disagree). The node being absent is NOT a view: [parseTransferState]
+/// returns null for it (a first team — the preview decides).
+class TransferStateView {
+  const TransferStateView({
+    this.free,
+    this.usedThisGw = 0,
+    this.countFromGw,
+    this.countFrom,
+    this.freeSwapsGw,
+    this.freeSwaps = const [],
+  });
+
+  /// Free transfers available this gameweek (`Free`); null = the FIELD is
+  /// absent (the preview then uses the config's weekly allowance, as the
+  /// server's tolerant parse does).
+  final int? free;
+
+  /// The server's own count for the saved squad (`UsedThisGw`). Display
+  /// only — the preview recounts the live draft.
+  final int usedThisGw;
+
+  /// The gameweek [countFrom] is the baseline for (`CountFromGw`); null = no
+  /// baseline published (an older node), or a half-written `CountFrom`.
+  final int? countFromGw;
+
+  /// The player ids of the squad the manager came into [countFromGw] with
+  /// (`CountFrom`). null with a [countFromGw] = no squad to count from: a
+  /// first team, nothing counts. Always null when [countFromGw] is null.
+  final List<String>? countFrom;
+
+  /// Holder-protection free swaps (spec §3): selling any of [freeSwaps] in
+  /// gameweek [freeSwapsGw] costs no transfer. [freeSwaps] empty and
+  /// [freeSwapsGw] null = none (the server writes both or neither).
+  final int? freeSwapsGw;
+  final List<String> freeSwaps;
+
+  @override
+  bool operator ==(Object other) =>
+      other is TransferStateView &&
+      other.free == free &&
+      other.usedThisGw == usedThisGw &&
+      other.countFromGw == countFromGw &&
+      other.freeSwapsGw == freeSwapsGw &&
+      _sameIds(other.countFrom, countFrom) &&
+      _sameIds(other.freeSwaps, freeSwaps);
+
+  @override
+  int get hashCode => Object.hash(free, usedThisGw, countFromGw, freeSwapsGw,
+      countFrom == null ? null : Object.hashAll(countFrom!),
+      Object.hashAll(freeSwaps));
+
+  @override
+  String toString() => 'TransferStateView(free: $free, used: $usedThisGw, '
+      'countFromGw: $countFromGw, countFrom: $countFrom, '
+      'freeSwapsGw: $freeSwapsGw, freeSwaps: $freeSwaps)';
+}
+
+bool _sameIds(List<String>? a, List<String>? b) {
+  if (a == null || b == null) return a == b;
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
+/// `TransferState/<uid>` → view; null ONLY when the node is absent (a
+/// first team — never a stand-in for "not read yet" or "read failed", the
+/// caller's job). A present node that is not a Map is unreadable: it reads
+/// as a node with no baseline (the preview hides), never as absent. Mirrors
+/// the server's parseTransferState: tolerates the null-padded List / index-
+/// keyed Map RTDB hands back for a holed list; `CountFromGw` is the anchor
+/// (without it `CountFrom` is half-written and reads as none; with it and
+/// no ids, [TransferStateView.countFrom] is null = a first team), and
+/// `FreeSwaps` / `FreeSwapsGw` count only as a pair.
+TransferStateView? parseTransferState(Object? node) {
+  if (node == null) return null;
+  if (node is! Map) return const TransferStateView();
+  final free = node['Free'];
+  final countFromGw = _positiveInt(node['CountFromGw']);
+  final countFromIds =
+      countFromGw == null ? const <String>[] : _idList(node['CountFrom']);
+  final swapsGw = _positiveInt(node['FreeSwapsGw']);
+  final swaps = swapsGw == null ? const <String>[] : _idList(node['FreeSwaps']);
+  return TransferStateView(
+    free: free is num ? free.toInt() : null,
+    usedThisGw: _optInt(node['UsedThisGw']) ?? 0,
+    countFromGw: countFromGw,
+    countFrom: countFromIds.isEmpty ? null : countFromIds,
+    freeSwapsGw: swaps.isEmpty ? null : swapsGw,
+    freeSwaps: swaps,
+  );
+}
+
+int? _positiveInt(Object? raw) {
+  final n = _optInt(raw);
+  return n != null && n > 0 ? n : null;
+}
+
+/// The non-blank string children of a node RTDB may hand back as a List
+/// (null-padded) OR an index-keyed Map.
+List<String> _idList(Object? raw) => [
+      for (final v in [
+        if (raw is List) ...raw,
+        if (raw is Map) ...raw.values,
+      ])
+        if (v is String && v.isNotEmpty) v,
+    ];
+
 /// The lock state the hub actually enforces: the owner's override wins,
 /// otherwise the engine's gameweek status. No current gameweek (season over)
 /// counts as locked in auto.

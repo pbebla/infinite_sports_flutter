@@ -49,6 +49,8 @@ void main() {
     // FPL selling: the own `Baselines/<uid>` snapshot (the draft's money)
     // must never seed the next user's hub.
     expect(declared, contains('_saleBaselineCache'));
+    // Transfers: the own `TransferState/<uid>` view (the draft's count).
+    expect(declared, contains('_transferStateCache'));
     final clearBody =
         RegExp(r'static void clearSessionCaches\(\) \{([\s\S]*?)\n  \}')
             .firstMatch(src)!

@@ -11,6 +11,7 @@ import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/transfer_preview.dart';
 
 FantasyPlayer player(String name, FantasyPosition pos, int price) =>
     FantasyPlayer(
@@ -672,6 +673,133 @@ void main() {
               baseline: null,
               nowUtc: DateTime.utc(2026, 10, 19, 12)),
           4);
+    });
+  });
+
+  group('transfers (transferPreview over the draft picks and chip)', () {
+    // The squad the manager came into gameweek 5 with: fullSquad()'s ids.
+    final held = [for (final p in fullSquad().picks) p.playerId];
+    TransferStateView view({int? free = 2, List<String>? countFrom}) =>
+        TransferStateView(
+            free: free, countFromGw: 5, countFrom: countFrom ?? held);
+
+    SquadDraftController draftWith() {
+      final d = SquadDraftController(config: cfg, initial: fullSquad());
+      d.setTransferContext(state: view(), answered: true, editingGw: 5);
+      return d;
+    }
+
+    test('nothing answered yet → notReady, never a first team', () {
+      final d = SquadDraftController(config: cfg, initial: fullSquad());
+      expect(d.transferPreview.kind, TransferPreviewKind.notReady);
+    });
+
+    test('an untouched draft has used nothing', () {
+      final p = draftWith().transferPreview;
+      expect(p.kind, TransferPreviewKind.counted);
+      expect((p.used, p.free, p.costPoints), (0, 2, 0));
+    });
+
+    test('counts the CURRENT picks: a swap, then three more', () {
+      final d = draftWith();
+      d.removePlayer('Att One');
+      d.addPlayer(player('Att New', FantasyPosition.att, 50));
+      expect(d.transferPreview.used, 1);
+      d.removePlayer('Def One');
+      d.addPlayer(player('Def New', FantasyPosition.def, 50));
+      d.removePlayer('Def Two');
+      d.addPlayer(player('Def New2', FantasyPosition.def, 50));
+      final p = d.transferPreview;
+      expect((p.used, p.free, p.costPoints), (3, 2, 4));
+    });
+
+    test('a removed player with no replacement yet costs nothing', () {
+      final d = draftWith();
+      d.removePlayer('Att One');
+      expect(d.transferPreview.used, 0);
+    });
+
+    test('every owned pick that is not in the baseline counts', () {
+      final d = SquadDraftController(config: cfg, initial: fullSquad());
+      d.setTransferContext(
+          state: view(countFrom: ['GK One']), answered: true, editingGw: 5);
+      // Six of the seven are not in a one-player baseline.
+      expect(d.transferPreview.used, 6);
+    });
+
+    test('the draft chip lifts the count: Wildcard, then off again', () {
+      final d = draftWith();
+      d.removePlayer('Att One');
+      d.addPlayer(player('Att New', FantasyPosition.att, 50));
+      d.setChip('wildcard');
+      expect(d.transferPreview.kind, TransferPreviewKind.unlimited);
+      expect(d.transferPreview.costPoints, 0);
+      d.setChip(null);
+      expect(d.transferPreview.kind, TransferPreviewKind.counted);
+      expect(d.transferPreview.used, 1);
+    });
+
+    test('a free swap sold this week is not counted', () {
+      final d = SquadDraftController(config: cfg, initial: fullSquad());
+      d.setTransferContext(
+          state: TransferStateView(
+              free: 2,
+              countFromGw: 5,
+              countFrom: held,
+              freeSwapsGw: 5,
+              freeSwaps: const ['Att One']),
+          answered: true,
+          editingGw: 5);
+      d.removePlayer('Att One');
+      d.addPlayer(player('Att New', FantasyPosition.att, 50));
+      expect(d.transferPreview.used, 0);
+    });
+
+    test('a stale baseline week, or no week yet → notReady', () {
+      final d = draftWith();
+      d.setTransferContext(state: view(), answered: true, editingGw: 6);
+      expect(d.transferPreview.kind, TransferPreviewKind.notReady);
+      d.setTransferContext(state: view(), answered: true, editingGw: null);
+      expect(d.transferPreview.kind, TransferPreviewKind.notReady);
+    });
+
+    test('a failed read (answered false) is notReady even after an answer',
+        () {
+      final d = draftWith();
+      d.setTransferContext(state: null, answered: false, editingGw: 5);
+      expect(d.transferPreview.kind, TransferPreviewKind.notReady);
+    });
+
+    test('an absent node, answered → firstTeam', () {
+      final d = SquadDraftController(config: cfg, initial: fullSquad());
+      d.setTransferContext(state: null, answered: true, editingGw: 5);
+      expect(d.transferPreview.kind, TransferPreviewKind.firstTeam);
+    });
+
+    test('setTransferContext notifies once per change, not on a repeat', () {
+      final d = SquadDraftController(config: cfg, initial: fullSquad());
+      var notified = 0;
+      d.addListener(() => notified++);
+      d.setTransferContext(state: view(), answered: true, editingGw: 5);
+      expect(notified, 1);
+      // A fresh but EQUAL view (every stream emit builds a new object).
+      d.setTransferContext(
+          state: view(countFrom: List.of(held)), answered: true, editingGw: 5);
+      expect(notified, 1);
+      d.setTransferContext(state: view(), answered: true, editingGw: 6);
+      expect(notified, 2);
+      d.setTransferContext(state: view(free: 3), answered: true, editingGw: 6);
+      expect(notified, 3);
+      d.setTransferContext(state: view(free: 3), answered: false, editingGw: 6);
+      expect(notified, 4);
+    });
+
+    test('edits and stream adoptions keep the transfer context', () {
+      final d = draftWith();
+      d.adoptFromStream(fullSquad(captainId: 'Att Two'));
+      expect(d.transferPreview.kind, TransferPreviewKind.counted);
+      d.revertToStored();
+      expect(d.transferPreview.kind, TransferPreviewKind.counted);
     });
   });
 }

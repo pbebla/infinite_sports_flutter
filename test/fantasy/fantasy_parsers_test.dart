@@ -629,4 +629,131 @@ void main() {
           '2d 4h');
     });
   });
+
+  group('parseTransferState (Fantasy/<sport>/<season>/TransferState/<uid>)',
+      () {
+    test('absent node → null (a first team, the preview decides)', () {
+      expect(parseTransferState(null), isNull);
+    });
+
+    test('a present node that is not a map reads as "no baseline", never '
+        'as absent', () {
+      final v = parseTransferState('junk')!;
+      expect(v.countFromGw, isNull);
+      expect(v.free, isNull);
+    });
+
+    test('every field of the server shape', () {
+      final v = parseTransferState({
+        'Free': 4,
+        'UsedThisGw': 2,
+        'ChipPlayed': 'wildcard', // ignored by the view
+        'SavedGw': 5,
+        'RolledGw': 4,
+        'CountFromGw': 5,
+        'CountFrom': ['a', 'b', 'c'],
+        'FreeSwapsGw': 5,
+        'FreeSwaps': ['a'],
+      })!;
+      expect(v.free, 4);
+      expect(v.usedThisGw, 2);
+      expect(v.countFromGw, 5);
+      expect(v.countFrom, ['a', 'b', 'c']);
+      expect(v.freeSwapsGw, 5);
+      expect(v.freeSwaps, ['a']);
+    });
+
+    test('a bare {Free, UsedThisGw} node (pre-feature) has no baseline', () {
+      final v = parseTransferState({'Free': 2, 'UsedThisGw': 0})!;
+      expect(v.free, 2);
+      expect(v.countFromGw, isNull);
+      expect(v.countFrom, isNull);
+      expect(v.freeSwaps, isEmpty);
+      expect(v.freeSwapsGw, isNull);
+    });
+
+    test('Free absent stays null; UsedThisGw absent reads 0', () {
+      final v = parseTransferState({'CountFromGw': 3})!;
+      expect(v.free, isNull);
+      expect(v.usedThisGw, 0);
+    });
+
+    test('CountFromGw alone = a first team for that week (countFrom null)',
+        () {
+      final v = parseTransferState({'Free': 2, 'CountFromGw': 1})!;
+      expect(v.countFromGw, 1);
+      expect(v.countFrom, isNull);
+    });
+
+    test('CountFrom without CountFromGw is half-written: treated as none',
+        () {
+      final v = parseTransferState({'CountFrom': ['a', 'b']})!;
+      expect(v.countFromGw, isNull);
+      expect(v.countFrom, isNull);
+    });
+
+    test('FreeSwaps without FreeSwapsGw (and the reverse) is none', () {
+      final noGw = parseTransferState({'FreeSwaps': ['a']})!;
+      expect(noGw.freeSwaps, isEmpty);
+      expect(noGw.freeSwapsGw, isNull);
+      final noSwaps = parseTransferState({'FreeSwapsGw': 5})!;
+      expect(noSwaps.freeSwaps, isEmpty);
+      expect(noSwaps.freeSwapsGw, isNull);
+    });
+
+    test('RTDB list coercion: holed lists and index-keyed maps both read',
+        () {
+      final holed = parseTransferState({
+        'CountFromGw': 2,
+        'CountFrom': ['a', null, 'c'],
+        'FreeSwapsGw': 2,
+        'FreeSwaps': {'0': 'a', '2': 'c'},
+      })!;
+      expect(holed.countFrom, ['a', 'c']);
+      expect(holed.freeSwaps, unorderedEquals(['a', 'c']));
+    });
+
+    test('blank and non-string ids are skipped; none left = first team',
+        () {
+      final v = parseTransferState({
+        'CountFromGw': 2,
+        'CountFrom': ['', 7, null],
+      })!;
+      expect(v.countFromGw, 2);
+      expect(v.countFrom, isNull);
+    });
+
+    test('numbers arrive as ints, doubles or numeric strings; junk is none',
+        () {
+      final v = parseTransferState({
+        'Free': 3.0,
+        'UsedThisGw': '2',
+        'CountFromGw': '5',
+      })!;
+      expect(v.free, 3);
+      expect(v.usedThisGw, 2);
+      expect(v.countFromGw, 5);
+      final bad = parseTransferState({'Free': 'x', 'CountFromGw': 0})!;
+      expect(bad.free, isNull);
+      expect(bad.countFromGw, isNull); // a gameweek is 1+
+    });
+
+    test('equal nodes parse to equal views (the draft notifies on change '
+        'only)', () {
+      Object? node() => {
+            'Free': 2,
+            'CountFromGw': 5,
+            'CountFrom': ['a', 'b'],
+            'FreeSwapsGw': 5,
+            'FreeSwaps': ['a'],
+          };
+      expect(parseTransferState(node()), parseTransferState(node()));
+      expect(parseTransferState(node()).hashCode,
+          parseTransferState(node()).hashCode);
+      expect(
+          parseTransferState(node()),
+          isNot(parseTransferState(
+              {...(node() as Map), 'CountFrom': ['a', 'c']})));
+    });
+  });
 }
