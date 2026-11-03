@@ -245,6 +245,11 @@ void main() {
       expect((payload['Note'] as String).length, 120);
     });
 
+    test('a fan can only claim Venmo or Zelle (cash is Manager-only)', () {
+      // The brief spells the accessor `db`; the enum's field is `key`.
+      expect(FantasyAccessMethod.values.map((m) => m.key), ['venmo', 'zelle']);
+    });
+
     test('a negative amount never reaches the database', () {
       expect(
           () => accessClaimPayload(
