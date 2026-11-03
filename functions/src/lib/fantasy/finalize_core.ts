@@ -295,8 +295,12 @@ export interface WeekCoreInput {
    *  VOIDED GAMEWEEKS). */
   voided: boolean;
   /** Live only: the teams that still have a not-started game today. Their
-   *  market players who have not played yet are PENDING. Absent or empty =
-   *  finalize scoring, exactly. */
+   *  market players who have not played yet are PENDING. The core never
+   *  inspects attendance: the caller lists every team with a not-started
+   *  game today, and a listed team's unplayed players are pending even if
+   *  marked absent in an earlier game that day (he can still play the
+   *  later one, like an FPL double gameweek). Absent or empty = finalize
+   *  scoring, exactly. */
   pendingTeams?: string[];
 }
 

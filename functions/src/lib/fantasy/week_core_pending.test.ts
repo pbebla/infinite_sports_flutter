@@ -216,6 +216,86 @@ describe('scoreWeekCore pending rule', () => {
     expect(final.playerWeeks['Leo']).toBe(12);
   });
 
+  it('bonusProvisional with mixed statuses: only the live game\'s bonus holders', () => {
+    // Lions 3-1 Tigers is Final (Leo/Lana/Tom hold settled bonus). Pumas
+    // 1-0 Hawks is live: Pete's goal + clean sheet = BPS 12 + 5 = 17, the
+    // only BPS of that game -> bonus 3. Pete (ATT): 1 + 4 + cs 2 + 3 = 10.
+    const out = scoreWeekCore(input({
+      games: [lionsTigers(2), {
+        node: {
+          team1: 'Pumas', team2: 'Hawks', team1score: 1, team2score: 0,
+          status: 1, team1activity: { "4'": [{ Goal: 'Pete' }] },
+        },
+        attendance: null,
+      }],
+    }));
+    expect([...out.bonusProvisional]).toEqual(['Pete']);
+    expect(out.playerWeeks['Pete']).toBe(10);
+    expect(out.playerWeeks['Leo']).toBe(12); // settled bonus still counts
+  });
+
+  for (const firstStatus of [1, 2]) {
+    it(`double-game day: absent in an earlier ${firstStatus === 2 ? 'Final' : 'live'} game, still pending for the later one`, () => {
+      // Controller ruling: Wolves play twice today. Game 1 (status
+      // [firstStatus]) has Xan (DEF) marked absent; game 2 (status 0) has
+      // not started, so it is not in `games` and the caller lists Wolves
+      // as pending. Xan can still play game 2 (an FPL double gameweek): no
+      // auto-sub yet, so bench DEF Vic counts half (25). Total: Pia 0 +
+      // Xan 0 + Dot 10 + Leo 240 + Lana 70 + Vic 25 + Tom 35 = 380.
+      const players: Record<string, MarketPlayer> = {
+        ...PLAYERS,
+        Xan: { position: 'DEF', eligible: true, teamName: 'Wolves' },
+      };
+      const wolvesGame1: FinalizeGame = {
+        node: {
+          team1: 'Wolves', team2: 'Hawks', team1score: 1, team2score: 1,
+          status: firstStatus,
+        },
+        attendance: { Wolves: { Xan: false }, Hawks: null },
+      };
+      const out = scoreWeekCore(input({
+        games: [lionsTigers(1), wolvesGame1],
+        players,
+        pendingTeams: ['Pumas', 'Wolves'],
+        squadsByUid: {
+          u: squad([
+            ['Pia', 'GK'], ['Xan', 'DEF'], ['Dot', 'DEF'], ['Leo', 'ATT'],
+            ['Lana', 'ATT'], ['Vic', 'DEF', true], ['Tom', 'ATT', true],
+          ], 'Leo', 'Lana'),
+        },
+      }));
+      const slots = breakdownOf(out, 'u');
+      expect(slots['Xan'].countedTenths).toBe(0);
+      expect(slots['Vic']).toEqual(
+        { playerId: 'Vic', countedTenths: 25, multiplier: 1, autoSubbedIn: false });
+      expect(out.historyByUid['u']['TotalTenths']).toBe(380);
+      // The real week: he has not played, so no Dream Team — not even alone
+      // in the market, where a "played" entry would take a DEF slot.
+      expect(out.week['Xan']).toEqual({ points: 0, played: false });
+      expect(pickDreamTeam(out.week, players, cfg, 1).Players
+        .map((r) => r.name)).not.toContain('Xan');
+      expect(pickDreamTeam(out.week, { Xan: players['Xan'] }, cfg, 1).Players)
+        .toEqual([]);
+    });
+  }
+
+  it('a market player with no teamName is never pending', () => {
+    // Nox (DEF, no team) starts and has not played: auto-subbed by Vic in
+    // FULL even while the rule is active. Total: 0+0+10+240+70+50+35 = 405.
+    const out = scoreWeekCore(input({
+      players: { ...PLAYERS, Nox: { position: 'DEF', eligible: true } },
+      squadsByUid: {
+        u: squad([
+          ['Pia', 'GK'], ['Nox', 'DEF'], ['Dot', 'DEF'], ['Leo', 'ATT'],
+          ['Lana', 'ATT'], ['Vic', 'DEF', true], ['Tom', 'ATT', true],
+        ], 'Leo', 'Lana'),
+      },
+    }));
+    expect(breakdownOf(out, 'u')['Vic']).toEqual(
+      { playerId: 'Vic', countedTenths: 50, multiplier: 1, autoSubbedIn: true });
+    expect(out.historyByUid['u']['TotalTenths']).toBe(405);
+  });
+
   it('no pendingTeams (or an empty list) changes nothing: a pending-team player is simply absent', () => {
     // The finalize path: Paz did not play, so Vic is auto-subbed in full.
     const none = scoreWeekCore(input({
