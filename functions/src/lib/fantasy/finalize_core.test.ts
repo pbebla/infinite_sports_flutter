@@ -15,7 +15,7 @@ import { futsalDefault, parsePosition } from './fantasy_config';
 import {
   competitionRanks, composeOverallBoard, composeRankHistory,
   computeGameweekFinalize, FinalizeGame, FinalizeInput, MarketPlayer,
-  pickDreamTeam, wholePoints,
+  pickDreamTeam, scoreWeekCore, wholePoints,
 } from './finalize_core';
 import { clone, Json, loadGoldenFixture } from './golden_fixture';
 
@@ -1041,5 +1041,56 @@ describe('PlayerTotals form / ppg / games (spec §3.3)', () => {
       playedGamesByWeek: { 5: { Ann: 9 } },
     }));
     expect(o.playerTotals['Ann'].games).toBe(1);
+  });
+});
+
+// ── Live design 2026-11-03 §1: stages 1–4 are the exported scoreWeekCore,
+// which the live week will reuse. With no pendingTeams it IS finalize's
+// scoring — the pending rule itself lives in week_core_pending.test.ts. ──
+describe('scoreWeekCore = computeGameweekFinalize stages 1–4', () => {
+  /** The core's input for a finalize input (finalize never passes
+   *  pendingTeams). */
+  const coreOf = (f: FinalizeInput) => scoreWeekCore({
+    cfg: f.cfg,
+    gw: f.gw,
+    games: f.games,
+    players: f.players,
+    squadsByUid: f.squadsByUid,
+    transferCostPointsByUid: f.transferCostPointsByUid,
+    voided: (f.voidedWeeks ?? []).includes(f.gw),
+  });
+
+  it('golden week: hand-math week points, net tenths, holders and managers', () => {
+    const core = coreOf(baseInput());
+    expect(core.playerWeeks).toEqual(WEEK_POINTS);
+    for (const [name, points] of Object.entries(WEEK_POINTS)) {
+      expect(core.week[name], name).toEqual(
+        { points, played: name !== 'Ezra' }); // Ezra was marked absent
+    }
+    expect(core.weekTenthsByUid).toEqual({ alpha: 350, boost: 440, churn: 555 });
+    // Holdings (the same hand count as the ownership test above).
+    expect(core.holders).toEqual({
+      Eva: 3, Ezra: 3, Wren: 3, Dana: 2, Will: 2, Bea: 2, Ben: 2,
+      Eli: 1, Alex: 1, Sam: 1, Bo: 1,
+    });
+    expect(core.scoredValid).toBe(3);
+    expect(core.skippedSquadUids).toEqual([]);
+    // Every golden game is Final: no bonus is provisional.
+    expect(core.bonusProvisional.size).toBe(0);
+  });
+
+  it('finalize publishes exactly the core\'s player weeks, stats and History (normal + voided)', () => {
+    for (const voidedWeeks of [[], [1]]) {
+      const input = baseInput();
+      input.voidedWeeks = voidedWeeks;
+      input.squadsByUid['junk'] = 7; // the skip list passes through too
+      const core = coreOf(input);
+      const fin = computeGameweekFinalize(input);
+      expect(fin.playerWeeks).toEqual(core.playerWeeks);
+      expect(fin.playerWeekStats).toEqual(core.playerWeekStats);
+      expect(fin.historyByUid).toEqual(core.historyByUid);
+      expect(fin.skippedSquadUids).toEqual(core.skippedSquadUids);
+      expect(fin.skippedSquadUids).toEqual(['junk']);
+    }
   });
 });

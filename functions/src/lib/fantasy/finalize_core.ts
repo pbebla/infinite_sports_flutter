@@ -17,6 +17,17 @@
 // like an absent player. Marking or undoing a forfeit is a write to a
 // Final game node, which re-runs this pipeline like any score edit.
 //
+// SCORING CORE + PENDING RULE (live design 2026-11-03 §1–2): stages 1–4
+// (mapper -> BPS/bonus -> player weeks -> squad weeks/History) are the
+// exported scoreWeekCore; computeGameweekFinalize calls it with no
+// pendingTeams, and the live week reuses it. Given pendingTeams (teams that
+// still have a not-started game today), a market player of such a team who
+// has not played yet is PENDING: team scoring counts him as playing with
+// his points so far — no auto-sub, a captain keeps the armband, a bench
+// player stays on the bench — while the returned real week map (Dream
+// Team, PlayerWeekStats.Played) never pretends he played. bonusProvisional
+// names the market players whose bonus comes from a game not yet Final.
+//
 // WRITE SHAPES (client contracts read from lib/fantasy/data/fantasy_parsers.dart
 // and lib/fantasy/hub/*; every number crosses the write boundary per these):
 //
@@ -131,6 +142,7 @@
 
 import { awardBonus, bpsScore } from './bps';
 import { FantasyConfig, FantasyPosition } from './fantasy_config';
+import { toIntLoose } from './orchestration_db';
 import { PlayerGameStats } from './player_game_stats';
 import { scorePlayerWeek, WeekScore } from './scoring';
 import { squadFromMap, squadToMap } from './squad';
@@ -145,7 +157,9 @@ export interface MarketPlayer {
   position: FantasyPosition;
   eligible: boolean;
   /** Players/<name>/teamName — which team's games a player's weekly
-   *  `Games` list (PlayerWeekStats). Absent = the list stays empty. */
+   *  `Games` list (PlayerWeekStats), and whose pending game makes him
+   *  PENDING (scoreWeekCore). Absent = the list stays empty and he is never
+   *  pending. */
   teamName?: string;
 }
 
@@ -260,6 +274,56 @@ export interface FinalizeOutput {
   voided: boolean;
   /** Squads that failed squadFromMap (malformed) — callers log these. */
   skippedSquadUids: string[];
+}
+
+/** scoreWeekCore's input: the part of the pipeline that scores ONE week
+ *  (see SCORING CORE + PENDING RULE in the header). */
+export interface WeekCoreInput {
+  cfg: FantasyConfig;
+  /** The gameweek being scored (the math itself never reads it). */
+  gw: number;
+  /** The week's counted non-friendly games: finalize passes the Final ones,
+   *  the live week every STARTED one (status 1 live, 2 Final). */
+  games: FinalizeGame[];
+  /** The market, exactly as FinalizeInput.players. */
+  players: Record<string, MarketPlayer>;
+  /** uid -> raw squad map, exactly as FinalizeInput.squadsByUid. */
+  squadsByUid: Record<string, unknown>;
+  /** Points already charged for this week's transfers. Absent uid = 0. */
+  transferCostPointsByUid?: Record<string, number>;
+  /** This gameweek is voided: every squad nets zero, cost waived (see
+   *  VOIDED GAMEWEEKS). */
+  voided: boolean;
+  /** Live only: the teams that still have a not-started game today. Their
+   *  market players who have not played yet are PENDING. Absent or empty =
+   *  finalize scoring, exactly. */
+  pendingTeams?: string[];
+}
+
+/** scoreWeekCore's output: stages 1–4 of the pipeline. */
+export interface WeekCoreOutput {
+  /** name -> bonus-inclusive week points + the REAL played flag (a pending
+   *  player stays unplayed): the Dream Team reads this. */
+  week: Record<string, PlayerWeek>;
+  /** PlayerWeeks/<gw> */
+  playerWeeks: Record<string, number>;
+  /** PlayerWeekStats/<gw> (a voided week: Pts 0, Voided, no Lines) */
+  playerWeekStats: Record<string, PlayerWeekStatsEntry>;
+  /** History/<gw>, Breakdown included (pending players as team-scored). */
+  historyByUid: Record<string, Record<string, unknown>>;
+  /** uid -> NET squad-week tenths: the weekly board's input. */
+  weekTenthsByUid: Record<string, number>;
+  /** name -> managers holding him over the valid squads (ownership's
+   *  numerator). */
+  holders: Record<string, number>;
+  /** Squads actually scored — ownership's denominator (invalid and
+   *  malformed squads excluded). */
+  scoredValid: number;
+  /** Squads that failed squadFromMap (malformed) — callers log these. */
+  skippedSquadUids: string[];
+  /** Market players holding a non-zero bonus from a game that is not Final
+   *  (status !== 2): that bonus stands as if the game ended now. */
+  bonusProvisional: Set<string>;
 }
 
 /** Dart `~/ 10` on tenths: truncation toward zero (a -155-tenth week is -15
@@ -438,16 +502,14 @@ function realizedFieldOf(raw: Record<string, unknown>): Record<string, number> {
     ? { [REALIZED_KEY]: realizedOf(raw) } : {};
 }
 
-/** The whole finalize pipeline for one gameweek, pure: games -> stats ->
- *  base+BPS+bonus -> player weeks -> squad weeks -> boards/totals/dream
- *  team. Deterministic and rerunnable: same inputs, same outputs — a
- *  score/attendance edit changes the inputs and everything downstream
- *  re-settles. */
-export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
-  const { cfg, gw, nowMs } = input;
+/** Stages 1–4 of the pipeline for one gameweek, pure: games -> stats ->
+ *  base+BPS+bonus -> player weeks -> squad weeks (History rows + the
+ *  weekly board's net tenths). computeGameweekFinalize calls it with no
+ *  pendingTeams; the live week passes them (the PENDING rule, header), which
+ *  changes only the map the squads are scored against. */
+export function scoreWeekCore(input: WeekCoreInput): WeekCoreOutput {
+  const { cfg, voided } = input;
   const costs = input.transferCostPointsByUid ?? {};
-  const voidedWeeks = new Set(input.voidedWeeks ?? []);
-  const voided = voidedWeeks.has(gw);
 
   // ── Stage 1: mapper — both teams of every game (golden replay parity) ──
   const statsByGame: Record<string, PlayerGameStats>[] = [];
@@ -466,7 +528,9 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
 
   // ── Stage 2: per-game BPS + 3/2/1 bonus. The BPS pool is EVERY player in
   // the game (guests included — a client-side engine replay sees the same
-  // pool), so a hot guest can consume a bonus slot exactly as on court. ──
+  // pool), so a hot guest can consume a bonus slot exactly as on court. A
+  // game that is not Final yet (status !== 2) awards its bonus as it stands
+  // now — provisional. ──
   const bonusByGame: Record<string, number>[] = [];
   for (const stats of statsByGame) {
     const bps: Record<string, number> = {};
@@ -475,11 +539,13 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
     }
     bonusByGame.push(awardBonus(bps));
   }
+  const gameFinal = input.games.map((g) => toIntLoose(g.node['status']) === 2);
 
   // ── Stage 3: player weeks (base + bonus) for every market player ──
   const week: Record<string, PlayerWeek> = {};
   const playerWeeks: Record<string, number> = {};
   const playerWeekStats: Record<string, PlayerWeekStatsEntry> = {};
+  const bonusProvisional = new Set<string>();
   for (const [name, p] of Object.entries(input.players)) {
     const wk = scorePlayerWeek(
       statsByGame.filter((stats) => name in stats).map((stats) => stats[name]),
@@ -490,9 +556,27 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
     week[name] = { points: wk.total + bonus, played: wk.played };
     playerWeeks[name] = wk.total + bonus;
     playerWeekStats[name] = playerWeekEntry(p, wk, bonus, input.games, voided);
+    if (bonusByGame.some((b, i) => (b[name] ?? 0) !== 0 && !gameFinal[i])) {
+      bonusProvisional.add(name);
+    }
   }
 
-  // ── Stage 4: squad weeks -> History entries + weekly board ──
+  // ── The PENDING rule (live only; header): a market player of a pending
+  // team who has not played yet is scored as playing, his points so far,
+  // by the squads alone — [week] keeps his real (unplayed) flag. ──
+  const pendingTeams = new Set(input.pendingTeams ?? []);
+  let squadWeek = week;
+  if (pendingTeams.size > 0) {
+    squadWeek = { ...week };
+    for (const [name, p] of Object.entries(input.players)) {
+      if (p.teamName !== undefined && pendingTeams.has(p.teamName) &&
+        !week[name].played) {
+        squadWeek[name] = { points: week[name].points, played: true };
+      }
+    }
+  }
+
+  // ── Stage 4: squad weeks -> History entries + the weekly board's input ──
   const historyByUid: Record<string, Record<string, unknown>> = {};
   const weekTenthsByUid: Record<string, number> = {};
   const holders: Record<string, number> = {};
@@ -525,7 +609,7 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
       };
       continue;
     }
-    const result = scoreSquadWeek(squad, week, cfg);
+    const result = scoreSquadWeek(squad, squadWeek, cfg);
     const gross = totalTenths(result);
     const cost = costs[uid] ?? 0;
     // A voided week counts zero — the transfer cost is waived with it.
@@ -549,6 +633,45 @@ export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
     }
   }
 
+  return {
+    week,
+    playerWeeks,
+    playerWeekStats,
+    historyByUid,
+    weekTenthsByUid,
+    holders,
+    scoredValid,
+    skippedSquadUids,
+    bonusProvisional,
+  };
+}
+
+/** The whole finalize pipeline for one gameweek, pure: games -> stats ->
+ *  base+BPS+bonus -> player weeks -> squad weeks (stages 1–4: scoreWeekCore)
+ *  -> boards/totals/dream team. Deterministic and rerunnable: same inputs,
+ *  same outputs — a score/attendance edit changes the inputs and everything
+ *  downstream re-settles. */
+export function computeGameweekFinalize(input: FinalizeInput): FinalizeOutput {
+  const { cfg, gw, nowMs } = input;
+  const voidedWeeks = new Set(input.voidedWeeks ?? []);
+  const voided = voidedWeeks.has(gw);
+
+  // ── Stages 1–4: scoreWeekCore. Finalize never passes pendingTeams: every
+  // player who did not play is simply absent. ──
+  const {
+    week, playerWeeks, playerWeekStats, historyByUid, weekTenthsByUid,
+    holders, scoredValid, skippedSquadUids,
+  } = scoreWeekCore({
+    cfg,
+    gw,
+    games: input.games,
+    players: input.players,
+    squadsByUid: input.squadsByUid,
+    transferCostPointsByUid: input.transferCostPointsByUid,
+    voided,
+  });
+
+  // The weekly board from the core's net tenths.
   const weekPointsByUid: Record<string, number> = {};
   for (const [uid, tenths] of Object.entries(weekTenthsByUid)) {
     weekPointsByUid[uid] = wholePoints(tenths);
