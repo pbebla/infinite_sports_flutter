@@ -29,7 +29,7 @@ import { legacyTarget, RegistrationConfigLike } from '../stripe_pay';
 import { escapeHtml } from '../support';
 import type { FantasyLogger } from './orchestration';
 import {
-  childEntries, FantasyDb, fantasyRoot, isPlainMap,
+  childEntries, FantasyDb, fantasyRoot, isPlainMap, updateIfPresent,
 } from './orchestration_db';
 import { adminUidsOf, FantasyPusher } from './pushes';
 
@@ -617,10 +617,12 @@ export async function revokeFantasyAccessOnRefund(
   const log = args.log ?? silent;
   const root = fantasyRoot(args.sport, args.season);
   const ctx = { sport: args.sport, season: args.season, uid: args.uid, pi: args.paymentIntent };
-  let why = '';
-  const res = await db.transaction(`${root}/Access/${args.uid}`, (current) => {
-    why = '';
-    if (!isPlainMap(current) || current['Status'] !== 'active') {
+  // updateIfPresent, never a bare transaction: RTDB's first run sees an
+  // empty cache, and aborting on that null skipped every live refund
+  // (2026-11-02). An absent record never reaches [next].
+  let why = 'no access record';
+  const landed = await updateIfPresent(db, `${root}/Access/${args.uid}`, (current) => {
+    if (current['Status'] !== 'active') {
       why = 'not active';
       return undefined;
     }
@@ -634,7 +636,7 @@ export async function revokeFantasyAccessOnRefund(
     }
     return { ...current, ...revokedPatch(args.nowMs, 'stripe') };
   });
-  if (!res.committed) {
+  if (landed === null) {
     log.info(`fantasy access: refund ignored — ${why}`, ctx);
     return { revoked: false };
   }

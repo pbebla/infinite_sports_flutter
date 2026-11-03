@@ -186,7 +186,7 @@ describe('revokeFantasyAccessOnRefund', () => {
       });
       expect(r).toEqual({ revoked: false });
       expect(db.writes).toEqual([]);
-      expect(log.has('not active')).toBe(true);
+      expect(log.has(access ? 'not active' : 'no access record')).toBe(true);
     }
   });
 

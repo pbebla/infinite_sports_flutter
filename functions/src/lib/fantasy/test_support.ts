@@ -65,9 +65,16 @@ export class FakeDb implements FantasyDb {
   async transaction(
     path: string, update: (current: unknown) => unknown,
   ): Promise<FantasyTxResult> {
-    // The update sees a COPY (it may not mutate stored state, as in RTDB).
     const current = await this.read(path);
-    const next = update(current === null ? null : clone(current));
+    // Real RTDB runs the update FIRST on its local cache, which is always
+    // empty in a Cloud Function, and asks the server only when that guess
+    // returns a value. An update that aborts on that null never sees the
+    // real node (the 2026-11-02 card-refund bug), so the fake does the same.
+    const guess = update(null);
+    if (guess === undefined) return { committed: false, value: current };
+    // The re-run on the server value sees a COPY (it may not mutate stored
+    // state, as in RTDB).
+    const next = current === null ? guess : update(clone(current));
     if (next === undefined) return { committed: false, value: current };
     // null over an absent node is RTDB's no-op: nothing written, no stub.
     if (!(next === null && current === null)) await this.write(path, next);

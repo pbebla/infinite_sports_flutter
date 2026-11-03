@@ -100,3 +100,13 @@ export function chunk<T>(items: T[], size: number): T[][] {
   }
   return out;
 }
+
+/** The send-claim transaction on `Campaigns/<id>/Status`: pending ->
+ *  sending, anything else aborts. A null returns null, never an abort:
+ *  RTDB's first run sees the function's empty cache, and null lets the
+ *  server re-run it on the real status (a no-op if Status is truly absent).
+ *  The caller sends only when the committed value is 'sending'. */
+export function campaignClaim(current: unknown): 'sending' | null | undefined {
+  if (current === null || current === undefined) return null;
+  return current === 'pending' ? 'sending' : undefined;
+}
