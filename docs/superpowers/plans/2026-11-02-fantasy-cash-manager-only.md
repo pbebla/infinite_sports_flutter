@@ -49,7 +49,7 @@ A gated fan cannot name a team (rules gate `Managers/$uid` on access), so someon
 
 - [ ] Tests first: `claimFrom({Method: 'cash', ...})` returns null; `methodLabel('cash')` still returns `'cash'`; `PAID_VIAS` still contains `'cash'`; the rules contract test pins `^(venmo|zelle)$` in both rules files.
 - [ ] Make them pass. Run `npx vitest run` (all green) and `npx tsc --noEmit -p .`.
-- [ ] Probe the rules in the LOCAL emulator only (scratchpad `hardening/access_rules_check.js` pattern): a fan's own claim with `Method: 'cash'` is DENIED, `'venmo'` still allowed.
+- [ ] Probe the rules in the LOCAL emulator only (scratchpad `hardening/access_rules_check.js` pattern): a fan's own claim with `Method: 'cash'` is DENIED, `'venmo'` still allowed, and an ADMIN write of `Access/<uid>` with `Via: 'cash'` is ALLOWED (no `Via` pattern may reject it).
 - [ ] Commit: `fix(fantasy-access): claims are venmo|zelle only; cash is recorded by an admin`.
 
 ### Task 3: Manager — the cash record and its write
@@ -60,11 +60,11 @@ A gated fan cannot name a team (rules gate `Managers/$uid` on access), so someon
   - remove the `cash` field from `AccessConfig` (constructor, `copyWith`, `toMap` `Methods`, `==`, `hashCode`, parse) and restore the validate message "(Venmo, Zelle or Card)"
 - Modify: `lib/services/fantasy_access_writes.dart`
   - add `TxDecision cashDecision(Object? current, {by, nowMs, amountCents})`: abort when already ACTIVE (never overwrite a live pass, same rule as grant); otherwise commit `cashRecord` keeping `Notified` (`_withNotified`), exactly like `grantOneDecision`
-  - add `Future<AccessActionResult> recordCashGuarded(store, {sport, season, uid, by, nowMs, amountCents})` = transaction with `cashDecision`, then resolve that fan's open claims as `superseded` (reuse `_resolveClaims`, the approve path's helper)
+  - add `Future<AccessActionResult> recordCashGuarded(store, {sport, season, uid, by, nowMs, amountCents, String? actedClaimKey})` = transaction with `cashDecision`, then resolve that fan's open claims with `_resolveClaims` (the approve path's helper): with `actedClaimKey` (the "Paid in cash instead" row action, Task 4) that claim resolves `approved` and the others `superseded`; without it every open claim resolves `superseded`
 - Modify: `lib/services/firebase/fantasy_access_service.dart` (`recordCash(...)` calling `recordCashGuarded`)
 - Test: `test/fantasy/fantasy_access_admin_test.dart`, `test/fantasy/fantasy_access_writes_test.dart`
 
-- [ ] Tests first: `cashRecord` shape; `cashDecision(null)` commits (an absent record: RTDB's first run can be an empty cache, so never abort on null); `cashDecision(active)` aborts; `cashDecision(pending)` commits and keeps `Notified`; `cashDecision(revoked)` commits; `recordCashGuarded` supersedes open claims; `AccessConfig().toMap()['Methods']` has no `Cash` key.
+- [ ] Tests first: `cashRecord` shape; `cashDecision(null)` commits (an absent record: RTDB's first run can be an empty cache, so never abort on null); `cashDecision(active)` aborts; `cashDecision(pending)` commits and keeps `Notified`; `cashDecision(revoked)` commits; `recordCashGuarded` without `actedClaimKey` supersedes every open claim; with `actedClaimKey: 'k1'` claim k1 resolves `approved` and another open claim `superseded`; an already-active fan → `AccessActionResult.alreadyActive` and the acted claim resolves `superseded` (same as approve); `AccessConfig().toMap()['Methods']` has no `Cash` key.
 - [ ] Implement. Run `flutter test test/fantasy` (green).
 - [ ] Commit: `feat(fantasy-access): record a cash payment (admin-only Via cash)`.
 
@@ -77,10 +77,10 @@ A gated fan cannot name a team (rules gate `Managers/$uid` on access), so someon
   - the confirm dialog says "Record a $5 cash payment for N people?" and the button "Record payment"
   - Team / All-registered sources stay grant-only (cash is per person)
 - Modify: `lib/ui/fantasy/access/profile_access_card.dart` (next to Grant / Revoke: `OutlinedButton` "Paid in cash" when the fan is NOT active; same amount dialog; calls `recordCash`)
-- Modify: `lib/ui/fantasy/access/pending_claims_card.dart` (copy back to "Fans who tapped "I sent it" for Venmo or Zelle.")
+- Modify: `lib/ui/fantasy/access/pending_claims_card.dart` (copy back to "Fans who tapped "I sent it" for Venmo or Zelle."; each claim row gets a third action **"Paid in cash instead"** next to Approve / Reject: the same amount dialog prefilled with the season price, then `recordCash(uid, amountCents, actedClaimKey: claim.key)` — Fable review B, owner-approved 2026-11-03)
 - Test: `test/ui/fantasy/fantasy_access_page_test.dart`, `test/ui/fantasy/grant_access_sheet_test.dart`, `test/ui/fantasy/fantasy_profile_detail_page_test.dart`
 
-- [ ] Widget tests first: the mode card has no "Cash" switch; Pick users → "Paid in cash" → amount prefilled `5` → Record payment calls the fake's `recordCash` with 500 cents per picked uid; an already-active user is listed as "already active" and skipped (same preview as grant); the profile card shows "Paid in cash" only when not active; both layouts at 360 px wide in light AND dark (project rule).
+- [ ] Widget tests first: the mode card has no "Cash" switch; Pick users → "Paid in cash" → amount prefilled `5` → Record payment calls the fake's `recordCash` with 500 cents per picked uid; an already-active user is listed as "already active" and skipped (same preview as grant); the profile card shows "Paid in cash" only when not active; a pending claim row's "Paid in cash instead" → amount prefilled `5` → calls `recordCash` with 500 cents and that claim's key; both layouts at 360 px wide in light AND dark (project rule).
 - [ ] Implement. Run `flutter test` (whole Manager suite) and `flutter analyze`.
 - [ ] Commit: `feat(fantasy-access): Paid in cash in the Grant sheet + profile; Cash switch removed`.
 
@@ -96,4 +96,5 @@ A gated fan cannot name a team (rules gate `Managers/$uid` on access), so someon
 
 - Spec coverage: fan sees card/Venmo/Zelle only (Task 1, plus a regression test against a stray `Cash: true`); owner can mark cash (Tasks 3-4, reachable for fans with no team via Pick users); receipts/revenue need no change (verified `PAID_VIAS`, `isPaid`).
 - The new transaction never aborts on null (the 2026-11-02 refund bug class).
-- Open question for review: should "Paid in cash" also be offered on a fan's pending Venmo/Zelle claim row ("they paid cash instead")? Default in this plan: no; Approve/Reject stay as they are, and recording cash supersedes the open claim.
+- Resolved by the Fable review (2026-11-03, `2026-11-03-fable-review-selling-rule-and-cash.md` §B): YES, "Paid in cash instead" on a pending claim row (Tasks 3-4).
+- Do NOT touch the fan app's `Via` parsing: it is plain text (`fantasy_access.dart`), so a `Via: cash` record still reads as active after Task 1.
