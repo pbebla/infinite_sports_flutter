@@ -8,9 +8,12 @@
 // Players market edits the same draft): fixed slots from the live config (a
 // GK slot only ever holds a GK), the engine's validateSquad running live on
 // every change, human sentences inline, Save enabled only when the draft is
-// valid AND changed. Self-echo safety: a successful save marks the draft
-// clean; the write then echoes back on the squad stream and is adopted as-is
-// (identical content — no double-apply, no flicker). When the hub passes a
+// valid AND changed AND its money is real (FPL selling, spec §4: every
+// money figure — the bar, the picker, the chips, the over-budget sentence —
+// is the shared draft's; see squad_draft.dart). Self-echo safety: a
+// successful save marks the draft clean; the write then echoes back on the
+// squad stream and is adopted as-is (identical content — no double-apply,
+// no flicker). When the hub passes a
 // shared [draft] it also feeds the squad stream into it; standalone (tests),
 // the builder owns a private controller and subscribes itself.
 //
@@ -27,9 +30,11 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/chip_row.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/market_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
@@ -147,14 +152,16 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
   }
 
   /// Shared draft: use the hub's controller as-is (the hub feeds it the
-  /// squad stream and config). Own draft: create, adopt the initial squad
-  /// and subscribe to the stream ourselves.
+  /// squad stream, config and money context). Own draft: create, adopt the
+  /// initial squad, feed its money context and subscribe to the stream
+  /// ourselves.
   void _attachDraft() {
     final shared = widget.draft;
     _ownsDraft = shared == null;
     _draft = shared ??
         SquadDraftController(
             config: widget.config, initial: widget.initialSquad);
+    _feedOwnSaleContext();
     _draft.addListener(_onDraftChanged);
     _squadSub?.cancel();
     if (_ownsDraft) {
@@ -162,6 +169,19 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
         if (mounted) _draft.adoptFromStream(squad);
       });
     }
+  }
+
+  /// FPL selling (spec §4) for the STANDALONE builder only (tests — in the
+  /// app the hub always shares its draft, which it feeds the real
+  /// `Baselines/<uid>`, market and price history): with no baseline feed
+  /// it prices as a first squad (nothing held, nothing sold) at the
+  /// widget's market, so its Save isn't held for a feed that doesn't exist.
+  void _feedOwnSaleContext() {
+    if (!_ownsDraft) return;
+    _draft.setSaleContext(
+      sale: const SaleBaselineState(loaded: true),
+      currentPrices: {for (final p in widget.players) p.name: p.priceTenths},
+    );
   }
 
   void _onDraftChanged() {
@@ -175,11 +195,15 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       _draft.removeListener(_onDraftChanged);
       if (_ownsDraft) _draft.dispose();
       _attachDraft();
-    } else if (_ownsDraft && old.squadStates != widget.squadStates) {
-      _squadSub?.cancel();
-      _squadSub = widget.squadStates.listen((squad) {
-        if (mounted) _draft.adoptFromStream(squad);
-      });
+    } else {
+      if (_ownsDraft && old.squadStates != widget.squadStates) {
+        _squadSub?.cancel();
+        _squadSub = widget.squadStates.listen((squad) {
+          if (mounted) _draft.adoptFromStream(squad);
+        });
+      }
+      // A no-op unless the market changed (setSaleContext compares).
+      if (old.players != widget.players) _feedOwnSaleContext();
     }
     // A formation change in the live config re-shapes the slots; the
     // controller re-maps the current picks into whatever still fits. (The
@@ -208,23 +232,27 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       return;
     }
     if (pick == null) {
-      await _pickInto(i, remainingExtraTenths: 0);
+      await _pickInto(i);
     } else {
       await _chipActions(i, pick);
     }
   }
 
-  /// Opens the picker for slot [i]; [remainingExtraTenths] is the outgoing
-  /// player's price on a swap (their money comes back for this pick).
-  Future<void> _pickInto(int i, {required int remainingExtraTenths}) async {
-    final remaining =
-        widget.config.budgetTenths - _draft.spentTenths + remainingExtraTenths;
+  /// Opens the picker for slot [i]. On a swap, [outgoing] (the slot's
+  /// current player) leaves first: the room offered is the draft's room
+  /// after his removal — his charged price back and, a baseline player,
+  /// his sale booked (FPL selling, spec §4).
+  Future<void> _pickInto(int i, {SquadPick? outgoing}) async {
+    final remaining = outgoing == null
+        ? _draft.remainingTenths
+        : _draft.remainingIfRemovedTenths(outgoing);
     final player = await showSquadPickerSheet(
       context,
       position: _draft.slots[i].position,
       players: widget.players,
       excludeIds: _draft.playerIds,
       remainingTenths: remaining,
+      priceOf: _draft.addCostOf,
     );
     if (player == null || !mounted) return;
     final message = _draft.setPickAt(
@@ -250,7 +278,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       case SquadChipAction.makeVice:
         _draft.makeVice(pick.playerId);
       case SquadChipAction.swap:
-        await _pickInto(i, remainingExtraTenths: pick.priceTenths);
+        await _pickInto(i, outgoing: pick);
       case SquadChipAction.remove:
         _announceArmbandLoss(_draft.removeAt(i));
     }
@@ -267,15 +295,14 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       _announceArmbandLoss(_draft.removeUnplaced(pick.playerId));
       return;
     }
-    final remaining = widget.config.budgetTenths -
-        _draft.spentTenths +
-        pick.priceTenths;
     final player = await showSquadPickerSheet(
       context,
       position: _draft.slots[slot].position,
       players: widget.players,
       excludeIds: _draft.playerIds,
-      remainingTenths: remaining,
+      // The moved player leaves: his money back, his sale booked.
+      remainingTenths: _draft.remainingIfRemovedTenths(pick),
+      priceOf: _draft.addCostOf,
     );
     if (player == null || !mounted) return;
     _announceArmbandLoss(_draft.swapUnplaced(pick.playerId, slot,
@@ -370,8 +397,20 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       chip: _draft.chip,
       cfg: widget.config,
       unplaced: _draft.unplaced,
+      spentTenths: _draft.spentTenths,
+      availableTenths: _draft.availableTenths,
     );
     final valid = issues.isEmpty;
+    // FPL selling (spec §4): Save waits until the draft's money is real.
+    // Said only when it is the ONE thing holding a save back (a valid,
+    // changed draft) — a clean draft can't save anyway, so the baseline
+    // landing just after the reveal never flashes the sentence.
+    final moneyReady = _draft.moneyReady;
+    final moneyPending = valid && _draft.dirty && !moneyReady;
+    final shownIssues = [
+      ...issues,
+      if (moneyPending) squadMoneyPendingMessage,
+    ];
     final alert = widget.alert;
 
     return SingleChildScrollView(
@@ -408,8 +447,10 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
           if (!widget.readOnly) ...[
             if (editable)
               _BudgetBar(
-                  spent: _draft.spentTenths,
-                  budget: widget.config.budgetTenths)
+                spent: _draft.spentTenths,
+                available: _draft.availableTenths,
+                realized: _draft.realizedTenths,
+              )
             else
               const _LockedLiveStrip(),
             const SizedBox(height: 12),
@@ -427,11 +468,15 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
             // Big photo chips (Task 3): the market's photoUrl per pick;
             // initials fall back instantly when a player has none.
             photoUrlFor: (id) => photoByName[id],
+            // The charged price (a held player at his baseline price) —
+            // the nameplates add up to the bar.
+            priceOf: _draft.priceOfPick,
           ),
           if (_draft.unplaced.isNotEmpty) ...[
             const SizedBox(height: 12),
             _NeedsNewSpotStrip(
               picks: _draft.unplaced,
+              priceOf: _draft.priceOfPick,
               enabled: editable,
               onSwap: _swapUnplaced,
               onRemove: (pick) =>
@@ -454,16 +499,17 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
               voidedWeeks: widget.voidedWeeks,
             ),
           ),
-          if (editable && issues.isNotEmpty) ...[
+          if (editable && shownIssues.isNotEmpty) ...[
             const SizedBox(height: 14),
-            _IssueList(issues: issues),
+            _IssueList(issues: shownIssues),
           ],
           if (editable) ...[
             const SizedBox(height: 16),
             FilledButton(
               key: const ValueKey('squad_save'),
-              onPressed:
-                  valid && _draft.dirty && !_saving ? _save : null,
+              onPressed: valid && _draft.dirty && moneyReady && !_saving
+                  ? _save
+                  : null,
               style: FilledButton.styleFrom(
                 backgroundColor: fantasyAccent(context),
                 foregroundColor:
@@ -483,23 +529,36 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
   }
 }
 
-/// Spent vs budget with the remaining amount — fills as picks land, flips to
-/// the error color when over. Restyled in the P3b feedback round (Task 5):
-/// the fill is the pitch-green family (works both themes), the remaining
-/// text reads in onSurface, and ONLY the over-budget state goes error-red.
+/// Spent vs the money available with the remaining amount — fills as picks
+/// land, flips to the error color when over. Restyled in the P3b feedback
+/// round (Task 5): the fill is the pitch-green family (works both themes),
+/// the remaining text reads in onSurface, and ONLY the over-budget state
+/// goes error-red.
+///
+/// FPL selling (spec §4): the total is the draft's available money — the
+/// budget plus the sales realized so far ([realized], may be negative) —
+/// and a second line says so whenever that isn't zero: "Includes +$0.5M
+/// from sales" (muted) / "Includes −$0.5M from sales" (the bright fantasy
+/// down red, both themes).
 class _BudgetBar extends StatelessWidget {
-  const _BudgetBar({required this.spent, required this.budget});
+  const _BudgetBar({
+    required this.spent,
+    required this.available,
+    required this.realized,
+  });
 
   final int spent;
-  final int budget;
+  final int available;
+  final int realized;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final green = fantasyPitchGreen(context);
-    final over = spent > budget;
-    final remaining = budget - spent;
-    final fill = budget == 0 ? 1.0 : (spent / budget).clamp(0.0, 1.0);
+    final over = spent > available;
+    final remaining = available - spent;
+    final fill =
+        available <= 0 ? 1.0 : (spent / available).clamp(0.0, 1.0);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
 
     return Container(
@@ -537,6 +596,22 @@ class _BudgetBar extends StatelessWidget {
               ),
             ],
           ),
+          if (realized != 0) ...[
+            const SizedBox(height: 2),
+            Text(
+              realizedSalesLine(realized),
+              key: const ValueKey('budget_realized'),
+              textAlign: TextAlign.end,
+              softWrap: true,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: realized < 0
+                    ? fantasyDownRed(context)
+                    : scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
           const SizedBox(height: 8),
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
@@ -662,12 +737,16 @@ class _SquadAlertBanner extends StatelessWidget {
 class _NeedsNewSpotStrip extends StatelessWidget {
   const _NeedsNewSpotStrip({
     required this.picks,
+    required this.priceOf,
     required this.enabled,
     required this.onSwap,
     required this.onRemove,
   });
 
   final List<SquadPick> picks;
+
+  /// The charged price (the draft's priceOfPick), as on the court.
+  final int Function(SquadPick pick) priceOf;
   final bool enabled;
   final void Function(SquadPick pick) onSwap;
   final void Function(SquadPick pick) onRemove;
@@ -724,7 +803,7 @@ class _NeedsNewSpotStrip extends StatelessWidget {
                         ),
                         Text(
                           '${_nowA(pick.position)} · '
-                          '${formatMoneyTenths(pick.priceTenths)}',
+                          '${formatMoneyTenths(priceOf(pick))}',
                           style: TextStyle(
                             fontSize: 11.5,
                             color: scheme.onSurfaceVariant,

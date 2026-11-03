@@ -105,6 +105,7 @@ class FantasyHubPage extends StatefulWidget {
     this.nowUtc,
     this.accessStates,
     this.saleBaselineStates,
+    this.priceHistoryStates,
     this.createCheckoutUrl,
     this.launchExternal,
     this.submitAccessClaim,
@@ -165,6 +166,10 @@ class FantasyHubPage extends StatefulWidget {
 
   /// Replaces `FantasyService.watchMySaleBaseline` (FPL selling).
   final Stream<SaleBaselineState>? saleBaselineStates;
+
+  /// Replaces `FantasyService.watchPriceHistory` (FPL selling: the market
+  /// floor a new pick is charged at uses last week's prices).
+  final Stream<Map<int, Map<String, int>>>? priceHistoryStates;
 
   /// Replaces `FantasyService.createCheckoutUrl` (the Checkout callable).
   final Future<Uri?> Function()? createCheckoutUrl;
@@ -262,6 +267,14 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   /// draft just isn't moneyReady until it lands.
   SaleBaselineState? _sale;
 
+  /// The season's price history (`PriceHistory/<gw>/<name>`, the prices
+  /// DURING each locked week): the draft's market floor for a new pick
+  /// reads `PriceHistory/<editingGw − 1>`, as the server's judge does.
+  /// null until it answers (the floor is then today's price — never lower
+  /// than the server's, so the room shown is never more than it allows).
+  /// NOT part of the reveal gate.
+  Map<int, Map<String, int>>? _priceHistory;
+
   /// Re-feeds the draft's sale context when the clock crosses the next
   /// lock: the week being edited moves on then even if no feed emits.
   Timer? _saleBoundary;
@@ -308,6 +321,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   StreamSubscription<Set<int>>? _voidedSub;
   StreamSubscription<FantasyAccessState>? _accessSub;
   StreamSubscription<SaleBaselineState>? _saleSub;
+  StreamSubscription<Map<int, Map<String, int>>>? _priceHistorySub;
 
   /// The push-tapped news post still to focus; cleared once the News tab
   /// has resolved it so a remounted tab (far tab swipes) never re-focuses.
@@ -384,6 +398,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
       if (mounted) setState(() => _squadLoaded = true);
     });
     _subscribeSaleBaseline();
+    _subscribePriceHistory();
     _alertSub = (widget.alertStates ??
             FantasyService.watchMySquadAlertAuto(widget.sport, widget.season))
         .listen((a) {
@@ -479,12 +494,36 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     }
   }
 
+  /// Listens to the season's price history (FPL selling: last week's
+  /// prices set a new pick's market floor). Error ≠ fact: a failed read
+  /// keeps the last known history; with none the floor stays today's price
+  /// (the server's own fallback with no history). Never part of the reveal
+  /// gate.
+  void _subscribePriceHistory() {
+    _priceHistorySub?.cancel();
+    void failed(Object e) =>
+        debugPrint('FantasyHubPage: price history feed failed: $e');
+    try {
+      _priceHistorySub = (widget.priceHistoryStates ??
+              FantasyService.watchPriceHistory(widget.sport, widget.season))
+          .listen((h) {
+        if (!mounted) return;
+        _priceHistory = h;
+        _feedSaleContext();
+      }, onError: failed);
+    } catch (e) {
+      failed(e);
+    }
+  }
+
   DateTime _nowUtc() => (widget.nowUtc ?? () => DateTime.now().toUtc())();
 
   /// Hands the shared draft its money context: the sale baseline, today's
-  /// market prices and the week being edited (saleEditingGameweek). Called
-  /// on every baseline / players / schedule / config change, and again at
-  /// the next lock (the clock moves the edited week on by itself).
+  /// market prices (null until the market loads — the draft is never
+  /// moneyReady before), last week's prices and the week being edited
+  /// (saleEditingGameweek). Called on every baseline / players / price
+  /// history / schedule / config change, and again at the next lock (the
+  /// clock moves the edited week on by itself).
   void _feedSaleContext() {
     _saleBoundary?.cancel();
     _saleBoundary = null;
@@ -492,18 +531,21 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     if (draft == null || !mounted) return;
     final now = _nowUtc();
     final gws = _schedule.gameweeks;
+    final players = _players;
+    final editingGw = saleEditingGameweek(
+      gameweeks: gws,
+      lockOverride: _configState?.lockOverride ?? FantasyLockOverride.auto,
+      baseline: _sale?.baseline,
+      nowUtc: now,
+    );
     draft.setSaleContext(
       sale: _sale,
-      currentPrices: {
-        for (final p in _players ?? const <FantasyPlayer>[])
-          p.name: p.priceTenths,
-      },
-      editingGw: saleEditingGameweek(
-        gameweeks: gws,
-        lockOverride: _configState?.lockOverride ?? FantasyLockOverride.auto,
-        baseline: _sale?.baseline,
-        nowUtc: now,
-      ),
+      currentPrices: players == null
+          ? null
+          : {for (final p in players) p.name: p.priceTenths},
+      lastWeekPrices:
+          editingGw == null ? null : _priceHistory?[editingGw - 1],
+      editingGw: editingGw,
     );
     for (final g in gws ?? const <Gameweek>[]) {
       if (!now.isBefore(g.lockUtc)) continue;
@@ -567,6 +609,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _voidedSub?.cancel();
     _accessSub?.cancel();
     _saleSub?.cancel();
+    _priceHistorySub?.cancel();
     _saleBoundary?.cancel();
     _configForRules.close();
     _managerForTabs.close();

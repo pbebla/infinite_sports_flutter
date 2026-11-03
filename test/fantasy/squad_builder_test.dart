@@ -17,8 +17,10 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 
 void main() {
   late StreamController<FantasySquad?> squads;
@@ -130,6 +132,8 @@ void main() {
     // scrolling.
     Size size = const Size(420, 1900),
     Brightness brightness = Brightness.light,
+    // A shared draft (the hub's): its money context is the test's to feed.
+    SquadDraftController? draft,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -153,6 +157,7 @@ void main() {
           voidedWeeks: voidedWeeks,
           nowUtc: nowUtc,
           onOpenPlayer: onOpenPlayer,
+          draft: draft,
         ),
       ),
     ));
@@ -938,6 +943,292 @@ void main() {
             tester.widget<Container>(banner).decoration! as BoxDecoration;
         expect(box.border, isNotNull);
         expect((box.border! as Border).top.color, red);
+      });
+    }
+  });
+
+  // FPL selling (spec §4): the shared draft's money — budget + realized
+  // sales − spent at the charged prices — is what the bar, the picker, the
+  // chips and the over-budget sentence show; Save waits until it is real.
+  group('FPL selling money', () {
+    const fullIds = [
+      'GK One',
+      'Def One',
+      'Def Two',
+      'Att One',
+      'Att Two',
+      'Bench Def',
+      'Bench Att',
+    ];
+
+    /// Today's market by id: the fixture squad at $5.0M each, the test
+    /// market's own prices, plus [moved].
+    Map<String, int> market([Map<String, int> moved = const {}]) => {
+          for (final id in fullIds) id: 50,
+          for (final p in players) p.name: p.priceTenths,
+          ...moved,
+        };
+
+    /// Last week's locked squad (the fixture squad at $5.0M each unless
+    /// [prices] says otherwise), for gameweek [forGw].
+    SaleBaselineState baseline(
+            {int realized = 0, Map<String, int>? prices, int forGw = 3}) =>
+        SaleBaselineState(
+          baseline: SaleBaseline(
+              forGw: forGw,
+              prices: prices ?? {for (final id in fullIds) id: 50},
+              realizedTenths: realized),
+          loaded: true,
+        );
+
+    SquadDraftController draftWith({
+      FantasySquad? squad,
+      SaleBaselineState? sale,
+      Map<String, int>? current,
+      bool withContext = true,
+    }) {
+      final d = SquadDraftController(
+          config: FantasyConfig.futsalDefault(),
+          initial: squad ?? fullSquad());
+      if (withContext) {
+        d.setSaleContext(
+            sale: sale ?? baseline(),
+            currentPrices: current ?? market(),
+            editingGw: 3);
+      }
+      return d;
+    }
+
+    Color red(Brightness b) => b == Brightness.dark
+        ? const Color(0xFFFF5252)
+        : const Color(0xFFD32F2F);
+
+    Text realizedLine(WidgetTester tester) =>
+        tester.widget<Text>(find.byKey(const ValueKey('budget_realized')));
+
+    for (final brightness in Brightness.values) {
+      testWidgets(
+          'the bar counts realized sales: +/− line, red only when '
+          'negative — $brightness', (tester) async {
+        final draft = draftWith(sale: baseline(realized: 5));
+        await pumpBuilder(tester, draft: draft, brightness: brightness);
+        await tester.pump();
+
+        // $35.0M spent of $50.0M + $0.5M from sales.
+        expect(find.text('\$35.0M spent'), findsOneWidget);
+        expect(find.text('\$15.5M left'), findsOneWidget);
+        expect(realizedLine(tester).data, 'Includes +\$0.5M from sales');
+        final context =
+            tester.element(find.byKey(const ValueKey('budget_bar')));
+        expect(realizedLine(tester).style?.color,
+            Theme.of(context).colorScheme.onSurfaceVariant);
+
+        // A loss narrows the room and reads in the bright down red.
+        draft.setSaleContext(
+            sale: baseline(realized: -5),
+            currentPrices: market(),
+            editingGw: 3);
+        await tester.pump();
+        expect(find.text('\$14.5M left'), findsOneWidget);
+        expect(realizedLine(tester).data, 'Includes −\$0.5M from sales');
+        expect(realizedLine(tester).style?.color, red(brightness));
+
+        // Nothing realized: no second line.
+        draft.setSaleContext(
+            sale: baseline(), currentPrices: market(), editingGw: 3);
+        await tester.pump();
+        expect(find.byKey(const ValueKey('budget_realized')), findsNothing);
+        expect(find.text('\$15.0M left'), findsOneWidget);
+      });
+    }
+
+    testWidgets('selling a riser grows the room, and the bar says why',
+        (tester) async {
+      // Att One was bought at $5.0M and is $7.0M today: he sells for $6.0M.
+      final draft = draftWith(current: market({'Att One': 70}));
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      expect(find.text('\$15.0M left'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('squad_chip_Att One')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('action_remove')));
+      await tester.pumpAndSettle();
+      // $50.0M + $1.0M from the sale − $30.0M spent.
+      expect(find.text('\$30.0M spent'), findsOneWidget);
+      expect(find.text('\$21.0M left'), findsOneWidget);
+      expect(realizedLine(tester).data, 'Includes +\$1.0M from sales');
+    });
+
+    testWidgets('a held player saved at another price shows and counts his '
+        'baseline price', (tester) async {
+      final squad = FantasySquad(
+        picks: [
+          for (final p in fullSquad().picks)
+            p.playerId == 'Att One'
+                ? pick('Att One', FantasyPosition.att, price: 90)
+                : p,
+        ],
+        captainId: 'GK One',
+        viceId: 'Def One',
+      );
+      final draft = draftWith(squad: squad);
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      final chip = find.byKey(const ValueKey('squad_chip_Att One'));
+      expect(
+          find.descendant(of: chip, matching: find.textContaining('\$5.0M')),
+          findsOneWidget);
+      expect(
+          find.descendant(of: chip, matching: find.textContaining('\$9.0M')),
+          findsNothing);
+      expect(find.text('\$35.0M spent'), findsOneWidget);
+    });
+
+    testWidgets('Swap: the picker offers the room after his sale, priced by '
+        'the draft', (tester) async {
+      // Last week: Ava (bought $5.0M, now $7.0M) instead of Att Two — she
+      // was sold (+$1.0M). Att One was bought $5.0M, now $7.0M.
+      final draft = draftWith(
+        sale: baseline(prices: {
+          for (final id in fullIds)
+            if (id != 'Att Two') id: 50,
+          'Ava Striker': 50,
+        }),
+        current: market({'Att One': 70}),
+      );
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      expect(find.text('\$16.0M left'), findsOneWidget);
+      expect(realizedLine(tester).data, 'Includes +\$1.0M from sales');
+
+      await tester.tap(find.byKey(const ValueKey('squad_chip_Att One')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('action_swap')));
+      await tester.pumpAndSettle();
+      // His $5.0M back + his sale (+$1.0M): $16.0M + $6.0M.
+      expect(find.text('\$22.0M left'), findsOneWidget);
+      // Ava comes back at what selling her banked ($6.0M) — taking her back
+      // undoes that sale — not at the market's $7.0M.
+      final ava = find.byKey(const ValueKey('picker_row_Ava Striker'));
+      expect(find.descendant(of: ava, matching: find.text('\$6.0M')),
+          findsOneWidget);
+      expect(find.descendant(of: ava, matching: find.text('\$7.0M')),
+          findsNothing);
+      await tester.tap(ava);
+      await tester.pumpAndSettle();
+
+      // She is held again at her baseline $5.0M; Att One's sale is booked.
+      final chip = find.byKey(const ValueKey('squad_chip_Ava Striker'));
+      expect(
+          find.descendant(of: chip, matching: find.textContaining('\$5.0M')),
+          findsOneWidget);
+      expect(find.text('\$16.0M left'), findsOneWidget);
+      expect(draft.remainingTenths, 160);
+    });
+
+    testWidgets('the over-budget sentence counts realized sales',
+        (tester) async {
+      // Spent $50.5M: over the bare budget, legal with +$0.5M from sales.
+      final squad = FantasySquad(
+        picks: [
+          for (final p in fullSquad().picks)
+            p.playerId == 'Att One'
+                ? pick('Att One', FantasyPosition.att, price: 205)
+                : p,
+        ],
+        captainId: 'GK One',
+        viceId: 'Def One',
+      );
+      final prices = {for (final id in fullIds) id: 50, 'Att One': 205};
+      final draft = draftWith(
+          squad: squad, sale: baseline(prices: prices, realized: 5));
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      expect(find.text('\$0.0M left'), findsOneWidget);
+      expect(find.textContaining('over budget'), findsNothing);
+
+      draft.setSaleContext(
+          sale: baseline(prices: prices, realized: -5),
+          currentPrices: market(),
+          editingGw: 3);
+      await tester.pump();
+      expect(find.text("You're \$1.0M over budget."), findsOneWidget);
+      expect(find.text('\$1.0M over'), findsOneWidget);
+    });
+
+    testWidgets('Save waits for the money: disabled with the exact sentence '
+        'until the draft is moneyReady', (tester) async {
+      const sentence =
+          'Your budget is still updating — try again in a few minutes.';
+      final draft = draftWith(withContext: false);
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      // A clean draft can't save anyway: no sentence.
+      expect(find.text(sentence), findsNothing);
+
+      // A valid edit: captain moves to Att One.
+      await tester.tap(find.byKey(const ValueKey('squad_chip_Att One')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('action_make_captain')));
+      await tester.pumpAndSettle();
+      expect(draft.dirty, isTrue);
+      expect(saveEnabled(tester), isFalse);
+      expect(find.text(sentence), findsOneWidget);
+
+      // A stale baseline (last week's) is not this week's money either.
+      draft.setSaleContext(
+          sale: baseline(forGw: 2), currentPrices: market(), editingGw: 3);
+      await tester.pump();
+      expect(saveEnabled(tester), isFalse);
+      expect(find.text(sentence), findsOneWidget);
+
+      draft.setSaleContext(
+          sale: baseline(), currentPrices: market(), editingGw: 3);
+      await tester.pump();
+      expect(saveEnabled(tester), isTrue);
+      expect(find.text(sentence), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('squad_save')));
+      await tester.pumpAndSettle();
+      expect(savedSquads, hasLength(1));
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('360 px: the realized line and the money-pending sentence '
+          'fit, no overflow — $brightness', (tester) async {
+        // A stale baseline with a loss: the line shows, Save is gated.
+        final draft = draftWith(sale: baseline(realized: -125, forGw: 2));
+        await pumpBuilder(tester,
+            draft: draft,
+            brightness: brightness,
+            size: const Size(360, 760));
+        await tester.pump();
+        await tester.tap(find.byKey(const ValueKey('squad_chip_Att One')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('action_make_captain')));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(realizedLine(tester).data, 'Includes −\$12.5M from sales');
+        expect(realizedLine(tester).style?.color, red(brightness));
+
+        final scrollable = find.byType(Scrollable).first;
+        for (final key in ['budget_bar', 'budget_realized', 'squad_save']) {
+          await tester.dragUntilVisible(
+              find.byKey(ValueKey(key)), scrollable, const Offset(0, -200));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull, reason: key);
+          final r = tester.getRect(find.byKey(ValueKey(key)));
+          expect(r.left, greaterThanOrEqualTo(0), reason: key);
+          expect(r.right, lessThanOrEqualTo(360), reason: key);
+        }
+        final pending = find.text(
+            'Your budget is still updating — try again in a few minutes.');
+        expect(pending, findsOneWidget);
+        final r = tester.getRect(pending);
+        expect(r.right, lessThanOrEqualTo(360));
+        for (final t in tester.widgetList<Text>(find.byType(Text))) {
+          expect(t.overflow, isNot(TextOverflow.ellipsis), reason: t.data);
+        }
       });
     }
   });

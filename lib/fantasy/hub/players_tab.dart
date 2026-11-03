@@ -746,7 +746,9 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
       player: p,
       slots: widget.draft.slots,
       slotPicks: widget.draft.picks,
-      budgetTenths: widget.draft.config.budgetTenths,
+      // The shared draft's money (FPL selling, spec §4).
+      remainingTenths: widget.draft.remainingTenths,
+      priceOf: widget.draft.addCostOf,
       editable: editable,
       unplaced: widget.draft.unplaced,
     );

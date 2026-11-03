@@ -66,6 +66,7 @@ class FantasyCourtView extends StatelessWidget {
     this.chipWidth = 96,
     this.chipAvatarSize = 58,
     this.showPrices = true,
+    this.priceOf,
   });
 
   final FantasyConfig config;
@@ -101,6 +102,12 @@ class FantasyCourtView extends StatelessWidget {
   /// false hides prices on the nameplates (the Dream Team shows position +
   /// week points, not market prices).
   final bool showPrices;
+
+  /// The price a nameplate shows (FPL selling, spec §4): the squad builder
+  /// passes its draft's SquadDraftController.priceOfPick, so a held player
+  /// reads his baseline price — what the bar counts. null = the pick's own
+  /// price (read-only viewers of a stored squad).
+  final int Function(SquadPick pick)? priceOf;
 
   @override
   Widget build(BuildContext context) {
@@ -207,7 +214,8 @@ class FantasyCourtView extends StatelessWidget {
     return FantasyPlayerChip(
       key: ValueKey('squad_chip_${pick.playerId}'),
       name: pick.playerId,
-      priceTenths: showPrices ? pick.priceTenths : null,
+      priceTenths:
+          showPrices ? (priceOf?.call(pick) ?? pick.priceTenths) : null,
       position: slots[i].position,
       photoUrl: photoUrlFor?.call(pick.playerId),
       isCaptain: pick.playerId == captainId,

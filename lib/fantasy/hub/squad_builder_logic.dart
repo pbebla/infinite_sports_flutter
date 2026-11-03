@@ -258,6 +258,13 @@ const String squadSaveLockedMessage =
     "The deadline passed while you were editing — this week's team is "
     "locked. Your changes weren't saved.";
 
+/// Shown under the issues while Save waits for the money (FPL selling, spec
+/// §4): the shared draft is not moneyReady — the market prices or this
+/// week's `Baselines/<uid>` haven't loaded, or the read failed — so its
+/// budget can't be trusted yet.
+const String squadMoneyPendingMessage =
+    'Your budget is still updating — try again in a few minutes.';
+
 /// Whether a failed squad save was refused by the database rules
 /// (`permission-denied` — FirebaseException's text is
 /// "[firebase_database/permission-denied] Client doesn't have permission…"
@@ -288,13 +295,10 @@ FantasySquad draftToSquad({
       chip: chip,
     );
 
-/// Total paid for the filled slots, in tenths.
-int draftSpentTenths(List<SquadPick?> slotPicks) =>
-    slotPicks.fold(0, (a, p) => a + (p?.priceTenths ?? 0));
-
 /// Picker candidates for one slot: eligible players of [position], not
 /// already in the squad, matching [query] on name or team. Sorted by price
-/// (desc, ties by name) or by name. Affordability does NOT filter — the
+/// (desc, ties by name) or by name — the price the sheet shows ([priceOf],
+/// the draft's; default the market's). Affordability does NOT filter — the
 /// sheet shows unaffordable players disabled instead.
 List<FantasyPlayer> pickerCandidates({
   required List<FantasyPlayer> players,
@@ -302,7 +306,9 @@ List<FantasyPlayer> pickerCandidates({
   required Set<String> excludeIds,
   String query = '',
   bool sortByPrice = true,
+  int Function(FantasyPlayer player)? priceOf,
 }) {
+  final price = priceOf ?? (FantasyPlayer p) => p.priceTenths;
   final q = query.trim().toLowerCase();
   final out = players
       .where((p) =>
@@ -315,7 +321,7 @@ List<FantasyPlayer> pickerCandidates({
       .toList();
   if (sortByPrice) {
     out.sort((a, b) {
-      final byPrice = b.priceTenths.compareTo(a.priceTenths);
+      final byPrice = price(b).compareTo(price(a));
       return byPrice != 0 ? byPrice : a.name.compareTo(b.name);
     });
   } else {
@@ -383,6 +389,12 @@ bool squadEditable({
 /// The engine's validateSquad, rendered as human sentences the builder shows
 /// inline. Formation problems come out per position ("Pick 2 defenders — you
 /// have 1"); the armband line appears only once there's a squad to captain.
+///
+/// Money (FPL selling, spec §4) is the shared draft's, not the picks' own
+/// prices against the bare budget: over budget = [spentTenths] (at the
+/// charged prices, SquadDraftController.spentTenths) above
+/// [availableTenths] (budget + realized sales,
+/// SquadDraftController.availableTenths) — the same figures as the bar.
 List<String> issueSentences({
   required List<SquadSlot> slots,
   required List<SquadPick?> slotPicks,
@@ -391,6 +403,8 @@ List<String> issueSentences({
   String? chip,
   required FantasyConfig cfg,
   List<SquadPick> unplaced = const [],
+  required int spentTenths,
+  required int availableTenths,
 }) {
   final squad = draftToSquad(
       slotPicks: slotPicks, captainId: captainId, viceId: viceId, chip: chip);
@@ -431,8 +445,10 @@ List<String> issueSentences({
         'bench attackers');
   }
 
-  if (issues.contains(SquadIssue.overBudget)) {
-    final over = squad.spentTenths - cfg.budgetTenths;
+  // The engine's own overBudget (pick prices vs the bare budget) is NOT
+  // read: the draft's figures are the ones the server will judge.
+  if (spentTenths > availableTenths) {
+    final over = spentTenths - availableTenths;
     out.add("You're ${formatMoneyTenths(over)} over budget.");
   }
 

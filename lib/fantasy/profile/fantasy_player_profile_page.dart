@@ -853,13 +853,19 @@ class _DraftAction extends StatelessWidget {
       player: player,
       slots: draft.slots,
       slotPicks: draft.picks,
-      budgetTenths: draft.config.budgetTenths,
+      // The shared draft's money (FPL selling, spec §4).
+      remainingTenths: draft.remainingTenths,
+      priceOf: draft.addCostOf,
       editable: editable,
       unplaced: draft.unplaced,
     );
     final inSquad = availability == MarketAddAvailability.inSquad;
     final addable = availability == MarketAddAvailability.addable;
     final reason = marketAddReason(availability, player.position);
+    // An owned baseline player's Remove says what he was bought at and
+    // what selling him banks; anyone bought this week has no such line.
+    final bought = inSquad ? draft.boughtPriceOf(player.name) : null;
+    final sells = inSquad ? draft.sellPriceOf(player.name) : null;
 
     void onPressed() {
       if (inSquad) {
@@ -884,6 +890,20 @@ class _DraftAction extends StatelessWidget {
           subdued: inSquad,
           onPressed: addable || inSquad ? onPressed : null,
         ),
+        if (bought != null && sells != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            sellsForLine(boughtTenths: bought, sellsTenths: sells),
+            key: const ValueKey('profile_sells_for'),
+            textAlign: TextAlign.center,
+            softWrap: true,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
         if (reason != null) ...[
           const SizedBox(height: 6),
           Text(

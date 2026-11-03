@@ -24,12 +24,17 @@ import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 
+/// [remainingTenths] is the shared draft's room for this pick (a swap: the
+/// room after the outgoing player leaves) and [priceOf] what a candidate
+/// takes from it (SquadDraftController.addCostOf) — the price each row
+/// shows and is judged affordable by (FPL selling, spec §4).
 Future<FantasyPlayer?> showSquadPickerSheet(
   BuildContext context, {
   required FantasyPosition position,
   required List<FantasyPlayer> players,
   required Set<String> excludeIds,
   required int remainingTenths,
+  required int Function(FantasyPlayer player) priceOf,
 }) {
   return showModalBottomSheet<FantasyPlayer>(
     context: context,
@@ -41,6 +46,7 @@ Future<FantasyPlayer?> showSquadPickerSheet(
       players: players,
       excludeIds: excludeIds,
       remainingTenths: remainingTenths,
+      priceOf: priceOf,
     ),
   );
 }
@@ -51,12 +57,14 @@ class _PickerSheet extends StatefulWidget {
     required this.players,
     required this.excludeIds,
     required this.remainingTenths,
+    required this.priceOf,
   });
 
   final FantasyPosition position;
   final List<FantasyPlayer> players;
   final Set<String> excludeIds;
   final int remainingTenths;
+  final int Function(FantasyPlayer player) priceOf;
 
   @override
   State<_PickerSheet> createState() => _PickerSheetState();
@@ -81,6 +89,7 @@ class _PickerSheetState extends State<_PickerSheet> {
       excludeIds: widget.excludeIds,
       query: _search.text,
       sortByPrice: _sortByPrice,
+      priceOf: widget.priceOf,
     );
 
     return Padding(
@@ -182,7 +191,8 @@ class _PickerSheetState extends State<_PickerSheet> {
 
   Widget _row(BuildContext context, FantasyPlayer p) {
     final scheme = Theme.of(context).colorScheme;
-    final affordable = p.priceTenths <= widget.remainingTenths;
+    final price = widget.priceOf(p);
+    final affordable = price <= widget.remainingTenths;
     return InkWell(
       key: ValueKey('picker_row_${p.name}'),
       onTap: affordable ? () => Navigator.of(context).pop(p) : null,
@@ -232,7 +242,7 @@ class _PickerSheetState extends State<_PickerSheet> {
               ),
               const SizedBox(width: 8),
               Text(
-                formatMoneyTenths(p.priceTenths),
+                formatMoneyTenths(price),
                 style: TextStyle(
                   fontSize: 13.5,
                   fontWeight: FontWeight.w700,

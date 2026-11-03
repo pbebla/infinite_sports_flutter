@@ -372,7 +372,8 @@ void main() {
       expect(owned(d, 'Att One').priceTenths, 90); // as stored
       expect(d.priceOfPick(owned(d, 'Att One')), 80);
       expect(d.spentTenths, 6 * 50 + 80);
-      // A pick that is not in the baseline keeps its own price.
+      // A pick that is not in the baseline keeps its own price (here also
+      // today's price — see the market-floor test below).
       expect(
           d.priceOfPick(pick('New Guy', FantasyPosition.att, price: 70)), 70);
     });
@@ -497,6 +498,113 @@ void main() {
       expect(notified, 1);
       d.setSaleContext(sale: s, currentPrices: current, editingGw: 6);
       expect(notified, 2);
+      // Last week's prices are part of the context too.
+      d.setSaleContext(
+          sale: s,
+          currentPrices: current,
+          lastWeekPrices: const {'Att One': 70},
+          editingGw: 6);
+      expect(notified, 3);
+      d.setSaleContext(
+          sale: s,
+          currentPrices: current,
+          lastWeekPrices: const {'Att One': 70},
+          editingGw: 6);
+      expect(notified, 3);
+    });
+
+    // Server parity (squad_integrity.ts judgeSale): a NEW (non-baseline)
+    // pick is charged max(0, client price, min(current, last week's
+    // price)) — PriceHistory/<editingGw − 1>, absent → current.
+    test('a carried non-baseline pick counts at the server\'s market floor',
+        () {
+      final d = SquadDraftController(config: cfg, initial: heldSquad());
+      final carried = pick('Carry On', FantasyPosition.att, price: 60);
+      d.setSaleContext(
+          sale: sale(),
+          currentPrices: const {...current, 'Carry On': 80},
+          lastWeekPrices: const {'Carry On': 70},
+          editingGw: 5);
+      expect(d.priceOfPick(carried), 70);
+      // No price history for him: the floor is today's price.
+      d.setSaleContext(
+          sale: sale(),
+          currentPrices: const {...current, 'Carry On': 80},
+          lastWeekPrices: null,
+          editingGw: 5);
+      expect(d.priceOfPick(carried), 80);
+      // Gone from the market: his own price (the server's floor is 0).
+      d.setSaleContext(sale: sale(), currentPrices: current, editingGw: 5);
+      expect(d.priceOfPick(carried), 60);
+      // A pick made this window at today's price is unchanged.
+      d.setSaleContext(
+          sale: sale(),
+          currentPrices: current,
+          lastWeekPrices: const {'New Guy': 60},
+          editingGw: 5);
+      final fresh = d.newPick(player('New Guy', FantasyPosition.att, 70),
+          bench: false);
+      expect(d.priceOfPick(fresh), 70);
+      // A baseline pick stays at his baseline price whatever the floor.
+      d.setSaleContext(
+          sale: sale(),
+          currentPrices: current,
+          lastWeekPrices: const {'Att One': 100},
+          editingGw: 5);
+      expect(d.priceOfPick(owned(d, 'Att One')), 80);
+    });
+
+    test('moneyReady waits for the market prices (null = not loaded)', () {
+      final d = SquadDraftController(config: cfg, initial: heldSquad());
+      d.setSaleContext(
+          sale: const SaleBaselineState(loaded: true),
+          currentPrices: null,
+          editingGw: 5);
+      expect(d.moneyReady, isFalse);
+      d.setSaleContext(
+          sale: const SaleBaselineState(loaded: true),
+          currentPrices: current,
+          editingGw: 5);
+      expect(d.moneyReady, isTrue);
+      // An empty market is a loaded one.
+      d.setSaleContext(
+          sale: const SaleBaselineState(loaded: true),
+          currentPrices: const {},
+          editingGw: 5);
+      expect(d.moneyReady, isTrue);
+    });
+
+    test('remainingIfRemovedTenths: the pick must be owned by the draft', () {
+      final d = draftWith();
+      expect(
+          () => d.remainingIfRemovedTenths(
+              pick('Not Mine', FantasyPosition.att, price: 70)),
+          throwsA(isA<AssertionError>()));
+    });
+
+    test('addCostOf: what adding him takes from the room', () {
+      // A new player: today's price.
+      final d = draftWith();
+      expect(d.addCostOf(player('New Guy', FantasyPosition.att, 70)), 70);
+
+      // A sold riser (paid 80, now 90): re-adding undoes the sale — the
+      // room drops by what selling him banked (85), not by 80 or 90.
+      final riser = draftWith();
+      riser.removePlayer('Att One');
+      final attOne = player('Att One', FantasyPosition.att, 90);
+      expect(riser.addCostOf(attOne), 85);
+      final before = riser.remainingTenths;
+      riser.addPlayer(attOne);
+      expect(riser.remainingTenths, before - 85);
+
+      // A sold faller (paid 50, now 40): undoing his sale costs 40.
+      final faller = draftWith();
+      faller.removePlayer('Att Two');
+      final attTwo = player('Att Two', FantasyPosition.att, 40);
+      expect(faller.addCostOf(attTwo), 40);
+      final room = faller.remainingTenths;
+      faller.addPlayer(attTwo);
+      expect(faller.remainingTenths, room - 40);
     });
   });
 

@@ -78,6 +78,7 @@ void main() {
   late StreamController<Map<int, FantasySquad>> history;
   late StreamController<FantasyAccessState> access;
   late StreamController<SaleBaselineState> sale;
+  late StreamController<Map<int, Map<String, int>>> priceHistory;
   late List<_Opened> opened;
 
   // Paid-access seam recorders.
@@ -127,6 +128,7 @@ void main() {
     history = StreamController<Map<int, FantasySquad>>.broadcast();
     access = StreamController<FantasyAccessState>.broadcast();
     sale = StreamController<SaleBaselineState>.broadcast();
+    priceHistory = StreamController<Map<int, Map<String, int>>>.broadcast();
     checkoutCalls = 0;
     launched = [];
     claims = [];
@@ -151,6 +153,7 @@ void main() {
     history.close();
     access.close();
     sale.close();
+    priceHistory.close();
   });
 
   /// Lets the feeds land and the 300ms reveal fade finish. Never
@@ -195,6 +198,7 @@ void main() {
         nowUtc: nowUtc,
         accessStates: access.stream,
         saleBaselineStates: sale.stream,
+        priceHistoryStates: priceHistory.stream,
         createCheckoutUrl: () async {
           checkoutCalls++;
           return checkoutUri;
@@ -798,12 +802,45 @@ void main() {
       await settle(tester);
       expect(draft.moneyReady, isTrue);
       expect(draft.realizedTenths, 0);
+      // Every pick is NEW now, charged like the server: at least
+      // min(today, last week). Ava was saved at 70 and is 80 today; with
+      // no price history the floor is today's 80...
+      expect(draft.spentTenths, 420);
+      // ...and once PriceHistory/2 (the week before the edited GW3) says
+      // she was 70, the floor is 70.
+      priceHistory.add(const {
+        2: {'Ava Striker': 70},
+        1: {'Ava Striker': 90},
+      });
+      await settle(tester);
       expect(draft.spentTenths, 410);
     });
 
+    testWidgets('a price history read error is logged; the floor falls back '
+        'to today\'s price', (tester) async {
+      final logs = <String>[];
+      final original = debugPrint;
+      debugPrint =
+          (String? message, {int? wrapWidth}) => logs.add(message ?? '');
+      try {
+        final draft = await hubDraft(tester);
+        sale.add(const SaleBaselineState(loaded: true));
+        priceHistory.addError(StateError('network'));
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+        expect(key('hub'), findsOneWidget);
+        expect(draft.moneyReady, isTrue);
+        expect(draft.spentTenths, 410);
+      } finally {
+        debugPrint = original;
+      }
+      expect(logs.join('\n'),
+          contains('FantasyHubPage: price history feed failed: Bad state: '
+              'network'));
+    });
+
     testWidgets('a read error before any value: degraded, never ready — the '
-        'hub still shows; a known baseline survives a later error',
-        (tester) async {
+        'hub still shows and the failure is logged', (tester) async {
       final logs = <String>[];
       final original = debugPrint;
       debugPrint =

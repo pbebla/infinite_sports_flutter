@@ -16,17 +16,23 @@
 //   draft left dirty since before the lock can't quietly re-arm the chip.
 //
 // FPL selling (spec §4, selling.dart): the hub feeds [setSaleContext] the
-// own `Baselines/<uid>` state, today's market prices and the gameweek being
-// edited, and the draft charges what the server's lock judge will charge —
-// a baseline player kept (or re-added) costs his BASELINE price whatever
-// the pick says; a sold one banks his FPL sell price into [realizedTenths];
-// the room is budget + realized − spent. Error ≠ fact: [moneyReady] is
-// false until a current baseline (or a known first squad) has loaded, and
-// the UI must not present the money as real before then.
+// own `Baselines/<uid>` state, today's market prices, last week's prices
+// (`PriceHistory/<editingGw − 1>`) and the gameweek being edited, and the
+// draft charges what the server's lock judge will charge — a baseline
+// player kept (or re-added) costs his BASELINE price whatever the pick
+// says; anyone else at least the market floor min(today, last week); a
+// sold baseline player banks his FPL sell price into [realizedTenths]; the
+// room is budget + realized − spent. Every UI money figure (the budget bar,
+// the picker, the market's add controls, the over-budget sentence) reads
+// it from here. Error ≠ fact: [moneyReady] is false until the market and a
+// current baseline (or a known first squad) have loaded, and Save waits
+// for it.
 //
 // Pure-ish: flutter/foundation only (ChangeNotifier), all placement/armband
 // math delegated to squad_builder_logic.dart; unit-tested in
 // test/fantasy/squad_draft_test.dart.
+
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
@@ -88,7 +94,14 @@ class SquadDraftController extends ChangeNotifier {
 
   // ── FPL selling context ([setSaleContext]) ─────────────────────────────
   SaleBaselineState? _sale;
-  Map<String, int> _currentPrices = const {};
+
+  /// Today's market prices; null = the market hasn't loaded yet.
+  Map<String, int>? _currentPrices;
+
+  /// The prices DURING the week before the edited one
+  /// (`PriceHistory/<editingGw − 1>`); null = unknown (the floor is then
+  /// today's price, as the server's is with no history).
+  Map<String, int>? _lastWeekPrices;
   int? _editingGw;
 
   SaleBaseline? get _baseline => _sale?.baseline;
@@ -126,37 +139,59 @@ class SquadDraftController extends ChangeNotifier {
   // ── FPL selling money (spec §4) ────────────────────────────────────────
 
   /// The hub's feed: the own `Baselines/<uid>` state ([sale]; null = not
-  /// answered yet), today's market prices by player id ([currentPrices])
-  /// and the gameweek being edited ([editingGw], see
-  /// [saleEditingGameweek]; null = the schedule is unknown). Notifies only
-  /// when something changed.
+  /// answered yet), today's market prices by player id ([currentPrices];
+  /// null = the market hasn't loaded — never [moneyReady]), the prices
+  /// during the week before the edited one ([lastWeekPrices],
+  /// `PriceHistory/<editingGw − 1>`; null = unknown) and the gameweek being
+  /// edited ([editingGw], see [saleEditingGameweek]; null = the schedule is
+  /// unknown). Notifies only when something changed.
   void setSaleContext({
     SaleBaselineState? sale,
-    Map<String, int> currentPrices = const {},
+    Map<String, int>? currentPrices,
+    Map<String, int>? lastWeekPrices,
     int? editingGw,
   }) {
     if (identical(sale, _sale) &&
         editingGw == _editingGw &&
-        mapEquals(currentPrices, _currentPrices)) {
+        mapEquals(currentPrices, _currentPrices) &&
+        mapEquals(lastWeekPrices, _lastWeekPrices)) {
       return;
     }
     _sale = sale;
-    _currentPrices = Map.unmodifiable(currentPrices);
+    _currentPrices =
+        currentPrices == null ? null : Map.unmodifiable(currentPrices);
+    _lastWeekPrices =
+        lastWeekPrices == null ? null : Map.unmodifiable(lastWeekPrices);
     _editingGw = editingGw;
     notifyListeners();
   }
 
-  /// What [p] costs the squad: his baseline price when he is a baseline
-  /// player (HELD — the server ignores the pick's own price), else the
-  /// price on the pick (what it was bought at this window).
-  int priceOfPick(SquadPick p) =>
-      _baseline?.prices[p.playerId] ?? p.priceTenths;
+  /// What [p] costs the squad — exactly what the server's lock judge
+  /// charges (squad_integrity.ts judgeSale): his baseline price when he is
+  /// a baseline player (HELD — the pick's own price is ignored); anyone
+  /// else (NEW) at least the lowest price he had this window, the market
+  /// floor min(today, last week) — max(0, the pick's price, floor). Not in
+  /// today's market: the pick's own price.
+  int priceOfPick(SquadPick p) {
+    final held = _baseline?.prices[p.playerId];
+    if (held != null) return held;
+    final current = _currentPrices?[p.playerId];
+    var floor = 0;
+    if (current != null) {
+      final lastWeek = _lastWeekPrices?[p.playerId];
+      floor = lastWeek == null ? current : min(current, lastWeek);
+    }
+    return max(0, max(p.priceTenths, floor));
+  }
 
   /// The profit/loss the lock would book for this draft: the carried total
   /// plus every baseline player no longer owned (unplaced picks still are),
   /// sold at today's price.
-  int get realizedTenths => realizedNowTenths(
-      _baseline, _ownedPicks.map((p) => p.playerId), _currentPrices);
+  int get realizedTenths =>
+      _realizedFor(_ownedPicks.map((p) => p.playerId));
+
+  int _realizedFor(Iterable<String> ownedIds) =>
+      realizedNowTenths(_baseline, ownedIds, _currentPrices ?? const {});
 
   /// The money to spend: budget + realized sales.
   int get availableTenths => _config.budgetTenths + realizedTenths;
@@ -164,19 +199,38 @@ class SquadDraftController extends ChangeNotifier {
   /// The room left (negative = over budget).
   int get remainingTenths => availableTenths - spentTenths;
 
-  /// The room after removing the owned [pick] (a swap's outgoing player):
-  /// his price back, and — a baseline player — his sale booked.
+  /// The room after removing [pick] (a swap's outgoing player): his price
+  /// back, and — a baseline player — his sale booked. [pick] must be one
+  /// this draft owns (a slot pick or an unplaced one); anything else is a
+  /// caller bug (asserted in debug builds).
   int remainingIfRemovedTenths(SquadPick pick) {
+    assert(
+        _ownedPicks.any((p) => p.playerId == pick.playerId),
+        'remainingIfRemovedTenths: ${pick.playerId} is not in the draft');
     final ids = [for (final p in _ownedPicks) p.playerId];
     ids.remove(pick.playerId); // one copy only
-    final realized = realizedNowTenths(_baseline, ids, _currentPrices);
-    return _config.budgetTenths + realized - (spentTenths - priceOfPick(pick));
+    return _config.budgetTenths +
+        _realizedFor(ids) -
+        (spentTenths - priceOfPick(pick));
   }
 
   /// What adding [p] costs: a baseline player is bought back at his
   /// baseline price (no sale, no transfer), anyone else at today's price.
+  /// This is the price ON the pick; the room it takes is [addCostOf].
   int buyPriceOf(FantasyPlayer p) =>
       buyPriceTenths(_baseline, p.name, p.priceTenths);
+
+  /// What adding [p] (not owned) takes from [remainingTenths] — the number
+  /// every add/pick control compares with the room: his charged price
+  /// ([priceOfPick] of [newPick]) plus any sale his return undoes. A new
+  /// player: today's price. A sold baseline player: what selling him
+  /// banked ([sellPriceOf]) — taking him back un-books that sale.
+  int addCostOf(FantasyPlayer p) {
+    final ids = [for (final q in _ownedPicks) q.playerId];
+    final before = _realizedFor(ids);
+    final after = _realizedFor([...ids, p.name]);
+    return priceOfPick(newPick(p, bench: false)) + (before - after);
+  }
 
   /// The ONE way a pick is made from a market player (market add, picker,
   /// the Needs-a-new-spot swap), priced by [buyPriceOf].
@@ -193,16 +247,21 @@ class SquadDraftController extends ChangeNotifier {
   int? sellPriceOf(String playerId) {
     final paid = _baseline?.prices[playerId];
     if (paid == null) return null;
-    final current = _currentPrices[playerId];
+    final current = _currentPrices?[playerId];
     if (current == null || current <= 0) return paid;
     return sellPriceTenths(purchaseTenths: paid, currentTenths: current);
   }
 
-  /// The money above is real: the baseline feed has loaded (not degraded)
-  /// and is for the week being edited. A known-absent node (a first squad)
-  /// is always ready.
+  /// What a baseline player was bought at (his baseline price); null for
+  /// anyone else. Pairs with [sellPriceOf] on the "Bought · Sells for" line.
+  int? boughtPriceOf(String playerId) => _baseline?.prices[playerId];
+
+  /// The money above is real: the market prices have loaded, and the
+  /// baseline feed has loaded (not degraded) for the week being edited. A
+  /// known-absent node (a first squad) is ready once the market is.
   bool get moneyReady {
     final sale = _sale;
+    if (_currentPrices == null) return false;
     if (sale == null || !sale.loaded || sale.degraded) return false;
     final b = sale.baseline;
     return b == null || b.forGw == _editingGw;

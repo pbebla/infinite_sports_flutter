@@ -168,15 +168,6 @@ void main() {
       expect(squad.picks, isEmpty);
     });
 
-    test('draftSpentTenths sums only the filled slots', () {
-      expect(
-          draftSpentTenths([
-            pick('A', FantasyPosition.gk, price: 45),
-            null,
-            pick('B', FantasyPosition.def, price: 60),
-          ]),
-          105);
-    });
   });
 
   group('holder protection copy', () {
@@ -229,6 +220,8 @@ void main() {
         viceId: 'Def One',
         cfg: cfg,
         unplaced: [pick('Moved Keeper', FantasyPosition.def)],
+        spentTenths: 350,
+        availableTenths: 500,
       );
       expect(out.first,
           'Find Moved Keeper a new spot — swap him out or remove him.');
@@ -371,6 +364,8 @@ void main() {
         captainId: null,
         viceId: null,
         cfg: cfg,
+        spentTenths: 0,
+        availableTenths: 500,
       );
       expect(out, contains('Pick a goalkeeper.'));
       expect(out, contains('Pick 2 defenders — you have 0.'));
@@ -389,6 +384,8 @@ void main() {
         captainId: null,
         viceId: null,
         cfg: cfg,
+        spentTenths: 50,
+        availableTenths: 500,
       );
       expect(out, contains('Pick 2 defenders — you have 1.'));
     });
@@ -410,6 +407,8 @@ void main() {
         captainId: null,
         viceId: null,
         cfg: cfg,
+        spentTenths: 350,
+        availableTenths: 500,
       );
       expect(out, ['Choose a captain and vice-captain.']);
 
@@ -419,6 +418,8 @@ void main() {
         captainId: null,
         viceId: 'Def One',
         cfg: cfg,
+        spentTenths: 350,
+        availableTenths: 500,
       );
       expect(onlyVice, ['Choose a captain.']);
     });
@@ -431,8 +432,37 @@ void main() {
         captainId: 'GK One',
         viceId: 'Def One',
         cfg: cfg,
+        spentTenths: 560,
+        availableTenths: 500,
       );
       expect(out, ["You're \$6.0M over budget."]);
+    });
+
+    // FPL selling (spec §4): the money is the draft's — spent at the
+    // charged prices against budget + realized sales — never the picks'
+    // own prices against the bare budget.
+    test('the over-budget sentence counts realized sales', () {
+      String? overLine({required int spent, required int available}) =>
+          issueSentences(
+            slots: slots,
+            slotPicks: fullPicks(),
+            captainId: 'GK One',
+            viceId: 'Def One',
+            cfg: cfg,
+            spentTenths: spent,
+            availableTenths: available,
+          ).where((s) => s.contains('over budget')).firstOrNull;
+
+      // $50.5M spent: legal with +$0.5M from sales, $0.5M over without.
+      expect(overLine(spent: 505, available: 505), isNull);
+      expect(overLine(spent: 505, available: 500),
+          "You're \$0.5M over budget.");
+      // A sales loss narrows the budget: $49.0M available.
+      expect(overLine(spent: 500, available: 490),
+          "You're \$1.0M over budget.");
+      // The picks' own prices ($35.0M here) never decide it.
+      expect(overLine(spent: 520, available: 505),
+          "You're \$1.5M over budget.");
     });
 
     test('a valid squad has no sentences', () {
@@ -442,6 +472,8 @@ void main() {
         captainId: 'GK One',
         viceId: 'Def One',
         cfg: cfg,
+        spentTenths: 350,
+        availableTenths: 500,
       );
       expect(out, isEmpty);
     });

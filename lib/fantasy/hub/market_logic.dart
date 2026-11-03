@@ -6,6 +6,7 @@
 // rules, Price Risers / Fallers by position, and the add/remove availability
 // rules the market control and the player profile's button both honor.
 
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
@@ -248,11 +249,17 @@ enum MarketAddAvailability {
 /// The add/remove state for one market row against the current draft.
 /// [unplaced] = the draft's "Needs a new spot" picks (still owned, still
 /// paid for — a position change left them without a fitting slot).
+///
+/// Money (FPL selling, spec §4) is the draft's, never recomputed here:
+/// [remainingTenths] is its room (SquadDraftController.remainingTenths —
+/// budget + realized sales − spent at the charged prices) and [priceOf]
+/// what adding a player takes from it (SquadDraftController.addCostOf).
 MarketAddAvailability marketAddState({
   required FantasyPlayer player,
   required List<SquadSlot> slots,
   required List<SquadPick?> slotPicks,
-  required int budgetTenths,
+  required int remainingTenths,
+  required int Function(FantasyPlayer player) priceOf,
   required bool editable,
   List<SquadPick> unplaced = const [],
 }) {
@@ -269,14 +276,22 @@ MarketAddAvailability marketAddState({
     }
   }
   if (!hasEmptySlot) return MarketAddAvailability.positionFull;
-  final remaining = budgetTenths -
-      draftSpentTenths(slotPicks) -
-      unplaced.fold<int>(0, (a, p) => a + p.priceTenths);
-  if (player.priceTenths > remaining) {
+  if (priceOf(player) > remainingTenths) {
     return MarketAddAvailability.unaffordable;
   }
   return MarketAddAvailability.addable;
 }
+
+/// The owned baseline player's money line beside his Remove control (FPL
+/// selling, spec §4): "Bought $8.0M · Sells for $8.5M".
+String sellsForLine({required int boughtTenths, required int sellsTenths}) =>
+    'Bought ${formatMoneyTenths(boughtTenths)} · '
+    'Sells for ${formatMoneyTenths(sellsTenths)}';
+
+/// The budget bar's realized line (FPL selling, spec §4): "Includes +$0.5M
+/// from sales" / "Includes −$0.5M from sales" (true minus sign).
+String realizedSalesLine(int realizedTenths) =>
+    'Includes ${formatPriceDelta(realizedTenths)} from sales';
 
 /// The tooltip-style sentence for a disabled add control; null when the
 /// control is live (addable or Remove).

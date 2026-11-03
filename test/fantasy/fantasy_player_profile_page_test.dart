@@ -15,6 +15,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart'
     show fantasyDownRed;
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
@@ -694,6 +695,69 @@ void main() {
       await tester.pumpAndSettle();
       expect(draft.playerIds, isNot(contains(_name)));
       expect(key('profile_add'), findsOneWidget);
+    });
+
+    // FPL selling (spec §4): an owned BASELINE player's Remove says what
+    // he was bought at and what selling him banks; anyone else's doesn't.
+    group('the sells-for line', () {
+      void feedBaseline() => draft.setSaleContext(
+            sale: const SaleBaselineState(
+              baseline: SaleBaseline(
+                  forGw: 3, prices: {_name: 70}, realizedTenths: 0),
+              loaded: true,
+            ),
+            currentPrices: {for (final p in market) p.name: p.priceTenths},
+            editingGw: 3,
+          );
+
+      testWidgets('an owned baseline player: Bought · Sells for',
+          (tester) async {
+        feedBaseline();
+        draft.addPlayer(market.first); // back at his baseline $7.0M
+        await pumpPage(tester);
+        await emitAll(tester);
+        expect(key('profile_remove'), findsOneWidget);
+        // Bought $7.0M, now $7.5M: half the rise (rounded down) → $7.2M.
+        expect(tester.widget<Text>(key('profile_sells_for')).data,
+            'Bought \$7.0M · Sells for \$7.2M');
+
+        // Not owned: no Remove, no line.
+        draft.removePlayer(_name);
+        await tester.pumpAndSettle();
+        expect(key('profile_add'), findsOneWidget);
+        expect(key('profile_sells_for'), findsNothing);
+      });
+
+      testWidgets('an owned player bought this week: no line',
+          (tester) async {
+        feedBaseline();
+        draft.addPlayer(market[1]); // Other Def — not a baseline player
+        await pumpPage(tester, name: 'Other Def');
+        await emitAll(tester);
+        expect(key('profile_remove'), findsOneWidget);
+        expect(key('profile_sells_for'), findsNothing);
+      });
+
+      for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+        testWidgets('${mode.name} theme at 360 px: the line fits the bottom '
+            'bar', (tester) async {
+          feedBaseline();
+          draft.addPlayer(market.first);
+          await pumpPage(tester,
+              size: const Size(360, 780), themeMode: mode);
+          await emitAll(tester);
+          expect(tester.takeException(), isNull);
+          final line = key('profile_sells_for');
+          expect(line, findsOneWidget);
+          final r = tester.getRect(line);
+          expect(r.left, greaterThanOrEqualTo(0));
+          expect(r.right, lessThanOrEqualTo(360));
+          final text = tester.widget<Text>(line);
+          expect(text.overflow, isNot(TextOverflow.ellipsis));
+          final scheme = Theme.of(tester.element(line)).colorScheme;
+          expect(text.style?.color, scheme.onSurfaceVariant);
+        });
+      }
     });
 
     testWidgets('locked: the button is dead with the market\'s reason',

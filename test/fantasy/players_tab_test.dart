@@ -15,12 +15,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/market_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/market_player_sheet.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/players_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
+import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 
 FantasyPlayer player(String name, FantasyPosition pos, int price,
@@ -1099,6 +1102,121 @@ void main() {
     final cheapoPrice =
         tester.widget<Text>(find.byKey(const ValueKey('market_price_Cheapo')));
     expect(cheapoPrice.style?.color, isNot(errorColor));
+  });
+
+  // FPL selling (spec §4): the add control asks the DRAFT what he costs and
+  // how much room is left — never the market price against the bare budget.
+  testWidgets(
+      'a sold baseline player is priced by the draft: addable with exactly '
+      'his sell price left, though the market says more', (tester) async {
+    final rich = [
+      player('Money Bags', FantasyPosition.def, 440),
+      player('Pricey Att', FantasyPosition.att, 70, team: 'Team C'),
+      ...players,
+    ];
+    // Last week: Ava bought at $6.0M; today $7.0M → selling her banked
+    // $6.5M (+$0.5M realized).
+    draft.setSaleContext(
+      sale: const SaleBaselineState(
+        baseline: SaleBaseline(
+            forGw: 3, prices: {'Ava Striker': 60}, realizedTenths: 0),
+        loaded: true,
+      ),
+      currentPrices: {for (final p in rich) p.name: p.priceTenths},
+      editingGw: 3,
+    );
+    await pumpTab(tester, marketPlayers: rich);
+    await land(tester);
+    await tester.tap(find.byKey(const ValueKey('market_add_Money Bags')));
+    await tester.pumpAndSettle();
+    // $50.0M + $0.5M − $44.0M = $6.5M left.
+    expect(draft.remainingTenths, 65);
+
+    // Taking Ava back undoes her $6.5M sale: exactly affordable.
+    expect(
+        find.byKey(const ValueKey('market_add_Ava Striker')), findsOneWidget);
+    final context =
+        tester.element(find.byKey(const ValueKey('players_market')));
+    final avaPrice = tester
+        .widget<Text>(find.byKey(const ValueKey('market_price_Ava Striker')));
+    expect(avaPrice.style?.color, isNot(fantasyDownRed(context)));
+    // A $7.0M player bought new is not.
+    expect(find.byKey(const ValueKey('market_add_disabled_Pricey Att')),
+        findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('market_add_Ava Striker')));
+    await tester.pumpAndSettle();
+    expect(draft.playerIds, contains('Ava Striker'));
+    expect(draft.remainingTenths, 0);
+  });
+
+  // The market's large player sheet (kept for a quick compare-and-buy):
+  // the same Remove + sells-for rule as the profile.
+  group('market player sheet: the sells-for line', () {
+    Future<void> pumpSheet(WidgetTester tester, FantasyPlayer p,
+        {Brightness brightness = Brightness.light,
+        Size size = const Size(420, 900)}) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(useMaterial3: true, brightness: brightness),
+        home: Scaffold(
+          body: MarketPlayerSheet(
+            player: p,
+            draft: draft,
+            editable: true,
+            totals: null,
+            totalsAvailable: false,
+            initialStats: const <String, TournamentPlayer>{},
+            statsStates: const Stream.empty(),
+          ),
+        ),
+      ));
+      await tester.pump();
+    }
+
+    void feedBaseline() => draft.setSaleContext(
+          sale: const SaleBaselineState(
+            baseline: SaleBaseline(
+                forGw: 3, prices: {'Ava Striker': 80}, realizedTenths: 0),
+            loaded: true,
+          ),
+          currentPrices: {for (final p in players) p.name: p.priceTenths},
+          editingGw: 3,
+        );
+
+    for (final brightness in Brightness.values) {
+      testWidgets('an owned baseline player: Bought · Sells for, 360 px — '
+          '$brightness', (tester) async {
+        feedBaseline();
+        draft.addPlayer(players[4]); // Ava, held at her $8.0M
+        await pumpSheet(tester, players[4],
+            brightness: brightness, size: const Size(360, 900));
+        expect(tester.takeException(), isNull);
+        expect(find.byKey(const ValueKey('sheet_remove')), findsOneWidget);
+        // Bought $8.0M, now $7.0M: the full drop.
+        final line = find.byKey(const ValueKey('sheet_sells_for'));
+        expect(tester.widget<Text>(line).data,
+            'Bought \$8.0M · Sells for \$7.0M');
+        final r = tester.getRect(line);
+        expect(r.left, greaterThanOrEqualTo(0));
+        expect(r.right, lessThanOrEqualTo(360));
+      });
+    }
+
+    testWidgets('an owned player bought this week, or one not owned: no line',
+        (tester) async {
+      feedBaseline();
+      draft.addPlayer(players[2]); // Dana Wall — new this week
+      await pumpSheet(tester, players[2]);
+      expect(find.byKey(const ValueKey('sheet_remove')), findsOneWidget);
+      expect(find.byKey(const ValueKey('sheet_sells_for')), findsNothing);
+
+      await pumpSheet(tester, players[4]); // Ava, sold: Add, no line
+      expect(find.byKey(const ValueKey('sheet_add')), findsOneWidget);
+      expect(find.byKey(const ValueKey('sheet_sells_for')), findsNothing);
+    });
   });
 
   testWidgets('locked: every control is dead with the locked reason',

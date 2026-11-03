@@ -417,6 +417,9 @@ void main() {
         priceTenths: p.priceTenths,
         bench: bench);
 
+    // The market's own price (a draft with no sale context charges it).
+    int marketPrice(FantasyPlayer p) => p.priceTenths;
+
     test('lock silences everything — even Remove', () {
       final picks = empty()..[0] = pickFor(players[0], bench: false);
       for (final p in players) {
@@ -425,7 +428,8 @@ void main() {
                 player: p,
                 slots: slots,
                 slotPicks: picks,
-                budgetTenths: cfg.budgetTenths,
+                remainingTenths: cfg.budgetTenths,
+                priceOf: marketPrice,
                 editable: false),
             MarketAddAvailability.locked);
       }
@@ -438,7 +442,8 @@ void main() {
               player: players[0],
               slots: slots,
               slotPicks: picks,
-              budgetTenths: cfg.budgetTenths,
+              remainingTenths: cfg.budgetTenths,
+              priceOf: marketPrice,
               editable: true),
           MarketAddAvailability.inSquad);
     });
@@ -449,7 +454,8 @@ void main() {
               player: players.last,
               slots: slots,
               slotPicks: empty(),
-              budgetTenths: cfg.budgetTenths,
+              remainingTenths: cfg.budgetTenths,
+              priceOf: marketPrice,
               editable: true),
           MarketAddAvailability.ineligible);
     });
@@ -461,12 +467,13 @@ void main() {
               player: players[1], // the other GK
               slots: slots,
               slotPicks: picks,
-              budgetTenths: cfg.budgetTenths,
+              remainingTenths: cfg.budgetTenths,
+              priceOf: marketPrice,
               editable: true),
           MarketAddAvailability.positionFull);
     });
 
-    test('price above remaining budget → unaffordable', () {
+    test('price above the room left → unaffordable', () {
       // One DEF at $46.0M leaves $4.0M — the $5.5M DEF can't come.
       final rich = player('Money Bags', FantasyPosition.def, 460);
       final picks = empty()..[1] = pickFor(rich, bench: false);
@@ -475,7 +482,8 @@ void main() {
               player: players[3], // Deb Rock $5.5M
               slots: slots,
               slotPicks: picks,
-              budgetTenths: cfg.budgetTenths,
+              remainingTenths: 40,
+              priceOf: marketPrice,
               editable: true),
           MarketAddAvailability.unaffordable);
       // An exactly-affordable price still adds.
@@ -484,9 +492,36 @@ void main() {
               player: player('Fits Just', FantasyPosition.def, 40),
               slots: slots,
               slotPicks: picks,
-              budgetTenths: cfg.budgetTenths,
+              remainingTenths: 40,
+              priceOf: marketPrice,
               editable: true),
           MarketAddAvailability.addable);
+    });
+
+    // FPL selling (spec §4): the money test is the DRAFT's price for him,
+    // never the market's — a sold baseline player comes back at what the
+    // draft says, with the room the draft says.
+    test('affordability uses priceOf, not the market price', () {
+      final baselineGuy = player('Back Again', FantasyPosition.att, 90);
+      expect(
+          marketAddState(
+              player: baselineGuy,
+              slots: slots,
+              slotPicks: empty(),
+              remainingTenths: 80,
+              priceOf: (p) => p.name == 'Back Again' ? 80 : p.priceTenths,
+              editable: true),
+          MarketAddAvailability.addable);
+      // The market price alone would have refused him.
+      expect(
+          marketAddState(
+              player: baselineGuy,
+              slots: slots,
+              slotPicks: empty(),
+              remainingTenths: 80,
+              priceOf: marketPrice,
+              editable: true),
+          MarketAddAvailability.unaffordable);
     });
 
     test('reasons: sentences for every disabled state, null when live', () {

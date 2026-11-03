@@ -311,13 +311,18 @@ class _SheetAction extends StatelessWidget {
       player: player,
       slots: draft.slots,
       slotPicks: draft.picks,
-      budgetTenths: draft.config.budgetTenths,
+      remainingTenths: draft.remainingTenths,
+      priceOf: draft.addCostOf,
       editable: editable,
       unplaced: draft.unplaced,
     );
     final inSquad = availability == MarketAddAvailability.inSquad;
     final addable = availability == MarketAddAvailability.addable;
     final reason = marketAddReason(availability, player.position);
+    // FPL selling (spec §4): an owned baseline player's Remove says what he
+    // was bought at and what selling him banks.
+    final bought = inSquad ? draft.boughtPriceOf(player.name) : null;
+    final sells = inSquad ? draft.sellPriceOf(player.name) : null;
 
     void onPressed() {
       if (inSquad) {
@@ -349,6 +354,20 @@ class _SheetAction extends StatelessWidget {
           ),
           child: Text(inSquad ? 'Remove from team' : 'Add to team'),
         ),
+        if (bought != null && sells != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            sellsForLine(boughtTenths: bought, sellsTenths: sells),
+            key: const ValueKey('sheet_sells_for'),
+            textAlign: TextAlign.center,
+            softWrap: true,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
         if (reason != null) ...[
           const SizedBox(height: 8),
           Text(
