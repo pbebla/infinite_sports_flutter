@@ -412,8 +412,9 @@ export function composeRankHistory(
   return out;
 }
 
-/** Rounded tenths, never -0 (a tiny negative ppg must not become "-0"). */
-function roundTenths(value: number): number {
+/** Rounded tenths, never -0 (a tiny negative ppg must not become "-0").
+ *  Shared with the live week (live_core.ts) so form/ppg round identically. */
+export function roundTenths(value: number): number {
   return Math.round(value) + 0;
 }
 
