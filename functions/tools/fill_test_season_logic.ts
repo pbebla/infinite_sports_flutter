@@ -56,12 +56,25 @@ export const NEVER_WRITTEN_WHOLE: readonly string[] = [
  *  trigger never pushes an auto award in a paused season anyway). The
  *  global Fantasy/BadgeCatalog the replay's sweep seeds and any trophy
  *  cabinet copy (Users/<uid>/Awards — never produced: the replay has no
- *  Users node) are outside this season and never part of the plan. */
+ *  Users node) are outside this season and never part of the plan.
+ *
+ *  FPL selling (spec §4, 2026-11-03): Baselines (every lock writes each
+ *  manager's Baselines/<uid> — always produced), and the over-budget
+ *  preview's SquadAlerts (also the lock's Invalid alert) + its once-only
+ *  push claim PreviewPushed — produced only when a replayed squad drifts
+ *  over budget or is judged Invalid (the replay's honest clients never are:
+ *  rehearse_s15.ts no-invalid-squads). Sorted key order writes the
+ *  PreviewPushed claims BEFORE SquadAlerts; and a paused / TestFill season's
+ *  sweep stands down, so nothing is pushed either way. The engine's other
+ *  season nodes — Access, AccessClaims (paid access callables) and
+ *  PendingPositionChanges (owner position edits) — are never produced by
+ *  the replay and stay off the list (fail closed). */
 export const EXPECTED_NODES: readonly string[] = [
   'Players', 'PlayerTotals', 'PlayerWeeks', 'PlayerWeekStats', 'PriceHistory',
   'PriceChanges', 'Leaderboards', 'History', 'PublishedPicks', 'DreamTeam',
   'TransferState', 'TransferCosts', 'GwState', 'LockedPositions', 'Repriced',
   'RecapSent', 'NewsDrafted', 'ReminderSent', 'Badges', 'BadgePushClaims',
+  'Baselines', 'SquadAlerts', 'PreviewPushed',
 ];
 
 export interface PlanEntry {

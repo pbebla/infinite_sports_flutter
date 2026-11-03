@@ -12,7 +12,12 @@
 //      production entry points (runLifecycleSweep every 15 minutes,
 //      maybeFinalizeGame on every game-final write, runMondayReprice every
 //      Monday 10:00 league time, recordSquadSave on every Squads/<uid> write)
-//      with six synthetic managers playing the client role.
+//      with six synthetic managers playing the client role. Their money is
+//      the fan app's FPL-rule squad draft (client_draft_money.ts — spec §4
+//      selling): a kept or re-added baseline player at his Baselines/<uid>
+//      price, a sale banked at sellPriceTenths(paid, today), room = budget +
+//      realized − spent — so an honest synthetic save is never a squad the
+//      lock judge calls overBudget.
 //   4. Cross-checks every number against an independent recomputation with
 //      the pure engine functions, asserts the pipeline invariants, and
 //      surveys the real data for quality problems.
@@ -39,6 +44,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { ClientDraftMoney, clientDraftMoney } from './client_draft_money';
 import { fakeManagerDefs, fakeManagerRow } from './fill_test_season_logic';
 import { pushBadgeAward } from '../src/lib/fantasy/badge_push';
 import { awardBonus, bpsScore } from '../src/lib/fantasy/bps';
@@ -57,8 +63,9 @@ import { PlayerGameStats, playedGame } from '../src/lib/fantasy/player_game_stat
 import { applyDelta, openingPrices, repriceDeltas } from '../src/lib/fantasy/pricing';
 import { FantasyPusher } from '../src/lib/fantasy/pushes';
 import { scorePlayerGame, scorePlayerWeek } from '../src/lib/fantasy/scoring';
+import { realizedOf, sellPriceTenths } from '../src/lib/fantasy/selling';
 import {
-  FantasySquad, spentTenths, squadFromMap, squadToMap, validateSquad,
+  FantasySquad, spentTenths, squadFromMap, squadToMap,
 } from '../src/lib/fantasy/squad';
 import { PlayerWeek, scoreSquadWeek, totalTenths } from '../src/lib/fantasy/squad_week';
 import {
@@ -739,13 +746,20 @@ interface ExpRow {
   locked: FantasySquad;
   pipelineFreeAtLock: number | null;
   pipelineUsedAtLock: number | null;
+  /** FPL selling (spec §4): the running sale total this lock books —
+   *  the carried total + every baseline player sold, at the lock's price. */
+  realized: number;
   grossTenths?: number;
   netTenths?: number;
 }
 
 interface ExpState {
   held: FantasySquad | null;
+  /** The effective squad after the last lock = the selling baseline (its
+   *  prices are what was paid). */
   lastLocked: FantasySquad | null;
+  /** The running sale total that baseline carries (Free Hit aware). */
+  realized: number;
   free: number;
   honored: Record<number, string>;
   week: { saves: number; lastSaved: FantasySquad | null; intent: string | null };
@@ -933,7 +947,10 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
         const breakdown = entriesOf(e['Breakdown']).map(([, b]) => b);
         const sum = breakdown.reduce((a: number, b: any) => a + Number(b?.countedTenths), 0);
         const cost = intLoose(childAt(childAt(costsAll, w), uid));
-        const expected = voided.has(Number(w)) ? 0 : sum - 10 * cost;
+        // An Invalid week (the lock judge, squad_integrity.ts) scores zero
+        // whatever its cost — the no-invalid-squads invariant flags the row.
+        const invalid = e['Invalid'] != null && e['Invalid'] !== false;
+        const expected = voided.has(Number(w)) || invalid ? 0 : sum - 10 * cost;
         if (e['TotalTenths'] !== expected || !Number.isInteger(e['TotalTenths'])) {
           fail('history-total', `${label}: History/${w}/${uid} TotalTenths ${e['TotalTenths']} != sum(Breakdown) ${sum} - 10*cost ${cost} = ${expected}`);
         }
@@ -1079,6 +1096,32 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     for (const [n, r] of entriesOf(db.get(`${F}/PlayerTotals`))) out[n] = intLoose(r?.points);
     return out;
   }
+  /** The app's FPL-rule draft money for [uid] editing gameweek [gw]
+   *  (client_draft_money.ts), from the nodes the app itself reads: its own
+   *  Baselines/<uid>, today's Players prices, PriceHistory/<gw − 1>. */
+  function clientMoney(uid: string, gw: number): ClientDraftMoney {
+    const currentPrices: Record<string, number> = {};
+    for (const [n, p] of Object.entries(livePlayers())) currentPrices[n] = p.price;
+    const last = gw > 1 ? db.get(`${F}/PriceHistory/${gw - 1}`) : null;
+    let lastWeekPrices: Record<string, number> | null = null;
+    if (isMap(last)) {
+      lastWeekPrices = {};
+      for (const [n, v] of Object.entries(last)) if (typeof v === 'number') lastWeekPrices[n] = v;
+    }
+    return clientDraftMoney({
+      baselineNode: db.get(`${F}/Baselines/${uid}`), currentPrices, lastWeekPrices, editingGw: gw,
+    });
+  }
+  /** The app blocks Save while its money isn't real (squad_draft.dart
+   *  moneyReady): a missing-for-this-week or unreadable Baselines/<uid> is a
+   *  pipeline finding, never a silent save. */
+  function moneyBlocked(uid: string, gw: number, draft: ClientDraftMoney, t: number, kind: string): boolean {
+    if (draft.ready) return false;
+    fail('sale-baseline', `${iso(t)} ${uid} GW${gw} ${kind}: Baselines/${uid} not FOR GW${gw} ` +
+      `(${stable(db.get(`${F}/Baselines/${uid}`))}) — the app would block Save`);
+    clientSaves.push({ at: iso(t), uid, gw, kind: `${kind}-blocked (budget still updating)` });
+    return true;
+  }
   function fixArmband(s: FantasySquad, form: Record<string, number>): void {
     const starters = s.picks.filter((p) => !p.bench).map((p) => p.playerId);
     const rank = (ids: string[]) => [...ids].sort((a, b) => (form[b] ?? 0) - (form[a] ?? 0) || a.localeCompare(b));
@@ -1088,9 +1131,16 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     }
   }
   /** Greedy transfers: sell the n worst by season form (PlayerTotals), buy
-   *  the best affordable same-position replacement at CURRENT price; kept
-   *  picks keep the price paid (squad_draft.dart behavior). */
-  function transferGreedy(squad: FantasySquad, n: number, notes: string[], pairs: Array<[string, string]>): FantasySquad {
+   *  the best affordable same-position replacement. The money is the app
+   *  draft's ([draft], FPL selling): kept picks cost their price paid (a
+   *  baseline player his baseline price), a sold baseline player frees his
+   *  SELL price (half a rise, the full drop), a replacement takes
+   *  draft.addCost (today's price; a sold baseline player bought back un-
+   *  books his sale) and is picked at draft.buyPrice. */
+  function transferGreedy(
+    squad: FantasySquad, n: number, notes: string[], pairs: Array<[string, string]>,
+    draft: ClientDraftMoney,
+  ): FantasySquad {
     const mkt = livePlayers();
     const form = liveForm();
     const s = cloneSquad(squad);
@@ -1102,22 +1152,28 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     const outIdx = order.slice(0, n).sort((a, b) => a - b);
     const filled = new Set<number>();
     const unfilled = (j: number) => outIdx.includes(j) && !filled.has(j);
-    const cheapest = (pos: string) => Math.min(...Object.entries(mkt)
-      .filter(([nm, p]) => p.eligible && p.position === pos && !owned.has(nm)).map(([, p]) => p.price));
+    const cheapest = (pos: string, keptIds: string[]) => Math.min(...Object.entries(mkt)
+      .filter(([nm, p]) => p.eligible && p.position === pos && !owned.has(nm))
+      .map(([nm]) => draft.addCost(nm, keptIds)));
     for (const i of outIdx) {
       filled.add(i);
       const pos = s.picks[i].position;
-      const committed = s.picks.reduce((a, p, j) => a + (unfilled(j) || j === i ? 0 : p.priceTenths), 0);
-      const reserve = outIdx.filter(unfilled).reduce((a, j) => a + cheapest(s.picks[j].position), 0);
-      const cap = cfg.budgetTenths - committed - reserve;
+      // Everything still owned once slot i and the unfilled slots are sold.
+      const kept = s.picks.filter((_, j) => !(unfilled(j) || j === i));
+      const keptIds = kept.map((p) => p.playerId);
+      const committed = kept.reduce((a, p) => a + draft.priceOfPick(p), 0);
+      const reserve = outIdx.filter(unfilled).reduce((a, j) => a + cheapest(s.picks[j].position, keptIds), 0);
+      const cap = cfg.budgetTenths + draft.realizedFor(keptIds) - committed - reserve;
       const cands = Object.entries(mkt)
-        .filter(([nm, p]) => p.eligible && p.position === pos && !owned.has(nm) && p.price <= cap)
+        .filter(([nm, p]) => p.eligible && p.position === pos && !owned.has(nm) &&
+          draft.addCost(nm, keptIds) <= cap)
         .sort((a, b) => (form[b[0]] ?? 0) - (form[a[0]] ?? 0) || a[1].price - b[1].price || a[0].localeCompare(b[0]));
       if (cands.length === 0) throw new Error(`no affordable ${pos} under ${cap}`);
-      const [nm, p] = cands[0];
-      notes.push(`${s.picks[i].playerId} -> ${nm} (${money(p.price)})`);
+      const [nm] = cands[0];
+      const price = draft.buyPrice(nm);
+      notes.push(`${s.picks[i].playerId} -> ${nm} (${money(price)})`);
       pairs.push([s.picks[i].playerId, nm]);
-      s.picks[i] = { playerId: nm, position: pos, priceTenths: p.price, bench: s.picks[i].bench };
+      s.picks[i] = { playerId: nm, position: pos, priceTenths: price, bench: s.picks[i].bench };
       owned.add(nm);
     }
     fixArmband(s, form);
@@ -1127,13 +1183,16 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
    *  (opts.lenientTransfers), as many of the n transfers as the greedy can
    *  afford (n, n-1, … 0), so one unlucky seeded squad cannot crash the
    *  replay. The rehearsal stays strict: there a failure is a finding. */
-  function transfers(squad: FantasySquad, n: number, notes: string[], pairs: Array<[string, string]>): FantasySquad {
-    if (!opts.lenientTransfers) return transferGreedy(squad, n, notes, pairs);
+  function transfers(
+    squad: FantasySquad, n: number, notes: string[], pairs: Array<[string, string]>,
+    draft: ClientDraftMoney,
+  ): FantasySquad {
+    if (!opts.lenientTransfers) return transferGreedy(squad, n, notes, pairs, draft);
     for (let k = n; k > 0; k--) {
       const kNotes: string[] = [];
       const kPairs: Array<[string, string]> = [];
       try {
-        const out = transferGreedy(squad, k, kNotes, kPairs);
+        const out = transferGreedy(squad, k, kNotes, kPairs, draft);
         if (k < n) {
           kNotes.push(`only ${k} of ${n} transfers affordable`);
           transfersCapped++;
@@ -1153,20 +1212,25 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
   const exp: Record<string, ExpState> = {};
   for (const m of managers) {
     exp[m.uid] = {
-      held: null, lastLocked: null, free: cfg.freeTransfersPerWeek, honored: {},
+      held: null, lastLocked: null, realized: 0, free: cfg.freeTransfersPerWeek, honored: {},
       week: { saves: 0, lastSaved: null, intent: null }, rows: {}, lastTransfers: [],
     };
   }
   const setOf = (gw: number) => (gw <= cfg.chipSet1EndGw ? 1 : 2);
 
   async function clientWrite(m: ManagerDef, gw: number, squad: FantasySquad, t: number, kind: string, notes: string[]): Promise<void> {
-    const issues = validateSquad(squad, cfg);
+    const draft = clientMoney(m.uid, gw);
+    if (moneyBlocked(m.uid, gw, draft, t, kind)) return;
+    const issues = draft.issues(squad, cfg);
     if (issues.length > 0) throw new Error(`synthetic squad invalid: ${m.uid} GW${gw} ${kind}: ${issues.join(',')}`);
     db.nowMs = t;
     db.job = `client:${m.uid}`;
     db.simWrite(`${F}/Squads/${m.uid}`, squadToMap(squad));
+    const ids = squad.picks.map((p) => p.playerId);
     clientSaves.push({
-      at: iso(t), uid: m.uid, gw, kind, notes, spent: spentTenths(squad), chip: squad.chip,
+      at: iso(t), uid: m.uid, gw, kind, notes, spent: spentTenths(squad),
+      charged: squad.picks.reduce((a, p) => a + draft.priceOfPick(p), 0),
+      available: cfg.budgetTenths + draft.realizedFor(ids), chip: squad.chip,
       captain: squad.captainId, vice: squad.viceId,
       picks: squad.picks.map((p) => `${p.playerId}${p.bench ? ' (bench)' : ''}`),
     });
@@ -1200,18 +1264,32 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
         const diffs = sameSquad(squad, e.held);
         if (diffs.length > 0) clientViewMismatches.push({ at: iso(t), uid: m.uid, gw, diffs });
       }
+      // The money the app shows (FPL selling): Baselines/<uid> must be FOR
+      // this week and say what the expected ledger says the last lock left.
+      const draft = clientMoney(m.uid, gw);
+      if (moneyBlocked(m.uid, gw, draft, t, 'save')) return;
+      const wantPrices: Record<string, number> = {};
+      for (const p of e.lastLocked?.picks ?? []) wantPrices[p.playerId] = p.priceTenths;
+      const b = draft.baseline;
+      const baselineDiffs: string[] = [];
+      if (b === null) baselineDiffs.push('Baselines absent');
+      else {
+        if (b.realizedTenths !== e.realized) baselineDiffs.push(`Baselines.RealizedTenths ${b.realizedTenths} != ${e.realized}`);
+        if (canon(b.prices) !== canon(wantPrices)) baselineDiffs.push(`Baselines.Prices ${stable(b.prices)} != ${stable(wantPrices)}`);
+      }
+      if (baselineDiffs.length > 0) clientViewMismatches.push({ at: iso(t), uid: m.uid, gw, diffs: baselineDiffs });
       const plan = m.weeks[gw];
       e.lastTransfers = [];
       if (plan.rebuild === 'freeHit') {
-        squad = transfers(squad, squad.picks.length, notes, e.lastTransfers);
+        squad = transfers(squad, squad.picks.length, notes, e.lastTransfers, draft);
         squad.chip = 'freeHit';
         e.week.intent = 'freeHit';
       } else if (plan.rebuild === 'wildcard') {
-        squad = transfers(squad, plan.transfers ?? 5, notes, e.lastTransfers);
+        squad = transfers(squad, plan.transfers ?? 5, notes, e.lastTransfers, draft);
         squad.chip = 'wildcard';
         e.week.intent = 'wildcard';
       } else if (plan.transfers) {
-        squad = transfers(squad, plan.transfers, notes, e.lastTransfers);
+        squad = transfers(squad, plan.transfers, notes, e.lastTransfers, draft);
       }
       if ('chip' in plan) {
         squad.chip = plan.chip ?? null;
@@ -1237,15 +1315,20 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     if (!isMap(raw)) return;
     const base = squadFromMap(raw);
     const mkt = livePlayers();
+    const draft = clientMoney(m.uid, gw);
+    if (moneyBlocked(m.uid, gw, draft, t, 'undo-one')) return;
     for (const [outName, inName] of [...e.lastTransfers].reverse()) {
       const p = mkt[outName];
       const idx = base.picks.findIndex((x) => x.playerId === inName);
       if (!p || idx < 0) continue;
+      // Changed your mind (FPL selling): a baseline player put back before
+      // the deadline returns at the price paid — no sale, no transfer.
+      const price = draft.buyPrice(outName);
       const cand = cloneSquad(base);
-      cand.picks[idx] = { playerId: outName, position: p.position, priceTenths: p.price, bench: base.picks[idx].bench };
+      cand.picks[idx] = { playerId: outName, position: p.position, priceTenths: price, bench: base.picks[idx].bench };
       fixArmband(cand, liveForm());
-      if (validateSquad(cand, cfg).length === 0) {
-        await clientWrite(m, gw, cand, t, 'undo-one', [`undo: ${inName} -> ${outName} (${money(p.price)})`]);
+      if (draft.issues(cand, cfg).length === 0) {
+        await clientWrite(m, gw, cand, t, 'undo-one', [`undo: ${inName} -> ${outName} (${money(price)})`]);
         return;
       }
     }
@@ -1269,7 +1352,10 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     const mkt = livePlayers();
     const unknown = squad.picks.map((p) => p.playerId).filter((n) => !(n in mkt));
     if (unknown.length > 0) return reject(`not in the market: ${unknown.join(', ')}`);
-    const issues = validateSquad(squad, cfg);
+    // The app's own check: its FPL-rule draft money for a first squad.
+    const draft = clientMoney(uid, 1);
+    if (!draft.ready) return reject(`Baselines/${uid} is not readable for GW1 — the app would block Save`);
+    const issues = draft.issues(squad, cfg);
     if (issues.length > 0) return reject(`invalid squad: ${issues.join(', ')}`);
     // The server's lock-time judge too (audit I2, squad_integrity.ts): a
     // first squad's picks must be affordable at the replay's OWN opening
@@ -1309,12 +1395,26 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     const unlimited = effective === 'wildcard' || effective === 'freeHit';
     const cost = unlimited ? 0 : Math.max(0, used - e.free) * cfg.extraTransferCost;
     const ts = db.get(`${F}/TransferState/${m.uid}`);
+    // FPL selling (spec §4), recomputed from the ledger's own baseline (the
+    // last locked squad, Free Hit aware): every baseline player missing from
+    // the locked squad is sold at the lock-instant price — half a rise, the
+    // full drop; no usable price adds 0.
+    const lockedIds = new Set(lockedRaw.picks.map((p) => p.playerId));
+    const mktNow = livePlayers();
+    let realized = e.realized;
+    for (const p of e.lastLocked?.picks ?? []) {
+      if (lockedIds.has(p.playerId)) continue;
+      const now = mktNow[p.playerId]?.price;
+      if (now === undefined || now <= 0) continue;
+      realized += sellPriceTenths(p.priceTenths, now) - p.priceTenths;
+    }
     const row: ExpRow = {
       gw, saved: e.week.saves > 0, used, freeBefore: e.free, intent,
       carriedChip: lockedRaw.chip ?? null, effectiveChip: effective, cost,
       locked: { ...cloneSquad(lockedRaw), chip: effective },
       pipelineFreeAtLock: isMap(ts) && typeof ts['Free'] === 'number' ? ts['Free'] : (isMap(ts) ? null : cfg.freeTransfersPerWeek),
       pipelineUsedAtLock: isMap(ts) ? intLoose(ts['UsedThisGw']) : 0,
+      realized,
     };
     e.rows[gw] = row;
     const remaining = unlimited ? e.free : Math.min(Math.max(e.free - used, 0), e.free);
@@ -1324,6 +1424,8 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     // Spec §6: a Free Hit squad lasts one week, the previous squad returns —
     // so the squad "last locked" for the next restore is the RETURNED one.
     e.lastLocked = effective === 'freeHit' && prevLocked ? prevLocked : row.locked;
+    // ...and its sales were temporary: the returned squad keeps ITS total.
+    if (!(effective === 'freeHit' && prevLocked)) e.realized = realized;
     // Chips are one-week (owner decision 2026-10-28): whatever chip the
     // squad carried is switched off after its week, so the squad the
     // manager holds next week is chipless.
@@ -1612,7 +1714,13 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
       if (isMap(pub)) {
         const pubPicks = entriesOf(pub['picks']).map(([, p]) => String(p.playerId)).sort();
         mm('locked picks', row.locked.picks.map((p) => p.playerId).sort(), pubPicks);
+        // FPL selling: the judge's running sale total (and its prices — an
+        // honest client's prices ARE the judged ones) equal the ledger's.
+        mm('realizedTenths (PublishedPicks)', row.realized, realizedOf(pub));
+        const pubPrices = entriesOf(pub['picks']).map(([, p]) => `${p.playerId}@${p.priceTenths}`).sort();
+        mm('locked prices (PublishedPicks)', row.locked.picks.map((p) => `${p.playerId}@${p.priceTenths}`).sort(), pubPrices);
       }
+      if (isMap(hist)) mm('realizedTenths (History)', row.realized, realizedOf(hist));
       mm('History TotalTenths', row.netTenths, pipeTotal);
       const armband = result.slots.find((s) => s.multiplier > 1)?.playerId ?? null;
       weeks.push({
@@ -1626,6 +1734,20 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     const ov = childAt(db.get(`${F}/Leaderboards/Overall`), m.uid);
     if (ov?.points !== expOverall) managerMismatches.push({ uid: m.uid, field: 'Overall points', expected: expOverall, pipeline: ov?.points });
     managerTable.push({ uid: m.uid, name: m.name, persona: m.persona, overall: ov, expectedOverall: expOverall, weeks });
+  }
+
+  // F4b. Every client in the replay is honest and saves with the app's own
+  // FPL-rule money, so the lock judge must never call a squad Invalid: one
+  // would be a false verdict (or a client bug) — never a scored zero.
+  for (const node of ['PublishedPicks', 'History']) {
+    for (const [w, byUid] of entriesOf(db.get(`${F}/${node}`))) {
+      for (const [uid, row] of entriesOf(byUid)) {
+        if (isMap(row) && row['Invalid'] != null && row['Invalid'] !== false) {
+          fail('no-invalid-squads', `${node}/${w}/${uid} Invalid ${stable(row['Invalid'])} ` +
+            `(realizedTenths ${stable(row['realizedTenths'] ?? null)})`);
+        }
+      }
+    }
   }
 
   // F5. Structural write-log checks
@@ -1752,6 +1874,7 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
       'history-total', 'gameweek-board', 'overall-sum', 'overall-movement', 'ranks', 'ownership', 'player-totals',
       'dream-team', 'prices', 'price-changes', 'no-nan-undefined', 'lock-snapshot-once', 'lock-positions-once', 'reprice-once',
       'gwstate-sequence', 'finalize-source', 'no-crash', 'history-shape', 'writes-in-scope', 'badges',
+      'no-invalid-squads', 'sale-baseline',
     ].map((k) => [k, { pass: !(invariantFailures[k]?.length), failures: invariantFailures[k] ?? [] }])),
     crossChecks: {
       playerWeeks: { compared: pwCompared, mismatches: pwMismatches },

@@ -168,6 +168,31 @@ describe('buildWritePlan', () => {
     expect(() => assertSafePaths([{ path: `Users/${REAL}/Awards/x` }])).toThrow();
   });
 
+  it('FPL selling: Baselines, SquadAlerts and PreviewPushed are written, the push claims before the alerts', () => {
+    const state = {
+      ...replayState(),
+      Baselines: {
+        [REAL]: { ForGw: 13, RealizedTenths: 0, Prices: { 'GK Player 00': 45 } },
+        'test-01': { ForGw: 13, RealizedTenths: -15, Prices: { 'GK Player 00': 45 } },
+      },
+      SquadAlerts: {
+        'test-01': { Gw: 4, Kind: 'preview', Issues: ['overBudget'], OverTenths: 5, CreatedAt: 1 },
+      },
+      PreviewPushed: [null, null, null, null, { 'test-01': { At: 1 } }],
+    };
+    const plan = buildWritePlan(state, live, 1);
+    const paths = plan.map((e) => e.path);
+    for (const node of ['Baselines', 'SquadAlerts', 'PreviewPushed']) {
+      expect(paths).toContain(`${ROOT}/${node}`);
+      expect(EXPECTED_NODES).toContain(node);
+    }
+    expect(paths.indexOf(`${ROOT}/PreviewPushed`)).toBeLessThan(paths.indexOf(`${ROOT}/SquadAlerts`));
+    // Gameweek-keyed claims go back to RTDB storage form.
+    expect(plan.find((e) => e.path === `${ROOT}/PreviewPushed`)!.value)
+      .toEqual({ 4: { 'test-01': { At: 1 } } });
+    expect(plan.find((e) => e.path === `${ROOT}/Baselines`)!.value).toEqual(state.Baselines);
+  });
+
   it('refuses to build a plan while the engine is on auto', () => {
     expect(() => buildWritePlan(replayState(), { ...live, config: { lockOverride: 'auto' } }, 1))
       .toThrow(/auto/i);
@@ -221,7 +246,9 @@ describe('assertSafePaths', () => {
       `${ROOT}/Watchlists`, `${ROOT}/Watchlists/test-01`, `${ROOT}/Watchlists/${REAL}`,
       `${ROOT}/MiniLeagues`, `${ROOT}/MiniLeagues/abc`,
       `${ROOT}/Analytics`, `${ROOT}/News`, `${ROOT}/Config`, `${ROOT}/Voided`,
-      `${ROOT}/SquadAlerts`, `${ROOT}/SomeFutureGuard`, `${ROOT}/${REAL}`,
+      `${ROOT}/SomeFutureGuard`, `${ROOT}/${REAL}`,
+      // Engine nodes the replay never produces stay off the list.
+      `${ROOT}/Access`, `${ROOT}/AccessClaims/${REAL}`, `${ROOT}/PendingPositionChanges`,
       `${ROOT}/TestFill/At`, // the marker is written / deleted whole only
     ];
     for (const path of rejected) {
