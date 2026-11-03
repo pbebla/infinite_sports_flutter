@@ -9,7 +9,7 @@ class SquadPick {
   });
   final String playerId;
   final FantasyPosition position;
-  final int priceTenths; // price PAID (buy/sell at current price, spec §4)
+  final int priceTenths; // price PAID; sells by the FPL rule, selling.dart (spec §4)
   final bool bench;
 
   Map<String, dynamic> toMap() => {
@@ -61,7 +61,11 @@ class FantasySquad {
       );
 }
 
-List<SquadIssue> validateSquad(FantasySquad s, FantasyConfig cfg) {
+/// [realizedTenths] is the running profit/loss from sales (may be negative):
+/// the budget rule is spent <= budget + realizedTenths (FPL selling, spec §4,
+/// selling.dart). It defaults to 0, which is the old "spent <= budget".
+List<SquadIssue> validateSquad(FantasySquad s, FantasyConfig cfg,
+    {int realizedTenths = 0}) {
   final issues = <SquadIssue>[];
   int count(Iterable<SquadPick> ps, FantasyPosition pos) =>
       ps.where((p) => p.position == pos).length;
@@ -75,7 +79,9 @@ List<SquadIssue> validateSquad(FantasySquad s, FantasyConfig cfg) {
       s.picks.length == cfg.squadSize;
   if (!okFormation) issues.add(SquadIssue.formation);
 
-  if (s.spentTenths > cfg.budgetTenths) issues.add(SquadIssue.overBudget);
+  if (s.spentTenths > cfg.budgetTenths + realizedTenths) {
+    issues.add(SquadIssue.overBudget);
+  }
 
   final ids = s.picks.map((p) => p.playerId).toSet();
   if (ids.length != s.picks.length) issues.add(SquadIssue.duplicatePlayer);

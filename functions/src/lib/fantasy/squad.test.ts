@@ -80,4 +80,27 @@ describe('squad', () => {
     expect(spentTenths(s)).toBe(480);
     expect(cfg.budgetTenths - spentTenths(s)).toBe(20);
   });
+
+  // The budget rule is spent <= budget + realizedTenths (FPL selling, spec §4).
+  // legal() spends 480; raising a1 from 90 by n tenths spends 480 + n.
+  function spending(total: number): FantasySquad {
+    const picks = legal();
+    picks[3] = p('a1', 'ATT', 90 + (total - 480));
+    expect(spentTenths(squad(picks))).toBe(total);
+    return squad(picks);
+  }
+  it('realized profit lifts the budget: spent 505 with realized 5 is legal', () => {
+    expect(validateSquad(spending(505), cfg, 5)).not.toContain('overBudget');
+  });
+  it('one tenth past budget + realized is overBudget: 506 with realized 5', () => {
+    expect(validateSquad(spending(506), cfg, 5)).toContain('overBudget');
+  });
+  it('realized loss shrinks the budget: spent 500 with realized -1', () => {
+    expect(validateSquad(spending(500), cfg, -1)).toContain('overBudget');
+    expect(validateSquad(spending(499), cfg, -1)).not.toContain('overBudget');
+  });
+  it('realized defaults to 0: spent 500 legal, 501 over', () => {
+    expect(validateSquad(spending(500), cfg)).not.toContain('overBudget');
+    expect(validateSquad(spending(501), cfg)).toContain('overBudget');
+  });
 });

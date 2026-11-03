@@ -9,7 +9,7 @@ import {
 export interface SquadPick {
   playerId: string;
   position: FantasyPosition;
-  priceTenths: number; // price PAID (buy/sell at current price, spec §4)
+  priceTenths: number; // price PAID; sells by the FPL rule, selling.ts (spec §4)
   bench: boolean;
 }
 
@@ -92,8 +92,11 @@ export function squadFromMap(m: Record<string, unknown>): FantasySquad {
   };
 }
 
+/** `realizedTenths` is the running profit/loss from sales (may be negative):
+ *  the budget rule is spent <= budget + realizedTenths (FPL selling, spec §4,
+ *  selling.ts). It defaults to 0, which is the old "spent <= budget". */
 export function validateSquad(
-  s: FantasySquad, cfg: FantasyConfig,
+  s: FantasySquad, cfg: FantasyConfig, realizedTenths = 0,
 ): SquadIssue[] {
   const issues: SquadIssue[] = [];
   const count = (ps: SquadPick[], pos: FantasyPosition) =>
@@ -110,7 +113,9 @@ export function validateSquad(
     s.picks.length === squadSize(cfg);
   if (!okFormation) issues.push('formation');
 
-  if (spentTenths(s) > cfg.budgetTenths) issues.push('overBudget');
+  if (spentTenths(s) > cfg.budgetTenths + realizedTenths) {
+    issues.push('overBudget');
+  }
 
   const ids = new Set(s.picks.map((p) => p.playerId));
   if (ids.size !== s.picks.length) issues.push('duplicatePlayer');

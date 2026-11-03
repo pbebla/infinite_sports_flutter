@@ -35,8 +35,8 @@ Basketball and Flag Football are later scoring tables, not rebuilds.
   the position.** Changing a player's position recalculates his price
   automatically (his stats re-scored at the new position and re-percentiled
   among its players — the same math as opening prices); the owner can still
-  override by hand afterwards. Buy/sell is always at current price, so this
-  is consistent for holders.
+  override by hand afterwards. A holder keeps his price paid and sells by the
+  FPL rule (§4), so a recalculated price is just another price move for him.
 - **Positions are locked per gameweek.** At each lock the server snapshots
   every player's position with the squads; that gameweek is scored with its
   snapshot forever (score-edit reruns of old weeks never use a later
@@ -63,7 +63,27 @@ Basketball and Flag Football are later scoring tables, not rebuilds.
   the points came from for their position, and **relative to peers in the same
   position** (an ATT's price move considers how other ATTs scored). ±$0.5M steps
   within floor/ceiling.
-- Buying and selling always at **current price** (no FPL profit-split accounting).
+- **Selling follows the Premier League Fantasy rule** (owner decision
+  2026-11-02, replacing "always at current price"): each pick keeps the price
+  **paid**. Selling a player banks his *sell price*: when the price has risen,
+  you keep **half the rise, rounded down to $0.1M**; when it is flat or has
+  fallen, you take the **full drop**.
+  `sell = purchase + floor((current − purchase) / 2)` when `current > purchase`,
+  else `current`. Money is integer tenths of $1M. Examples: bought $8.0M, now
+  $9.0M → sells for $8.5M; now $8.5M → $8.2M (the odd tenth is lost); now
+  $8.1M → $8.0M; unchanged $8.0M → $8.0M; now $7.0M → $7.0M. "Current" is the
+  player's price at the moment the squad is judged at the lock; there is no
+  "best of this week and last" credit.
+- **Spending room.** A squad is legal while
+  `Σ prices paid ≤ budget + realizedTenths`, where `realizedTenths` is the
+  running profit/loss from sales and **may be negative** (a manager who sold
+  into price drops has less than $50M to spend).
+- **Held rule.** The baseline is the manager's effective squad after the
+  previous gameweek. A baseline player who stays in the squad is **held at his
+  baseline price**, whatever the market says now (and whatever price a client
+  sends). Re-adding a player you sold, before the deadline, restores him at
+  the price you paid: no sale, no transfer. Anyone else is bought at the
+  current price. Only baseline players absent from the squad count as sold.
 - **Owner override:** Manager can edit any price at any time; play continues.
 
 ## 5. Gameweeks, lock, transfers
@@ -239,8 +259,8 @@ works. The **Rules tab** is that place:
   - **Chips** — what each of the four does, one per week, two sets, set-1
     expiry date shown once configured.
   - **Prices** — how Monday repricing works in plain words ("play well versus
-    other players in your position and your price rises"), buy/sell at current
-    price.
+    other players in your position and your price rises"), and how selling works
+    (you keep half of any price rise, rounded down, and take the full drop).
   - **Auto-subs, captain & vice, bench** — when the bench scores full vs half.
   - **Eligibility** — guests aren't selectable until promoted; position
     changes apply at the next unlock.
