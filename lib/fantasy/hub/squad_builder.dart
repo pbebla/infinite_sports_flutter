@@ -26,7 +26,9 @@
 // the saved squad already costs asks "Take a points hit?" first; with the
 // count unknown (notReady / hidden) Save is never blocked or questioned — the
 // lock's own recount is the truth. Wildcard and Free Hit play from the chip
-// row like the other two chips.
+// row like the other two chips — except that arming them waits while the team
+// is a first team or the count is not known (the chip would be spent for
+// nothing).
 //
 // House rules: streams only; colorScheme + the gold/primary fantasy accent
 // pairing; scrollable clears the glass navbar; snackbars surface every
@@ -530,9 +532,11 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
             activeChip: _draft.chip,
             enabled: editable,
             onChipChanged: _draft.setChip,
-            // A first team has nothing to transfer: Wildcard / Free Hit sit
-            // out under "Your first team is free".
+            // A first team has nothing to transfer, and an unknown count may
+            // be one (the server spends a first-team chip for nothing):
+            // Wildcard / Free Hit can't be armed in either case.
             firstTeam: transfers.kind == TransferPreviewKind.firstTeam,
+            transfersUnknown: transfers.kind == TransferPreviewKind.notReady,
             // Real usage: spent-in-this-set from History, the armed chip on
             // the squad on screen (the live squad, or its unsaved edit).
             availability: chipAvailability(

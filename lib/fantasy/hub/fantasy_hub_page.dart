@@ -33,8 +33,10 @@
 // and "Take a points hit?" count against the server's own baseline. Error ≠
 // fact: until it answers, after it fails, or with nobody signed in (the
 // signed-out feed's lone null means "no user", not "no node"), the draft's
-// preview is "not ready" — never a free first team. Also not part of the
-// reveal gate.
+// preview is "not ready" — never a free first team. It DOES join the reveal gate
+// (no pop-in of the transfers line or the chips' first-team caption after the
+// fade): its first answer or first error ends the wait, and signed out there
+// is nothing to wait for.
 //
 // Player profiles (round 3, spec §4): EVERY player tap inside the hub — News
 // "View player" and compact rows, the My Team court (chip sheet's "Player
@@ -289,9 +291,13 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   /// The signed-in user's transfer state (`TransferState/<uid>`): null = the
   /// node is ABSENT, only meaningful once [_transferAnswered]. False before
   /// the first emission, after the feed failed and with nobody signed in —
-  /// the draft's preview is then "not ready". NOT part of the reveal gate.
+  /// the draft's preview is then "not ready".
   TransferStateView? _transfer;
   bool _transferAnswered = false;
+
+  /// Joins the reveal gate: true on the feed's first data OR first error (a
+  /// failed feed never holds the screen), and at once when signed out.
+  bool _transferLoaded = false;
 
   /// The season's price history (`PriceHistory/<gw>/<name>`, the prices
   /// DURING each locked week): the draft's market floor for a new pick
@@ -368,6 +374,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
       _managerLoaded &&
       _squadLoaded &&
       _alertLoaded &&
+      _transferLoaded &&
       _chipsLoaded &&
       _voidedLoaded &&
       _accessLoaded;
@@ -539,26 +546,36 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   /// ends after an error; there is no retry): data = answered; an error =
   /// NOT answered ("Transfer count updating…", never a first team). Nobody
   /// signed in = never subscribed: the real feed's lone null for a signed-out
-  /// session is "no user", not "the node is absent". Never part of the
-  /// reveal gate.
+  /// session is "no user", not "the node is absent". Joins the reveal gate
+  /// ([_transferLoaded]): the first answer or error ends the wait, and with
+  /// nobody signed in there is nothing to wait for.
   void _subscribeTransferState() {
     _transferSub?.cancel();
     void failed(Object e) {
       debugPrint('FantasyHubPage: transfer state feed failed: $e');
       if (!mounted) return;
-      _transferAnswered = false;
+      setState(() {
+        _transferAnswered = false;
+        _transferLoaded = true;
+      });
       _feedSaleContext();
     }
 
     try {
-      if (_signedInUid() == null) return;
+      if (_signedInUid() == null) {
+        _transferLoaded = true;
+        return;
+      }
       _transferSub = (widget.transferStateStates ??
               FantasyService.watchMyTransferStateAuto(
                   widget.sport, widget.season))
           .listen((view) {
         if (!mounted) return;
-        _transfer = view;
-        _transferAnswered = true;
+        setState(() {
+          _transfer = view;
+          _transferAnswered = true;
+          _transferLoaded = true;
+        });
         _feedSaleContext();
       }, onError: failed);
     } catch (e) {

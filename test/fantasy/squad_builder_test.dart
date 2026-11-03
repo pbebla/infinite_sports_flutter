@@ -1461,8 +1461,65 @@ void main() {
       await tester.pump();
       expect(lineText(tester).data, 'Transfer count updating…');
       expect(find.text('Your first team is free'), findsNothing);
-      // The chips are not held back by an unanswered feed.
       expect(find.text('Coming with transfers'), findsNothing);
+    });
+
+    // Error ≠ fact: an unknown count may BE a first team, and the server does
+    // not guard a first-team Wildcard / Free Hit (the chip is spent) — so
+    // arming waits for the answer; disarming never does.
+    testWidgets('count unknown: Wildcard and Free Hit cannot be armed '
+        '("Checking your transfers…"); Triple Captain still can',
+        (tester) async {
+      final draft = draftWith(state: null, answered: false);
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      expect(find.text('Checking your transfers…'), findsNWidgets(2));
+      expect(find.text('Your first team is free'), findsNothing);
+
+      await tapChip(tester, 'wildcard');
+      await tapChip(tester, 'freeHit');
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(draft.chip, isNull);
+
+      await tapChip(tester, 'tripleCaptain');
+      expect(draft.chip, 'tripleCaptain');
+    });
+
+    testWidgets('count unknown: an armed Wildcard can still be switched '
+        'off', (tester) async {
+      final draft =
+          draftWith(stored: savedWith(0, chip: 'wildcard'), answered: false);
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      expect(draft.chip, 'wildcard');
+      await tapChip(tester, 'wildcard');
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(draft.chip, isNull);
+    });
+
+    testWidgets('the answer lifts the hold: the captions go and the chips '
+        'ask as usual', (tester) async {
+      final draft = draftWith(state: null, answered: false);
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      expect(find.text('Checking your transfers…'), findsNWidgets(2));
+
+      draft.setTransferContext(
+          state: counted(), answered: true, editingGw: editingGw);
+      await tester.pump();
+      expect(find.text('Checking your transfers…'), findsNothing);
+      await tapChip(tester, 'wildcard');
+      expect(find.text('Play your Wildcard?'), findsOneWidget);
+    });
+
+    testWidgets('an older node (no baseline) is not held: the chips tap',
+        (tester) async {
+      final draft = draftWith(state: const TransferStateView(free: 2));
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      expect(find.text('Checking your transfers…'), findsNothing);
+      await tapChip(tester, 'wildcard');
+      expect(find.text('Play your Wildcard?'), findsOneWidget);
     });
 
     testWidgets('an older node with no baseline: no line at all',

@@ -35,8 +35,9 @@
 // recounts the draft's CURRENT picks and chip against the squad the manager
 // came into the week with — the transfers line and the points-hit confirm
 // read it ([storedTransferPreview] is the same count for the squad as last
-// saved, so the confirm can tell a hit that RISES from one already taken). Error ≠ fact: until the feed has answered (or after it failed)
-// the preview is notReady, never a free first team.
+// saved, so the confirm can tell a hit that RISES from one already taken).
+// Error ≠ fact: until the feed has answered (or after it failed) the preview
+// is notReady, never a free first team.
 //
 // Pure-ish: flutter/foundation only (ChangeNotifier), all placement/armband
 // math delegated to squad_builder_logic.dart; unit-tested in

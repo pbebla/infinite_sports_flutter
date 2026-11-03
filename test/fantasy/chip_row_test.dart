@@ -27,6 +27,7 @@ void main() {
     String? active,
     bool enabled = true,
     bool firstTeam = false,
+    bool transfersUnknown = false,
     Map<String, ChipAvailability>? availability,
     FantasyConfig? config,
     double width = 420,
@@ -50,6 +51,7 @@ void main() {
               activeChip: chip,
               enabled: enabled,
               firstTeam: firstTeam,
+              transfersUnknown: transfersUnknown,
               availability: availability,
               onChipChanged: (id) {
                 log?.add(id);
@@ -250,6 +252,45 @@ void main() {
     });
   });
 
+  // Error ≠ fact: while the transfer count is unknown the team may be a first
+  // team, whose Wildcard / Free Hit the server would spend for nothing — so
+  // arming waits ("Checking your transfers…"); disarming never does.
+  group('the transfer count is not known yet', () {
+    testWidgets(
+        'Wildcard and Free Hit cannot be armed, captioned '
+        '"Checking your transfers…"; the other two are not affected',
+        (tester) async {
+      final log = <String?>[];
+      await pumpRow(tester, transfersUnknown: true, log: log);
+      expect(find.text('Checking your transfers…'), findsNWidgets(2));
+      expect(find.text('Your first team is free'), findsNothing);
+
+      await tapChip(tester, 'wildcard');
+      await tapChip(tester, 'freeHit');
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(log, isEmpty);
+
+      await tapChip(tester, 'benchBoost');
+      expect(log, ['benchBoost']);
+    });
+
+    testWidgets('an armed Free Hit can still be switched off', (tester) async {
+      final armed =
+          await pumpRow(tester, transfersUnknown: true, active: 'freeHit');
+      await tapChip(tester, 'freeHit');
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(armed.value, isNull);
+    });
+
+    testWidgets('known again: no caption, and they ask as usual',
+        (tester) async {
+      await pumpRow(tester, transfersUnknown: false);
+      expect(find.text('Checking your transfers…'), findsNothing);
+      await tapChip(tester, 'freeHit');
+      expect(find.text('Play your Free Hit?'), findsOneWidget);
+    });
+  });
+
   group('availability still blocks arming', () {
     const used = {
       'tripleCaptain': ChipAvailability.available,
@@ -289,6 +330,11 @@ void main() {
           firstTeam: true, width: 360, brightness: brightness);
       expect(tester.takeException(), isNull);
       expect(find.text('Your first team is free'), findsNWidgets(2));
+
+      await pumpRow(tester,
+          transfersUnknown: true, width: 360, brightness: brightness);
+      expect(tester.takeException(), isNull);
+      expect(find.text('Checking your transfers…'), findsNWidgets(2));
 
       await pumpRow(tester, width: 360, brightness: brightness);
       await tapChip(tester, 'wildcard');

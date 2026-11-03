@@ -6,9 +6,13 @@
 // (transfer_dialogs.dart — they rebuild the team, so a stray tap shouldn't
 // play one), while Triple Captain and Bench Boost arm on the tap. While the
 // team is still a first team (nothing to transfer, plan 2026-11-03) Wildcard
-// and Free Hit can't be armed and say "Your first team is free". Effect
-// lines, the set windows in the heading and the counts all read from the
-// live config, never hard-coded.
+// and Free Hit can't be armed and say "Your first team is free" — and neither
+// can they while the transfer count is not known yet ("Checking your
+// transfers…"): the server doesn't guard a first-team Wildcard / Free Hit (the
+// chip is spent for nothing), so an unknown count is never read as "not a
+// first team" (error ≠ fact). Switching an armed one OFF is always allowed.
+// Effect lines, the set windows in the heading and the counts all read from
+// the live config, never hard-coded.
 //
 // Counts (owner feedback round): each badge reads the manager's REAL usage
 // (chip_usage.dart chipAvailability over their History): "1 left" while
@@ -36,6 +40,7 @@ class FantasyChipRow extends StatelessWidget {
     required this.onChipChanged,
     this.availability,
     this.firstTeam = false,
+    this.transfersUnknown = false,
   });
 
   final FantasyConfig config;
@@ -58,18 +63,30 @@ class FantasyChipRow extends StatelessWidget {
   /// can still be switched off).
   final bool firstTeam;
 
+  /// The draft's transfer preview is "not ready" (the feed hasn't answered,
+  /// or failed): the team may be a first team, so Wildcard and Free Hit
+  /// can't be armed yet either (an armed one can still be switched off).
+  final bool transfersUnknown;
+
+  /// Why Wildcard / Free Hit can't be armed right now (the caption), or null.
+  String? get _transferChipHold => firstTeam
+      ? _firstTeamCaption
+      : transfersUnknown
+          ? _checkingCaption
+          : null;
+
   ChipAvailability _availability(String id) =>
       availability?[id] ??
       (id == activeChip ? ChipAvailability.active : ChipAvailability.available);
 
   /// A spent chip only taps to DISARM (it was armed anyway), and so does a
-  /// Wildcard / Free Hit on a first team; otherwise the usual toggle while
-  /// editable.
+  /// Wildcard / Free Hit that is held (first team, or the count unknown);
+  /// otherwise the usual toggle while editable.
   VoidCallback? _tap(BuildContext context, String id) {
     if (!enabled) return null;
     if (activeChip != id) {
       if (_availability(id) == ChipAvailability.used) return null;
-      if (firstTeam && _asksFirst(id)) return null;
+      if (_isTransferChip(id) && _transferChipHold != null) return null;
     }
     return () => _toggle(context, id);
   }
@@ -126,7 +143,7 @@ class FantasyChipRow extends StatelessWidget {
                 asset: 'assets/fantasy/chip_wildcard.png',
                 label: 'Wildcard',
                 effect: 'Unlimited transfers, permanent rebuild',
-                caption: firstTeam ? _firstTeamCaption : null,
+                caption: _transferChipHold,
                 active: activeChip == 'wildcard',
                 availability: _availability('wildcard'),
                 onTap: _tap(context, 'wildcard'),
@@ -137,7 +154,7 @@ class FantasyChipRow extends StatelessWidget {
                 asset: 'assets/fantasy/chip_free_hit.png',
                 label: 'Free Hit',
                 effect: 'One-week rebuild — squad returns after',
-                caption: firstTeam ? _firstTeamCaption : null,
+                caption: _transferChipHold,
                 active: activeChip == 'freeHit',
                 availability: _availability('freeHit'),
                 onTap: _tap(context, 'freeHit'),
@@ -150,15 +167,17 @@ class FantasyChipRow extends StatelessWidget {
   }
 
   static const _firstTeamCaption = 'Your first team is free';
+  static const _checkingCaption = 'Checking your transfers…';
 
-  /// Wildcard and Free Hit rebuild the team: arming either asks first.
-  static bool _asksFirst(String id) => id == 'wildcard' || id == 'freeHit';
+  /// Wildcard and Free Hit rebuild the team: arming either asks first, and
+  /// either is held while the team is a first team or the count is unknown.
+  static bool _isTransferChip(String id) => id == 'wildcard' || id == 'freeHit';
 
   /// One active chip max: tapping the active one clears it (never asks),
   /// tapping another replaces it — Wildcard / Free Hit only after the yes.
   Future<void> _toggle(BuildContext context, String id) async {
     if (activeChip == id) return onChipChanged(null);
-    if (_asksFirst(id)) {
+    if (_isTransferChip(id)) {
       final yes =
           await showChipConfirmDialog(context, chip: id, config: config);
       if (!yes || !context.mounted) return;

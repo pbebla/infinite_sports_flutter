@@ -255,6 +255,9 @@ void main() {
     // A user with no squad yet: the feed answers null (withSquad: false
     // keeps the feed SILENT to hold the reveal).
     bool squadNull = false,
+    // The transfer feed joins the reveal gate: it answers "no node yet"
+    // (null) unless a test holds it back to prove the wait.
+    bool withTransfer = true,
   }) async {
     config.add(FantasyConfigState(
         config: FantasyConfig.futsalDefault(),
@@ -271,6 +274,7 @@ void main() {
     } else if (withSquad) {
       squad.add(mySquad);
     }
+    if (withTransfer) transfer.add(null);
     await settle(tester);
   }
 
@@ -763,16 +767,27 @@ void main() {
 
     /// The hub revealed WITHOUT any baseline answer, and its shared draft
     /// (reached through "Open in Fantasy", which hands the opener the draft).
+    ///
+    /// The transfer feed (part of the reveal gate) answers with
+    /// [transferState] (null = no node), or fails when [transferError].
     Future<SquadDraftController> hubDraft(WidgetTester tester,
         {FantasyLockOverride lock = FantasyLockOverride.auto,
-        DateTime? now}) async {
+        DateTime? now,
+        TransferStateView? transferState,
+        bool transferError = false}) async {
       final at = now ?? DateTime.utc(2026, 10, 17, 12);
       await pumpHub(tester,
           tab: FantasyHubTab.rules,
           initialPlayerName: 'Ava Striker',
           gameweekStates: Stream.value(gws),
           nowUtc: () => at);
-      await land(tester, lock: lock);
+      await land(tester, lock: lock, withTransfer: false);
+      if (transferError) {
+        transfer.addError(StateError('network'));
+      } else {
+        transfer.add(transferState);
+      }
+      await settle(tester);
       expect(key('hub'), findsOneWidget);
       return opened.single.draft!;
     }
@@ -919,26 +934,48 @@ void main() {
       TransferStateView view(int countFromGw) => TransferStateView(
           free: 2, countFromGw: countFromGw, countFrom: List.of(held));
 
-      testWidgets('never holds the reveal; not answered = notReady, never a '
-          'first team', (tester) async {
-        final draft = await hubDraft(tester);
+      // The owner's standing rule: no pop-ins after the single reveal — the
+      // transfers line and the chips' first-team caption are final when the
+      // hub appears, so the feed's first answer (or error) is waited for.
+      testWidgets('the reveal waits for the transfer feed: its first answer '
+          'ends the wait', (tester) async {
+        await pumpHub(tester);
+        await land(tester, withTransfer: false);
+        expect(key('hub'), findsNothing);
+
+        transfer.add(null);
+        await settle(tester);
         expect(key('hub'), findsOneWidget);
-        expect(draft.transferPreview.kind, TransferPreviewKind.notReady);
+      });
+
+      testWidgets('its first ERROR ends the wait too — a failed feed never '
+          'holds the screen', (tester) async {
+        await pumpHub(tester);
+        await land(tester, withTransfer: false);
+        expect(key('hub'), findsNothing);
+
+        transfer.addError(StateError('permission-denied'));
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+        expect(key('hub'), findsOneWidget);
+      });
+
+      testWidgets('signed out: counts as loaded at once — nothing to wait '
+          'for', (tester) async {
+        await pumpHub(tester, signedIn: false);
+        await land(tester, withTransfer: false);
+        expect(key('hub'), findsOneWidget);
       });
 
       testWidgets('an absent node (null) answers: a first team',
           (tester) async {
         final draft = await hubDraft(tester);
-        transfer.add(null);
-        await settle(tester);
         expect(draft.transferPreview.kind, TransferPreviewKind.firstTeam);
       });
 
       testWidgets('a baseline for the week being edited is counted — the '
           'same editingGw the sale context uses', (tester) async {
-        final draft = await hubDraft(tester); // edits GW3
-        transfer.add(view(3));
-        await settle(tester);
+        final draft = await hubDraft(tester, transferState: view(3)); // GW3
         expect(draft.transferPreview.kind, TransferPreviewKind.counted);
         expect(draft.transferPreview.used, 0);
 
@@ -963,9 +1000,7 @@ void main() {
         debugPrint =
             (String? message, {int? wrapWidth}) => logs.add(message ?? '');
         try {
-          final draft = await hubDraft(tester);
-          transfer.add(view(3));
-          await settle(tester);
+          final draft = await hubDraft(tester, transferState: view(3));
           expect(draft.transferPreview.kind, TransferPreviewKind.counted);
 
           transfer.addError(StateError('permission-denied'));
@@ -981,11 +1016,9 @@ void main() {
                 'permission-denied'));
       });
 
-      testWidgets('a read error before any answer is notReady too',
-          (tester) async {
-        final draft = await hubDraft(tester);
-        transfer.addError(StateError('network'));
-        await settle(tester);
+      testWidgets('a read error before any answer is notReady too — and the '
+          'hub still reveals', (tester) async {
+        final draft = await hubDraft(tester, transferError: true);
         expect(tester.takeException(), isNull);
         expect(draft.transferPreview.kind, TransferPreviewKind.notReady);
       });
@@ -1000,7 +1033,7 @@ void main() {
             gameweekStates: Stream.value(gws),
             nowUtc: () => DateTime.utc(2026, 10, 17, 12),
             signedIn: false);
-        await land(tester);
+        await land(tester, withTransfer: false);
         final draft = opened.single.draft!;
         expect(tester.takeException(), isNull);
         expect(draft.transferPreview.kind, TransferPreviewKind.notReady);
