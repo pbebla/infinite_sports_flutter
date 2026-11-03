@@ -67,9 +67,9 @@ The S15 replay runs finalize, which now writes the `Live` tombstone; without the
 
 **S4. Cost, for the record.** Per relevant game write: ~10 reads (`PublishedPicks` ≈ 150 KB at 200 managers, `Players`, `Line Ups`, the date, `LiveBase`) and one transaction on a ~60 KB node. A match day is ~150 relevant writes → ~25 MB of reads. Fine on the Blaze plan; the first event of the day will lag 3–5 s (cold start), later ones 1–3 s.
 
-### Questions for the owner
-1. S1 — reshuffle the Players list live even while you're scrolling it, or keep the order steady and offer a "refresh" pill?
-2. S3 — want the demo build so you can watch live points on the emulator before Season 16?
+### Owner decisions (2026-11-03, after this review)
+1. **S1 → steady order while scrolling, with a refresh pill** (owner asked for the user-friendly, professional option). Rules for Task 7: the numbers on every row update in place the moment they arrive; the list re-orders at once when it is scrolled to the top or when the tab is (re)opened; otherwise a small pill `Order changed · tap to refresh` sits under the sort bar and re-orders on tap (pill colour = the accent, dark and light). Never re-order under a moving finger. Same rule for every sorted list that goes live (Players market and the leaderboards; the leaderboards keep the moved-row tint on re-order).
+2. **S3 → yes, build the demo.** New Task 8b (fan repo, before Task 9): a `--dart-define=RTDB_EMULATOR=1` switch that points `FirebaseDatabase` (and only the database) at the local emulator `10.0.2.2:9000` on Android; the normal build is byte-identical without the define (test: the define absent → no emulator call). Opus runs the Task 3 rehearsal with the real fan app on emulator-5554 against the local database, records a short screen video of My Team, the leaderboards and the Players list moving as goals land, and sends it to the owner. The owner may also drive it himself on the emulator while the rehearsal script feeds goals.
 
 ### Order
 Transfers plan first (must be live before Season 16's first rollover), then Live. Both touch `squad_builder.dart`, `fantasy_service.dart` and `fantasy_session.dart`; sequential execution avoids the merge.
