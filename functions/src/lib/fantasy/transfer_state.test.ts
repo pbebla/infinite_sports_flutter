@@ -8,9 +8,9 @@ import { futsalDefault } from './fantasy_config';
 import { FantasySquad } from './squad';
 import { IntegrityInputs, integrityMarketOf } from './squad_integrity';
 import {
-  annotateSquadIntegrity, chipSetOf, isUnlimitedChip, lockAccounting,
-  parseTransferState, priorChipsOfUid, rolloverState, shouldVoidChip,
-  transferStateToNode, usedTransfers,
+  annotateSquadIntegrity, chipSetOf, isUnlimitedChip, LockAccounting,
+  lockAccounting, parseTransferState, priorChipsOfUid, rolloverState,
+  shouldVoidChip, transferStateToNode, usedTransfers,
 } from './transfer_state';
 
 const cfg = futsalDefault();
@@ -227,14 +227,16 @@ describe('lockAccounting: the lock recounts transfers (uncounted saves)', () => 
     ({ market, previousByUid, previousWeekPrices: {} });
   const threeSold = ['A', 'B', 'C', 'D', 'X', 'Y', 'Z'];
 
-  function costOf(args: {
+  type RecountCase = {
     squad: Record<string, unknown>;
     state: Record<string, unknown>;
     previous?: unknown; // absent = no baseline for the manager
     integrity?: boolean; // default true
     historyRaw?: unknown;
     gw?: number;
-  }): Record<string, number> {
+  };
+
+  function accOf(args: RecountCase): LockAccounting {
     return lockAccounting({
       squadsByUid: { u: args.squad },
       statesByUid: { u: args.state },
@@ -244,8 +246,10 @@ describe('lockAccounting: the lock recounts transfers (uncounted saves)', () => 
       ...(args.integrity === false ? {} : {
         integrity: inputs(args.previous === undefined ? {} : { u: args.previous }),
       }),
-    }).costPointsByUid;
+    });
   }
+  const costOf = (args: RecountCase) => accOf(args).costPointsByUid;
+  const usedOf = (args: RecountCase) => accOf(args).usedByUid;
 
   it('3 sales locked while UsedThisGw says 0 (Free 2): 1 extra transfer charged', () => {
     expect(costOf({
@@ -311,6 +315,29 @@ describe('lockAccounting: the lock recounts transfers (uncounted saves)', () => 
       squad: mkSquadMap(threeSold), state: { Free: 2, UsedThisGw: 0 },
       previous: { picks: 'nope' },
     })).toEqual({});
+  });
+
+  // Fix round 1: the caller persists usedByUid into TransferState.UsedThisGw
+  // (max) so the rollover banks from it — only where the recount WON.
+  it('usedByUid: the recounted used, only where it beat the stored count', () => {
+    const base = { squad: mkSquadMap(threeSold), previous: prev };
+    expect(usedOf({ ...base, state: { Free: 2, UsedThisGw: 0 } })).toEqual({ u: 3 });
+    // Free swaps discount the recount here too (3 sold - 2 swaps = 1).
+    expect(usedOf({
+      ...base, state: { Free: 2, UsedThisGw: 0, FreeSwaps: ['E', 'F'], FreeSwapsGw: 3 },
+    })).toEqual({ u: 1 });
+    // An unlimited week still records Used (the bank is untouched by it).
+    expect(usedOf({
+      ...base, squad: mkSquadMap(threeSold, 'wildcard'), state: { Free: 2, UsedThisGw: 0 },
+    })).toEqual({ u: 3 });
+    // Stored equal or higher: nothing to raise.
+    expect(usedOf({ ...base, state: { Free: 2, UsedThisGw: 3 } })).toEqual({});
+    expect(usedOf({ ...base, state: { Free: 2, UsedThisGw: 4 } })).toEqual({});
+    // No baseline, or no integrity inputs: never.
+    expect(usedOf({ squad: mkSquadMap(threeSold), state: { Free: 2, UsedThisGw: 0 } }))
+      .toEqual({});
+    expect(usedOf({ ...base, state: { Free: 2, UsedThisGw: 0 }, integrity: false }))
+      .toEqual({});
   });
 });
 

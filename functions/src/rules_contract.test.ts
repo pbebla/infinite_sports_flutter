@@ -245,15 +245,27 @@ for (const file of RULES_FILES) {
     // locked week.
     //
     // UNCOUNTED SAVES (FPL selling plan Task 5, owner 2026-11-03 "do
-    // both"): a save is accepted ONLY while GwState says 'open' AND the
-    // server clock is before lockAtUtc — the only window the save trigger
-    // (recordSquadSave) counts transfers in. 'locked'/'finalized' (Sunday's
-    // lock until the engine opens the next week) used to accept saves the
-    // trigger never counted; the fan app already treats that window as
-    // locked, so only a REST write could use it. Kept: no GwState yet (the
-    // season hasn't started) and the owner's effective 'open' lockOverride
-    // (the engine keeps counting under it). The lock recounts transfers as
-    // insurance (transfer_state.ts lockAccounting).
+    // both"; fix round 1): the save trigger (recordSquadSave) counts
+    // transfers only while GwState says 'open' and before lockAtUtc (or
+    // under the effective 'open' override while GwState says 'open'); it
+    // stands down under a 'locked' override. So a save is accepted only:
+    //   - with no GwState yet (the season hasn't started);
+    //   - while GwState says 'open' AND the server clock is before
+    //     lockAtUtc (the counted window);
+    //   - once 24 h have passed since the stored lockAtUtc while GwState
+    //     still says 'locked'/'finalized' — the fan app reopens the next
+    //     week exactly at lock + 24 h (gameweeks.dart currentGameweek), a
+    //     sweep may flip GwState up to 15 min later, and a save refused in
+    //     that gap would drop the fan's edits;
+    //   - under the owner's effective 'open' lockOverride.
+    // 'locked'/'finalized' before lock + 24 h used to accept saves the
+    // trigger never counted (the app shows that window as locked; only a
+    // REST write could use it) — now refused. Saves the trigger misses
+    // (the +24 h gap, a 'locked' override before the lock, an 'open'
+    // override after GwState left 'open', a failed trigger) are caught by
+    // the next lock's recount, which is charged AND persisted into
+    // TransferState.UsedThisGw (transfer_state.ts lockAccounting usedByUid,
+    // orchestration.ts freezeLockTransferState).
     //
     // A delete (null) skips .validate, so a deadline sits on .write for
     // deletes only (`newData.exists() || <window>`): nobody wipes a squad
@@ -283,27 +295,26 @@ for (const file of RULES_FILES) {
       const w = String(uidNode['.write'] ?? '');
       expect(w.startsWith('auth != null && auth.uid == $uid && (newData.exists() || ')).toBe(true);
 
-      const v = String(uidNode['.validate'] ?? '');
-      expect(v, `${file}: Squads/$uid has no .validate`).not.toBe('');
-      expect(v).toContain("newData.hasChildren(['picks', 'captainId', 'viceId'])");
-      expect(v).toContain("newData.child('captainId').isString()");
-      expect(v).toContain("newData.child('viceId').isString()");
       const gw = "root.child('Fantasy/' + $sport + '/' + $season + '/GwState";
       const cfgP = "root.child('Fantasy/' + $sport + '/' + $season + '/Config";
       const openOverride =
         `(${cfgP}/lockOverride').val() === 'open' && ` +
         `(!${cfgP}/lockOverrideUntil').isNumber() || now < ${cfgP}/lockOverrideUntil').val()))`;
-      // The save window: no GwState, OR (open AND before the lock), OR the
+      // The squad shape (unchanged since the hardening round).
+      const shape =
+        "newData.hasChildren(['picks', 'captainId', 'viceId']) && " +
+        "newData.child('captainId').isString() && newData.child('captainId').val().length <= 60 && " +
+        "newData.child('viceId').isString() && newData.child('viceId').val().length <= 60";
+      // The save window: no GwState, OR (open AND before the lock), OR (not
+      // open AND 24 h past the stored lock — the app's own reopen), OR the
       // effective 'open' override — and nothing else.
       const saveWindow =
         `(!${gw}').exists() || ` +
         `(${gw}/status').val() === 'open' && now < ${gw}/lockAtUtc').val()) || ` +
+        `(${gw}/status').val() !== 'open' && now >= ${gw}/lockAtUtc').val() + 86400000) || ` +
         `${openOverride})`;
-      expect(v.endsWith(` && ${saveWindow}`),
-        `${file}: Squads/$uid .validate deadline group is not the open-only window: ${v}`)
-        .toBe(true);
-      // The old escape hatch ("any status but 'open' saves") is gone.
-      expect(v).not.toContain(`${gw}/status').val() !== 'open'`);
+      expect(uidNode['.validate'], `${file}: Squads/$uid .validate`)
+        .toBe(`${shape} && ${saveWindow}`);
       // The delete gate keeps its ORIGINAL deadline group verbatim (review
       // ruling), then the paid-access gate (spec 2026-11-01 §5).
       const deleteWindow =

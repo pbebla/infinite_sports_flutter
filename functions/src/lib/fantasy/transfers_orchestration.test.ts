@@ -7,9 +7,10 @@
 // Golden gross tenths: alpha 350, boost 440, churn 595 (fixture _notes).
 
 import { describe, expect, it } from 'vitest';
+import { futsalDefault } from './fantasy_config';
 import { clone, Json } from './golden_fixture';
 import {
-  maybeFinalizeGame, recordSquadSave, runLifecycleSweep,
+  FantasyLogger, maybeFinalizeGame, recordSquadSave, runLifecycleSweep,
 } from './orchestration';
 import {
   AFTER_LOCK2, F_ROOT, FakeDb, fixtureSquad, GW2_DATE, world2,
@@ -291,6 +292,101 @@ describe('finalize: cost application + rollover (once only)', () => {
       .toEqual({ ...liveAlpha, ServerWriteAt: now.getTime() });
     expect(await db.read(`${fRoot}/TransferState/alpha`)).toEqual({
       Free: 4, UsedThisGw: 0, RolledGw: 1,
+    });
+  });
+});
+
+// FPL selling plan Task 5, fix round 1: a save the trigger never counted
+// (stored UsedThisGw lower than the transfers really made) is charged at
+// the lock AND persisted into TransferState.UsedThisGw, so the rollover
+// banks from the real count. Here churn's GW2 squad sells Bo, Ben and Eva
+// (3 transfers, still exactly 500 tenths) but TransferState says 0 used.
+describe('the lock recount is persisted (uncounted saves)', () => {
+  const RECOUNT_MSG = 'fantasy transfers: lock recount raised the count';
+
+  function uncountedWorld(state: Json, opts: { gw2Status?: number } = {}): FakeDb {
+    const db = new FakeDb(world2(opts));
+    const f = db.data.Fantasy.Futsal['15'];
+    const churn = f.Squads.churn;
+    churn.picks[0] = { playerId: 'Eli', position: 'GK', priceTenths: 55, bench: false }; // Bo out
+    churn.picks[4] = { playerId: 'Alex', position: 'ATT', priceTenths: 95, bench: false }; // Ben out
+    churn.picks[5] = { playerId: 'Will', position: 'DEF', priceTenths: 60, bench: true }; // Eva out
+    churn.captainId = 'Alex';
+    f.TransferState = { churn: state };
+    return db;
+  }
+
+  function capture(): { log: FantasyLogger; infos: Array<{ m: string; c?: Json }> } {
+    const infos: Array<{ m: string; c?: Json }> = [];
+    return {
+      infos,
+      log: { info: (m, c) => { infos.push({ m, c }); }, warn: () => undefined },
+    };
+  }
+
+  it('the lock charges 1 extra AND raises UsedThisGw to 3 (other fields kept), logged', async () => {
+    const db = uncountedWorld({ Free: 2, UsedThisGw: 0, RolledGw: 1 }, { gw2Status: 1 });
+    const { log, infos } = capture();
+    await runLifecycleSweep(db, AFTER_LOCK2, log); // games live: lock only
+    expect(await db.read(`${fRoot}/TransferCosts/2`)).toEqual({ churn: 4 });
+    expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
+      Free: 2, UsedThisGw: 3, RolledGw: 1,
+    });
+    const recounts = infos.filter((i) => i.m === RECOUNT_MSG);
+    expect(recounts).toHaveLength(1);
+    expect(recounts[0].c).toMatchObject({ uid: 'churn', gw: 2, stored: 0, recounted: 3 });
+    // Squads the recount didn't raise are untouched (and not logged).
+    expect(await db.read(`${fRoot}/TransferState/alpha`)).toEqual({ Free: 2, UsedThisGw: 0 });
+  });
+
+  it('the rollover banks from the recount: Free 2, real 3 -> next week 0 + 2', async () => {
+    const db = uncountedWorld({ Free: 2, UsedThisGw: 0, RolledGw: 1 });
+    await runLifecycleSweep(db, AFTER_LOCK2); // lock + backstop finalize
+    expect(await db.read(`${fRoot}/TransferCosts/2`)).toEqual({ churn: 4 });
+    // Without the persisted recount this banked 2 - 0 + 2 = 4.
+    expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
+      Free: 0 + futsalDefault().freeTransfersPerWeek, UsedThisGw: 0, RolledGw: 2,
+    });
+  });
+
+  it('a recount that does not win changes nothing (stored kept, no log)', async () => {
+    const db = uncountedWorld({ Free: 2, UsedThisGw: 5, SavedGw: 2 }, { gw2Status: 1 });
+    const { log, infos } = capture();
+    await runLifecycleSweep(db, AFTER_LOCK2, log);
+    expect(await db.read(`${fRoot}/TransferCosts/2`)).toEqual({ churn: 12 }); // 3 extra
+    expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
+      Free: 2, UsedThisGw: 5, SavedGw: 2,
+    });
+    expect(infos.filter((i) => i.m === RECOUNT_MSG)).toEqual([]);
+  });
+
+  it('a first finalize from live Squads (no lock snapshot) persists it too', async () => {
+    const db = uncountedWorld({ Free: 2, UsedThisGw: 0, RolledGw: 1 });
+    const { log, infos } = capture();
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: GW2_DATE, nowUtc: AFTER_LOCK2, log,
+    });
+    expect(await db.read(`${fRoot}/PublishedPicks/2`)).toBeNull(); // the fallback ran
+    expect(await db.read(`${fRoot}/TransferCosts/2`)).toEqual({ churn: 4 });
+    expect(infos.filter((i) => i.m === RECOUNT_MSG).map((i) => i.c))
+      .toEqual([expect.objectContaining({ uid: 'churn', gw: 2, stored: 0, recounted: 3 })]);
+    expect(await db.read(`${fRoot}/TransferState/churn`)).toEqual({
+      Free: 2, UsedThisGw: 0, RolledGw: 2,
+    });
+  });
+
+  it("a counter already running for a LATER week is never raised (it isn't this week's)", async () => {
+    // A late first finalize after the manager saved for GW3: UsedThisGw is
+    // GW3's running count and survives the rollover — the GW2 recount must
+    // not leak into it.
+    const db = uncountedWorld({ Free: 2, UsedThisGw: 1, SavedGw: 3, RolledGw: 1 });
+    const { log, infos } = capture();
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: GW2_DATE, nowUtc: AFTER_LOCK2, log,
+    });
+    expect(infos.filter((i) => i.m === RECOUNT_MSG)).toEqual([]);
+    expect(await db.read(`${fRoot}/TransferState/churn`)).toMatchObject({
+      UsedThisGw: 1, SavedGw: 3, RolledGw: 2,
     });
   });
 });

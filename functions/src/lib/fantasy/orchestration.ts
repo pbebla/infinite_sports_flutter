@@ -219,8 +219,8 @@ import {
 } from './squad_integrity';
 import { parseForfeitedBy } from './stats_mapper';
 import {
-  annotateSquadIntegrity, lockAccounting, parseTransferState, rolloverState,
-  transferStateToNode, usedAfterFreeSwaps,
+  annotateSquadIntegrity, LockAccounting, lockAccounting, parseTransferState,
+  rolloverState, transferStateToNode, usedAfterFreeSwaps,
 } from './transfer_state';
 
 /** Injected logging seam (firebase-functions/logger in production, a spy or
@@ -271,18 +271,38 @@ function mapChildren(node: unknown): Record<string, unknown> {
 
 // ── Phase E: transfer accounting ───────────────────────────────────────────
 
-/** Merge the lock-frozen effective chip into each manager's TransferState.
- *  Every other field survives; a no-chip week clears any stale ChipPlayed
- *  (so a crashed earlier lock can never leak a Free Hit restore). */
-async function freezeChipPlayed(
-  db: FantasyDb, root: string, cfg: FantasyConfig,
-  chipPlayedByUid: Record<string, string | null>,
+/** Merge the lock's frozen results into each manager's TransferState
+ *  (read-modify-write, not a transaction — it runs inside the lock's
+ *  once-only claim, or a first finalize):
+ *  - ChipPlayed = the effective chip; a no-chip week clears any stale one
+ *    (so a crashed earlier lock can never leak a Free Hit restore).
+ *  - UsedThisGw raised to the lock's recount when that is higher (FPL
+ *    selling plan Task 5 — lockAccounting usedByUid, max against the value
+ *    re-read here), so the rollover banks from the transfers really made,
+ *    not from a count a missed save never updated. Logged. Skipped when
+ *    the manager already saved for a LATER gameweek (SavedGw > gw — a late
+ *    first finalize): that counter is next week's and survives the
+ *    rollover.
+ *  Every other field survives. usedByUid's uids are a subset of
+ *  chipPlayedByUid's (both are the parseable squads). */
+async function freezeLockTransferState(
+  db: FantasyDb, root: string, cfg: FantasyConfig, gw: number,
+  acc: Pick<LockAccounting, 'chipPlayedByUid' | 'usedByUid'>,
+  log: FantasyLogger, ctx: Record<string, unknown>,
 ): Promise<void> {
-  for (const [uid, chip] of Object.entries(chipPlayedByUid)) {
+  for (const [uid, chip] of Object.entries(acc.chipPlayedByUid)) {
     const state = parseTransferState(
       await db.read(`${root}/TransferState/${uid}`), cfg);
+    let usedThisGw = state.usedThisGw;
+    const recounted = acc.usedByUid[uid];
+    const laterWeek = state.savedGw !== null && state.savedGw > gw;
+    if (recounted !== undefined && recounted > usedThisGw && !laterWeek) {
+      log.info('fantasy transfers: lock recount raised the count',
+        { ...ctx, uid, gw, stored: usedThisGw, recounted });
+      usedThisGw = recounted;
+    }
     await db.write(`${root}/TransferState/${uid}`,
-      transferStateToNode({ ...state, chipPlayed: chip }));
+      transferStateToNode({ ...state, chipPlayed: chip, usedThisGw }));
   }
 }
 
@@ -931,11 +951,11 @@ export async function finalizeGameweek(
   }
   // Audit I3: live Squads are only trustworthy as "the locked squads" when
   // read right at the lock (the rule freezes client saves from the lock
-  // instant until the engine opens the next week, but the owner's 'open'
-  // override and the server's own writes still move them). A FIRST
-  // finalize long after the lock with no snapshot means the sweep was
-  // down through the lock — say so loudly rather than silently scoring
-  // whatever is live now.
+  // instant until a sweep opens the next week, or — once a sweep marked
+  // the week locked — until lock + 24 h; the owner's 'open' override and
+  // the server's own writes still move them). A FIRST finalize long after
+  // the lock with no snapshot means the sweep was down through the lock —
+  // say so loudly rather than silently scoring whatever is live now.
   const sinceLockMs = args.nowUtc.getTime() - gw.lockUtc.getTime();
   if (firstRun && source === 'squadsFallback' &&
     Object.keys(squadsByUid).length > 0 &&
@@ -981,7 +1001,7 @@ export async function finalizeGameweek(
     if (Object.keys(acc.costPointsByUid).length > 0) {
       await db.write(`${root}/TransferCosts/${gw.number}`, acc.costPointsByUid);
     }
-    await freezeChipPlayed(db, root, cfg, acc.chipPlayedByUid);
+    await freezeLockTransferState(db, root, cfg, gw.number, acc, log, ctx);
     costsRaw = acc.costPointsByUid;
     if (integrity !== undefined) {
       await settleIntegrityAlerts(
@@ -1504,14 +1524,16 @@ async function snapshotPriceHistory(
  *  lock accounting rides the same claim: a chip replayed within its set is
  *  VOIDED (stripped from the snapshot itself, so finalize and the public
  *  reveal agree), the effective chip is frozen into
- *  TransferState.ChipPlayed, and the week's transfer cost points are
- *  persisted to TransferCosts/<gw> for finalize. The integrity pass rides
- *  it too (audit I2): every squad is judged (squad_integrity.ts), an invalid
- *  one is published with its `Invalid` verdict and its manager alerted.
- *  Squads are read LIVE here, which is right: the Squads/<uid> rule
- *  rejects client saves from the lock instant on (server clock) and under
- *  any GwState status but 'open', and the sweep writes the snapshot BEFORE
- *  it flips GwState to 'locked' (step 3) — keep that order. */
+ *  TransferState.ChipPlayed (UsedThisGw raised to the lock's recount when
+ *  that is higher — freezeLockTransferState), and the week's transfer
+ *  cost points are persisted to TransferCosts/<gw> for finalize. The
+ *  integrity pass rides it too (audit I2): every squad is judged
+ *  (squad_integrity.ts), an invalid one is published with its `Invalid`
+ *  verdict and its manager alerted. Squads are read LIVE here, which is
+ *  right: the Squads/<uid> rule rejects client saves from the lock instant
+ *  (server clock) until lock + 24 h (the app's reopen), and the sweep
+ *  writes the snapshot BEFORE it flips GwState to 'locked' (step 3) —
+ *  keep that order. */
 async function snapshotPublishedPicks(
   db: FantasyDb, root: string, cfg: FantasyConfig, gw: number,
   nowMs: number, log: FantasyLogger, ctx: Record<string, unknown>,
@@ -1554,7 +1576,7 @@ async function snapshotPublishedPicks(
   if (Object.keys(acc.costPointsByUid).length > 0) {
     await db.write(`${root}/TransferCosts/${gw}`, acc.costPointsByUid);
   }
-  await freezeChipPlayed(db, root, cfg, acc.chipPlayedByUid);
+  await freezeLockTransferState(db, root, cfg, gw, acc, log, ctx);
   // Alerts next: the snapshot + accounting above are what scoring needs.
   await settleIntegrityAlerts(db, root, gw, acc, nowMs, log, ctx);
   log.info('fantasy lock: picks published', {

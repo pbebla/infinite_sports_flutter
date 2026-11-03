@@ -9,9 +9,9 @@
 //   { Free:int,         // free transfers available THIS gameweek
 //     UsedThisGw:int,   // players in the saved squad that were not in the
 //                       //   previous locked squad; recomputed on every save
-//                       //   while the gameweek is open (the lock charges
-//                       //   the max of this and its own recount —
-//                       //   lockUsedTransfers)
+//                       //   while the gameweek is open; the lock raises
+//                       //   it to its own recount when that is higher
+//                       //   (lockUsedTransfers; charged and persisted)
 //     ChipPlayed?:string, // frozen at lock from the locked squad's chip
 //                       //   (post-void); cleared again at rollover
 //     SavedGw?:int,     // gameweek of the manager's latest squad save —
@@ -181,6 +181,12 @@ export interface LockAccounting {
   cleanSquads: Record<string, unknown>;
   /** Non-zero transfer cost points per uid (TransferCosts/<gw> rows). */
   costPointsByUid: Record<string, number>;
+  /** The lock's recount of used transfers (lockUsedTransfers), ONLY for
+   *  the uids where it beat the stored UsedThisGw — the caller raises
+   *  TransferState.UsedThisGw to it (max, re-read) so the rollover banks
+   *  from the transfers really made (orchestration.ts
+   *  freezeLockTransferState). Empty without [integrity]. */
+  usedByUid: Record<string, number>;
   /** Effective chip per uid (post-void; null = none) — frozen into
    *  TransferState.ChipPlayed. Only uids with a parseable squad appear. */
   chipPlayedByUid: Record<string, string | null>;
@@ -245,10 +251,11 @@ export function annotateSquadIntegrity(
  *  'open'), raised to a recount of the LOCKED squad against the manager's
  *  baseline — integrity.previousByUid[uid], the same effective squad the
  *  trigger counts against — with the same free-swap discount
- *  (usedAfterFreeSwaps). Insurance for saves the trigger never counted
- *  (a save outside the 'open' window, a trigger that failed): the rules
- *  only accept saves in that window now, but the count must not depend on
- *  it. max(): the recount never lowers what the trigger recorded. No
+ *  (usedAfterFreeSwaps). Catches saves the trigger never counted: the
+ *  rules' +24 h reopen gap (a save once lock + 24 h has passed while
+ *  GwState still says 'locked'/'finalized'), a 'locked' override before
+ *  the lock, an 'open' override after GwState left 'open', a trigger that
+ *  failed. max(): the recount never lowers what the trigger recorded. No
  *  integrity inputs, or no usable baseline (absent, malformed or
  *  Invalid-marked — baselineSquadOf null, the judge's own fresh start) →
  *  the stored value unchanged. A wildcard / Free Hit week is still free:
@@ -285,7 +292,8 @@ function lockUsedTransfers(
  *
  *  RECOUNT (FPL selling plan Task 5): with [integrity] the week's used
  *  transfers are also recounted from the locked squad itself — see
- *  lockUsedTransfers. */
+ *  lockUsedTransfers. The cost is priced from it, and [usedByUid] carries
+ *  every recount that beat the stored count for the caller to persist. */
 export function lockAccounting(args: {
   squadsByUid: Record<string, unknown>;
   statesByUid: Record<string, unknown>;
@@ -307,6 +315,7 @@ export function lockAccounting(args: {
   }
   const cleanSquads: Record<string, unknown> = {};
   const costPointsByUid: Record<string, number> = {};
+  const usedByUid: Record<string, number> = {};
   const chipPlayedByUid: Record<string, string | null> = {};
   const voided: Array<{ uid: string; chip: string }> = [];
 
@@ -336,8 +345,10 @@ export function lockAccounting(args: {
     chipPlayedByUid[uid] = chip;
 
     const state = parseTransferState(args.statesByUid[uid], cfg);
+    const used = lockUsedTransfers(squad, uid, state, gw, args.integrity);
+    if (used > state.usedThisGw) usedByUid[uid] = used;
     const cost = transferCost({
-      used: lockUsedTransfers(squad, uid, state, gw, args.integrity),
+      used,
       free: state.free,
       cfg,
       unlimited: isUnlimitedChip(chip),
@@ -345,7 +356,8 @@ export function lockAccounting(args: {
     if (cost > 0) costPointsByUid[uid] = cost;
   }
   return {
-    cleanSquads, costPointsByUid, chipPlayedByUid, voided, invalid, valid,
+    cleanSquads, costPointsByUid, usedByUid, chipPlayedByUid, voided,
+    invalid, valid,
   };
 }
 
