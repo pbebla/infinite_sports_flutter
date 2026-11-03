@@ -242,15 +242,31 @@ for (const file of RULES_FILES) {
     // each pick playerId <= 60 / priceTenths number / bench bool, at most
     // squadSize picks) and must land BEFORE the lock by Firebase's SERVER
     // clock (`now`) — so a skewed phone clock or a REST write can't edit a
-    // locked week. No GwState yet, or a status other than 'open' (the
-    // engine opens the next week), still accepts saves, as does the owner's
-    // effective 'open' lockOverride (the engine keeps counting under it).
-    // A delete (null) skips .validate, so the SAME deadline sits on .write
-    // for deletes only (`newData.exists() || <open window>`): nobody wipes
-    // a squad between the lock and the sweep's snapshot (the client never
-    // deletes a squad; the server's own deletes bypass rules). Admin SDK
-    // writes (functions) bypass rules entirely, so the Free Hit restore /
-    // chip switch-off still land.
+    // locked week.
+    //
+    // UNCOUNTED SAVES (FPL selling plan Task 5, owner 2026-11-03 "do
+    // both"): a save is accepted ONLY while GwState says 'open' AND the
+    // server clock is before lockAtUtc — the only window the save trigger
+    // (recordSquadSave) counts transfers in. 'locked'/'finalized' (Sunday's
+    // lock until the engine opens the next week) used to accept saves the
+    // trigger never counted; the fan app already treats that window as
+    // locked, so only a REST write could use it. Kept: no GwState yet (the
+    // season hasn't started) and the owner's effective 'open' lockOverride
+    // (the engine keeps counting under it). The lock recounts transfers as
+    // insurance (transfer_state.ts lockAccounting).
+    //
+    // A delete (null) skips .validate, so a deadline sits on .write for
+    // deletes only (`newData.exists() || <window>`): nobody wipes a squad
+    // between the lock and the sweep's snapshot (the client never deletes a
+    // squad; the server's own deletes bypass rules). That delete gate keeps
+    // the ORIGINAL deadline group verbatim (review ruling, Task 5 — "the
+    // delete gate stays"). Admin SDK writes (functions) bypass rules
+    // entirely, so the Free Hit restore / chip switch-off still land.
+    //
+    // realizedTenths (FPL selling, spec §4) is the server's own number on
+    // a LOCKED snapshot; a client may never write it on Squads/<uid> (a
+    // malformed squad is snapshotted verbatim, so a planted value would
+    // survive into the record). The fan app never sends it.
     //
     // KEEP IN SYNC WITH CONFIG: the pick-key regex hard-codes the squad
     // size (keys 0..squadSize-1 — RTDB lists are index-keyed, and rules have
@@ -273,14 +289,31 @@ for (const file of RULES_FILES) {
       expect(v).toContain("newData.child('captainId').isString()");
       expect(v).toContain("newData.child('viceId').isString()");
       const gw = "root.child('Fantasy/' + $sport + '/' + $season + '/GwState";
-      expect(v).toContain(`!${gw}').exists()`);
-      expect(v).toContain(`${gw}/status').val() !== 'open'`);
-      expect(v).toContain(`now < ${gw}/lockAtUtc').val()`);
-      // The delete gate is the validate's deadline group, verbatim, then the
-      // paid-access gate (spec 2026-11-01 §5).
-      const deadline = v.slice(v.indexOf(`(!${gw}').exists()`));
+      const cfgP = "root.child('Fantasy/' + $sport + '/' + $season + '/Config";
+      const openOverride =
+        `(${cfgP}/lockOverride').val() === 'open' && ` +
+        `(!${cfgP}/lockOverrideUntil').isNumber() || now < ${cfgP}/lockOverrideUntil').val()))`;
+      // The save window: no GwState, OR (open AND before the lock), OR the
+      // effective 'open' override — and nothing else.
+      const saveWindow =
+        `(!${gw}').exists() || ` +
+        `(${gw}/status').val() === 'open' && now < ${gw}/lockAtUtc').val()) || ` +
+        `${openOverride})`;
+      expect(v.endsWith(` && ${saveWindow}`),
+        `${file}: Squads/$uid .validate deadline group is not the open-only window: ${v}`)
+        .toBe(true);
+      // The old escape hatch ("any status but 'open' saves") is gone.
+      expect(v).not.toContain(`${gw}/status').val() !== 'open'`);
+      // The delete gate keeps its ORIGINAL deadline group verbatim (review
+      // ruling), then the paid-access gate (spec 2026-11-01 §5).
+      const deleteWindow =
+        `(!${gw}').exists() || ${gw}/status').val() !== 'open' || ` +
+        `now < ${gw}/lockAtUtc').val() || ${openOverride})`;
       expect(w).toBe(
-        `auth != null && auth.uid == $uid && (newData.exists() || ${deadline}) && ${ACCESS_GATE}`);
+        `auth != null && auth.uid == $uid && (newData.exists() || ${deleteWindow}) && ${ACCESS_GATE}`);
+      // A client never writes the server's realizedTenths.
+      expect(uidNode['realizedTenths'], `${file}: Squads/$uid lets a client write realizedTenths`)
+        .toEqual({ '.validate': false });
 
       const pick = String(uidNode['picks']?.['$i']?.['.validate'] ?? '');
       const n = squadSize(configFromMap({}));

@@ -9,7 +9,9 @@
 //   { Free:int,         // free transfers available THIS gameweek
 //     UsedThisGw:int,   // players in the saved squad that were not in the
 //                       //   previous locked squad; recomputed on every save
-//                       //   while the gameweek is open
+//                       //   while the gameweek is open (the lock charges
+//                       //   the max of this and its own recount —
+//                       //   lockUsedTransfers)
 //     ChipPlayed?:string, // frozen at lock from the locked squad's chip
 //                       //   (post-void); cleared again at rollover
 //     SavedGw?:int,     // gameweek of the manager's latest squad save —
@@ -36,8 +38,8 @@ import { childEntries, isPlainMap, toIntLoose } from './orchestration_db';
 import { REALIZED_KEY } from './selling';
 import { FantasySquad, squadFromMap } from './squad';
 import {
-  baselineRealizedFor, INVALID_KEY, integrityVerdictOf, IntegrityInputs,
-  picksAtJudgedPrices, SquadIntegrityIssue,
+  baselineRealizedFor, baselineSquadOf, INVALID_KEY, integrityVerdictOf,
+  IntegrityInputs, picksAtJudgedPrices, SquadIntegrityIssue,
 } from './squad_integrity';
 import { rolloverFreeTransfers, transferCost } from './transfers';
 
@@ -238,6 +240,30 @@ export function annotateSquadIntegrity(
   return { squads, invalid, valid };
 }
 
+/** The used transfers the lock charges for: the stored UsedThisGw (counted
+ *  by the save trigger, recordSquadSave, on every save while GwState says
+ *  'open'), raised to a recount of the LOCKED squad against the manager's
+ *  baseline — integrity.previousByUid[uid], the same effective squad the
+ *  trigger counts against — with the same free-swap discount
+ *  (usedAfterFreeSwaps). Insurance for saves the trigger never counted
+ *  (a save outside the 'open' window, a trigger that failed): the rules
+ *  only accept saves in that window now, but the count must not depend on
+ *  it. max(): the recount never lowers what the trigger recorded. No
+ *  integrity inputs, or no usable baseline (absent, malformed or
+ *  Invalid-marked — baselineSquadOf null, the judge's own fresh start) →
+ *  the stored value unchanged. A wildcard / Free Hit week is still free:
+ *  the caller passes `unlimited` for the post-void chip. */
+function lockUsedTransfers(
+  squad: FantasySquad, uid: string, state: TransferState, gw: number,
+  integrity: IntegrityInputs | undefined,
+): number {
+  if (integrity === undefined) return state.usedThisGw;
+  const baseline = baselineSquadOf(integrity.previousByUid[uid]);
+  if (baseline === null) return state.usedThisGw;
+  return Math.max(state.usedThisGw,
+    usedAfterFreeSwaps(squad, baseline, state, gw));
+}
+
 /** The whole lock-time transfer accounting, pure: per manager, void a chip
  *  reused within its set, freeze the effective chip, and price the week's
  *  transfers (used vs Free; wildcard/freeHit = unlimited = free — Used stays
@@ -255,7 +281,11 @@ export function annotateSquadIntegrity(
  *  `Invalid: [issues]` and finalize scores it zero. Its chip/cost
  *  accounting runs as for any squad (the chip it locked is consumed; the
  *  cost is moot — the week nets zero). Without [integrity] nothing is
- *  judged (a snapshot that already carries a marker keeps it verbatim). */
+ *  judged (a snapshot that already carries a marker keeps it verbatim).
+ *
+ *  RECOUNT (FPL selling plan Task 5): with [integrity] the week's used
+ *  transfers are also recounted from the locked squad itself — see
+ *  lockUsedTransfers. */
 export function lockAccounting(args: {
   squadsByUid: Record<string, unknown>;
   statesByUid: Record<string, unknown>;
@@ -307,7 +337,7 @@ export function lockAccounting(args: {
 
     const state = parseTransferState(args.statesByUid[uid], cfg);
     const cost = transferCost({
-      used: state.usedThisGw,
+      used: lockUsedTransfers(squad, uid, state, gw, args.integrity),
       free: state.free,
       cfg,
       unlimited: isUnlimitedChip(chip),

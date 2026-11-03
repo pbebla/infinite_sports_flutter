@@ -930,10 +930,12 @@ export async function finalizeGameweek(
     source = 'squadsFallback';
   }
   // Audit I3: live Squads are only trustworthy as "the locked squads" when
-  // read right at the lock (the rule freezes them from the lock instant on,
-  // but only while GwState says 'open'). A FIRST finalize long after the
-  // lock with no snapshot means the sweep was down through the lock — say
-  // so loudly rather than silently scoring whatever is live now.
+  // read right at the lock (the rule freezes client saves from the lock
+  // instant until the engine opens the next week, but the owner's 'open'
+  // override and the server's own writes still move them). A FIRST
+  // finalize long after the lock with no snapshot means the sweep was
+  // down through the lock — say so loudly rather than silently scoring
+  // whatever is live now.
   const sinceLockMs = args.nowUtc.getTime() - gw.lockUtc.getTime();
   if (firstRun && source === 'squadsFallback' &&
     Object.keys(squadsByUid).length > 0 &&
@@ -1507,9 +1509,9 @@ async function snapshotPriceHistory(
  *  it too (audit I2): every squad is judged (squad_integrity.ts), an invalid
  *  one is published with its `Invalid` verdict and its manager alerted.
  *  Squads are read LIVE here, which is right: the Squads/<uid> rule
- *  rejects client saves from the lock instant on (server clock, while
- *  GwState says 'open'), and the sweep writes the snapshot BEFORE it flips
- *  GwState to 'locked' (step 3) — keep that order. */
+ *  rejects client saves from the lock instant on (server clock) and under
+ *  any GwState status but 'open', and the sweep writes the snapshot BEFORE
+ *  it flips GwState to 'locked' (step 3) — keep that order. */
 async function snapshotPublishedPicks(
   db: FantasyDb, root: string, cfg: FantasyConfig, gw: number,
   nowMs: number, log: FantasyLogger, ctx: Record<string, unknown>,

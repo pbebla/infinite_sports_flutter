@@ -212,6 +212,108 @@ describe('lockAccounting', () => {
   });
 });
 
+describe('lockAccounting: the lock recounts transfers (uncounted saves)', () => {
+  // Last week's locked squad A..G. Every player costs 50 now, so every
+  // squad below passes the judge (the count never depends on the verdict).
+  // This week's squad sold E, F, G for X, Y, Z: 3 transfers.
+  const at = (priceTenths: number) =>
+    ({ position: 'ATT', priceTenths, eligible: true });
+  const market = integrityMarketOf({
+    A: at(50), B: at(50), C: at(50), D: at(50), E: at(50), F: at(50),
+    G: at(50), X: at(50), Y: at(50), Z: at(50),
+  });
+  const prev = mkSquadMap(['A', 'B', 'C', 'D', 'E', 'F', 'G']);
+  const inputs = (previousByUid: Record<string, unknown>): IntegrityInputs =>
+    ({ market, previousByUid, previousWeekPrices: {} });
+  const threeSold = ['A', 'B', 'C', 'D', 'X', 'Y', 'Z'];
+
+  function costOf(args: {
+    squad: Record<string, unknown>;
+    state: Record<string, unknown>;
+    previous?: unknown; // absent = no baseline for the manager
+    integrity?: boolean; // default true
+    historyRaw?: unknown;
+    gw?: number;
+  }): Record<string, number> {
+    return lockAccounting({
+      squadsByUid: { u: args.squad },
+      statesByUid: { u: args.state },
+      historyRaw: args.historyRaw ?? null,
+      cfg,
+      gw: args.gw ?? 3,
+      ...(args.integrity === false ? {} : {
+        integrity: inputs(args.previous === undefined ? {} : { u: args.previous }),
+      }),
+    }).costPointsByUid;
+  }
+
+  it('3 sales locked while UsedThisGw says 0 (Free 2): 1 extra transfer charged', () => {
+    expect(costOf({
+      squad: mkSquadMap(threeSold), state: { Free: 2, UsedThisGw: 0 }, previous: prev,
+    })).toEqual({ u: 1 * cfg.extraTransferCost });
+    // Without the integrity inputs nothing is recounted (the old gap).
+    expect(costOf({
+      squad: mkSquadMap(threeSold), state: { Free: 2, UsedThisGw: 0 }, previous: prev,
+      integrity: false,
+    })).toEqual({});
+  });
+
+  it('wildcard / Free Hit weeks stay free', () => {
+    for (const chip of ['wildcard', 'freeHit']) {
+      expect(costOf({
+        squad: mkSquadMap(threeSold, chip), state: { Free: 2, UsedThisGw: 0 }, previous: prev,
+      }), chip).toEqual({});
+    }
+  });
+
+  it('a VOIDED wildcard is no shield: the recount is charged', () => {
+    // Wildcard already played in GW1 (same set) → void at GW3 → chip null.
+    expect(costOf({
+      squad: mkSquadMap(threeSold, 'wildcard'), state: { Free: 2, UsedThisGw: 0 },
+      previous: prev, historyRaw: { 1: { u: { chip: 'wildcard' } } },
+    })).toEqual({ u: 1 * cfg.extraTransferCost });
+  });
+
+  it('free-swap players sold are not counted (their own week only)', () => {
+    // E and F broke the formation (holder protection): selling them is free.
+    // Free 0: the 1 transfer left (G -> Z) is the only one charged.
+    expect(costOf({
+      squad: mkSquadMap(threeSold),
+      state: { Free: 0, UsedThisGw: 0, FreeSwaps: ['E', 'F'], FreeSwapsGw: 3 },
+      previous: prev,
+    })).toEqual({ u: 1 * cfg.extraTransferCost });
+    // Swaps granted for another week discount nothing.
+    expect(costOf({
+      squad: mkSquadMap(threeSold),
+      state: { Free: 0, UsedThisGw: 0, FreeSwaps: ['E', 'F'], FreeSwapsGw: 2 },
+      previous: prev,
+    })).toEqual({ u: 3 * cfg.extraTransferCost });
+  });
+
+  it('the stored count wins when it is higher (max of the two)', () => {
+    expect(costOf({
+      squad: mkSquadMap(threeSold), state: { Free: 2, UsedThisGw: 4 }, previous: prev,
+    })).toEqual({ u: 2 * cfg.extraTransferCost });
+  });
+
+  it('no usable baseline keeps the stored value', () => {
+    // No previous squad (a first squad): the stored count, whatever it is.
+    expect(costOf({ squad: mkSquadMap(threeSold), state: { Free: 2, UsedThisGw: 0 } }))
+      .toEqual({});
+    expect(costOf({ squad: mkSquadMap(threeSold), state: { Free: 2, UsedThisGw: 3 } }))
+      .toEqual({ u: 1 * cfg.extraTransferCost });
+    // An Invalid-marked or malformed baseline is no baseline either.
+    expect(costOf({
+      squad: mkSquadMap(threeSold), state: { Free: 2, UsedThisGw: 0 },
+      previous: { ...prev, Invalid: ['overBudget'] },
+    })).toEqual({});
+    expect(costOf({
+      squad: mkSquadMap(threeSold), state: { Free: 2, UsedThisGw: 0 },
+      previous: { picks: 'nope' },
+    })).toEqual({});
+  });
+});
+
 describe('annotateSquadIntegrity: the snapshot node (FPL selling, spec §4)', () => {
   // Last week's locked squad A..G (all bought at 50), carrying realized 3.
   // Since then G rose to 70 (sells for 60: +10); H costs 60.
