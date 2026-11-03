@@ -633,7 +633,11 @@ async function settleTransfersAfterFinalize(
     const wasScored = scored.has(uid);
     // A latecomer an old week's rerun reaches: his own baseline stands.
     const workingOn = Math.max(state.savedGw ?? 0, state.countFrom?.gw ?? 0);
-    if (!wasScored && workingOn > gw + 1) continue;
+    if (!wasScored && workingOn > gw + 1) {
+      log.info('fantasy transfers: rollover skipped — manager already ' +
+        'working on a later week', { ...ctx, uid, gw, workingOn });
+      continue;
+    }
     const before = await effectiveSquadAfterWeek(db, root, uid, gw - 1);
     if (wasScored && state.chipPlayed === 'freeHit') {
       let restored: Record<string, unknown> | null = null;

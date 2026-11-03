@@ -308,6 +308,55 @@ void main() {
       expect(f.weekData, isNull);
     });
 
+    // Final fix wave: a failed History read must not look like "nothing
+    // used" (the chip row would offer a spent Wildcard again).
+    test(
+        'weekUnknown: an error with no good value is UNKNOWN — not an empty '
+        'answer, not a kept last-good value, not "not asked yet"', () async {
+      final f = feed();
+      expect(f.weekUnknown, isFalse); // nothing asked, nothing answered
+      config.addError(StateError('offline'));
+      await pumpEventQueue();
+      expect(f.weekLoaded, isFalse);
+      expect(f.weekUnknown, isFalse); // asked, not answered yet
+
+      weekFeeds[0].addError(StateError('permission-denied'));
+      await pumpEventQueue();
+      expect(f.weekLoaded, isTrue);
+      expect(f.weekData, isNull);
+      expect(f.weekUnknown, isTrue);
+
+      // A later answer ends it (an empty map is a real "nothing used").
+      weekFeeds[0].add(<int, int>{});
+      await pumpEventQueue();
+      expect(f.weekData, isEmpty);
+      expect(f.weekUnknown, isFalse);
+    });
+
+    test('weekUnknown: a loaded-empty answer and a kept last-good value are '
+        'known; a new key forgets the old answer', () async {
+      final f = feed();
+      config.add(_config(15));
+      await pumpEventQueue();
+      schedules[0].add(_gws(3));
+      await pumpEventQueue();
+      weekFeeds[0].add(<int, int>{});
+      await pumpEventQueue();
+      expect(f.weekLoaded, isTrue);
+      expect(f.weekUnknown, isFalse); // loaded-empty is "nothing there"
+
+      weekFeeds[0].add({2: 7});
+      await pumpEventQueue();
+      weekFeeds[0].addError(StateError('weeks-offline'));
+      await pumpEventQueue();
+      expect(f.weekData, {2: 7});
+      expect(f.weekUnknown, isFalse); // last good kept
+
+      f.setWeekFeed('another player', perWeek);
+      expect(f.weekLoaded, isFalse);
+      expect(f.weekUnknown, isFalse);
+    });
+
     test(
         'a stream that cannot even be created (no Firebase) degrades and is '
         'logged — never a throw, never a notify during start', () async {

@@ -619,8 +619,19 @@ describe('first team never banks; the rollover publishes the transfer baseline',
     const db = new FakeDb(world2());
     const latecomer = { Free: 2, UsedThisGw: 1, SavedGw: 4, CountFromGw: 4 };
     f(db).TransferState = { latecomer: { ...latecomer } };
-    await runLifecycleSweep(db, AFTER_LOCK2); // GW2 lock + finalize
+    const infos: Array<{ m: string; c?: Json }> = [];
+    const log: FantasyLogger = {
+      info: (m, c) => { infos.push({ m, c }); },
+      warn: () => undefined,
+    };
+    await runLifecycleSweep(db, AFTER_LOCK2, log); // GW2 lock + finalize
     expect(await db.read(`${fRoot}/TransferState/latecomer`)).toEqual(latecomer);
+    // The skip is not silent: one info line says who and why.
+    const skipped = infos.filter((i) => i.m.startsWith('fantasy transfers: rollover skipped'));
+    expect(skipped).toHaveLength(1);
+    expect(skipped[0].m).toBe(
+      'fantasy transfers: rollover skipped — manager already working on a later week');
+    expect(skipped[0].c).toMatchObject({ uid: 'latecomer', gw: 2, workingOn: 4 });
   });
 
   it('the Free Hit restore and the chip switch-off stay scored-only', async () => {

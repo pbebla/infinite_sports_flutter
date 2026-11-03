@@ -10,7 +10,10 @@
 // can they while the transfer count is not known yet ("Checking your
 // transfers…"): the server doesn't guard a first-team Wildcard / Free Hit (the
 // chip is spent for nothing), so an unknown count is never read as "not a
-// first team" (error ≠ fact). Switching an armed one OFF is always allowed.
+// first team" (error ≠ fact). Likewise while the manager's chip history is
+// unknown (the read failed): "nothing used" would be a guess, and a
+// Wildcard / Free Hit already spent this set would be voided at the lock with
+// every transfer charged. Switching an armed one OFF is always allowed.
 // Effect lines, the set windows in the heading and the counts all read from
 // the live config, never hard-coded.
 //
@@ -41,6 +44,7 @@ class FantasyChipRow extends StatelessWidget {
     this.availability,
     this.firstTeam = false,
     this.transfersUnknown = false,
+    this.chipHistoryUnknown = false,
   });
 
   final FantasyConfig config;
@@ -63,15 +67,23 @@ class FantasyChipRow extends StatelessWidget {
   /// can still be switched off).
   final bool firstTeam;
 
-  /// The draft's transfer preview is "not ready" (the feed hasn't answered,
-  /// or failed): the team may be a first team, so Wildcard and Free Hit
-  /// can't be armed yet either (an armed one can still be switched off).
+  /// The draft's transfer count is not known — the preview is "not ready"
+  /// (the feed hasn't answered, or failed) or "hidden" (an older node with no
+  /// baseline): the team may be a first team, so Wildcard and Free Hit can't
+  /// be armed yet either (an armed one can still be switched off).
   final bool transfersUnknown;
+
+  /// The manager's chip history is not known (its read failed): "1 left" for
+  /// Wildcard / Free Hit would be a guess — a spent one would be voided at the
+  /// lock and every transfer charged — so they can't be armed either (an
+  /// armed one can still be switched off). Triple Captain and Bench Boost
+  /// keep their badges and stay armable.
+  final bool chipHistoryUnknown;
 
   /// Why Wildcard / Free Hit can't be armed right now (the caption), or null.
   String? get _transferChipHold => firstTeam
       ? _firstTeamCaption
-      : transfersUnknown
+      : transfersUnknown || chipHistoryUnknown
           ? _checkingCaption
           : null;
 

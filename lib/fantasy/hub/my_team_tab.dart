@@ -75,6 +75,7 @@ class FantasyMyTeamTab extends StatelessWidget {
 
   /// The manager's finalized chips by gameweek (the hub's
   /// FantasyService.watchChipHistoryFor feed) — the chip row's real counts.
+  /// null = unknown (the read failed): Wildcard / Free Hit can't be armed.
   final Map<int, ChipHistoryEntry>? chipHistory;
 
   /// The season's owner-voided gameweeks (the hub's

@@ -27,8 +27,8 @@
 // count unknown (notReady / hidden) Save is never blocked or questioned — the
 // lock's own recount is the truth. Wildcard and Free Hit play from the chip
 // row like the other two chips — except that arming them waits while the team
-// is a first team or the count is not known (the chip would be spent for
-// nothing).
+// is a first team, while the transfer count is not known, and while the chip
+// history is not known (the chip would be spent for nothing, or voided).
 //
 // House rules: streams only; colorScheme + the gold/primary fantasy accent
 // pairing; scrollable clears the glass navbar; snackbars surface every
@@ -93,8 +93,10 @@ class FantasySquadBuilder extends StatefulWidget {
 
   /// The manager's finalized chips by gameweek (`History/<gw>/<uid>`, via
   /// FantasyService.watchChipHistoryFor) — drives the chip row's real
-  /// "1 left" / "Used" / "Active" badges (chip_usage.dart). null = unknown
-  /// (signed out / not loaded): nothing counts as spent.
+  /// "1 left" / "Used" / "Active" badges (chip_usage.dart). An empty map =
+  /// loaded, nothing spent. null = UNKNOWN (the read failed): the badges
+  /// still read "1 left", but Wildcard and Free Hit can't be armed (a spent
+  /// one would be voided at the lock and every transfer charged).
   final Map<int, ChipHistoryEntry>? chipHistory;
 
   /// The season's owner-voided gameweeks (`Voided/<gw>`, via
@@ -534,9 +536,13 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
             onChipChanged: _draft.setChip,
             // A first team has nothing to transfer, and an unknown count may
             // be one (the server spends a first-team chip for nothing):
-            // Wildcard / Free Hit can't be armed in either case.
+            // Wildcard / Free Hit can't be armed in either case. "Unknown"
+            // covers notReady AND hidden (a node with no baseline). Nor can
+            // they while the chip history is unknown (null).
             firstTeam: transfers.kind == TransferPreviewKind.firstTeam,
-            transfersUnknown: transfers.kind == TransferPreviewKind.notReady,
+            transfersUnknown: transfers.kind == TransferPreviewKind.notReady ||
+                transfers.kind == TransferPreviewKind.hidden,
+            chipHistoryUnknown: widget.chipHistory == null,
             // Real usage: spent-in-this-set from History, the armed chip on
             // the squad on screen (the live squad, or its unsaved edit).
             availability: chipAvailability(

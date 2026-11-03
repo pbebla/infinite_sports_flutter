@@ -1038,8 +1038,10 @@ class TransferStateView {
   /// server's tolerant parse does).
   final int? free;
 
-  /// The server's own count for the saved squad (`UsedThisGw`). Display
-  /// only — the preview recounts the live draft.
+  /// The server's own count for the last counted save (`UsedThisGw`).
+  /// RESERVED: parsed (so the view mirrors the node) but displayed nowhere —
+  /// the app previews the count itself, from [countFrom] and the live draft,
+  /// so it can never disagree with the lock's recount.
   final int usedThisGw;
 
   /// The gameweek [countFrom] is the baseline for (`CountFromGw`); null = no

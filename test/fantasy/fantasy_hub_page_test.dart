@@ -80,6 +80,7 @@ void main() {
   late StreamController<FantasyAccessState> access;
   late StreamController<SaleBaselineState> sale;
   late StreamController<TransferStateView?> transfer;
+  late int transferListens;
   late StreamController<Map<int, Map<String, int>>> priceHistory;
   late List<_Opened> opened;
 
@@ -130,7 +131,9 @@ void main() {
     history = StreamController<Map<int, FantasySquad>>.broadcast();
     access = StreamController<FantasyAccessState>.broadcast();
     sale = StreamController<SaleBaselineState>.broadcast();
-    transfer = StreamController<TransferStateView?>.broadcast();
+    transferListens = 0;
+    transfer = StreamController<TransferStateView?>.broadcast(
+        onListen: () => transferListens++);
     priceHistory = StreamController<Map<int, Map<String, int>>>.broadcast();
     checkoutCalls = 0;
     launched = [];
@@ -363,6 +366,58 @@ void main() {
     });
 
     // Opus audit item 4: the chip row reads Voided/<gw> like the server.
+    // Final fix wave: a failed History read is UNKNOWN, not "nothing used" —
+    // a Wildcard / Free Hit spent earlier this set would look "1 left" and
+    // could be armed again (the lock voids a replay and charges every
+    // transfer). It holds arming of those two; Triple Captain / Bench Boost
+    // keep today's behaviour. A loaded-empty History is known.
+    group('chip history unknown vs empty', () {
+      TransferStateView counted() => TransferStateView(
+          free: 2,
+          countFromGw: 3, // "now" (Oct 17) edits GW3
+          countFrom: [for (final p in mySquad.picks) p.playerId]);
+
+      Future<void> tapChip(WidgetTester tester, String id) async {
+        final chip = key('fantasy_chip_$id');
+        await tester.ensureVisible(chip);
+        await tester.pumpAndSettle();
+        await tester.tap(chip, warnIfMissed: false);
+        await tester.pumpAndSettle();
+      }
+
+      testWidgets('a History read error holds Wildcard / Free Hit; Triple '
+          'Captain still arms; the hub still reveals', (tester) async {
+        await pumpHub(
+          tester,
+          gameweekStates: Stream.value(gws),
+          nowUtc: now,
+          chipHistoryFor: (weeks) => Stream.error(StateError('denied')),
+        );
+        await land(tester, withTransfer: false);
+        transfer.add(counted());
+        await settle(tester);
+        expect(key('hub'), findsOneWidget);
+        expect(find.text('Checking your transfers…'), findsNWidgets(2));
+
+        await tapChip(tester, 'wildcard');
+        await tapChip(tester, 'freeHit');
+        expect(find.byType(AlertDialog), findsNothing);
+        await tapChip(tester, 'tripleCaptain');
+        expect(key('chip_active_tripleCaptain'), findsOneWidget);
+      });
+
+      testWidgets('a loaded-EMPTY History is known: Wildcard asks as usual',
+          (tester) async {
+        await pumpHub(tester, gameweekStates: Stream.value(gws), nowUtc: now);
+        await land(tester, withTransfer: false);
+        transfer.add(counted());
+        await settle(tester);
+        expect(find.text('Checking your transfers…'), findsNothing);
+        await tapChip(tester, 'wildcard');
+        expect(find.text('Play your Wildcard?'), findsOneWidget);
+      });
+    });
+
     testWidgets('the Voided feed joins the reveal gate and refunds a chip '
         'History still shows as spent', (tester) async {
       final voided = StreamController<Set<int>>();
@@ -1014,6 +1069,51 @@ void main() {
         expect(logs.join('\n'),
             contains('FantasyHubPage: transfer state feed failed: Bad state: '
                 'permission-denied'));
+      });
+
+      // The copy says "updating…" — so something must actually retry. The
+      // service's stream ends after an error, so the hub re-subscribes.
+      testWidgets('after a failed read the feed is re-subscribed every 30 s '
+          'until it answers; data stops the retries', (tester) async {
+        final draft = await hubDraft(tester, transferError: true);
+        expect(transferListens, 1);
+        expect(draft.transferPreview.kind, TransferPreviewKind.notReady);
+
+        await tester.pump(const Duration(seconds: 29));
+        expect(transferListens, 1, reason: 'not before 30 s');
+        await tester.pump(const Duration(seconds: 1));
+        expect(transferListens, 2);
+        expect(draft.transferPreview.kind, TransferPreviewKind.notReady);
+
+        // Still failing: a fresh failure schedules the next try.
+        transfer.addError(StateError('still down'));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 30));
+        expect(transferListens, 3);
+
+        // It answers: counted, and no more retries.
+        transfer.add(view(3));
+        await tester.pump();
+        expect(draft.transferPreview.kind, TransferPreviewKind.counted);
+        await tester.pump(const Duration(minutes: 5));
+        expect(transferListens, 3);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('leaving the hub cancels the pending retry', (tester) async {
+        await hubDraft(tester, transferError: true);
+        expect(transferListens, 1);
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump(const Duration(minutes: 5));
+        expect(transferListens, 1);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('signed out: nothing to retry', (tester) async {
+        await pumpHub(tester, signedIn: false);
+        await land(tester, withTransfer: false);
+        await tester.pump(const Duration(minutes: 5));
+        expect(transferListens, 0);
       });
 
       testWidgets('a read error before any answer is notReady too — and the '

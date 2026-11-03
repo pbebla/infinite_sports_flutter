@@ -354,6 +354,13 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   StreamSubscription<FantasyAccessState>? _accessSub;
   StreamSubscription<SaleBaselineState>? _saleSub;
   StreamSubscription<TransferStateView?>? _transferSub;
+
+  /// Re-subscribes the transfer feed after a failure (the service's stream
+  /// ends at its error, and the copy says "updating…" — so something must
+  /// retry). One pending timer, replaced on each failure, cancelled by data
+  /// and in dispose.
+  Timer? _transferRetry;
+  static const _transferRetryAfter = Duration(seconds: 30);
   StreamSubscription<Map<int, Map<String, int>>>? _priceHistorySub;
 
   /// The push-tapped news post still to focus; cleared once the News tab
@@ -548,7 +555,9 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   /// signed in = never subscribed: the real feed's lone null for a signed-out
   /// session is "no user", not "the node is absent". Joins the reveal gate
   /// ([_transferLoaded]): the first answer or error ends the wait, and with
-  /// nobody signed in there is nothing to wait for.
+  /// nobody signed in there is nothing to wait for. A failure re-subscribes
+  /// after [_transferRetryAfter] (while mounted), and again after each
+  /// further failure, until data arrives.
   void _subscribeTransferState() {
     _transferSub?.cancel();
     void failed(Object e) {
@@ -559,6 +568,11 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         _transferLoaded = true;
       });
       _feedSaleContext();
+      _transferRetry?.cancel();
+      _transferRetry = Timer(_transferRetryAfter, () {
+        _transferRetry = null;
+        if (mounted) _subscribeTransferState();
+      });
     }
 
     try {
@@ -571,6 +585,8 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
                   widget.sport, widget.season))
           .listen((view) {
         if (!mounted) return;
+        _transferRetry?.cancel();
+        _transferRetry = null;
         setState(() {
           _transfer = view;
           _transferAnswered = true;
@@ -706,6 +722,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _accessSub?.cancel();
     _saleSub?.cancel();
     _transferSub?.cancel();
+    _transferRetry?.cancel();
     _priceHistorySub?.cancel();
     _saleBoundary?.cancel();
     _configForRules.close();
@@ -800,7 +817,10 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         squadStates: _squadForTabs.stream,
         alert: _alert,
         alertStates: _alertForTabs.stream,
-        chipHistory: _chipHistory,
+        // A failed History read is UNKNOWN (null), never "nothing used": it
+        // holds arming of Wildcard / Free Hit (a spent one would be voided
+        // at the lock and every transfer charged).
+        chipHistory: _schedule.weekUnknown ? null : _chipHistory,
         voidedWeeks: _voidedWeeks,
         access: _access,
         accessStates: _accessForTabs.stream,
@@ -904,8 +924,9 @@ class _HubBody extends StatelessWidget {
   final FantasySquadAlert? alert;
   final Stream<FantasySquadAlert?> alertStates;
 
-  /// The manager's finalized chips by gameweek — the chip row's counts.
-  final Map<int, ChipHistoryEntry> chipHistory;
+  /// The manager's finalized chips by gameweek — the chip row's counts;
+  /// null = unknown (the History read failed).
+  final Map<int, ChipHistoryEntry>? chipHistory;
 
   /// The season's owner-voided gameweeks — their chips are refunded.
   final Set<int> voidedWeeks;

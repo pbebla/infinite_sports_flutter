@@ -190,6 +190,15 @@ class FantasyScheduleFeed<W> {
   /// last changed.
   bool get weekLoaded => _weekLoaded;
 
+  /// The per-week listener answered with an ERROR and has no good value to
+  /// fall back on ([weekData] null): what it would have said is UNKNOWN.
+  /// Distinct from answering with an empty map ("nothing there"), from an
+  /// error after good data (the last good value is kept), and from not having
+  /// answered yet ([weekLoaded] false). A consumer that must not guess —
+  /// e.g. "which chips are spent" — reads this instead of treating the null
+  /// [weekData] as empty.
+  bool get weekUnknown => _weekLoaded && _weekData == null;
+
   // ── Lifecycle ────────────────────────────────────────────────────────────
 
   /// Seeds from the session cache and subscribes. Call once; never throws

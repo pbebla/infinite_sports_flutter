@@ -123,7 +123,9 @@ void main() {
     Future<void> Function(FantasySquad)? onSave,
     FantasySquadAlert? alert,
     List<Gameweek> gameweeks = const [],
-    Map<int, ChipHistoryEntry>? chipHistory,
+    // Default: History loaded and empty (nothing spent). An explicit null is
+    // "History unknown" — Wildcard / Free Hit can't be armed then.
+    Map<int, ChipHistoryEntry>? chipHistory = const {},
     Set<int> voidedWeeks = const {},
     DateTime Function()? nowUtc,
     void Function(String playerName)? onOpenPlayer,
@@ -1512,10 +1514,63 @@ void main() {
       expect(find.text('Play your Wildcard?'), findsOneWidget);
     });
 
-    testWidgets('an older node (no baseline) is not held: the chips tap',
-        (tester) async {
+    // A node with no CountFromGw (written before the baseline shipped, e.g. a
+    // GW1 save on the old server code) is as unknown as no answer: it may be
+    // a first team, whose chip the server spends for nothing. No line, but
+    // the chips are held.
+    testWidgets('an older node (no baseline) holds the chips too — no line, '
+        'no arming', (tester) async {
       final draft = draftWith(state: const TransferStateView(free: 2));
       await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      expect(find.byKey(const ValueKey('transfers_line')), findsNothing);
+      expect(find.text('Checking your transfers…'), findsNWidgets(2));
+
+      await tapChip(tester, 'wildcard');
+      await tapChip(tester, 'freeHit');
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(draft.chip, isNull);
+
+      await tapChip(tester, 'benchBoost');
+      expect(draft.chip, 'benchBoost');
+    });
+
+    // The History read failed (the hub passes null): "nothing used" would be
+    // a guess — a Wildcard spent earlier this set looks "1 left", and the
+    // lock would void a replay and charge every transfer.
+    testWidgets('chip history unknown (null): Wildcard / Free Hit are held, '
+        'Triple Captain / Bench Boost keep their "1 left" and arm',
+        (tester) async {
+      final draft = draftWith(state: counted());
+      await pumpBuilder(tester, draft: draft, chipHistory: null);
+      await tester.pump();
+      expect(find.text('Checking your transfers…'), findsNWidgets(2));
+      expect(find.text('1 left'), findsNWidgets(4));
+
+      await tapChip(tester, 'wildcard');
+      await tapChip(tester, 'freeHit');
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(draft.chip, isNull);
+
+      await tapChip(tester, 'tripleCaptain');
+      expect(draft.chip, 'tripleCaptain');
+    });
+
+    testWidgets('chip history unknown: an armed Wildcard still switches off',
+        (tester) async {
+      final draft = draftWith(
+          stored: savedWith(0, chip: 'wildcard'), state: counted());
+      await pumpBuilder(tester, draft: draft, chipHistory: null);
+      await tester.pump();
+      await tapChip(tester, 'wildcard');
+      expect(draft.chip, isNull);
+      expect(find.byType(AlertDialog), findsNothing);
+    });
+
+    testWidgets('chip history loaded EMPTY is known: Wildcard asks as usual',
+        (tester) async {
+      final draft = draftWith(state: counted());
+      await pumpBuilder(tester, draft: draft, chipHistory: const {});
       await tester.pump();
       expect(find.text('Checking your transfers…'), findsNothing);
       await tapChip(tester, 'wildcard');

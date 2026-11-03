@@ -28,6 +28,7 @@ void main() {
     bool enabled = true,
     bool firstTeam = false,
     bool transfersUnknown = false,
+    bool chipHistoryUnknown = false,
     Map<String, ChipAvailability>? availability,
     FantasyConfig? config,
     double width = 420,
@@ -52,6 +53,7 @@ void main() {
               enabled: enabled,
               firstTeam: firstTeam,
               transfersUnknown: transfersUnknown,
+              chipHistoryUnknown: chipHistoryUnknown,
               availability: availability,
               onChipChanged: (id) {
                 log?.add(id);
@@ -288,6 +290,41 @@ void main() {
       expect(find.text('Checking your transfers…'), findsNothing);
       await tapChip(tester, 'freeHit');
       expect(find.text('Play your Free Hit?'), findsOneWidget);
+    });
+  });
+
+  // Final fix wave: a failed History read looks like "nothing used", so a
+  // Wildcard / Free Hit already spent this set could be armed again — the
+  // lock would void it and charge every transfer. Unknown history holds
+  // arming the same way; Triple Captain / Bench Boost keep today's behaviour.
+  group('the chip history is not known', () {
+    testWidgets('Wildcard and Free Hit cannot be armed, captioned '
+        '"Checking your transfers…"; the other two still arm', (tester) async {
+      final log = <String?>[];
+      await pumpRow(tester, chipHistoryUnknown: true, log: log);
+      expect(find.text('Checking your transfers…'), findsNWidgets(2));
+
+      await tapChip(tester, 'wildcard');
+      await tapChip(tester, 'freeHit');
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(log, isEmpty);
+
+      await tapChip(tester, 'tripleCaptain');
+      expect(log, ['tripleCaptain']);
+    });
+
+    testWidgets('an armed Wildcard can still be switched off',
+        (tester) async {
+      final armed =
+          await pumpRow(tester, chipHistoryUnknown: true, active: 'wildcard');
+      await tapChip(tester, 'wildcard');
+      expect(armed.value, isNull);
+    });
+
+    testWidgets('a first team keeps its own caption', (tester) async {
+      await pumpRow(tester, firstTeam: true, chipHistoryUnknown: true);
+      expect(find.text('Your first team is free'), findsNWidgets(2));
+      expect(find.text('Checking your transfers…'), findsNothing);
     });
   });
 
