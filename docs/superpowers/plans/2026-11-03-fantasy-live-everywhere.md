@@ -40,9 +40,11 @@
 
 1. **The first game ends while the second hasn't started.** Players of the second game's teams must still be "pending": no auto-sub, captain keeps the armband. Pinned in Task 1.
 2. **A run that read older games finishing after a newer run.** The stored `Live` must keep the newer numbers. Pinned in Task 3.
-3. **A late game write after the week settled** (a score correction after finalize). `Live` must stay `settled` and phones must keep showing official numbers. Pinned in Task 3.
+3. **A late game write after the week settled** (a score correction after finalize). `Live` must stay a `settled` tombstone, never come back to life, and phones must keep showing official numbers. Pinned in Task 3.
 4. **The owner voids the live week mid-day.** Live shows 0 and "Voided", and `LiveBase` is rebuilt. Pinned in Task 3.
-5. **A phone that opens the app after the week settled but before the official nodes arrive** must not flash back to last week's numbers. A settled `Live` mirrors the official output (Task 3 settle), and phones overlay it. Pinned in Tasks 3 and 4.
+5. **A Manager write that doesn't touch scoring** (the kickoff clock, a livestream link, undo bookkeeping) must cost zero reads and no recompute (Fable L2). Pinned in Task 3.
+
+> **Fable review folded in (2026-11-03, `2026-11-03-fable-review-live-and-transfers.md`):** L1 settled is a Meta-only tombstone, with no mirror and no `liveFromFinalize`; L2 trigger diff; L3 `St` priority; L4 void refreshes now; L5 fill-tool allowlist. Owner decisions: S1 steady order plus a refresh pill; S3 demo build (Task 8b). S2 match-tab footnote added. The spec was updated to match.
 
 ---
 
@@ -113,11 +115,12 @@
     TeamOfWeek: Array<{ name; position; points }>;
   }
   export function computeLiveWeek(input: LiveInput): LiveOutput
-  /** The settled Live node, built from finalize's OWN output (Task 3's
-   *  settle step): St = 'done' if played else 'out', no BonusProv. */
-  export function liveFromFinalize(args: { out: FinalizeOutput; gw: number;
-    gameStatus: LiveInput['gameStatus']; nowMs: number }): LiveOutput  // Meta.State 'settled'
   ```
+- `St` priority (Fable L3), first match wins:
+  1. present (not marked absent) in a status-1 game of his team → `'live'`;
+  2. his team still has a status-0 game today and he hasn't played → `'pending'`;
+  3. played → `'done'`;
+  4. otherwise → `'out'`.
 - `St` per player:
   - `'live'` if any of his team's games today has `S === 1`;
   - else `'pending'` if his team is in `pendingTeams` and he hasn't played;
@@ -136,7 +139,7 @@
   - `W`/`WR` only for managers scored this week (voided → `W` 0, so everyone ties at rank 1, as finalize does).
 
 - [ ] **Step 1: Failing tests.**
-  - **THE CONTRACT TEST:** for each scenario below, finalize the earlier weeks with `computeGameweekFinalize`, then build the base from their outputs and run `computeLiveWeek` with every game of gw at status 2 and no pending teams. Assert that its Board/Players/Squads/TeamOfWeek deep-equal `liveFromFinalize` of gw's own finalize output (only `Meta.State`/`ReadAt`/`UpdatedAt` may differ). That single equality covers, for every uid and every player:
+  - **THE CONTRACT TEST:** for each scenario below, finalize the earlier weeks with `computeGameweekFinalize`, then build the base from their outputs and run `computeLiveWeek` with every game of gw at status 2 and no pending teams. Compare it directly to gw's own `computeGameweekFinalize` output, for every uid and every player:
     - `Board.W/WR` == `gameweekBoard`;
     - `Board.O/R/M` == `overallBoard`;
     - `Players.Pts/Lines` == `playerWeekStats.Pts/Lines`;
@@ -144,7 +147,7 @@
     - `TeamOfWeek` == `dreamTeam.Players`;
     - `Squads[uid].T` == `History TotalTenths`, and `Slots` == `Breakdown`.
   - **Scenarios:** (i) the golden fixture as gw 1; (ii) a 4-week synthetic season with a transfer hit, a Triple Captain, a Bench Boost, an invalid squad and a manager who skips week 3; (iii) the same with week 2 voided; (iv) the same with gw itself voided.
-  - **Plus unit cases:** a pending player keeps `Total`/`Form`; `St` values; a manager new this week has no `M`; ties share rank.
+  - **Plus unit cases:** a pending player keeps `Total`/`Form`; each `St` rule in priority order (an absent player in a live game is `'out'`, not `'live'`); a manager new this week has no `M`; ties share rank.
 - [ ] **Step 2: Run; expect FAIL** — `npx vitest run src/lib/fantasy/live_core.test.ts`.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run** `npx vitest run` and `npx tsc --noEmit -p .`; green.
@@ -155,12 +158,13 @@
 **Files:**
 - Modify: `functions/src/lib/fantasy/orchestration.ts`:
   - new `refreshLiveWeek`;
-  - `finalizeGameweek` writes the settled mirror and removes `LiveBase`;
-  - `resettleVoidToggle` removes `LiveBase`;
+  - `finalizeGameweek` writes the settled tombstone and removes `LiveBase`;
+  - `resettleVoidToggle` removes `LiveBase`, then refreshes the live week (L4);
   - `runLifecycleSweep` backstop step (new "2c" after 2b, line ~1704).
 - Create: `functions/src/fantasy_live.ts` (`makeFantasyLiveTrigger(sport)`, same shape as `fantasy_finalize.ts`)
 - Modify: `functions/src/index.ts` (add `onGameLive` to each sport's grouped export next to `onGameWritten`, line ~361)
 - Modify: `database.rules.stage1.json`, `database.rules.json`
+- Modify: `functions/tools/fill_test_season_logic.ts` (`EXPECTED_NODES` += `Live`, the finalize tombstone; Fable L5) + its shape test in `fill_test_season_logic.test.ts`
 - Test: new `functions/src/lib/fantasy/live_orchestration.test.ts`, `functions/src/rules_contract.test.ts`
 
 **Interfaces:**
@@ -172,23 +176,24 @@
   - `PublishedPicks/<gw>`, `TransferCosts/<gw>`, `Voided`, `LiveBase/<gw>`, `Live/Meta`.
   - When `LiveBase/<gw>` is absent, it reads History, PlayerWeeks and PlayerWeekStats once, writes `LiveBase/<gw>` via `buildLiveBase`, and continues.
 - **Coalescing:** if the stored `Live/Meta.ReadAt` ≥ `eventAtMs` and `Live/Meta.Gw === gw`, return `'stale'` before any heavy read.
+- **Never resurrect a settled week (Fable L1):** if `PlayerWeeks/<gw>` exists (finalize's first write, about 2 KB), return `'settled'` before any heavy read. Ruling: this replaces Fable's `History/<gw>` check (same meaning, about 100× smaller read).
 - **The write:** `db.transaction('Live', cur => …)`:
   - `cur` null → write;
+  - `cur.Meta.Gw > gw` → abort (`'stale'`: a newer week owns `Live`);
   - `cur.Meta.Gw === gw && cur.Meta.State === 'settled'` → abort (`'settled'`);
   - `cur.Meta.Gw === gw && cur.Meta.ReadAt > readAtMs` → abort (`'stale'`);
   - else → write the `LiveOutput`.
   - The first run's null cache must never abort (the 2026-11-02 refund lesson; FakeDb runs transactions cold first).
 - **No started game** (all status 0) → `'skipped'` (nothing written).
-- **Settle:** at the end of `finalizeGameweek` for gw, after every official write, run `db.transaction('Live', cur => …)`:
-  - `cur?.Meta?.Gw === gw` (live or already settled) → replace with `liveFromFinalize(...)` (State `settled`);
-  - `cur?.Meta?.Gw` greater than gw, or `cur` null → leave it alone;
-  - `cur?.Meta?.Gw` less than gw → replace too (a week that settled with no live run still gets a settled mirror).
+- **Settle (Fable L1: a tombstone, no mirror):** at the end of `finalizeGameweek` for gw, after every official write, run `db.transaction('Live', cur => …)`:
+  - `cur` null or `cur.Meta.Gw <= gw` → replace the WHOLE node with `{ Meta: { Gw: gw, State: 'settled', UpdatedAt: now } }`;
+  - `cur.Meta.Gw > gw` → leave it alone (a newer week owns `Live`).
   - Then remove the whole `LiveBase` node.
-- **Older-week rerun** (a past-week correction while a newer week owns `Live`):
-  - remove the whole `LiveBase` node;
-  - if `Live/Meta.State === 'settled'`, remove `Live` (phones fall back to the official nodes, which this rerun just corrected);
-  - if `'live'`, call `refreshLiveWeek` for the live gw with `eventAtMs = now`.
-- **Trigger:** `onValueWritten` on `/${sport}/{season}/Date/{dateKey}/{gameIndex}`. It returns without reads unless the after-status is 1 or 2, or the before-status was 1 (a reopen/undo). It calls `refreshLiveWeek` with `eventAtMs = Date.parse(event.time)`. No secrets.
+- **Older-week rerun while a newer week is live:** the tombstone rule leaves `Live` alone; `LiveBase` is removed (above); then call `refreshLiveWeek` for the live gw with `eventAtMs = now`, so the corrected Overall shows at once.
+- **Trigger:** `onValueWritten` on `/${sport}/{season}/Date/{dateKey}/{gameIndex}`. It calls `refreshLiveWeek` with `eventAtMs = Date.parse(event.time)` (no secrets), but returns **with zero reads** unless both hold:
+  - the after-status is 1 or 2, or the before-status was 1 (a reopen/undo);
+  - **(Fable L2)** a scoring key changed between before and after. Deep-compare exactly the keys the mapper reads: `status`, `team1`, `team2`, `team1activity`, `team2activity`, `team1score`, `team2score`, `team1Score`, `team2Score`, `team1attendance`, `team2attendance`, `team1keepers`, `team2keepers`, `forfeitedBy`.
+  - Put the diff in a pure exported `scoringKeysChanged(before, after): boolean` with its own test.
 - **Sweep 2c:** when `GwState.status === 'locked'` and some game of its date has status 1, or every game is 2 but `Live/Meta.State !== 'settled'`, call `refreshLiveWeek` with `eventAtMs = now`.
 - **Rules (both files):**
   - `Fantasy/$sport/$season/Live`: `.read: auth != null`, no `.write`.
@@ -197,9 +202,10 @@
 - [ ] **Step 1: Failing tests** (`live_orchestration.test.ts`, FakeDb, cold-first transactions):
   1. A goal at status 1 → `Live` written with the scorer's `Pts`, the owner's `Board.W`.
   2. A run with `readAt` older than the stored one → `'stale'`, numbers unchanged (Review Focus 2).
-  3. The last game Final → the finalize trigger path settles → `Live/Meta.State === 'settled'` and `Live` deep-equals `liveFromFinalize(official output)`. A later live run → `'settled'`, nothing changed. A score correction after settle → finalize reruns → the settled `Live` carries the corrected numbers (Review Focus 3). With the last live run deliberately dropped, settle still leaves `Live` == official.
-  3b. An older-week correction while the next week is settled removes `Live`; while it is live, `LiveBase` is removed and `Live.Board.O` reflects the corrected base after the refresh.
-  4. `Voided/<gw>` set mid-day → the whole `LiveBase` removed; the next run shows `W` 0 and keeps O = base (Review Focus 4).
+  3. The last game Final → the finalize trigger path settles → `Live` deep-equals `{ Meta: { Gw, State: 'settled', UpdatedAt } }` (no Board/Players/Squads). A later live run, or a score correction after settle (finalize reruns, live trigger fires) → `Live` is still the tombstone, and `PlayerWeeks/<gw>` makes the live run return `'settled'` before any heavy read (Review Focus 3). With `Live` deleted after settle, a correction write still never recreates it.
+  3b. An older-week correction while the next week is live: `Live` stays the newer week's, `LiveBase` is removed, and the immediate refresh shows the corrected `Board.O`.
+  4. `Voided/<gw>` set mid-day → the whole `LiveBase` removed and an immediate refresh shows `W` 0 with O = base, with no game write needed (Review Focus 4, Fable L4).
+  4b. (Fable L2) A write that changes only `Clock` (or any non-scoring key) → zero reads, zero writes (Review Focus 5). `scoringKeysChanged` unit cases: each listed key flips it; `Clock`, a livestream link and an unknown key don't.
   5. Game 1 Final, game 2 status 0 → game 2's players `St 'pending'`, no auto-sub (Review Focus 1, end to end).
   6. Stand-downs: no Config; lockOverride `open`; TestFill; before lock; no `PublishedPicks/<gw>` → `'standDown'` and zero writes.
   7. Live never writes an official node: snapshot every official path before and after, deep-equal.
@@ -213,7 +219,7 @@
   - lock GW1 → write 20 game events across two games;
   - assert `Live` after each;
   - fire two runs out of order;
-  - finish both games → finalize → assert `Live` deep-equals the official numbers (contract), then `State 'settled'`;
+  - just before the last game goes Final, assert `Live`'s numbers equal what finalize then writes (contract, end to end); after finalize, assert `Live` is the `settled` tombstone;
   - a REST read of `Live` as a signed-in fan succeeds;
   - a REST write of `Live` is refused.
   - Save the full output.
@@ -241,12 +247,11 @@
   - `class LivePlayer { int pts; LivePlayerStatus st; Map<String, ({int n, int p})> lines; bool bonusProv; int total, form, ppg, games, own; }` with `enum LivePlayerStatus { pending, live, done, out }`;
   - `class LiveSquad { int totalTenths, week; List<LiveSlot> slots; }` and `class LiveSlot { String playerId; int countedTenths, multiplier; bool autoSubbedIn; }`.
 - Produces: `FantasyLiveFeed.watch(sport, season)` → `Stream<FantasyLiveState>` (Meta + Board + Players + TeamOfWeek; four `onValue` children, never the whole `Live` node, so phones don't download all squads). Session-cached.
-- Produces the overlay rule as two pure functions:
+- Produces the overlay rule as ONE pure function (Fable L1):
   ```dart
-  bool liveAppliesTo({required LiveMeta? meta, required int week}) // meta?.gw == week (live OR settled)
-  bool liveIsInProgress({required LiveMeta? meta, required int week}) // ... && state == live (the pill)
+  bool liveAppliesTo({required LiveMeta? meta, required int week}) // meta?.gw == week && meta.state == LiveState.live
   ```
-  - A settled `Live` is the server's mirror of the official numbers (Task 3 settle), so overlaying it is always safe. That is Review Focus 5: no flash back while the official nodes are still arriving.
+  - Anything else → the official nodes. A settled tombstone carries no numbers. Finalize writes every official node before it tombstones `Live`, and a phone receives them in that order on its one connection, so live numbers hand over to official ones with no gap.
 - **Overlays** (each a pure `merge…` function, unit-tested; the stream wrappers just combine):
   - **Leaderboards:**
     - Overall rows = `LiveBoardRow.o/r/m` with `live: true`.
@@ -258,9 +263,9 @@
 
 - [ ] **Step 1: Failing tests.**
   - Parser round-trips for every `Live` child, including the list-coerced shapes RTDB produces.
-  - `liveAppliesTo` / `liveIsInProgress`: meta null; other week; same week live; same week settled.
-  - Each merge function: live rows replace, non-live weeks untouched, `live` flags set only while in progress.
-  - A settled meta overlays with `live: false` (no pill) and identical numbers.
+  - `liveAppliesTo`: meta null; other week; same week live (true); same week settled tombstone (false).
+  - Each merge function: live rows replace, non-live weeks untouched, `live` flags set.
+  - The tombstone parses (`Meta` only, no Board/Players) and overlays nothing.
   - Sign-out clears the live caches.
   - `historyBreakdownFromNode` parses `{playerId, countedTenths, multiplier, autoSubbedIn}`.
 - [ ] **Step 2: Run; expect FAIL** — `flutter test test/fantasy/fantasy_live_test.dart`.
@@ -330,10 +335,19 @@
 
 **Behaviour:**
 - **Moved row:** a row whose rank changed since the previous emission tints for 800 ms (up: the existing up colour at 18 % alpha; down: `fantasyDownRed` at 18 %). Its rank number cross-fades over 250 ms. Under reduced motion both are instant.
-- **Ordering** follows the merged board (rank asc, then points, then uid, as today).
+- **Ordering** follows the merged board (rank asc, then points, then uid, as today), under the owner's steady-order rule (S1, "like ESPN and the Premier League: numbers move, rows don't jump"):
+  - Numbers update in place the moment they arrive.
+  - The list re-orders at once when it is scrolled to the top, when the tab is (re)opened, or when the user picks a sort or scope.
+  - Otherwise, a pill `Order changed · tap to refresh` (accent colour, both themes) appears under the header and re-orders on tap, with the moved-row tint.
+  - Never re-order under a moving finger.
+  - The rule lives in one shared pure helper `lib/fantasy/hub/steady_order.dart` (`SteadyOrder<T>`: `applied`, `pending`, `update(newOrder, {required bool atTop})`, `refresh()`), with unit tests, reused by Task 7.
 - **Rank chart:** the live point is drawn hollow (2 px stroke, no fill). The `#start → #now` label uses it.
 
-- [ ] **Step 1: Failing widget tests:** each pill shows only while live; the copy is verbatim; the tint appears for a moved row only; reduced motion → no animation; the hollow point; the profile's "View team" shows the chart; dark mode and 360 px.
+- [ ] **Step 1: Failing widget tests:**
+  - each pill shows only while live; the copy is verbatim;
+  - the tint appears for a moved row only; reduced motion → no animation;
+  - `SteadyOrder`: scrolled down + new order → rows unchanged + `Order changed · tap to refresh`; tap → re-ordered; at top → re-orders immediately; a sort change → re-orders immediately;
+  - the hollow point; the profile's "View team" shows the chart; dark mode and 360 px.
 - [ ] **Step 2: Run; expect FAIL.**
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run** `flutter test test/fantasy/ test/profile/`; green.
@@ -343,18 +357,20 @@
 
 **Files:**
 - Modify: `lib/fantasy/hub/manager_squad_viewer.dart:457` (court `weekPointsFor` for every week: live from `watchLiveSquad`, settled from History Breakdown; week total line `{W} pts` / `Final · {W} pts`)
-- Modify: `lib/fantasy/hub/players_tab.dart` (pill by the sort bar while live; points and form re-sort live, keeping the scroll offset; rows keyed by player id)
+- Modify: `lib/fantasy/hub/players_tab.dart` (LIVE pill by the sort bar while live; points and form update in place; ordering follows Task 6's `SteadyOrder` rule, so it re-sorts on a sort tap, at the top or on reopen, and otherwise shows `Order changed · tap to refresh`; rows keyed by player id)
 - Modify: `lib/fantasy/profile/fantasy_player_profile_page.dart`, `profile_stat_strip.dart`, `profile_tabs.dart` (pill on the strip; the live week's bar hollow with a `LIVE` label; `bonus (provisional)` line text when `bonusProvisional`)
 - Modify: `lib/profile/fantasy_profile_tab.dart` (pills on the player and manager cards while live)
 - Modify: `lib/fantasy/match/match_fantasy_tab.dart` and `match_fantasy_logic.dart`:
   - (a) the header shows `LIVE` (pill) or `FINAL` from the game status (today live and final render identically);
   - (b) the viewer's squad for a game is that week's locked squad: `PublishedPicks/<gw>/<uid>`, else `History/<gw>/<uid>`; `Squads/<uid>` only for a not-yet-locked week. Today past games use the current saved squad;
-  - (c) a strip under the header while live: `Your gameweek so far: {W} pts · #{R}`.
+  - (c) a strip under the header while live: `Your gameweek so far: {W} pts · #{R}`;
+  - (d) (Fable S2) the tab's existing footnote gains the sentence `Bonus, captain and bench counting show on My Team.`
 - Test: `test/fantasy/manager_squad_viewer_test.dart`, `test/fantasy/players_tab_test.dart`, `test/fantasy/fantasy_player_profile_page_test.dart`, `test/fantasy/match_fantasy_tab_test.dart`, `test/fantasy/match_fantasy_logic_test.dart`, `test/profile/` tab tests
 
 - [ ] **Step 1: Failing tests:**
   - The viewer shows per-player points for a settled week (from Breakdown) and a live week.
-  - The market re-sorts on a live totals emission and the scroll offset is unchanged.
+  - Market scrolled down + a live totals emission → numbers change, row order unchanged, refresh pill shown; a sort tap re-sorts by the live numbers.
+  - The match-tab footnote sentence, verbatim.
   - The profile bar for the live week is hollow and labelled.
   - The match tab picks the week's locked squad for a past game (regression test with a squad changed since).
   - `LIVE`/`FINAL` header; the week strip copy is verbatim.
@@ -373,11 +389,30 @@
 - Modify: `lib/ui/fantasy/fantasy_profile_detail_page.dart` (`_StandingCard` live label; `_WeeksCard` adds the live week row: `GW{n}` · `{W}` · Hit · Chip, with the note `live — settles after the last game`)
 - Test: `test/fantasy/fantasy_profile_models_test.dart`, `test/fantasy/fantasy_widgets_test.dart`
 
-- [ ] **Step 1: Failing tests:** the merge (live rows replace, rank order), the `liveAppliesTo` / `liveIsInProgress` twins (same cases as Task 4), the row text and the live week row.
+- [ ] **Step 1: Failing tests:** the merge (live rows replace, rank order), the `liveAppliesTo` twin (same cases as Task 4), the row text and the live week row.
 - [ ] **Step 2: Run; expect FAIL** — `flutter test test/fantasy/`.
 - [ ] **Step 3: Implement.** Riverpod `StreamProvider` over `onValue`; no `.get()` (`test/no_rtdb_get_guard_test.dart` stays green).
 - [ ] **Step 4: Run** the full Manager suite: `flutter test` green.
 - [ ] **Step 5: Commit** — `feat(fantasy): Manager profiles show live standings during games`.
+
+### Task 8b: Demo build — the real app against the local database (owner decision S3)
+
+**Files:**
+- Modify: the fan app's Firebase start-up (`lib/main.dart`, right after `Firebase.initializeApp`)
+- Create: `lib/misc/rtdb_emulator.dart` (`bool get useRtdbEmulator => const bool.fromEnvironment('RTDB_EMULATOR')`, and `void connectRtdbEmulatorIfRequested(FirebaseDatabase db)` → `db.useDatabaseEmulator('10.0.2.2', 9000)` only when the define is set)
+- Test: `test/misc/rtdb_emulator_test.dart`
+- Create (not committed): `scratchpad/live/demo_feed.js`, which seeds the local emulator with a small season (8 managers, 2 games) and then plays 20 scripted events about 4 s apart through the real compiled engine (Task 3's harness)
+
+- [ ] **Step 1: Failing test:** without the define, `connectRtdbEmulatorIfRequested` calls nothing on the database (a fake records calls); with `useRtdbEmulator` forced true, it calls `useDatabaseEmulator('10.0.2.2', 9000)` once.
+- [ ] **Step 2: Run; expect FAIL. Step 3: implement. Step 4: run; pass.** Auth stays on the real project (the demo signs in as the owner's normal account; the emulator database runs with the stage-1 rules and `--project demo-live`).
+- [ ] **Step 5: Record the demo.**
+  - Start the database emulator.
+  - `flutter run --dart-define=RTDB_EMULATOR=1` on emulator-5554.
+  - Run `demo_feed.js`.
+  - Screen-record (`adb shell screenrecord`) My Team, the leaderboards and the Players list as the goals land.
+  - Send the video to the owner with SendUserFile.
+  - Leave the emulator running so he can drive it.
+- [ ] **Step 6: Commit** (the switch and its test only) — `feat(dev): demo switch points the app's database at the local emulator`.
 
 ### Task 9: Ship
 

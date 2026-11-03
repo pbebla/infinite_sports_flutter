@@ -56,7 +56,7 @@ The server recomputes the live gameweek on every write to a game of the locked w
 Every place that shows any of these numbers overlays the live node while the week is live: player week points, season points, form, ppg, manager week points, Overall points, ranks, movement arrows, rank-history chart, Team of the Week, and market or leaderboard orderings by points or form. The plan lists every screen by file (from a full inventory of both apps).
 
 - **One shared "LIVE" pill** (red dot + "LIVE") marks live numbers. When the week settles the pill disappears and the official numbers take over.
-- **Rows move.** Leaderboard rows re-order live. A row that moved tints briefly (up colour or bright red) and its rank number cross-fades; under reduced motion both are instant. Sliding rows was considered and left for Fable to weigh, because the list is lazy and has a pinned own-row. Market lists sorted by points or form re-sort live without losing the scroll position.
+- **Rows move, steadily (owner decision: "like ESPN and the Premier League — numbers move, rows don't jump").** Numbers update in place at once. A sorted list (leaderboards, the Players market) re-orders immediately when it is at the top, when it is opened, or when the user picks a sort. Otherwise it shows `Order changed · tap to refresh` and re-orders on tap. A row that moved tints briefly (up colour or bright red) and its rank number cross-fades; under reduced motion both are instant.
 - **The rank-history chart** adds this week's live rank as a hollow end point, solid once settled.
 - **My Team** in a locked week:
   - The placeholder becomes a live strip: LIVE pill + `34 pts · #5 ▲2` (week points, Overall rank, movement), `Final · 34 pts · #5` when settled, and `Locked · waiting for kickoff` before any game starts.
@@ -66,11 +66,12 @@ Every place that shows any of these numbers overlays the live node while the wee
 
 - `Live/Meta.State`:
   - `'live'` from the first started game of the locked gameweek;
-  - `'settled'`, written by the finalize run that settles the week. **That run rewrites the whole `Live` node from its own official output**, so a settled `Live` always equals the official numbers, even if the last live run was lost. Every later finalize rerun of that same week (a score correction, a void) rewrites it again;
+  - `'settled'`: a **tombstone** `{ Meta: { Gw, State: 'settled', UpdatedAt } }` with no numbers (Fable review L1). The finalize run writes it after every official node, replacing `Live` when it holds this week or an older one;
   - a new week's first live run replaces a settled one.
-- Phones overlay `Live` whenever `Live/Meta.Gw` is the week on screen. The pill shows only while `'live'`. A settled `Live` carries the official numbers, so there is no flash back while the official nodes are still arriving on a phone.
-- A finalize rerun of an **older** week (a past-week correction) removes a settled `Live` (phones fall back to the official nodes) or, during a live day, removes `LiveBase` so the next live run rebuilds it.
-- A live run never overwrites a settled week. The state guard sits inside the same transaction as the write.
+- Phones overlay `Live` only while `Live/Meta.Gw` is the week on screen **and** the state is `'live'`; anything else shows the official nodes. Finalize writes every official node before the tombstone, and a phone receives them in that order on its one connection, so the hand-over has no gap.
+- A live run never resurrects a settled week: it stands down when `PlayerWeeks/<gw>` exists, and the transaction aborts on a tombstone or a newer week.
+- A finalize rerun of an **older** week while a newer week is live removes `LiveBase` and refreshes the live week at once.
+- Writes that don't touch scoring (clock, livestream link, undo bookkeeping) cost nothing: the trigger compares only the keys the scorer uses.
 - Concurrency: every run stamps the time it read the games (`ReadAt`) and writes only if that is newer than the stored one. Out-of-order runs can never leave older numbers on top. A run whose event is older than the stored `ReadAt` skips its work entirely.
 - **Backstop:** the existing 15-minute sweep recomputes live when a locked week has started games that aren't all Final, in case a trigger was lost.
 - **Stands down** exactly like finalize: no fantasy Config, a frozen lock override, a TestFill season, or no lock snapshot (`PublishedPicks/<gw>`).
