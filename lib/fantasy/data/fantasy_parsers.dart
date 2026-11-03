@@ -895,6 +895,17 @@ Map<int, FantasyDreamTeam> dreamTeamsFromNode(Object? node) {
 // "Your Gameweek Gw team didn't count" — the lock judged the squad invalid
 // and scored it zero; cleared by the next clean save or the next clean
 // lock. Lower-case field names (kind/issues/gameweek) are tolerated too.
+//
+// ...and the open window's over-budget PREVIEW (FPL selling, spec §4 —
+// squad_integrity.ts THE OVER-BUDGET PREVIEW):
+//
+//   SquadAlerts/<uid> = { Gw: int, Kind: 'preview', Issues: ['overBudget'],
+//                         OverTenths: int, CreatedAt: int }
+//
+// "Your team is $X over budget after this week's price changes" — the
+// 15-minute sweep judged the SAVED squad at the coming lock's prices; it
+// clears once the squad is back within budget (a clean save, the next
+// sweep, or the lock — where an Invalid verdict replaces it).
 
 /// One position change behind a squad alert.
 class FantasyPositionChange {
@@ -909,27 +920,32 @@ class FantasyPositionChange {
   final FantasyPosition to;
 }
 
-/// Which of the two alerts sharing `SquadAlerts/<uid>` this is.
+/// Which of the alerts sharing `SquadAlerts/<uid>` this is.
 enum FantasySquadAlertKind {
   /// A position change broke the formation (spec §3 holder protection).
   positionChange,
 
   /// The lock judged the squad invalid; that gameweek scored zero.
   invalid,
+
+  /// The open window's warning: at the coming lock's prices the saved squad
+  /// is over budget (FPL selling, spec §4) — fix it or the week won't count.
+  overBudgetPreview,
 }
 
-/// "Your team needs rearranging" / "Your Gameweek N team didn't count" —
-/// the hub banner's source.
+/// "Your team needs rearranging" / "Your Gameweek N team didn't count" /
+/// "Your team is $X over budget" — the hub banner's source.
 class FantasySquadAlert {
   const FantasySquadAlert({
     required this.gameweek,
     this.changes = const [],
     this.kind = FantasySquadAlertKind.positionChange,
     this.issues = const [],
+    this.overTenths = 0,
   });
 
   /// The gameweek the alert is for (the free swap's week; the zeroed week
-  /// for an integrity alert).
+  /// for an integrity alert; the open week for a preview).
   final int gameweek;
   final List<FantasyPositionChange> changes;
   final FantasySquadAlertKind kind;
@@ -938,7 +954,12 @@ class FantasySquadAlert {
   /// names kept — the banner words the ones it knows).
   final List<String> issues;
 
+  /// Preview only: how far over budget, in tenths of $1M (0 = unknown).
+  final int overTenths;
+
   bool get isInvalid => kind == FantasySquadAlertKind.invalid;
+  bool get isOverBudgetPreview =>
+      kind == FantasySquadAlertKind.overBudgetPreview;
 }
 
 /// `SquadAlerts/<uid>` → alert; null when absent or carrying no usable
@@ -947,9 +968,10 @@ class FantasySquadAlert {
 FantasySquadAlert? squadAlertFromNode(Object? node) {
   if (node is! Map) return null;
   final kind = (node['Kind'] ?? node['kind'])?.toString().trim();
-  if (kind == 'invalid') {
-    // An integrity verdict: shown even with no recognisable issue name
-    // (the banner then says "it broke the squad rules").
+  if (kind == 'invalid' || kind == 'preview') {
+    // An integrity verdict (or the preview): shown even with no
+    // recognisable issue name (the Invalid banner then says "it broke the
+    // squad rules"; the preview banner words no amount without one).
     final rawIssues = node['Issues'] ?? node['issues'];
     final issues = <String>[
       for (final v in [
@@ -958,10 +980,15 @@ FantasySquadAlert? squadAlertFromNode(Object? node) {
       ])
         if (v is String && v.trim().isNotEmpty) v.trim(),
     ];
+    final preview = kind == 'preview';
     return FantasySquadAlert(
       gameweek: _optInt(node['Gw'] ?? node['gameweek']) ?? 0,
-      kind: FantasySquadAlertKind.invalid,
+      kind: preview
+          ? FantasySquadAlertKind.overBudgetPreview
+          : FantasySquadAlertKind.invalid,
       issues: issues,
+      overTenths:
+          preview ? _optInt(node['OverTenths'] ?? node['overTenths']) ?? 0 : 0,
     );
   }
   final raw = node['Changes'];

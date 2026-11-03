@@ -78,11 +78,37 @@
 // realizedTenths (transfer_state.ts annotateSquadIntegrity), so next week's
 // held prices are the judge's own, never the client's.
 // A legitimate client (the app's FPL-rule draft) prices its picks the same
-// way, so the server's verdict equals the budget bar the manager saw.
-// DOCUMENTED LIMIT: an owner price edit that RAISES a player above what a
-// manager paid earlier in the same window, by more than that manager's
-// remaining budget, flags that squad overBudget (rare; the alert says so
-// and the next save fixes it).
+// way, so the server's verdict equals the budget bar the manager saw AT
+// THE SAVE. But prices keep moving until the lock, and the lock judges at
+// ITS prices — two honest drifts can turn a saved, legal squad overBudget:
+//   - SELL SIDE: a reprice (the Monday 10:00 job) or an owner price edit
+//     between a sale and the lock LOWERS the sold player's credit (a faller
+//     banks his whole drop at the lock's price; a riser who falls back
+//     banks less of his rise), so a squad saved at the full budget is over;
+//   - BUY SIDE (rare): an owner edit that RAISES a NEW pick above what the
+//     manager paid earlier in the same window, by more than his remaining
+//     budget (the market floor is min(now, last week), so only a player who
+//     fell and was then pushed back above his old price).
+// Neither is forgiven at the lock (FPL: the rule is the rule). Instead THE
+// OVER-BUDGET PREVIEW (below) warns the fan before the deadline.
+//
+// THE OVER-BUDGET PREVIEW (spec §4, 2026-11-03): while the current
+// gameweek is open, every lifecycle sweep (orchestration.ts sweepSeason
+// step 3c, every 15 minutes) re-judges each saved squad with the NEXT
+// lock's inputs (loadIntegrityInputs for the current gameweek). A verdict
+// that includes overBudget gets SquadAlerts/<uid> = { Gw, Kind:'preview',
+// Issues:['overBudget'], OverTenths, CreatedAt } (OverTenths =
+// overBudgetTenthsOf; rewritten only when Gw or the amount moved) and ONE
+// push per manager per gameweek (once-only claim PreviewPushed/<gw>/<uid>).
+// The preview clears once the squad is no longer over: at the next sweep,
+// on a clean save (the Squads trigger), or at the lock
+// (settleIntegrityAlerts: an Invalid verdict replaces it, a clean one
+// clears it). It only ever owns an empty slot or its own node: an Invalid
+// alert (a judged week) and a position-change alert (actionable now) are
+// never touched, and their manager gets no preview push while they stand.
+// Squads whose issues do not include overBudget (forged ones) get neither
+// alert nor push — overBudget is the one issue an honest fan can drift
+// into.
 // Guests and unknown names are only rejected as NEW picks: the Manager's
 // "Make ineligible" promises holders keep the player until they sell
 // (fantasy_players_page.dart; spec §3), and the server never removes a
@@ -113,6 +139,10 @@ export const INVALID_KEY = 'Invalid';
 /** SquadAlerts/<uid> Kind for an integrity verdict (the position-change
  *  alert carries no Kind — fantasy_parsers.dart squadAlertFromNode). */
 export const INVALID_ALERT_KIND = 'invalid';
+
+/** SquadAlerts/<uid> Kind for the over-budget preview while the window is
+ *  open (see THE OVER-BUDGET PREVIEW). */
+export const PREVIEW_ALERT_KIND = 'preview';
 
 export interface IntegrityMarketEntry {
   priceTenths: number;
@@ -461,18 +491,64 @@ export function invalidAlertNode(
   };
 }
 
-/** Whether a SquadAlerts/<uid> node is an integrity alert. */
-export function isInvalidAlert(node: unknown): boolean {
-  return isPlainMap(node) && node['Kind'] === INVALID_ALERT_KIND;
+/** SquadAlerts/<uid> for the open window's over-budget warning (see THE
+ *  OVER-BUDGET PREVIEW): [overTenths] = how far over, in tenths. */
+export function previewAlertNode(
+  gw: number, overTenths: number, nowMs: number,
+): Record<string, unknown> {
+  return {
+    Gw: gw, Kind: PREVIEW_ALERT_KIND, Issues: ['overBudget'],
+    OverTenths: overTenths, CreatedAt: nowMs,
+  };
 }
 
-/** Same Gw + same issues (CreatedAt aside) — a rerun rewrites nothing. */
+/** Whether a SquadAlerts/<uid> node is an integrity alert of either kind
+ *  (Invalid or preview) — never a position-change alert (no Kind). */
+export function isIntegrityAlert(node: unknown): boolean {
+  return isPlainMap(node) && (node['Kind'] === INVALID_ALERT_KIND ||
+    node['Kind'] === PREVIEW_ALERT_KIND);
+}
+
+/** Whether a SquadAlerts/<uid> node is the over-budget preview. */
+export function isPreviewAlert(node: unknown): boolean {
+  return isPlainMap(node) && node['Kind'] === PREVIEW_ALERT_KIND;
+}
+
+/** The alert's issue names, in stored order (a list or index-keyed map). */
+function alertIssuesOf(node: Record<string, unknown>): unknown[] {
+  return childEntries(node['Issues']).map(([, v]) => v);
+}
+
+/** Same Gw + same issues (CreatedAt aside) — a rerun rewrites nothing. Only
+ *  an Invalid node matches: a preview for the same week and issue is a
+ *  different alert, which the lock's Invalid verdict replaces. */
 export function sameInvalidAlert(
   node: unknown, gw: number, issues: readonly SquadIntegrityIssue[],
 ): boolean {
-  if (!isInvalidAlert(node)) return false;
-  const m = node as Record<string, unknown>;
-  const have = childEntries(m['Issues']).map(([, v]) => v);
-  return Number(m['Gw']) === gw && have.length === issues.length &&
+  if (!isPlainMap(node) || node['Kind'] !== INVALID_ALERT_KIND) return false;
+  const have = alertIssuesOf(node);
+  return Number(node['Gw']) === gw && have.length === issues.length &&
     issues.every((i, k) => have[k] === i);
+}
+
+/** Same Gw + Issues ['overBudget'] + OverTenths (CreatedAt aside) — the
+ *  next sweep rewrites nothing while the amount stands. */
+export function samePreviewAlert(
+  node: unknown, gw: number, overTenths: number,
+): boolean {
+  if (!isPreviewAlert(node)) return false;
+  const m = node as Record<string, unknown>;
+  const have = alertIssuesOf(m);
+  return Number(m['Gw']) === gw && m['OverTenths'] === overTenths &&
+    have.length === 1 && have[0] === 'overBudget';
+}
+
+/** How far a verdict's squad is over budget, in tenths: the judged spend
+ *  (the sum of its trusted prices) - (Config.budgetTenths +
+ *  realizedTenths). > 0 exactly when the verdict says overBudget. */
+export function overBudgetTenthsOf(
+  verdict: LockVerdict, cfg: FantasyConfig,
+): number {
+  const spent = verdict.prices.reduce((a, p) => a + p, 0);
+  return spent - (cfg.budgetTenths + verdict.realizedTenths);
 }

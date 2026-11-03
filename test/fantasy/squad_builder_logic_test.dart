@@ -515,6 +515,29 @@ void main() {
     });
   });
 
+  // FPL selling (spec §4): the sweep's over-budget preview.
+  group('over-budget preview sentence', () {
+    test('the exact copy, amount in the app money format', () {
+      expect(
+          squadOverBudgetPreviewText(overTenths: 10),
+          "Your team is \$1.0M over budget after this week's price changes. "
+          "Fix it before the deadline or this week won't count.");
+      expect(
+          squadOverBudgetPreviewText(overTenths: 5),
+          "Your team is \$0.5M over budget after this week's price changes. "
+          "Fix it before the deadline or this week won't count.");
+    });
+
+    test('no amount (0 / negative): the same sentence without one', () {
+      for (final over in [0, -3]) {
+        expect(
+            squadOverBudgetPreviewText(overTenths: over),
+            "Your team is over budget after this week's price changes. "
+            "Fix it before the deadline or this week won't count.");
+      }
+    });
+  });
+
   group('isSaveRefusedByRules', () {
     test('the database permission-denied (both platforms) is a refusal', () {
       expect(

@@ -5,8 +5,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   adminUidsOf, DEFAULT_REMINDER_TEMPLATE, fantasyPushData,
-  fillReminderTemplate, formatDeadline, NEWS_READY_TITLE, newsReadyBody,
-  recapBody, reminderAudience, reminderConfigFrom, reminderInstantMs,
+  fillReminderTemplate, formatDeadline, formatMoneyTenths, NEWS_READY_TITLE,
+  newsReadyBody, OVER_BUDGET_PREVIEW_TITLE, overBudgetPreviewBody, recapBody,
+  reminderAudience, reminderConfigFrom, reminderInstantMs,
 } from './pushes';
 
 describe('reminderConfigFrom', () => {
@@ -94,6 +95,26 @@ describe('recapBody + push payload', () => {
     expect(fantasyPushData('Futsal', '15', 2)).toEqual({
       type: 'fantasy', sport: 'Futsal', season: '15', gw: '2',
     });
+  });
+});
+
+describe('over-budget preview push (FPL selling, spec §4)', () => {
+  it('formatMoneyTenths is the app\'s "$1.0M" (fantasy_format.dart twin)', () => {
+    expect(formatMoneyTenths(10)).toBe('$1.0M');
+    expect(formatMoneyTenths(5)).toBe('$0.5M');
+    expect(formatMoneyTenths(125)).toBe('$12.5M');
+    expect(formatMoneyTenths(0)).toBe('$0.0M');
+    expect(formatMoneyTenths(-5)).toBe('$-0.5M');
+  });
+
+  it('the exact copy: title + body with the amount and the deadline', () => {
+    expect(OVER_BUDGET_PREVIEW_TITLE).toBe('Your fantasy team is over budget');
+    expect(overBudgetPreviewBody(10, formatDeadline('06282026', 15))).toBe(
+      "This week's price changes put your team $1.0M over. Fix it before " +
+      "Sun, Jun 28 · 3:00 PM or this week won't count.");
+    expect(overBudgetPreviewBody(5, 'Sun, Oct 19 · 3:00 PM')).toBe(
+      "This week's price changes put your team $0.5M over. Fix it before " +
+      "Sun, Oct 19 · 3:00 PM or this week won't count.");
   });
 });
 

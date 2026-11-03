@@ -9,7 +9,9 @@
 // now), weekly recap "GW3: you scored 41, moved to #4, top score 52."
 // Lock/price notices stay hub badges — never pushes. News desk 2.0 (spec
 // 2026-10-28 §4.4) adds the once-per-gameweek admin heads-up that the
-// week's stories are drafted.
+// week's stories are drafted. The FPL selling rule (spec §4, 2026-11-03)
+// adds one exception, because the week is at stake: the once-per-gameweek
+// over-budget preview ("this week's price changes put your team $X over").
 
 import { parseDbDate } from './league_time';
 import { childEntries, isPlainMap, toIntLoose } from './orchestration_db';
@@ -132,6 +134,28 @@ export function reminderAudience(args: {
     const s = states[uid];
     return !isPlainMap(s) || toIntLoose(s['SavedGw']) !== args.gw;
   }).sort();
+}
+
+// ── Over-budget preview (FPL selling, spec §4) ─────────────────────────────
+
+export const OVER_BUDGET_PREVIEW_TITLE = 'Your fantasy team is over budget';
+
+/** Integer tenths of $1M → the app's money label: 10 → "$1.0M", 5 →
+ *  "$0.5M", -5 → "$-0.5M" (lib/fantasy/data/fantasy_format.dart
+ *  formatMoneyTenths twin; integer math, so no float rounding). */
+export function formatMoneyTenths(tenths: number): string {
+  const t = Math.trunc(tenths);
+  const a = Math.abs(t);
+  return `$${t < 0 ? '-' : ''}${Math.floor(a / 10)}.${a % 10}M`;
+}
+
+/** The once-per-gameweek warning that the week's price moves put a saved
+ *  squad [overTenths] over budget (orchestration.ts sweep step 3c);
+ *  [deadline] = formatDeadline of the gameweek's lock. */
+export function overBudgetPreviewBody(overTenths: number, deadline: string): string {
+  return "This week's price changes put your team " +
+    `${formatMoneyTenths(overTenths)} over. Fix it before ${deadline} or ` +
+    "this week won't count.";
 }
 
 // ── Weekly recap ────────────────────────────────────────────────────────────

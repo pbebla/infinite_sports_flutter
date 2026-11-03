@@ -12,8 +12,9 @@ import { FantasySquad, squadFromMap } from './squad';
 import {
   baselineForGwOf, baselineNodeOf, baselineRealizedFor, baselineSquadOf,
   IntegrityInputs, integrityMarketOf, integrityVerdictOf, invalidAlertNode,
-  invalidIssuesOf, isInvalidAlert, judgeSale, judgeSquad, picksAtJudgedPrices,
-  priceSnapshotOf, sameBaselineNode, sameInvalidAlert, squadIntegrityIssues,
+  invalidIssuesOf, isIntegrityAlert, isPreviewAlert, judgeSale, judgeSquad,
+  overBudgetTenthsOf, picksAtJudgedPrices, previewAlertNode, priceSnapshotOf,
+  sameBaselineNode, sameInvalidAlert, samePreviewAlert, squadIntegrityIssues,
 } from './squad_integrity';
 import { annotateSquadIntegrity, lockAccounting } from './transfer_state';
 
@@ -513,15 +514,50 @@ describe('markers + alert nodes', () => {
     expect(node).toEqual({
       Gw: 3, Kind: 'invalid', Issues: ['duplicatePlayer', 'overBudget'], CreatedAt: 99,
     });
-    expect(isInvalidAlert(node)).toBe(true);
+    expect(isIntegrityAlert(node)).toBe(true);
+    expect(isPreviewAlert(node)).toBe(false);
     expect(sameInvalidAlert(node, 3, ['duplicatePlayer', 'overBudget'])).toBe(true);
     expect(sameInvalidAlert(node, 4, ['duplicatePlayer', 'overBudget'])).toBe(false);
     expect(sameInvalidAlert(node, 3, ['overBudget'])).toBe(false);
-    expect(isInvalidAlert({ Gw: 3, Changes: [] })).toBe(false);
+    expect(isIntegrityAlert({ Gw: 3, Changes: [] })).toBe(false);
+  });
+
+  it('the over-budget preview node (FPL selling): its shape and rerun check', () => {
+    const node = previewAlertNode(2, 5, 77);
+    expect(node).toEqual({
+      Gw: 2, Kind: 'preview', Issues: ['overBudget'], OverTenths: 5, CreatedAt: 77,
+    });
+    // Both integrity kinds share the slot; a position alert is neither.
+    expect(isIntegrityAlert(node)).toBe(true);
+    expect(isPreviewAlert(node)).toBe(true);
+    expect(isPreviewAlert(invalidAlertNode(2, ['overBudget'], 1))).toBe(false);
+    expect(isPreviewAlert({ Gw: 2, Changes: [] })).toBe(false);
+    expect(isIntegrityAlert(null)).toBe(false);
+    // Rewritten only when Gw or the amount moved (CreatedAt aside).
+    expect(samePreviewAlert(node, 2, 5)).toBe(true);
+    expect(samePreviewAlert({ ...node, CreatedAt: 1 }, 2, 5)).toBe(true);
+    expect(samePreviewAlert(node, 3, 5)).toBe(false);
+    expect(samePreviewAlert(node, 2, 6)).toBe(false);
+    expect(samePreviewAlert({ ...node, Issues: ['duplicatePlayer'] }, 2, 5)).toBe(false);
+    expect(samePreviewAlert(invalidAlertNode(2, ['overBudget'], 1), 2, 5)).toBe(false);
+    expect(samePreviewAlert(null, 2, 5)).toBe(false);
+    // The lock's Invalid verdict on the same week + issue is NOT "the same
+    // alert": the Invalid node replaces the preview.
+    expect(sameInvalidAlert(node, 2, ['overBudget'])).toBe(false);
+  });
+
+  it('overBudgetTenthsOf = judged spend - (budget + realizedTenths)', () => {
+    const judged = (prices: number[], realizedTenths: number) =>
+      ({ issues: [], prices, realizedTenths });
+    expect(overBudgetTenthsOf(judged([300, 205], 0), cfg)).toBe(5);
+    expect(overBudgetTenthsOf(judged([300, 205], -10), cfg)).toBe(15);
+    expect(overBudgetTenthsOf(judged([300, 205], 5), cfg)).toBe(0);
+    expect(overBudgetTenthsOf(judged([300, 180], 0), cfg)).toBe(-20);
   });
 
   it('position_changes never reads an integrity alert as a position alert', () => {
     expect(parseSquadAlert(invalidAlertNode(3, ['overBudget'], 1))).toBeNull();
+    expect(parseSquadAlert(previewAlertNode(3, 5, 1))).toBeNull();
     expect(parseSquadAlert({ Gw: 3, Changes: [{ player: 'Ann', from: 'ATT', to: 'DEF' }], CreatedAt: 1 }))
       .not.toBeNull();
   });

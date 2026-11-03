@@ -239,6 +239,17 @@ String squadInvalidAlertText({
   return "Your $team didn't count: $why. Fix it before the next deadline.";
 }
 
+/// The over-budget preview's sentence (FPL selling, spec §4 — the sweep
+/// re-judged the saved squad at the coming lock's prices): "Your team is
+/// $1.0M over budget after this week's price changes. Fix it before the
+/// deadline or this week won't count." No amount (0 or less — an old or
+/// partial node) drops the "$X".
+String squadOverBudgetPreviewText({required int overTenths}) {
+  final amount = overTenths > 0 ? ' ${formatMoneyTenths(overTenths)}' : '';
+  return "Your team is$amount over budget after this week's price changes. "
+      "Fix it before the deadline or this week won't count.";
+}
+
 /// Shown when a squad save is refused after the deadline (squad hardening,
 /// audit I3): the database rules reject a Squads write from the lock
 /// instant on by the SERVER's clock, so a phone whose clock runs slow can

@@ -9,12 +9,13 @@ import { describe, expect, it } from 'vitest';
 import { STARTER_CATALOG } from './badges';
 import { clone, Json, loadGoldenFixture } from './golden_fixture';
 import {
-  maybeFinalizeGame, publishSaleBaselines, runLifecycleSweep, runMondayReprice,
+  FantasyLogger, maybeFinalizeGame, publishSaleBaselines, recordSquadSave,
+  runLifecycleSweep, runMondayReprice,
 } from './orchestration';
 import { FantasyDb, FantasyTxResult } from './orchestration_db';
 import {
-  AFTER_LOCK2, F_ROOT, FakeDb as ColdFakeDb, fixtureSquad, GW1_DATE, GW2_DATE,
-  world2,
+  AFTER_LOCK2, F_ROOT, FakeDb as ColdFakeDb, FakePusher, fixtureSquad,
+  GW1_DATE, GW2_DATE, LOCK2_MS, world2,
 } from './test_support';
 
 const fixture = loadGoldenFixture();
@@ -917,5 +918,263 @@ describe('Baselines/<uid> (FPL selling: last locked prices + realized)', () => {
     await finalizeGw(db, GW2_DATE);
     expect(await db.read(`${F_ROOT}/Baselines/alpha`))
       .toEqual({ ForGw: 3, RealizedTenths: 0, Prices: GW1_ALPHA });
+  });
+});
+
+describe('over-budget preview while the window is open (sweep step 3c)', () => {
+  const t = (db: ColdFakeDb) => db.data.Fantasy.Futsal['15'];
+  // Saturday 15:00 league time: GW2 open, before the Sunday-noon reminder.
+  const SATURDAY = new Date(LOCK2_MS - 24 * 3600 * 1000);
+  const SATURDAY_LATER = new Date(SATURDAY.getTime() + 15 * 60_000);
+  const TITLE = 'Your fantasy team is over budget';
+  const previews = (p: FakePusher) =>
+    p.sends.flat().filter((m) => m.title === TITLE);
+  const alertWrites = (db: ColdFakeDb) => db.writes.filter((w) =>
+    w.includes('/SquadAlerts/') || w.includes('/PreviewPushed/'));
+  const capture = () => {
+    const warns: Array<{ m: string; c?: Json }> = [];
+    const log: FantasyLogger = {
+      info: () => undefined, warn: (m, c) => { warns.push({ m, c }); },
+    };
+    return { log, warns };
+  };
+  /** alpha (480) sells Eva (bought 50, still 50: no profit) for Bea (70 at
+   *  market, a NEW pick): exactly 500, the whole budget. */
+  const spendItAll = (db: ColdFakeDb) => {
+    t(db).Squads.alpha.picks[2] =
+      { playerId: 'Bea', position: 'DEF', priceTenths: 70, bench: false };
+  };
+  /** ...and then Bea rises 5 (a riser reprice / owner edit; no
+   *  PriceHistory/1, so the buy floor is her price now): 505 = over by 5. */
+  const overByFive = (db: ColdFakeDb) => {
+    spendItAll(db);
+    t(db).Players.Bea.priceTenths = 75;
+  };
+  const PREVIEW = (at: Date, over = 5) => ({
+    Gw: 2, Kind: 'preview', Issues: ['overBudget'], OverTenths: over,
+    CreatedAt: at.getTime(),
+  });
+
+  it('a riser makes a saved squad over by 5: the preview alert + exactly one push', async () => {
+    const db = new ColdFakeDb(world2());
+    overByFive(db);
+    const pusher = new FakePusher();
+    await runLifecycleSweep(db, SATURDAY, undefined, { pusher });
+
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toEqual(PREVIEW(SATURDAY));
+    expect(previews(pusher)).toEqual([{
+      uid: 'alpha',
+      title: TITLE,
+      body: "This week's price changes put your team $0.5M over. Fix it " +
+        "before Sun, Jun 28 · 3:00 PM or this week won't count.",
+      data: { type: 'fantasy', sport: 'Futsal', season: '15', gw: '2' },
+    }]);
+    expect(await db.read(`${F_ROOT}/PreviewPushed/2/alpha`))
+      .toEqual({ At: SATURDAY.getTime() });
+    // The squads within budget: nothing.
+    for (const uid of ['boost', 'churn']) {
+      expect(await db.read(`${F_ROOT}/SquadAlerts/${uid}`), uid).toBeNull();
+      expect(await db.read(`${F_ROOT}/PreviewPushed/2/${uid}`), uid).toBeNull();
+    }
+    // A preview is a warning, never a verdict: no snapshot, no Invalid.
+    expect(await db.read(`${F_ROOT}/PublishedPicks/2`)).toBeNull();
+  });
+
+  it('a second sweep: no new push, no rewrite; a further rise rewrites the '
+    + 'amount, still no second push', async () => {
+    const db = new ColdFakeDb(world2());
+    overByFive(db);
+    const pusher = new FakePusher();
+    await runLifecycleSweep(db, SATURDAY, undefined, { pusher });
+    db.writes = [];
+    await runLifecycleSweep(db, SATURDAY_LATER, undefined, { pusher });
+    expect(alertWrites(db)).toEqual([]);
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toEqual(PREVIEW(SATURDAY));
+    expect(previews(pusher)).toHaveLength(1);
+
+    t(db).Players.Bea.priceTenths = 80; // over by 10 now
+    const later = new Date(SATURDAY_LATER.getTime() + 15 * 60_000);
+    await runLifecycleSweep(db, later, undefined, { pusher });
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toEqual(PREVIEW(later, 10));
+    expect(previews(pusher)).toHaveLength(1); // one push per gameweek
+  });
+
+  it('the fan saves a clean squad: the save trigger clears it (a save still '
+    + 'over budget keeps it)', async () => {
+    const db = new ColdFakeDb(world2());
+    overByFive(db);
+    await runLifecycleSweep(db, SATURDAY, undefined, { pusher: new FakePusher() });
+    // Still over (a formation-legal save that did not fix the money).
+    t(db).Squads.alpha.captainId = 'Alex';
+    t(db).Squads.alpha.viceId = 'Ezra';
+    await recordSquadSave(db,
+      { sport: 'Futsal', season: '15', uid: 'alpha', nowUtc: SATURDAY_LATER });
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toEqual(PREVIEW(SATURDAY));
+    // Fixed: back to the golden squad (480).
+    t(db).Squads.alpha = fixtureSquad('alpha');
+    await recordSquadSave(db,
+      { sport: 'Futsal', season: '15', uid: 'alpha', nowUtc: SATURDAY_LATER });
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toBeNull();
+  });
+
+  it('a squad back under budget by itself: the next sweep clears it, no push', async () => {
+    const db = new ColdFakeDb(world2());
+    overByFive(db);
+    const pusher = new FakePusher();
+    await runLifecycleSweep(db, SATURDAY, undefined, { pusher });
+    t(db).Players.Bea.priceTenths = 70; // the edit is undone
+    await runLifecycleSweep(db, SATURDAY_LATER, undefined, { pusher });
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toBeNull();
+    expect(previews(pusher)).toHaveLength(1);
+  });
+
+  it("a locked week runs nothing: the owner's 'locked' override, and the "
+    + 'lock itself', async () => {
+    const frozen = new ColdFakeDb(world2());
+    overByFive(frozen);
+    t(frozen).Config.lockOverride = 'locked';
+    const pusher = new FakePusher();
+    await runLifecycleSweep(frozen, SATURDAY, undefined, { pusher });
+    expect(await frozen.read(`${F_ROOT}/SquadAlerts`)).toBeNull();
+    expect(await frozen.read(`${F_ROOT}/PreviewPushed`)).toBeNull();
+    expect(previews(pusher)).toEqual([]);
+
+    // After the lock instant (GW2 games still live): the lock judged the
+    // squad clean at 500; a price move AFTER the lock is not previewed —
+    // the week is decided.
+    const locked = new ColdFakeDb(world2({ gw2Status: 1 }));
+    spendItAll(locked);
+    await runLifecycleSweep(locked, new Date(LOCK2_MS + 5 * 60_000),
+      undefined, { pusher });
+    expect('Invalid' in (await locked.read(`${F_ROOT}/PublishedPicks/2/alpha`) as Json))
+      .toBe(false);
+    t(locked).Players.Bea.priceTenths = 75;
+    await runLifecycleSweep(locked, new Date(LOCK2_MS + 20 * 60_000),
+      undefined, { pusher });
+    expect(await locked.read(`${F_ROOT}/SquadAlerts`)).toBeNull();
+    expect(await locked.read(`${F_ROOT}/PreviewPushed`)).toBeNull();
+    expect(previews(pusher)).toEqual([]);
+  });
+
+  it('the lock judging the same squad Invalid replaces the preview with the '
+    + 'Invalid alert; a clean lock clears it', async () => {
+    const db = new ColdFakeDb(world2({ gw2Status: 1 }));
+    overByFive(db);
+    const pusher = new FakePusher();
+    await runLifecycleSweep(db, SATURDAY, undefined, { pusher });
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toEqual(PREVIEW(SATURDAY));
+    await runLifecycleSweep(db, AFTER_LOCK2, undefined, { pusher });
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toEqual({
+      Gw: 2, Kind: 'invalid', Issues: ['overBudget'], CreatedAt: AFTER_LOCK2.getTime(),
+    });
+    expect(previews(pusher)).toHaveLength(1);
+
+    // The price fell back after the last sweep: the lock finds it clean.
+    const clean = new ColdFakeDb(world2({ gw2Status: 1 }));
+    overByFive(clean);
+    await runLifecycleSweep(clean, SATURDAY);
+    t(clean).Players.Bea.priceTenths = 70;
+    await runLifecycleSweep(clean, AFTER_LOCK2);
+    expect('Invalid' in (await clean.read(`${F_ROOT}/PublishedPicks/2/alpha`) as Json))
+      .toBe(false);
+    expect(await clean.read(`${F_ROOT}/SquadAlerts/alpha`)).toBeNull();
+  });
+
+  it('a sold player who FELL lowers the credit: the sell-side case is '
+    + 'previewed too', async () => {
+    const db = new ColdFakeDb(world2());
+    // alpha sold Alex (bought 95) for Ben (85): 470 spent. Then Alex falls
+    // to 60 before the lock: the sale banks 60, -35 → budget 465, over by 5.
+    t(db).Squads.alpha.picks[4] =
+      { playerId: 'Ben', position: 'ATT', priceTenths: 85, bench: false };
+    t(db).Squads.alpha.viceId = 'Ben';
+    t(db).Players.Alex.priceTenths = 60;
+    const pusher = new FakePusher();
+    await runLifecycleSweep(db, SATURDAY, undefined, { pusher });
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toEqual(PREVIEW(SATURDAY));
+    expect(previews(pusher).map((m) => m.uid)).toEqual(['alpha']);
+  });
+
+  it('an Invalid alert and a position-change alert are never touched (no '
+    + 'push either)', async () => {
+    const invalid = { Gw: 1, Kind: 'invalid', Issues: ['overBudget'], CreatedAt: 5 };
+    const position = {
+      Gw: 2, Changes: [{ player: 'Wren', from: 'ATT', to: 'DEF' }], CreatedAt: 6,
+    };
+    for (const standing of [invalid, position]) {
+      const db = new ColdFakeDb(world2());
+      overByFive(db);
+      t(db).SquadAlerts = { alpha: clone(standing) };
+      const pusher = new FakePusher();
+      await runLifecycleSweep(db, SATURDAY, undefined, { pusher });
+      expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toEqual(standing);
+      expect(await db.read(`${F_ROOT}/PreviewPushed`)).toBeNull();
+      expect(previews(pusher)).toEqual([]);
+    }
+  });
+
+  it('a forged squad (issues other than overBudget) gets no preview, no push', async () => {
+    const db = new ColdFakeDb(world2());
+    // Wren (75) out, an unknown "Ghost" at 75 in: 480, unknownPlayer only.
+    t(db).Squads.alpha.picks[6] =
+      { playerId: 'Ghost', position: 'ATT', priceTenths: 75, bench: true };
+    const pusher = new FakePusher();
+    await runLifecycleSweep(db, SATURDAY, undefined, { pusher });
+    expect(await db.read(`${F_ROOT}/SquadAlerts`)).toBeNull();
+    expect(previews(pusher)).toEqual([]);
+  });
+
+  it('no pusher: the alert lands, nothing is claimed; a later equipped sweep '
+    + 'pushes once', async () => {
+    const db = new ColdFakeDb(world2());
+    overByFive(db);
+    await runLifecycleSweep(db, SATURDAY);
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toEqual(PREVIEW(SATURDAY));
+    expect(await db.read(`${F_ROOT}/PreviewPushed`)).toBeNull();
+    const pusher = new FakePusher();
+    await runLifecycleSweep(db, SATURDAY_LATER, undefined, { pusher });
+    await runLifecycleSweep(db, SATURDAY_LATER, undefined, { pusher });
+    expect(previews(pusher).map((m) => m.uid)).toEqual(['alpha']);
+  });
+
+  it("one manager's failure never stops the others, or the sweep", async () => {
+    class FlakyDb extends ColdFakeDb {
+      failWrite: string | null = null;
+      failRead: string | null = null;
+      async write(path: string, value: unknown): Promise<void> {
+        if (path === this.failWrite) throw new Error('boom');
+        return super.write(path, value);
+      }
+      async read(path: string): Promise<unknown> {
+        if (path === this.failRead) throw new Error('boom');
+        return super.read(path);
+      }
+    }
+    // alpha AND churn over budget (churn sells Eva 50 for Will 60: over 10).
+    const db = new FlakyDb(world2());
+    overByFive(db);
+    t(db).Squads.churn.picks[5] =
+      { playerId: 'Will', position: 'DEF', priceTenths: 60, bench: true };
+    db.failWrite = `${F_ROOT}/SquadAlerts/alpha`;
+    const pusher = new FakePusher();
+    const { log, warns } = capture();
+    await runLifecycleSweep(db, SATURDAY, log, { pusher });
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toBeNull();
+    expect(await db.read(`${F_ROOT}/SquadAlerts/churn`))
+      .toEqual(PREVIEW(SATURDAY, 10));
+    expect(previews(pusher).map((m) => m.uid)).toEqual(['churn']);
+    expect(warns.some((w) => w.c?.['uid'] === 'alpha')).toBe(true);
+
+    // A whole-step failure is logged; the sweep goes on (the Sunday-noon
+    // reminder still fires).
+    const broken = new FlakyDb(world2());
+    overByFive(broken);
+    broken.failRead = `${F_ROOT}/PreviewPushed/2`;
+    const later = new FakePusher();
+    const step = capture();
+    await runLifecycleSweep(broken, new Date(LOCK2_MS - 3 * 3600 * 1000),
+      step.log, { pusher: later });
+    expect(later.sends.flat().some((m) => m.title === 'Fantasy deadline')).toBe(true);
+    expect(step.warns.some((w) => w.m.includes('preview'))).toBe(true);
   });
 });

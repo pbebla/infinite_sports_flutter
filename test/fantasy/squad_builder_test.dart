@@ -897,5 +897,48 @@ void main() {
         expect(r.right, lessThanOrEqualTo(360));
       });
     }
+
+    // FPL selling (spec §4): the sweep's over-budget preview — the exact
+    // sentence, bright red (fantasyDownRed) in both themes, 360 px.
+    const preview = FantasySquadAlert(
+      gameweek: 2,
+      kind: FantasySquadAlertKind.overBudgetPreview,
+      issues: ['overBudget'],
+      overTenths: 10,
+    );
+    const previewText = "Your team is \$1.0M over budget after this week's "
+        "price changes. Fix it before the deadline or this week won't count.";
+
+    for (final brightness in Brightness.values) {
+      testWidgets(
+          '360 px: the over-budget preview banner — exact copy, bright red, '
+          'no overflow — $brightness', (tester) async {
+        await pumpBuilder(tester,
+            size: const Size(360, 760),
+            brightness: brightness,
+            initialSquad: fullSquad(),
+            alert: preview);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        final banner = find.byKey(const ValueKey('squad_alert_banner'));
+        expect(banner, findsOneWidget);
+        expect(find.text(previewText), findsOneWidget);
+        final r = tester.getRect(banner);
+        expect(r.left, greaterThanOrEqualTo(0));
+        expect(r.right, lessThanOrEqualTo(360));
+
+        final red = brightness == Brightness.dark
+            ? const Color(0xFFFF5252)
+            : const Color(0xFFD32F2F);
+        expect(tester.widget<Text>(find.text(previewText)).style?.color, red);
+        final icon = tester.widget<Icon>(
+            find.descendant(of: banner, matching: find.byType(Icon)));
+        expect(icon.color, red);
+        final box =
+            tester.widget<Container>(banner).decoration! as BoxDecoration;
+        expect(box.border, isNotNull);
+        expect((box.border! as Border).top.color, red);
+      });
+    }
   });
 }

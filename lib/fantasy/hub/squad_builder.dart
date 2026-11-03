@@ -303,6 +303,9 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       return squadInvalidAlertText(
           gameweek: alert.gameweek, issues: alert.issues);
     }
+    if (alert.isOverBudgetPreview) {
+      return squadOverBudgetPreviewText(overTenths: alert.overTenths);
+    }
     final current = currentGameweek(widget.gameweeks, _now);
     Gameweek? target = current;
     if (target == null) {
@@ -404,7 +407,12 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
               text: _alertText(alert),
               icon: alert.isInvalid
                   ? Icons.error_outline_rounded
-                  : Icons.swap_horiz_rounded,
+                  : alert.isOverBudgetPreview
+                      ? Icons.account_balance_wallet_outlined
+                      : Icons.swap_horiz_rounded,
+              // FPL selling (spec §4): the preview is a money warning —
+              // the bright fantasy "down" red in both themes.
+              brightRed: alert.isOverBudgetPreview,
             ),
             const SizedBox(height: 12),
           ],
@@ -608,26 +616,40 @@ class _LockedLiveStrip extends StatelessWidget {
 /// team didn't count: over budget. Fix it before the next deadline." The
 /// error-container pair is a Material 3 scheme role, so it reads
 /// correctly in both light and dark mode.
+///
+/// [brightRed] (the over-budget preview, FPL selling spec §4: "Your team is
+/// $1.0M over budget after this week's price changes…") swaps the pair for
+/// the bright fantasy "down" red (fantasyDownRed — never the soft dark-mode
+/// error pink): red text, icon and outline on the plain surface, the
+/// combination that constant is checked for (≥4.5:1 in both themes).
 class _SquadAlertBanner extends StatelessWidget {
-  const _SquadAlertBanner({required this.text, required this.icon});
+  const _SquadAlertBanner({
+    required this.text,
+    required this.icon,
+    this.brightRed = false,
+  });
 
   final String text;
   final IconData icon;
+  final bool brightRed;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final red = fantasyDownRed(context);
+    final fg = brightRed ? red : scheme.onErrorContainer;
     return Container(
       key: const ValueKey('squad_alert_banner'),
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
-        color: scheme.errorContainer,
+        color: brightRed ? scheme.surface : scheme.errorContainer,
         borderRadius: BorderRadius.circular(14),
+        border: brightRed ? Border.all(color: red, width: 1.5) : null,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 20, color: scheme.onErrorContainer),
+          Icon(icon, size: 20, color: fg),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -636,8 +658,8 @@ class _SquadAlertBanner extends StatelessWidget {
               style: TextStyle(
                 fontSize: 13,
                 height: 1.35,
-                fontWeight: FontWeight.w600,
-                color: scheme.onErrorContainer,
+                fontWeight: brightRed ? FontWeight.w700 : FontWeight.w600,
+                color: fg,
               ),
             ),
           ),

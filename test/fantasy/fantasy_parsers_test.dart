@@ -489,10 +489,55 @@ void main() {
         ],
       })!;
       expect(alert.isInvalid, isFalse);
+      expect(alert.isOverBudgetPreview, isFalse);
       expect(alert.kind, FantasySquadAlertKind.positionChange);
       expect(alert.issues, isEmpty);
       // An unknown future Kind falls back to the position shape.
       expect(squadAlertFromNode({'Gw': 4, 'Kind': 'other'}), isNull);
+    });
+
+    // FPL selling (spec §4): the sweep's over-budget preview shares the
+    // node — {Gw, Kind:'preview', Issues:['overBudget'], OverTenths,
+    // CreatedAt}.
+    test('preview (Kind preview) → an over-budget preview with OverTenths',
+        () {
+      final alert = squadAlertFromNode({
+        'Gw': 2,
+        'Kind': 'preview',
+        'Issues': ['overBudget'],
+        'OverTenths': 5,
+        'CreatedAt': 1782597600000,
+      })!;
+      expect(alert.kind, FantasySquadAlertKind.overBudgetPreview);
+      expect(alert.isOverBudgetPreview, isTrue);
+      expect(alert.isInvalid, isFalse);
+      expect(alert.gameweek, 2);
+      expect(alert.overTenths, 5);
+      expect(alert.issues, ['overBudget']);
+      expect(alert.changes, isEmpty);
+    });
+
+    test('preview: lower-case fields, a string amount; no amount still an '
+        'alert (0)', () {
+      final lower = squadAlertFromNode({
+        'gameweek': '3',
+        'kind': 'preview',
+        'issues': {'0': 'overBudget'},
+        'overTenths': '12',
+      })!;
+      expect(lower.isOverBudgetPreview, isTrue);
+      expect(lower.gameweek, 3);
+      expect(lower.overTenths, 12);
+      expect(lower.issues, ['overBudget']);
+
+      final bare = squadAlertFromNode({'Gw': 2, 'Kind': 'preview'})!;
+      expect(bare.isOverBudgetPreview, isTrue);
+      expect(bare.overTenths, 0);
+      // The other kinds carry no amount.
+      expect(
+          squadAlertFromNode({'Gw': 2, 'Kind': 'invalid', 'OverTenths': 5})!
+              .overTenths,
+          0);
     });
   });
 

@@ -35,8 +35,9 @@
 //   snapshotted verbatim plus `Invalid: [issues]` and the baseline's
 //   `realizedTenths` (no sale credited), scores zero (finalize),
 //   and its manager gets SquadAlerts/<uid> = { Gw, Kind:'invalid', Issues,
-//   CreatedAt } (the fan banner; cleared by the next clean save or the next
-//   clean lock). A FIRST finalize reading live Squads (no snapshot) judges
+//   CreatedAt } (the fan banner — it replaces an over-budget preview, step
+//   3c; cleared by the next clean save or the next clean lock, which clears
+//   a preview too). A FIRST finalize reading live Squads (no snapshot) judges
 //   them the same way. Snapshots and History rows are never re-judged.
 //
 // - LockedPositions/<gw> = { <name>: 'GK'|'DEF'|'ATT' } — every market
@@ -96,6 +97,14 @@
 //   (functions-internal): once-only claims for the Phase F pushes. Claimed
 //   via writeIfAbsent BEFORE sending, and only when a pusher was injected —
 //   a sweep without one (tests) leaves them unclaimed.
+//
+// - PreviewPushed/<gw>/<uid> = { At:int } (functions-internal, no rules
+//   entry: server-only): the once-only claim for the over-budget PREVIEW
+//   push (sweep step 3c — FPL selling, spec §4): one per manager per
+//   gameweek, claimed the same way. The preview's banner node is
+//   SquadAlerts/<uid> { Gw, Kind:'preview', Issues:['overBudget'],
+//   OverTenths, CreatedAt } — contract in squad_integrity.ts THE
+//   OVER-BUDGET PREVIEW.
 //
 // - NewsDrafted/<gw> = { At:int } (functions-internal): once-only claim for
 //   the Phase G news step (the Dream Team post + the AI drafts + the admin
@@ -191,8 +200,9 @@ import {
 import { applyDelta, repriceDeltas } from './pricing';
 import {
   adminUidsOf, FantasyPusher, fantasyPushData, fillReminderTemplate,
-  formatDeadline, NEWS_READY_TITLE, newsReadyBody, RECAP_TITLE, recapBody,
-  REMINDER_TITLE, reminderAudience, reminderConfigFrom, reminderInstantMs,
+  formatDeadline, NEWS_READY_TITLE, newsReadyBody, OVER_BUDGET_PREVIEW_TITLE,
+  overBudgetPreviewBody, RECAP_TITLE, recapBody, REMINDER_TITLE,
+  reminderAudience, reminderConfigFrom, reminderInstantMs,
 } from './pushes';
 import {
   applyPendingPositionChanges, positionWindowOf,
@@ -202,9 +212,10 @@ import {
 } from './squad';
 import {
   baselineForGwOf, baselineNodeOf, baselineRealizedTenthsOf,
-  integrityMarketOf, IntegrityInputs, invalidAlertNode, isInvalidAlert,
-  judgeSquad, priceSnapshotOf, sameBaselineNode, sameInvalidAlert,
-  SquadIntegrityIssue,
+  integrityMarketOf, IntegrityInputs, integrityVerdictOf, invalidAlertNode,
+  isIntegrityAlert, isPreviewAlert, judgeSquad, overBudgetTenthsOf,
+  previewAlertNode, priceSnapshotOf, sameBaselineNode, sameInvalidAlert,
+  samePreviewAlert, SquadIntegrityIssue,
 } from './squad_integrity';
 import { parseForfeitedBy } from './stats_mapper';
 import {
@@ -404,10 +415,12 @@ export async function publishSaleBaselines(
 }
 
 /** After an integrity pass for gameweek [gw]: each invalid squad's manager
- *  gets the SquadAlerts/<uid> integrity alert (rewritten only when it
- *  differs — reruns write nothing) and a warn; a clean squad whose manager
- *  still carries an integrity alert from an earlier week has it cleared
- *  (this week counts). A position-change alert is never touched here. */
+ *  gets the SquadAlerts/<uid> Invalid alert (rewritten only when it
+ *  differs — reruns write nothing; a standing over-budget PREVIEW, even for
+ *  the same week and issue, is replaced by it) and a warn; a clean squad
+ *  whose manager still carries an integrity alert of either kind (an
+ *  earlier week's Invalid, or this week's preview) has it cleared (this
+ *  week counts). A position-change alert is never touched here. */
 async function settleIntegrityAlerts(
   db: FantasyDb, root: string, gw: number,
   verdict: {
@@ -427,10 +440,98 @@ async function settleIntegrityAlerts(
       invalidAlertNode(gw, issues, nowMs));
   }
   for (const uid of verdict.valid) {
-    if (!isInvalidAlert(alerts[uid])) continue;
+    if (!isIntegrityAlert(alerts[uid])) continue;
     await db.write(`${root}/SquadAlerts/${uid}`, null);
     log.info('fantasy lock: squad valid again — integrity alert cleared',
       { ...ctx, gw, uid });
+  }
+}
+
+/** Own-key lookup (a uid is never an Object.prototype name). */
+function hasKey(m: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(m, key);
+}
+
+/** Sweep step 3c — THE OVER-BUDGET PREVIEW (FPL selling, spec §4; the
+ *  contract lives in squad_integrity.ts): while gameweek [gw] is open,
+ *  re-judge every saved squad with the inputs its lock will use
+ *  (loadIntegrityInputs for [gw]) so a fan whose saved team drifted over
+ *  budget (a reprice or owner edit after a sale) hears about it before the
+ *  deadline:
+ *  - issues include overBudget → SquadAlerts/<uid> = the preview (written
+ *    only when Gw or OverTenths moved) and, the first time this gameweek,
+ *    ONE push: the PreviewPushed/<gw>/<uid> claim lands set-if-absent
+ *    BEFORE the send (the reminder's pattern — concurrent sweeps never
+ *    double-push); no [pusher] = no claim, no push;
+ *  - otherwise (clean, forged-but-not-over, malformed, or no squad any
+ *    more) → a standing preview is cleared;
+ *  - an Invalid or position-change alert in the slot wins: that manager is
+ *    skipped (no write, no push) and re-checked by every later sweep.
+ *  One manager's failure is logged and never stops the others. */
+async function previewOverBudget(
+  db: FantasyDb, root: string, cfg: FantasyConfig,
+  args: {
+    sport: string; season: string; gw: number; date: string; nowMs: number;
+    pusher?: FantasyPusher;
+  },
+  log: FantasyLogger, ctx: Record<string, unknown>,
+): Promise<void> {
+  const { gw, nowMs, pusher } = args;
+  const squads = mapChildren(await db.read(`${root}/Squads`));
+  const alertsNode = await db.read(`${root}/SquadAlerts`);
+  const alerts: Record<string, unknown> = isPlainMap(alertsNode) ? alertsNode : {};
+  // Every saved squad, plus every standing preview (a squad deleted since
+  // the preview was written still has it cleared).
+  const uids = new Set(Object.keys(squads));
+  for (const [uid, node] of Object.entries(alerts)) {
+    if (isPreviewAlert(node)) uids.add(uid);
+  }
+  if (uids.size === 0) return;
+  const inputs = await loadIntegrityInputs(db, root, Object.keys(squads), gw);
+  const claimsNode = pusher ? await db.read(`${root}/PreviewPushed/${gw}`) : null;
+  const claimed: Record<string, unknown> = isPlainMap(claimsNode) ? claimsNode : {};
+  const deadline = formatDeadline(args.date, cfg.lockHour);
+  const data = fantasyPushData(args.sport, args.season, gw);
+  let alerted = 0;
+  let cleared = 0;
+  let pushed = 0;
+  for (const uid of [...uids].sort()) {
+    const path = `${root}/SquadAlerts/${uid}`;
+    try {
+      const standing = hasKey(alerts, uid) ? alerts[uid] : null;
+      if (standing != null && !isPreviewAlert(standing)) continue;
+      const verdict = hasKey(squads, uid)
+        ? integrityVerdictOf(squads[uid], uid, cfg, inputs) : null;
+      const over = verdict !== null && verdict.issues.includes('overBudget')
+        ? overBudgetTenthsOf(verdict, cfg) : 0;
+      if (over <= 0) {
+        if (standing != null) {
+          await db.write(path, null);
+          cleared++;
+        }
+        continue;
+      }
+      if (!samePreviewAlert(standing, gw, over)) {
+        await db.write(path, previewAlertNode(gw, over, nowMs));
+        alerted++;
+      }
+      if (!pusher || hasKey(claimed, uid)) continue;
+      if (!(await db.writeIfAbsent(
+        `${root}/PreviewPushed/${gw}/${uid}`, { At: nowMs }))) {
+        continue; // a concurrent sweep claimed (and sends) it
+      }
+      pushed += await pusher.sendToUsers([{
+        uid, title: OVER_BUDGET_PREVIEW_TITLE,
+        body: overBudgetPreviewBody(over, deadline), data,
+      }]);
+    } catch (err) {
+      log.warn('fantasy preview: over-budget check failed for one manager — ' +
+        'the others go on', { ...ctx, gw, uid, error: String(err) });
+    }
+  }
+  if (alerted + cleared + pushed > 0) {
+    log.info('fantasy preview: over-budget alerts settled',
+      { ...ctx, gw, alerted, cleared, pushed });
   }
 }
 
@@ -544,7 +645,9 @@ export interface SquadSaveArgs {
  *       app, or a draft dirty since before the change) can never quietly
  *       revert a position change or dodge its alert;
  *     - a standing SquadAlerts/<uid> is cleared once the (re-labelled)
- *       squad's formation is legal.
+ *       squad's formation is legal — or, for an integrity alert (Kind
+ *       'invalid' or the over-budget 'preview'), once the squad would pass
+ *       the next lock's judge.
  *  2. Transfer counting, while the current gameweek is open: recompute the
  *     used-transfer count against the manager's EFFECTIVE previous squad
  *     (effectiveSquadAfterWeek(gw-1): the squad locked last week — or,
@@ -638,10 +741,12 @@ export async function recordSquadSave(
     }
   }
   const alertNode = await db.read(`${root}/SquadAlerts/${uid}`);
-  if (isInvalidAlert(alertNode)) {
-    // An integrity alert ("your GW n team didn't count", audit I2) clears
-    // once the saved squad would pass the NEXT lock's judge — the same
-    // inputs the lock will use (its gameweek's baseline and prices).
+  if (isIntegrityAlert(alertNode)) {
+    // An integrity alert ("your GW n team didn't count", audit I2 — or the
+    // open window's over-budget preview, squad_integrity.ts) clears once
+    // the saved squad would pass the NEXT lock's judge — the same inputs
+    // the lock will use (its gameweek's baseline and prices). A save that
+    // is still over budget keeps the preview (the next sweep re-prices it).
     const target = nextLockGwOf(gwState);
     const inputs = await loadIntegrityInputs(db, root, [uid], target);
     if (judgeSquad(squad, uid, cfg, inputs).issues.length === 0) {
@@ -1643,6 +1748,25 @@ async function sweepSeason(
     if (applied > 0) {
       log.info('fantasy sweep: deferred position changes applied',
         { ...ctx, gw: current.number, applied });
+    }
+  }
+
+  // 3c. Over-budget preview (FPL selling, spec §4): while the week is open,
+  //     warn — banner + one push per gameweek — every manager whose saved
+  //     squad the coming lock would judge overBudget (prices moved after
+  //     the save). After 3b, so a position alert it just wrote keeps the
+  //     slot. A 'locked' (or 'open') lockOverride and a TestFill season
+  //     already stood the whole sweep down above. A failure here is logged
+  //     and never blocks the reminder below.
+  if (status === 'open') {
+    try {
+      await previewOverBudget(db, root, cfg, {
+        sport, season, gw: current.number, date: current.date, nowMs,
+        pusher: deps?.pusher,
+      }, log, ctx);
+    } catch (err) {
+      log.warn('fantasy preview: over-budget check failed — retried by the ' +
+        'next sweep', { ...ctx, gw: current.number, error: String(err) });
     }
   }
 
