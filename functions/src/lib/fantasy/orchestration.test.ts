@@ -815,6 +815,49 @@ describe('Baselines/<uid> (FPL selling: last locked prices + realized)', () => {
     expect(JSON.stringify(t(db).Baselines)).toBe(before);
   });
 
+  it('an older week\'s rerun never creates a STALE node for a manager who has '
+    + 'none (absent = "first squad, ready" in the app; ForGw 2 while GW3 is '
+    + 'next would block his Save until the GW3 lock)', async () => {
+    const db = lockOnly();
+    await runLifecycleSweep(db, AFTER_LOCK2); // GwState: GW2 locked, GW3 next
+    // erin joins after the GW2 lock: no Baselines node yet.
+    t(db).Managers = { erin: { TeamName: 'Erin Athletic' } };
+    db.writes = [];
+    await finalizeGw(db, GW1_DATE); // a score correction on the GW1 date
+    expect(db.writes).toContain(`${F_ROOT}/History/1`);
+    expect(baselineWrites(db)).toEqual([]);
+    expect(await db.read(`${F_ROOT}/Baselines/erin`)).toBeNull();
+    // The next lock (GW3) still gives her a node — the floor never blocks a
+    // current week: the GW2 finalize writes ForGw 3 for her.
+    for (const g of db.data.Futsal['15'].Date[GW2_DATE]) g.status = 2;
+    await finalizeGw(db, GW2_DATE);
+    expect(await db.read(`${F_ROOT}/Baselines/erin`))
+      .toEqual({ ForGw: 3, RealizedTenths: 0, Prices: {} });
+  });
+
+  it('a week first-finalized from LIVE Squads is never snapshotted later: no '
+    + 'PublishedPicks claim, no Baselines rewrite, a carried -15 stays -15', async () => {
+    const db = new ColdFakeDb(world2()); // GW2 final; the sweep was down at the lock
+    // dave: no GW1 squad, -15 carried into GW2; a 480 squad (<= 500 - 15).
+    t(db).Squads.dave = fixtureSquad('alpha');
+    t(db).Baselines = { dave: { ForGw: 2, RealizedTenths: -15 } };
+    await finalizeGw(db, GW2_DATE);
+    expect(await db.read(`${F_ROOT}/PublishedPicks/2`)).toBeNull();
+    expect(await db.read(`${F_ROOT}/History/2/dave/realizedTenths`)).toBe(-15);
+    const carried = { ForGw: 3, RealizedTenths: -15, Prices: GW1_ALPHA };
+    expect(await db.read(`${F_ROOT}/Baselines/dave`)).toEqual(carried);
+
+    // The sweep comes back inside the locked window (GW2 still current).
+    const infos: string[] = [];
+    db.writes = [];
+    await runLifecycleSweep(db, LATER2,
+      { info: (m) => { infos.push(m); }, warn: () => undefined });
+    expect(await db.read(`${F_ROOT}/PublishedPicks/2`)).toBeNull();
+    expect(baselineWrites(db)).toEqual([]);
+    expect(await db.read(`${F_ROOT}/Baselines/dave`)).toEqual(carried);
+    expect(infos).toContain('fantasy lock: History already written — snapshot skipped');
+  });
+
   it('never backwards even in a race: the write is a guarded transaction', async () => {
     const db = new ColdFakeDb({ Fantasy: { Futsal: { '15': {
       Managers: { alpha: { TeamName: 'Alpha FC' } },

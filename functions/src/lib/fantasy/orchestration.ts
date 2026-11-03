@@ -24,6 +24,9 @@
 //   ONCE via a set-if-absent claim the
 //   first time the sweep sees the current gameweek locked — never
 //   overwritten, so late sweeps after downtime still snapshot exactly once.
+//   Never claimed once History/<gw> exists: a FIRST finalize that outran
+//   every sweep scored the week from live Squads, and that History is the
+//   law for the week (a late claim would snapshot post-settle Squads).
 //   SQUAD INTEGRITY (audit I2, 2026-11-01): the same claim judges every
 //   squad (squad_integrity.ts — too many players, duplicates, unknown /
 //   guest NEW picks, over budget at TRUSTED prices + the FPL selling rule's
@@ -76,8 +79,10 @@
 //   prices it — a held player's price and the running sale total. Written
 //   by publishSaleBaselines for EVERY manager (Managers ∪ Squads ∪
 //   PublishedPicks/<gw> ∪ existing Baselines) at the lock of gw (ForGw =
-//   gw + 1) and re-checked by every finalize run (never backwards, no-op
-//   when unchanged). No squad, or an unreadable one, carries the previous
+//   gw + 1) and re-checked by every finalize run (never backwards: nothing
+//   is written for a week before the next lock's, a stored node for a later
+//   week is kept; no-op when unchanged). No squad, or an unreadable one,
+//   carries the previous
 //   RealizedTenths with Prices {}. The lock judge reads RealizedTenths back
 //   when ForGw is the week it judges (loadIntegrityInputs). Rules: read own
 //   + admin, no client write (like TransferState).
@@ -342,16 +347,27 @@ async function loadIntegrityInputs(
  *
  *  Called by the lock (snapshotPublishedPicks, after its claim) and by
  *  EVERY finalize run after History/<gw> (self-heals a lost lock-time
- *  write). Never backwards: a stored node FOR a later gameweek than gw + 1
- *  is left alone (a score-edit rerun of an old week), and a stored node
- *  that already says the same is not rewritten (reruns write nothing). The
- *  check runs again inside a transaction, so a newer baseline landing in
- *  between survives. One manager's failure is logged and never stops the
- *  others. */
+ *  write). Never backwards: nothing at all is written when gw + 1 is
+ *  before the next lock's gameweek (nextLockGwOf(GwState) — a score-edit
+ *  rerun of an old week), a stored node FOR a later gameweek than gw + 1
+ *  is left alone, and a stored node that already says the same is not
+ *  rewritten (reruns write nothing). The per-node check runs again inside
+ *  a transaction, so a newer baseline landing in between survives. One
+ *  manager's failure is logged and never stops the others. */
 export async function publishSaleBaselines(
   db: FantasyDb, root: string, gw: number,
   log: FantasyLogger = silent, ctx: Record<string, unknown> = {},
 ): Promise<void> {
+  const forGw = gw + 1;
+  // A node FOR a week before the next lock is never read (the app sees it
+  // as stale and blocks the Save; the judge reads only ForGw === the week
+  // it judges), so an older week's rerun writes nothing at all — it must
+  // not CREATE a stale node for a manager who has none (absent = "first
+  // squad, ready"). At the lock of gw the floor is gw (GwState still 'open'
+  // — the sweep flips it after the snapshot) or gw + 1; at the finalize of
+  // gw it is gw + 1; a stale GwState (sweep down) only lowers it; no
+  // GwState = 1 (nothing skipped).
+  if (forGw < nextLockGwOf(await db.read(`${root}/GwState`))) return;
   const uids = new Set<string>();
   for (const node of [
     await db.read(`${root}/Managers`),
@@ -361,7 +377,6 @@ export async function publishSaleBaselines(
   ]) {
     for (const [uid] of childEntries(node)) uids.add(uid);
   }
-  const forGw = gw + 1;
   let written = 0;
   for (const uid of [...uids].sort()) {
     const path = `${root}/Baselines/${uid}`;
@@ -1395,6 +1410,18 @@ async function snapshotPublishedPicks(
   nowMs: number, log: FantasyLogger, ctx: Record<string, unknown>,
 ): Promise<void> {
   if (await db.read(`${root}/PublishedPicks/${gw}`) != null) return;
+  // A FIRST finalize that outran every sweep already scored this week from
+  // the live Squads (finalizeGameweek's fallback): its History/<gw> is the
+  // law for the week (effectiveSquadAfterWeek falls back to it; the fan
+  // squad viewer reads it). A late claim here would snapshot Squads as they
+  // are NOW (after the Free Hit restore and chip switch-off), re-judge them
+  // from a fallback sale total (Baselines/<uid> is already FOR gw + 1) and
+  // overwrite the week's baselines — so it never happens.
+  if (await db.read(`${root}/History/${gw}`) != null) {
+    log.info('fantasy lock: History already written — snapshot skipped',
+      { ...ctx, gw });
+    return;
+  }
   const squads = mapChildren(await db.read(`${root}/Squads`));
   if (Object.keys(squads).length === 0) {
     log.info('fantasy lock: no squads to snapshot', { ...ctx, gw });
