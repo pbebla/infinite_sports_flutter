@@ -387,7 +387,7 @@
                 }
               },
               "chip": {
-                ".validate": "newData.isString()"
+                ".validate": "newData.isString() && newData.val().matches(/^(tripleCaptain|benchBoost|wildcard|freeHit)$/)"
               }
             }
           },

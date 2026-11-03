@@ -336,6 +336,32 @@ for (const file of RULES_FILES) {
       expect(pick).toContain("newData.child('bench').isBoolean()");
     });
 
+    // TRANSFERS IN-APP (plan 2026-11-03 Task 2): the squad's chip is one of
+    // the four chip names and nothing else (it used to be any string, so a
+    // REST write could plant 'superSub' and the Wildcard / Free Hit /
+    // Triple Captain / Bench Boost handling downstream would misread it).
+    // `.validate` only runs on NON-null new data, so removing the field (the
+    // chip switch-off / a save with no chip) stays allowed. TransferState
+    // stays server-written: no client `.write` anywhere on its chain, so a
+    // fan can't forge the transfer budget the app shows.
+    it('Squads/$uid/chip: .validate pins the four chip names; TransferState has no client write', () => {
+      const season = rules['rules']['Fantasy']['$sport']['$season'];
+      expect(season['Squads']['$uid']['chip'], `${file}: Squads/$uid/chip`).toEqual({
+        '.validate':
+          "newData.isString() && newData.val().matches(/^(tripleCaptain|benchBoost|wildcard|freeHit)$/)",
+      });
+      const ts = season['TransferState'];
+      expect(ts, `${file}: no TransferState rules`).toBeDefined();
+      expect(ts['.write']).toBeUndefined();
+      expect(ts['$uid']['.write']).toBeUndefined();
+      for (const p of [`${S}/TransferState`, `${S}/TransferState/UID`,
+        `${S}/TransferState/UID/UsedThisGw`]) {
+        const { links } = writeChain(rules, p);
+        expect(links.filter((l) => typeof l.write === 'string' && l.write !== 'false'),
+          `${file}: unexpected .write on ${p}`).toEqual([]);
+      }
+    });
+
     // PAID ACCESS (spec 2026-11-01 §4–§6, plan A5): the Squads/Managers gate
     // on both nodes; Access = admin-written, own-or-admin read; AccessClaims =
     // fan create-only with a validated shape, admin resolve; Templates/Access
