@@ -24,7 +24,10 @@
 
 ## Decisions for review (Opus rulings, Fable please check)
 
-- **D1. First week = the manager's first counted week,** i.e. no effective squad after the previous week (`effectiveSquadAfterWeek(gw − 1)` is null). That covers GW1, a mid-season joiner's first week, and a manager who deleted and rebuilt their team. In each case the next week gets exactly `freeTransfersPerWeek` (2).
+- **D1. First week = the manager's first counted week,** i.e. no effective squad after the previous week (`effectiveSquadAfterWeek(gw − 1)` is null). That covers GW1 and a mid-season joiner's first week; the next week gets exactly `freeTransfersPerWeek` (2). *(Fable T1:)* deleting and rebuilding a team inside an open week is **not** a first team: last week's locked squad still exists, so the rebuild counts against it, exactly as `recordSquadSave` does today.
+- **D1b (Fable T2). The rollover covers every manager in `TransferState` ∪ this week's scored managers**, not just the scored ones, so `CountFrom` never goes stale for someone who sat a week out. A manager not scored this week rolls with `used = 0` (nothing was charged); his `CountFrom` is `effectiveSquadAfterWeek(gw)`, which is null when he had no locked squad, so his next save is a first team. Ruling: sitting a week out therefore resets transfers, at the price of a zero-point week. Never worth doing, so accepted.
+- **D1c. Every counted save also refreshes `CountFrom`/`CountFromGw`** from the same `effectiveSquadAfterWeek(gw − 1)` the count uses. That way a brand-new manager's first save writes `CountFromGw = gw` with no `CountFrom` (the app says "first team"), and any stale node heals on the next save.
+- **D1d (Fable T3). Save is never blocked by the transfer line.** While it is `notReady`, Save proceeds without a confirm: a miscount only costs points at the lock, and the server's lock recount is the truth. A node with no `CountFromGw` at all (written before this ships, e.g. the S15 fill) hides the line instead of saying "updating" forever.
 - **D2. The app previews the count against a server-published baseline (`CountFrom`)**, not the selling baseline (`Baselines/<uid>.Prices`). The two differ after an Invalid week (selling prices `{}`, transfer counter still the locked squad), and the counter's baseline is `effectiveSquadAfterWeek`, which only the server resolves (Free Hit recursion).
 - **D3. A save that ADDS a points cost asks first.** No dialog when the cost stays the same or drops.
 - **D4. Wildcard and Free Hit toggle like the other two chips** (one per week; switch off any time before the deadline). The Premier League game makes a confirmed Wildcard permanent; ours keeps the existing "chips are a draft until the deadline" behaviour. Arming either one asks for confirmation.
@@ -43,7 +46,7 @@
 
 ## Review Focus
 
-1. **A save made while `TransferState` is stale** (rollover not run yet, deleted-and-rebuilt squad). The app must show "Transfer count updating…" and never a guessed count. Pinned in Task 3.
+1. **A save made while `TransferState` is stale** (rollover not run yet). The app must show "Transfer count updating…", never a guessed count, and Save still works without a confirm. Pinned in Tasks 3 and 4.
 2. **Free Hit last week.** `CountFrom` must be the pre-Free-Hit squad (the restored one), or the preview disagrees with the server by up to 7 transfers. Pinned in Task 1.
 3. **A position-change free swap** (`FreeSwaps`). Selling that player must preview as free, exactly like `usedAfterFreeSwaps`. Pinned in Task 3.
 4. **A save that writes `TransferState`** (`recordSquadSave`, `freezeLockTransferState`, rollover) must carry `CountFrom`/`CountFromGw` through and never drop them. Pinned in Task 1.
@@ -56,7 +59,7 @@
 **Files:**
 - Modify: `functions/src/lib/fantasy/transfers.ts` (`rolloverFreeTransfers`)
 - Modify: `functions/src/lib/fantasy/transfer_state.ts` (`TransferState`, `parseTransferState`, `transferStateToNode`, `rolloverState`, header doc block)
-- Modify: `functions/src/lib/fantasy/orchestration.ts` (`settleTransfersAfterFinalize`, ~line 600)
+- Modify: `functions/src/lib/fantasy/orchestration.ts` (`settleTransfersAfterFinalize` ~line 600 and its caller ~1164; `recordSquadSave` ~705)
 - Modify: `lib/fantasy/engine/transfers.dart` (Dart twin)
 - Modify: `functions/tools/rehearse_s15.ts` (expected ledger, ~line 1420)
 - Test: `functions/src/lib/fantasy/transfers.test.ts`, `functions/src/lib/fantasy/transfer_state.test.ts`, `functions/src/lib/fantasy/transfers_orchestration.test.ts`, `test/fantasy/transfers_test.dart`
@@ -64,7 +67,9 @@
 **Interfaces:**
 - Produces: `rolloverFreeTransfers({free, used, cfg, unlimited?, firstWeek?}): number`, where `firstWeek: true` → `cfg.freeTransfersPerWeek`. Dart twin: `rolloverFreeTransfers({..., bool firstWeek = false})`.
 - Produces: `TransferState.countFrom?: { gw: number; ids: string[] | null }`. Node fields `CountFromGw:int` plus `CountFrom:[playerId]`. `CountFromGw` present with `CountFrom` absent means "no squad to count from: a first team".
-- Produces: `rolloverState(state, cfg, gw, basis: { firstWeek: boolean; countFromIds: string[] | null })` sets `countFrom = { gw: gw + 1, ids: countFromIds }`.
+- Produces: `rolloverState(state, cfg, gw, basis: { firstWeek: boolean; countFromIds: string[] | null; scored: boolean })` sets `countFrom = { gw: gw + 1, ids: countFromIds }`. `scored: false` rolls with `used = 0`.
+- `settleTransfersAfterFinalize` is called with `uids` = keys of `TransferState` ∪ `historyByUid` (D1b). It keeps the `RolledGw` guard; the Free Hit restore and chip switch-off still run only for scored uids.
+- `recordSquadSave` writes `countFrom = { gw, ids: <prevRaw pick ids> | null }` alongside `usedThisGw` (D1c).
 
 - [ ] **Step 1: Failing tests**
   - `transfers.test.ts`: `firstWeek` with free 2, used 0 → 2; `firstWeek` + unlimited → 2; not `firstWeek` with free 2, used 0 → 4 (unchanged); not `firstWeek` with free 6, used 0 → 7 (cap unchanged).
@@ -74,7 +79,10 @@
     - (b) A manager whose first squad is GW3 → after GW3, `Free === 2`.
     - (c) GW1 squad, no save in GW2 → after GW2, `Free === 4` (a real bank still banks).
     - (d) Free Hit in GW2 → after GW2, `CountFrom` = the GW1 ids, matching what the restore wrote.
-    - (e) A save (`recordSquadSave`) and the lock freeze both preserve `CountFrom`/`CountFromGw`.
+    - (e) The lock freeze preserves `CountFrom`/`CountFromGw`; a counted save rewrites them from its own baseline.
+    - (f) *(Fable T1)* GW1 locked squad; in the open GW2 the manager deletes the squad and saves a new one with 5 new players → `UsedThisGw === 5` (not a first team).
+    - (g) *(Fable T2)* GW1 scored; squad deleted before the GW2 lock (not scored in GW2) → after the GW2 rollover: `Free` banked as if used 0, `CountFromGw === 3`, no `CountFrom`; a GW3 save counts `UsedThisGw === 0`.
+    - (h) *(D1c)* a brand-new manager's first save in an open week writes `CountFromGw === gw` and no `CountFrom`.
   - `test/fantasy/transfers_test.dart`: the same 4 cases as the TS `transfers.test.ts` (twin parity).
 - [ ] **Step 2: Run them; expect FAIL** — `cd functions && npx vitest run src/lib/fantasy/transfers.test.ts src/lib/fantasy/transfer_state.test.ts src/lib/fantasy/transfers_orchestration.test.ts` and `flutter test test/fantasy/transfers_test.dart`.
 - [ ] **Step 3: Implement.** In `settleTransfersAfterFinalize`, per uid:
@@ -112,11 +120,12 @@
 **Interfaces:**
 - Consumes: Task 1 node shape (`Free`, `UsedThisGw`, `FreeSwaps`, `FreeSwapsGw`, `CountFrom`, `CountFromGw`).
 - Produces: `class TransferStateView { final int? free; final int usedThisGw; final int? countFromGw; final List<String>? countFrom; final int? freeSwapsGw; final List<String> freeSwaps; }`. `free == null` means the node is absent.
-- Produces: `class TransferPreview { final TransferPreviewKind kind; final int used; final int free; final int costPoints; }` with `enum TransferPreviewKind { firstTeam, unlimited, counted, notReady }`.
-- Produces: `TransferPreview transferPreview({required List<String> draftIds, required TransferStateView? state, required int? editingGw, required String? chip, required FantasyConfig cfg})`. Rules:
+- Produces: `class TransferPreview { final TransferPreviewKind kind; final int used; final int free; final int costPoints; }` with `enum TransferPreviewKind { firstTeam, unlimited, counted, notReady, hidden }`.
+- Produces: `TransferPreview transferPreview({required List<String> draftIds, required TransferStateView? state, required int? editingGw, required String? chip, required FantasyConfig cfg})`. Rules, in this order:
   - Absent node → `firstTeam`.
-  - `countFromGw == editingGw` and `countFrom == null` → `firstTeam`.
-  - `countFromGw != editingGw` → `notReady`.
+  - Node present with no `countFromGw` (pre-feature, D1d) → `hidden`.
+  - `editingGw == null` or `countFromGw != editingGw` → `notReady`.
+  - `countFrom == null` → `firstTeam`.
   - Chip `wildcard`/`freeHit` → `unlimited`, cost 0.
   - Otherwise `used` = draft ids not in `countFrom`, minus free-swap players sold (only when `freeSwapsGw == editingGw`, same as `usedAfterFreeSwaps`). `free = state.free ?? cfg.freeTransfersPerWeek`, cost = `max(0, used − free) × cfg.extraTransferCost`.
 - Produces: `String transferLineText(TransferPreview p)` with this exact copy:
@@ -126,9 +135,10 @@
   - counted, cost 0: `{used} of {free} free transfers used` (singular `transfer` when free == 1)
   - counted, cost > 0: `{used} transfers · {free} free · −{cost} pts this week`
   - notReady: `Transfer count updating…`
+  - hidden: no line (`transferLineText` returns `null`; its return type is `String?`)
 - Produces: `SquadDraftController.setTransferContext({TransferStateView? state, int? editingGw})` (notify only on change) and `TransferPreview get transferPreview` (uses the draft's current picks and chip).
 
-- [ ] **Step 1: Failing tests** in `transfer_preview_test.dart`, one per rule: absent node; first-team marker; stale `countFromGw`; wildcard; Free Hit; 1 of 2 used; 3 used with 2 free → cost 4; 4 used with 2 free → cost 8; free swap sold → not counted; free swap from another week → counted. Each copy string asserted verbatim. Add a parser round-trip test.
+- [ ] **Step 1: Failing tests** in `transfer_preview_test.dart`, one per rule: absent node; node without `countFromGw` → hidden (no line); first-team marker; stale `countFromGw`; `editingGw` null; wildcard; Free Hit; 1 of 2 used; 3 used with 2 free → cost 4; 4 used with 2 free → cost 8; free swap sold → not counted; free swap from another week → counted. Each copy string asserted verbatim. Add a parser round-trip test.
 - [ ] **Step 2: Cross-check against the server.** In a new `functions/tools/transfer_preview_parity.test.ts`, port `transferPreview`'s counting rule as a 15-line TS mirror and assert it equals `usedAfterFreeSwaps` + `transferCost` over 8 fixtures, including a free swap, a wildcard and a Free Hit. Same pattern as `client_draft_money.test.ts`.
 - [ ] **Step 3: Run; expect FAIL.**
 - [ ] **Step 4: Implement.** The stream reads `Fantasy/<sport>/<season>/TransferState/<uid>` with `onValue`. Its error yields a "not ready" state, never a fake absent node: a failed read is not a first team.
@@ -152,10 +162,11 @@
   - The transfers line shows each `transferLineText` case. The cost text uses `fantasyDownRed` in both light and dark themes.
   - `_save()` with a draft whose cost rose from 0 to 4 shows a dialog titled `Take a points hit?` with body `This team uses 3 transfers and you have 2 free, so it costs 4 points this week.` and buttons `Cancel` / `Save (−4 pts)`. Cancel saves nothing.
   - A save whose cost does not rise shows no dialog.
+  - *(Fable T3)* A save while the preview is `notReady` or `hidden` shows no dialog and saves.
   - Wildcard tap → dialog `Play your Wildcard?` with body `Every transfer this week is free and your new team stays. You can switch it off until the deadline. You get one Wildcard for Gameweeks 1–{chipSet1EndGw} and one for the rest of the season.` and buttons `Not now` / `Play Wildcard`. Confirm arms it. Tapping the armed chip disarms it with no dialog.
   - Free Hit tap → `Play your Free Hit?` with body `Every transfer this week is free. After this week's games, the team you have now comes back. You can switch it off until the deadline.` and buttons `Not now` / `Play Free Hit`.
   - Wildcard/Free Hit while `firstTeam` → untappable, caption `Your first team is free`.
-  - "Used" availability still blocks arming, as for the other chips.
+  - "Used" availability still blocks arming, as for the other chips; `test/fantasy/chip_usage_test.dart` gains `wildcard` and `freeHit` cases (Fable small note).
   - Arm Wildcard, make 4 transfers, disarm → the line shows `4 transfers · 2 free · −8 pts this week` at once.
   - Rules tab Transfers text starts `Your first team is free: change it as much as you like until your first deadline. After that you get {freeTransfersPerWeek} free transfers each gameweek;` and the rest of today's sentence follows.
   - At 360 px wide and in dark mode, nothing overflows (the hub's existing 360 px test pattern).
@@ -169,5 +180,6 @@
 - [ ] **Step 1:** Deploy rules (`database.rules.stage1.json`) and verify live == file with `scratchpad/compare_live_rules.js` (expect `MATCH`).
 - [ ] **Step 2:** Deploy every fantasy function (rollover code is bundled in the finalize functions; deploy them together as always).
 - [ ] **Step 3:** Build and install the fan APK on emulator-5554.
+- [ ] **Step 3b (Fable T3, owner OK required):** re-fill S15 (`npm run fill:s15 -- --clear <backup>` then `--apply`) so the replay's rollovers write `CountFrom` and the transfers line shows on the test season. Ask the owner before running it.
 - [ ] **Step 4:** Report to the owner in plain language what fans now see, with one test path on the emulator.
 - [ ] **Step 5:** Put an iOS check list in the PR notes: the confirm dialogs, the chip row scroll and the transfers line at the smallest iPhone width.
