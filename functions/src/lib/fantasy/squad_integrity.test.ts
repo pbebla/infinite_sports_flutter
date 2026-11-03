@@ -11,7 +11,7 @@ import { FantasySquad, squadFromMap } from './squad';
 import {
   baselineSquadOf, IntegrityInputs, integrityMarketOf, integrityVerdictOf,
   invalidAlertNode, invalidIssuesOf, isInvalidAlert, judgeSale, judgeSquad,
-  priceSnapshotOf, sameInvalidAlert, squadIntegrityIssues,
+  picksAtJudgedPrices, priceSnapshotOf, sameInvalidAlert, squadIntegrityIssues,
 } from './squad_integrity';
 import { annotateSquadIntegrity, lockAccounting } from './transfer_state';
 
@@ -52,7 +52,7 @@ const sq = (raw: Raw): FantasySquad => squadFromMap(raw);
 
 describe('squadIntegrityIssues: the judge', () => {
   it('a legal squad bought at market is clean (first squad, no baseline)', () => {
-    expect(squadIntegrityIssues(sq(alpha()), cfg, market, null, {})).toEqual([]);
+    expect(squadIntegrityIssues(sq(alpha()), cfg, market, null, 0, {})).toEqual([]);
   });
 
   it('formation and badCaptain are NOT integrity issues (tolerated as today)', () => {
@@ -60,56 +60,56 @@ describe('squadIntegrityIssues: the judge', () => {
     s.picks[0].bench = true; // the GK benched, a DEF started: still 5
     s.picks[5].bench = false; // starters, but an illegal formation
     s.captainId = 'Nobody'; // badCaptain
-    expect(squadIntegrityIssues(sq(s), cfg, market, null, {})).toEqual([]);
+    expect(squadIntegrityIssues(sq(s), cfg, market, null, 0, {})).toEqual([]);
   });
 
   it('tooManyStarters: more non-bench picks than the formation (a REST '
     + '"Bench Boost every week") — 6 or 7 starters, never 5', () => {
     const s = alpha();
     s.picks[5].bench = false; // 6 starters
-    expect(squadIntegrityIssues(sq(s), cfg, market, null, {}))
+    expect(squadIntegrityIssues(sq(s), cfg, market, null, 0, {}))
       .toEqual(['tooManyStarters']);
     s.picks[6].bench = false; // all 7
-    expect(squadIntegrityIssues(sq(s), cfg, market, null, {}))
+    expect(squadIntegrityIssues(sq(s), cfg, market, null, 0, {}))
       .toEqual(['tooManyStarters']);
     const five = alpha(); // the legal 5 + 2 is clean
-    expect(squadIntegrityIssues(sq(five), cfg, market, null, {})).toEqual([]);
+    expect(squadIntegrityIssues(sq(five), cfg, market, null, 0, {})).toEqual([]);
   });
 
   it('too few picks is a formation problem, not an integrity one', () => {
     const s = alpha();
     s.picks.pop();
-    expect(squadIntegrityIssues(sq(s), cfg, market, null, {})).toEqual([]);
+    expect(squadIntegrityIssues(sq(s), cfg, market, null, 0, {})).toEqual([]);
   });
 
   it('duplicatePlayer', () => {
     const s = alpha();
     s.picks[1] = pick('Eva', 'DEF', 50); // Dana out, a second Eva in (450)
-    expect(squadIntegrityIssues(sq(s), cfg, market, null, {}))
+    expect(squadIntegrityIssues(sq(s), cfg, market, null, 0, {}))
       .toEqual(['duplicatePlayer']);
   });
 
   it('tooManyPlayers (8 picks) — and the 8th pick costs, so over budget too', () => {
     const s = alpha();
     s.picks.push(pick('Sam', 'GK', 85, true));
-    expect(squadIntegrityIssues(sq(s), cfg, market, null, {}))
+    expect(squadIntegrityIssues(sq(s), cfg, market, null, 0, {}))
       .toEqual(['tooManyPlayers', 'overBudget']);
   });
 
   it('unknownPlayer: a new pick that is not in the market (or unusable)', () => {
     const s = alpha();
     s.picks[6] = pick('Ghost', 'ATT', 75, true);
-    expect(squadIntegrityIssues(sq(s), cfg, market, null, {}))
+    expect(squadIntegrityIssues(sq(s), cfg, market, null, 0, {}))
       .toEqual(['unknownPlayer']);
     s.picks[6] = pick('Junk', 'ATT', 40, true); // bad position = not selectable
-    expect(squadIntegrityIssues(sq(s), cfg, market, null, {}))
+    expect(squadIntegrityIssues(sq(s), cfg, market, null, 0, {}))
       .toEqual(['unknownPlayer']);
   });
 
   it('ineligiblePlayer: a NEW guest pick', () => {
     const s = alpha();
     s.picks[0] = pick('Bo', 'GK', 75); // 500 total
-    expect(squadIntegrityIssues(sq(s), cfg, market, null, {}))
+    expect(squadIntegrityIssues(sq(s), cfg, market, null, 0, {}))
       .toEqual(['ineligiblePlayer']);
   });
 
@@ -118,7 +118,7 @@ describe('squadIntegrityIssues: the judge', () => {
     before.picks[0] = pick('Bo', 'GK', 55); // bought while eligible, at 55
     const s = alpha();
     s.picks[0] = pick('Bo', 'GK', 55);
-    expect(squadIntegrityIssues(sq(s), cfg, market, sq(before), {})).toEqual([]);
+    expect(squadIntegrityIssues(sq(s), cfg, market, sq(before), 0, {})).toEqual([]);
   });
 
   it('overBudget: low client prices do NOT fool the check (new picks at market)', () => {
@@ -126,7 +126,7 @@ describe('squadIntegrityIssues: the judge', () => {
     s.picks[0] = pick('Sam', 'GK', 10); // Sam is 85: real total 510
     // The client's own sum would read 435 — under budget.
     expect(s.picks.reduce((a: number, p: Raw) => a + p.priceTenths, 0)).toBe(435);
-    expect(squadIntegrityIssues(sq(s), cfg, market, null, {}))
+    expect(squadIntegrityIssues(sq(s), cfg, market, null, 0, {}))
       .toEqual(['overBudget']);
   });
 
@@ -134,7 +134,7 @@ describe('squadIntegrityIssues: the judge', () => {
     const s = alpha();
     s.picks[0] = pick('Ghost', 'GK', -10000);
     expect(judgeSale(sq(s), market, null, 0, {}).prices[0]).toBe(0);
-    expect(squadIntegrityIssues(sq(s), cfg, market, null, {}))
+    expect(squadIntegrityIssues(sq(s), cfg, market, null, 0, {}))
       .toEqual(['unknownPlayer']);
   });
 
@@ -145,7 +145,7 @@ describe('squadIntegrityIssues: the judge', () => {
     const s = alpha(); // still lists Alex at the 95 he paid
     s.picks[2] = pick('Eva', 'DEF', 50);
     // 480 paid; at today's market it would be 535.
-    expect(squadIntegrityIssues(sq(s), cfg, risen, sq(alpha()), {})).toEqual([]);
+    expect(squadIntegrityIssues(sq(s), cfg, risen, sq(alpha()), 0, {})).toEqual([]);
   });
 
   it('lowering a HELD pick\'s price in the save buys nothing', () => {
@@ -153,9 +153,9 @@ describe('squadIntegrityIssues: the judge', () => {
     s.picks[4] = pick('Alex', 'ATT', 0); // held at 95 last week
     s.picks[1] = pick('Bea', 'DEF', 75); // Dana out: real 480 - 80 + 75 = 475
     expect(judgeSale(sq(s), market, sq(alpha()), 0, {}).prices[4]).toBe(95);
-    expect(squadIntegrityIssues(sq(s), cfg, market, sq(alpha()), {})).toEqual([]);
+    expect(squadIntegrityIssues(sq(s), cfg, market, sq(alpha()), 0, {})).toEqual([]);
     s.picks[0] = pick('Sam', 'GK', 55); // Eli out for Sam (85): 505
-    expect(squadIntegrityIssues(sq(s), cfg, market, sq(alpha()), {}))
+    expect(squadIntegrityIssues(sq(s), cfg, market, sq(alpha()), 0, {}))
       .toEqual(['overBudget']);
   });
 
@@ -171,7 +171,7 @@ describe('squadIntegrityIssues: the judge', () => {
     expect(sale.prices[1]).toBe(80);
     expect(sale.realizedTenths).toBe(0);
     // 480 - 50 + 75 = 505: the 10 Dana fell by is NOT freed.
-    expect(squadIntegrityIssues(sq(s), cfg, fallen, sq(alpha()), { Dana: 80 }))
+    expect(squadIntegrityIssues(sq(s), cfg, fallen, sq(alpha()), 0, { Dana: 80 }))
       .toEqual(['overBudget']);
     s.picks[1] = pick('Dana', 'DEF', 0);
     expect(judgeSale(sq(s), fallen, sq(alpha()), 0, { Dana: 80 }).prices[1]).toBe(80);
@@ -181,10 +181,10 @@ describe('squadIntegrityIssues: the judge', () => {
     const s = alpha();
     s.picks[2] = pick('Bea', 'DEF', 70); // Eva out; Bea was 70, now 75
     // 480 - 50 + 70 = 500 (legal); at today's 75 it would be 505.
-    expect(squadIntegrityIssues(sq(s), cfg, market, sq(alpha()), { Bea: 70 }))
+    expect(squadIntegrityIssues(sq(s), cfg, market, sq(alpha()), 0, { Bea: 70 }))
       .toEqual([]);
     // Without last week's price on record, today's price is the floor.
-    expect(squadIntegrityIssues(sq(s), cfg, market, sq(alpha()), {}))
+    expect(squadIntegrityIssues(sq(s), cfg, market, sq(alpha()), 0, {}))
       .toEqual(['overBudget']);
     // Claiming LESS than either price still counts the lower real one.
     s.picks[2] = pick('Bea', 'DEF', 1);
@@ -255,6 +255,37 @@ describe('judgeSale', () => {
     // ...and the baseline's own realized still carries.
     expect(judgeSale(bare(['B', 50]), mkt({ B: 50 }), bare(['A', 80]), 3, {})
       .realizedTenths).toBe(3);
+  });
+
+  it('a sold player priced <= 0 in the market counts as missing (adds 0), '
+    + 'never as a sale at 0', () => {
+    for (const price of [0, -5]) {
+      expect(judgeSale(bare(['B', 50]), mkt({ A: price, B: 50 }), bare(['A', 80]), 3, {}),
+        String(price)).toEqual({ prices: [50], realizedTenths: 3 });
+    }
+    // A Players entry with no price at all reads 0 in the market: same.
+    const noPrice = integrityMarketOf({
+      A: { position: 'ATT', eligible: true },
+      B: { position: 'ATT', priceTenths: 50, eligible: true },
+    });
+    expect(judgeSale(bare(['B', 50]), noPrice, bare(['A', 80]), 3, {}).realizedTenths)
+      .toBe(3);
+  });
+
+  it('an RTDB null-padded picks list keeps the judged prices aligned', () => {
+    // RTDB hands back a list with a deleted index as null; squadFromMap
+    // skips it, so judgeSale's prices are dense — picksAtJudgedPrices must
+    // put the k-th price on the k-th REAL pick, nulls kept in place.
+    const raw: Raw = {
+      picks: [pick('A', 'ATT', 10), null, pick('B', 'ATT', 99), null, pick('C', 'ATT', 70)],
+      captainId: 'A', viceId: 'B',
+    };
+    const sale = judgeSale(sq(raw), mkt({ A: 80, B: 60, C: 60 }), bare(['B', 40]), 0, {});
+    // A new (client 10 < market 80), B held at 40, C new (client 70 > 60).
+    expect(sale.prices).toEqual([80, 40, 70]);
+    expect(picksAtJudgedPrices(raw['picks'], sale.prices)).toEqual([
+      pick('A', 'ATT', 80), null, pick('B', 'ATT', 40), null, pick('C', 'ATT', 70),
+    ]);
   });
 
   it('new pick keeps the market floor', () => {

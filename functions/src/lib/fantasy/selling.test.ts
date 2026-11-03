@@ -1,7 +1,7 @@
 // The FPL selling rule (spec §4). The (purchase, current) -> sell table below
 // is the SAME table as test/fantasy/selling_test.dart: the two twins must agree.
 import { describe, expect, it } from 'vitest';
-import { realizedOf, sellPriceTenths } from './selling';
+import { REALIZED_KEY, realizedOf, sellPriceTenths } from './selling';
 
 // (purchase, current) -> sell, in tenths of $1M.
 const SELL_TABLE: Array<[number, number, number]> = [
@@ -23,6 +23,11 @@ describe('sellPriceTenths', () => {
 });
 
 describe('realizedOf', () => {
+  it('reads the REALIZED_KEY the snapshots and History rows carry', () => {
+    expect(REALIZED_KEY).toBe('realizedTenths');
+    expect(realizedOf({ [REALIZED_KEY]: 4 })).toBe(4);
+  });
+
   it('reads realizedTenths when it is a finite number', () => {
     expect(realizedOf({ realizedTenths: 5 })).toBe(5);
     expect(realizedOf({ realizedTenths: -12 })).toBe(-12);

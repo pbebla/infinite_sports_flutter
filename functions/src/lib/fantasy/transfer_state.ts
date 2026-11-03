@@ -33,10 +33,11 @@
 
 import { FantasyConfig } from './fantasy_config';
 import { childEntries, isPlainMap, toIntLoose } from './orchestration_db';
+import { REALIZED_KEY } from './selling';
 import { FantasySquad, squadFromMap } from './squad';
 import {
   baselineRealizedOf, INVALID_KEY, integrityVerdictOf, IntegrityInputs,
-  picksAtJudgedPrices, REALIZED_KEY, SquadIntegrityIssue,
+  picksAtJudgedPrices, SquadIntegrityIssue,
 } from './squad_integrity';
 import { rolloverFreeTransfers, transferCost } from './transfers';
 

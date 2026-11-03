@@ -20,11 +20,15 @@ export function sellPriceTenths(
   return currentTenths;
 }
 
-/** The `realizedTenths` a server-written squad/baseline node carries: a
- *  finite number (truncated toward zero, Dart `.toInt()`), else 0. */
+/** The running sale profit/loss key on PublishedPicks/<gw>/<uid> and
+ *  History/<gw>/<uid> (written by the lock judge, read with realizedOf). */
+export const REALIZED_KEY = 'realizedTenths';
+
+/** The `realizedTenths` a server-written squad node carries: a finite
+ *  number (truncated toward zero, Dart `.toInt()`), else 0. */
 export function realizedOf(node: unknown): number {
   if (node === null || typeof node !== 'object') return 0;
-  const v = (node as Record<string, unknown>)['realizedTenths'];
+  const v = (node as Record<string, unknown>)[REALIZED_KEY];
   if (typeof v !== 'number' || !Number.isFinite(v)) return 0;
   return Math.trunc(v);
 }

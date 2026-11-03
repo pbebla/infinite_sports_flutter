@@ -134,10 +134,8 @@ import { FantasyConfig, FantasyPosition } from './fantasy_config';
 import { PlayerGameStats } from './player_game_stats';
 import { scorePlayerWeek, WeekScore } from './scoring';
 import { squadFromMap, squadToMap } from './squad';
-import { realizedOf } from './selling';
-import {
-  INVALID_KEY, invalidIssuesOf, isInvalidRow, REALIZED_KEY,
-} from './squad_integrity';
+import { REALIZED_KEY, realizedOf } from './selling';
+import { INVALID_KEY, invalidIssuesOf, isInvalidRow } from './squad_integrity';
 import { PlayerWeek, scoreSquadWeek, totalTenths } from './squad_week';
 import { gameScores, mapGameToStats, parseForfeitedBy } from './stats_mapper';
 

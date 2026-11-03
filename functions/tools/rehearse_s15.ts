@@ -1277,7 +1277,7 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     // already-filled season, whose Players hold end-of-season prices) would
     // be scored zero every week — skipped instead, never repaired.
     const serverIssues = squadIntegrityIssues(
-      squad, cfg, integrityMarketOf(db.get(`${F}/Players`)), null, {});
+      squad, cfg, integrityMarketOf(db.get(`${F}/Players`)), null, 0, {});
     if (serverIssues.length > 0) {
       return reject('the server would judge it invalid at the replay ' +
         `opening prices: ${serverIssues.join(', ')}`);

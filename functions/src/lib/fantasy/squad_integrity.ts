@@ -60,7 +60,8 @@
 //   - SOLD = a baseline id absent from the squad: credited by the FPL rule
 //     at the price he has NOW (market Players price; no "max(current, last
 //     week)"): realized += sellPriceTenths(paid, current) - paid. A sold
-//     player missing from the market adds 0.
+//     player missing from the market — or priced <= 0 there (no usable
+//     price) — adds 0.
 // realizedTenths = the baseline's realizedTenths + every sale this week.
 // A previous squad that was itself judged Invalid has no trusted picks (its
 // prices were never judged): every pick is then NEW and nothing is sold, so
@@ -104,10 +105,6 @@ export const SQUAD_INTEGRITY_ISSUES: readonly SquadIntegrityIssue[] = [
 
 /** The marker key on PublishedPicks/<gw>/<uid> and History/<gw>/<uid>. */
 export const INVALID_KEY = 'Invalid';
-
-/** The running sale profit/loss on PublishedPicks/<gw>/<uid> and
- *  History/<gw>/<uid> (read back with selling.ts realizedOf). */
-export const REALIZED_KEY = 'realizedTenths';
 
 /** SquadAlerts/<uid> Kind for an integrity verdict (the position-change
  *  alert carries no Kind — fantasy_parsers.dart squadAlertFromNode). */
@@ -241,7 +238,9 @@ export function judgeSale(
   for (const [id, bought] of paid) {
     if (kept.has(id)) continue;
     const m = market[id];
-    if (m === undefined) continue; // gone from the market: adds 0
+    // Gone from the market, or no usable price (a Players entry without a
+    // price reads 0): adds 0 — never a "sale at 0" that books the full loss.
+    if (m === undefined || m.priceTenths <= 0) continue;
     realizedTenths += sellPriceTenths(bought, m.priceTenths) - bought;
   }
   return { prices, realizedTenths };
@@ -287,13 +286,13 @@ function lockVerdict(
 }
 
 /** The integrity issues for one squad ([] = valid) against a parsed
- *  [previous] baseline carrying [baselineRealized]. Pure. */
+ *  [previous] baseline carrying [baselineRealized] (judgeSale's order).
+ *  Pure. */
 export function squadIntegrityIssues(
   squad: FantasySquad, cfg: FantasyConfig,
   market: Record<string, IntegrityMarketEntry>,
-  previous: FantasySquad | null,
+  previous: FantasySquad | null, baselineRealized: number,
   previousWeekPrices: Record<string, number>,
-  baselineRealized = 0,
 ): SquadIntegrityIssue[] {
   return lockVerdict(squad, cfg, market, previous, baselineRealized,
     previousWeekPrices).issues;

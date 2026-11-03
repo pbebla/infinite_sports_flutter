@@ -18,8 +18,10 @@
 //   status (opens <= previous lock + 24h always), but is mapped to 'open'
 //   defensively.
 //
-// - PublishedPicks/<gw> = verbatim Squads snapshot (uid -> squad map), the
-//   spec §9 anti-copy reveal. Written ONCE via a set-if-absent claim the
+// - PublishedPicks/<gw> = the judged Squads snapshot (uid -> squad map; a
+//   valid squad at its judged prices + `realizedTenths`, an invalid one
+//   verbatim + `Invalid` — below), the spec §9 anti-copy reveal. Written
+//   ONCE via a set-if-absent claim the
 //   first time the sweep sees the current gameweek locked — never
 //   overwritten, so late sweeps after downtime still snapshot exactly once.
 //   SQUAD INTEGRITY (audit I2, 2026-11-01): the same claim judges every
