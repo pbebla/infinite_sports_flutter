@@ -376,8 +376,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('chip_active_benchBoost')), findsNothing);
 
-    // Wildcard / Free Hit are visual-only until transfers (P3c).
-    expect(find.text('Coming with transfers'), findsNWidgets(2));
+    // Wildcard / Free Hit are playable now (plan 2026-11-03): no placeholder
+    // caption — the 'transfers' group below covers their dialogs.
+    expect(find.text('Coming with transfers'), findsNothing);
   });
 
   group('chip availability counts (real usage)', () {
@@ -1334,5 +1335,521 @@ void main() {
       // $50.0M − $35.0M + his $5.0M back.
       expect(leftText(tester, 'picker_left'), '\$20.0M left');
     });
+  });
+
+  // Transfers (plan 2026-11-03, Task 4): the line under the budget bar, the
+  // "Take a points hit?" confirm before a save that adds a cost, and the
+  // Wildcard / Free Hit chips — all read the shared draft's transferPreview.
+  group('transfers (plan 2026-11-03)', () {
+    final held = [for (final p in fullSquad().picks) p.playerId];
+    const editingGw = 3;
+
+    Color red(Brightness b) => b == Brightness.dark
+        ? const Color(0xFFFF5252)
+        : const Color(0xFFD32F2F);
+
+    /// The transfers that never touch the armbands (captain GK One, vice
+    /// Def One): fixture player out → market player in, same position.
+    const swaps = [
+      ('Def Two', 'Deb Rock'),
+      ('Att One', 'Ava Striker'),
+      ('Att Two', 'Axel Shot'),
+      ('Bench Def', 'Dom Stone'),
+      ('Bench Att', 'Ari Goal'),
+    ];
+
+    FantasyPlayer market(String name) =>
+        players.firstWhere((p) => p.name == name);
+
+    /// The saved squad: the fixture squad with the first [n] [swaps] made.
+    FantasySquad savedWith(int n, {String? chip}) {
+      final out = {for (final s in swaps.take(n)) s.$1: s.$2};
+      return FantasySquad(
+        picks: [
+          for (final p in fullSquad().picks)
+            out.containsKey(p.playerId)
+                ? pick(out[p.playerId]!, p.position,
+                    price: market(out[p.playerId]!).priceTenths,
+                    bench: p.bench)
+                : p,
+        ],
+        captainId: 'GK One',
+        viceId: 'Def One',
+        chip: chip,
+      );
+    }
+
+    /// A shared draft the way the hub feeds it: money ready (a first squad
+    /// at today's market), the transfer feed's [state] (null = the node is
+    /// absent) and whether it has [answered].
+    SquadDraftController draftWith({
+      FantasySquad? stored,
+      TransferStateView? state,
+      bool answered = true,
+    }) {
+      final d = SquadDraftController(
+          config: FantasyConfig.futsalDefault(),
+          initial: stored ?? fullSquad());
+      d.setSaleContext(
+          sale: const SaleBaselineState(loaded: true),
+          currentPrices: {
+            for (final id in held) id: 50,
+            for (final p in players) p.name: p.priceTenths,
+          },
+          editingGw: editingGw);
+      d.setTransferContext(
+          state: state, answered: answered, editingGw: editingGw);
+      return d;
+    }
+
+    /// Last week's locked squad is the fixture squad; 2 free this week.
+    TransferStateView counted({int? free = 2}) =>
+        TransferStateView(free: free, countFromGw: editingGw, countFrom: held);
+
+    /// Transfers [from]..[n] on the draft (the first [n] of [swaps]).
+    void transfer(SquadDraftController d, int n, {int from = 0}) {
+      for (final s in swaps.skip(from).take(n - from)) {
+        final i = d.picks.indexWhere((p) => p?.playerId == s.$1);
+        d.setPickAt(i, d.newPick(market(s.$2), bench: d.slots[i].bench));
+      }
+    }
+
+    Text lineText(WidgetTester tester) =>
+        tester.widget<Text>(find.byKey(const ValueKey('transfers_line_text')));
+
+    /// The chip row scrolls sideways (four 132 px cards): bring the chip on
+    /// screen first, as a thumb would, then tap it.
+    Future<void> tapChip(WidgetTester tester, String id) async {
+      final chip = find.byKey(ValueKey('fantasy_chip_$id'));
+      await tester.ensureVisible(chip);
+      await tester.pumpAndSettle();
+      await tester.tap(chip, warnIfMissed: false);
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> tapSave(WidgetTester tester) async {
+      await tester.tap(find.byKey(const ValueKey('squad_save')));
+      await tester.pumpAndSettle();
+    }
+
+    // The line.
+
+    testWidgets('a first team: the free line, muted; Wildcard and Free Hit '
+        'sit out under "Your first team is free"', (tester) async {
+      final draft = draftWith(state: null);
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      expect(lineText(tester).data,
+          'Your first team is free — change anything until the deadline.');
+      final context =
+          tester.element(find.byKey(const ValueKey('transfers_line')));
+      expect(lineText(tester).style?.color,
+          Theme.of(context).colorScheme.onSurfaceVariant);
+      expect(find.text('Your first team is free'), findsNWidgets(2));
+
+      await tester.tap(find.byKey(const ValueKey('fantasy_chip_wildcard')),
+          warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(find.text('Play your Wildcard?'), findsNothing);
+      expect(draft.chip, isNull);
+    });
+
+    testWidgets('not answered yet (or the read failed): "Transfer count '
+        'updating…", never a first team', (tester) async {
+      final draft = draftWith(state: null, answered: false);
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      expect(lineText(tester).data, 'Transfer count updating…');
+      expect(find.text('Your first team is free'), findsNothing);
+      // The chips are not held back by an unanswered feed.
+      expect(find.text('Coming with transfers'), findsNothing);
+    });
+
+    testWidgets('an older node with no baseline: no line at all',
+        (tester) async {
+      final draft = draftWith(state: const TransferStateView(free: 2));
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      expect(find.byKey(const ValueKey('transfers_line')), findsNothing);
+      expect(find.byKey(const ValueKey('budget_bar')), findsOneWidget);
+    });
+
+    testWidgets('the line follows the draft: within the free ones muted, '
+        'past them in the bright down red', (tester) async {
+      final draft = draftWith(state: counted());
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      expect(lineText(tester).data, '0 of 2 free transfers used');
+
+      transfer(draft, 1);
+      await tester.pump();
+      expect(lineText(tester).data, '1 of 2 free transfers used');
+      final context =
+          tester.element(find.byKey(const ValueKey('transfers_line')));
+      expect(lineText(tester).style?.color,
+          Theme.of(context).colorScheme.onSurfaceVariant);
+
+      transfer(draft, 3, from: 1);
+      await tester.pump();
+      expect(lineText(tester).data, '3 transfers · 2 free · −4 pts this week');
+      expect(lineText(tester).style?.color, red(Brightness.light));
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('the cost text is fantasyDownRed in $brightness — never '
+          'the soft error pink', (tester) async {
+        final draft = draftWith(state: counted());
+        transfer(draft, 4);
+        await pumpBuilder(tester, draft: draft, brightness: brightness);
+        await tester.pump();
+        expect(lineText(tester).data,
+            '4 transfers · 2 free · −8 pts this week');
+        expect(lineText(tester).style?.color, red(brightness));
+        final icon = tester.widget<Icon>(find.descendant(
+            of: find.byKey(const ValueKey('transfers_line')),
+            matching: find.byType(Icon)));
+        expect(icon.color, red(brightness));
+      });
+    }
+
+    testWidgets('the chip in the draft is said in the line', (tester) async {
+      final draft = draftWith(state: counted());
+      await pumpBuilder(tester, draft: draft);
+      draft.setChip('wildcard');
+      await tester.pump();
+      expect(lineText(tester).data,
+          'Wildcard on — every transfer is free this week.');
+      draft.setChip('freeHit');
+      await tester.pump();
+      expect(lineText(tester).data,
+          'Free Hit on — every transfer is free, and your team comes back '
+          'after this week.');
+    });
+
+    testWidgets('sits directly under the budget bar, above the court',
+        (tester) async {
+      final draft = draftWith(state: counted());
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      final bar = tester.getRect(find.byKey(const ValueKey('budget_bar')));
+      final line = tester.getRect(find.byKey(const ValueKey('transfers_line')));
+      final court =
+          tester.getRect(find.byKey(const ValueKey('squad_chip_GK One')));
+      expect(line.top, greaterThanOrEqualTo(bar.bottom));
+      expect(line.top - bar.bottom, lessThan(16));
+      expect(line.bottom, lessThanOrEqualTo(court.top));
+    });
+
+    testWidgets('a locked court has no transfers line', (tester) async {
+      final draft = draftWith(state: counted());
+      await pumpBuilder(tester,
+          draft: draft, lockOverride: FantasyLockOverride.locked);
+      await tester.pump();
+      expect(find.byKey(const ValueKey('transfers_line')), findsNothing);
+    });
+
+    // The confirm.
+
+    testWidgets('a save whose cost rises from 0 to 4 asks first; Cancel '
+        'saves nothing', (tester) async {
+      final draft = draftWith(state: counted());
+      transfer(draft, 3);
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+
+      await tapSave(tester);
+      expect(find.text('Take a points hit?'), findsOneWidget);
+      expect(
+          find.text('This team uses 3 transfers and you have 2 free, so it '
+              'costs 4 points this week.'),
+          findsOneWidget);
+      expect(find.text('Cancel'), findsOneWidget);
+      expect(find.text('Save (−4 pts)'), findsOneWidget);
+      expect(savedSquads, isEmpty, reason: 'nothing is saved before the yes');
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.text('Take a points hit?'), findsNothing);
+      expect(savedSquads, isEmpty);
+      expect(find.text('Squad saved — good luck!'), findsNothing);
+      // Still editable: the draft is dirty and Save is armed, not stuck.
+      expect(draft.dirty, isTrue);
+      expect(find.text('Save squad'), findsOneWidget);
+      expect(saveEnabled(tester), isTrue);
+    });
+
+    testWidgets('confirming "Save (−4 pts)" saves the squad as it was',
+        (tester) async {
+      final draft = draftWith(state: counted());
+      transfer(draft, 3);
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+
+      await tapSave(tester);
+      await tester.tap(find.text('Save (−4 pts)'));
+      await tester.pumpAndSettle();
+      expect(savedSquads, hasLength(1));
+      expect({for (final p in savedSquads.single.picks) p.playerId},
+          containsAll(['Deb Rock', 'Ava Striker', 'Axel Shot']));
+      expect(find.text('Squad saved — good luck!'), findsOneWidget);
+      expect(draft.dirty, isFalse);
+    });
+
+    testWidgets('one transfer with 0 free reads singular', (tester) async {
+      final draft = draftWith(state: counted(free: 0));
+      transfer(draft, 1);
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      await tapSave(tester);
+      expect(
+          find.text('This team uses 1 transfer and you have 0 free, so it '
+              'costs 4 points this week.'),
+          findsOneWidget);
+      expect(find.text('Save (−4 pts)'), findsOneWidget);
+    });
+
+    testWidgets('a hit already saved is not asked again; going deeper is',
+        (tester) async {
+      // Saved with 3 transfers (−4); the draft starts from it.
+      final draft = draftWith(stored: savedWith(3), state: counted());
+      draft.setChip('tripleCaptain'); // an edit that changes no transfer
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      expect(lineText(tester).data, '3 transfers · 2 free · −4 pts this week');
+
+      await tapSave(tester);
+      expect(find.text('Take a points hit?'), findsNothing);
+      expect(savedSquads, hasLength(1));
+
+      // A fourth transfer takes the cost from −4 to −8: ask again.
+      transfer(draft, 4, from: 3);
+      await tester.pump();
+      await tapSave(tester);
+      expect(
+          find.text('This team uses 4 transfers and you have 2 free, so it '
+              'costs 8 points this week.'),
+          findsOneWidget);
+      expect(find.text('Save (−8 pts)'), findsOneWidget);
+    });
+
+    testWidgets('a save that does not raise the cost shows no dialog — '
+        'within the free ones, or when it drops', (tester) async {
+      // Within the free ones: 0 → 0.
+      final within = draftWith(state: counted());
+      transfer(within, 2);
+      await pumpBuilder(tester, draft: within);
+      await tester.pump();
+      await tapSave(tester);
+      expect(find.text('Take a points hit?'), findsNothing);
+      expect(savedSquads, hasLength(1));
+
+      // Cost drops: saved with 4 transfers (−8), back to 3 (−4).
+      savedSquads.clear();
+      final drops = draftWith(stored: savedWith(4), state: counted());
+      final i = drops.picks.indexWhere((p) => p?.playerId == 'Dom Stone');
+      drops.setPickAt(i, pick('Bench Def', FantasyPosition.def, bench: true));
+      await pumpBuilder(tester, draft: drops);
+      await tester.pump();
+      expect(lineText(tester).data, '3 transfers · 2 free · −4 pts this week');
+      await tapSave(tester);
+      expect(find.text('Take a points hit?'), findsNothing);
+      expect(savedSquads, hasLength(1));
+    });
+
+    testWidgets('Save is never blocked by the line: a save while the count '
+        'is not ready, or the node is older, or a first team, saves '
+        'without a dialog (D1d)', (tester) async {
+      final cases = <String, SquadDraftController>{
+        'not answered': draftWith(state: null, answered: false),
+        'older node': draftWith(state: const TransferStateView(free: 2)),
+        'first team': draftWith(state: null),
+      };
+      for (final entry in cases.entries) {
+        savedSquads.clear();
+        transfer(entry.value, 4);
+        await pumpBuilder(tester, draft: entry.value);
+        await tester.pump();
+        await tapSave(tester);
+        expect(find.text('Take a points hit?'), findsNothing,
+            reason: entry.key);
+        expect(savedSquads, hasLength(1), reason: entry.key);
+      }
+    });
+
+    testWidgets('a Wildcard / Free Hit week costs nothing: no dialog, the '
+        'chip is saved', (tester) async {
+      final draft = draftWith(state: counted());
+      transfer(draft, 4);
+      draft.setChip('wildcard');
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      expect(lineText(tester).data,
+          'Wildcard on — every transfer is free this week.');
+      await tapSave(tester);
+      expect(find.text('Take a points hit?'), findsNothing);
+      expect(savedSquads.single.chip, 'wildcard');
+    });
+
+    testWidgets('a failed save after the yes keeps the edits and says try '
+        'again', (tester) async {
+      final draft = draftWith(state: counted());
+      transfer(draft, 3);
+      await pumpBuilder(tester,
+          draft: draft, onSave: (_) async => throw StateError('network'));
+      await tester.pump();
+      await tapSave(tester);
+      await tester.tap(find.text('Save (−4 pts)'));
+      await tester.pumpAndSettle();
+      expect(find.text("Couldn't save — try again."), findsOneWidget);
+      expect(draft.dirty, isTrue);
+    });
+
+    // The chips.
+
+    testWidgets('Wildcard from the builder: tap, confirm, armed — and the '
+        'line says so', (tester) async {
+      final draft = draftWith(state: counted());
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+
+      await tapChip(tester, 'wildcard');
+      await tester.pumpAndSettle();
+      expect(find.text('Play your Wildcard?'), findsOneWidget);
+      expect(draft.chip, isNull);
+      await tester.tap(find.text('Play Wildcard'));
+      await tester.pumpAndSettle();
+      expect(draft.chip, 'wildcard');
+      expect(find.byKey(const ValueKey('chip_active_wildcard')),
+          findsOneWidget);
+      expect(lineText(tester).data,
+          'Wildcard on — every transfer is free this week.');
+
+      // Free Hit replaces it, after its own question.
+      await tapChip(tester, 'freeHit');
+      await tester.pumpAndSettle();
+      expect(find.text('Play your Free Hit?'), findsOneWidget);
+      await tester.tap(find.text('Play Free Hit'));
+      await tester.pumpAndSettle();
+      expect(draft.chip, 'freeHit');
+      expect(find.byKey(const ValueKey('chip_active_wildcard')), findsNothing);
+    });
+
+    testWidgets('arm Wildcard, make 4 transfers, switch it off: the cost '
+        'line and the confirm are back at once', (tester) async {
+      final draft = draftWith(state: counted());
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+
+      await tapChip(tester, 'wildcard');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Play Wildcard'));
+      await tester.pumpAndSettle();
+
+      // Four transfers through the real picker.
+      for (final s in swaps.take(4)) {
+        await tester.tap(find.byKey(ValueKey('squad_chip_${s.$1}')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('action_swap')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(ValueKey('picker_row_${s.$2}')));
+        await tester.pumpAndSettle();
+      }
+      expect(lineText(tester).data,
+          'Wildcard on — every transfer is free this week.');
+
+      // Tapping the armed chip switches it off — no dialog.
+      await tapChip(tester, 'wildcard');
+      await tester.pumpAndSettle();
+      expect(find.text('Play your Wildcard?'), findsNothing);
+      expect(draft.chip, isNull);
+      expect(lineText(tester).data,
+          '4 transfers · 2 free · −8 pts this week');
+
+      await tapSave(tester);
+      expect(find.text('Take a points hit?'), findsOneWidget);
+      expect(
+          find.text('This team uses 4 transfers and you have 2 free, so it '
+              'costs 8 points this week.'),
+          findsOneWidget);
+      expect(find.text('Save (−8 pts)'), findsOneWidget);
+    });
+
+    testWidgets('"Used" still blocks arming Wildcard and Free Hit',
+        (tester) async {
+      // Ten weekly gameweeks locking Jan 1..10 22:00Z; editing GW4.
+      final gws = [
+        for (var n = 1; n <= 10; n++)
+          Gameweek(
+            number: n,
+            date: '01${n.toString().padLeft(2, '0')}2026',
+            lockUtc: DateTime.utc(2026, 1, n, 22),
+            opensUtc: null,
+          ),
+      ];
+      final draft = draftWith(state: counted());
+      await pumpBuilder(
+        tester,
+        draft: draft,
+        gameweeks: gws,
+        nowUtc: () => DateTime.utc(2026, 1, 3, 23),
+        chipHistory: {
+          1: const ChipHistoryEntry(chip: 'wildcard'),
+          2: const ChipHistoryEntry(chip: 'freeHit'),
+        },
+      );
+      await tester.pump();
+      expect(find.text('Used'), findsNWidgets(2));
+      await tapChip(tester, 'wildcard');
+      await tapChip(tester, 'freeHit');
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(draft.chip, isNull);
+    });
+
+    // 360 px, both themes.
+
+    for (final brightness in Brightness.values) {
+      testWidgets('360 px: the line, the captions and the hit dialog fit, '
+          'no overflow — $brightness', (tester) async {
+        void expectInside360(Finder finder) {
+          final r = tester.getRect(finder);
+          expect(r.left, greaterThanOrEqualTo(0));
+          expect(r.right, lessThanOrEqualTo(360));
+        }
+
+        // A first team: the longest free line + two caption cards.
+        final first = draftWith(state: null);
+        await pumpBuilder(tester,
+            draft: first, brightness: brightness, size: const Size(360, 1900));
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        expectInside360(find.byKey(const ValueKey('transfers_line')));
+        expect(find.text('Your first team is free'), findsNWidgets(2));
+
+        // A hit: the cost line and the dialog.
+        final hit = draftWith(state: counted());
+        transfer(hit, 4);
+        await pumpBuilder(tester,
+            draft: hit, brightness: brightness, size: const Size(360, 1900));
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        expectInside360(find.byKey(const ValueKey('transfers_line')));
+        expect(lineText(tester).style?.color, red(brightness));
+        await tapSave(tester);
+        expect(tester.takeException(), isNull);
+        for (final text in [
+          'Take a points hit?',
+          'This team uses 4 transfers and you have 2 free, so it costs 8 '
+              'points this week.',
+          'Cancel',
+          'Save (−8 pts)',
+        ]) {
+          expectInside360(find.text(text));
+        }
+        for (final t in tester.widgetList<Text>(find.byType(Text))) {
+          expect(t.overflow, isNot(TextOverflow.ellipsis), reason: t.data);
+        }
+      });
+    }
   });
 }

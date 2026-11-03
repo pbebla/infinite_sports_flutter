@@ -94,6 +94,39 @@ void main() {
     await tester.pumpWidget(const SizedBox()); // dispose chip timer
   });
 
+  // Plan 2026-11-03: a first team is free and never banks — the Transfers
+  // section says so first, then the usual allowance, all from the live config.
+  testWidgets('Transfers: a first team is free, then the config\'s weekly '
+      'allowance — and it follows the config', (tester) async {
+    final controller = await pumpRules(tester);
+    Text transfersBody() => tester.widget<Text>(find.byWidgetPredicate(
+        (w) => w is Text && (w.data ?? '').startsWith('Your first team')));
+
+    expect(
+        transfersBody().data,
+        startsWith('Your first team is free: change it as much as you like '
+            'until your first deadline. After that you get 2 free transfers '
+            'each gameweek;'));
+    // The rest of the old sentence follows, unchanged.
+    expect(
+        transfersBody().data,
+        contains('unused ones bank up to 7. Every transfer beyond your free '
+            'ones costs 4 points off that week\'s score.'));
+
+    controller.add(_state(FantasyConfig.futsalDefault().toMap()
+      ..['lockOverride'] = 'open'
+      ..['freeTransfersPerWeek'] = 3));
+    await tester.pump();
+    expect(
+        transfersBody().data,
+        startsWith('Your first team is free: change it as much as you like '
+            'until your first deadline. After that you get 3 free transfers '
+            'each gameweek;'));
+
+    await controller.close();
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('a changed config re-renders the page from the stream',
       (tester) async {
     final controller = await pumpRules(tester);

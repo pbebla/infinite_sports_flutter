@@ -801,5 +801,68 @@ void main() {
       d.revertToStored();
       expect(d.transferPreview.kind, TransferPreviewKind.counted);
     });
+
+    // The "Take a points hit?" confirm compares the draft's cost with what
+    // the SAVED squad already costs — same state, the stored picks + chip.
+    group('storedTransferPreview (the saved squad, counted the same way)', () {
+      FantasySquad savedWithOneTransfer({String? chip}) => FantasySquad(
+            picks: [
+              for (final p in fullSquad().picks)
+                p.playerId == 'Att One'
+                    ? pick('Att New', FantasyPosition.att)
+                    : p,
+            ],
+            captainId: 'GK One',
+            viceId: 'Def One',
+            chip: chip,
+          );
+
+      test('counts the stored picks, not the edits — until markSaved', () {
+        final d = SquadDraftController(
+            config: cfg, initial: savedWithOneTransfer());
+        d.setTransferContext(state: view(), answered: true, editingGw: 5);
+        expect(d.storedTransferPreview.used, 1);
+        expect(d.transferPreview.used, 1);
+
+        d.removePlayer('Def Two');
+        d.addPlayer(player('Def New', FantasyPosition.def, 50));
+        expect(d.transferPreview.used, 2);
+        expect(d.storedTransferPreview.used, 1, reason: 'not saved yet');
+
+        d.markSaved();
+        expect(d.storedTransferPreview.used, 2);
+      });
+
+      test('follows the stream\'s latest squad, even while dirty', () {
+        final d = draftWith();
+        d.setChip('benchBoost'); // dirty
+        expect(d.storedTransferPreview.used, 0);
+        d.adoptFromStream(savedWithOneTransfer());
+        expect(d.storedTransferPreview.used, 1);
+      });
+
+      test('the stored chip counts: a saved Wildcard week is unlimited', () {
+        final d = SquadDraftController(
+            config: cfg, initial: savedWithOneTransfer(chip: 'wildcard'));
+        d.setTransferContext(state: view(), answered: true, editingGw: 5);
+        expect(d.storedTransferPreview.kind, TransferPreviewKind.unlimited);
+        d.setChip(null);
+        expect(d.transferPreview.kind, TransferPreviewKind.counted);
+        expect(d.storedTransferPreview.kind, TransferPreviewKind.unlimited);
+      });
+
+      test('never saved: nothing owned, nothing counted', () {
+        final d = SquadDraftController(config: cfg);
+        d.setTransferContext(state: view(), answered: true, editingGw: 5);
+        expect(d.storedTransferPreview.kind, TransferPreviewKind.counted);
+        expect(d.storedTransferPreview.used, 0);
+        expect(d.storedTransferPreview.costPoints, 0);
+      });
+
+      test('a draft with no context is notReady, stored too', () {
+        final d = SquadDraftController(config: cfg, initial: fullSquad());
+        expect(d.storedTransferPreview.kind, TransferPreviewKind.notReady);
+      });
+    });
   });
 }

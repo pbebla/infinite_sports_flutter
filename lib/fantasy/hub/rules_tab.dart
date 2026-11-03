@@ -159,8 +159,10 @@ class _RulesBody extends StatelessWidget {
         _Section(
           title: 'Transfers',
           child: _Body(
-            'You get ${cfg.freeTransfersPerWeek} free transfers each '
-            'gameweek; unused ones bank up to ${cfg.maxBankedTransfers}. '
+            'Your first team is free: change it as much as you like until '
+            'your first deadline. After that you get '
+            '${cfg.freeTransfersPerWeek} free transfers each gameweek; '
+            'unused ones bank up to ${cfg.maxBankedTransfers}. '
             'Every transfer beyond your free ones costs '
             '${cfg.extraTransferCost} points off that week\'s score.\n\n'
             'Worked example: with ${cfg.freeTransfersPerWeek} free '

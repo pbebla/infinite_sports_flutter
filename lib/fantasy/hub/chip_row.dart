@@ -1,11 +1,14 @@
 // The chips row (P3b, spec §6; v2 in the owner's feedback round, Task 6):
-// the four medallion assets as cards with a per-set count badge. Triple
-// Captain and Bench Boost toggle FantasySquad.chip (one active per gameweek
-// — selecting one deselects the other) with an accent glow when active;
-// Wildcard and Free Hit render with a "Coming with transfers" caption and
-// stay untappable until the transfer flows land (P3c). Effect lines, the
-// set windows in the heading and the counts all read from the live config,
-// never hard-coded.
+// the four medallion assets as cards with a per-set count badge. All four
+// toggle FantasySquad.chip (one active per gameweek — selecting one
+// deselects the other) with an accent glow when active. Tapping the armed
+// one switches it off at once; ARMING Wildcard or Free Hit asks first
+// (transfer_dialogs.dart — they rebuild the team, so a stray tap shouldn't
+// play one), while Triple Captain and Bench Boost arm on the tap. While the
+// team is still a first team (nothing to transfer, plan 2026-11-03) Wildcard
+// and Free Hit can't be armed and say "Your first team is free". Effect
+// lines, the set windows in the heading and the counts all read from the
+// live config, never hard-coded.
 //
 // Counts (owner feedback round): each badge reads the manager's REAL usage
 // (chip_usage.dart chipAvailability over their History): "1 left" while
@@ -22,6 +25,7 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/transfer_dialogs.dart';
 
 class FantasyChipRow extends StatelessWidget {
   const FantasyChipRow({
@@ -31,11 +35,13 @@ class FantasyChipRow extends StatelessWidget {
     required this.enabled,
     required this.onChipChanged,
     this.availability,
+    this.firstTeam = false,
   });
 
   final FantasyConfig config;
 
-  /// 'tripleCaptain' | 'benchBoost' | null — FantasySquad.chip.
+  /// 'tripleCaptain' | 'benchBoost' | 'wildcard' | 'freeHit' | null —
+  /// FantasySquad.chip.
   final String? activeChip;
 
   /// false while locked: everything renders, nothing toggles.
@@ -47,18 +53,25 @@ class FantasyChipRow extends StatelessWidget {
   /// armed one "Active".
   final Map<String, ChipAvailability>? availability;
 
+  /// The draft's transfer preview says "first team": Wildcard and Free Hit
+  /// have nothing to transfer, so they sit out under a caption (an armed one
+  /// can still be switched off).
+  final bool firstTeam;
+
   ChipAvailability _availability(String id) =>
       availability?[id] ??
       (id == activeChip ? ChipAvailability.active : ChipAvailability.available);
 
-  /// A spent chip only taps to DISARM (it was armed anyway); otherwise the
-  /// usual toggle while editable.
-  VoidCallback? _tap(String id) {
+  /// A spent chip only taps to DISARM (it was armed anyway), and so does a
+  /// Wildcard / Free Hit on a first team; otherwise the usual toggle while
+  /// editable.
+  VoidCallback? _tap(BuildContext context, String id) {
     if (!enabled) return null;
-    if (_availability(id) == ChipAvailability.used && activeChip != id) {
-      return null;
+    if (activeChip != id) {
+      if (_availability(id) == ChipAvailability.used) return null;
+      if (firstTeam && _asksFirst(id)) return null;
     }
-    return () => _toggle(id);
+    return () => _toggle(context, id);
   }
 
   @override
@@ -95,7 +108,7 @@ class FantasyChipRow extends StatelessWidget {
                 effect: 'Captain ×${config.tripleCaptainMultiplier} this week',
                 active: activeChip == 'tripleCaptain',
                 availability: _availability('tripleCaptain'),
-                onTap: _tap('tripleCaptain'),
+                onTap: _tap(context, 'tripleCaptain'),
               ),
               const SizedBox(width: 10),
               _ChipCard(
@@ -105,7 +118,7 @@ class FantasyChipRow extends StatelessWidget {
                 effect: 'Bench scores full points this week',
                 active: activeChip == 'benchBoost',
                 availability: _availability('benchBoost'),
-                onTap: _tap('benchBoost'),
+                onTap: _tap(context, 'benchBoost'),
               ),
               const SizedBox(width: 10),
               _ChipCard(
@@ -113,10 +126,10 @@ class FantasyChipRow extends StatelessWidget {
                 asset: 'assets/fantasy/chip_wildcard.png',
                 label: 'Wildcard',
                 effect: 'Unlimited transfers, permanent rebuild',
-                caption: 'Coming with transfers',
-                active: false,
+                caption: firstTeam ? _firstTeamCaption : null,
+                active: activeChip == 'wildcard',
                 availability: _availability('wildcard'),
-                onTap: null,
+                onTap: _tap(context, 'wildcard'),
               ),
               const SizedBox(width: 10),
               _ChipCard(
@@ -124,10 +137,10 @@ class FantasyChipRow extends StatelessWidget {
                 asset: 'assets/fantasy/chip_free_hit.png',
                 label: 'Free Hit',
                 effect: 'One-week rebuild — squad returns after',
-                caption: 'Coming with transfers',
-                active: false,
+                caption: firstTeam ? _firstTeamCaption : null,
+                active: activeChip == 'freeHit',
                 availability: _availability('freeHit'),
-                onTap: null,
+                onTap: _tap(context, 'freeHit'),
               ),
             ],
           ),
@@ -136,9 +149,22 @@ class FantasyChipRow extends StatelessWidget {
     );
   }
 
-  /// One active chip max: tapping the active one clears it, tapping another
-  /// replaces it.
-  void _toggle(String id) => onChipChanged(activeChip == id ? null : id);
+  static const _firstTeamCaption = 'Your first team is free';
+
+  /// Wildcard and Free Hit rebuild the team: arming either asks first.
+  static bool _asksFirst(String id) => id == 'wildcard' || id == 'freeHit';
+
+  /// One active chip max: tapping the active one clears it (never asks),
+  /// tapping another replaces it — Wildcard / Free Hit only after the yes.
+  Future<void> _toggle(BuildContext context, String id) async {
+    if (activeChip == id) return onChipChanged(null);
+    if (_asksFirst(id)) {
+      final yes =
+          await showChipConfirmDialog(context, chip: id, config: config);
+      if (!yes || !context.mounted) return;
+    }
+    onChipChanged(id);
+  }
 }
 
 class _ChipCard extends StatelessWidget {
@@ -171,7 +197,9 @@ class _ChipCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final accent = fantasyAccent(context);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final comingSoon = caption != null;
+    // A captioned chip that can't be tapped sits dimmed; an armed one stays
+    // lit even under a caption.
+    final dimmed = caption != null && onTap == null;
     final used = availability == ChipAvailability.used;
     final badge = Container(
       key: ValueKey('chip_count_$id'),
@@ -202,7 +230,7 @@ class _ChipCard extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(14),
       child: Opacity(
-        opacity: comingSoon ? 0.65 : 1,
+        opacity: dimmed ? 0.65 : 1,
         child: AnimatedContainer(
           duration:
               reduceMotion ? Duration.zero : const Duration(milliseconds: 200),
@@ -261,7 +289,7 @@ class _ChipCard extends StatelessWidget {
                   color: scheme.onSurfaceVariant,
                 ),
               ),
-              if (comingSoon) ...[
+              if (caption != null) ...[
                 const SizedBox(height: 5),
                 Text(
                   caption!,

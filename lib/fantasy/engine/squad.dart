@@ -38,7 +38,8 @@ class FantasySquad {
   final List<SquadPick> picks;
   final String captainId;
   final String viceId;
-  final String? chip; // 'tripleCaptain' | 'benchBoost' | null for the week
+  // 'tripleCaptain' | 'benchBoost' | 'wildcard' | 'freeHit' | null (the week).
+  final String? chip;
 
   Iterable<SquadPick> get starters => picks.where((p) => !p.bench);
   Iterable<SquadPick> get bench => picks.where((p) => p.bench);

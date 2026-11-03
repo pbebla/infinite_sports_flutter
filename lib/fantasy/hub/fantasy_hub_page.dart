@@ -27,6 +27,15 @@
 // market prices and the gameweek being edited. It does NOT join the reveal
 // gate — until it answers the draft simply isn't moneyReady.
 //
+// Transfers (plan 2026-11-03, spec §5): the own `TransferState/<uid>` stream
+// feeds the same draft (SquadDraftController.setTransferContext) with the
+// SAME edited gameweek the money uses, so the squad builder's transfers line
+// and "Take a points hit?" count against the server's own baseline. Error ≠
+// fact: until it answers, after it fails, or with nobody signed in (the
+// signed-out feed's lone null means "no user", not "no node"), the draft's
+// preview is "not ready" — never a free first team. Also not part of the
+// reveal gate.
+//
 // Player profiles (round 3, spec §4): EVERY player tap inside the hub — News
 // "View player" and compact rows, the My Team court (chip sheet's "Player
 // profile"; a locked court's chip tap), the Leaderboards tab's Team of the
@@ -105,6 +114,8 @@ class FantasyHubPage extends StatefulWidget {
     this.nowUtc,
     this.accessStates,
     this.saleBaselineStates,
+    this.transferStateStates,
+    this.signedInUid,
     this.priceHistoryStates,
     this.createCheckoutUrl,
     this.launchExternal,
@@ -166,6 +177,14 @@ class FantasyHubPage extends StatefulWidget {
 
   /// Replaces `FantasyService.watchMySaleBaseline` (FPL selling).
   final Stream<SaleBaselineState>? saleBaselineStates;
+
+  /// Replaces `FantasyService.watchMyTransferStateAuto` (the transfers line
+  /// and points-hit confirm): null = the node is ABSENT (a first team).
+  final Stream<TransferStateView?>? transferStateStates;
+
+  /// Replaces the signed-in user's uid (null = signed out) — the gate the
+  /// transfer feed is only subscribed behind.
+  final String? Function()? signedInUid;
 
   /// Replaces `FantasyService.watchPriceHistory` (FPL selling: the market
   /// floor a new pick is charged at uses last week's prices).
@@ -267,6 +286,13 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   /// draft just isn't moneyReady until it lands.
   SaleBaselineState? _sale;
 
+  /// The signed-in user's transfer state (`TransferState/<uid>`): null = the
+  /// node is ABSENT, only meaningful once [_transferAnswered]. False before
+  /// the first emission, after the feed failed and with nobody signed in —
+  /// the draft's preview is then "not ready". NOT part of the reveal gate.
+  TransferStateView? _transfer;
+  bool _transferAnswered = false;
+
   /// The season's price history (`PriceHistory/<gw>/<name>`, the prices
   /// DURING each locked week): the draft's market floor for a new pick
   /// reads `PriceHistory/<editingGw − 1>`, as the server's judge does.
@@ -321,6 +347,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   StreamSubscription<Set<int>>? _voidedSub;
   StreamSubscription<FantasyAccessState>? _accessSub;
   StreamSubscription<SaleBaselineState>? _saleSub;
+  StreamSubscription<TransferStateView?>? _transferSub;
   StreamSubscription<Map<int, Map<String, int>>>? _priceHistorySub;
 
   /// The push-tapped news post still to focus; cleared once the News tab
@@ -398,6 +425,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
       if (mounted) setState(() => _squadLoaded = true);
     });
     _subscribeSaleBaseline();
+    _subscribeTransferState();
     _subscribePriceHistory();
     _alertSub = (widget.alertStates ??
             FantasyService.watchMySquadAlertAuto(widget.sport, widget.season))
@@ -494,6 +522,50 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     }
   }
 
+  /// The signed-in user's uid; null when signed out (or, in widget tests,
+  /// with no Firebase app) — never throws.
+  String? _signedInUid() {
+    final seam = widget.signedInUid;
+    if (seam != null) return seam();
+    try {
+      return FirebaseAuth.instance.currentUser?.uid;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Listens to the own transfer state (plan 2026-11-03). Error ≠ fact, the
+  /// same one-shot subscription as the sale baseline (the service's stream
+  /// ends after an error; there is no retry): data = answered; an error =
+  /// NOT answered ("Transfer count updating…", never a first team). Nobody
+  /// signed in = never subscribed: the real feed's lone null for a signed-out
+  /// session is "no user", not "the node is absent". Never part of the
+  /// reveal gate.
+  void _subscribeTransferState() {
+    _transferSub?.cancel();
+    void failed(Object e) {
+      debugPrint('FantasyHubPage: transfer state feed failed: $e');
+      if (!mounted) return;
+      _transferAnswered = false;
+      _feedSaleContext();
+    }
+
+    try {
+      if (_signedInUid() == null) return;
+      _transferSub = (widget.transferStateStates ??
+              FantasyService.watchMyTransferStateAuto(
+                  widget.sport, widget.season))
+          .listen((view) {
+        if (!mounted) return;
+        _transfer = view;
+        _transferAnswered = true;
+        _feedSaleContext();
+      }, onError: failed);
+    } catch (e) {
+      failed(e);
+    }
+  }
+
   /// Listens to the season's price history (FPL selling: last week's
   /// prices set a new pick's market floor). Error ≠ fact: a failed read
   /// keeps the last known history; with none the floor stays today's price
@@ -521,9 +593,11 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
   /// Hands the shared draft its money context: the sale baseline, today's
   /// market prices (null until the market loads — the draft is never
   /// moneyReady before), last week's prices and the week being edited
-  /// (saleEditingGameweek). Called on every baseline / players / price
-  /// history / schedule / config change, and again at the next lock (the
-  /// clock moves the edited week on by itself).
+  /// (saleEditingGameweek) — and, with that SAME week, its transfer context
+  /// (the transfer state and whether it has answered). Called on every
+  /// baseline / transfer state / players / price history / schedule / config
+  /// change, and again at the next lock (the clock moves the edited week on
+  /// by itself).
   void _feedSaleContext() {
     _saleBoundary?.cancel();
     _saleBoundary = null;
@@ -545,6 +619,11 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
           : {for (final p in players) p.name: p.priceTenths},
       lastWeekPrices:
           editingGw == null ? null : _priceHistory?[editingGw - 1],
+      editingGw: editingGw,
+    );
+    draft.setTransferContext(
+      state: _transfer,
+      answered: _transferAnswered,
       editingGw: editingGw,
     );
     for (final g in gws ?? const <Gameweek>[]) {
@@ -609,6 +688,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _voidedSub?.cancel();
     _accessSub?.cancel();
     _saleSub?.cancel();
+    _transferSub?.cancel();
     _priceHistorySub?.cancel();
     _saleBoundary?.cancel();
     _configForRules.close();

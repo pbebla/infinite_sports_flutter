@@ -34,7 +34,8 @@
 // feed has answered) and the same edited gameweek, and [transferPreview]
 // recounts the draft's CURRENT picks and chip against the squad the manager
 // came into the week with — the transfers line and the points-hit confirm
-// read it. Error ≠ fact: until the feed has answered (or after it failed)
+// read it ([storedTransferPreview] is the same count for the squad as last
+// saved, so the confirm can tell a hit that RISES from one already taken). Error ≠ fact: until the feed has answered (or after it failed)
 // the preview is notReady, never a free first team.
 //
 // Pure-ish: flutter/foundation only (ChangeNotifier), all placement/armband
@@ -220,6 +221,24 @@ class SquadDraftController extends ChangeNotifier {
         answered: _transferAnswered,
         editingGw: _transferEditingGw,
         chip: _chip,
+        cfg: _config,
+      );
+
+  /// What the squad as last STORED (the stream's latest value, or this
+  /// device's own successful save) costs in transfers this week: the same
+  /// preview over its picks and chip. The squad builder's "Take a points
+  /// hit?" asks only when a save raises the cost above this — a hit already
+  /// saved is not asked about again. A never-saved squad owns nothing, so it
+  /// counts nothing.
+  transfers.TransferPreview get storedTransferPreview =>
+      transfers.transferPreview(
+        draftIds: [
+          for (final p in _stored?.picks ?? const <SquadPick>[]) p.playerId,
+        ],
+        state: _transferState,
+        answered: _transferAnswered,
+        editingGw: _transferEditingGw,
+        chip: _stored?.chip,
         cfg: _config,
       );
 

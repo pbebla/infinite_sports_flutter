@@ -115,6 +115,46 @@ void main() {
       expect(a['benchBoost'], ChipAvailability.used);
     });
 
+    // Wildcard and Free Hit are playable now (plan 2026-11-03): the same
+    // spent-in-this-set rule as the other two, one case each.
+    for (final id in ['wildcard', 'freeHit']) {
+      test('$id: played earlier in the same set -> Used; still fresh in the '
+          'other set; the others are untouched', () {
+        final a = avail({3: ChipHistoryEntry(chip: id)}, editingGw: 5);
+        expect(a[id], ChipAvailability.used);
+        expect(a['tripleCaptain'], ChipAvailability.available);
+        expect(a['benchBoost'], ChipAvailability.available);
+        expect(a[id == 'wildcard' ? 'freeHit' : 'wildcard'],
+            ChipAvailability.available);
+        // Set 2 starts fresh; the edited week itself does not count.
+        expect(avail({3: ChipHistoryEntry(chip: id)}, editingGw: 8)[id],
+            ChipAvailability.available);
+        expect(avail({5: ChipHistoryEntry(chip: id)}, editingGw: 5)[id],
+            ChipAvailability.available);
+      });
+
+      test('$id: armed -> Active; a spent one stays Used when re-armed; a '
+          'voided week refunds it', () {
+        expect(avail({}, editingGw: 5, armed: id)[id], ChipAvailability.active);
+        expect(
+            avail({3: ChipHistoryEntry(chip: id)}, editingGw: 5, armed: id)[id],
+            ChipAvailability.used);
+        expect(
+            avail({3: ChipHistoryEntry(chip: id, voided: true)},
+                editingGw: 5)[id],
+            ChipAvailability.available);
+        expect(
+            chipAvailability(
+              historyByWeek: {3: ChipHistoryEntry(chip: id)},
+              editingGw: 5,
+              armedChip: null,
+              config: cfg,
+              voidedWeeks: {3},
+            )[id],
+            ChipAvailability.available);
+      });
+    }
+
     test('labels', () {
       expect(chipAvailabilityLabel(ChipAvailability.available), '1 left');
       expect(chipAvailabilityLabel(ChipAvailability.used), 'Used');

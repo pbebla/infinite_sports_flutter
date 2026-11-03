@@ -97,6 +97,9 @@ Basketball and Flag Football are later scoring tables, not rebuilds.
   show the absolute lock time ("Sun, Oct 19 · 3:00 PM").
 - **Transfers: 2 free per gameweek, bankable up to 7; −4 points per extra
   transfer** beyond the allowance (applied to that week's score).
+- **A first team never banks** (owner 2026-11-03): building your first squad
+  is free and uses no allowance, so after your first deadline you get the
+  normal 2 free transfers — not 4.
 
 ## 6. Chips (one per gameweek; two sets per season)
 

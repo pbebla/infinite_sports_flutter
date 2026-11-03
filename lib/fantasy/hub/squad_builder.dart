@@ -17,6 +17,17 @@
 // shared [draft] it also feeds the squad stream into it; standalone (tests),
 // the builder owns a private controller and subscribes itself.
 //
+// Transfers (plan 2026-11-03, spec §5–§6): while editable, one line under the
+// budget bar says how many transfers the draft uses against the squad the
+// manager came into the week with (the draft's transferPreview — "Your first
+// team is free", "2 of 2 free transfers used", "3 transfers · 2 free · −4
+// pts this week", the chip in play, or "Transfer count updating…"; no line
+// for an older node). A save that RAISES the week's points cost above what
+// the saved squad already costs asks "Take a points hit?" first; with the
+// count unknown (notReady / hidden) Save is never blocked or questioned — the
+// lock's own recount is the truth. Wildcard and Free Hit play from the chip
+// row like the other two chips.
+//
 // House rules: streams only; colorScheme + the gold/primary fantasy accent
 // pairing; scrollable clears the glass navbar; snackbars surface every
 // armband side effect (nothing silent).
@@ -39,6 +50,8 @@ import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_picker_sheet.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/transfer_dialogs.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/transfer_preview.dart';
 
 class FantasySquadBuilder extends StatefulWidget {
   const FantasySquadBuilder({
@@ -347,8 +360,22 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
+  /// "Take a points hit?" — only for a save that RAISES the week's points
+  /// cost above what the saved squad already costs (a hit already taken, a
+  /// cost that stays or drops, and any week with no cost all go straight
+  /// through). Never when the count isn't known: notReady / hidden / a first
+  /// team claim nothing, so Save is never blocked by the line (D1d).
+  Future<bool> _confirmPointsHit() async {
+    final next = _draft.transferPreview;
+    if (next.kind != TransferPreviewKind.counted) return true;
+    if (next.costPoints <= _draft.storedTransferPreview.costPoints) return true;
+    final yes = await showPointsHitDialog(context, next);
+    return yes && mounted;
+  }
+
   Future<void> _save() async {
     final squad = _draft.squad;
+    if (!await _confirmPointsHit()) return;
     setState(() => _saving = true);
     try {
       await widget.onSaveSquad(squad);
@@ -418,6 +445,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       if (moneyPending) squadMoneyPendingMessage,
     ];
     final alert = widget.alert;
+    final transfers = _draft.transferPreview;
 
     return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(
@@ -451,14 +479,20 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
           // Same layout both states: only this header swaps (spec §10).
           // Read-only mode has neither — the header above says why.
           if (!widget.readOnly) ...[
-            if (editable)
+            if (editable) ...[
               _BudgetBar(
                 spent: _draft.spentTenths,
                 available: _draft.availableTenths,
                 realized: _draft.realizedTenths,
                 moneyReady: moneyReady,
-              )
-            else
+              ),
+              // Plan 2026-11-03: what this team's transfers cost (nothing at
+              // all for an older node with no baseline).
+              if (transferLineText(transfers) != null) ...[
+                const SizedBox(height: 8),
+                _TransfersLine(preview: transfers),
+              ],
+            ] else
               const _LockedLiveStrip(),
             const SizedBox(height: 12),
           ],
@@ -496,6 +530,9 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
             activeChip: _draft.chip,
             enabled: editable,
             onChipChanged: _draft.setChip,
+            // A first team has nothing to transfer: Wildcard / Free Hit sit
+            // out under "Your first team is free".
+            firstTeam: transfers.kind == TransferPreviewKind.firstTeam,
             // Real usage: spent-in-this-set from History, the armed chip on
             // the squad on screen (the live squad, or its unsaved edit).
             availability: chipAvailability(
@@ -646,6 +683,55 @@ class _BudgetBar extends StatelessWidget {
                 minHeight: 7,
                 color: over ? fantasyDownRed(context) : green,
                 backgroundColor: scheme.outlineVariant.withValues(alpha: 0.4),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The transfers line (plan 2026-11-03): [transferLineText] for the draft's
+/// preview, one muted line — except a points cost, which reads in the bright
+/// fantasy "down" red (fantasyDownRed, both themes; never the soft dark-mode
+/// error pink). No fill, so nothing to fit in either mode; it wraps rather
+/// than clips at 360 px.
+class _TransfersLine extends StatelessWidget {
+  const _TransfersLine({required this.preview});
+
+  final TransferPreview preview;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = transferLineText(preview);
+    if (text == null) return const SizedBox.shrink();
+    final hit = preview.kind == TransferPreviewKind.counted &&
+        preview.costPoints > 0;
+    final color = hit
+        ? fantasyDownRed(context)
+        : Theme.of(context).colorScheme.onSurfaceVariant;
+    return Padding(
+      key: const ValueKey('transfers_line'),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(Icons.swap_horiz_rounded, size: 15, color: color),
+          ),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              text,
+              key: const ValueKey('transfers_line_text'),
+              softWrap: true,
+              style: TextStyle(
+                fontSize: 12.5,
+                height: 1.3,
+                fontWeight: hit ? FontWeight.w700 : FontWeight.w600,
+                color: color,
               ),
             ),
           ),

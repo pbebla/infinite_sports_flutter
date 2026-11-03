@@ -26,6 +26,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/transfer_preview.dart';
 import 'package:infinite_sports_flutter/registration/payment_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -78,6 +79,7 @@ void main() {
   late StreamController<Map<int, FantasySquad>> history;
   late StreamController<FantasyAccessState> access;
   late StreamController<SaleBaselineState> sale;
+  late StreamController<TransferStateView?> transfer;
   late StreamController<Map<int, Map<String, int>>> priceHistory;
   late List<_Opened> opened;
 
@@ -128,6 +130,7 @@ void main() {
     history = StreamController<Map<int, FantasySquad>>.broadcast();
     access = StreamController<FantasyAccessState>.broadcast();
     sale = StreamController<SaleBaselineState>.broadcast();
+    transfer = StreamController<TransferStateView?>.broadcast();
     priceHistory = StreamController<Map<int, Map<String, int>>>.broadcast();
     checkoutCalls = 0;
     launched = [];
@@ -153,6 +156,7 @@ void main() {
     history.close();
     access.close();
     sale.close();
+    transfer.close();
     priceHistory.close();
   });
 
@@ -176,6 +180,8 @@ void main() {
     Stream<Set<int>>? voidedWeeksStates,
     DateTime Function()? nowUtc,
     Brightness brightness = Brightness.light,
+    // false = nobody signed in (the transfer feed is never subscribed).
+    bool signedIn = true,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -198,6 +204,8 @@ void main() {
         nowUtc: nowUtc,
         accessStates: access.stream,
         saleBaselineStates: sale.stream,
+        transferStateStates: transfer.stream,
+        signedInUid: () => signedIn ? 'me' : null,
         priceHistoryStates: priceHistory.stream,
         createCheckoutUrl: () async {
           checkoutCalls++;
@@ -901,6 +909,106 @@ void main() {
       sale.add(baseline(3));
       await settle(tester);
       expect(draft.moneyReady, isTrue);
+    });
+
+    // Plan 2026-11-03: the own `TransferState/<uid>` feed rides the same
+    // wiring and the SAME edited week as the sale baseline — and never holds
+    // the reveal either.
+    group('transfer state feed', () {
+      final held = [for (final p in mySquad.picks) p.playerId];
+      TransferStateView view(int countFromGw) => TransferStateView(
+          free: 2, countFromGw: countFromGw, countFrom: List.of(held));
+
+      testWidgets('never holds the reveal; not answered = notReady, never a '
+          'first team', (tester) async {
+        final draft = await hubDraft(tester);
+        expect(key('hub'), findsOneWidget);
+        expect(draft.transferPreview.kind, TransferPreviewKind.notReady);
+      });
+
+      testWidgets('an absent node (null) answers: a first team',
+          (tester) async {
+        final draft = await hubDraft(tester);
+        transfer.add(null);
+        await settle(tester);
+        expect(draft.transferPreview.kind, TransferPreviewKind.firstTeam);
+      });
+
+      testWidgets('a baseline for the week being edited is counted — the '
+          'same editingGw the sale context uses', (tester) async {
+        final draft = await hubDraft(tester); // edits GW3
+        transfer.add(view(3));
+        await settle(tester);
+        expect(draft.transferPreview.kind, TransferPreviewKind.counted);
+        expect(draft.transferPreview.used, 0);
+
+        draft.removePlayer('Ari Goal');
+        draft.addPlayer(_player('Ari New', FantasyPosition.att, 60));
+        await settle(tester);
+        expect(draft.transferPreview.used, 1);
+
+        // Another week's baseline is not this week's count.
+        transfer.add(view(2));
+        await settle(tester);
+        expect(draft.transferPreview.kind, TransferPreviewKind.notReady);
+        transfer.add(view(3));
+        await settle(tester);
+        expect(draft.transferPreview.kind, TransferPreviewKind.counted);
+      });
+
+      testWidgets('a read error: logged, not ready — never a first team — '
+          'and the hub still shows', (tester) async {
+        final logs = <String>[];
+        final original = debugPrint;
+        debugPrint =
+            (String? message, {int? wrapWidth}) => logs.add(message ?? '');
+        try {
+          final draft = await hubDraft(tester);
+          transfer.add(view(3));
+          await settle(tester);
+          expect(draft.transferPreview.kind, TransferPreviewKind.counted);
+
+          transfer.addError(StateError('permission-denied'));
+          await settle(tester);
+          expect(tester.takeException(), isNull);
+          expect(key('hub'), findsOneWidget);
+          expect(draft.transferPreview.kind, TransferPreviewKind.notReady);
+        } finally {
+          debugPrint = original;
+        }
+        expect(logs.join('\n'),
+            contains('FantasyHubPage: transfer state feed failed: Bad state: '
+                'permission-denied'));
+      });
+
+      testWidgets('a read error before any answer is notReady too',
+          (tester) async {
+        final draft = await hubDraft(tester);
+        transfer.addError(StateError('network'));
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+        expect(draft.transferPreview.kind, TransferPreviewKind.notReady);
+      });
+
+      testWidgets('with no signed-in user the feed is never subscribed: '
+          'the signed-out null is "no user", not "no node"', (tester) async {
+        // The real signed-out feed streams a lone null — it must not read as
+        // an answered, absent node (a free first team).
+        await pumpHub(tester,
+            tab: FantasyHubTab.rules,
+            initialPlayerName: 'Ava Striker',
+            gameweekStates: Stream.value(gws),
+            nowUtc: () => DateTime.utc(2026, 10, 17, 12),
+            signedIn: false);
+        await land(tester);
+        final draft = opened.single.draft!;
+        expect(tester.takeException(), isNull);
+        expect(draft.transferPreview.kind, TransferPreviewKind.notReady);
+        // Whatever the stream emits is not listened to.
+        transfer.add(null);
+        await settle(tester);
+        expect(draft.transferPreview.kind, TransferPreviewKind.notReady);
+      });
     });
   });
 
