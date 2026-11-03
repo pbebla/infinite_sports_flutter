@@ -22,13 +22,16 @@ void main() {
     WidgetTester tester, {
     List<Gameweek> gameweeks = const [],
     Widget Function()? supportPageBuilder,
+    double width = 800,
+    ThemeData? theme,
   }) async {
     // Tall viewport so the lazy ListView builds every rules section.
-    tester.view.physicalSize = const Size(800, 6000);
+    tester.view.physicalSize = Size(width, 6000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final controller = StreamController<FantasyConfigState?>.broadcast();
     await tester.pumpWidget(MaterialApp(
+      theme: theme,
       home: Scaffold(
         body: FantasyRulesTab(
           configStates: controller.stream,
@@ -117,6 +120,75 @@ void main() {
 
     await controller.close();
     await tester.pumpWidget(const SizedBox());
+  });
+
+  // FPL selling rule (Task 8): the Rules tab explains that you keep half of
+  // any price rise (rounded down to $0.1M) and take the full drop.
+  group('Selling section explains the FPL selling rule', () {
+    const sellingLines = <String>[
+      'You buy at today\'s price. When you sell, you keep half of any rise '
+          '(rounded down to \$0.1M) and take the full drop.',
+      'Example: bought at \$8.0M, now \$9.0M → sells for \$8.5M. Bought at '
+          '\$8.0M, now \$7.0M → sells for \$7.0M.',
+      'Changed your mind? Put a player you sold this week back before the '
+          'deadline and the sale is undone — he keeps the price you paid and '
+          'no transfer is used.',
+      'Prices change on Monday morning. If a change puts your saved team '
+          'over budget, you\'ll get a message so you can fix it before the '
+          'deadline.',
+    ];
+
+    testWidgets('shows the Selling copy and drops the old "current price" line',
+        (tester) async {
+      final controller = await pumpRules(tester);
+
+      // The old promise is gone (it is no longer true).
+      expect(find.textContaining('You always buy and sell at the'),
+          findsNothing);
+      expect(find.textContaining('current price'), findsNothing);
+
+      // The config-driven price range still renders in the Prices section.
+      expect(find.textContaining('\$4.0M to \$15.0M'), findsOneWidget);
+
+      // The Selling section, in order, with the exact copy.
+      expect(find.text('Selling'), findsOneWidget);
+      for (final line in sellingLines) {
+        expect(find.text(line), findsOneWidget, reason: line);
+      }
+      // It sits right after the Prices section.
+      expect(tester.getTopLeft(find.text('Selling')).dy,
+          greaterThan(tester.getTopLeft(find.text('Prices')).dy));
+
+      await controller.close();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('fits at 360 px wide in ${brightness.name} mode',
+          (tester) async {
+        final controller = await pumpRules(
+          tester,
+          width: 360,
+          theme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color.fromRGBO(208, 0, 0, 1),
+              brightness: brightness,
+            ),
+          ),
+        );
+
+        expect(find.text('Selling'), findsOneWidget);
+        for (final line in sellingLines) {
+          expect(find.text(line), findsOneWidget, reason: line);
+        }
+        // No RenderFlex / layout overflow anywhere on the page.
+        expect(tester.takeException(), isNull);
+
+        await controller.close();
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
   });
 
   testWidgets('feedback card at the bottom opens the support form',

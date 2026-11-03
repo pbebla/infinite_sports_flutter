@@ -218,9 +218,41 @@ class _RulesBody extends StatelessWidget {
             '${formatMoneyTenths(cfg.priceStepTenths)} steps. Every Monday '
             'prices move on performance: score well compared with other '
             'players in YOUR position and your price rises one step; fall '
-            'behind and it drops one. You always buy and sell at the '
-            'current price, and brand-new players start around '
+            'behind and it drops one. Brand-new players start around '
             '${formatMoneyTenths(cfg.rookiePriceTenths)}.',
+          ),
+        ),
+        // FPL selling rule — keep half of any rise (rounded down to $0.1M),
+        // take the full drop. The server, builder, picker and market all
+        // price a sale this way; the $8.0M / $9.0M / $7.0M figures are fixed
+        // illustrative numbers, not config.
+        const _Section(
+          title: 'Selling',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Body(
+                'You buy at today\'s price. When you sell, you keep half of '
+                'any rise (rounded down to \$0.1M) and take the full drop.',
+              ),
+              SizedBox(height: 10),
+              _Body(
+                'Example: bought at \$8.0M, now \$9.0M → sells for \$8.5M. '
+                'Bought at \$8.0M, now \$7.0M → sells for \$7.0M.',
+              ),
+              SizedBox(height: 10),
+              _Body(
+                'Changed your mind? Put a player you sold this week back '
+                'before the deadline and the sale is undone — he keeps the '
+                'price you paid and no transfer is used.',
+              ),
+              SizedBox(height: 10),
+              _Body(
+                'Prices change on Monday morning. If a change puts your '
+                'saved team over budget, you\'ll get a message so you can '
+                'fix it before the deadline.',
+              ),
+            ],
           ),
         ),
         _Section(
