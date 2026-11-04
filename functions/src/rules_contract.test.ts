@@ -430,6 +430,27 @@ for (const file of RULES_FILES) {
       expect(b).toEqual(season['TransferState']);
     });
 
+    // LIVE (live design 2026-11-03 §5, plan Task 3): Live/** is the server's
+    // provisional gameweek (Meta/Board/Players/Squads/TeamOfWeek, or the
+    // settled tombstone) — any signed-in user reads it, NOBODY writes it
+    // (functions only, Admin SDK). LiveBase/<gw> is its functions-only
+    // settled base: admin read (TransferState's node read), no client
+    // write anywhere on either chain.
+    it('Live: signed-in read, no client write; LiveBase: admin read only, no client write', () => {
+      const season = rules['rules']['Fantasy']['$sport']['$season'];
+      expect(season['Live'], `${file}: Live`).toEqual({ '.read': 'auth != null' });
+      expect(season['LiveBase'], `${file}: LiveBase`).toEqual({
+        '.read': "auth != null && root.child('Admins').child(auth.uid).exists()",
+      });
+      expect(season['LiveBase']['.read']).toBe(season['TransferState']['.read']);
+      for (const p of [`${S}/Live`, `${S}/Live/Meta`, `${S}/Live/Board/UID`,
+        `${S}/Live/Squads/UID`, `${S}/LiveBase`, `${S}/LiveBase/3`]) {
+        const { links } = writeChain(rules, p);
+        expect(links.filter((l) => typeof l.write === 'string' && l.write !== 'false'),
+          `${file}: unexpected .write on ${p}`).toEqual([]);
+      }
+    });
+
     it('Voided: public read, admin write, each <gw> validated true', () => {
       const voided = rules['rules']['Fantasy']['$sport']['$season']['Voided'];
       expect(voided['.read']).toBe(true);
@@ -445,7 +466,8 @@ describe('rules contract: the walker itself', () => {
   it('a functions-only path has no client grant (the check can fail)', () => {
     for (const p of [`${S}/History/3/someUid`, `${S}/BadgePushClaims/u/a`,
       `${S}/TransferState/UID`, `${S}/Repriced/5`, `${S}/Baselines/UID`,
-      `${S}/Baselines/UID/RealizedTenths`]) {
+      `${S}/Baselines/UID/RealizedTenths`, `${S}/Live/Board/UID`,
+      `${S}/LiveBase/3`]) {
       const { links, bindings } = writeChain(rules, p);
       for (const kind of ['admin', 'own', 'ownerCreate'] as const) {
         expect(links.some((l) => grants(kind, l, bindings)), `${p} ${kind}`).toBe(false);

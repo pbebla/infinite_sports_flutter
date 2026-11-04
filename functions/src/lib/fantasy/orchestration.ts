@@ -140,6 +140,44 @@
 //   drafts NO late news — days-late "GW n" pushes after an owner flip-flop
 //   are noise, and the guards are once-only by design.
 //
+// - Live = the live gameweek (live design 2026-11-03,
+//   docs/superpowers/specs/2026-11-03-fantasy-live-design.md §4; node
+//   shapes in live_core.ts): Meta/Board/Players/Squads/TeamOfWeek of the
+//   locked week while its games are played — recomputed on every scoring
+//   write to a game of its date (fantasy_live.ts trigger -> maybeRefreshLive
+//   -> refreshLiveWeek) and by the sweep backstop (step 2c). Written ONLY
+//   through a transaction on the whole node (LIVE ORDERING below). When the
+//   week settles, finalize — after every official node — replaces it with
+//   the Meta-only TOMBSTONE { Meta: { Gw, State: 'settled', UpdatedAt } }
+//   (Fable L1: no settled mirror), which a new week's first live run
+//   replaces. A live run never writes an official node (History,
+//   Leaderboards, PlayerTotals, PlayerWeeks, PlayerWeekStats, DreamTeam,
+//   TransferState, TransferCosts, PublishedPicks, Baselines, SquadAlerts).
+//   It stands down exactly where finalize does (no Config, a frozen
+//   lockOverride, TestFill, before the lock) and without the lock snapshot
+//   PublishedPicks/<gw>. Rules: signed-in read, no client write.
+//
+// - LiveBase/<gw> (functions-internal; admin read, no client write): the
+//   settled base a live run resums against (live_core.ts buildLiveBase,
+//   from the stored History/PlayerWeeks/PlayerWeekStats of the weeks before
+//   gw), built by the week's first live run and reused after. The WHOLE
+//   node is removed by every finalize run and every void toggle (either
+//   may have changed a settled week); a live week still showing is then
+//   refreshed at once (Fable L4), which rebuilds it.
+//
+// LIVE ORDERING: a live run stamps ReadAt with the wall clock (deps.clock,
+// Date.now in production) taken BEFORE its first game read, so a stamp
+// never claims a fresher view than the run had. The Live transaction writes
+// over an absent node, an older week's, or this week's when the stored
+// ReadAt is not after its own — a run that read older games and lands
+// after a newer one aborts, so older numbers never end on top — and never
+// over a newer week or this week's tombstone. A run whose event is not
+// after the stored ReadAt of its week (a newer run already read past it),
+// and one whose week has PlayerWeeks/<gw> (finalize's first write: the
+// week settled — never resurrected), stand down before any heavy read.
+// The settle and void refreshes take a fresh clock reading after removing
+// LiveBase, so they win over every run that read the old base.
+//
 // Finalize manager-source precedence (documented contract): the lock
 // snapshot PublishedPicks/<gw> is the law; a rerun without one re-reads the
 // squads stored in History/<gw> (deterministic reruns); only a FIRST run of
@@ -181,6 +219,10 @@ import {
   currentGameweek, deriveGameweeks, Gameweek, gameweekStatusAt,
 } from './gameweeks';
 import {
+  buildLiveBase, computeLiveWeek, LiveBase, LiveGameStatus, LiveOutput,
+  liveWriteMatters,
+} from './live_core';
+import {
   autopilotPublishAtUtc, buildDreamTeamDraft, buildNewsStats, dreamTeamNames,
   formatLeagueWeekdayTime, generateNewsDrafts, newsAutopilotConfigFrom,
   publishedRowFromDraft, shouldAutoPublish,
@@ -192,11 +234,11 @@ import { sendDueScheduledMessages } from './messages';
 import {
   allGamesFinal, childEntries, dateKeysOf, FantasyDb, fantasyRoot,
   fantasySeasonsOf, fullAttendance, gamesOfDate, isPlainMap,
-  isServerSquadWrite, isTestFillSeason, isVoidFlag, lockedPositionsOf,
-  lockOverrideOf, marketPlayersOf, marketPricesOf, markServerSquadWrite,
-  parseAbsentMap, positionsSnapshotOf, rosterNamesOf, SERVER_WRITE_KEY,
-  TEST_FILL_STAND_DOWN, toIntLoose, updateIfPresent, voidedWeeksOf,
-  withLockedPositions,
+  isServerSquadWrite, isTestFillSeason, isVoidFlag, keyedGamesOfDate,
+  lockedPositionsOf, lockOverrideOf, marketPlayersOf, marketPricesOf,
+  markServerSquadWrite, parseAbsentMap, positionsSnapshotOf, rosterNamesOf,
+  SERVER_WRITE_KEY, TEST_FILL_STAND_DOWN, toIntLoose, updateIfPresent,
+  voidedWeeksOf, withLockedPositions,
 } from './orchestration_db';
 import { applyDelta, repriceDeltas } from './pricing';
 import {
@@ -244,6 +286,9 @@ export interface FantasyJobDeps {
    *  (or an API failure) skips the AI drafts with a log — the deterministic
    *  Dream Team post still builds, and finalize never blocks. */
   news?: { apiKey: string; fetchImpl?: FetchLike; timeoutMs?: number };
+  /** Wall clock (epoch ms) stamping the live node's ReadAt (LIVE ORDERING
+   *  in the header). Date.now when absent — tests pin it. */
+  clock?: () => number;
 }
 
 export interface GwStateNode {
@@ -912,6 +957,81 @@ async function newsCardBuilder(
   };
 }
 
+/** One match-day game as the scorer takes it: roster-derived full
+ *  attendance maps (spec §8 default-present) with the absent-only
+ *  team{n}attendance node applied on top. [onNoRoster] hears each team
+ *  without a Line Ups roster. Finalize and the live week both compose
+ *  through here, so they score the same attendance. */
+function scorableGame(
+  node: Record<string, unknown>, lineups: unknown,
+  onNoRoster: (team: string) => void,
+): FinalizeGame {
+  const attendance: Record<string, Record<string, boolean> | null> = {};
+  (['team1', 'team2'] as const).forEach((key, i) => {
+    const team = node[key];
+    if (typeof team !== 'string' || team.length === 0) return;
+    const roster = rosterNamesOf(lineups, team);
+    if (roster.length === 0) onNoRoster(team);
+    attendance[team] =
+      fullAttendance(roster, parseAbsentMap(node[`team${i + 1}attendance`]));
+  });
+  return { node, attendance };
+}
+
+/** Stored per-week results other than week [skipGw] (finalize replaces its
+ *  own week; the live base reads only earlier weeks anyway), as the pure
+ *  engine takes them — shared by finalize and the live base:
+ *  PlayerWeeks week -> name -> points. */
+function playerWeeksByWeekOf(
+  raw: unknown, skipGw: number,
+): Record<number, Record<string, number>> {
+  const out: Record<number, Record<string, number>> = {};
+  for (const [w, byName] of childEntries(raw)) {
+    const week = Number(w);
+    if (!Number.isInteger(week) || week === skipGw) continue;
+    const m: Record<string, number> = {};
+    for (const [name, v] of childEntries(byName)) m[name] = toIntLoose(v);
+    out[week] = m;
+  }
+  return out;
+}
+
+/** PlayerWeekStats week -> name -> games played (GP) — PlayerTotals
+ *  games/ppg (see playerWeeksByWeekOf). */
+function playedGamesByWeekOf(
+  raw: unknown, skipGw: number,
+): Record<number, Record<string, number>> {
+  const out: Record<number, Record<string, number>> = {};
+  for (const [w, byName] of childEntries(raw)) {
+    const week = Number(w);
+    if (!Number.isInteger(week) || week === skipGw) continue;
+    const m: Record<string, number> = {};
+    for (const [name, entry] of childEntries(byName)) {
+      if (isPlainMap(entry)) m[name] = toIntLoose(entry['GP']);
+    }
+    out[week] = m;
+  }
+  return out;
+}
+
+/** History week -> uid -> net TotalTenths — the Overall board (see
+ *  playerWeeksByWeekOf). */
+function historyTenthsByWeekOf(
+  raw: unknown, skipGw: number,
+): Record<number, Record<string, number>> {
+  const out: Record<number, Record<string, number>> = {};
+  for (const [w, byUid] of childEntries(raw)) {
+    const week = Number(w);
+    if (!Number.isInteger(week) || week === skipGw) continue;
+    const m: Record<string, number> = {};
+    for (const [uid, entry] of childEntries(byUid)) {
+      if (isPlainMap(entry)) m[uid] = toIntLoose(entry['TotalTenths']);
+    }
+    out[week] = m;
+  }
+  return out;
+}
+
 /** A first finalize this long after the lock with no PublishedPicks
  *  snapshot warns (the sweep runs every 15 minutes, so two missed sweeps). */
 export const FIRST_FINALIZE_SNAPSHOT_GRACE_MS = 30 * 60 * 1000;
@@ -949,25 +1069,15 @@ export async function finalizeGameweek(
   // Attendance: roster-derived full maps (spec §8 default-present) with the
   // absent-only team{n}attendance node applied on top.
   const lineups = await db.read(`${sport}/${season}/Line Ups`);
-  const games: FinalizeGame[] = gameNodes.map((node) => {
-    const attendance: Record<string, Record<string, boolean> | null> = {};
-    (['team1', 'team2'] as const).forEach((key, i) => {
-      const team = node[key];
-      if (typeof team !== 'string' || team.length === 0) return;
-      const roster = rosterNamesOf(lineups, team);
-      if (roster.length === 0) {
-        // On a forfeit (spec §8a) events are ignored, so a missing roster
-        // means nobody on this team gets the appearance point — say so.
-        log.warn('fantasy finalize: no roster for team — scoring activity ' +
-          'players only', {
-          ...ctx, team, forfeit: parseForfeitedBy(node['forfeitedBy']) !== null,
-        });
-      }
-      attendance[team] =
-        fullAttendance(roster, parseAbsentMap(node[`team${i + 1}attendance`]));
-    });
-    return { node, attendance };
-  });
+  const games: FinalizeGame[] = gameNodes.map((node) =>
+    scorableGame(node, lineups, (team) => {
+      // On a forfeit (spec §8a) events are ignored, so a missing roster
+      // means nobody on this team gets the appearance point — say so.
+      log.warn('fantasy finalize: no roster for team — scoring activity ' +
+        'players only', {
+        ...ctx, team, forfeit: parseForfeitedBy(node['forfeitedBy']) !== null,
+      });
+    }));
 
   // Owner voids (spec §15): this week and every other voided week resum as
   // zero; chips from voided weeks are refunded in the lock accounting.
@@ -1064,36 +1174,14 @@ export async function finalizeGameweek(
     transferCostPointsByUid[u] = toIntLoose(v);
   }
 
-  // Other weeks' stored results (this week's are replaced by the compute).
-  const playerWeeksByWeek: Record<number, Record<string, number>> = {};
-  for (const [w, byName] of childEntries(await db.read(`${root}/PlayerWeeks`))) {
-    const week = Number(w);
-    if (!Number.isInteger(week) || week === gw.number) continue;
-    const m: Record<string, number> = {};
-    for (const [name, v] of childEntries(byName)) m[name] = toIntLoose(v);
-    playerWeeksByWeek[week] = m;
-  }
-  // Other weeks' games played (PlayerWeekStats.GP) — PlayerTotals games/ppg.
-  const playedGamesByWeek: Record<number, Record<string, number>> = {};
-  for (const [w, byName] of childEntries(await db.read(`${root}/PlayerWeekStats`))) {
-    const week = Number(w);
-    if (!Number.isInteger(week) || week === gw.number) continue;
-    const m: Record<string, number> = {};
-    for (const [name, entry] of childEntries(byName)) {
-      if (isPlainMap(entry)) m[name] = toIntLoose(entry['GP']);
-    }
-    playedGamesByWeek[week] = m;
-  }
-  const historyTenthsByWeek: Record<number, Record<string, number>> = {};
-  for (const [w, byUid] of childEntries(historyRaw)) {
-    const week = Number(w);
-    if (!Number.isInteger(week) || week === gw.number) continue;
-    const m: Record<string, number> = {};
-    for (const [uid, entry] of childEntries(byUid)) {
-      if (isPlainMap(entry)) m[uid] = toIntLoose(entry['TotalTenths']);
-    }
-    historyTenthsByWeek[week] = m;
-  }
+  // Other weeks' stored results (this week's are replaced by the compute):
+  // points, games played (PlayerWeekStats.GP — PlayerTotals games/ppg) and
+  // History net tenths.
+  const playerWeeksByWeek =
+    playerWeeksByWeekOf(await db.read(`${root}/PlayerWeeks`), gw.number);
+  const playedGamesByWeek =
+    playedGamesByWeekOf(await db.read(`${root}/PlayerWeekStats`), gw.number);
+  const historyTenthsByWeek = historyTenthsByWeekOf(historyRaw, gw.number);
 
   // Ownership is a "right now" figure: a rerun of an OLDER week (a late
   // score correction) keeps PlayerTotals ownership on the latest finalized
@@ -1210,6 +1298,23 @@ export async function finalizeGameweek(
     await settleTransfersAfterFinalize(
       db, root, cfg, gw.number, Object.keys(out.historyByUid),
       args.nowUtc.getTime(), log, ctx);
+  }
+
+  // Live hand-over (live design 2026-11-03 §4, Fable L1), after EVERY
+  // official node above and before the recap push: this week's (or an
+  // older week's) live node becomes the settled tombstone, so phones fall
+  // back to the official nodes — received in write order on their one
+  // connection, so the hand-over has no gap. The whole LiveBase goes (this
+  // run may have changed a settled week) and a NEWER week still live is
+  // refreshed at once with the corrected Overall. Best-effort like the
+  // badges: a failure is logged and never fails the finalize.
+  try {
+    await settleLiveWeek(db, {
+      sport, season, cfg, gw: gw.number, nowUtc: args.nowUtc, log, ctx,
+      clock: args.deps?.clock,
+    });
+  } catch (err) {
+    log.warn('fantasy live: settle failed', { ...ctx, error: String(err) });
   }
 
   // Owner-voided week: claim both once-only guards WITHOUT pushing or
@@ -1459,7 +1564,12 @@ export interface VoidToggleArgs {
  *  the first-run guard holds). finalize re-reads the flag itself, so voiding
  *  and un-voiding are both just a deterministic rerun. A flip on a week that
  *  has not settled yet changes nothing now: its eventual finalize reads the
- *  flag. Rollover/Free Hit restore stay RolledGw-guarded (never re-run). */
+ *  flag. Rollover/Free Hit restore stay RolledGw-guarded (never re-run).
+ *
+ *  Live (Fable L4): the flip changes the live week itself (voided: 0 for
+ *  everyone, "Voided") or a settled week under it, so the whole LiveBase
+ *  goes and the week Live is showing refreshes at once — no game write
+ *  needed. A TestFill season stands down here too (zero writes). */
 export async function resettleVoidToggle(
   db: FantasyDb, args: VoidToggleArgs,
 ): Promise<void> {
@@ -1489,6 +1599,351 @@ export async function resettleVoidToggle(
   await maybeFinalizeGame(db, {
     sport, season, dateKey: gw.date, nowUtc: args.nowUtc, log, deps: args.deps,
   });
+
+  if (await isTestFillSeason(db, root)) return; // maybeFinalizeGame logged it
+  // Best-effort like finalize's settle: the next game write or sweep
+  // refreshes anyway.
+  try {
+    await removeLiveBase(db, root);
+    const meta = liveMetaOf(await db.read(`${root}/Live/Meta`));
+    if (meta === null || !meta.live) return; // nothing live to refresh
+    await refreshLiveGw(db, {
+      sport, season, cfg: configFromMap(configNode), liveGw: meta.gw,
+      nowUtc: args.nowUtc, log, clock: args.deps?.clock,
+    }, { ...ctx, reason: 'void' });
+  } catch (err) {
+    log.warn('fantasy live: void refresh failed', { ...ctx, error: String(err) });
+  }
+}
+
+// ── The live gameweek (live design 2026-11-03 §4) ──────────────────────────
+
+/** What a live run did:
+ *  - 'written'   — Live holds this run's numbers;
+ *  - 'skipped'   — no game of the date has started (this week's live node,
+ *                  if one is left from an undone kickoff, is removed);
+ *  - 'stale'     — a newer read already published, or a newer week owns
+ *                  Live (nothing written);
+ *  - 'settled'   — the week is finalized (PlayerWeeks/<gw> or the
+ *                  tombstone): never resurrected;
+ *  - 'standDown' — not a live week of a running season: no Config, a
+ *                  frozen lockOverride, TestFill, before the lock, a date
+ *                  off the schedule, or no lock snapshot. */
+export type LiveRefreshResult =
+  'written' | 'skipped' | 'stale' | 'settled' | 'standDown';
+
+export interface LiveRefreshArgs {
+  sport: string;
+  season: string;
+  /** The match date (Date/<dateKey>) to recompute. */
+  dateKey: string;
+  /** When the write that asked for this run happened — the trigger's event
+   *  time; the run's own now for the sweep and the settle/void refreshes.
+   *  A stored ReadAt of the same week at or after it = already covered. */
+  eventAtMs: number;
+  nowUtc: Date;
+  log?: FantasyLogger;
+  /** Wall clock for ReadAt (FantasyJobDeps.clock); Date.now when absent. */
+  clock?: () => number;
+}
+
+export interface LiveWriteArgs extends LiveRefreshArgs {
+  /** The written game node before and after (the trigger's payload). */
+  before: unknown;
+  after: unknown;
+}
+
+/** Live/Meta as the live jobs read it; null = no usable Meta. */
+interface LiveMeta {
+  gw: number;
+  live: boolean;
+  settled: boolean;
+  readAt: number;
+}
+
+function liveMetaOf(meta: unknown): LiveMeta | null {
+  if (!isPlainMap(meta)) return null;
+  return {
+    gw: toIntLoose(meta['Gw']),
+    live: meta['State'] === 'live',
+    settled: meta['State'] === 'settled',
+    readAt: toIntLoose(meta['ReadAt']),
+  };
+}
+
+/** The Meta of a whole Live node (a transaction's current value). */
+function liveMetaOfNode(live: unknown): LiveMeta | null {
+  return liveMetaOf(isPlainMap(live) ? live['Meta'] : null);
+}
+
+/** Removes the WHOLE LiveBase node (every settled week it summed may have
+ *  changed) — only when there is one, so a season that never went live
+ *  sees no write. */
+async function removeLiveBase(db: FantasyDb, root: string): Promise<void> {
+  if ((await db.read(`${root}/LiveBase`)) != null) {
+    await db.write(`${root}/LiveBase`, null);
+  }
+}
+
+/** LiveBase/<gw>: the stored one (as RTDB hands it back — computeLiveWeek
+ *  normalises it), else built ONCE from the settled weeks before gw (the
+ *  same stored maps finalize reads) and stored for the week's later runs. */
+async function liveBaseFor(
+  db: FantasyDb, root: string, gw: number, voidedWeeks: number[],
+  log: FantasyLogger, ctx: Record<string, unknown>,
+): Promise<LiveBase> {
+  const stored = await db.read(`${root}/LiveBase/${gw}`);
+  if (isPlainMap(stored) && toIntLoose(stored['Gw']) === gw) {
+    return stored as unknown as LiveBase;
+  }
+  const base = buildLiveBase({
+    gw,
+    historyTenthsByWeek: historyTenthsByWeekOf(await db.read(`${root}/History`), gw),
+    playerWeeksByWeek: playerWeeksByWeekOf(await db.read(`${root}/PlayerWeeks`), gw),
+    playedGamesByWeek:
+      playedGamesByWeekOf(await db.read(`${root}/PlayerWeekStats`), gw),
+    voidedWeeks,
+  });
+  await db.write(`${root}/LiveBase/${gw}`, base);
+  log.info('fantasy live: settled base built', {
+    ...ctx, managers: Object.keys(base.Managers).length,
+    players: Object.keys(base.Players).length,
+  });
+  return base;
+}
+
+/** The one Live write (LIVE ORDERING): a transaction on the whole node —
+ *  writes over nothing, an older week, or this week's node read no later
+ *  than [readAtMs]; aborts on a newer week or this week's tombstone. The
+ *  cold first run (null) always writes, never aborts (FantasyDb). */
+async function publishLive(
+  db: FantasyDb, root: string, gw: number, readAtMs: number, out: LiveOutput,
+): Promise<LiveRefreshResult> {
+  let refused = 'stale' as LiveRefreshResult;
+  const res = await db.transaction(`${root}/Live`, (cur) => {
+    const meta = liveMetaOfNode(cur);
+    if (meta !== null && meta.gw > gw) {
+      refused = 'stale'; // a newer week owns Live
+      return undefined;
+    }
+    if (meta !== null && meta.gw === gw && meta.settled) {
+      refused = 'settled';
+      return undefined;
+    }
+    if (meta !== null && meta.gw === gw && meta.readAt > readAtMs) {
+      refused = 'stale'; // a run that read later already landed
+      return undefined;
+    }
+    return out;
+  });
+  return res.committed ? 'written' : refused;
+}
+
+/** No game of the week's date has started (an undone kickoff): this week's
+ *  live node — and only one this run reads past — is removed, so phones
+ *  show the official nodes again. Anything else is left alone. */
+async function clearUnstartedLive(
+  db: FantasyDb, root: string, gw: number, readAtMs: number,
+  log: FantasyLogger, ctx: Record<string, unknown>,
+): Promise<void> {
+  let removed = false as boolean;
+  const res = await db.transaction(`${root}/Live`, (cur) => {
+    removed = false; // every (re-)run decides afresh
+    if (cur === null || cur === undefined) return null; // see FantasyDb
+    const meta = liveMetaOfNode(cur);
+    if (meta === null || meta.gw !== gw || !meta.live || meta.readAt > readAtMs) {
+      return undefined;
+    }
+    removed = true;
+    return null;
+  });
+  if (res.committed && removed) {
+    log.info('fantasy live: no game started any more — live node removed', ctx);
+  }
+}
+
+/** Recomputes the live gameweek of [args.dateKey] and publishes it to Live
+ *  (live design §4; LIVE ORDERING in the header). Read-only on every
+ *  official node: inputs are loaded exactly as finalizeGameweek loads them
+ *  (one read of the date's games builds both the game nodes and the status
+ *  table; attendance through the same roster composition; the market at
+ *  the week's locked positions without claiming anything; the lock
+ *  snapshot PublishedPicks/<gw>; TransferCosts/<gw>; Voided) plus the
+ *  settled base LiveBase/<gw> (built once, liveBaseFor). Cheap reads first:
+ *  a covered event ('stale') or a settled week ('settled') stops before
+ *  any heavy read. */
+export async function refreshLiveWeek(
+  db: FantasyDb, args: LiveRefreshArgs,
+): Promise<LiveRefreshResult> {
+  const { sport, season, dateKey, nowUtc } = args;
+  const log = args.log ?? silent;
+  const clock = args.clock ?? Date.now;
+  const root = fantasyRoot(sport, season);
+  const ctx = { sport, season, dateKey };
+
+  const configNode = await db.read(`${root}/Config`);
+  if (!isPlainMap(configNode)) return 'standDown'; // not fantasy-enabled: silent
+  if (lockOverrideOf(configNode, nowUtc.getTime()) !== 'auto') {
+    log.info('fantasy live: lockOverride frozen — standing down', ctx);
+    return 'standDown';
+  }
+  if (await isTestFillSeason(db, root)) {
+    log.info(TEST_FILL_STAND_DOWN, { ...ctx, job: 'live' });
+    return 'standDown';
+  }
+  const cfg = configFromMap(configNode);
+
+  // ReadAt BEFORE the first game read (LIVE ORDERING). The season's Date
+  // node gives the schedule AND this date's games: one read.
+  const readAtMs = clock();
+  const datesNode = await db.read(`${sport}/${season}/Date`);
+  const gw = deriveGameweeks(dateKeysOf(datesNode), cfg)
+    .find((g) => g.date === dateKey);
+  if (!gw) return 'standDown'; // not a scheduled match day
+  if (gw.lockUtc.getTime() > nowUtc.getTime()) {
+    log.info('fantasy live: date before its lock — standing down',
+      { ...ctx, gw: gw.number });
+    return 'standDown';
+  }
+  const lctx = { ...ctx, gw: gw.number };
+
+  // Coalescing + never resurrect (Fable L1), before any heavy read.
+  const meta = liveMetaOf(await db.read(`${root}/Live/Meta`));
+  if (meta !== null && meta.gw > gw.number) return 'stale';
+  if (meta !== null && meta.gw === gw.number) {
+    if (meta.settled) return 'settled';
+    if (meta.readAt >= args.eventAtMs) return 'stale';
+  }
+  if ((await db.read(`${root}/PlayerWeeks/${gw.number}`)) != null) return 'settled';
+
+  // The status table and the game nodes, from the SAME read.
+  const dateNode = childEntries(datesNode).find(([k]) => k === dateKey)?.[1] ?? null;
+  const gameStatus: Record<string, LiveGameStatus> = {};
+  const startedNodes: Array<[string, Record<string, unknown>]> = [];
+  for (const [key, node] of keyedGamesOfDate(dateNode)) {
+    const s = toIntLoose(node['status']);
+    const S: LiveGameStatus['S'] = s === 1 || s === 2 ? s : 0;
+    gameStatus[key] = {
+      S, T1: String(node['team1'] ?? ''), T2: String(node['team2'] ?? ''),
+    };
+    if (S !== 0) startedNodes.push([key, node]);
+  }
+  if (startedNodes.length === 0) {
+    await clearUnstartedLive(db, root, gw.number, readAtMs, log, lctx);
+    return 'skipped';
+  }
+
+  const squadsByUid =
+    mapChildren(await db.read(`${root}/PublishedPicks/${gw.number}`));
+  if (Object.keys(squadsByUid).length === 0) {
+    log.warn('fantasy live: no lock snapshot (PublishedPicks) — standing down',
+      lctx);
+    return 'standDown';
+  }
+
+  const lineups = await db.read(`${sport}/${season}/Line Ups`);
+  const games: Record<string, FinalizeGame> = {};
+  // A missing roster is finalize's warning to give, once — not every event's.
+  for (const [key, node] of startedNodes) {
+    games[key] = scorableGame(node, lineups, () => undefined);
+  }
+  const players = await marketForGameweek(db, root, gw.number, false, log, lctx);
+  const transferCostPointsByUid: Record<string, number> = {};
+  for (const [u, v] of childEntries(
+    await db.read(`${root}/TransferCosts/${gw.number}`))) {
+    transferCostPointsByUid[u] = toIntLoose(v);
+  }
+  const voidedWeeks = voidedWeeksOf(await db.read(`${root}/Voided`));
+  const base = await liveBaseFor(db, root, gw.number, voidedWeeks, log, lctx);
+
+  const out = computeLiveWeek({
+    cfg,
+    gw: gw.number,
+    games,
+    players,
+    squadsByUid,
+    transferCostPointsByUid,
+    voided: voidedWeeks.includes(gw.number),
+    base,
+    gameStatus,
+    readAtMs,
+    nowMs: nowUtc.getTime(),
+  });
+  const result = await publishLive(db, root, gw.number, readAtMs, out);
+  log.info('fantasy live: week refreshed', {
+    ...lctx, result, readAtMs, started: startedNodes.length,
+    managers: Object.keys(out.Squads).length,
+  });
+  return result;
+}
+
+/** The live trigger's entry (fantasy_live.ts): a game under
+ *  <sport>/<season>/Date/<dateKey> was written. The payload gate runs
+ *  first — zero reads unless the game is or was in play AND a key the
+ *  scorer reads changed (live_core.ts liveWriteMatters; Fable L2) — then
+ *  refreshLiveWeek. 'ignored' = the gate said no. */
+export async function maybeRefreshLive(
+  db: FantasyDb, args: LiveWriteArgs,
+): Promise<LiveRefreshResult | 'ignored'> {
+  if (!liveWriteMatters(args.before, args.after)) return 'ignored';
+  return refreshLiveWeek(db, args);
+}
+
+/** Refreshes live gameweek [liveGw] right away (eventAtMs = a fresh clock
+ *  reading, so it never coalesces into a run that read before the caller's
+ *  change): the settle of an older week, a void toggle. */
+async function refreshLiveGw(
+  db: FantasyDb,
+  a: {
+    sport: string; season: string; cfg: FantasyConfig; liveGw: number;
+    nowUtc: Date; log: FantasyLogger; clock?: () => number;
+  },
+  ctx: Record<string, unknown>,
+): Promise<void> {
+  const dates = dateKeysOf(await db.read(`${a.sport}/${a.season}/Date`));
+  const live = deriveGameweeks(dates, a.cfg).find((g) => g.number === a.liveGw);
+  if (!live) return;
+  const clock = a.clock ?? Date.now;
+  const result = await refreshLiveWeek(db, {
+    sport: a.sport, season: a.season, dateKey: live.date,
+    eventAtMs: clock(), nowUtc: a.nowUtc, log: a.log, clock,
+  });
+  a.log.info('fantasy live: live week refreshed', {
+    ...ctx, liveGw: a.liveGw, result,
+  });
+}
+
+/** Finalize's live hand-over for [gw] (the TOMBSTONE, Fable L1): one
+ *  transaction replaces a live node of gw or an older week — or none —
+ *  with { Meta: { Gw: gw, State: 'settled', UpdatedAt } } and leaves a
+ *  newer week's alone; then the whole LiveBase goes; then a newer week
+ *  still live is refreshed at once (its settled base just changed). */
+async function settleLiveWeek(
+  db: FantasyDb,
+  a: {
+    sport: string; season: string; cfg: FantasyConfig; gw: number;
+    nowUtc: Date; log: FantasyLogger; ctx: Record<string, unknown>;
+    clock?: () => number;
+  },
+): Promise<void> {
+  const root = fantasyRoot(a.sport, a.season);
+  let newerLiveGw = null as number | null;
+  const res = await db.transaction(`${root}/Live`, (cur) => {
+    newerLiveGw = null; // every (re-)run decides afresh
+    const meta = liveMetaOfNode(cur);
+    if (meta !== null && meta.gw > a.gw) {
+      if (meta.live) newerLiveGw = meta.gw;
+      return undefined; // a newer week owns Live
+    }
+    return { Meta: { Gw: a.gw, State: 'settled', UpdatedAt: a.nowUtc.getTime() } };
+  });
+  if (res.committed) a.log.info('fantasy live: week settled', a.ctx);
+  await removeLiveBase(db, root);
+  if (newerLiveGw === null) return;
+  await refreshLiveGw(db, {
+    sport: a.sport, season: a.season, cfg: a.cfg, liveGw: newerLiveGw,
+    nowUtc: a.nowUtc, log: a.log, clock: a.clock,
+  }, { ...a.ctx, reason: 'older week settled' });
 }
 
 // ── Positions locked per gameweek (spec §3 revision 2026-10-28) ────────────
@@ -1777,6 +2232,43 @@ async function sweepSeason(
     await db.write(`${root}/News/Drafts/${key}`, null);
     log.info('fantasy news: draft auto-published',
       { ...ctx, key, source: String(d['Source'] ?? '') });
+  }
+
+  // 2c. Live backstop (live design 2026-11-03 §4): a lost trigger must not
+  //     leave the live week behind. While the STORED GwState says the
+  //     current week is locked (a previous sweep saw the lock; 'finalized'
+  //     once History exists), recompute it when a game of its date is in
+  //     play, or when every game is Final but Live never reached this
+  //     week's settled tombstone — refreshLiveWeek itself answers 'settled'
+  //     once PlayerWeeks/<gw> exists, so the backstop finalize above wins.
+  //     After the backstop (step 2), before step 3. A failure is logged and
+  //     never blocks the steps below.
+  if (current) {
+    try {
+      const stored = await db.read(`${root}/GwState`);
+      if (isPlainMap(stored) && stored['status'] === 'locked' &&
+        toIntLoose(stored['current']) === current.number) {
+        const games = gamesOfDate(
+          await db.read(`${sport}/${season}/Date/${current.date}`));
+        const inPlay = games.some((g) => toIntLoose(g['status']) === 1);
+        let due = inPlay;
+        if (!due && allGamesFinal(games)) {
+          const meta = liveMetaOf(await db.read(`${root}/Live/Meta`));
+          due = !(meta !== null && meta.gw === current.number && meta.settled);
+        }
+        if (due) {
+          const result = await refreshLiveWeek(db, {
+            sport, season, dateKey: current.date, eventAtMs: nowMs, nowUtc,
+            log, clock: deps?.clock,
+          });
+          log.info('fantasy sweep: live backstop',
+            { ...ctx, gw: current.number, result });
+        }
+      }
+    } catch (err) {
+      log.warn('fantasy sweep: live backstop failed — retried by the next sweep',
+        { ...ctx, error: String(err) });
+    }
   }
 
   // 3. GwState upsert, after the backstop so a finalize lands as 'finalized'

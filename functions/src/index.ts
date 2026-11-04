@@ -15,6 +15,7 @@ import { readUserName } from './lib/user_names';
 import { makeLeagueTriggers } from './league_watch';
 import { makeInsiderVerifyTrigger } from './insiders_verify';
 import { makeFantasyFinalizeTrigger } from './fantasy_finalize';
+import { makeFantasyLiveTrigger } from './fantasy_live';
 
 admin.initializeApp();
 
@@ -355,12 +356,24 @@ export const leagueFlagFootball = makeLeagueTriggers('Flag Football');
 
 export { fantasyLifecycleSweep, fantasyMondayReprice } from './fantasy_lifecycle';
 
-/** Grouped export -> deploys as fantasyFutsal-onGameWritten, ...
- *  (makeLeagueTriggers convention: sport baked into the path). The handler
- *  no-ops instantly for seasons without a Fantasy/<sport>/<season>/Config. */
-export const fantasyFutsal = makeFantasyFinalizeTrigger('Futsal');
-export const fantasyBasketball = makeFantasyFinalizeTrigger('Basketball');
-export const fantasyFlagFootball = makeFantasyFinalizeTrigger('Flag Football');
+/** Grouped export -> deploys as fantasyFutsal-onGameWritten (finalize) and
+ *  fantasyFutsal-onGameLive (the live gameweek, live design 2026-11-03),
+ *  ... (makeLeagueTriggers convention: sport baked into the path). Both
+ *  handlers no-op for seasons without a Fantasy/<sport>/<season>/Config;
+ *  onGameLive returns with zero reads unless a scoring key of a game in
+ *  play changed. */
+export const fantasyFutsal = {
+  ...makeFantasyFinalizeTrigger('Futsal'),
+  ...makeFantasyLiveTrigger('Futsal'),
+};
+export const fantasyBasketball = {
+  ...makeFantasyFinalizeTrigger('Basketball'),
+  ...makeFantasyLiveTrigger('Basketball'),
+};
+export const fantasyFlagFootball = {
+  ...makeFantasyFinalizeTrigger('Flag Football'),
+  ...makeFantasyLiveTrigger('Flag Football'),
+};
 
 // ---- Infinite Fantasy P4 (E): transfer accounting on squad saves ----
 

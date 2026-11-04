@@ -19,9 +19,18 @@
 // every past week. Anything that changes finalize's stages 5–7 must change
 // here too — the contract test fails otherwise.
 //
+// ONE STATUS SOURCE (Task 2 review): every status decision — counted, live,
+// Final (provisional bonus), pending — reads the day's status table
+// (gameStatus) by the game's key; `games` is keyed the same way (a list is
+// keyed by its index — the Date node's own list shape) and a node's own
+// `status` field is never consulted (the core gets the table's). The
+// caller builds both from ONE read of Date/<dateKey> (orchestration.ts
+// refreshLiveWeek).
+//
 // PROVISIONAL RULES (spec §2; while games are still to come):
-// - Counted games: today's started non-friendly games (status 1 live, 2
-//   Final). A status-0 game counts nothing, even if a caller hands one in.
+// - Counted games: today's started non-friendly games (table S 1 live, 2
+//   Final). A game whose table entry is 0 (or missing) counts nothing, even
+//   if a caller hands its node in.
 // - Pending teams = every team with at least one status-0 game in the day's
 //   status table (gameStatus). Their market players who have not played yet
 //   are PENDING: team scoring counts them as playing, 0 so far (no auto-sub,
@@ -42,8 +51,11 @@
 //   finalize (scoreWeekCore does them).
 //
 // St (Fable L3), first match wins:
-//   1. 'live'    — present (not marked absent in the composed attendance)
-//                  in a status-1 game of his team;
+//   1. 'live'    — present in a status-1 game of his team: marked present
+//                  in its composed attendance, or — with no entry there
+//                  (no map, or a name off the roster) — only if he has
+//                  played (the mapper put him on the court through an
+//                  event; Task 2 review);
 //   2. 'pending' — his team has a status-0 game today and he has not played;
 //   3. 'done'    — he played;
 //   4. 'out'     — otherwise (no game, absent with nothing to come, no team).
@@ -96,14 +108,23 @@
 //   highest-numbered non-voided settled weeks (numeric order), each week's
 //   PlayerWeeks map copied whole. Readers note: FormWeeks' small int keys
 //   may come back from RTDB list-coerced, and an empty Managers/Players/
-//   FormWeeks map is dropped on write (read it back as {}).
+//   FormWeeks map is dropped on write (every season's first live week
+//   reads back as just { Gw }) — computeLiveWeek takes the stored node as
+//   it comes back and normalises it (missing maps = {}, a null-padded
+//   FormWeeks list = its non-null weeks).
+//
+// THE TRIGGER GATE (Fable L2): SCORING_KEYS are the game-node keys the
+// scorer reads (stats_mapper.ts, finalize_core.ts, the friendly filter
+// gamesOfDate). liveWriteMatters(before, after) — the game is or was in
+// play AND one of those keys changed — is the live trigger's payload-only
+// gate: a clock tick, a livestream link or undo bookkeeping costs nothing.
 
 import { FantasyPosition } from './fantasy_config';
 import {
   competitionRanks, FinalizeGame, pickDreamTeam, roundTenths, scoreWeekCore,
   WeekCoreInput, wholePoints,
 } from './finalize_core';
-import { toIntLoose } from './orchestration_db';
+import { childEntries, isPlainMap, toIntLoose } from './orchestration_db';
 
 /** Weeks in the form window (finalize's PlayerTotals form, Stage 6). */
 const FORM_WINDOW = 3;
@@ -129,12 +150,19 @@ export interface LiveGameStatus {
 
 /** computeLiveWeek's input: the week-scoring input minus pendingTeams
  *  (derived here from gameStatus — one source of truth for "still to come",
- *  see pendingTeamsOf) plus the settled base and the day's status table. */
-export interface LiveInput extends Omit<WeekCoreInput, 'pendingTeams'> {
-  /** buildLiveBase output for [gw] (a base for any other week throws). */
+ *  see pendingTeamsOf), with the games keyed like the status table, plus
+ *  the settled base and the day's status table. */
+export interface LiveInput extends Omit<WeekCoreInput, 'pendingTeams' | 'games'> {
+  /** The day's game nodes (attendance composed), keyed exactly like
+   *  [gameStatus] — a list is keyed by its index, the Date node's own list
+   *  shape. Only the keys the table marks started (1 or 2) count. */
+  games: FinalizeGame[] | Record<string, FinalizeGame>;
+  /** buildLiveBase output for [gw] (a base for any other week throws), or
+   *  that node as RTDB hands it back (see the header: normalised here). */
   base: LiveBase;
-  /** Every non-friendly game of the day, keyed by game index: the
-   *  not-started ones make their teams pending; published as Meta.Games. */
+  /** Every non-friendly game of the day, keyed by game index: THE status
+   *  source (header) — the not-started ones make their teams pending;
+   *  published as Meta.Games. */
   gameStatus: Record<string, LiveGameStatus>;
   /** When the caller read the games (Meta.ReadAt). */
   readAtMs: number;
@@ -269,29 +297,66 @@ export function buildLiveBase(args: {
   return { Gw: gw, Managers, Players, FormWeeks };
 }
 
-/** A game that has started (status 1 live or 2 Final). */
-function isStarted(g: FinalizeGame): boolean {
-  const s = toIntLoose(g.node['status']);
-  return s === 1 || s === 2;
+/** LiveBase/<gw> as RTDB hands it back, made whole (header): a dropped
+ *  empty map reads {}, a list-coerced FormWeeks keeps only its real weeks,
+ *  every number an int. A base built in memory comes out identical. */
+function normalizedBase(base: LiveBase): LiveBase {
+  const Managers: LiveBase['Managers'] = {};
+  for (const [uid, m] of childEntries(base.Managers)) {
+    if (isPlainMap(m)) Managers[uid] = { O: toIntLoose(m['O']) };
+  }
+  const Players: LiveBase['Players'] = {};
+  for (const [name, p] of childEntries(base.Players)) {
+    if (isPlainMap(p)) Players[name] = { P: toIntLoose(p['P']), G: toIntLoose(p['G']) };
+  }
+  const FormWeeks: LiveBase['FormWeeks'] = {};
+  for (const [week, byName] of childEntries(base.FormWeeks)) {
+    if (!isPlainMap(byName)) continue;
+    const pts: Record<string, number> = {};
+    for (const [name, v] of childEntries(byName)) pts[name] = toIntLoose(v);
+    FormWeeks[week] = pts;
+  }
+  return { Gw: toIntLoose(base.Gw), Managers, Players, FormWeeks };
+}
+
+/** A game of the day the status table has under way (S 1), with its
+ *  composed attendance. */
+interface LiveGame {
+  T1: string;
+  T2: string;
+  attendance: FinalizeGame['attendance'];
 }
 
 /** The live gameweek, pure: scoreWeekCore over the started games with the
  *  pending rule, resummed against the settled base — see the header.
  *  Deterministic: same inputs, same node. */
 export function computeLiveWeek(input: LiveInput): LiveOutput {
-  const { cfg, gw, base, voided } = input;
+  const { cfg, gw, voided } = input;
+  const base = normalizedBase(input.base);
   if (base.Gw !== gw) {
     throw new Error(
       `LiveBase is for gameweek ${base.Gw}, not the live gameweek ${gw}`);
   }
 
+  // ── One status source: the table, by game key (header). The core reads
+  // Final-ness from the node (the provisional bonus), so it gets the
+  // table's status. ──
+  const started: FinalizeGame[] = [];
+  const liveGames: LiveGame[] = [];
+  for (const [key, g] of Object.entries(input.games)) {
+    const st = Object.prototype.hasOwnProperty.call(input.gameStatus, key)
+      ? input.gameStatus[key] : undefined;
+    if (!g || st === undefined || (st.S !== 1 && st.S !== 2)) continue;
+    started.push({ node: { ...g.node, status: st.S }, attendance: g.attendance });
+    if (st.S === 1) liveGames.push({ T1: st.T1, T2: st.T2, attendance: g.attendance });
+  }
+
   // ── Stages 1–4, shared with finalize ──
-  const games = input.games.filter(isStarted);
   const pendingTeams = new Set(pendingTeamsOf(input.gameStatus));
   const core = scoreWeekCore({
     cfg,
     gw,
-    games,
+    games: started,
     players: input.players,
     squadsByUid: input.squadsByUid,
     transferCostPointsByUid: input.transferCostPointsByUid,
@@ -303,10 +368,13 @@ export function computeLiveWeek(input: LiveInput): LiveOutput {
   const statusOf = (name: string, team: string | undefined): LiveSt => {
     const played = core.week[name].played;
     if (team !== undefined) {
-      for (const g of games) {
-        if (toIntLoose(g.node['status']) !== 1) continue;
-        if (g.node['team1'] !== team && g.node['team2'] !== team) continue;
-        if (g.attendance?.[team]?.[name] !== false) return 'live';
+      for (const g of liveGames) {
+        if (g.T1 !== team && g.T2 !== team) continue;
+        const marked = g.attendance?.[team]?.[name];
+        // No entry: on the court only if the mapper put him there (played).
+        const present = marked === undefined || marked === null
+          ? played : marked !== false;
+        if (present) return 'live';
       }
       if (pendingTeams.has(team) && !played) return 'pending';
     }
@@ -418,4 +486,53 @@ export function computeLiveWeek(input: LiveInput): LiveOutput {
       ? []
       : pickDreamTeam(core.week, input.players, cfg, input.nowMs).Players,
   };
+}
+
+// ── The trigger gate (header: THE TRIGGER GATE) ────────────────────────────
+
+/** The game-node keys the scorer reads: the mapper (teams, activity, both
+ *  score spellings, attendance, keepers, forfeit), the status, and Stage
+ *  (a friendly counts nothing — gamesOfDate). */
+export const SCORING_KEYS: readonly string[] = [
+  'status', 'team1', 'team2', 'team1activity', 'team2activity',
+  'team1score', 'team2score', 'team1Score', 'team2Score',
+  'team1attendance', 'team2attendance', 'team1keepers', 'team2keepers',
+  'forfeitedBy', 'Stage',
+];
+
+/** RTDB value equality: an absent key equals null (RTDB stores no null),
+ *  and a list equals the index-keyed map with the same children (RTDB
+ *  coerces one into the other). Leaves compare strictly (2 vs '2' differ:
+ *  a needless recompute, never a missed one). */
+function sameRtdbValue(a: unknown, b: unknown): boolean {
+  const x = a === undefined ? null : a;
+  const y = b === undefined ? null : b;
+  if (x === y) return true;
+  if (x === null || y === null || typeof x !== 'object' || typeof y !== 'object') {
+    return false;
+  }
+  const xs = childEntries(x);
+  const ys = new Map(childEntries(y));
+  return xs.length === ys.size &&
+    xs.every(([k, v]) => ys.has(k) && sameRtdbValue(v, ys.get(k)));
+}
+
+/** Whether a game write changed anything the scorer reads (SCORING_KEYS,
+ *  deep-compared). A created or deleted game changes them all. */
+export function scoringKeysChanged(before: unknown, after: unknown): boolean {
+  const b = isPlainMap(before) ? before : {};
+  const a = isPlainMap(after) ? after : {};
+  return SCORING_KEYS.some((k) => !sameRtdbValue(b[k], a[k]));
+}
+
+/** The live trigger's payload-only gate: the write can move a live number
+ *  only when the game is or was in play — the after-status is 1 or 2, or
+ *  the before-status was 1 (an undone kickoff) — AND a scoring key
+ *  changed. False = the trigger returns with zero reads. */
+export function liveWriteMatters(before: unknown, after: unknown): boolean {
+  const status = (node: unknown) =>
+    (isPlainMap(node) ? toIntLoose(node['status']) : 0);
+  const inPlay = status(after) === 1 || status(after) === 2 ||
+    status(before) === 1;
+  return inPlay && scoringKeysChanged(before, after);
 }

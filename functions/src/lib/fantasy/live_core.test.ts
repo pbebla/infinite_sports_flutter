@@ -714,14 +714,15 @@ describe('computeLiveWeek: St, first match wins', () => {
       node: { team1, team2, team1score: 0, team2score: 0, status, ...node },
       attendance,
     });
-    const games: FinalizeGame[] = [
-      g('Lions', 'Tigers', 1, { Lions: { Leo: true, Abe: false }, Tigers: null },
+    // Keyed like the status table (the not-started g2/g4 have no node).
+    const games: Record<string, FinalizeGame> = {
+      g0: g('Lions', 'Tigers', 1, { Lions: { Leo: true, Abe: false }, Tigers: null },
         { team2activity: { "3'": [{ Goal: 'Tom' }] }, team2score: 1 }),
-      g('Wolves', 'Hawks', 2, { Wolves: { Xan: true, Yul: false }, Hawks: null }),
-      g('Pumas', 'Rams', 1, { Pumas: { Pia: true, Paz: false }, Rams: null }),
-      g('Bears', 'Cats', 2, { Bears: { Bo: true, Bez: false }, Cats: { Cid: true } }),
-      g('Bears', 'Kites', 1, { Bears: { Bo: true, Bez: false }, Kites: null }),
-    ];
+      g1: g('Wolves', 'Hawks', 2, { Wolves: { Xan: true, Yul: false }, Hawks: null }),
+      g3: g('Pumas', 'Rams', 1, { Pumas: { Pia: true, Paz: false }, Rams: null }),
+      g5: g('Bears', 'Cats', 2, { Bears: { Bo: true, Bez: false }, Cats: { Cid: true } }),
+      g6: g('Bears', 'Kites', 1, { Bears: { Bo: true, Bez: false }, Kites: null }),
+    };
     const S = (s: 0 | 1 | 2, T1: string, T2: string) => ({ S: s, T1, T2 });
     const out = computeLiveWeek(liveInput({
       games,
@@ -738,7 +739,7 @@ describe('computeLiveWeek: St, first match wins', () => {
     expect(st).toEqual({
       Leo: 'live', // present in a live game
       Abe: 'out', // absent in a live game, no game still to come: NOT live
-      Tom: 'live', // no attendance map: nobody is marked absent
+      Tom: 'live', // no attendance map, but he scored: he is on the court
       Xan: 'done', // played the Final game; his next one has not started
       Yul: 'pending', // absent in the Final game, Wolves still play today
       Pia: 'live', // present in a live game beats a game still to come
@@ -749,6 +750,95 @@ describe('computeLiveWeek: St, first match wins', () => {
       Gus: 'out', // no game today
       Nox: 'out', // no team
     });
+  });
+
+  it("'live' needs a known presence: no attendance entry = live only if he has played", () => {
+    // Lions-Tigers live: the Lions map has no entry for Lex, the Tigers have
+    // no map at all. Tom scored (the mapper counts him); Lex and Tia did
+    // nothing, so the mapper never put them on the court either.
+    const out = computeLiveWeek(liveInput({
+      players: {
+        ...PLAYERS,
+        Lex: { position: 'DEF', eligible: true, teamName: 'Lions' },
+        Tia: { position: 'DEF', eligible: true, teamName: 'Tigers' },
+      },
+    }));
+    expect(out.Players['Tom'].St).toBe('live');
+    expect(out.Players['Leo'].St).toBe('live');
+    expect(out.Players['Lex']).toMatchObject({ St: 'out', Pts: 0, Games: 0 });
+    expect(out.Players['Tia']).toMatchObject({ St: 'out', Pts: 0, Games: 0 });
+  });
+});
+
+describe('computeLiveWeek: one status source — the status table (Task 2 review)', () => {
+  // Every decision (counted, live, Final, pending) reads gameStatus by the
+  // game's key; a node's own status field is never consulted.
+  it('a game the table says is live is live, whatever its node says', () => {
+    const out = computeLiveWeek(liveInput({ games: [lionsTigers(2)] }));
+    // Table '0' = S 1: Leo is live and his bonus is provisional.
+    expect(out.Players['Leo']).toMatchObject({ St: 'live', Pts: 12, BonusProv: true });
+  });
+
+  it('a game the table says is Final is Final, whatever its node says', () => {
+    const out = computeLiveWeek(liveInput({
+      games: [lionsTigers(1)],
+      gameStatus: { '0': { S: 2, T1: 'Lions', T2: 'Tigers' } },
+    }));
+    expect(out.Players['Leo'].St).toBe('done');
+    expect(out.Players['Leo'].Pts).toBe(12);
+    expect('BonusProv' in out.Players['Leo']).toBe(false);
+  });
+
+  it('a game the table says has not started counts nothing, whatever its node says', () => {
+    const out = computeLiveWeek(liveInput({
+      games: [lionsTigers(1)],
+      gameStatus: { '0': { S: 0, T1: 'Lions', T2: 'Tigers' } },
+    }));
+    // Leo's team still kicks off: pending, settled numbers only.
+    expect(out.Players['Leo']).toMatchObject({ St: 'pending', Pts: 0, Games: 0 });
+    expect(out.Players['Tom']).toMatchObject({ St: 'pending', Pts: 0 });
+  });
+
+  it('games keyed like the table: a key the table does not list counts nothing', () => {
+    const keyed = computeLiveWeek(liveInput({
+      games: { '0': lionsTigers(1), x9: lionsTigers(1) },
+    }));
+    const listed = computeLiveWeek(liveInput({ games: [lionsTigers(1)] }));
+    expect(keyed).toStrictEqual(listed);
+  });
+});
+
+describe('computeLiveWeek: a LiveBase read back from RTDB (Task 2 review)', () => {
+  // RTDB drops empty maps on write, and small-int keys (FormWeeks' weeks)
+  // come back list-coerced with null holes.
+  it("the season's first live week: the stored base reads back as just { Gw: 1 }", () => {
+    const run = (base: LiveBase) => computeLiveWeek(liveInput({
+      gw: 1, base, squadsByUid: { u: PAZ_STARTS },
+    }));
+    const stored = { Gw: 1 } as unknown as LiveBase;
+    expect(run(stored)).toStrictEqual(run(emptyBase(1)));
+    expect(run(stored).Board['u']).toStrictEqual({ O: 38, R: 1, W: 38, WR: 1 });
+  });
+
+  it('FormWeeks as a null-padded list reads exactly like the map', () => {
+    // Weeks 1 and 2 settled: RTDB hands back [null, w1, w2]. Pia pending:
+    // Form over w2/w1 only = round(10 x (2+6)/2) = 40 — a list index 0
+    // counted as a week would give round(10 x 8/3) = 27.
+    const asMap: LiveBase = {
+      Gw: 3,
+      Managers: { u: { O: 12 } },
+      Players: { Pia: { P: 8, G: 2 }, Leo: { P: 12, G: 2 } },
+      FormWeeks: { '1': { Pia: 6, Leo: 4 }, '2': { Pia: 2, Leo: 8 } },
+    };
+    const asList = {
+      ...asMap,
+      FormWeeks: [null, { Pia: 6, Leo: 4 }, { Pia: 2, Leo: 8 }],
+    } as unknown as LiveBase;
+    const run = (base: LiveBase) => computeLiveWeek(liveInput({
+      gw: 3, base, squadsByUid: { u: PAZ_STARTS },
+    }));
+    expect(run(asList)).toStrictEqual(run(asMap));
+    expect(run(asList).Players['Pia']).toMatchObject({ St: 'pending', Form: 40 });
   });
 });
 

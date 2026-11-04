@@ -193,6 +193,21 @@ describe('buildWritePlan', () => {
     expect(plan.find((e) => e.path === `${ROOT}/Baselines`)!.value).toEqual(state.Baselines);
   });
 
+  it('live: the finalize tombstone Live is written whole; the functions-only LiveBase is not on the allowlist', () => {
+    // The replay's finalize runs end with the settled tombstone (live design
+    // 2026-11-03 §4, Fable L5); a live run's LiveBase is never produced by
+    // the replay (every finalize removes it) and stays refused.
+    const state = { ...replayState(), Live: { Meta: { Gw: 12, State: 'settled', UpdatedAt: 1 } } };
+    const plan = buildWritePlan(state, live, 1);
+    expect(EXPECTED_NODES).toContain('Live');
+    expect(EXPECTED_NODES).not.toContain('LiveBase');
+    expect(plan.find((e) => e.path === `${ROOT}/Live`)!.value).toEqual(state.Live);
+    expect(() => assertSafePaths([{ path: `${ROOT}/Live` }])).not.toThrow();
+    expect(() => buildWritePlan({ ...state, LiveBase: { 12: { Gw: 12 } } }, live, 1))
+      .toThrow(/LiveBase.*allowlist/);
+    expect(() => assertSafePaths([{ path: `${ROOT}/LiveBase` }])).toThrow();
+  });
+
   it('refuses to build a plan while the engine is on auto', () => {
     expect(() => buildWritePlan(replayState(), { ...live, config: { lockOverride: 'auto' } }, 1))
       .toThrow(/auto/i);

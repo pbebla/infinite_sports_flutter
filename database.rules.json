@@ -459,6 +459,12 @@
           "PlayerWeekStats": {
             ".read": true
           },
+          "Live": {
+            ".read": "auth != null"
+          },
+          "LiveBase": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()"
+          },
           "PriceChanges": {
             ".read": true,
             "$gw": {

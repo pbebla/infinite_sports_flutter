@@ -247,10 +247,19 @@ export function isFriendly(gameNode: Record<string, unknown>): boolean {
 /** The scoreable game nodes of one date: plain maps, friendlies dropped.
  *  Date nodes hold Lists (normal) or index-keyed Maps (hole collapsing). */
 export function gamesOfDate(dateNode: unknown): Record<string, unknown>[] {
-  return childEntries(dateNode)
-    .map(([, v]) => v)
-    .filter(isPlainMap)
-    .filter((g) => !isFriendly(g));
+  return keyedGamesOfDate(dateNode).map(([, g]) => g);
+}
+
+/** gamesOfDate with each game's key under the date (its list index) — the
+ *  live week's game keys (Live/Meta.Games). Same games, same order. */
+export function keyedGamesOfDate(
+  dateNode: unknown,
+): Array<[string, Record<string, unknown>]> {
+  const out: Array<[string, Record<string, unknown>]> = [];
+  for (const [key, v] of childEntries(dateNode)) {
+    if (isPlainMap(v) && !isFriendly(v)) out.push([key, v]);
+  }
+  return out;
 }
 
 /** All games final (status 2) — the finalize gate. An empty list is NOT

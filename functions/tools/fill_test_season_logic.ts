@@ -68,13 +68,20 @@ export const NEVER_WRITTEN_WHOLE: readonly string[] = [
  *  sweep stands down, so nothing is pushed either way. The engine's other
  *  season nodes — Access, AccessClaims (paid access callables) and
  *  PendingPositionChanges (owner position edits) — are never produced by
- *  the replay and stay off the list (fail closed). */
+ *  the replay and stay off the list (fail closed).
+ *
+ *  Live (live design 2026-11-03 §4, Fable L5): every replayed finalize
+ *  ends by writing the settled tombstone { Meta: { Gw, State: 'settled',
+ *  UpdatedAt } } — always produced, a derived node like the boards. Its
+ *  functions-only LiveBase is NOT listed: every finalize removes it, so a
+ *  replay that produced one would mean a live run escaped the replay
+ *  (fail closed). */
 export const EXPECTED_NODES: readonly string[] = [
   'Players', 'PlayerTotals', 'PlayerWeeks', 'PlayerWeekStats', 'PriceHistory',
   'PriceChanges', 'Leaderboards', 'History', 'PublishedPicks', 'DreamTeam',
   'TransferState', 'TransferCosts', 'GwState', 'LockedPositions', 'Repriced',
   'RecapSent', 'NewsDrafted', 'ReminderSent', 'Badges', 'BadgePushClaims',
-  'Baselines', 'SquadAlerts', 'PreviewPushed',
+  'Baselines', 'SquadAlerts', 'PreviewPushed', 'Live',
 ];
 
 export interface PlanEntry {
