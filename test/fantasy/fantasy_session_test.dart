@@ -53,6 +53,10 @@ void main() {
     expect(declared, contains('_transferStateCache'));
     // Live everywhere: the own `Live/Squads/<uid>` snapshot.
     expect(declared, contains('_liveSquadCache'));
+    // The locked My Team: the own settled `History/<gw>/<uid>` week and the
+    // own `Leaderboards/Overall/<uid>` row.
+    expect(declared, contains('_historyWeekCache'));
+    expect(declared, contains('_overallStandingCache'));
     final clearBody =
         RegExp(r'static void clearSessionCaches\(\) \{([\s\S]*?)\n  \}')
             .firstMatch(src)!

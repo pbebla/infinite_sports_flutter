@@ -2,7 +2,9 @@
 // layout for both states (spec §10 adopted decision): while editing is open
 // it shows the budget bar, court, bench, chips, inline validation and Save;
 // when the gameweek locks the SAME layout stays and only the header swaps to
-// the compact live-strip placeholder while every edit affordance disables.
+// the compact locked-week strip (live points with the LIVE pill, Final, Voided,
+// or "waiting for kickoff" — live_logic.dart) while every edit affordance
+// disables and each court chip shows that player's counted points.
 //
 // Draft model (P3c: lifted into the shared SquadDraftController so the
 // Players market edits the same draft): fixed slots from the live config (a
@@ -47,6 +49,12 @@ import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/chip_row.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart'
+    show movementDirection;
+import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart'
+    show movementColor;
+import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/market_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
@@ -54,6 +62,8 @@ import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_picker_sheet.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/transfer_dialogs.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/transfer_preview.dart';
+import 'package:infinite_sports_flutter/fantasy/match/match_fantasy_logic.dart'
+    show captainMultiplierFor;
 
 class FantasySquadBuilder extends StatefulWidget {
   const FantasySquadBuilder({
@@ -73,7 +83,16 @@ class FantasySquadBuilder extends StatefulWidget {
     this.onOpenPlayer,
     this.readOnly = false,
     this.header,
+    this.lockedWeek,
   });
+
+  /// The locked week's live / settled view (live everywhere, Task 5): the
+  /// strip's content and each court chip's week line, resolved by the hub from
+  /// its locked-week feed (live_logic.resolveLockedWeek). Only used while the
+  /// court is locked. null = nothing known yet — the strip reads "Locked ·
+  /// waiting for kickoff" and the chips stay quiet (a standalone builder, a
+  /// week with no data).
+  final LockedWeekModel? lockedWeek;
 
   /// Paid access (spec 2026-11-01 §5): an existing manager without an
   /// active season pass sees their court but cannot edit it — no budget
@@ -497,7 +516,8 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
                 _TransfersLine(preview: transfers),
               ],
             ] else
-              const _LockedLiveStrip(),
+              _LockedWeekStrip(
+                  view: widget.lockedWeek?.view ?? const LockedWeekView.waiting()),
             const SizedBox(height: 12),
           ],
           FantasyCourtView(
@@ -506,6 +526,12 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
             slotPicks: _draft.picks,
             captainId: _draft.captainId,
             viceId: _draft.viceId,
+            // The REAL armband multiplier: ×3 while Triple Captain is the
+            // squad's chip, else the config's ×2.
+            captainMultiplier: captainMultiplierFor(_draft.squad, widget.config),
+            // Locked: each chip carries that player's counted points (live or
+            // settled) — nothing while editing is open.
+            weekPointsFor: editable ? null : widget.lockedWeek?.chipTextFor,
             onSlotTap: editable ? _onSlotTap : null,
             // Locked: viewing a profile is still allowed (filled chips only;
             // empty slots stay inert).
@@ -751,15 +777,34 @@ class _TransfersLine extends StatelessWidget {
   }
 }
 
-/// The locked state's compact header — live points wiring lands in P4/P6;
-/// the placeholder keeps the one-layout promise meanwhile.
-class _LockedLiveStrip extends StatelessWidget {
-  const _LockedLiveStrip();
+/// The locked state's compact header (live everywhere, Task 5): what the week
+/// is doing for this manager — the LIVE pill while the numbers move, then
+/// `34 pts · #5 ▲2`, `Final · 34 pts · #5`, `Voided · this week counts 0`,
+/// `0 pts · this week didn't count`, or `Locked · waiting for kickoff`
+/// (live_logic.lockedStripText; copy pinned by live_logic_test.dart). The
+/// fantasy accent tint (gold in dark, primary red in light) like the rest of
+/// the hub; the movement reads in the leaderboard's own up / down colours
+/// (pitch green / the bright fantasy red), both themes. Text wraps, never
+/// ellipsizes, so it fits 360 px.
+class _LockedWeekStrip extends StatelessWidget {
+  const _LockedWeekStrip({required this.view});
+
+  final LockedWeekView view;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final accent = fantasyAccent(context);
+    final parts = lockedStripParts(view);
+    final numbers = view.kind == LockedWeekKind.live ||
+        view.kind == LockedWeekKind.settled;
+    final style = TextStyle(
+      fontSize: numbers ? 15 : 13,
+      height: 1.25,
+      fontWeight: numbers ? FontWeight.w800 : FontWeight.w600,
+      color: scheme.onSurface,
+    );
+    final movement = parts.movement;
     return Container(
       key: const ValueKey('locked_live_strip'),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -772,15 +817,27 @@ class _LockedLiveStrip extends StatelessWidget {
         children: [
           Icon(Icons.lock, size: 18, color: accent),
           const SizedBox(width: 10),
+          if (view.isLive) ...[
+            const FantasyLivePill(),
+            const SizedBox(width: 10),
+          ],
           Expanded(
-            child: Text(
-              'Gameweek locked — live points coming here',
-              softWrap: true,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: scheme.onSurface,
+            child: Text.rich(
+              TextSpan(
+                text: movement == null ? parts.main : '${parts.main} ',
+                children: [
+                  if (movement != null)
+                    TextSpan(
+                      text: movement,
+                      style: TextStyle(
+                        color: movementColor(
+                            context, movementDirection(view.movement)),
+                      ),
+                    ),
+                ],
               ),
+              softWrap: true,
+              style: style,
             ),
           ),
         ],

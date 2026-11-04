@@ -612,6 +612,66 @@ List<LiveSlot> historyBreakdownFromNode(Object? node) {
   ];
 }
 
+/// One manager's settled week — `History/<gw>/<uid>` (written whole by
+/// finalize): the net squad-week tenths, the per-pick Breakdown and the two
+/// verdicts that void a week for him. The locked My Team reads exactly this
+/// node (never the whole History) once the week has settled.
+class HistoryWeek {
+  const HistoryWeek({
+    required this.slots,
+    this.totalTenths,
+    this.voided = false,
+    this.invalid = false,
+  });
+
+  /// The Breakdown rows in pick order (empty for an invalid squad).
+  final List<LiveSlot> slots;
+
+  /// `TotalTenths`: the NET week (transfer hits taken off); null when the
+  /// node lacks it (never a made-up 0).
+  final int? totalTenths;
+
+  /// A literal `Voided: true`: the owner voided the week; it counted 0.
+  final bool voided;
+
+  /// The `Invalid` marker (a non-empty list of issues): the lock judged the
+  /// squad illegal and it scored 0.
+  final bool invalid;
+}
+
+/// `History/<gw>/<uid>` → the settled week; null when absent or not a map (no
+/// finalized squad that week).
+HistoryWeek? historyWeekFromNode(Object? node) {
+  if (node is! Map) return null;
+  final issues = node['Invalid'];
+  return HistoryWeek(
+    slots: historyBreakdownFromNode(node),
+    totalTenths: tolerantInt(node['TotalTenths']),
+    voided: node['Voided'] == true,
+    invalid: (issues is List && issues.isNotEmpty) ||
+        (issues is Map && issues.isNotEmpty),
+  );
+}
+
+/// One manager's official Overall standing — `Leaderboards/Overall/<uid>`:
+/// his rank and the places he climbed ([movement]; null for a manager new
+/// this week).
+class OverallStanding {
+  const OverallStanding({required this.rank, this.movement});
+
+  final int rank;
+  final int? movement;
+}
+
+/// `Leaderboards/Overall/<uid>` → his standing; null when absent or without a
+/// usable rank (never rank 0).
+OverallStanding? overallStandingFromNode(Object? node) {
+  if (node is! Map) return null;
+  final rank = tolerantInt(node['rank']);
+  if (rank == null || rank < 1) return null;
+  return OverallStanding(rank: rank, movement: tolerantInt(node['movement']));
+}
+
 /// Live slot rows from `Live/Squads/<uid>.Slots` ([{p, c, x, s?}]): the same
 /// rules as [historyBreakdownFromNode] over the live node's short keys.
 List<LiveSlot> liveSlotsFromNode(Object? node) => [

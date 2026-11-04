@@ -24,6 +24,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/access_pay_card.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/team_name_dialog.dart';
@@ -55,7 +56,13 @@ class FantasyMyTeamTab extends StatelessWidget {
     this.initialAccess,
     this.accessActions,
     this.displayName = '',
+    this.lockedWeek,
   });
+
+  /// The locked week's live / settled view (the hub's locked-week feed,
+  /// resolved): the builder's strip and chip lines while the court is locked.
+  /// null = nothing known yet.
+  final LockedWeekModel? lockedWeek;
 
   /// Paid access (spec 2026-11-01): the live `Config/Access` block, the
   /// hub's re-listen-safe broadcast of FantasyService.watchMyAccess + its
@@ -175,6 +182,7 @@ class FantasyMyTeamTab extends StatelessWidget {
           onOpenPlayer: onOpenPlayer,
           readOnly: readOnly,
           header: header,
+          lockedWeek: lockedWeek,
         );
     Widget withAlerts(Widget Function(FantasySquadAlert? alert) build) {
       final alerts = alertStates;

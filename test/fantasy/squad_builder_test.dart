@@ -19,6 +19,8 @@ import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 
@@ -136,6 +138,9 @@ void main() {
     Brightness brightness = Brightness.light,
     // A shared draft (the hub's): its money context is the test's to feed.
     SquadDraftController? draft,
+    // The locked week's live / settled view (the hub's feed); null = nothing
+    // known yet.
+    LockedWeekModel? lockedWeek,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -160,6 +165,7 @@ void main() {
           nowUtc: nowUtc,
           onOpenPlayer: onOpenPlayer,
           draft: draft,
+          lockedWeek: lockedWeek,
         ),
       ),
     ));
@@ -320,10 +326,12 @@ void main() {
     await pumpBuilder(tester,
         lockOverride: FantasyLockOverride.locked, initialSquad: fullSquad());
 
-    // Header swaps to the compact live strip (same-layout decision).
+    // Header swaps to the compact live strip (same-layout decision); with
+    // nothing known about the week yet it is the honest default.
     expect(find.byKey(const ValueKey('locked_live_strip')), findsOneWidget);
+    expect(find.text('Locked · waiting for kickoff'), findsOneWidget);
     expect(find.text('Gameweek locked — live points coming here'),
-        findsOneWidget);
+        findsNothing);
     expect(find.byKey(const ValueKey('budget_bar')), findsNothing);
     expect(find.byKey(const ValueKey('squad_save')), findsNothing);
 
@@ -1963,5 +1971,280 @@ void main() {
         }
       });
     }
+  });
+
+  // Live everywhere, Task 5: the locked My Team. The placeholder is gone: the
+  // strip says what the week is doing (copy pinned in live_logic_test.dart),
+  // the LIVE pill shows only while the numbers are live, and every court chip
+  // carries that player's counted points. Nothing here animates on its own
+  // except the pill's pulse, so these tests pump explicit durations (a
+  // pumpAndSettle would never return with a pulsing pill on screen).
+  group('locked week (live everywhere)', () {
+    const live = LockedWeekView.live(weekPoints: 34, rank: 5, movement: 2);
+
+    LockedWeekModel model(LockedWeekView view,
+            {Map<String, String> chips = const {}}) =>
+        LockedWeekModel(view: view, chipTexts: chips);
+
+    Future<void> pumpLocked(
+      WidgetTester tester,
+      LockedWeekModel? lockedWeek, {
+      Size size = const Size(420, 1900),
+      Brightness brightness = Brightness.light,
+      FantasySquad? squad,
+      FantasyLockOverride lockOverride = FantasyLockOverride.locked,
+    }) async {
+      await pumpBuilder(tester,
+          lockOverride: lockOverride,
+          initialSquad: squad ?? fullSquad(),
+          lockedWeek: lockedWeek,
+          size: size,
+          brightness: brightness);
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+
+    testWidgets('live: the pill, the points and rank and the movement',
+        (tester) async {
+      await pumpLocked(tester, model(live));
+      expect(find.byType(FantasyLivePill), findsOneWidget);
+      expect(find.text('LIVE'), findsOneWidget);
+      expect(find.text('34 pts · #5 ▲2'), findsOneWidget);
+      expect(find.text('Locked · waiting for kickoff'), findsNothing);
+      // The pill sits inside the strip.
+      expect(
+          find.descendant(
+              of: find.byKey(const ValueKey('locked_live_strip')),
+              matching: find.byType(FantasyLivePill)),
+          findsOneWidget);
+    });
+
+    testWidgets('the movement reads green up / bright red down, colour from '
+        'the shared leaderboard pair', (tester) async {
+      Color? colorOf(String glyphText) {
+        final rich = tester.widget<RichText>(find.descendant(
+            of: find.byKey(const ValueKey('locked_live_strip')),
+            matching: find.byWidgetPredicate((w) =>
+                w is RichText && w.text.toPlainText().contains(' pts'))));
+        Color? found;
+        rich.text.visitChildren((span) {
+          if (span is TextSpan && span.text == glyphText) {
+            found = span.style?.color;
+          }
+          return true;
+        });
+        return found;
+      }
+
+      await pumpLocked(tester, model(live));
+      expect(colorOf('▲2'), const Color(0xFF2FA05A)); // fantasyPitchGreen light
+
+      await pumpLocked(
+          tester,
+          model(const LockedWeekView.live(
+              weekPoints: 34, rank: 5, movement: -1)));
+      expect(colorOf('▼1'), const Color(0xFFD32F2F)); // fantasyDownRed light
+    });
+
+    testWidgets('every other state: no pill', (tester) async {
+      for (final (view, text) in [
+        (const LockedWeekView.waiting(), 'Locked · waiting for kickoff'),
+        (
+          const LockedWeekView.settled(weekPoints: 34, rank: 5),
+          'Final · 34 pts · #5'
+        ),
+        (const LockedWeekView.voided(), 'Voided · this week counts 0'),
+        (const LockedWeekView.invalid(), "0 pts · this week didn't count"),
+      ]) {
+        await pumpLocked(tester, model(view));
+        expect(find.byType(FantasyLivePill), findsNothing, reason: text);
+        expect(find.text(text), findsOneWidget, reason: text);
+      }
+    });
+
+    testWidgets('no model at all: the honest default, no pill',
+        (tester) async {
+      await pumpLocked(tester, null);
+      expect(find.text('Locked · waiting for kickoff'), findsOneWidget);
+      expect(find.byType(FantasyLivePill), findsNothing);
+    });
+
+    testWidgets('the court chips show the slot texts', (tester) async {
+      await pumpLocked(
+          tester,
+          model(live, chips: {
+            'GK One': '16 pts · live',
+            'Def One': 'Not started',
+            'Def Two': '4 pts',
+            'Att Two': 'Out',
+            'Bench Def': '2.5 pts',
+          }));
+      Finder inChip(String id, String text) => find.descendant(
+          of: find.byKey(ValueKey('squad_chip_$id')),
+          matching: find.text(text));
+      expect(inChip('GK One', '16 pts · live'), findsOneWidget);
+      expect(inChip('Def One', 'Not started'), findsOneWidget);
+      expect(inChip('Def Two', '4 pts'), findsOneWidget);
+      expect(inChip('Att Two', 'Out'), findsOneWidget);
+      expect(inChip('Bench Def', '2.5 pts'), findsOneWidget);
+      // A pick with no text (not in the squad's slots) shows none.
+      expect(
+          find.descendant(
+              of: find.byKey(const ValueKey('squad_chip_Att One')),
+              matching: find.textContaining('pts')),
+          findsNothing);
+    });
+
+    testWidgets('voided: the chips stay quiet', (tester) async {
+      await pumpLocked(tester, model(const LockedWeekView.voided()));
+      expect(find.textContaining(' pts'), findsNothing);
+    });
+
+    testWidgets('while editing is open the model is ignored: the budget '
+        'bar, no strip, no pill, no chip text', (tester) async {
+      await pumpLocked(tester, model(live, chips: {'GK One': '16 pts · live'}),
+          lockOverride: FantasyLockOverride.open);
+      expect(find.byKey(const ValueKey('budget_bar')), findsOneWidget);
+      expect(find.byKey(const ValueKey('locked_live_strip')), findsNothing);
+      expect(find.byType(FantasyLivePill), findsNothing);
+      expect(find.text('16 pts · live'), findsNothing);
+    });
+
+    testWidgets('the numbers update in place when the model changes',
+        (tester) async {
+      Widget builder(LockedWeekModel m) => MaterialApp(
+            theme: ThemeData(useMaterial3: true),
+            home: Scaffold(
+              body: FantasySquadBuilder(
+                config: FantasyConfig.futsalDefault(),
+                lockOverride: FantasyLockOverride.locked,
+                gameweeks: const [],
+                players: players,
+                squadStates: squads.stream,
+                initialSquad: fullSquad(),
+                onSaveSquad: (_) async {},
+                chipHistory: const {},
+                lockedWeek: m,
+              ),
+            ),
+          );
+      tester.view.physicalSize = const Size(420, 1900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(builder(model(live, chips: {'GK One': '8 pts · live'})));
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('8 pts · live'), findsOneWidget);
+
+      await tester.pumpWidget(builder(model(
+          const LockedWeekView.live(weekPoints: 40, rank: 4, movement: 3),
+          chips: {'GK One': '14 pts · live'})));
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('40 pts · #4 ▲3'), findsOneWidget);
+      expect(find.text('14 pts · live'), findsOneWidget);
+      expect(find.text('8 pts · live'), findsNothing);
+      // The same pill widget lives on (no remount flash).
+      expect(find.byType(FantasyLivePill), findsOneWidget);
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('360 px, scrolled end to end: no overflow, no ellipsis — '
+          '$brightness', (tester) async {
+        await pumpLocked(
+            tester,
+            model(
+                const LockedWeekView.live(
+                    weekPoints: 112, rank: 1203, movement: -14),
+                chips: {
+                  'GK One': '10.5 pts · live',
+                  'Def One': 'Not started',
+                  'Def Two': '104 pts',
+                  'Att One': 'Out',
+                  'Att Two': '12 pts · live',
+                  'Bench Def': '2.5 pts',
+                  'Bench Att': '0 pts',
+                }),
+            size: const Size(360, 760),
+            brightness: brightness);
+        expect(tester.takeException(), isNull);
+        expect(find.text('112 pts · #1203 ▼14'), findsOneWidget);
+        final scrollable = find.byType(Scrollable).first;
+        for (final key in [
+          'locked_live_strip',
+          'squad_chip_Bench Att',
+        ]) {
+          await tester.dragUntilVisible(
+              find.byKey(ValueKey(key)), scrollable, const Offset(0, -200));
+          await tester.pump(const Duration(milliseconds: 50));
+          expect(tester.takeException(), isNull, reason: key);
+          final r = tester.getRect(find.byKey(ValueKey(key)));
+          expect(r.left, greaterThanOrEqualTo(0), reason: key);
+          expect(r.right, lessThanOrEqualTo(360), reason: key);
+        }
+        for (final t in tester.widgetList<Text>(find.byType(Text))) {
+          expect(t.overflow, isNot(TextOverflow.ellipsis), reason: t.data);
+        }
+      });
+    }
+
+    testWidgets('the voided / invalid / final copy fits 360 px in dark mode',
+        (tester) async {
+      for (final view in [
+        const LockedWeekView.voided(),
+        const LockedWeekView.invalid(),
+        const LockedWeekView.settled(weekPoints: 112, rank: 1203),
+      ]) {
+        await pumpLocked(tester, model(view),
+            size: const Size(360, 760), brightness: Brightness.dark);
+        expect(tester.takeException(), isNull);
+        final r =
+            tester.getRect(find.byKey(const ValueKey('locked_live_strip')));
+        expect(r.right, lessThanOrEqualTo(360));
+      }
+    });
+  });
+
+  // Live everywhere, Task 5: the captain nameplate's multiplier is the REAL
+  // one (the inventory bug: "×2" was hard-coded — a Triple Captain week
+  // showed ×2 while scoring ×3).
+  group('captain nameplate multiplier', () {
+    testWidgets('×2 without a chip', (tester) async {
+      await pumpBuilder(tester, initialSquad: fullSquad());
+      expect(find.text('GK · \$5.0M · ×2'), findsOneWidget);
+      expect(find.text('GK · \$5.0M · ×3'), findsNothing);
+    });
+
+    testWidgets('×3 under Triple Captain', (tester) async {
+      await pumpBuilder(tester,
+          initialSquad: fullSquad(chip: 'tripleCaptain'));
+      expect(find.text('GK · \$5.0M · ×3'), findsOneWidget);
+      expect(find.text('GK · \$5.0M · ×2'), findsNothing);
+    });
+
+    testWidgets('another chip keeps ×2; only the captain carries a ×',
+        (tester) async {
+      await pumpBuilder(tester, initialSquad: fullSquad(chip: 'benchBoost'));
+      expect(find.text('GK · \$5.0M · ×2'), findsOneWidget);
+      expect(find.textContaining(' · ×'), findsOneWidget);
+    });
+
+    testWidgets('arming and disarming Triple Captain flips the nameplate at '
+        'once', (tester) async {
+      await pumpBuilder(tester, initialSquad: fullSquad());
+      expect(find.text('GK · \$5.0M · ×2'), findsOneWidget);
+      await tester
+          .tap(find.byKey(const ValueKey('fantasy_chip_tripleCaptain')));
+      await tester.pumpAndSettle();
+      expect(find.text('GK · \$5.0M · ×3'), findsOneWidget);
+      await tester
+          .tap(find.byKey(const ValueKey('fantasy_chip_tripleCaptain')));
+      await tester.pumpAndSettle();
+      expect(find.text('GK · \$5.0M · ×2'), findsOneWidget);
+    });
+
+    testWidgets('the locked court shows it too', (tester) async {
+      await pumpBuilder(tester,
+          lockOverride: FantasyLockOverride.locked,
+          initialSquad: fullSquad(chip: 'tripleCaptain'));
+      expect(find.text('GK · \$5.0M · ×3'), findsOneWidget);
+    });
   });
 }

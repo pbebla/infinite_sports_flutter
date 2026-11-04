@@ -59,6 +59,7 @@ class FantasyCourtView extends StatelessWidget {
     required this.slotPicks,
     this.captainId,
     this.viceId,
+    this.captainMultiplier = 2,
     this.onSlotTap,
     this.onPlayerTap,
     this.weekPointsFor,
@@ -78,6 +79,10 @@ class FantasyCourtView extends StatelessWidget {
   final String? captainId;
   final String? viceId;
 
+  /// The armband's multiplier shown on the captain's nameplate (×2, ×3 under
+  /// Triple Captain): callers pass `captainMultiplierFor(squad, config)`.
+  final int captainMultiplier;
+
   /// Called with the slot index; null = locked (nothing tappable).
   final void Function(int slotIndex)? onSlotTap;
 
@@ -87,7 +92,9 @@ class FantasyCourtView extends StatelessWidget {
   /// while editing is open (the action sheet carries "Player profile").
   final void Function(String playerId)? onPlayerTap;
 
-  /// Week-points text per playerId — only rendered when provided (P4/P6).
+  /// Week-points text per playerId — only rendered when non-null: the locked
+  /// court's live / settled line (live_logic.chipWeekText) and the Team of
+  /// the Week's points.
   final String? Function(String playerId)? weekPointsFor;
 
   /// Market photo per playerId (Task 3) — null/absent falls back to
@@ -220,6 +227,7 @@ class FantasyCourtView extends StatelessWidget {
       photoUrl: photoUrlFor?.call(pick.playerId),
       isCaptain: pick.playerId == captainId,
       isVice: pick.playerId == viceId,
+      captainMultiplier: captainMultiplier,
       weekPoints: weekPointsFor?.call(pick.playerId),
       onTap: onSlotTap != null
           ? () => onSlotTap!(i)

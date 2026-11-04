@@ -818,6 +818,80 @@ void main() {
     });
   });
 
+  // Live everywhere, Task 5: the locked My Team's settled week. One small
+  // `History/<gw>/<uid>` node (never the whole History) and one
+  // `Leaderboards/Overall/<uid>` row.
+  group('historyWeekFromNode (History/<gw>/<uid>)', () {
+    Map<String, Object?> row(String id, int tenths, int x) => {
+          'playerId': id,
+          'countedTenths': tenths,
+          'multiplier': x,
+          'autoSubbedIn': false,
+        };
+
+    test('a settled week: net tenths + the Breakdown slots', () {
+      final week = historyWeekFromNode({
+        'picks': [],
+        'TotalTenths': 345,
+        'Breakdown': [row('A', 100, 2), row('B', 245, 1)],
+      })!;
+      expect(week.totalTenths, 345);
+      expect(week.slots.map((s) => s.playerId), ['A', 'B']);
+      expect(week.voided, isFalse);
+      expect(week.invalid, isFalse);
+    });
+
+    test('a voided week keeps its would-have-counted slots and says so', () {
+      final week = historyWeekFromNode({
+        'TotalTenths': 0,
+        'Voided': true,
+        'Breakdown': [row('A', 100, 2)],
+      })!;
+      expect(week.voided, isTrue);
+      expect(week.totalTenths, 0);
+      expect(week.slots, hasLength(1));
+    });
+
+    test('an invalid squad: the Invalid marker, no Breakdown', () {
+      final week = historyWeekFromNode({
+        'TotalTenths': 0,
+        'Invalid': ['over budget'],
+      })!;
+      expect(week.invalid, isTrue);
+      expect(week.slots, isEmpty);
+      // Only a literal Voided:true voids; an empty/absent Invalid is valid.
+      expect(historyWeekFromNode({'TotalTenths': 5, 'Voided': 'yes'})!.voided,
+          isFalse);
+      expect(historyWeekFromNode({'TotalTenths': 5, 'Invalid': []})!.invalid,
+          isFalse);
+    });
+
+    test('absent / not a map → null; a missing TotalTenths stays null '
+        '(never a made-up 0)', () {
+      expect(historyWeekFromNode(null), isNull);
+      expect(historyWeekFromNode('nope'), isNull);
+      expect(historyWeekFromNode([1]), isNull);
+      expect(historyWeekFromNode({'picks': []})!.totalTenths, isNull);
+    });
+  });
+
+  group('overallStandingFromNode (Leaderboards/Overall/<uid>)', () {
+    test('rank + movement (places climbed)', () {
+      final s = overallStandingFromNode(
+          {'points': 120, 'rank': 5, 'movement': -2})!;
+      expect(s.rank, 5);
+      expect(s.movement, -2);
+      expect(overallStandingFromNode({'points': 9, 'rank': 7})!.movement,
+          isNull);
+    });
+
+    test('no usable rank → null (never rank 0)', () {
+      expect(overallStandingFromNode(null), isNull);
+      expect(overallStandingFromNode({'points': 3}), isNull);
+      expect(overallStandingFromNode('x'), isNull);
+    });
+  });
+
   group('live flag defaults (live everywhere, Task 4)', () {
     test('official totals and dream teams are not live', () {
       final totals = playerTotalsFromNode({

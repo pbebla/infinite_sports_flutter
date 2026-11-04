@@ -95,6 +95,11 @@ class FantasyService {
   // a known-ABSENT node (no live week / not scored) caches as null. The
   // season-wide live state is FantasyLiveFeed's own session cache.
   static final Map<String, LiveSquad?> _liveSquadCache = {};
+  // The locked My Team's settled week: one manager's `History/<gw>/<uid>`
+  // (keyed `<root>|<uid>|<gw>`) and his `Leaderboards/Overall/<uid>` row
+  // (keyed `<root>|<uid>`); a known-ABSENT node caches as null.
+  static final Map<String, HistoryWeek?> _historyWeekCache = {};
+  static final Map<String, OverallStanding?> _overallStandingCache = {};
 
   /// Clears the session caches (sign-out hygiene, tests).
   static void clearSessionCaches() {
@@ -124,6 +129,8 @@ class FantasyService {
     _badgesCache.clear();
     _badgesForCache.clear();
     _liveSquadCache.clear();
+    _historyWeekCache.clear();
+    _overallStandingCache.clear();
   }
 
   /// Live `Fantasy/<sport>/<season>/Config` → engine FantasyConfig + lock
@@ -840,6 +847,45 @@ class FantasyService {
       debugPrint('FantasyService: live squad feed failed: $e');
       _liveSquadCache.remove(key);
       yield null;
+    }
+  }
+
+  /// One manager's settled gameweek (`History/<gw>/<uid>`: net tenths, the
+  /// per-pick Breakdown, the Voided / Invalid verdicts) — the locked My Team's
+  /// numbers once the week has settled. A single small node (public read):
+  /// NEVER the whole `History` of every manager. null = no finalized squad
+  /// that week. Seeded from the session cache (`<root>|<uid>|<gw>`, a
+  /// known-absent node included); a stream error is forwarded to the caller
+  /// (the locked-week feed counts it as "no data") and never cached.
+  static Stream<HistoryWeek?> watchHistoryWeek(
+      String sport, String season, String uid, int week) async* {
+    final key = '${_root(sport, season)}|$uid|$week';
+    if (_historyWeekCache.containsKey(key)) yield _historyWeekCache[key];
+    await for (final event
+        in _ref('${_root(sport, season)}/History/$week/$uid').onValue) {
+      final settled = historyWeekFromNode(event.snapshot.value);
+      _historyWeekCache[key] = settled;
+      yield settled;
+    }
+  }
+
+  /// One manager's official Overall standing (`Leaderboards/Overall/<uid>`:
+  /// rank + movement) — the locked My Team's "#R" once the week has settled.
+  /// A single small child of the public `Leaderboards` node, not the whole
+  /// board. null = not on the board yet. Seeded from the session cache
+  /// (`<root>|<uid>`); errors are forwarded and never cached.
+  static Stream<OverallStanding?> watchOverallStanding(
+      String sport, String season, String uid) async* {
+    final key = '${_root(sport, season)}|$uid';
+    if (_overallStandingCache.containsKey(key)) {
+      yield _overallStandingCache[key];
+    }
+    await for (final event in _ref(
+            '${_root(sport, season)}/Leaderboards/Overall/$uid')
+        .onValue) {
+      final standing = overallStandingFromNode(event.snapshot.value);
+      _overallStandingCache[key] = standing;
+      yield standing;
     }
   }
 

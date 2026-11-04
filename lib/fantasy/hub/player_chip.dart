@@ -5,7 +5,8 @@
 // WRAPS (two lines max, soft wrap, never an ellipsis), the price in engine
 // tenths, and the armband states — captain = gold-accent ring + 'C' badge
 // (colorScheme-derived accent, NOT the chip asset), vice = 'V' badge. A
-// week-points line renders only when provided (live wiring lands in P4/P6).
+// week-points line renders only when provided (the locked court's live / settled
+// week line, the Team of the Week's points).
 //
 // Theme: the fantasy accent pairing (gold in dark, primary red in light —
 // the deadline chip's rule); everything else from colorScheme. Photo fade-in
@@ -87,6 +88,7 @@ class FantasyPlayerChip extends StatelessWidget {
     this.photoUrl,
     this.isCaptain = false,
     this.isVice = false,
+    this.captainMultiplier = 2,
     this.weekPoints,
     this.onTap,
     this.width = 96,
@@ -108,7 +110,13 @@ class FantasyPlayerChip extends StatelessWidget {
   final bool isCaptain;
   final bool isVice;
 
-  /// Rendered only when provided — nothing live feeds it yet (P4/P6).
+  /// The armband's multiplier on the captain's nameplate ("×2", "×3" under
+  /// Triple Captain) — the real one, from the config and the squad's chip
+  /// (match_fantasy_logic.captainMultiplierFor); never a hard-coded ×2.
+  final int captainMultiplier;
+
+  /// Rendered only when provided: a locked court's live / settled week line
+  /// (live_logic.chipWeekText), the Team of the Week's points.
   final String? weekPoints;
 
   /// null = not tappable (locked state).
@@ -199,7 +207,7 @@ class FantasyPlayerChip extends StatelessWidget {
                       if (position != null) position!.db,
                       if (priceTenths != null)
                         formatMoneyTenths(priceTenths!),
-                      if (isCaptain) '×2',
+                      if (isCaptain) '×$captainMultiplier',
                     ].join(' · '),
                     style: TextStyle(
                       fontSize: 10.5,
@@ -208,12 +216,18 @@ class FantasyPlayerChip extends StatelessWidget {
                     ),
                   ),
                   if (weekPoints != null)
-                    Text(
-                      weekPoints!,
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: accent,
+                    // One line, always: a long "10.5 pts · live" shrinks a
+                    // touch rather than wrapping the nameplate taller.
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        weekPoints!,
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: accent,
+                        ),
                       ),
                     ),
                 ],

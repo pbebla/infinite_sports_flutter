@@ -641,11 +641,22 @@ void main() {
     // READ-ONLY: no slot is tappable.
     final court = tester.widget<FantasyCourtView>(find.byType(FantasyCourtView));
     expect(court.onSlotTap, isNull);
+    // The captain's nameplate carries the REAL multiplier: this week played
+    // Triple Captain (×3), never a hard-coded ×2.
+    expect(court.captainMultiplier, 3);
+    expect(find.text('GK · \$5.0M · ×3'), findsOneWidget);
 
     // Browse back to GW1 (full history, spec: forever).
     await tester.tap(find.byKey(const ValueKey('viewer_week_1')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('squad_chip_Old Keeper')), findsOneWidget);
+    // No chip that week: the ordinary ×2.
+    expect(
+        tester
+            .widget<FantasyCourtView>(find.byType(FantasyCourtView))
+            .captainMultiplier,
+        2);
+    expect(find.text('GK · \$5.0M · ×2'), findsOneWidget);
     expect(find.text('Gameweek 1 squad'), findsOneWidget);
     // No "Now" chip for someone else's squad.
     expect(find.byKey(const ValueKey('viewer_week_now')), findsNothing);

@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_access.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_prefs.dart';
@@ -25,6 +26,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/transfer_preview.dart';
 import 'package:infinite_sports_flutter/registration/payment_links.dart';
@@ -185,6 +187,12 @@ void main() {
     Brightness brightness = Brightness.light,
     // false = nobody signed in (the transfer feed is never subscribed).
     bool signedIn = true,
+    // The locked week's feeds (live everywhere, Task 5) — null = the real
+    // ones (which, with no Firebase app, answer "nothing" at once).
+    Stream<FantasyLiveState>? liveStates,
+    Stream<LiveSquad?>? liveSquadStates,
+    Stream<HistoryWeek?> Function(int week)? historyWeekFor,
+    Stream<OverallStanding?>? overallStandingStates,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -209,6 +217,10 @@ void main() {
         saleBaselineStates: sale.stream,
         transferStateStates: transfer.stream,
         signedInUid: () => signedIn ? 'me' : null,
+        liveStates: liveStates,
+        liveSquadStates: liveSquadStates,
+        historyWeekFor: historyWeekFor,
+        overallStandingStates: overallStandingStates,
         priceHistoryStates: priceHistory.stream,
         createCheckoutUrl: () async {
           checkoutCalls++;
@@ -1402,6 +1414,364 @@ void main() {
           expect(t.style?.decoration ?? TextDecoration.none,
               TextDecoration.none,
               reason: t.data);
+        }
+      });
+    }
+  });
+
+  // Live everywhere, Task 5: the locked My Team. The hub subscribes to the
+  // locked week's four small streams ONLY while a week is locked, joins them
+  // to the single reveal gate (bounded at 2 s) so the first painted frame
+  // already carries live numbers, and hands the resolved view to the court.
+  group('locked week (live everywhere)', () {
+    // GW1..3 lock Oct 3 / 10 / 17 at 22:00 UTC; "now" (Oct 17, 23:00) is the
+    // lock day of GW3: it is the locked week. The owner's `locked` override
+    // is what the builder reads (it keeps its own real clock).
+    final gws = [
+      for (var n = 1; n <= 3; n++)
+        Gameweek(
+          number: n,
+          date: '10${(3 + 7 * (n - 1)).toString().padLeft(2, '0')}2026',
+          lockUtc: DateTime.utc(2026, 10, 3 + 7 * (n - 1), 22),
+          opensUtc: null,
+        ),
+    ];
+    DateTime lockDay() => DateTime.utc(2026, 10, 17, 23);
+
+    late StreamController<FantasyLiveState> liveFeed;
+    late StreamController<LiveSquad?> liveSquadFeed;
+    late StreamController<OverallStanding?> overallFeed;
+    late Map<int, StreamController<HistoryWeek?>> historyFeeds;
+    late int liveListens;
+    late List<int> historyRequests;
+
+    setUp(() {
+      liveListens = 0;
+      historyRequests = [];
+      liveFeed = StreamController<FantasyLiveState>.broadcast(
+          onListen: () => liveListens++);
+      liveSquadFeed = StreamController<LiveSquad?>.broadcast();
+      overallFeed = StreamController<OverallStanding?>.broadcast();
+      historyFeeds = {};
+    });
+
+    tearDown(() {
+      liveFeed.close();
+      liveSquadFeed.close();
+      overallFeed.close();
+      for (final c in historyFeeds.values) {
+        c.close();
+      }
+    });
+
+    Stream<HistoryWeek?> historyFor(int week) {
+      historyRequests.add(week);
+      return (historyFeeds[week] ??= StreamController<HistoryWeek?>.broadcast())
+          .stream;
+    }
+
+    Future<void> pumpLockedHub(
+      WidgetTester tester, {
+      Size size = const Size(420, 1900),
+      Brightness brightness = Brightness.light,
+      Stream<Set<int>>? voided,
+      DateTime Function()? now,
+    }) =>
+        pumpHub(tester,
+            size: size,
+            brightness: brightness,
+            gameweekStates: Stream.value(gws),
+            nowUtc: now ?? lockDay,
+            voidedWeeksStates: voided,
+            liveStates: liveFeed.stream,
+            liveSquadStates: liveSquadFeed.stream,
+            historyWeekFor: historyFor,
+            overallStandingStates: overallFeed.stream);
+
+    LiveSquad liveSquad({int week = 34}) => LiveSquad(
+          totalTenths: week * 10 + 5,
+          week: week,
+          slots: const [
+            LiveSlot(playerId: 'Alan Keeper', countedTenths: 40, multiplier: 1),
+            LiveSlot(playerId: 'Dana Wall', countedTenths: 30, multiplier: 1),
+            LiveSlot(playerId: 'Deb Rock', countedTenths: 0, multiplier: 1),
+            LiveSlot(
+                playerId: 'Ava Striker', countedTenths: 160, multiplier: 2),
+            LiveSlot(playerId: 'Axel Shot', countedTenths: 70, multiplier: 1),
+            LiveSlot(playerId: 'Dom Stone', countedTenths: 25, multiplier: 1),
+            LiveSlot(playerId: 'Ari Goal', countedTenths: 0, multiplier: 1),
+          ],
+        );
+
+    FantasyLiveState liveState({LiveState state = LiveState.live, int gw = 3}) =>
+        FantasyLiveState(
+          meta: LiveMeta(gw: gw, state: state),
+          board: const {
+            'me': LiveBoardRow(o: 90, r: 5, m: 2, w: 34, wr: 1),
+          },
+          players: {
+            for (final e in {
+              'Alan Keeper': LivePlayerStatus.done,
+              'Dana Wall': LivePlayerStatus.done,
+              'Deb Rock': LivePlayerStatus.pending,
+              'Ava Striker': LivePlayerStatus.live,
+              'Axel Shot': LivePlayerStatus.out,
+              'Dom Stone': LivePlayerStatus.done,
+              'Ari Goal': LivePlayerStatus.pending,
+            }.entries)
+              e.key: LivePlayer(
+                  pts: 0,
+                  st: e.value,
+                  total: 0,
+                  form: 0,
+                  ppg: 0,
+                  games: 0,
+                  own: 0),
+          },
+        );
+
+    HistoryWeek settledWeek() => HistoryWeek(totalTenths: 345, slots: const [
+          LiveSlot(playerId: 'Alan Keeper', countedTenths: 40, multiplier: 1),
+          LiveSlot(playerId: 'Ava Striker', countedTenths: 160, multiplier: 2),
+          LiveSlot(playerId: 'Dom Stone', countedTenths: 25, multiplier: 1),
+        ]);
+
+    void answerOwn({bool withLive = true}) {
+      if (withLive) liveFeed.add(liveState());
+      liveSquadFeed.add(liveSquad());
+      historyFeeds[3]?.add(null);
+      overallFeed.add(const OverallStanding(rank: 5, movement: 2));
+    }
+
+    Finder strip() => key('locked_live_strip');
+
+    testWidgets('live: the strip, the pill and the chips all show live '
+        'numbers; nothing else subscribed for other weeks', (tester) async {
+      await pumpLockedHub(tester);
+      await land(tester, lock: FantasyLockOverride.locked);
+      expect(historyRequests, [3]);
+      answerOwn();
+      await settle(tester);
+
+      expect(key('hub'), findsOneWidget);
+      expect(find.text('34 pts · #5 ▲2'), findsOneWidget);
+      expect(find.byType(FantasyLivePill), findsOneWidget);
+      Finder inChip(String id, String text) => find.descendant(
+          of: key('squad_chip_$id'), matching: find.text(text));
+      expect(inChip('Ava Striker', '16 pts · live'), findsOneWidget);
+      expect(inChip('Alan Keeper', '4 pts'), findsOneWidget);
+      expect(inChip('Deb Rock', 'Not started'), findsOneWidget);
+      expect(inChip('Axel Shot', 'Out'), findsOneWidget);
+      expect(inChip('Dom Stone', '2.5 pts'), findsOneWidget);
+      // The captain's nameplate carries the real multiplier.
+      expect(find.text('ATT · \$7.0M · ×2'), findsOneWidget);
+      // Tapping a locked chip still opens the profile.
+      await tester.tap(key('squad_chip_Ava Striker'));
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(opened.map((o) => o.name), ['Ava Striker']);
+    });
+
+    testWidgets('live arriving 500 ms late: the reveal waits for it, and the '
+        'FIRST painted frame of the hub already has live numbers — never '
+        '"waiting for kickoff" flipping to live', (tester) async {
+      await pumpLockedHub(tester);
+      await land(tester, lock: FantasyLockOverride.locked);
+      // Every own feed but the live one has answered.
+      answerOwn(withLive: false);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(key('hub'), findsNothing);
+      expect(key('skeleton'), findsOneWidget);
+
+      var sawHub = false;
+      var elapsed = 100;
+      while (elapsed < 1200) {
+        if (elapsed == 500) liveFeed.add(liveState());
+        await tester.pump(const Duration(milliseconds: 20));
+        elapsed += 20;
+        // Not one frame — before or after the reveal — shows the default.
+        expect(find.text('Locked · waiting for kickoff'), findsNothing,
+            reason: 'frame at $elapsed ms');
+        if (key('hub').evaluate().isNotEmpty) {
+          if (!sawHub) {
+            // The first frame the hub exists in the tree.
+            expect(find.text('34 pts · #5 ▲2'), findsOneWidget,
+                reason: 'the first revealed frame already has live numbers');
+            expect(elapsed, greaterThanOrEqualTo(500));
+          }
+          sawHub = true;
+        }
+      }
+      expect(sawHub, isTrue);
+    });
+
+    testWidgets('live silent for 2 s: the hub reveals without it (waiting for '
+        'kickoff), and a late live lands in place', (tester) async {
+      await pumpLockedHub(tester);
+      await land(tester, lock: FantasyLockOverride.locked);
+      answerOwn(withLive: false);
+      await tester.pump(const Duration(milliseconds: 900));
+      expect(key('hub'), findsNothing);
+      await tester.pump(const Duration(milliseconds: 700));
+      await settle(tester);
+      expect(key('hub'), findsOneWidget);
+      expect(find.text('Locked · waiting for kickoff'), findsOneWidget);
+
+      liveFeed.add(liveState());
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('34 pts · #5 ▲2'), findsOneWidget);
+      expect(find.text('Locked · waiting for kickoff'), findsNothing);
+    });
+
+    testWidgets('settled: Final, the official rank, History points on the '
+        'chips, no pill', (tester) async {
+      await pumpLockedHub(tester);
+      await land(tester, lock: FantasyLockOverride.locked);
+      // finalize left a tombstone (overlays nothing); History is written.
+      liveFeed.add(liveState(state: LiveState.settled));
+      liveSquadFeed.add(null);
+      historyFeeds[3]!.add(settledWeek());
+      overallFeed.add(const OverallStanding(rank: 4, movement: 1));
+      await settle(tester);
+
+      expect(find.text('Final · 34 pts · #4'), findsOneWidget);
+      expect(find.byType(FantasyLivePill), findsNothing);
+      expect(
+          find.descendant(
+              of: key('squad_chip_Ava Striker'), matching: find.text('16 pts')),
+          findsOneWidget);
+      expect(
+          find.descendant(
+              of: key('squad_chip_Dom Stone'), matching: find.text('2.5 pts')),
+          findsOneWidget);
+    });
+
+    testWidgets('the hand-over: live → tombstone updates in place, the pill '
+        'disappears, the numbers become the official ones', (tester) async {
+      await pumpLockedHub(tester);
+      await land(tester, lock: FantasyLockOverride.locked);
+      answerOwn();
+      await tester.pump(const Duration(milliseconds: 50));
+      await settle(tester);
+      expect(find.byType(FantasyLivePill), findsOneWidget);
+
+      historyFeeds[3]!.add(settledWeek());
+      overallFeed.add(const OverallStanding(rank: 4));
+      liveSquadFeed.add(null);
+      liveFeed.add(liveState(state: LiveState.settled));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('Final · 34 pts · #4'), findsOneWidget);
+      expect(find.byType(FantasyLivePill), findsNothing);
+    });
+
+    testWidgets('a voided week reads Voided from the Voided set (the live '
+        'record says "not voided")', (tester) async {
+      await pumpLockedHub(tester, voided: Stream.value(const {3}));
+      await land(tester, lock: FantasyLockOverride.locked);
+      answerOwn();
+      await settle(tester);
+      expect(find.text('Voided · this week counts 0'), findsOneWidget);
+      expect(find.byType(FantasyLivePill), findsNothing);
+      expect(find.textContaining(' pts'), findsNothing);
+    });
+
+    testWidgets('an invalid squad: 0 pts, "this week didn\'t count"',
+        (tester) async {
+      await pumpLockedHub(tester);
+      await land(tester, lock: FantasyLockOverride.locked);
+      liveFeed.add(liveState());
+      liveSquadFeed.add(const LiveSquad(totalTenths: 0, week: 0, slots: []));
+      historyFeeds[3]?.add(null);
+      overallFeed.add(null);
+      await settle(tester);
+      expect(find.text("0 pts · this week didn't count"), findsOneWidget);
+    });
+
+    testWidgets('editing open: no locked-week stream is ever subscribed',
+        (tester) async {
+      await pumpLockedHub(tester, now: () => DateTime.utc(2026, 10, 10, 12));
+      await land(tester, lock: FantasyLockOverride.open);
+      expect(key('hub'), findsOneWidget);
+      expect(liveListens, 0);
+      expect(historyRequests, isEmpty);
+      expect(strip(), findsNothing);
+      expect(find.byType(FantasyLivePill), findsNothing);
+    });
+
+    testWidgets('the owner locking the week while the hub is open starts the '
+        'streams; reopening stops them', (tester) async {
+      await pumpLockedHub(tester);
+      await land(tester, lock: FantasyLockOverride.open);
+      expect(liveListens, 0);
+
+      config.add(FantasyConfigState(
+          config: FantasyConfig.futsalDefault(),
+          lockOverride: FantasyLockOverride.locked));
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(liveListens, 1);
+      expect(historyRequests, [3]);
+      // The streams have not answered yet — and the shown hub never goes back
+      // to its skeleton for it (the gate belongs to the first reveal only).
+      expect(key('hub'), findsOneWidget);
+      expect(key('skeleton'), findsNothing);
+      answerOwn();
+      await settle(tester);
+      expect(find.text('34 pts · #5 ▲2'), findsOneWidget);
+
+      config.add(FantasyConfigState(
+          config: FantasyConfig.futsalDefault(),
+          lockOverride: FantasyLockOverride.open));
+      await settle(tester);
+      expect(strip(), findsNothing);
+      expect(find.byType(FantasyLivePill), findsNothing);
+      expect(liveFeed.hasListener, isFalse);
+    });
+
+    testWidgets('the clock crossing the lock (auto) starts the streams at '
+        'that instant', (tester) async {
+      var now = DateTime.utc(2026, 10, 17, 21, 59, 50);
+      await pumpLockedHub(tester, now: () => now);
+      await land(tester, lock: FantasyLockOverride.auto);
+      expect(liveListens, 0);
+      expect(historyRequests, isEmpty);
+
+      now = DateTime.utc(2026, 10, 17, 22, 0, 1);
+      await tester.pump(const Duration(seconds: 11));
+      expect(liveListens, 1);
+      expect(historyRequests, [3]);
+    });
+
+    testWidgets('nobody signed in: nothing is subscribed, the hub still '
+        'reveals', (tester) async {
+      await pumpHub(tester,
+          signedIn: false,
+          gameweekStates: Stream.value(gws),
+          nowUtc: lockDay,
+          liveStates: liveFeed.stream,
+          liveSquadStates: liveSquadFeed.stream,
+          historyWeekFor: historyFor,
+          overallStandingStates: overallFeed.stream);
+      await land(tester, lock: FantasyLockOverride.locked);
+      expect(key('hub'), findsOneWidget);
+      expect(liveListens, 0);
+      expect(historyRequests, isEmpty);
+      expect(find.text('Locked · waiting for kickoff'), findsOneWidget);
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('360 px, $brightness: the live court fits, no overflow',
+          (tester) async {
+        await pumpLockedHub(tester,
+            size: const Size(360, 1900), brightness: brightness);
+        await land(tester, lock: FantasyLockOverride.locked);
+        answerOwn();
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+        expect(find.text('34 pts · #5 ▲2'), findsOneWidget);
+        for (final k in ['locked_live_strip', 'squad_chip_Ava Striker']) {
+          final r = tester.getRect(key(k));
+          expect(r.left, greaterThanOrEqualTo(0), reason: k);
+          expect(r.right, lessThanOrEqualTo(360), reason: k);
         }
       });
     }

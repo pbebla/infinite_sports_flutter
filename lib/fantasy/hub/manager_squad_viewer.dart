@@ -36,6 +36,8 @@ import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/rank_history_chart.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/match/match_fantasy_logic.dart'
+    show captainMultiplierFor;
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 class ManagerSquadViewerPage extends StatefulWidget {
@@ -460,6 +462,8 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
               slotPicks: picksToSlots(squad, slots),
               captainId: squad.captainId,
               viceId: squad.viceId,
+              // The real armband: ×3 on a Triple Captain week.
+              captainMultiplier: captainMultiplierFor(squad, widget.config),
               onSlotTap: null,
               onPlayerTap: widget.onOpenPlayer,
               photoUrlFor: (id) => photoByName[id],

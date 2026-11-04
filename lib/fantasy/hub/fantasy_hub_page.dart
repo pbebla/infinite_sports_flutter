@@ -38,6 +38,17 @@
 // fade): its first answer or first error ends the wait, and signed out there
 // is nothing to wait for.
 //
+// The locked week (live everywhere, Task 5): while My Team is locked
+// ([lockedWeekNumber]) the hub listens to the locked week's four small
+// streams (FantasyLockedWeekFeed: the live gameweek, the own Live/Squads/<uid>,
+// the own History/<gw>/<uid>, the own Overall rank), resolves them with the
+// Voided set into ONE LockedWeekModel (live_logic.dart) and hands it to the
+// squad builder — the strip's live / Final / Voided line and every court
+// chip's points. They join the FIRST reveal's gate (bounded at 2 s) so the
+// first painted frame already carries live numbers; once revealed, a lock
+// arriving mid-session never brings the skeleton back. Nothing is subscribed
+// while editing is open or nobody is signed in.
+//
 // Player profiles (round 3, spec §4): EVERY player tap inside the hub — News
 // "View player" and compact rows, the My Team court (chip sheet's "Player
 // profile"; a locked court's chip tap), the Leaderboards tab's Team of the
@@ -52,6 +63,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_access.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart'
+    show FantasyLiveState, LiveSquad;
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_prefs.dart';
@@ -67,6 +80,8 @@ import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_walkthrough.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/locked_week_feed.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/my_team_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/news_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/players_tab.dart';
@@ -123,6 +138,10 @@ class FantasyHubPage extends StatefulWidget {
     this.launchExternal,
     this.submitAccessClaim,
     this.displayName,
+    this.liveStates,
+    this.liveSquadStates,
+    this.historyWeekFor,
+    this.overallStandingStates,
   });
 
   final String sport;
@@ -206,6 +225,20 @@ class FantasyHubPage extends StatefulWidget {
   /// Replaces the signed-in user's display name (the claim note's tail).
   final String Function()? displayName;
 
+  // ── The locked week's feeds (live everywhere, Task 5) — null = the real ──
+
+  /// Replaces `FantasyLiveFeed.watch` (the season's live gameweek).
+  final Stream<FantasyLiveState>? liveStates;
+
+  /// Replaces `FantasyService.watchLiveSquad` for the signed-in user.
+  final Stream<LiveSquad?>? liveSquadStates;
+
+  /// Replaces `FantasyService.watchHistoryWeek` (the settled week's squad).
+  final Stream<HistoryWeek?> Function(int week)? historyWeekFor;
+
+  /// Replaces `FantasyService.watchOverallStanding` (the official rank).
+  final Stream<OverallStanding?>? overallStandingStates;
+
   @override
   State<FantasyHubPage> createState() => _FantasyHubPageState();
 }
@@ -228,6 +261,9 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     owner: 'FantasyHubPage',
     onChanged: () {
       if (!mounted) return;
+      // The schedule / the lock override move the locked week (settled before
+      // the repaint below, so the repaint already knows it).
+      _syncLockedWeek(notify: false);
       setState(() {});
       _feedSaleContext(); // the schedule moves the week being edited
     },
@@ -241,6 +277,34 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     weekLabel: 'chip history feed',
     nowUtc: widget.nowUtc,
   );
+
+  /// The locked week's four small streams (live everywhere, Task 5): the live
+  /// gameweek, the own live squad, the own settled History week and the own
+  /// official Overall rank — subscribed ONLY while a week is locked
+  /// ([lockedWeekNumber]), joined to the reveal gate (bounded at 2 s) so the
+  /// first painted frame already carries live numbers. Never `Squads/<uid>`
+  /// for points.
+  late final FantasyLockedWeekFeed _locked = FantasyLockedWeekFeed(
+    sport: widget.sport,
+    season: widget.season,
+    uid: _signedInUid,
+    onChanged: () {
+      if (mounted) setState(() {});
+    },
+    liveStates: widget.liveStates,
+    liveSquadStates: widget.liveSquadStates,
+    historyWeekFor: widget.historyWeekFor,
+    overallStates: widget.overallStandingStates,
+  );
+
+  /// Re-syncs the locked week when the clock crosses the next lock (or the
+  /// end of the lock day, when editing reopens) even if no feed emits.
+  Timer? _lockBoundary;
+
+  /// The hub has been shown once: from then on a locked week starting
+  /// mid-session (the lock arriving, the owner locking) never puts the
+  /// skeleton back — its numbers land in place.
+  bool _revealed = false;
 
   FantasyConfigState? get _configState => _schedule.config;
   List<Gameweek> get _gameweeks => _schedule.gameweeks ?? const [];
@@ -384,7 +448,10 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
       _transferLoaded &&
       _chipsLoaded &&
       _voidedLoaded &&
-      _accessLoaded;
+      _accessLoaded &&
+      // The locked week's streams (live arriving late is waited for, bounded
+      // at 2 s) — only ever part of the FIRST reveal.
+      (_revealed || _locked.ready);
 
   @override
   void initState() {
@@ -623,6 +690,48 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
 
   DateTime _nowUtc() => (widget.nowUtc ?? () => DateTime.now().toUtc())();
 
+  /// Points the locked-week feed at the week My Team is locked on right now
+  /// ([lockedWeekNumber]; null while editing is open — and before the Config
+  /// has answered, since its lock override decides) and schedules the next
+  /// moment the clock moves it. Called on every schedule / config change and
+  /// when that moment arrives. [notify] false inside a callback that
+  /// repaints anyway.
+  void _syncLockedWeek({bool notify = true}) {
+    _lockBoundary?.cancel();
+    _lockBoundary = null;
+    final cfg = _configState;
+    final gws = _schedule.gameweeks;
+    final now = _nowUtc();
+    _locked.setWeek(
+      cfg == null
+          ? null
+          : lockedWeekNumber(
+              lockOverride: cfg.lockOverride, gameweeks: gws, nowUtc: now),
+      notify: notify,
+    );
+    final next = gws == null ? null : nextLockTransition(gws, now);
+    if (next == null) return;
+    var wait = next.difference(now);
+    if (wait > const Duration(days: 1)) wait = const Duration(days: 1);
+    if (wait < const Duration(seconds: 1)) wait = const Duration(seconds: 1);
+    _lockBoundary = Timer(wait, () {
+      _lockBoundary = null;
+      if (mounted) _syncLockedWeek();
+    });
+  }
+
+  /// The locked week as My Team shows it (null while editing is open).
+  LockedWeekModel? _lockedModel() {
+    final week = _locked.week;
+    if (week == null) return null;
+    return resolveLockedWeek(
+      week: week,
+      uid: _signedInUid(),
+      voidedWeeks: _voidedWeeks,
+      sources: _locked.sources,
+    );
+  }
+
   /// Hands the shared draft its money context: the sale baseline, today's
   /// market prices (null until the market loads — the draft is never
   /// moneyReady before), last week's prices and the week being edited
@@ -725,6 +834,8 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _transferRetry?.cancel();
     _priceHistorySub?.cancel();
     _saleBoundary?.cancel();
+    _lockBoundary?.cancel();
+    _locked.dispose();
     _configForRules.close();
     _managerForTabs.close();
     _squadForTabs.close();
@@ -802,6 +913,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         onDone: _finishWalkthrough,
       );
     } else if (_ready && _walkthroughSeen != null) {
+      _revealed = true;
       _openPendingPlayer();
       body = _HubBody(
         key: const ValueKey('hub'),
@@ -822,6 +934,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         // at the lock and every transfer charged).
         chipHistory: _schedule.weekUnknown ? null : _chipHistory,
         voidedWeeks: _voidedWeeks,
+        lockedWeek: _lockedModel(),
         access: _access,
         accessStates: _accessForTabs.stream,
         accessActions: _accessActions,
@@ -894,6 +1007,7 @@ class _HubBody extends StatelessWidget {
     required this.alertStates,
     required this.chipHistory,
     required this.voidedWeeks,
+    required this.lockedWeek,
     required this.access,
     required this.accessStates,
     required this.accessActions,
@@ -930,6 +1044,10 @@ class _HubBody extends StatelessWidget {
 
   /// The season's owner-voided gameweeks — their chips are refunded.
   final Set<int> voidedWeeks;
+
+  /// The locked week's live / settled view (live everywhere, Task 5): the
+  /// strip and the chips' week lines; null while editing is open.
+  final LockedWeekModel? lockedWeek;
 
   /// Paid access: the live own Access state + its re-listen-safe feed, the
   /// pay card's actions and the claim note's name (the config's `.access`
@@ -1019,6 +1137,7 @@ class _HubBody extends StatelessWidget {
                   initialAlert: alert,
                   chipHistory: chipHistory,
                   voidedWeeks: voidedWeeks,
+                  lockedWeek: lockedWeek,
                   onOpenPlayer: onOpenPlayer,
                   // Paid access (spec 2026-11-01 §5): the pay card in pass
                   // mode until this fan's record is active.
