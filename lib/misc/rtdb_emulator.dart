@@ -28,3 +28,15 @@ void connectRtdbEmulatorIfRequested(FirebaseDatabase db, {bool? enabled}) {
   if (!(enabled ?? useRtdbEmulator)) return;
   db.useDatabaseEmulator(rtdbEmulatorHost, rtdbEmulatorPort);
 }
+
+/// Turns the database's on-disk cache on (the normal build, unchanged) —
+/// except against the demo emulator. There, on Android, applying the
+/// emulator host leaves the SDK with a second database instance for the
+/// same host, both open the same cache file, and the app dies at start
+/// ("Failed to gain exclusive lock to Firebase Database's offline
+/// persistence"). [emulator] exists for tests; the app passes nothing.
+void enableRtdbPersistenceUnlessEmulator(FirebaseDatabase db,
+    {bool? emulator}) {
+  if (emulator ?? useRtdbEmulator) return;
+  db.setPersistenceEnabled(true);
+}

@@ -13,6 +13,11 @@ class _RecordingDb extends Fake implements FirebaseDatabase {
       {bool automaticHostMapping = true}) {
     calls.add('useDatabaseEmulator($host, $port)');
   }
+
+  @override
+  void setPersistenceEnabled(bool enabled) {
+    calls.add('setPersistenceEnabled($enabled)');
+  }
 }
 
 void main() {
@@ -47,5 +52,20 @@ void main() {
     final db = _RecordingDb();
     connectRtdbEmulatorIfRequested(db, enabled: true);
     expect(db.calls, ['useDatabaseEmulator(10.0.2.2, 9000)']);
+  });
+
+  test('the normal build turns the on-disk cache on, exactly as before', () {
+    final db = _RecordingDb();
+    enableRtdbPersistenceUnlessEmulator(db);
+    expect(db.calls, ['setPersistenceEnabled(true)']);
+  });
+
+  test('against the emulator the on-disk cache stays off', () {
+    // On Android, useEmulator plus persistence opens the same cache file
+    // from two database instances and the app dies at start ("Failed to
+    // gain exclusive lock to Firebase Database's offline persistence").
+    final db = _RecordingDb();
+    enableRtdbPersistenceUnlessEmulator(db, emulator: true);
+    expect(db.calls, isEmpty);
   });
 }

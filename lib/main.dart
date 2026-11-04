@@ -50,7 +50,8 @@ Future<void> main() async {
   initServerTimeOffset();
   // Cache RTDB on disk so tournament pages render instantly from the last
   // known data, then stream fresh updates. Must run before any DB access.
-  FirebaseDatabase.instance.setPersistenceEnabled(true);
+  // (Not in demo builds: the emulator and the disk cache crash together.)
+  enableRtdbPersistenceUnlessEmulator(FirebaseDatabase.instance);
   await PushNotifications.init();
   await PushNotifications.initLocalNotifications();
   FirebaseMessaging.instance.getToken().then( (token) {
