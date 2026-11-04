@@ -11,6 +11,12 @@
 // Plain widgets + CustomPaint (no chart package — house rule). Under two
 // weeks of history there is no line to draw: a short muted note instead.
 //
+// Live everywhere (Task 6): while a gameweek is being played its rank is
+// provisional, so that last point (RankPoint.live) is drawn HOLLOW — a 2 px
+// ring, no fill — with the shared LIVE pill beside the "#start → #now" label
+// (whose "#now" is the live rank); once finalize settles the week the same
+// point is the solid "now" dot again.
+//
 // House rules: theme-safe both modes (the line is the fantasy accent — gold
 // in dark, primary red in light — on a scheme surface card); labels scale
 // down rather than overflow at 360 px; screen readers get every week's rank.
@@ -19,6 +25,7 @@ import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_share_button.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 
 /// The panel's note while there is no line yet (0–1 weeks of history).
@@ -100,14 +107,25 @@ class RankHistoryPanel extends StatelessWidget {
                   ),
                 ),
                 if (journey != null)
-                  Text(
-                    journey,
-                    key: const ValueKey('rank_history_journey'),
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: accent,
-                    ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // The gameweek being played: the label's "#now" is its
+                      // provisional rank (the hollow end point below).
+                      if (rankSeriesLiveWeek(series) != null) ...[
+                        const FantasyLivePill(),
+                        const SizedBox(width: 8),
+                      ],
+                      Text(
+                        journey,
+                        key: const ValueKey('rank_history_journey'),
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: accent,
+                        ),
+                      ),
+                    ],
                   ),
               ],
             ),
@@ -267,8 +285,12 @@ class _RankLinePainter extends CustomPainter {
     for (final p in points.skip(1)) {
       path.lineTo(p.dx, p.dy);
     }
+    // A live end point is a ring (no fill): the line stops at its edge
+    // instead of running through the hollow.
+    final live = series.last.live && points.length > 1;
+    final linePath = live ? _pathEndingAtRing(points) : path;
     canvas.drawPath(
-      path,
+      linePath,
       Paint()
         ..color = line
         ..style = PaintingStyle.stroke
@@ -280,9 +302,41 @@ class _RankLinePainter extends CustomPainter {
     for (final p in points.take(points.length - 1)) {
       canvas.drawCircle(p, 3, dot);
     }
-    // "Now": a bigger ringed dot.
-    canvas.drawCircle(points.last, 5, dot);
-    canvas.drawCircle(points.last, 2.2, Paint()..color = dotCenter);
+    if (series.last.live) {
+      // The gameweek being played: its rank is provisional, so its point is
+      // hollow — a 2 px ring, no fill. Settled, it turns solid below.
+      canvas.drawCircle(
+        points.last,
+        _ringRadius,
+        Paint()
+          ..color = line
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2,
+      );
+    } else {
+      // "Now": a bigger ringed dot.
+      canvas.drawCircle(points.last, 5, dot);
+      canvas.drawCircle(points.last, 2.2, Paint()..color = dotCenter);
+    }
+  }
+
+  /// The ring's radius (its centre line; the 2 px stroke straddles it).
+  static const double _ringRadius = 5;
+
+  /// The line through [points], its last segment cut at the live ring's edge.
+  static Path _pathEndingAtRing(List<Offset> points) {
+    final last = points.last;
+    final from = points[points.length - 2];
+    final gap = (last - from).distance;
+    final end = gap <= _ringRadius
+        ? from
+        : last + (from - last) / gap * _ringRadius;
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (final p in points.skip(1).take(points.length - 2)) {
+      path.lineTo(p.dx, p.dy);
+    }
+    path.lineTo(end.dx, end.dy);
+    return path;
   }
 
   @override

@@ -13,6 +13,18 @@
 // Leaderboards (Overall). The banner waits for that flag too (session-cached,
 // a failing feed = not finished), so its copy never flips after it shows.
 //
+// Live everywhere (Task 6): while the manager's gameweek is being played the
+// banner reads `GW3 live · 34 pts · #5` (his own row of the live board —
+// liveBannerLine) with the shared LIVE pill in place of "Fantasy is live — set
+// your squad" (the squad is locked then). The live feed joins the banner's
+// reveal (bounded at the global 2 s), so the first frame the banner shows
+// already carries the live line — it never pops in or flips afterwards. A
+// manager with no squad scored this week, nobody signed in, no live week or a
+// week the owner VOIDED (the Voided set — the live board says 0 pts · #1 for
+// everyone then) leaves the banner exactly as it was; a Voided set that is
+// unknown (failed, or silent past the bound) never calls a week live.
+// Subscribed only with someone signed in.
+//
 // House rules: streams only; theme-safe both modes via the single-sourced
 // brand surface; text wraps, never underlined; the countdown line is
 // INFORMATION (a 60s refresh, nothing animates per tick, timer cancelled on
@@ -20,13 +32,19 @@
 
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart'
+    show liveBannerLine;
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 
 class FantasyHomeBanner extends StatefulWidget {
@@ -37,6 +55,9 @@ class FantasyHomeBanner extends StatefulWidget {
     this.configStates,
     this.gameweeksStates,
     this.finishedStates,
+    this.liveStates,
+    this.voidedStates,
+    this.signedInUid,
     this.onOpen,
     this.nowUtc,
   });
@@ -50,6 +71,15 @@ class FantasyHomeBanner extends StatefulWidget {
 
   /// The league's `Finished` flag (`FantasyService.watchLeagueSeasonFinished`).
   final Stream<bool>? finishedStates;
+
+  /// Replaces `FantasyLiveFeed.watch` (the season's live gameweek).
+  final Stream<FantasyLiveState>? liveStates;
+
+  /// Replaces `FantasyService.watchVoidedWeeks` (the owner-voided weeks).
+  final Stream<Set<int>>? voidedStates;
+
+  /// The signed-in uid (null / empty = nobody); null seam = FirebaseAuth.
+  final String? Function()? signedInUid;
 
   /// Test seam replacing the real `Navigator.push(... FantasyHubPage ...)`:
   /// receives the tab the hub would open on.
@@ -93,6 +123,29 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
   );
   Timer? _ticker;
 
+  // ── The live gameweek (joins the reveal) ──────────────────────────────
+  StreamSubscription<FantasyLiveState>? _liveSub;
+  StreamSubscription<Set<int>>? _voidedSub;
+  Timer? _liveBound;
+  FantasyLiveState _live = FantasyLiveState.none;
+
+  /// The owner-voided weeks, and whether a REAL answer has said so (a failed
+  /// or silent feed leaves them unknown — then no week is called live).
+  Set<int> _voided = const {};
+  bool _voidedKnown = false;
+
+  /// The live feed and the Voided set have each answered (or failed, or there
+  /// is nobody to ask) — part of the banner's single reveal.
+  bool _liveAnswered = false;
+  bool _voidedAnswered = false;
+
+  /// The 2 s global bound passed with one of them still silent: show without.
+  bool _liveBoundPassed = false;
+  String? _uid;
+
+  bool get _liveReady =>
+      (_liveAnswered && _voidedAnswered) || _liveBoundPassed;
+
   FantasyConfigState? get _config => _schedule.config;
   List<Gameweek> get _gameweeks => _schedule.gameweeks ?? const [];
 
@@ -101,6 +154,7 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
     super.initState();
     _schedule.start();
     _seasonFinished.start();
+    _startLive();
     // 60s refresh keeps the countdown text honest (information, not
     // decoration — no per-tick animation); cancelled in dispose.
     _ticker = Timer.periodic(const Duration(seconds: 60), (_) {
@@ -113,7 +167,88 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
     _schedule.dispose();
     _seasonFinished.dispose();
     _ticker?.cancel();
+    _liveBound?.cancel();
+    _liveSub?.cancel();
+    _voidedSub?.cancel();
     super.dispose();
+  }
+
+  /// Best-effort (utility.dart convention): widget tests never touch
+  /// FirebaseAuth — no seam means "signed out", never a throw.
+  String? _signedInUid() {
+    final seam = widget.signedInUid;
+    if (seam != null) return seam();
+    try {
+      return FirebaseAuth.instance.currentUser?.uid;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Subscribes to the live gameweek, only with someone signed in (the line
+  /// is HIS row). Nobody to ask = nothing to wait for. A failing feed is
+  /// logged and counts as answered (the banner shows as before); the 2 s
+  /// bound keeps a silent one from holding the banner back, and a late value
+  /// lands in place.
+  void _startLive() {
+    final uid = _signedInUid();
+    if (uid == null || uid.isEmpty) {
+      _liveAnswered = true;
+      _voidedAnswered = true;
+      return;
+    }
+    _uid = uid;
+    _liveBound = Timer(kLiveJoinWait, () {
+      _liveBound = null;
+      _liveBoundPassed = true;
+      if (mounted) setState(() {});
+    });
+    // Both answered: the bound has nothing left to bound.
+    void settleBound() {
+      if (!_liveAnswered || !_voidedAnswered) return;
+      _liveBound?.cancel();
+      _liveBound = null;
+    }
+
+    try {
+      _liveSub = (widget.liveStates ??
+              FantasyLiveFeed.watch(widget.sport, widget.season))
+          .listen((state) {
+        _live = state;
+        _liveAnswered = true;
+        settleBound();
+        if (mounted) setState(() {});
+      }, onError: (Object e) {
+        debugPrint('FantasyHomeBanner: live feed failed: $e');
+        _liveAnswered = true;
+        settleBound();
+        if (mounted) setState(() {});
+      });
+    } catch (e) {
+      debugPrint('FantasyHomeBanner: live feed failed: $e');
+      _liveAnswered = true;
+    }
+    try {
+      _voidedSub = (widget.voidedStates ??
+              FantasyService.watchVoidedWeeks(widget.sport, widget.season))
+          .listen((weeks) {
+        _voided = weeks;
+        _voidedKnown = true;
+        _voidedAnswered = true;
+        settleBound();
+        if (mounted) setState(() {});
+      }, onError: (Object e) {
+        // Unknown, not "none voided": no week is called live without it.
+        debugPrint('FantasyHomeBanner: voided feed failed: $e');
+        _voidedAnswered = true;
+        settleBound();
+        if (mounted) setState(() {});
+      });
+    } catch (e) {
+      debugPrint('FantasyHomeBanner: voided feed failed: $e');
+      _voidedAnswered = true;
+    }
+    settleBound();
   }
 
   DateTime get _now => (widget.nowUtc ?? () => DateTime.now().toUtc())();
@@ -157,12 +292,17 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
 
   @override
   Widget build(BuildContext context) {
-    if (_config == null || !_seasonFinished.ready) {
+    if (_config == null || !_seasonFinished.ready || !_liveReady) {
       return const SizedBox.shrink();
     }
     final accent = FantasyBanner.accent(context);
-    final deadline = _deadlineText();
     final finished = _seasonFinished.finished;
+    // The live line (never once the season is over): his row of the live
+    // board, null = the banner as before.
+    final liveLine = finished || !_voidedKnown
+        ? null
+        : liveBannerLine(live: _live, uid: _uid, voidedWeeks: _voided);
+    final deadline = liveLine == null ? _deadlineText() : null;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(19, 4, 19, 0),
@@ -191,20 +331,44 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          finished
-                              ? 'Season over — see the final standings'
-                              : 'Fantasy is live — set your squad',
-                          key: const ValueKey('fantasy_home_banner_title'),
-                          // Wraps, never underlined (house rules).
-                          softWrap: true,
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w700,
-                            height: 1.25,
-                            color: FantasyBanner.foreground(context),
+                        if (liveLine != null)
+                          // The pill, then the line; the line wraps under the
+                          // pill when the strip is narrow.
+                          Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 8,
+                            runSpacing: 4,
+                            children: [
+                              const FantasyLivePill(),
+                              Text(
+                                liveLine,
+                                key: const ValueKey(
+                                    'fantasy_home_banner_title'),
+                                softWrap: true,
+                                style: TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.25,
+                                  color: FantasyBanner.foreground(context),
+                                ),
+                              ),
+                            ],
+                          )
+                        else
+                          Text(
+                            finished
+                                ? 'Season over — see the final standings'
+                                : 'Fantasy is live — set your squad',
+                            key: const ValueKey('fantasy_home_banner_title'),
+                            // Wraps, never underlined (house rules).
+                            softWrap: true,
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                              height: 1.25,
+                              color: FantasyBanner.foreground(context),
+                            ),
                           ),
-                        ),
                         if (deadline != null) ...[
                           const SizedBox(height: 4),
                           Container(

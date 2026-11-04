@@ -297,9 +297,9 @@ void main() {
   group('rank over the season (RankHistory)', () {
     test('rankSeries orders by gameweek; null/empty history → no points', () {
       expect(rankSeries({3: 2, 1: 14, 2: 9}), [
-        (gameweek: 1, rank: 14),
-        (gameweek: 2, rank: 9),
-        (gameweek: 3, rank: 2),
+        (gameweek: 1, rank: 14, live: false),
+        (gameweek: 2, rank: 9, live: false),
+        (gameweek: 3, rank: 2, live: false),
       ]);
       expect(rankSeries(null), isEmpty);
       expect(rankSeries(const {}), isEmpty);
@@ -316,6 +316,134 @@ void main() {
     test('screen-reader text lists every week', () {
       expect(rankSeriesSemantics(rankSeries({2: 10, 1: 14})),
           'Your rank by gameweek: GW1 #14, GW2 #10');
+    });
+
+    test("a live gameweek's point is flagged live; the others never are", () {
+      expect(rankSeries({1: 14, 2: 9, 3: 2}, liveWeeks: {3}), [
+        (gameweek: 1, rank: 14, live: false),
+        (gameweek: 2, rank: 9, live: false),
+        (gameweek: 3, rank: 2, live: true),
+      ]);
+      // A live week the history does not carry adds no point.
+      expect(rankSeries({1: 14}, liveWeeks: {5}), [
+        (gameweek: 1, rank: 14, live: false),
+      ]);
+    });
+
+    test('the journey label uses the live end point as "#now"', () {
+      final series = rankSeries({1: 14, 2: 9, 3: 2}, liveWeeks: {3});
+      expect(rankJourneyLabel(series), '#14 → #2');
+    });
+
+    test("rankSeriesFor reads one manager's line + live flags from the "
+        'boards', () {
+      const boards = FantasyLeaderboards(
+        overall: [],
+        byWeek: {},
+        rankHistory: {
+          'u1': {1: 4, 2: 3},
+          'u2': {1: 1, 2: 2},
+        },
+        liveRankPoints: {
+          'u1': {2},
+        },
+      );
+      expect(rankSeriesFor(boards, 'u1'), [
+        (gameweek: 1, rank: 4, live: false),
+        (gameweek: 2, rank: 3, live: true),
+      ]);
+      expect(rankSeriesFor(boards, 'u2'), [
+        (gameweek: 1, rank: 1, live: false),
+        (gameweek: 2, rank: 2, live: false),
+      ]);
+      expect(rankSeriesFor(boards, 'nobody'), isEmpty);
+    });
+  });
+
+  group('live boards and moved rows', () {
+    test('entriesAreLive: only a live-merged board counts', () {
+      expect(entriesAreLive(const []), isFalse);
+      expect(entriesAreLive([entry('a', 5, rank: 1)]), isFalse);
+      expect(
+          entriesAreLive(const [
+            FantasyLeaderboardEntry(uid: 'a', points: 5, rank: 1, live: true),
+          ]),
+          isTrue);
+    });
+
+    LeaderboardRowData ranked(String uid, int rank) => LeaderboardRowData(
+        uid: uid, points: 10, displayRank: rank, isSelf: false);
+
+    test('a rank number that improved is "up", one that fell is "down"; a '
+        'row that held its number is not moved', () {
+      final moved = movedRows(
+        before: [ranked('a', 1), ranked('b', 2), ranked('c', 3)],
+        after: [ranked('a', 2), ranked('b', 1), ranked('c', 3)],
+        beforeOrder: const ['a', 'b', 'c'],
+        afterOrder: const ['a', 'b', 'c'],
+      );
+      expect(moved, {
+        'a': MovementDirection.down,
+        'b': MovementDirection.up,
+      });
+    });
+
+    test('a re-order (the fan refreshed) moves the rows that changed place, '
+        'even though their rank numbers were already updated', () {
+      final rows = [ranked('b', 1), ranked('a', 2), ranked('c', 3)];
+      final moved = movedRows(
+        before: rows,
+        after: rows,
+        beforeOrder: const ['a', 'b', 'c'],
+        afterOrder: const ['b', 'a', 'c'],
+      );
+      expect(moved, {
+        'b': MovementDirection.up,
+        'a': MovementDirection.down,
+      });
+    });
+
+    test('the rank change wins over the place change for the same row', () {
+      final moved = movedRows(
+        before: [ranked('a', 1), ranked('b', 2)],
+        after: [ranked('a', 3), ranked('b', 1)],
+        beforeOrder: const ['a', 'b'],
+        afterOrder: const ['b', 'a'],
+      );
+      expect(moved['a'], MovementDirection.down);
+      expect(moved['b'], MovementDirection.up);
+    });
+
+    test('a first sighting and an unchanged board move nobody', () {
+      final rows = [ranked('a', 1), ranked('b', 2)];
+      expect(
+          movedRows(
+              before: const [],
+              after: rows,
+              beforeOrder: const [],
+              afterOrder: const ['a', 'b']),
+          isEmpty);
+      expect(
+          movedRows(
+              before: rows,
+              after: rows,
+              beforeOrder: const ['a', 'b'],
+              afterOrder: const ['a', 'b']),
+          isEmpty);
+    });
+
+    test('a newcomer above shifts the rows below it down by RANK (their '
+        'numbers did change) but is not itself "moved"', () {
+      final moved = movedRows(
+        before: [ranked('a', 1), ranked('b', 2)],
+        after: [ranked('n', 1), ranked('a', 2), ranked('b', 3)],
+        beforeOrder: const ['a', 'b'],
+        afterOrder: const ['n', 'a', 'b'],
+      );
+      expect(moved, {
+        'a': MovementDirection.down,
+        'b': MovementDirection.down,
+      });
     });
   });
 

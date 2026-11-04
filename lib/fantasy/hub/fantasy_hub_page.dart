@@ -943,6 +943,12 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         chipHistory: _schedule.weekUnknown ? null : _chipHistory,
         voidedWeeks: _voidedWeeks,
         lockedWeek: _lockedModel(),
+        // The banner's live line: from the live feed the locked-week streams
+        // already hold (the SAME first reveal — no extra stream, no late pop).
+        liveLine: liveBannerLine(
+            live: _locked.sources.live,
+            uid: _signedInUid(),
+            voidedWeeks: _voidedWeeks),
         access: _access,
         accessStates: _accessForTabs.stream,
         accessActions: _accessActions,
@@ -1016,6 +1022,7 @@ class _HubBody extends StatelessWidget {
     required this.chipHistory,
     required this.voidedWeeks,
     required this.lockedWeek,
+    required this.liveLine,
     required this.access,
     required this.accessStates,
     required this.accessActions,
@@ -1056,6 +1063,10 @@ class _HubBody extends StatelessWidget {
   /// The locked week's live / settled view (live everywhere, Task 5): the
   /// strip and the chips' week lines; null while editing is open.
   final LockedWeekModel? lockedWeek;
+
+  /// The banner's `GW{n} live · {W} pts · #{R}` line while his gameweek is
+  /// being played ([liveBannerLine]); null = the plain banner.
+  final String? liveLine;
 
   /// Paid access: the live own Access state + its re-listen-safe feed, the
   /// pay card's actions and the claim note's name (the config's `.access`
@@ -1098,6 +1109,7 @@ class _HubBody extends StatelessWidget {
             child: FantasyBanner(
               subtitle: '$sport · Season $season',
               teamName: manager?.teamName,
+              liveLine: liveLine,
               onEditTeamName: manager == null
                   ? null
                   : () => showTeamNameDialog(

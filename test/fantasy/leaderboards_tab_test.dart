@@ -38,6 +38,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/manager_squad_viewer.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/mini_leagues_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
@@ -115,12 +116,18 @@ void main() {
     // true = no squadViewerBuilder seam: rows open the REAL
     // ManagerSquadViewerPage (fed by viewerPublished / viewerHistory / squads).
     bool realViewer = false,
+    // The OS "reduce motion" setting (MediaQuery.disableAnimations).
+    bool reduceMotion = false,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(
       theme: ThemeData(brightness: brightness, fontFamily: fontFamily),
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(disableAnimations: reduceMotion),
+        child: child!,
+      ),
       home: Scaffold(
         body: FantasyLeaderboardsTab(
           sport: 'Futsal',
@@ -1378,9 +1385,9 @@ void main() {
     test('chart geometry: rank 1 at the top, gameweeks left to right', () {
       final points = rankChartOffsets(
         [
-          (gameweek: 1, rank: 14),
-          (gameweek: 2, rank: 12),
-          (gameweek: 4, rank: 10),
+          (gameweek: 1, rank: 14, live: false),
+          (gameweek: 2, rank: 12, live: false),
+          (gameweek: 4, rank: 10, live: false),
         ],
         const Size(200, 100),
         inset: 6,
@@ -1394,7 +1401,7 @@ void main() {
       expect(points[1].dy, 50);
       // A flat line (same rank every week) runs through the middle.
       final flat = rankChartOffsets(
-          [(gameweek: 1, rank: 3), (gameweek: 2, rank: 3)],
+          [(gameweek: 1, rank: 3, live: false), (gameweek: 2, rank: 3, live: false)],
           const Size(100, 60),
           inset: 5);
       expect(flat.map((o) => o.dy), [30, 30]);
@@ -1897,5 +1904,589 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     }
+  });
+
+  // ── Live everywhere (Task 6) ─────────────────────────────────────────────
+  //
+  // The owner's steady-order rule: numbers move in place at once, rows don't
+  // jump — a sorted list re-orders at the top / on (re)open / on a scope pick,
+  // else behind "Order changed · tap to refresh". Plus the LIVE pills, the
+  // moved-row tint and the rank cross-fade.
+  group('live everywhere (Task 6)', () {
+    // 30 managers m01..m30 (a list long enough to scroll), best first.
+    final uids = [
+      for (var i = 1; i <= 30; i++) 'm${i.toString().padLeft(2, '0')}'
+    ];
+    final names = {for (final u in uids) u: manager('Team ${u.substring(1)}')};
+
+    List<FantasyLeaderboardEntry> board(List<String> order,
+            {bool live = true}) =>
+        [
+          for (final (i, uid) in order.indexed)
+            FantasyLeaderboardEntry(
+              uid: uid,
+              points: 1000 - i * 10,
+              rank: i + 1,
+              movement: 0,
+              live: live,
+            ),
+        ];
+
+    FantasyLeaderboards boardsOf(List<FantasyLeaderboardEntry> overall,
+            {Map<int, List<FantasyLeaderboardEntry>> byWeek = const {},
+            Map<String, Map<int, int>> history = const {},
+            Map<String, Set<int>> liveRank = const {}}) =>
+        FantasyLeaderboards(
+            overall: overall,
+            byWeek: byWeek,
+            rankHistory: history,
+            liveRankPoints: liveRank);
+
+    /// [uids] with [who] moved to the front: the new leader.
+    List<String> withLeader(String who) =>
+        [who, ...uids.where((u) => u != who)];
+
+    /// Lets the feeds land WITHOUT pumpAndSettle (a live pill pulses
+    /// forever, which never settles).
+    Future<void> land(WidgetTester tester, FantasyLeaderboards data,
+        {Map<int, FantasyDreamTeam> dreamTeams = const {}}) async {
+      boards.add(data);
+      managers.add(names);
+      leagues.add(const []);
+      dreams.add(dreamTeams);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    /// pickScope without pumpAndSettle (live pills never settle).
+    Future<void> pickScopeLive(WidgetTester tester, String label) async {
+      await tester.tap(find.descendant(
+          of: find.byKey(const ValueKey('leaderboard_scope')),
+          matching: find.text(label)));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    /// The row uids on screen (built rows), top to bottom.
+    List<String> shownUids(WidgetTester tester) {
+      final rows = find
+          .byWidgetPredicate((w) =>
+              w is InkWell &&
+              w.key is ValueKey<String> &&
+              (w.key! as ValueKey<String>)
+                  .value
+                  .startsWith('leaderboard_row_'))
+          .evaluate()
+          .map((e) => (
+                (e.widget.key! as ValueKey<String>)
+                    .value
+                    .substring('leaderboard_row_'.length),
+                tester.getTopLeft(find.byWidget(e.widget)).dy,
+              ))
+          .toList()
+        ..sort((a, b) => a.$2.compareTo(b.$2));
+      return [for (final r in rows) r.$1];
+    }
+
+    Finder pill() => byKey('order_changed_pill');
+    const pillText = 'Order changed · tap to refresh';
+
+    Finder rankSwitcher(String uid) => byKey('leaderboard_rank_$uid');
+    Finder rankText(String uid, String text) =>
+        find.descendant(of: rankSwitcher(uid), matching: find.text(text));
+
+    Finder list() => find.byType(ListView);
+
+    Future<void> scrollDown(WidgetTester tester) async {
+      await tester.drag(list(), const Offset(0, -700));
+      await tester.pumpAndSettle();
+    }
+
+    group('the steady order', () {
+      testWidgets(
+          'scrolled down: numbers move in place, the rows do NOT jump, '
+          '"Order changed · tap to refresh" appears, a tap re-orders',
+          (tester) async {
+        await pumpTab(tester, selfUid: 'nobody', reduceMotion: true);
+        await land(tester, boardsOf(board(uids)));
+        await scrollDown(tester);
+        final before = shownUids(tester);
+        expect(before.first, isNot('m01'));
+        expect(find.text(pillText), findsNothing);
+        final probe = before[3]; // a row on screen
+        final rank = uids.indexOf(probe) + 1;
+        expect(rankText(probe, '$rank'), findsOneWidget);
+
+        // m30 scores big: leader. Everyone else slides down one place.
+        boards.add(boardsOf(board(withLeader('m30'))));
+        await tester.pumpAndSettle();
+
+        // Numbers moved in place…
+        expect(rankText(probe, '${rank + 1}'), findsOneWidget);
+        // …the rows did not.
+        expect(shownUids(tester), before);
+        expect(find.text(pillText), findsOneWidget);
+
+        // Tap: the order is applied (the same window now shows the rows one
+        // place earlier in the new order), the pill is gone.
+        await tester.tap(pill());
+        await tester.pumpAndSettle();
+        final order2 = withLeader('m30');
+        final first = uids.indexOf(before.first);
+        expect(
+            shownUids(tester), order2.sublist(first, first + before.length));
+        expect(find.text(pillText), findsNothing);
+      });
+
+      testWidgets('at the top: the new order is applied at once, no pill',
+          (tester) async {
+        await pumpTab(tester, selfUid: 'nobody', reduceMotion: true);
+        await land(tester, boardsOf(board(uids)));
+        expect(shownUids(tester).first, 'm01');
+
+        boards.add(boardsOf(board(withLeader('m30'))));
+        await tester.pumpAndSettle();
+
+        expect(shownUids(tester).first, 'm30');
+        expect(find.text(pillText), findsNothing);
+      });
+
+      testWidgets(
+          'scrolling back to the top applies the waiting order by itself',
+          (tester) async {
+        await pumpTab(tester, selfUid: 'nobody', reduceMotion: true);
+        await land(tester, boardsOf(board(uids)));
+        await scrollDown(tester);
+        boards.add(boardsOf(board(withLeader('m30'))));
+        await tester.pumpAndSettle();
+        expect(find.text(pillText), findsOneWidget);
+
+        await tester.drag(list(), const Offset(0, 1500));
+        await tester.pumpAndSettle();
+
+        expect(find.text(pillText), findsNothing);
+        expect(shownUids(tester).first, 'm30');
+      });
+
+      testWidgets(
+          'never re-orders under a moving finger: at the top but dragging, '
+          'the order waits until the finger is up', (tester) async {
+        await pumpTab(tester, selfUid: 'nobody', reduceMotion: true);
+        await land(tester, boardsOf(board(uids)));
+
+        final gesture = await tester.startGesture(tester.getCenter(list()));
+        await gesture.moveBy(const Offset(0, 40));
+        await tester.pump();
+        boards.add(boardsOf(board(withLeader('m30'))));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+
+        expect(shownUids(tester).first, 'm01', reason: 'finger is down');
+        expect(find.text(pillText), findsOneWidget);
+
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(shownUids(tester).first, 'm30');
+        expect(find.text(pillText), findsNothing);
+      });
+
+      testWidgets(
+          'picking a scope re-orders at once: back on Overall the newest '
+          'order shows and nothing waits', (tester) async {
+        await pumpTab(tester, selfUid: 'nobody', reduceMotion: true);
+        await land(tester, boardsOf(board(uids)));
+        await scrollDown(tester);
+        boards.add(boardsOf(board(withLeader('m30'))));
+        await tester.pumpAndSettle();
+        expect(find.text(pillText), findsOneWidget);
+
+        await pickScope(tester, kTeamOfWeekSegmentLabel);
+        await pickScope(tester, 'Overall');
+
+        expect(shownUids(tester).first, 'm30');
+        expect(find.text(pillText), findsNothing);
+      });
+
+      testWidgets(
+          'Overall and Gameweek are separate lists: from a scrolled Overall, '
+          "picking Gameweek shows the week's own order at once, no pill",
+          (tester) async {
+        await pumpTab(tester, selfUid: 'nobody', reduceMotion: true);
+        // The week's order differs from the Overall one.
+        final weekOrder = withLeader('m30');
+        await land(
+            tester, boardsOf(board(uids), byWeek: {2: board(weekOrder)}));
+        await scrollDown(tester);
+        expect(find.text(pillText), findsNothing);
+
+        await pickScope(tester, 'Gameweek');
+
+        expect(find.text(pillText), findsNothing);
+        expect(find.byKey(const ValueKey('leaderboard_week_2')), findsOneWidget);
+        expect(shownUids(tester).first, 'm30');
+      });
+
+      testWidgets(
+          "picking another week chip shows that week's own order at once "
+          '(each week is its own list)', (tester) async {
+        await pumpTab(tester, selfUid: 'nobody', reduceMotion: true);
+        await land(
+            tester,
+            boardsOf(board(uids), byWeek: {
+              1: board(withLeader('m30')),
+              2: board(uids),
+            }));
+        await pickScope(tester, 'Gameweek');
+        expect(shownUids(tester).first, 'm01'); // GW2, the latest
+        await scrollDown(tester);
+        // Back to the top (the chips live in the list's own header).
+        await tester.drag(list(), const Offset(0, 1500));
+        await tester.pumpAndSettle();
+
+        await tester.tap(byKey('leaderboard_week_1'));
+        await tester.pumpAndSettle();
+
+        expect(find.text(pillText), findsNothing);
+        expect(shownUids(tester).first, 'm30');
+      });
+
+      testWidgets(
+          "the list stays on the route's primary scroll controller (iOS "
+          'status-bar tap scrolls it to the top)', (tester) async {
+        final primary = ScrollController();
+        addTearDown(primary.dispose);
+        await tester.pumpWidget(MaterialApp(
+          home: PrimaryScrollController(
+            controller: primary,
+            child: Scaffold(
+              body: RankedLeaderboardList(
+                rows: composeLeaderboardRows(
+                  entries: board(uids),
+                  managers: names,
+                  profiles: const {},
+                  selfUid: 'nobody',
+                ),
+              ),
+            ),
+          ),
+        ));
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(primary.hasClients, isTrue);
+      });
+
+      testWidgets('(re)opening the tab shows the latest order at once',
+          (tester) async {
+        await pumpTab(tester, selfUid: 'nobody', reduceMotion: true);
+        await land(tester, boardsOf(board(withLeader('m30'))));
+        expect(shownUids(tester).first, 'm30');
+        expect(find.text(pillText), findsNothing);
+      });
+
+      testWidgets(
+          'an order that comes back to the shown one withdraws the pill '
+          '(nothing left to refresh)', (tester) async {
+        await pumpTab(tester, selfUid: 'nobody', reduceMotion: true);
+        await land(tester, boardsOf(board(uids)));
+        await scrollDown(tester);
+        boards.add(boardsOf(board(withLeader('m30'))));
+        await tester.pumpAndSettle();
+        expect(find.text(pillText), findsOneWidget);
+
+        boards.add(boardsOf(board(uids)));
+        await tester.pumpAndSettle();
+        expect(find.text(pillText), findsNothing);
+      });
+
+      testWidgets('the Gameweek scope follows the same rule', (tester) async {
+        await pumpTab(tester, selfUid: 'nobody', reduceMotion: true);
+        FantasyLeaderboards data(List<String> order) =>
+            boardsOf(board(uids), byWeek: {2: board(order)});
+        await land(tester, data(uids));
+        await pickScope(tester, 'Gameweek');
+        await scrollDown(tester);
+        final before = shownUids(tester);
+
+        boards.add(data(withLeader('m30')));
+        await tester.pumpAndSettle();
+
+        expect(shownUids(tester), before);
+        expect(find.text(pillText), findsOneWidget);
+        await tester.tap(pill());
+        await tester.pumpAndSettle();
+        expect(find.text(pillText), findsNothing);
+      });
+
+      for (final brightness in Brightness.values) {
+        testWidgets(
+            'the pill is the accent colour, readable, at 360 px — $brightness',
+            (tester) async {
+          await pumpTab(tester,
+              selfUid: 'nobody',
+              size: const Size(360, 760),
+              brightness: brightness,
+              reduceMotion: true);
+          await land(tester, boardsOf(board(uids)));
+          await scrollDown(tester);
+          boards.add(boardsOf(board(withLeader('m30'))));
+          await tester.pumpAndSettle();
+
+          final accent = fantasyAccent(tester.element(pill()));
+          final material = tester.widget<Material>(
+              find.descendant(of: pill(), matching: find.byType(Material))
+                  .first);
+          expect(material.color, accent);
+          final label = tester.widget<Text>(
+              find.descendant(of: pill(), matching: find.text(pillText)));
+          final fg = label.style!.color!;
+          final lighter = fg.computeLuminance() > accent.computeLuminance()
+              ? fg
+              : accent;
+          final darker = identical(lighter, fg) ? accent : fg;
+          final contrast = (lighter.computeLuminance() + 0.05) /
+              (darker.computeLuminance() + 0.05);
+          expect(contrast, greaterThanOrEqualTo(4.5));
+          final r = tester.getRect(pill());
+          expect(r.left, greaterThanOrEqualTo(0));
+          expect(r.right, lessThanOrEqualTo(360));
+          // Under the fixed header, over the list's top.
+          expect(r.top,
+              greaterThan(tester.getRect(byKey('leaderboard_scope')).bottom));
+          expect(tester.takeException(), isNull);
+        });
+      }
+    });
+
+    group('the moved-row tint and the rank cross-fade', () {
+      Color? tintOf(WidgetTester tester, String uid) {
+        final box = tester.widget<AnimatedContainer>(byKey('row_tint_$uid'));
+        return (box.foregroundDecoration! as BoxDecoration).color;
+      }
+
+      List<String> swapped() {
+        final order = [...uids];
+        order[1] = 'm03';
+        order[2] = 'm02';
+        return order;
+      }
+
+      testWidgets(
+          'only the rows whose rank changed tint — up in the up colour, '
+          'down in the bright red, each at 18 %', (tester) async {
+        await pumpTab(tester, selfUid: 'nobody');
+        await land(tester, boardsOf(board(uids)));
+        expect(tintOf(tester, 'm02')!.a, 0);
+
+        boards.add(boardsOf(board(swapped())));
+        await tester.pump();
+
+        final context = tester.element(byKey('leaderboard_row_m02'));
+        expect(tintOf(tester, 'm02'),
+            fantasyDownRed(context).withValues(alpha: 0.18)); // 2 → 3
+        expect(tintOf(tester, 'm03'),
+            fantasyPitchGreen(context).withValues(alpha: 0.18)); // 3 → 2
+        for (final still in ['m01', 'm04', 'm05']) {
+          expect(tintOf(tester, still)!.a, 0, reason: still);
+        }
+
+        // It lasts 800 ms, then it is gone.
+        await tester.pump(const Duration(milliseconds: 700));
+        expect(tintOf(tester, 'm02')!.a, greaterThan(0));
+        await tester.pump(const Duration(milliseconds: 150));
+        expect(tintOf(tester, 'm02')!.a, 0);
+        expect(tintOf(tester, 'm03')!.a, 0);
+      });
+
+      testWidgets('the rank number cross-fades over 250 ms', (tester) async {
+        await pumpTab(tester, selfUid: 'nobody');
+        await land(tester, boardsOf(board(uids)));
+        final switcher =
+            tester.widget<AnimatedSwitcher>(rankSwitcher('m02'));
+        expect(switcher.duration, const Duration(milliseconds: 250));
+        expect(rankText('m02', '2'), findsOneWidget);
+
+        boards.add(boardsOf(board(swapped())));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        // Mid-fade: the old and the new number are both on screen.
+        expect(rankText('m02', '2'), findsOneWidget);
+        expect(rankText('m02', '3'), findsOneWidget);
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(rankText('m02', '2'), findsNothing);
+        expect(rankText('m02', '3'), findsOneWidget);
+        // A row that did not change never fades.
+        expect(
+            find.descendant(
+                of: rankSwitcher('m01'), matching: find.byType(Text)),
+            findsOneWidget);
+      });
+
+      testWidgets(
+          'reduced motion: no animation — the number is swapped and the '
+          'tint switched on and off instantly', (tester) async {
+        await pumpTab(tester, selfUid: 'nobody', reduceMotion: true);
+        await land(tester, boardsOf(board(uids)));
+        expect(tester.widget<AnimatedSwitcher>(rankSwitcher('m02')).duration,
+            Duration.zero);
+
+        boards.add(boardsOf(board(swapped())));
+        await tester.pump();
+
+        // One frame later: only the new number, never a cross-fade.
+        expect(rankText('m02', '2'), findsNothing);
+        expect(rankText('m02', '3'), findsOneWidget);
+        // The tint is on at once, with no fade in or out.
+        expect(
+            tester.widget<AnimatedContainer>(byKey('row_tint_m02')).duration,
+            Duration.zero);
+        expect(tintOf(tester, 'm02')!.a, greaterThan(0));
+        await tester.pump(const Duration(milliseconds: 850));
+        expect(tintOf(tester, 'm02')!.a, 0);
+      });
+
+      testWidgets(
+          'a refresh tints the rows that changed place (their rank numbers '
+          'had already moved)', (tester) async {
+        await pumpTab(tester, selfUid: 'nobody', reduceMotion: true);
+        await land(tester, boardsOf(board(uids)));
+        await scrollDown(tester);
+        boards.add(boardsOf(board(withLeader('m30'))));
+        await tester.pumpAndSettle();
+        // The numbers moved earlier; that tint is long gone.
+        await tester.pump(const Duration(milliseconds: 900));
+        final window = shownUids(tester);
+        for (final u in window) {
+          expect(tintOf(tester, u)!.a, 0, reason: u);
+        }
+
+        await tester.tap(pill());
+        await tester.pump();
+
+        // Every row in view now holds a different row's place: they tint.
+        final context = tester.element(byKey('leaderboard_row_${window[3]}'));
+        final moved = shownUids(tester)
+            .where((u) => tintOf(tester, u)!.a > 0)
+            .toList();
+        expect(moved, isNotEmpty);
+        expect(
+            tintOf(tester, moved.first),
+            anyOf(
+              fantasyPitchGreen(context).withValues(alpha: 0.18),
+              fantasyDownRed(context).withValues(alpha: 0.18),
+            ));
+        await tester.pump(const Duration(milliseconds: 900));
+      });
+
+      for (final brightness in Brightness.values) {
+        testWidgets('the tint pair in $brightness', (tester) async {
+          await pumpTab(tester, selfUid: 'nobody', brightness: brightness);
+          await land(tester, boardsOf(board(uids)));
+          boards.add(boardsOf(board(swapped())));
+          await tester.pump();
+          final dark = brightness == Brightness.dark;
+          expect(
+              tintOf(tester, 'm02'),
+              (dark ? const Color(0xFFFF5252) : const Color(0xFFD32F2F))
+                  .withValues(alpha: 0.18));
+          expect(
+              tintOf(tester, 'm03'),
+              (dark ? const Color(0xFF2E8B57) : const Color(0xFF2FA05A))
+                  .withValues(alpha: 0.18));
+          await tester.pump(const Duration(milliseconds: 900));
+        });
+      }
+    });
+
+    group('the LIVE pills (shown only while live)', () {
+      Finder headerPill() => find.descendant(
+          of: byKey('leaderboard_column_header'),
+          matching: find.byType(FantasyLivePill));
+
+      testWidgets(
+          'Overall: a live board shows the pill in its header; an official '
+          'one never does', (tester) async {
+        await pumpTab(tester, selfUid: 'nobody');
+        await land(tester, boardsOf(board(uids, live: false)));
+        expect(find.byType(FantasyLivePill), findsNothing);
+
+        boards.add(boardsOf(board(uids)));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(headerPill(), findsOneWidget);
+
+        // The week settles: the pill is simply not drawn any more.
+        boards.add(boardsOf(board(uids, live: false)));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(find.byType(FantasyLivePill), findsNothing);
+      });
+
+      testWidgets(
+          "Gameweek: the live week's chip carries a pill, the header only "
+          'while the LIVE week is selected', (tester) async {
+        await pumpTab(tester, selfUid: 'nobody');
+        await land(
+            tester,
+            boardsOf(board(uids), byWeek: {
+              1: board(uids, live: false),
+              2: board(uids),
+            }));
+        await pickScopeLive(tester, 'Gameweek');
+
+        Finder chipPill(int week) => find.descendant(
+            of: byKey('leaderboard_week_$week'),
+            matching: find.byType(FantasyLivePill));
+        expect(chipPill(2), findsOneWidget);
+        expect(chipPill(1), findsNothing);
+        expect(chipPill(3), findsNothing);
+        // Week 2 (the latest scored) is selected: its header says LIVE too.
+        expect(headerPill(), findsOneWidget);
+
+        await tester.tap(byKey('leaderboard_week_1'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(headerPill(), findsNothing);
+        expect(chipPill(2), findsOneWidget);
+      });
+
+      testWidgets('the Gameweek summary is the live numbers', (tester) async {
+        await pumpTab(tester, selfUid: 'nobody');
+        final live = [
+          const FantasyLeaderboardEntry(
+              uid: 'm01', points: 30, rank: 1, live: true),
+          const FantasyLeaderboardEntry(
+              uid: 'm02', points: 10, rank: 2, live: true),
+        ];
+        await land(tester, boardsOf(board(uids), byWeek: {2: live}));
+        await pickScopeLive(tester, 'Gameweek');
+        expect(find.text('Average 20 pts · Highest 30 (Team 01)'),
+            findsOneWidget);
+      });
+
+      for (final brightness in Brightness.values) {
+        testWidgets(
+            '360 px: the live headers, the chip pill and the rows never '
+            'overflow — $brightness', (tester) async {
+          await pumpTab(tester,
+              selfUid: 'm05',
+              size: const Size(360, 760),
+              brightness: brightness);
+          await land(
+              tester,
+              boardsOf(board(uids),
+                  byWeek: {1: board(uids, live: false), 2: board(uids)}));
+          expect(tester.takeException(), isNull);
+          expect(headerPill(), findsOneWidget);
+          final header = tester.getRect(byKey('leaderboard_column_header'));
+          expect(header.right, lessThanOrEqualTo(360));
+
+          await pickScopeLive(tester, 'Gameweek');
+          expect(tester.takeException(), isNull);
+          expect(tester.getRect(byKey('leaderboard_week_2')).height,
+              lessThan(60));
+          expect(headerPill(), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        });
+      }
+    });
   });
 }

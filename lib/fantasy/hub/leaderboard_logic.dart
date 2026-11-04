@@ -16,6 +16,8 @@ import 'dart:math' as math;
 
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/steady_order.dart'
+    show positionMoves;
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
 
 // ── Row composition ────────────────────────────────────────────────────────
@@ -182,31 +184,88 @@ String movementLabel(int? movement) {
 
 // ── Rank over the season (Leaderboards/RankHistory) ───────────────────────
 
-/// One point of a manager's season rank line.
-typedef RankPoint = ({int gameweek, int rank});
+/// One point of a manager's season rank line. [live] marks the gameweek being
+/// played right now (its rank is provisional — the chart draws it hollow, the
+/// share image says so); every settled week is `live: false`.
+typedef RankPoint = ({int gameweek, int rank, bool live});
 
 /// The line needs two weeks; under that the panel shows a muted note.
 const int kRankChartMinWeeks = 2;
 
 /// A manager's RankHistory ({gameweek → Overall rank}) as points in
-/// gameweek order. null / empty → no points.
-List<RankPoint> rankSeries(Map<int, int>? history) {
+/// gameweek order. null / empty → no points. [liveWeeks] are the gameweeks
+/// whose point is the live (provisional) one — a live week the history does
+/// not carry adds no point.
+List<RankPoint> rankSeries(Map<int, int>? history,
+    {Set<int> liveWeeks = const {}}) {
   if (history == null || history.isEmpty) return const [];
   final weeks = history.keys.toList()..sort();
-  return [for (final w in weeks) (gameweek: w, rank: history[w]!)];
+  return [
+    for (final w in weeks)
+      (gameweek: w, rank: history[w]!, live: liveWeeks.contains(w)),
+  ];
 }
 
-/// "#14 → #10": the first recorded rank → the latest. null under
+/// [uid]'s rank line from the (live-merged) boards: his RankHistory with the
+/// live gameweek's point flagged ([FantasyLeaderboards.liveRankPoints]). The
+/// ONE place the chart's opener, the squad viewer's feed, the share story and
+/// the profile tab all read it, so they can never disagree about "live".
+List<RankPoint> rankSeriesFor(FantasyLeaderboards boards, String uid) =>
+    rankSeries(boards.rankHistory[uid],
+        liveWeeks: boards.liveRankPoints[uid] ?? const {});
+
+/// "#14 → #10": the first recorded rank → the latest (the live gameweek's
+/// provisional rank while one is being played). null under
 /// [kRankChartMinWeeks] points (no line to label yet).
 String? rankJourneyLabel(List<RankPoint> series) =>
     series.length < kRankChartMinWeeks
         ? null
         : '#${series.first.rank} → #${series.last.rank}';
 
+/// The gameweek whose rank is live on this line (the last point, when it is
+/// the live one); null when the line is all settled.
+int? rankSeriesLiveWeek(List<RankPoint> series) =>
+    series.isNotEmpty && series.last.live ? series.last.gameweek : null;
+
 /// The chart's screen-reader text: every week's rank in order.
 String rankSeriesSemantics(List<RankPoint> series) =>
     'Your rank by gameweek: '
     '${series.map((p) => 'GW${p.gameweek} #${p.rank}').join(', ')}';
+
+// ── Live boards (live everywhere, Task 6) ──────────────────────────────────
+
+/// The board is the live gameweek's provisional one ([FantasyLiveFeed]'s merge
+/// replaces a scope's rows wholesale, so one live row means a live board).
+bool entriesAreLive(List<FantasyLeaderboardEntry> entries) =>
+    entries.any((e) => e.live);
+
+/// Which rows moved between two emissions, and which way: a row whose RANK
+/// NUMBER changed ([before] → [after]; a better, smaller number is up) or,
+/// failing that, whose PLACE in the list changed ([beforeOrder] → [afterOrder]
+/// — the fan refreshed a held order; moving up the list is up). A row that is
+/// new, or held both its number and its place, is absent. The rank change wins
+/// when both moved: the data's word over the list's.
+Map<String, MovementDirection> movedRows({
+  required List<LeaderboardRowData> before,
+  required List<LeaderboardRowData> after,
+  required List<String> beforeOrder,
+  required List<String> afterOrder,
+}) {
+  final moved = <String, MovementDirection>{};
+  for (final e in positionMoves(beforeOrder, afterOrder).entries) {
+    moved[e.key] =
+        e.value < 0 ? MovementDirection.up : MovementDirection.down;
+  }
+  final was = {for (final r in before) r.uid: r.displayRank};
+  for (final row in after) {
+    final previous = was[row.uid];
+    if (previous == null || previous == row.displayRank) continue;
+    moved[row.uid] = row.displayRank < previous
+        ? MovementDirection.up
+        : MovementDirection.down;
+  }
+  return moved;
+}
 
 // ── Biggest climber / faller of the week (Overall) ────────────────────────
 

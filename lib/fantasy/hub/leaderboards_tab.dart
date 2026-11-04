@@ -31,6 +31,16 @@
 // behind [kShowMiniLeagues]: no segment, no MiniLeagues subscription, and it
 // no longer gates the reveal. Flip the constant to bring it back.
 //
+// Live everywhere (Task 6): while a gameweek is being played the Leaderboards
+// stream already carries the live board (the data layer merges it — Overall,
+// that week's rows and the rank history's last point carry `live`). The tab
+// shows the shared LIVE pill in the Overall / Gameweek column header and on
+// the live week's chip, and keeps the rows STEADY (leaderboard_rows.dart,
+// steady_order.dart): numbers move in place, the order waits behind "Order
+// changed · tap to refresh" unless the list is at the top. Each scope / week
+// is its own keyed list, so picking one (or reopening the tab) starts from the
+// newest order. Moved rows tint and their rank cross-fades.
+//
 // Data: the functions-written Leaderboards node (friendly empty state until
 // P4 writes it), the whole Managers node for team names, PublicProfiles
 // (once, session-cached) for real names + avatar photos.
@@ -56,6 +66,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_share.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/manager_squad_viewer.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/mini_leagues_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
@@ -358,7 +369,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
     );
     final self = rows.where((r) => r.isSelf).firstOrNull;
     if (self == null) return null;
-    final series = rankSeries(boards.rankHistory[self.uid]);
+    final series = rankSeriesFor(boards, self.uid);
     return (
       series: series,
       share: (buttonContext) => shareMyRankStory(
@@ -402,7 +413,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
               rankStates: rankCard == null
                   ? null
                   : _boardsForViewer.stream
-                      .map((b) => rankSeries(b.rankHistory[row.uid])),
+                      .map((b) => rankSeriesFor(b, row.uid)),
               onShareRank: rankCard == null
                   ? null
                   : (buttonContext) =>
@@ -570,6 +581,10 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
       selfUid: _selfUid,
     );
     return RankedLeaderboardList(
+      // One list per scope: opening it (or coming back to it) starts from the
+      // newest order, never from a held one.
+      key: const ValueKey('leaderboard_list_overall'),
+      live: entriesAreLive(entries),
       rows: rows,
       showMovement: true,
       onRowTap: _openManager,
@@ -588,6 +603,12 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
     final selected = _selectedGameweek(byWeek);
 
     final scheme = Theme.of(context).colorScheme;
+    // The gameweek being played (its rows are the live board's): its chip
+    // carries the shared LIVE pill, whichever week is selected.
+    final liveWeeks = {
+      for (final e in byWeek.entries)
+        if (entriesAreLive(e.value)) e.key,
+    };
     final chips = SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
@@ -596,7 +617,16 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
           for (final week in weekNumbers) ...[
             ChoiceChip(
               key: ValueKey('leaderboard_week_$week'),
-              label: Text('GW$week'),
+              label: liveWeeks.contains(week)
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('GW$week'),
+                        const SizedBox(width: 6),
+                        const FantasyLivePill(),
+                      ],
+                    )
+                  : Text('GW$week'),
               visualDensity: VisualDensity.compact,
               selected: selected == week,
               onSelected: (_) => setState(
@@ -643,6 +673,9 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
     );
     final summary = gameweekSummary(rows);
     return RankedLeaderboardList(
+      // One list per week: picking a week starts from its newest order.
+      key: ValueKey('leaderboard_list_week_$selected'),
+      live: entriesAreLive(entries),
       // The week chips, then the selected week's summary line.
       header: Column(
         mainAxisSize: MainAxisSize.min,

@@ -32,7 +32,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/badge_shelf.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart'
-    show movementDirection, movementLabel;
+    show movementDirection, movementLabel, rankSeriesFor;
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart'
     show movementColor;
 import 'package:infinite_sports_flutter/fantasy/hub/manager_squad_viewer.dart';
@@ -556,6 +556,11 @@ void _viewTeam(BuildContext context, FantasyProfileSource source,
       ? (seams.viewerSquadStates ??
           FantasyService.watchMySquad(sport, season, source.uid))
       : null;
+  // Your own team page carries "Your rank this season" (live everywhere,
+  // Task 6, gap A6): the line from the boards this tab already holds, then
+  // following them (a live week's hollow point, the week settling). Nobody
+  // else's page has the card, so nobody else is handed a series.
+  final boards = isSelf ? source.boards : null;
   final FantasyProfileOpener opener =
       seams.profileOpener ?? openFantasyPlayerProfile;
   Navigator.push(
@@ -571,6 +576,10 @@ void _viewTeam(BuildContext context, FantasyProfileSource source,
         players: source.players,
         gameweeks: source.gameweeks,
         squadStates: live,
+        rankSeries: boards == null ? null : rankSeriesFor(boards, source.uid),
+        rankStates: boards == null
+            ? null
+            : source.boardStates.map((b) => rankSeriesFor(b, source.uid)),
         publishedStates: seams.viewerPublishedStates,
         historyStates: seams.viewerHistoryStates,
         // The badges this tab already shows: the viewer's shelf paints at

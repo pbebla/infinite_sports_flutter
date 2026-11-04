@@ -354,6 +354,11 @@ class FantasyProfileSource extends ChangeNotifier {
   bool _boardsSubscribed = false;
   FantasyLeaderboards? _boards;
 
+  /// Re-listen-safe copy of the boards feed for the pages this tab opens
+  /// (your team page's live rank card): one upstream subscription, however
+  /// many pages are pushed.
+  final _boardsOut = StreamController<FantasyLeaderboards>.broadcast();
+
   /// The manager's badges + the catalog (manager role only); a failing feed
   /// loads as "none" / the starter catalog.
   bool _badgesSubscribed = false;
@@ -414,6 +419,15 @@ class FantasyProfileSource extends ChangeNotifier {
       _access?.manager == null || _boards == null
           ? null
           : managerStanding(_boards!, uid);
+
+  /// The (live-merged) Leaderboards this tab holds, null until they land or
+  /// without a manager role: the squad viewer's rank card opens from them.
+  FantasyLeaderboards? get boards => _boards;
+
+  /// The boards as they keep arriving (each live update, the week settling):
+  /// re-listen-safe, so a page can follow them without a second Firebase
+  /// subscription.
+  Stream<FantasyLeaderboards> get boardStates => _boardsOut.stream;
 
   /// The manager's earned badges, oldest first (empty without a manager role
   /// or before they load).
@@ -697,6 +711,7 @@ class FantasyProfileSource extends ChangeNotifier {
             FantasyService.watchLeaderboards(season.sport, season.season),
         (b) {
           _boards = b;
+          if (!_boardsOut.isClosed) _boardsOut.add(b);
           _notify();
         },
         onFail: () {
@@ -783,6 +798,7 @@ class FantasyProfileSource extends ChangeNotifier {
     _subs.clear();
     _schedule?.dispose();
     _seasonFinished?.dispose();
+    _boardsOut.close();
     super.dispose();
   }
 }

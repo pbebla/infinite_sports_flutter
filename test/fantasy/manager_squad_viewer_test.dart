@@ -26,9 +26,11 @@ import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/manager_squad_viewer.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/rank_history_chart.dart';
+import '../helpers/chart_paint.dart';
 
 FantasySquad squad(String gk, {String? chip}) => FantasySquad(
       picks: [
@@ -134,9 +136,9 @@ void main() {
   ];
 
   const season = <RankPoint>[
-    (gameweek: 1, rank: 14),
-    (gameweek: 2, rank: 12),
-    (gameweek: 3, rank: 10),
+    (gameweek: 1, rank: 14, live: false),
+    (gameweek: 2, rank: 12, live: false),
+    (gameweek: 3, rank: 10, live: false),
   ];
 
   Finder byKey(String key) => find.byKey(ValueKey(key));
@@ -207,7 +209,7 @@ void main() {
       expect(find.text('#14 → #10'), findsOneWidget);
 
       // GW4 finalizes: RankHistory gains a week, you climbed to #7.
-      rank.add(const [...season, (gameweek: 4, rank: 7)]);
+      rank.add(const [...season, (gameweek: 4, rank: 7, live: false)]);
       await tester.pumpAndSettle();
       expect(find.text('#14 → #7'), findsOneWidget);
       expect(find.text('#14 → #10'), findsNothing);
@@ -226,6 +228,50 @@ void main() {
       expect(find.text('#14 → #7'), findsOneWidget);
       expect(tester.takeException(), isNull);
       semantics.dispose();
+    });
+
+    testWidgets('a LIVE gameweek: the end point is a hollow ring with the '
+        'pill; when the week settles the same chart goes solid and the pill '
+        'goes (live everywhere, Task 6)', (tester) async {
+      final rank = StreamController<List<RankPoint>>.broadcast();
+      addTearDown(rank.close);
+      const liveLine = <RankPoint>[
+        (gameweek: 1, rank: 14, live: false),
+        (gameweek: 2, rank: 12, live: false),
+        (gameweek: 3, rank: 10, live: true),
+      ];
+      await pumpViewer(tester,
+          isSelf: true,
+          initialSquad: squad('Live Keeper'),
+          rankSeries: liveLine,
+          rankStates: rank.stream);
+      published.add(const {});
+      history.add({1: squad('Old Keeper')});
+      // The pill pulses forever: fixed pumps, never pumpAndSettle.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      Finder painter() => find.descendant(
+          of: byKey('rank_history_chart'),
+          matching: find.byWidgetPredicate((w) =>
+              w is CustomPaint &&
+              w.painter.runtimeType.toString() == '_RankLinePainter'));
+      Finder panelPill() => find.descendant(
+          of: byKey('rank_history_panel'),
+          matching: find.byType(FantasyLivePill));
+      expect(find.text('#14 → #10'), findsOneWidget);
+      expect(panelPill(), findsOneWidget);
+      expect(tester.renderObject(painter()),
+          paintsHollowRing());
+
+      // finalize settles GW3: same rank, now official.
+      rank.add(season);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('#14 → #10'), findsOneWidget);
+      expect(panelPill(), findsNothing);
+      expect(tester.renderObject(painter()),
+          paintsNoRing());
     });
 
     testWidgets('with badges: the card sits just BELOW the shelf and above '
@@ -295,7 +341,7 @@ void main() {
 
     for (final (label, series) in [
       ('no history at all', const <RankPoint>[]),
-      ('one week of history', const <RankPoint>[(gameweek: 1, rank: 4)]),
+      ('one week of history', const <RankPoint>[(gameweek: 1, rank: 4, live: false)]),
     ]) {
       testWidgets('under two weeks ($label): the card is the short muted '
           'note, no chart, sharing still offered', (tester) async {
@@ -371,9 +417,9 @@ void main() {
         (
           'chart',
           const <RankPoint>[
-            (gameweek: 1, rank: 1234),
-            (gameweek: 2, rank: 987),
-            (gameweek: 5, rank: 1),
+            (gameweek: 1, rank: 1234, live: false),
+            (gameweek: 2, rank: 987, live: false),
+            (gameweek: 5, rank: 1, live: false),
           ]
         ),
         ('note', const <RankPoint>[]),

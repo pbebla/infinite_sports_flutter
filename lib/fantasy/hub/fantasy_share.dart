@@ -12,6 +12,13 @@
 // Both sit in [FantasyStoryFrame]: logo, title/season line, and the shared
 // "Follow Infinite Sports" footer every share card carries.
 //
+// Live everywhere (Task 6): while a gameweek is being played the numbers on an
+// image are provisional, so the frame carries a `LIVE · GW{n} in progress` tag
+// under the season line — the Team of the Week story when the team is the live
+// one (`FantasyDreamTeam.live`), the rank story when the rank line's last
+// point is the live one (`RankPoint.live`, drawn as the hollow ring). A
+// settled week has no tag.
+//
 // The images are ALWAYS the dark brand style — they are posted outside the
 // app, so they never follow the viewer's theme: the frame swaps in the app's
 // own dark theme (theme_provider.darkMode) and every color comes from that
@@ -50,6 +57,10 @@ String fantasySeasonLabel(String sport, String season) =>
 String teamOfWeekShareCaption(int week, String seasonLabel) =>
     'Infinite Fantasy · Team of the Week · GW$week ($seasonLabel)';
 
+/// The story's live tag while a gameweek is being played:
+/// "LIVE · GW8 in progress" (the numbers on the image are provisional).
+String liveStoryTag(int week) => 'LIVE · GW$week in progress';
+
 /// "Infinite Fantasy · My rank · #10 of 21 · 512 pts (Futsal Season 15)".
 String myRankShareCaption({
   required int rank,
@@ -82,11 +93,16 @@ class FantasyStoryFrame extends StatelessWidget {
     super.key,
     this.title,
     required this.subtitle,
+    this.liveTag,
     required this.child,
   });
 
   final String? title;
   final String subtitle;
+
+  /// "LIVE · GW8 in progress" under the subtitle while the numbers on the
+  /// image are a gameweek's provisional ones; null = no tag.
+  final String? liveTag;
   final Widget child;
 
   @override
@@ -187,6 +203,10 @@ class FantasyStoryFrame extends StatelessWidget {
                         color: scheme.onSurfaceVariant,
                       ),
                     ),
+                    if (liveTag != null) ...[
+                      const SizedBox(height: 8),
+                      _StoryLiveTag(text: liveTag!),
+                    ],
                   ],
                 ),
               ),
@@ -201,6 +221,52 @@ class FantasyStoryFrame extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// The story's `LIVE · GW{n} in progress` tag: the bright fantasy red (the
+/// LIVE pill's own pair), a still dot and the text. Always on the dark story,
+/// never animated (the image is captured once).
+class _StoryLiveTag extends StatelessWidget {
+  const _StoryLiveTag({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final red = fantasyDownRed(context);
+    return Container(
+      key: const ValueKey('story_live_tag'),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: red.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: red.withValues(alpha: 0.55)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(shape: BoxShape.circle, color: red),
+            child: const SizedBox(width: 7, height: 7),
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              text,
+              softWrap: true,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.6,
+                height: 1.15,
+                color: red,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -232,6 +298,8 @@ class TeamOfWeekStoryCard extends StatelessWidget {
     return FantasyStoryFrame(
       title: 'Team of the Week',
       subtitle: 'GW$week · $seasonLabel',
+      // The live gameweek's team can still change: say so on the image.
+      liveTag: team.live ? liveStoryTag(week) : null,
       child: Center(
         // As big as the middle allows; the court keeps its own aspect.
         child: AspectRatio(
@@ -301,8 +369,11 @@ class RankStoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The week the line's last point belongs to, while it is being played.
+    final liveWeek = rankSeriesLiveWeek(series);
     return FantasyStoryFrame(
       subtitle: seasonLabel,
+      liveTag: liveWeek == null ? null : liveStoryTag(liveWeek),
       child: Builder(builder: _content),
     );
   }

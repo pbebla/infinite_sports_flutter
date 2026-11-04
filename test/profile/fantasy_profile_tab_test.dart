@@ -30,12 +30,14 @@ import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/manager_squad_viewer.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart'
     show fantasyAccent;
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/profile/fantasy_profile_source.dart';
 import 'package:infinite_sports_flutter/profile/profile_page.dart';
+import '../helpers/chart_paint.dart';
 
 const _uid = 'u1';
 const _name = 'Demsin Betvarda';
@@ -1648,6 +1650,111 @@ void main() {
           .widget<ManagerSquadViewerPage>(find.byType(ManagerSquadViewerPage));
       expect(viewer.isSelf, isTrue);
       expect(key('viewer_week_now'), findsOneWidget);
+    });
+
+    // Live everywhere (Task 6, inventory gap A6): "View team" from the
+    // profile used to open the viewer WITHOUT the rank series, so "Your rank
+    // this season" was missing from your own team page when you came here.
+    group('your rank this season from the profile (A6)', () {
+      FantasyLeaderboards withHistory({Set<int> live = const {}}) =>
+          FantasyLeaderboards(
+            overall: const [
+              FantasyLeaderboardEntry(uid: 'a', points: 90, rank: 1),
+              FantasyLeaderboardEntry(
+                  uid: _uid, points: 80, rank: 2, movement: 3),
+            ],
+            byWeek: const {},
+            rankHistory: const {
+              _uid: {1: 6, 2: 4, 3: 2},
+            },
+            liveRankPoints: {if (live.isNotEmpty) _uid: live},
+          );
+
+      Future<void> openOwnTeam(WidgetTester tester,
+          {required FantasyLeaderboards boardsValue,
+          String self = _uid}) async {
+        await pumpProfile(tester, self: self);
+        await landEligibility(tester, asManager: topCats);
+        await landContent(tester,
+            managerRole: true, boardsValue: boardsValue);
+        await openFantasyTab(tester);
+        await tester.tap(key('fantasy_view_team'));
+        await tester.pump();
+        published.add(const {});
+        history.add(const {});
+        viewerSquad.add(null);
+        await settle(tester);
+      }
+
+      testWidgets('on his OWN profile the viewer shows the rank card with '
+          'his line', (tester) async {
+        await openOwnTeam(tester, boardsValue: withHistory());
+
+        expect(key('rank_history_panel'), findsOneWidget);
+        expect(key('rank_history_chart'), findsOneWidget);
+        expect(find.text('#6 → #2'), findsOneWidget);
+        final viewer = tester.widget<ManagerSquadViewerPage>(
+            find.byType(ManagerSquadViewerPage));
+        expect(viewer.rankSeries, [
+          (gameweek: 1, rank: 6, live: false),
+          (gameweek: 2, rank: 4, live: false),
+          (gameweek: 3, rank: 2, live: false),
+        ]);
+      });
+
+      testWidgets('a LIVE gameweek: the end point is hollow with the pill, '
+          'and the card follows the boards when the week settles',
+          (tester) async {
+        await openOwnTeam(tester, boardsValue: withHistory(live: {3}));
+        Finder painter() => find.descendant(
+            of: key('rank_history_chart'),
+            matching: find.byWidgetPredicate((w) =>
+                w is CustomPaint &&
+                w.painter.runtimeType.toString() == '_RankLinePainter'));
+        Finder panelPill() => find.descendant(
+            of: key('rank_history_panel'),
+            matching: find.byType(FantasyLivePill));
+        expect(panelPill(), findsOneWidget);
+        expect(tester.renderObject(painter()),
+            paintsHollowRing());
+
+        // finalize settles the week: the same boards, no live point.
+        boards.add(withHistory());
+        await settle(tester);
+        expect(find.text('#6 → #2'), findsOneWidget);
+        expect(panelPill(), findsNothing);
+        expect(tester.renderObject(painter()),
+            paintsNoRing());
+      });
+
+      testWidgets("someone else's profile: no rank card (it is YOURS), the "
+          'viewer is handed no series', (tester) async {
+        await openOwnTeam(tester,
+            boardsValue: withHistory(), self: 'me');
+        final viewer = tester.widget<ManagerSquadViewerPage>(
+            find.byType(ManagerSquadViewerPage));
+        expect(viewer.isSelf, isFalse);
+        expect(viewer.rankSeries, isNull);
+        expect(key('rank_history_panel'), findsNothing);
+      });
+
+      testWidgets('your history has under two weeks: the muted note, not an '
+          'empty chart', (tester) async {
+        await openOwnTeam(
+            tester,
+            boardsValue: const FantasyLeaderboards(
+              overall: [
+                FantasyLeaderboardEntry(uid: _uid, points: 5, rank: 1),
+              ],
+              byWeek: {},
+              rankHistory: {
+                _uid: {1: 1},
+              },
+            ));
+        expect(key('rank_history_panel'), findsOneWidget);
+        expect(key('rank_history_note'), findsOneWidget);
+        expect(key('rank_history_chart'), findsNothing);
+      });
     });
   });
 

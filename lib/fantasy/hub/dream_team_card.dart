@@ -19,6 +19,11 @@
 // Gameweek view). Renders nothing while no DreamTeam exists — the Leaderboards
 // tab shows its own friendly line instead of building the card.
 //
+// Live everywhere (Task 6): the live gameweek's Team of the Week (the data
+// layer's `live` overlay) carries the shared LIVE pill beside the title and the
+// subline "Can still change until the last game ends." under it; stepping back
+// to a settled week drops both. The court itself just refills in place.
+//
 // Share (owner follow-up): with a [DreamTeamCard.seasonLabel] the header
 // carries a Share button that renders the week ON SCREEN as a branded story
 // image (fantasy_share.dart — the same court + chips) and opens the share
@@ -32,8 +37,12 @@ import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_share.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_share_button.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
 import 'package:infinite_sports_flutter/misc/share_card_service.dart';
+
+/// The subline under the title while the week is still being played.
+const String kDreamTeamLiveNote = 'Can still change until the last game ends.';
 
 class DreamTeamCard extends StatefulWidget {
   const DreamTeamCard({
@@ -112,15 +121,25 @@ class _DreamTeamCardState extends State<DreamTeamCard> {
               Icon(Icons.emoji_events, size: 20, color: accent),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  'Team of the Week · GW$selected',
-                  key: const ValueKey('dream_team_title'),
-                  softWrap: true,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: FantasyBanner.foreground(context),
-                  ),
+                // The pill rides beside the title and drops under it when
+                // the line is full (360 px with the share button).
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    Text(
+                      'Team of the Week · GW$selected',
+                      key: const ValueKey('dream_team_title'),
+                      softWrap: true,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: FantasyBanner.foreground(context),
+                      ),
+                    ),
+                    if (team.live) const FantasyLivePill(),
+                  ],
                 ),
               ),
               if (seasonLabel != null)
@@ -140,6 +159,21 @@ class _DreamTeamCardState extends State<DreamTeamCard> {
                 ),
             ],
           ),
+          if (team.live)
+            Padding(
+              // Under the title (past the trophy icon).
+              padding: const EdgeInsets.only(top: 4, left: 28),
+              child: Text(
+                kDreamTeamLiveNote,
+                key: const ValueKey('dream_team_live_note'),
+                softWrap: true,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  height: 1.3,
+                  color: FantasyBanner.foregroundMuted(context),
+                ),
+              ),
+            ),
           if (weeks.length > 1) ...[
             const SizedBox(height: 8),
             SingleChildScrollView(

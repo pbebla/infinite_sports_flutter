@@ -22,6 +22,7 @@ import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/access_pay_card.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
@@ -1579,7 +1580,8 @@ void main() {
 
       expect(key('hub'), findsOneWidget);
       expect(find.text('34 pts · #5 ▲2'), findsOneWidget);
-      expect(find.byType(FantasyLivePill), findsOneWidget);
+      // The pill beside the banner's live line and the strip's own.
+      expect(find.byType(FantasyLivePill), findsNWidgets(2));
       Finder inChip(String id, String text) => find.descendant(
           of: key('squad_chip_$id'), matching: find.text(text));
       expect(inChip('Ava Striker', '16 pts · live'), findsOneWidget);
@@ -1593,6 +1595,54 @@ void main() {
       await tester.tap(key('squad_chip_Ava Striker'));
       await tester.pump(const Duration(milliseconds: 50));
       expect(opened.map((o) => o.name), ['Ava Striker']);
+    });
+
+    testWidgets('live: the hub banner says "GW{n} live · {W} pts · #{R}" with '
+        'the pill; no squad this week = the banner unchanged; the tombstone '
+        'takes the line away', (tester) async {
+      Finder inBanner(Finder f) =>
+          find.descendant(of: find.byType(FantasyBanner), matching: f);
+
+      await pumpLockedHub(tester);
+      await land(tester, lock: FantasyLockOverride.locked);
+      answerOwn();
+      await settle(tester);
+      expect(inBanner(find.text('GW3 live · 34 pts · #5')), findsOneWidget);
+      expect(inBanner(find.byType(FantasyLivePill)), findsOneWidget);
+
+      // A moving score changes the line in place.
+      liveFeed.add(FantasyLiveState(
+        meta: const LiveMeta(gw: 3, state: LiveState.live),
+        board: const {'me': LiveBoardRow(o: 93, r: 4, m: 3, w: 37, wr: 1)},
+      ));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(inBanner(find.text('GW3 live · 37 pts · #4')), findsOneWidget);
+
+      // The week settles: the banner is the plain one again.
+      liveFeed.add(liveState(state: LiveState.settled));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(inBanner(find.textContaining('live ·')), findsNothing);
+      expect(inBanner(find.byType(FantasyLivePill)), findsNothing);
+    });
+
+    testWidgets('live, but he has no squad scored this week (no W): the '
+        'banner is exactly as before', (tester) async {
+      await pumpLockedHub(tester);
+      await land(tester, lock: FantasyLockOverride.locked);
+      answerOwn(withLive: false);
+      liveFeed.add(FantasyLiveState(
+        meta: const LiveMeta(gw: 3, state: LiveState.live),
+        board: const {'me': LiveBoardRow(o: 90, r: 5)},
+      ));
+      await settle(tester);
+      expect(key('hub'), findsOneWidget);
+      expect(
+          find.descendant(
+              of: find.byType(FantasyBanner),
+              matching: find.byType(FantasyLivePill)),
+          findsNothing);
+      expect(find.textContaining('GW3 live'), findsNothing);
     });
 
     testWidgets('live arriving 500 ms late: the reveal waits for it, and the '
@@ -1620,6 +1670,9 @@ void main() {
             // The first frame the hub exists in the tree.
             expect(find.text('34 pts · #5 ▲2'), findsOneWidget,
                 reason: 'the first revealed frame already has live numbers');
+            // …and so does the banner: it never pops its live line in later.
+            expect(find.text('GW3 live · 34 pts · #5'), findsOneWidget,
+                reason: 'the banner joins the same single reveal');
             expect(elapsed, greaterThanOrEqualTo(500));
           }
           sawHub = true;
@@ -1680,7 +1733,7 @@ void main() {
       answerOwn();
       await tester.pump(const Duration(milliseconds: 50));
       await settle(tester);
-      expect(find.byType(FantasyLivePill), findsOneWidget);
+      expect(find.byType(FantasyLivePill), findsNWidgets(2)); // banner + strip
 
       historyFeeds[3]!.add(settledWeek());
       overallFeed.add(const OverallStanding(rank: 4));

@@ -28,18 +28,52 @@
 // reserves that slot empty, so the numbers fill in after the reveal without
 // moving the name, the climber badge or the row (Opus audit item 1).
 //
+// Live everywhere (Task 6) — "like ESPN and the Premier League: numbers move,
+// rows don't jump":
+//   • [RankedLeaderboardList] keeps its rows in a [SteadyOrder]: a row's rank
+//     and points update IN PLACE the moment they arrive, but the ORDER only
+//     changes when the list is at the top (and nobody is scrolling it), when
+//     the list is opened or replaced (a scope / week pick builds a new list)
+//     — otherwise "Order changed · tap to refresh" floats over the top of the
+//     list and re-orders on its tap. Never under a moving finger.
+//   • [LeaderboardRowTile] tints a moved row for 800 ms (up = the up colour,
+//     down = the bright fantasy red, each at 18 % alpha) and cross-fades its
+//     rank number over 250 ms; both are instant under reduced motion.
+//   • the column header carries the shared LIVE pill while the board is live.
+//
 // House rules: theme-safe both modes (fantasy accent = gold in dark, primary
 // red in light; movement up = the pitch-green family, down = error); manager
 // names WRAP and are never underlined or ellipsized; list clears the glass
 // navbar; photos never gate rows (FantasyAvatar's initials fallback); the
 // pinned row's appear/disappear is 200ms and zero under reduced motion.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:infinite_sports_flutter/fantasy/hub/badge_shelf.dart'
     show BadgeCountChip, kBadgeCountChipHeight, kBadgeCountChipWidth;
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/steady_order.dart';
+
+/// How long a moved row stays tinted.
+const Duration kRowTintHold = Duration(milliseconds: 800);
+
+/// How long a moved row's rank number takes to cross-fade to its new value.
+const Duration kRankCrossFade = Duration(milliseconds: 250);
+
+/// The moved-row tint's strength.
+const double kRowTintAlpha = 0.18;
+
+/// How near the top (logical px) still counts as "at the top" — a hair of
+/// slop so a settled list that sits a pixel off 0 still follows the rule.
+const double kListTopSlop = 2;
+
+/// The pill that appears while a new order waits (the owner's copy).
+const String kOrderChangedCopy = 'Order changed · tap to refresh';
 
 // Column geometry shared by the rows and the column header so "#", the
 // movement cell and the manager column line up.
@@ -107,10 +141,21 @@ class LeaderboardMoverBadge extends StatelessWidget {
   }
 }
 
+/// A row that just moved: which way, and a [serial] that is new for every
+/// move so a second move of the same row restarts its tint. A tile starts the
+/// tint when it SEES the serial change — a row built later (scrolled into
+/// view) never replays an old one.
+class RowFlash {
+  const RowFlash(this.direction, this.serial);
+
+  final MovementDirection direction;
+  final int serial;
+}
+
 /// One ranked row: rank, movement cell (when the data provides one), avatar,
 /// the two-line manager cell (real name; team name under it), points. The
 /// signed-in manager's row carries the accent highlight.
-class LeaderboardRowTile extends StatelessWidget {
+class LeaderboardRowTile extends StatefulWidget {
   const LeaderboardRowTile({
     super.key,
     required this.row,
@@ -118,6 +163,7 @@ class LeaderboardRowTile extends StatelessWidget {
     this.onTap,
     this.mover,
     this.badgeCount = 0,
+    this.flash,
   });
 
   final LeaderboardRowData row;
@@ -133,16 +179,58 @@ class LeaderboardRowTile extends StatelessWidget {
   /// without moving anything.
   final int? badgeCount;
 
+  /// The row moved (rank number or place): tint it for [kRowTintHold]. null =
+  /// nothing new (a running tint is left to finish).
+  final RowFlash? flash;
+
+  @override
+  State<LeaderboardRowTile> createState() => _LeaderboardRowTileState();
+}
+
+class _LeaderboardRowTileState extends State<LeaderboardRowTile> {
+  Timer? _tintTimer;
+  bool _tinted = false;
+
+  /// Kept after the tint ends so it fades OUT in its own colour, never
+  /// through a darker blend.
+  MovementDirection _tintDirection = MovementDirection.up;
+
+  @override
+  void didUpdateWidget(LeaderboardRowTile old) {
+    super.didUpdateWidget(old);
+    final flash = widget.flash;
+    if (flash == null || flash.serial == old.flash?.serial) return;
+    _tintTimer?.cancel();
+    // No setState: this build is already happening.
+    _tintDirection = flash.direction;
+    _tinted = true;
+    _tintTimer = Timer(kRowTintHold, () {
+      if (mounted) setState(() => _tinted = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _tintTimer?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final row = widget.row;
+    final showMovement = widget.showMovement;
+    final onTap = widget.onTap;
     final scheme = Theme.of(context).colorScheme;
     final accent = fantasyAccent(context);
     final direction = movementDirection(row.movement);
     final secondary = row.secondaryName;
-    final mover = this.mover;
-    final badgeCount = this.badgeCount;
+    final mover = widget.mover;
+    final badgeCount = widget.badgeCount;
     final reserveBadge = badgeCount == null;
     final showBadge = badgeCount != null && badgeCount > 0;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final tint = movementColor(context, _tintDirection)
+        .withValues(alpha: _tinted ? kRowTintAlpha : 0);
 
     final nameText = Text(
       row.name,
@@ -163,14 +251,21 @@ class LeaderboardRowTile extends StatelessWidget {
         children: [
           SizedBox(
             width: _rankWidth,
-            child: Text(
-              '${row.displayRank}',
-              textAlign: TextAlign.center,
-              // The rank is the gold/red accent on every row (the mockup).
-              style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w800,
-                color: accent,
+            // A moved rank cross-fades to its new number (instant under
+            // reduced motion); a row that did not move never animates.
+            child: AnimatedSwitcher(
+              key: ValueKey('leaderboard_rank_${row.uid}'),
+              duration: reduceMotion ? Duration.zero : kRankCrossFade,
+              child: Text(
+                '${row.displayRank}',
+                key: ValueKey(row.displayRank),
+                textAlign: TextAlign.center,
+                // The rank is the gold/red accent on every row (the mockup).
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w800,
+                  color: accent,
+                ),
               ),
             ),
           ),
@@ -268,13 +363,22 @@ class LeaderboardRowTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       border: Border.all(color: accent.withValues(alpha: 0.65)),
     );
-    final body = InkWell(
-      key: ValueKey('leaderboard_row_${row.uid}'),
-      borderRadius: BorderRadius.circular(12),
-      onTap: onTap == null ? null : () => onTap!(row),
-      child: row.isSelf
-          ? Container(foregroundDecoration: selfBorder, child: content)
-          : content,
+    final body = AnimatedContainer(
+      // The moved-row tint, painted over the row (own highlight included).
+      key: ValueKey('row_tint_${row.uid}'),
+      duration: reduceMotion ? Duration.zero : kRankCrossFade,
+      foregroundDecoration: BoxDecoration(
+        color: tint,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: InkWell(
+        key: ValueKey('leaderboard_row_${row.uid}'),
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap == null ? null : () => onTap(row),
+        child: row.isSelf
+            ? Container(foregroundDecoration: selfBorder, child: content)
+            : content,
+      ),
     );
 
     return Padding(
@@ -294,9 +398,14 @@ class LeaderboardRowTile extends StatelessWidget {
 /// The mockup's "# · Manager · Pts" header — same paddings and column widths
 /// as [LeaderboardRowTile] so the labels sit over their columns.
 class _LeaderboardColumnHeader extends StatelessWidget {
-  const _LeaderboardColumnHeader({required this.showMovement});
+  const _LeaderboardColumnHeader(
+      {required this.showMovement, required this.live});
 
   final bool showMovement;
+
+  /// The board is the live gameweek's: the shared LIVE pill sits by the
+  /// "Manager" label.
+  final bool live;
 
   @override
   Widget build(BuildContext context) {
@@ -321,7 +430,16 @@ class _LeaderboardColumnHeader extends StatelessWidget {
               if (showMovement) const SizedBox(width: _movementWidth),
               const SizedBox(
                   width: _afterMovementGap + _avatarSize + _afterAvatarGap),
-              Expanded(child: Text('Manager', style: style)),
+              Expanded(
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  children: [
+                    Text('Manager', style: style),
+                    if (live) const FantasyLivePill(),
+                  ],
+                ),
+              ),
               Text('Pts', style: style),
             ],
           ),
@@ -340,6 +458,14 @@ class _LeaderboardColumnHeader extends StatelessWidget {
 /// The scrolling standings: a column header, plain ranked rows, and the
 /// signed-in manager's row pinned to the bottom of the viewport whenever its
 /// natural place is out of view.
+///
+/// STEADY ORDER (live everywhere, Task 6): [rows] arrives in the board's
+/// order every time a number moves. Each row's numbers are drawn from the
+/// LATEST [rows] at once; the order they are drawn in is a [SteadyOrder] — it
+/// follows the data only when the list is at the top and not being scrolled,
+/// else it waits behind the "Order changed · tap to refresh" pill. A new list
+/// (the opener gives each scope / week its own key) is a fresh start: the
+/// first order is applied at once.
 class RankedLeaderboardList extends StatefulWidget {
   const RankedLeaderboardList({
     super.key,
@@ -349,6 +475,7 @@ class RankedLeaderboardList extends StatefulWidget {
     this.header,
     this.movers = const {},
     this.badgeCounts = const {},
+    this.live = false,
   });
 
   final List<LeaderboardRowData> rows;
@@ -366,6 +493,10 @@ class RankedLeaderboardList extends StatefulWidget {
   /// fixed-size slot (no row moves when they land).
   final Map<String, int>? badgeCounts;
 
+  /// [rows] are the live gameweek's provisional numbers: the column header
+  /// carries the shared LIVE pill.
+  final bool live;
+
   int? _badgeCountFor(String uid) {
     final counts = badgeCounts;
     return counts == null ? null : (counts[uid] ?? 0);
@@ -381,16 +512,105 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
   final GlobalKey _ownKey = GlobalKey();
   bool _pinned = false;
 
+  /// The list's scroll offset as of its last scroll / metrics notification
+  /// (0 until it scrolls). Read from notifications, NOT from an owned
+  /// ScrollController: the list stays on the route's PrimaryScrollController,
+  /// so iOS's tap-the-status-bar-to-scroll-to-top keeps working on it.
+  double _pixels = 0;
+
+  /// The order the rows are drawn in (uids); see the class doc.
+  final SteadyOrder<String> _order = SteadyOrder<String>();
+
+  /// The fan is dragging or flinging the list (user-driven scrolling that has
+  /// not come to rest): never re-order under a moving finger.
+  bool _userScrolling = false;
+
+  /// The rows that just moved, by uid, and the serial that tells a tile it is
+  /// a NEW move.
+  Map<String, RowFlash> _flashes = const {};
+  int _flashSerial = 0;
+
   @override
   void initState() {
     super.initState();
+    _order.update(_uids(widget.rows), atTop: true);
     _scheduleCheck();
   }
 
   @override
   void didUpdateWidget(RankedLeaderboardList old) {
     super.didUpdateWidget(old);
+    final before = List<String>.of(_order.applied);
+    _order.update(_uids(widget.rows), atTop: _atTop);
+    _noteMoves(old.rows, before);
     _scheduleCheck();
+  }
+
+  static List<String> _uids(List<LeaderboardRowData> rows) =>
+      [for (final row in rows) row.uid];
+
+  /// At the top and nobody is scrolling: a new order may be applied now.
+  bool get _atTop {
+    return !_userScrolling && _pixels <= kListTopSlop;
+  }
+
+  /// Works out which rows moved between the previous rows / order and the
+  /// current ones (a rank number changed, or the order moved them) and hands
+  /// each its [RowFlash]. Nobody moved = no flashes (a running tint finishes).
+  void _noteMoves(List<LeaderboardRowData> beforeRows, List<String> beforeOrder) {
+    final moved = movedRows(
+      before: beforeRows,
+      after: widget.rows,
+      beforeOrder: beforeOrder,
+      afterOrder: _order.applied,
+    );
+    if (moved.isEmpty) {
+      _flashes = const {};
+      return;
+    }
+    _flashSerial++;
+    _flashes = {
+      for (final e in moved.entries) e.key: RowFlash(e.value, _flashSerial),
+    };
+  }
+
+  /// "Order changed · tap to refresh" was tapped (or the list came to rest at
+  /// the top): apply the waiting order.
+  void _refresh() {
+    final beforeOrder = List<String>.of(_order.applied);
+    setState(() {
+      if (_order.refresh()) _noteMoves(widget.rows, beforeOrder);
+    });
+  }
+
+  /// A scroll came to rest at the top with an order waiting: apply it.
+  /// Deferred — scroll notifications can fire during layout.
+  void _applyWaitingAtRest() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _order.hasPending && _atTop) _refresh();
+    });
+  }
+
+  bool _onScroll(ScrollNotification n) {
+    // Only THIS list's own vertical scroll (not the week chips' strip).
+    if (n.depth == 0 && n.metrics.axis == Axis.vertical) {
+      _pixels = n.metrics.pixels;
+      if (n is ScrollStartNotification && n.dragDetails != null) {
+        // A finger has started dragging (before its first movement counts).
+        _userScrolling = true;
+      } else if (n is UserScrollNotification) {
+        _userScrolling = n.direction != ScrollDirection.idle;
+      } else if (n is ScrollEndNotification) {
+        _userScrolling = false;
+        if (_order.hasPending && n.metrics.pixels <= kListTopSlop) {
+          _applyWaitingAtRest();
+        }
+      }
+    }
+    // Scroll notifications can fire DURING viewport layout — reading
+    // render-box geometry there asserts. Defer to after the frame.
+    _scheduleCheck();
+    return false;
   }
 
   /// A row tile with the opt-in extras (mover badge, badge-count chip). The
@@ -402,6 +622,7 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
         onTap: widget.onRowTap,
         mover: widget.movers[row.uid],
         badgeCount: widget._badgeCountFor(row.uid),
+        flash: _flashes[row.uid],
       );
 
   void _scheduleCheck() {
@@ -436,40 +657,80 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
 
   @override
   Widget build(BuildContext context) {
-    final rows = widget.rows;
+    // The latest numbers, in the order currently shown.
+    final latest = {for (final row in widget.rows) row.uid: row};
+    final rows = [
+      for (final uid in _order.applied)
+        if (latest[uid] case final row?) row,
+    ];
     // The optional header, then the column header, then the rows.
     final headerCount = (widget.header != null ? 1 : 0) + 1;
     final selfRow = rows.where((r) => r.isSelf).firstOrNull;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    // Each tile's key follows its row, so a re-order moves the tile (and its
+    // running tint / rank fade) instead of re-using it for another manager.
+    Key tileKey(LeaderboardRowData row) =>
+        row.isSelf ? _ownKey : ValueKey<String>('leaderboard_tile_${row.uid}');
+    final indexOf = <Key, int>{
+      for (final (i, row) in rows.indexed) tileKey(row): i + headerCount,
+    };
 
     return Stack(
       children: [
-        NotificationListener<ScrollNotification>(
-          onNotification: (_) {
-            // Scroll notifications can fire DURING viewport layout — reading
-            // render-box geometry there asserts. Defer to after the frame.
-            _scheduleCheck();
+        NotificationListener<ScrollMetricsNotification>(
+          // The content grew or shrank under the viewport: the offset may
+          // have been clamped without a scroll.
+          onNotification: (n) {
+            if (n.depth == 0 && n.metrics.axis == Axis.vertical) {
+              _pixels = n.metrics.pixels;
+            }
             return false;
           },
-          child: ListView.builder(
-            padding: EdgeInsets.fromLTRB(
-                0, 4, 0, 24 + MediaQuery.paddingOf(context).bottom),
-            itemCount: headerCount + rows.length,
-            itemBuilder: (context, i) {
-              var index = i;
-              if (widget.header != null) {
-                if (index == 0) return widget.header!;
+          child: NotificationListener<ScrollNotification>(
+            onNotification: _onScroll,
+            child: ListView.builder(
+              padding: EdgeInsets.fromLTRB(
+                  0, 4, 0, 24 + MediaQuery.paddingOf(context).bottom),
+              itemCount: headerCount + rows.length,
+              findChildIndexCallback: (key) => indexOf[key],
+              itemBuilder: (context, i) {
+                var index = i;
+                if (widget.header != null) {
+                  if (index == 0) return widget.header!;
+                  index--;
+                }
+                if (index == 0) {
+                  return _LeaderboardColumnHeader(
+                    showMovement: widget.showMovement,
+                    live: widget.live,
+                  );
+                }
                 index--;
-              }
-              if (index == 0) {
-                return _LeaderboardColumnHeader(
-                  showMovement: widget.showMovement,
-                );
-              }
-              index--;
-              final row = rows[index];
-              return _tile(row, key: row.isSelf ? _ownKey : null);
-            },
+                final row = rows[index];
+                return _tile(row, key: tileKey(row));
+              },
+            ),
+          ),
+        ),
+        // A new order is waiting (the fan is scrolled away or scrolling):
+        // floats over the top of the list, under the fixed header.
+        Positioned(
+          top: 8,
+          left: 0,
+          right: 0,
+          child: Center(
+            child: AnimatedSwitcher(
+              duration: reduceMotion
+                  ? Duration.zero
+                  : const Duration(milliseconds: 200),
+              child: _order.hasPending
+                  ? _OrderChangedPill(
+                      key: const ValueKey('order_changed_pill_shown'),
+                      onTap: _refresh,
+                    )
+                  : const SizedBox.shrink(
+                      key: ValueKey('no_order_changed_pill')),
+            ),
           ),
         ),
         // The sticky own-row: bottom of the viewport, above the navbar.
@@ -502,6 +763,66 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// "Order changed · tap to refresh": the accent-coloured pill that floats over
+/// the top of a list whose order is being held still. Filled with the fantasy
+/// accent (gold in dark, the primary red in light) with whichever of black /
+/// white reads on it.
+class _OrderChangedPill extends StatelessWidget {
+  const _OrderChangedPill({super.key, required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = fantasyAccent(context);
+    final onAccent =
+        ThemeData.estimateBrightnessForColor(accent) == Brightness.dark
+            ? Colors.white
+            : Colors.black;
+    return Semantics(
+      key: const ValueKey('order_changed_pill'),
+      button: true,
+      label: kOrderChangedCopy,
+      onTap: onTap,
+      excludeSemantics: true,
+      child: Material(
+        color: accent,
+        elevation: 4,
+        shadowColor: Colors.black.withValues(alpha: 0.35),
+        shape: const StadiumBorder(),
+        child: InkWell(
+          customBorder: const StadiumBorder(),
+          onTap: onTap,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 36),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.swap_vert, size: 16, color: onAccent),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      kOrderChangedCopy,
+                      softWrap: true,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: onAccent,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -337,6 +337,9 @@ class _MiniLeaguesViewState extends State<MiniLeaguesView> {
         // Same ranked-rows UI, scoped to the league's members.
         Expanded(
           child: RankedLeaderboardList(
+            // One list per league: a different league starts from its own
+            // newest order (the steady-order rule's "list was replaced").
+            key: ValueKey('mini_league_list_${league.id}'),
             rows: rows,
             showMovement: false,
             onRowTap: widget.onOpenManager,

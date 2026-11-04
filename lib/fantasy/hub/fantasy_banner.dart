@@ -13,6 +13,7 @@
 // row (deadline countdown / entry button).
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 
 /// The gold Infinite Fantasy wordmark (the banner, the share images).
@@ -25,10 +26,16 @@ class FantasyBanner extends StatelessWidget {
     this.bottom,
     this.teamName,
     this.onEditTeamName,
+    this.liveLine,
   });
 
   /// Muted line under the wordmark (e.g. "Futsal · Season 15").
   final String? subtitle;
+
+  /// Live everywhere (Task 6): while the manager's gameweek is being played,
+  /// `GW3 live · 34 pts · #5` (liveBannerLine) with the shared LIVE pill
+  /// beside it, under the subtitle. null = the banner exactly as before.
+  final String? liveLine;
 
   /// Optional row pinned under the text (e.g. the deadline countdown or the
   /// entry button), rendered centered.
@@ -179,6 +186,31 @@ class FantasyBanner extends StatelessWidget {
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
               ),
+            ),
+          ],
+          if (liveLine != null) ...[
+            const SizedBox(height: 10),
+            // The pill, then the line; the line wraps under the pill at 360.
+            Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                const FantasyLivePill(),
+                Text(
+                  liveLine!,
+                  key: const ValueKey('fantasy_banner_live_line'),
+                  textAlign: TextAlign.center,
+                  softWrap: true,
+                  style: TextStyle(
+                    color: foreground(context),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    height: 1.2,
+                  ),
+                ),
+              ],
             ),
           ],
           if (bottom != null) ...[

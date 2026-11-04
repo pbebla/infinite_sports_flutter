@@ -32,6 +32,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/manager_squad_viewer.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/rank_history_chart.dart';
 import 'package:infinite_sports_flutter/widgets/share_card_footer.dart';
 
+import '../helpers/chart_paint.dart';
 import '../helpers/real_fonts.dart';
 import '../helpers/share_capture.dart';
 
@@ -76,14 +77,14 @@ LeaderboardRowData me({
     );
 
 const List<RankPoint> season = [
-  (gameweek: 1, rank: 14),
-  (gameweek: 2, rank: 12),
-  (gameweek: 3, rank: 11),
-  (gameweek: 4, rank: 13),
-  (gameweek: 5, rank: 12),
-  (gameweek: 6, rank: 11),
-  (gameweek: 7, rank: 11),
-  (gameweek: 8, rank: 10),
+  (gameweek: 1, rank: 14, live: false),
+  (gameweek: 2, rank: 12, live: false),
+  (gameweek: 3, rank: 11, live: false),
+  (gameweek: 4, rank: 13, live: false),
+  (gameweek: 5, rank: 12, live: false),
+  (gameweek: 6, rank: 11, live: false),
+  (gameweek: 7, rank: 11, live: false),
+  (gameweek: 8, rank: 10, live: false),
 ];
 
 Widget totwStory({bool longNames = false, String label = 'Futsal Season 15'}) =>
@@ -138,6 +139,85 @@ void main() {
           reason: '$element');
     }
   }
+
+  // Live everywhere (Task 6): while a gameweek is being played the stories
+  // say so — `LIVE · GW{n} in progress` — and only then.
+  group('the live tag (Task 6)', () {
+    const liveTag = 'LIVE · GW8 in progress';
+
+    Widget liveTotw({bool live = true, bool longNames = false}) =>
+        TeamOfWeekStoryCard(
+          week: 8,
+          seasonLabel: 'Futsal Season 15',
+          team: FantasyDreamTeam(
+              players: dreamTeam(longNames: longNames).players, live: live),
+          config: FantasyConfig.futsalDefault(),
+        );
+
+    const liveSeason = [
+      (gameweek: 6, rank: 11, live: false),
+      (gameweek: 7, rank: 11, live: false),
+      (gameweek: 8, rank: 10, live: true),
+    ];
+
+    for (final host in Brightness.values) {
+      testWidgets('Team of the Week: the tag shows while live, not once '
+          'official — $host', (tester) async {
+        await pumpStory(tester, liveTotw(), host: host);
+        expect(find.text(liveTag), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        expectInsideStory(tester, find.byType(Text));
+        // Still the same story under the tag.
+        expect(find.text('Team of the Week'), findsOneWidget);
+        expect(find.text('GW8 · Futsal Season 15'), findsOneWidget);
+
+        await pumpStory(tester, liveTotw(live: false), host: host);
+        expect(find.text(liveTag), findsNothing);
+        expect(find.textContaining('LIVE'), findsNothing);
+      });
+
+      testWidgets('My rank: the tag names the live week, never an official '
+          'one — $host', (tester) async {
+        await pumpStory(tester, rankStory(series: liveSeason), host: host);
+        expect(find.text(liveTag), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        expectInsideStory(tester, find.byType(Text));
+        // "#start → #now": the live rank is the "now".
+        expect(find.text('#11 → #10'), findsOneWidget);
+
+        await pumpStory(tester, rankStory(), host: host);
+        expect(find.text(liveTag), findsNothing);
+        expect(find.textContaining('LIVE'), findsNothing);
+      });
+    }
+
+    testWidgets('a long season label and long names still fit the canvas '
+        'with the tag', (tester) async {
+      await pumpStory(
+          tester,
+          TeamOfWeekStoryCard(
+            week: 12,
+            seasonLabel: 'Flag Football Season 15 · Spring Showcase Edition',
+            team: FantasyDreamTeam(
+                players: dreamTeam(longNames: true).players, live: true),
+            config: FantasyConfig.futsalDefault(),
+          ));
+      expect(find.text('LIVE · GW12 in progress'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      expectInsideStory(tester, find.byType(Text));
+    });
+
+    testWidgets('the live rank chart inside the story draws its end point '
+        'hollow', (tester) async {
+      await pumpStory(tester, rankStory(series: liveSeason));
+      final chart = find.descendant(
+          of: find.byType(RankHistoryChart),
+          matching: find.byWidgetPredicate((w) =>
+              w is CustomPaint &&
+              w.painter.runtimeType.toString() == '_RankLinePainter'));
+      expect(tester.renderObject(chart), paintsHollowRing());
+    });
+  });
 
   test('captions', () {
     expect(teamOfWeekShareCaption(8, 'Futsal Season 15'),
@@ -286,7 +366,7 @@ void main() {
       await pumpStory(
           tester,
           rankStory(
-              row: me(teamName: null), series: const [(gameweek: 1, rank: 3)]));
+              row: me(teamName: null), series: const [(gameweek: 1, rank: 3, live: false)]));
       expect(find.text('Jordan Avery'), findsOneWidget);
       expect(find.byType(RankHistoryChart), findsNothing);
       expect(tester.takeException(), isNull);

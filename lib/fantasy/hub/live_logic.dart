@@ -139,6 +139,32 @@ String lockedStripText(LockedWeekView v) {
       : '${parts.main} ${parts.movement}';
 }
 
+// ── The banners ────────────────────────────────────────────────────────────
+
+/// The hub banner's and the front page banner's live line, verbatim from the
+/// plan: `GW{n} live · {W} pts · #{R}` — the live week, this manager's whole
+/// points so far and his Overall rank with them, both from HIS row of the live
+/// board. null in every other case, and the banner then stays exactly as it
+/// was: no live week (none, another week's tombstone), nobody signed in, no
+/// row for him, or no points this week (`W` absent = no squad scored this
+/// week; a real 0 is a number and shows). A week the owner VOIDED counts 0
+/// for everyone (the live board says 0 pts · #1 for all): the Voided set
+/// ([voidedWeeks], never the live record) takes the line away, like the My
+/// Team strip's "Voided · this week counts 0".
+String? liveBannerLine({
+  required FantasyLiveState live,
+  required String? uid,
+  Set<int> voidedWeeks = const {},
+}) {
+  final week = live.liveWeek;
+  if (week == null || uid == null || uid.isEmpty) return null;
+  if (voidedWeeks.contains(week)) return null;
+  final row = live.board[uid];
+  final points = row?.w;
+  if (row == null || points == null) return null;
+  return 'GW$week live · $points pts · #${row.r}';
+}
+
 // ── The chip ───────────────────────────────────────────────────────────────
 
 /// Tenths of a point → "8", "2.5", "-0.5": one decimal only when not whole

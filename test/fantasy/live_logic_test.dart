@@ -536,4 +536,56 @@ void main() {
       expect(nextLockTransition(const [], DateTime.utc(2026, 10, 10)), isNull);
     });
   });
+
+  group('liveBannerLine (hub + home banner copy, verbatim)', () {
+    FantasyLiveState liveWith(Map<String, LiveBoardRow> board,
+            {LiveMeta meta = liveMeta}) =>
+        FantasyLiveState(meta: meta, board: board);
+
+    test('while live: "GW{n} live · {W} pts · #{R}" from his Board row', () {
+      final live = liveWith({
+        'me': const LiveBoardRow(o: 120, r: 5, w: 34, wr: 2),
+        'other': const LiveBoardRow(o: 90, r: 9, w: 12, wr: 8),
+      });
+      expect(liveBannerLine(live: live, uid: 'me'), 'GW3 live · 34 pts · #5');
+      expect(liveBannerLine(live: live, uid: 'other'),
+          'GW3 live · 12 pts · #9');
+    });
+
+    test('a manager with no squad this week (no W) sees the banner unchanged',
+        () {
+      final live = liveWith({'me': const LiveBoardRow(o: 120, r: 5)});
+      expect(liveBannerLine(live: live, uid: 'me'), isNull);
+    });
+
+    test('not on the live board, signed out, settled or no live node: none',
+        () {
+      final live = liveWith({'me': const LiveBoardRow(o: 1, r: 1, w: 3)});
+      expect(liveBannerLine(live: live, uid: 'nobody'), isNull);
+      expect(liveBannerLine(live: live, uid: null), isNull);
+      expect(liveBannerLine(live: live, uid: ''), isNull);
+      expect(
+          liveBannerLine(
+              live: liveWith(
+                  {'me': const LiveBoardRow(o: 1, r: 1, w: 3)},
+                  meta: settledMeta),
+              uid: 'me'),
+          isNull);
+      expect(liveBannerLine(live: FantasyLiveState.none, uid: 'me'), isNull);
+    });
+
+    test('a week the owner VOIDED has no live line (the Voided set decides, '
+        'never the live record that says 0 pts · #1)', () {
+      final live = liveWith({'me': const LiveBoardRow(o: 7, r: 1, w: 0)});
+      expect(liveBannerLine(live: live, uid: 'me', voidedWeeks: {3}), isNull);
+      // Another week's void changes nothing.
+      expect(liveBannerLine(live: live, uid: 'me', voidedWeeks: {2}),
+          'GW3 live · 0 pts · #1');
+    });
+
+    test('a zero-point week is still a number, never hidden', () {
+      final live = liveWith({'me': const LiveBoardRow(o: 7, r: 12, w: 0)});
+      expect(liveBannerLine(live: live, uid: 'me'), 'GW3 live · 0 pts · #12');
+    });
+  });
 }
