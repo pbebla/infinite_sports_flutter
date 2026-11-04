@@ -22,6 +22,8 @@
 // `BadgeCatalog` sits next to the sport keys under `Fantasy/` — it is never a
 // sport (see kFantasyReservedRootKeys and the season resolver's guard).
 
+import 'package:infinite_sports_flutter/fantasy/data/parse_ints.dart';
+
 /// Keys directly under `Fantasy/` that are NOT sports.
 const Set<String> kFantasyReservedRootKeys = {'BadgeCatalog'};
 
@@ -157,10 +159,6 @@ final FantasyBadgeCatalog kStarterBadgeCatalog = {
     e.id: e,
 };
 
-int? _optInt(Object? raw) => raw is num
-    ? (raw.isFinite ? raw.toInt() : null)
-    : int.tryParse(raw?.toString().trim() ?? '');
-
 String _text(Object? raw) => raw is String ? raw.trim() : '';
 
 /// `{key: child}` pairs of a Map, or of a list-coerced node (index = key,
@@ -210,7 +208,7 @@ FantasyBadgeCatalogEntry? badgeCatalogEntryFromNode(String id, Object? node) {
     // A stored Rule that is not an engine rule key reads as none.
     clearRule: node.containsKey('Rule') && storedRule == null,
     repeatable: repeatable is bool ? repeatable : base.repeatable,
-    order: _optInt(node['Order']) ?? base.order,
+    order: tolerantInt(node['Order']) ?? base.order,
     active: active is bool ? active : base.active,
   );
 }
@@ -265,14 +263,14 @@ FantasyBadgeAward? badgeAwardFromNode(String id, Object? node) {
   if (node is! Map) return null;
   final badge = _text(node['Badge']);
   if (badge.isEmpty) return null;
-  final gw = _optInt(node['Gw']);
+  final gw = tolerantInt(node['Gw']);
   final note = _text(node['Note']);
   final by = _text(node['By']);
   return FantasyBadgeAward(
     id: id,
     badgeId: badge,
     gw: (gw == null || gw <= 0) ? null : gw,
-    atMs: _optInt(node['At']) ?? 0,
+    atMs: tolerantInt(node['At']) ?? 0,
     source: node['Source'] == 'manual'
         ? FantasyBadgeSource.manual
         : FantasyBadgeSource.auto,

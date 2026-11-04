@@ -5,6 +5,7 @@
 
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_access.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
+import 'package:infinite_sports_flutter/fantasy/data/parse_ints.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
@@ -176,9 +177,9 @@ Map<String, FantasyPlayerTotals>? playerTotalsFromNode(Object? node) {
         ownershipPct: rawPct is num
             ? rawPct.toDouble()
             : double.tryParse(rawPct?.toString() ?? ''),
-        formTenths: optInt(raw['form']),
-        ppgTenths: optInt(raw['ppg']),
-        games: optInt(raw['games']),
+        formTenths: tolerantInt(raw['form']),
+        ppgTenths: tolerantInt(raw['ppg']),
+        games: tolerantInt(raw['games']),
       );
     } else if (raw is num) {
       // Tolerate a bare-points shape.
@@ -261,7 +262,7 @@ Map<int, Map<String, int>> _weeklyIntsFromNode(
       final Object? value = (allowDeltaMap && raw is Map) ? raw['delta'] : raw;
       // A bare bool is a flag, not a number (and must not parse as one).
       if (value is bool) return;
-      final n = optInt(value);
+      final n = tolerantInt(value);
       if (n == null || (skipZero && n == 0)) return;
       names[name.toString()] = n;
     });
@@ -412,14 +413,6 @@ class FantasyLeaderboards {
   bool get isEmpty => overall.isEmpty && byWeek.isEmpty;
 }
 
-/// A number as RTDB may hand it back (a num or a numeric string), or null —
-/// the one tolerant int reader the fantasy parsers share (the live parsers in
-/// fantasy_live.dart too). Non-finite numbers are null, never a throw.
-int? optInt(Object? raw) {
-  if (raw is num) return raw.isFinite ? raw.toInt() : null;
-  return int.tryParse(raw?.toString().trim() ?? '');
-}
-
 /// The board order every leaderboard list uses: rank asc (unranked last),
 /// then points desc, then uid. Sorts [entries] in place and returns it.
 List<FantasyLeaderboardEntry> sortLeaderboardEntries(
@@ -446,9 +439,9 @@ List<FantasyLeaderboardEntry> leaderboardEntriesFromNode(Object? node) {
     if (raw is! Map) return;
     out.add(FantasyLeaderboardEntry(
       uid: uid.toString(),
-      points: optInt(raw['points']) ?? 0,
-      rank: optInt(raw['rank']),
-      movement: optInt(raw['movement']),
+      points: tolerantInt(raw['points']) ?? 0,
+      rank: tolerantInt(raw['rank']),
+      movement: tolerantInt(raw['movement']),
     ));
   });
   return sortLeaderboardEntries(out);
@@ -461,7 +454,7 @@ Map<int, int> rankHistoryFromNode(Object? node) {
   final out = <int, int>{};
   void put(Object? gw, Object? raw) {
     final week = int.tryParse(gw.toString());
-    final rank = raw is Map || raw is List ? null : optInt(raw);
+    final rank = raw is Map || raw is List ? null : tolerantInt(raw);
     if (week == null || week < 1 || rank == null || rank < 1) return;
     out[week] = rank;
   }
@@ -630,8 +623,8 @@ LiveSlot? _slotFromRow(
     Object? raw, String id, String tenths, String multiplier, String sub) {
   if (raw is! Map) return null;
   final playerId = raw[id]?.toString().trim() ?? '';
-  final counted = optInt(raw[tenths]);
-  final x = optInt(raw[multiplier]);
+  final counted = tolerantInt(raw[tenths]);
+  final x = tolerantInt(raw[multiplier]);
   if (playerId.isEmpty || counted == null || x == null) return null;
   return LiveSlot(
     playerId: playerId,
@@ -690,7 +683,7 @@ FantasyMiniLeague? miniLeagueFromNode(String id, Object? node) {
     name: name,
     code: code,
     ownerUid: node['Owner']?.toString() ?? '',
-    createdAtMs: optInt(node['CreatedAt']),
+    createdAtMs: tolerantInt(node['CreatedAt']),
     memberUids: members,
   );
 }
@@ -777,7 +770,7 @@ NewsPlayerCard? newsPlayerCardFromNode(Object? node) {
   } on ArgumentError {
     return null;
   }
-  final price = optInt(node['priceTenths']);
+  final price = tolerantInt(node['priceTenths']);
   if (price == null) return null;
   final photo = node['photoUrl']?.toString().trim();
   final rawPct = node['ownershipPct'];
@@ -790,13 +783,13 @@ NewsPlayerCard? newsPlayerCardFromNode(Object? node) {
     team: node['team']?.toString().trim() ?? '',
     photoUrl: (photo == null || photo.isEmpty) ? null : photo,
     priceTenths: price,
-    priceDeltaTenths: optInt(node['priceDeltaTenths']),
-    gw: optInt(node['gw']),
-    gwPoints: optInt(node['gwPoints']),
-    seasonPoints: optInt(node['seasonPoints']),
+    priceDeltaTenths: tolerantInt(node['priceDeltaTenths']),
+    gw: tolerantInt(node['gw']),
+    gwPoints: tolerantInt(node['gwPoints']),
+    seasonPoints: tolerantInt(node['seasonPoints']),
     ownershipPct: (pct == null || !pct.isFinite) ? null : pct,
-    goals: optInt(node['goals']) ?? 0,
-    assists: optInt(node['assists']) ?? 0,
+    goals: tolerantInt(node['goals']) ?? 0,
+    assists: tolerantInt(node['assists']) ?? 0,
   );
 }
 
@@ -867,12 +860,12 @@ List<FantasyNewsPost> newsPostsFromNode(Object? node) {
     if (title.isEmpty) return;
     final photo = raw['PhotoUrl']?.toString().trim();
     final template = raw['Template']?.toString().trim() ?? '';
-    final gw = optInt(raw['Gw']);
+    final gw = tolerantInt(raw['Gw']);
     out.add(FantasyNewsPost(
       id: id.toString(),
       title: title,
       body: raw['Body']?.toString() ?? '',
-      atMs: optInt(raw['At']) ?? 0,
+      atMs: tolerantInt(raw['At']) ?? 0,
       photoUrl: (photo == null || photo.isEmpty) ? null : photo,
       template: template.isEmpty ? 'free' : template,
       gw: (gw == null || gw <= 0) ? null : gw,
@@ -950,13 +943,13 @@ FantasyDreamTeam? dreamTeamFromNode(Object? node) {
     players.add(FantasyDreamTeamPlayer(
       name: name,
       position: position,
-      points: optInt(raw['points']) ?? 0,
+      points: tolerantInt(raw['points']) ?? 0,
     ));
   }
   if (players.isEmpty) return null;
   return FantasyDreamTeam(
     players: players,
-    computedAtMs: optInt(node['ComputedAt']),
+    computedAtMs: tolerantInt(node['ComputedAt']),
   );
 }
 
@@ -1090,13 +1083,13 @@ FantasySquadAlert? squadAlertFromNode(Object? node) {
     ];
     final preview = kind == 'preview';
     return FantasySquadAlert(
-      gameweek: optInt(node['Gw'] ?? node['gameweek']) ?? 0,
+      gameweek: tolerantInt(node['Gw'] ?? node['gameweek']) ?? 0,
       kind: preview
           ? FantasySquadAlertKind.overBudgetPreview
           : FantasySquadAlertKind.invalid,
       issues: issues,
       overTenths:
-          preview ? optInt(node['OverTenths'] ?? node['overTenths']) ?? 0 : 0,
+          preview ? tolerantInt(node['OverTenths'] ?? node['overTenths']) ?? 0 : 0,
     );
   }
   final raw = node['Changes'];
@@ -1121,7 +1114,7 @@ FantasySquadAlert? squadAlertFromNode(Object? node) {
   }
   if (changes.isEmpty) return null;
   return FantasySquadAlert(
-    gameweek: optInt(node['Gw']) ?? 0,
+    gameweek: tolerantInt(node['Gw']) ?? 0,
     changes: changes,
   );
 }
@@ -1217,7 +1210,7 @@ TransferStateView? parseTransferState(Object? node) {
   final swaps = swapsGw == null ? const <String>[] : _idList(node['FreeSwaps']);
   return TransferStateView(
     free: free is num ? free.toInt() : null,
-    usedThisGw: optInt(node['UsedThisGw']) ?? 0,
+    usedThisGw: tolerantInt(node['UsedThisGw']) ?? 0,
     countFromGw: countFromGw,
     countFrom: countFromIds.isEmpty ? null : countFromIds,
     freeSwapsGw: swaps.isEmpty ? null : swapsGw,
@@ -1226,7 +1219,7 @@ TransferStateView? parseTransferState(Object? node) {
 }
 
 int? _positiveInt(Object? raw) {
-  final n = optInt(raw);
+  final n = tolerantInt(raw);
   return n != null && n > 0 ? n : null;
 }
 

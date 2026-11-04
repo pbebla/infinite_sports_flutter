@@ -844,7 +844,86 @@ void main() {
       expect(out.last.liveWeek, isNull);
     });
 
-    test('a stream error means NO live (never an empty board or a fake '
+    test('the four first answers delivered in one turn are ONE emission',
+        () async {
+      await listen('Futsal', 'F-one-turn');
+      children['Meta']!.add(liveMetaNode());
+      children['Board']!.add({
+        'u1': {'O': 40, 'R': 1},
+      });
+      children['Players']!.add(null);
+      children['TeamOfWeek']!.add(null);
+      await pumpEventQueue();
+      expect(out, hasLength(1));
+      expect(out.single.liveWeek, 2);
+      expect(out.single.board.keys, ['u1']);
+    });
+
+    test('Meta and Board of one server update delivered in the same turn '
+        'are ONE emission carrying both (a new week\'s Meta never rides '
+        'with the old Board)', () async {
+      await listen('Futsal', 'F-coalesce');
+      children['Meta']!.add(liveMetaNode());
+      children['Board']!.add({
+        'old': {'O': 40, 'R': 1},
+      });
+      children['Players']!.add(null);
+      children['TeamOfWeek']!.add(null);
+      await pumpEventQueue();
+      expect(out, hasLength(1));
+
+      // One update: Meta for the next week + its own Board, same turn.
+      children['Meta']!.add(liveMetaNode(gw: 3));
+      children['Board']!.add({
+        'new': {'O': 5, 'R': 1, 'W': 5, 'WR': 1},
+      });
+      await pumpEventQueue();
+      expect(out, hasLength(2), reason: 'one emission for the burst');
+      expect(out.last.meta!.gw, 3);
+      expect(out.last.board.keys, ['new']);
+      expect(
+          out.any((s) => s.meta?.gw == 3 && s.board.containsKey('old')),
+          isFalse,
+          reason: 'no mixed frame ever reached a listener');
+    });
+
+    test('the session seed stores only coalesced states', () async {
+      await listen('Futsal', 'F-seed-coalesced');
+      children['Meta']!.add(liveMetaNode());
+      children['Board']!.add({
+        'old': {'O': 40, 'R': 1},
+      });
+      children['Players']!.add(null);
+      children['TeamOfWeek']!.add(null);
+      await pumpEventQueue();
+      children['Meta']!.add(liveMetaNode(gw: 3));
+      children['Board']!.add({
+        'new': {'O': 5, 'R': 1},
+      });
+      await pumpEventQueue();
+
+      final cached = FantasyLiveFeed.cachedState('Futsal', 'F-seed-coalesced');
+      expect(identical(cached, out.last), isTrue);
+      expect(cached!.meta!.gw, 3);
+      expect(cached.board.keys, ['new']);
+    });
+
+    test('an error in the same turn as the answers beats the pending frame',
+        () async {
+      await listen('Futsal', 'F-error-same-turn');
+      children['Meta']!.add(liveMetaNode());
+      children['Board']!.add(null);
+      children['Players']!.add(null);
+      children['TeamOfWeek']!.add(null);
+      children['Players']!.addError(StateError('denied'));
+      await pumpEventQueue();
+      expect(out, hasLength(1));
+      expect(out.single.liveWeek, isNull, reason: 'no live, not a live frame');
+      expect(FantasyLiveFeed.cachedState('Futsal', 'F-error-same-turn'),
+          isNull);
+    });
+
+    test('a stream error means NO live (never an empty board or a fake'
         'value), and the dead feed stays quiet', () async {
       await listen('Futsal', 'F-error');
       children['Meta']!.add(liveMetaNode());
@@ -932,63 +1011,162 @@ void main() {
     });
   });
 
-  // ── combineLatest2 (the wrappers' join of official ⊕ live) ───────────────
+  // ── joinWithLive (the wrappers' join of official ⊕ live, 2 s bound) ──────
 
-  group('combineLatest2', () {
-    test('emits only once BOTH sides answered, then on every change of '
-        'either (no pop of official-then-live)', () async {
-      final a = StreamController<int>();
-      final b = StreamController<String>();
+  group('joinWithLive', () {
+    // Fake clock (testWidgets): cancels are not awaited, they settle on the
+    // next pump. The merge under test labels what it was handed: "<official>:<week>"
+    // ("-" = no live week), so each emission shows which live it carried.
+    String label(int official, FantasyLiveState live) =>
+        '$official:${live.liveWeek ?? '-'}';
+
+    const week2 = FantasyLiveState(meta: _liveMeta);
+
+    testWidgets('live answers in time: ONE merged emission, nothing at the '
+        'bound (no official-then-live flip)', (tester) async {
+      final official = StreamController<int>();
+      final live = StreamController<FantasyLiveState>();
       final out = <String>[];
-      final sub = combineLatest2<int, String, String>(
-          a.stream, b.stream, (x, y) => '$x$y').listen(out.add);
+      final sub = joinWithLive<int, String>(
+              official.stream, live.stream, label)
+          .listen(out.add);
 
-      a.add(1);
-      await pumpEventQueue();
-      expect(out, isEmpty);
-      b.add('x');
-      await pumpEventQueue();
-      expect(out, ['1x']);
-      a.add(2);
-      b.add('y');
-      await pumpEventQueue();
-      expect(out, ['1x', '2x', '2y']);
-      await sub.cancel();
+      official.add(1);
+      await tester.pump();
+      expect(out, isEmpty, reason: 'official alone waits for live');
+
+      await tester.pump(const Duration(milliseconds: 500));
+      live.add(week2);
+      await tester.pump();
+      expect(out, ['1:2']);
+
+      await tester.pump(const Duration(seconds: 3));
+      expect(out, ['1:2'], reason: 'the bound fires on nothing');
+      unawaited(sub.cancel());
+      await tester.pump();
     });
 
-    test('errors are forwarded; cancel cancels both sides; completes when '
-        'both complete', () async {
-      final a = StreamController<int>();
-      final b = StreamController<int>();
-      final out = <int>[];
+    testWidgets('live never answers: the official value is emitted at 2 s '
+        'with live treated as none', (tester) async {
+      final official = StreamController<int>();
+      final live = StreamController<FantasyLiveState>();
+      final out = <String>[];
+      final sub = joinWithLive<int, String>(
+              official.stream, live.stream, label)
+          .listen(out.add);
+
+      official.add(1);
+      await tester.pump(const Duration(milliseconds: 1900));
+      expect(out, isEmpty);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(out, ['1:-']);
+
+      // Still listening: official changes keep flowing, live-less.
+      official.add(2);
+      await tester.pump();
+      expect(out, ['1:-', '2:-']);
+      unawaited(sub.cancel());
+      await tester.pump();
+    });
+
+    testWidgets('live answers at 3 s: official at 2 s, then the merged '
+        'value', (tester) async {
+      final official = StreamController<int>();
+      final live = StreamController<FantasyLiveState>();
+      final out = <String>[];
+      final sub = joinWithLive<int, String>(
+              official.stream, live.stream, label)
+          .listen(out.add);
+
+      official.add(1);
+      await tester.pump(const Duration(seconds: 2));
+      expect(out, ['1:-']);
+      await tester.pump(const Duration(seconds: 1));
+      live.add(week2);
+      await tester.pump();
+      expect(out, ['1:-', '1:2']);
+
+      // Every later change of either side re-emits.
+      official.add(5);
+      await tester.pump();
+      live.add(FantasyLiveState.none);
+      await tester.pump();
+      expect(out, ['1:-', '1:2', '5:2', '5:-']);
+      unawaited(sub.cancel());
+      await tester.pump();
+    });
+
+    testWidgets('official arriving after the bound with live still silent '
+        'is emitted at once; live first waits for official',
+        (tester) async {
+      final official = StreamController<int>();
+      final live = StreamController<FantasyLiveState>();
+      final out = <String>[];
+      final sub = joinWithLive<int, String>(
+              official.stream, live.stream, label)
+          .listen(out.add);
+
+      await tester.pump(const Duration(seconds: 5));
+      expect(out, isEmpty, reason: 'nothing official to show yet');
+      official.add(1);
+      await tester.pump();
+      expect(out, ['1:-']);
+      unawaited(sub.cancel());
+      await tester.pump();
+
+      // The other order: live first, official second, one emission.
+      final official2 = StreamController<int>();
+      final live2 = StreamController<FantasyLiveState>();
+      final out2 = <String>[];
+      final sub2 = joinWithLive<int, String>(
+              official2.stream, live2.stream, label)
+          .listen(out2.add);
+      live2.add(week2);
+      await tester.pump(const Duration(seconds: 3));
+      expect(out2, isEmpty);
+      official2.add(7);
+      await tester.pump();
+      expect(out2, ['7:2']);
+      unawaited(sub2.cancel());
+      await tester.pump();
+    });
+
+    testWidgets('errors are forwarded; completes when both complete; '
+        'cancel cancels both sides and the bound', (tester) async {
+      final official = StreamController<int>();
+      final live = StreamController<FantasyLiveState>();
+      final out = <String>[];
       final errors = <Object>[];
       var done = false;
-      final sub = combineLatest2<int, int, int>(
-              a.stream, b.stream, (x, y) => x + y)
+      final sub = joinWithLive<int, String>(
+              official.stream, live.stream, label)
           .listen(out.add, onError: errors.add, onDone: () => done = true);
-      a.add(1);
-      b.add(2);
-      a.addError(StateError('official failed'));
-      await pumpEventQueue();
-      expect(out, [3]);
+      official.add(1);
+      live.add(week2);
+      official.addError(StateError('official failed'));
+      await tester.pump();
+      expect(out, ['1:2']);
       expect(errors, hasLength(1));
 
-      await a.close();
-      await pumpEventQueue();
+      unawaited(official.close());
+      await tester.pump();
       expect(done, isFalse);
-      await b.close();
-      await pumpEventQueue();
+      unawaited(live.close());
+      await tester.pump();
       expect(done, isTrue);
-      await sub.cancel();
+      unawaited(sub.cancel());
+      await tester.pump();
 
+      // Cancelled before anything answered: both listeners gone and no
+      // bound timer left pending (testWidgets fails on a pending timer).
       final c = StreamController<int>();
-      final d = StreamController<int>();
-      final sub2 =
-          combineLatest2<int, int, int>(c.stream, d.stream, (x, y) => x)
-              .listen((_) {});
-      await pumpEventQueue();
+      final d = StreamController<FantasyLiveState>();
+      final sub2 = joinWithLive<int, String>(c.stream, d.stream, label)
+          .listen((_) {});
+      await tester.pump();
       expect(c.hasListener && d.hasListener, isTrue);
-      await sub2.cancel();
+      unawaited(sub2.cancel());
+      await tester.pump();
       expect(c.hasListener || d.hasListener, isFalse);
     });
   });

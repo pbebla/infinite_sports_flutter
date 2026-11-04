@@ -11,7 +11,8 @@
 // THE LIVE OVERLAY (live everywhere, fantasy_live.dart): the leaderboards,
 // player totals, dream teams and a player's weekly records join their
 // official stream with the live gameweek (FantasyLiveFeed) while one is being
-// played — the pure `mergeLive…` overlays decide, these wrappers only join.
+// played — the pure `mergeLive…` overlays decide, these wrappers only join
+// (joinWithLive: one emission once live answers, official alone after 2 s).
 // The session caches below keep the OFFICIAL values (never the overlay), so a
 // cached seed can never present a stale live number as official.
 
@@ -165,7 +166,7 @@ class FantasyService {
   /// column and the Points sort on null (P3c Task 4).
   static Stream<Map<String, FantasyPlayerTotals>?> watchPlayerTotals(
           String sport, String season) =>
-      combineLatest2<Map<String, FantasyPlayerTotals>?, FantasyLiveState,
+      joinWithLive<Map<String, FantasyPlayerTotals>?,
           Map<String, FantasyPlayerTotals>?>(
         _watchOfficialPlayerTotals(sport, season),
         FantasyLiveFeed.watch(sport, season),
@@ -254,8 +255,7 @@ class FantasyService {
         _watchOfficialPlayerWeekStatsFor(sport, season, name, weeks);
     // No weeks, nothing to overlay: no live listeners either.
     if (weeks.isEmpty) return official;
-    return combineLatest2<Map<int, PlayerWeekStats>, FantasyLiveState,
-        Map<int, PlayerWeekStats>>(
+    return joinWithLive<Map<int, PlayerWeekStats>, Map<int, PlayerWeekStats>>(
       official,
       FantasyLiveFeed.watch(sport, season),
       (stats, live) =>
@@ -632,8 +632,7 @@ class FantasyService {
   /// empty state.
   static Stream<FantasyLeaderboards> watchLeaderboards(
           String sport, String season) =>
-      combineLatest2<FantasyLeaderboards, FantasyLiveState,
-          FantasyLeaderboards>(
+      joinWithLive<FantasyLeaderboards, FantasyLeaderboards>(
         _watchOfficialLeaderboards(sport, season),
         FantasyLiveFeed.watch(sport, season),
         mergeLiveLeaderboards,
@@ -800,8 +799,7 @@ class FantasyService {
   /// finalized gameweek yet, no live team) — the hub hides the card.
   static Stream<Map<int, FantasyDreamTeam>> watchDreamTeams(
           String sport, String season) =>
-      combineLatest2<Map<int, FantasyDreamTeam>, FantasyLiveState,
-          Map<int, FantasyDreamTeam>>(
+      joinWithLive<Map<int, FantasyDreamTeam>, Map<int, FantasyDreamTeam>>(
         _watchOfficialDreamTeams(sport, season),
         FantasyLiveFeed.watch(sport, season),
         mergeLiveDreamTeams,

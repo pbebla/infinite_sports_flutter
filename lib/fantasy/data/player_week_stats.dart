@@ -17,6 +17,8 @@
 // No Flutter/Firebase imports — fully unit-tested
 // (test/fantasy/player_week_stats_test.dart).
 
+import 'package:infinite_sports_flutter/fantasy/data/parse_ints.dart';
+
 /// One source of points within a week (a `Lines.<key>` entry): [count] of
 /// them worth [points] in total (e.g. goals ×3 → 12 pts). For the bonus line
 /// both are the bonus points.
@@ -90,11 +92,6 @@ class PlayerWeekStats {
   final bool bonusProvisional;
 }
 
-int? _int(Object? raw) {
-  if (raw is num) return raw.isFinite ? raw.toInt() : null;
-  return int.tryParse(raw?.toString().trim() ?? '');
-}
-
 /// Children of a list-ish node in index order: a List as-is, an index-keyed
 /// Map (RTDB hole collapsing) sorted numerically by key with non-index keys
 /// ignored.
@@ -118,8 +115,8 @@ PlayerWeekGame? _gameFromNode(Object? raw) {
   final forfeit = raw['Forfeit']?.toString();
   return PlayerWeekGame(
     vs: vs,
-    goalsFor: _int(raw['For']) ?? 0,
-    goalsAgainst: _int(raw['Against']) ?? 0,
+    goalsFor: tolerantInt(raw['For']) ?? 0,
+    goalsAgainst: tolerantInt(raw['Against']) ?? 0,
     forfeit: (forfeit == 'won' || forfeit == 'lost') ? forfeit : null,
   );
 }
@@ -129,7 +126,7 @@ PlayerWeekGame? _gameFromNode(Object? raw) {
 /// (the player's team didn't play yet / the week isn't finalized).
 PlayerWeekStats? playerWeekStatsFromNode(Object? raw) {
   if (raw is! Map) return null;
-  final points = _int(raw['Pts']);
+  final points = tolerantInt(raw['Pts']);
   if (points == null) return null;
 
   final games = <PlayerWeekGame>[
@@ -143,15 +140,15 @@ PlayerWeekStats? playerWeekStatsFromNode(Object? raw) {
     rawLines.forEach((key, line) {
       if (line is! Map) return;
       lines[key.toString()] = ScoreSourceLine(
-        count: _int(line['N']) ?? 0,
-        points: _int(line['P']) ?? 0,
+        count: tolerantInt(line['N']) ?? 0,
+        points: tolerantInt(line['P']) ?? 0,
       );
     });
   }
 
   // GP is always written by the server; fall back to the plays line (the
   // same number by construction), else 0 — never the schedule length.
-  final gamesPlayed = _int(raw['GP']) ?? lines['plays']?.count ?? 0;
+  final gamesPlayed = tolerantInt(raw['GP']) ?? lines['plays']?.count ?? 0;
   final rawPlayed = raw['Played'];
 
   return PlayerWeekStats(

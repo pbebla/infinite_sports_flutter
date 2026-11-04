@@ -27,7 +27,7 @@
 // THE OVERLAY RULE is one function, [liveAppliesTo]; every overlay below goes
 // through it. The `mergeLive…` overlays are pure (unit-tested in
 // test/fantasy/fantasy_live_test.dart): the FantasyService wrappers just join
-// the official stream with [FantasyLiveFeed] through [combineLatest2]. A feed
+// the official stream with [FantasyLiveFeed] through [joinWithLive]. A feed
 // error means NO live (the official numbers keep showing) — never an empty
 // board and never a made-up number.
 
@@ -36,6 +36,7 @@ import 'dart:async';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
+import 'package:infinite_sports_flutter/fantasy/data/parse_ints.dart';
 import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
 
 export 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart'
@@ -232,7 +233,7 @@ int? liveWeekOf(LiveMeta? meta) =>
 /// never a fake live week).
 LiveMeta? liveMetaFromNode(Object? node) {
   if (node is! Map) return null;
-  final gw = optInt(node['Gw']);
+  final gw = tolerantInt(node['Gw']);
   if (gw == null || gw < 1) return null;
   final state = switch (node['State']?.toString()) {
     'live' => LiveState.live,
@@ -243,8 +244,8 @@ LiveMeta? liveMetaFromNode(Object? node) {
   return LiveMeta(
     gw: gw,
     state: state,
-    readAt: optInt(node['ReadAt']) ?? 0,
-    updatedAt: optInt(node['UpdatedAt']) ?? 0,
+    readAt: tolerantInt(node['ReadAt']) ?? 0,
+    updatedAt: tolerantInt(node['UpdatedAt']) ?? 0,
     games: _liveGamesFromNode(node['Games']),
   );
 }
@@ -255,7 +256,7 @@ Map<String, LiveGame> _liveGamesFromNode(Object? node) {
   final out = <String, LiveGame>{};
   void put(String key, Object? raw) {
     if (raw is! Map) return;
-    final status = optInt(raw['S']);
+    final status = tolerantInt(raw['S']);
     if (status == null || status < 0 || status > 2) return;
     out[key] = LiveGame(
       status: status,
@@ -281,15 +282,15 @@ Map<String, LiveBoardRow> liveBoardFromNode(Object? node) {
   if (node is! Map) return out;
   node.forEach((uid, raw) {
     if (raw is! Map) return;
-    final o = optInt(raw['O']);
-    final r = optInt(raw['R']);
+    final o = tolerantInt(raw['O']);
+    final r = tolerantInt(raw['R']);
     if (o == null || r == null) return;
     out[uid.toString()] = LiveBoardRow(
       o: o,
       r: r,
-      m: optInt(raw['M']),
-      w: optInt(raw['W']),
-      wr: optInt(raw['WR']),
+      m: tolerantInt(raw['M']),
+      w: tolerantInt(raw['W']),
+      wr: tolerantInt(raw['WR']),
     );
   });
   return out;
@@ -310,12 +311,12 @@ Map<String, LivePlayer> livePlayersFromNode(Object? node) {
       'out' => LivePlayerStatus.out,
       _ => null,
     };
-    final pts = optInt(raw['Pts']);
-    final total = optInt(raw['Total']);
-    final form = optInt(raw['Form']);
-    final ppg = optInt(raw['Ppg']);
-    final games = optInt(raw['Games']);
-    final own = optInt(raw['Own']);
+    final pts = tolerantInt(raw['Pts']);
+    final total = tolerantInt(raw['Total']);
+    final form = tolerantInt(raw['Form']);
+    final ppg = tolerantInt(raw['Ppg']);
+    final games = tolerantInt(raw['Games']);
+    final own = tolerantInt(raw['Own']);
     if (st == null ||
         pts == null ||
         total == null ||
@@ -331,7 +332,7 @@ Map<String, LivePlayer> livePlayersFromNode(Object? node) {
       rawLines.forEach((key, line) {
         if (line is! Map) return;
         lines[key.toString()] =
-            (n: optInt(line['N']) ?? 0, p: optInt(line['P']) ?? 0);
+            (n: tolerantInt(line['N']) ?? 0, p: tolerantInt(line['P']) ?? 0);
       });
     }
     out[name.toString()] = LivePlayer(
@@ -361,11 +362,11 @@ FantasyDreamTeam? liveTeamOfWeekFromNode(Object? node) =>
 /// empty list (RTDB drops it for an invalid squad).
 LiveSquad? liveSquadFromNode(Object? node) {
   if (node is! Map) return null;
-  final total = optInt(node['T']);
+  final total = tolerantInt(node['T']);
   if (total == null) return null;
   return LiveSquad(
     totalTenths: total,
-    week: optInt(node['W']) ?? total ~/ 10,
+    week: tolerantInt(node['W']) ?? total ~/ 10,
     slots: liveSlotsFromNode(node['Slots']),
   );
 }
@@ -525,26 +526,50 @@ Map<int, PlayerWeekStats> mergeLivePlayerWeekStats(
 
 // ── Joining official ⊕ live ────────────────────────────────────────────────
 
-/// Combines the latest value of [a] and [b] with [combine]: nothing is
-/// emitted until BOTH have answered (the screen never paints official numbers
-/// and then pops live ones in), then every change of either re-emits. Errors
-/// of either side are forwarded; the stream completes when both complete;
-/// cancelling cancels both.
-Stream<R> combineLatest2<A, B, R>(
-    Stream<A> a, Stream<B> b, R Function(A a, B b) combine) {
+/// How long a screen's reveal gate waits for the live feed's first value
+/// before showing the official numbers alone (the global bound: when Live is
+/// active the gate waits for it too, but never longer than this).
+const Duration kLiveJoinWait = Duration(seconds: 2);
+
+/// Joins an OFFICIAL stream with the live feed through [merge]:
+///
+/// - the first emission needs the official value AND the live feed's first
+///   value, so a screen never paints official numbers and then pops live ones
+///   in — with the official value in hand and live answering in time there is
+///   exactly ONE emission;
+/// - bounded: if live has not produced its first value [liveWait] after
+///   subscription, the official value is emitted with live treated as
+///   [FantasyLiveState.none] (an official value arriving after the bound is
+///   emitted at once, likewise), the join keeps listening, and a live value
+///   arriving later re-emits the merged result;
+/// - after that every change of either side re-emits.
+///
+/// Official errors are forwarded (the live feed itself never errors); the
+/// stream completes when both sides complete; cancelling cancels both and the
+/// bound's timer. Nothing is emitted before the official side answers — there
+/// is nothing to show without it.
+Stream<R> joinWithLive<A, R>(
+  Stream<A> official,
+  Stream<FantasyLiveState> live,
+  R Function(A official, FantasyLiveState live) merge, {
+  Duration liveWait = kLiveJoinWait,
+}) {
   late final StreamController<R> controller;
-  StreamSubscription<A>? subA;
-  StreamSubscription<B>? subB;
-  A? lastA;
-  B? lastB;
-  var hasA = false;
-  var hasB = false;
+  StreamSubscription<A>? officialSub;
+  StreamSubscription<FantasyLiveState>? liveSub;
+  Timer? bound;
+  A? lastOfficial;
+  FantasyLiveState? lastLive;
+  var hasOfficial = false;
+  var hasLive = false;
+  var boundPassed = false;
   var done = 0;
 
   void emit() {
-    if (!hasA || !hasB) return;
+    if (!hasOfficial || (!hasLive && !boundPassed)) return;
     try {
-      controller.add(combine(lastA as A, lastB as B));
+      controller.add(
+          merge(lastOfficial as A, lastLive ?? FantasyLiveState.none));
     } catch (e, s) {
       controller.addError(e, s);
     }
@@ -556,20 +581,32 @@ Stream<R> combineLatest2<A, B, R>(
 
   controller = StreamController<R>(
     onListen: () {
-      subA = a.listen((v) {
-        lastA = v;
-        hasA = true;
+      bound = Timer(liveWait, () {
+        bound = null;
+        boundPassed = true;
+        emit();
+      });
+      officialSub = official.listen((v) {
+        lastOfficial = v;
+        hasOfficial = true;
         emit();
       }, onError: controller.addError, onDone: sideDone);
-      subB = b.listen((v) {
-        lastB = v;
-        hasB = true;
+      liveSub = live.listen((v) {
+        lastLive = v;
+        hasLive = true;
+        bound?.cancel();
+        bound = null;
         emit();
       }, onError: controller.addError, onDone: sideDone);
     },
-    onCancel: () async {
-      await subA?.cancel();
-      await subB?.cancel();
+    // Synchronous on purpose: the output's onDone waits on onCancel's future,
+    // and awaiting the cancel of a finished subscription never completes
+    // under a fake clock (widget tests).
+    onCancel: () {
+      bound?.cancel();
+      bound = null;
+      unawaited(officialSub?.cancel());
+      unawaited(liveSub?.cancel());
     },
   );
   return controller.stream;
@@ -586,6 +623,13 @@ Stream<R> combineLatest2<A, B, R>(
 /// all four have answered (no piecemeal frame — a live meta with a not-yet-
 /// arrived board would otherwise read as an empty board), then on every
 /// change.
+///
+/// COALESCED: the four children arrive as separate events, so a burst is
+/// folded into ONE emission per event-loop turn (a zero-duration timer — not
+/// a wall-clock debounce): one server update, with a Meta for the next week
+/// and its own Board, reaches the listener as one state, never a new Meta
+/// riding with the old Board. The session seed stores only these coalesced
+/// states.
 ///
 /// A stream error — or a stream that cannot even be created (no Firebase app
 /// in a widget test) — yields [FantasyLiveState.none] ("no live": the official
@@ -634,12 +678,15 @@ class FantasyLiveFeed {
     final subs = <StreamSubscription<Object?>>[];
     final raw = <String, Object?>{};
     late final StreamController<FantasyLiveState> controller;
+    Timer? pendingFrame; // the coalescing turn: one frame per burst
     var failed = false;
 
     void fail(String what, Object error) {
       debugPrint('FantasyLiveFeed: $what failed: $error');
       if (failed) return;
       failed = true;
+      pendingFrame?.cancel(); // an error beats a frame still waiting
+      pendingFrame = null;
       _session.remove(key); // a broken feed must not seed the next visit
       for (final s in subs) {
         unawaited(s.cancel());
@@ -647,10 +694,9 @@ class FantasyLiveFeed {
       if (!controller.isClosed) controller.add(FantasyLiveState.none);
     }
 
-    void onChild(String child, Object? value) {
+    void emitFrame() {
+      pendingFrame = null;
       if (failed) return;
-      raw[child] = value;
-      if (raw.length < children.length) return; // not every child answered
       try {
         final state = liveStateFromNodes(
           meta: raw['Meta'],
@@ -658,11 +704,18 @@ class FantasyLiveFeed {
           players: raw['Players'],
           teamOfWeek: raw['TeamOfWeek'],
         );
-        _session[key] = state;
+        _session[key] = state; // only coalesced states are ever cached
         controller.add(state);
       } catch (e) {
         fail('parse', e);
       }
+    }
+
+    void onChild(String child, Object? value) {
+      if (failed) return;
+      raw[child] = value;
+      if (raw.length < children.length) return; // not every child answered
+      pendingFrame ??= Timer(Duration.zero, emitFrame);
     }
 
     controller = StreamController<FantasyLiveState>(
@@ -681,9 +734,12 @@ class FantasyLiveFeed {
           }
         }
       },
-      onCancel: () async {
+      // Synchronous (see joinWithLive): nothing here awaits a cancel.
+      onCancel: () {
+        pendingFrame?.cancel();
+        pendingFrame = null;
         for (final s in subs) {
-          await s.cancel();
+          unawaited(s.cancel());
         }
         subs.clear();
       },
