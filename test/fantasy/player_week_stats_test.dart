@@ -201,4 +201,13 @@ void main() {
       expect(scoreSourceLabel(''), '');
     });
   });
+
+  group('live flags (live everywhere, Task 4)', () {
+    test('a stored record is official: live false, bonus not provisional',
+        () {
+      final stats = playerWeekStatsFromNode({'Pts': 4, 'GP': 1})!;
+      expect(stats.live, isFalse);
+      expect(stats.bonusProvisional, isFalse);
+    });
+  });
 }

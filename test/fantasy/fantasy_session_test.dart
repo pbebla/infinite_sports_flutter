@@ -51,6 +51,8 @@ void main() {
     expect(declared, contains('_saleBaselineCache'));
     // Transfers: the own `TransferState/<uid>` view (the draft's count).
     expect(declared, contains('_transferStateCache'));
+    // Live everywhere: the own `Live/Squads/<uid>` snapshot.
+    expect(declared, contains('_liveSquadCache'));
     final clearBody =
         RegExp(r'static void clearSessionCaches\(\) \{([\s\S]*?)\n  \}')
             .firstMatch(src)!

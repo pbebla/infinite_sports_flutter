@@ -129,9 +129,11 @@ class FantasyPlayerTotals {
     this.formTenths,
     this.ppgTenths,
     this.games,
+    this.live = false,
   });
 
-  /// Total fantasy points across finalized gameweeks.
+  /// Total fantasy points across finalized gameweeks (the live overlay adds
+  /// the in-progress gameweek's provisional points — see [live]).
   final int points;
 
   /// Share of managers holding the player (0–100); null when the functions
@@ -150,6 +152,11 @@ class FantasyPlayerTotals {
 
   /// Games played this season.
   final int? games;
+
+  /// These numbers are the LIVE gameweek's provisional ones (the `Live/
+  /// Players` overlay, fantasy_live.dart), not the finalized ones. Always
+  /// false for a parsed `PlayerTotals` row.
+  final bool live;
 }
 
 /// The whole `PlayerTotals` node → name → totals. null when the node is
@@ -169,9 +176,9 @@ Map<String, FantasyPlayerTotals>? playerTotalsFromNode(Object? node) {
         ownershipPct: rawPct is num
             ? rawPct.toDouble()
             : double.tryParse(rawPct?.toString() ?? ''),
-        formTenths: _optInt(raw['form']),
-        ppgTenths: _optInt(raw['ppg']),
-        games: _optInt(raw['games']),
+        formTenths: optInt(raw['form']),
+        ppgTenths: optInt(raw['ppg']),
+        games: optInt(raw['games']),
       );
     } else if (raw is num) {
       // Tolerate a bare-points shape.
@@ -254,7 +261,7 @@ Map<int, Map<String, int>> _weeklyIntsFromNode(
       final Object? value = (allowDeltaMap && raw is Map) ? raw['delta'] : raw;
       // A bare bool is a flag, not a number (and must not parse as one).
       if (value is bool) return;
-      final n = _optInt(value);
+      final n = optInt(value);
       if (n == null || (skipZero && n == 0)) return;
       names[name.toString()] = n;
     });
@@ -351,6 +358,7 @@ class FantasyLeaderboardEntry {
     required this.points,
     this.rank,
     this.movement,
+    this.live = false,
   });
 
   final String uid;
@@ -361,6 +369,11 @@ class FantasyLeaderboardEntry {
 
   /// Places gained since last week (+up / −down); null/0 = neutral "—".
   final int? movement;
+
+  /// This row is the LIVE gameweek's provisional number (the `Live/Board`
+  /// overlay, fantasy_live.dart), not the finalized one. Always false for a
+  /// parsed `Leaderboards` row.
+  final bool live;
 }
 
 /// The whole streamed `Leaderboards` node. Both sides empty = node absent
@@ -370,6 +383,7 @@ class FantasyLeaderboards {
     required this.overall,
     required this.byWeek,
     this.rankHistory = const {},
+    this.liveRankPoints = const {},
   });
 
   static const FantasyLeaderboards empty =
@@ -385,12 +399,43 @@ class FantasyLeaderboards {
   /// functions write it; a uid with no usable entries is absent.
   final Map<String, Map<int, int>> rankHistory;
 
+  /// The [rankHistory] points that are LIVE (provisional, from the `Live/
+  /// Board` overlay): uid → gameweeks. Empty for the official node. Read
+  /// through [isLiveRankPoint].
+  final Map<String, Set<int>> liveRankPoints;
+
+  /// [rankHistory]`[uid][gw]` is the live gameweek's provisional rank.
+  bool isLiveRankPoint(String uid, int gw) =>
+      liveRankPoints[uid]?.contains(gw) ?? false;
+
   /// Standings only — a RankHistory with no standings is still "no board".
   bool get isEmpty => overall.isEmpty && byWeek.isEmpty;
 }
 
-int? _optInt(Object? raw) =>
-    raw is num ? raw.toInt() : int.tryParse(raw?.toString() ?? '');
+/// A number as RTDB may hand it back (a num or a numeric string), or null —
+/// the one tolerant int reader the fantasy parsers share (the live parsers in
+/// fantasy_live.dart too). Non-finite numbers are null, never a throw.
+int? optInt(Object? raw) {
+  if (raw is num) return raw.isFinite ? raw.toInt() : null;
+  return int.tryParse(raw?.toString().trim() ?? '');
+}
+
+/// The board order every leaderboard list uses: rank asc (unranked last),
+/// then points desc, then uid. Sorts [entries] in place and returns it.
+List<FantasyLeaderboardEntry> sortLeaderboardEntries(
+    List<FantasyLeaderboardEntry> entries) {
+  entries.sort((a, b) {
+    if (a.rank != null || b.rank != null) {
+      if (a.rank == null) return 1;
+      if (b.rank == null) return -1;
+      final byRank = a.rank!.compareTo(b.rank!);
+      if (byRank != 0) return byRank;
+    }
+    final byPoints = b.points.compareTo(a.points);
+    return byPoints != 0 ? byPoints : a.uid.compareTo(b.uid);
+  });
+  return entries;
+}
 
 /// One scope's `{uid: {points, rank, movement}}` map → sorted entries.
 /// Malformed children are skipped, never crash.
@@ -401,22 +446,12 @@ List<FantasyLeaderboardEntry> leaderboardEntriesFromNode(Object? node) {
     if (raw is! Map) return;
     out.add(FantasyLeaderboardEntry(
       uid: uid.toString(),
-      points: _optInt(raw['points']) ?? 0,
-      rank: _optInt(raw['rank']),
-      movement: _optInt(raw['movement']),
+      points: optInt(raw['points']) ?? 0,
+      rank: optInt(raw['rank']),
+      movement: optInt(raw['movement']),
     ));
   });
-  out.sort((a, b) {
-    if (a.rank != null || b.rank != null) {
-      if (a.rank == null) return 1;
-      if (b.rank == null) return -1;
-      final byRank = a.rank!.compareTo(b.rank!);
-      if (byRank != 0) return byRank;
-    }
-    final byPoints = b.points.compareTo(a.points);
-    return byPoints != 0 ? byPoints : a.uid.compareTo(b.uid);
-  });
-  return out;
+  return sortLeaderboardEntries(out);
 }
 
 /// One manager's `RankHistory/<uid>` → {gameweek → rank}. Accepts the
@@ -426,7 +461,7 @@ Map<int, int> rankHistoryFromNode(Object? node) {
   final out = <int, int>{};
   void put(Object? gw, Object? raw) {
     final week = int.tryParse(gw.toString());
-    final rank = raw is Map || raw is List ? null : _optInt(raw);
+    final rank = raw is Map || raw is List ? null : optInt(raw);
     if (week == null || week < 1 || rank == null || rank < 1) return;
     out[week] = rank;
   }
@@ -514,6 +549,98 @@ Map<int, FantasySquad> squadsByWeekForUid(Object? node, String uid) {
   return out;
 }
 
+// ── Per-player points of a squad week (live everywhere, Task 4) ────────────
+// The SAME slot rows live in two places, written by the same scoring core
+// (finalize_core.ts scoreWeekCore): settled in `History/<gw>/<uid>.Breakdown`
+// = [{playerId, countedTenths, multiplier, autoSubbedIn}] (finalize; unread
+// by the app before the live work) and live in `Live/Squads/<uid>.Slots` =
+// [{p, c, x, s?}] (live_core.ts) — one model, so a squad screen renders a
+// past week and the live week with the same code. One row per pick, in pick
+// order. An invalid squad has no rows (RTDB drops the empty list).
+
+/// One squad slot's points for a gameweek: what the player counted for the
+/// squad (the captain's multiplier, the bench factor and any auto-sub are
+/// already applied) and why.
+///
+/// Named for the live feed (it is the `Live/Squads` slot); fantasy_live.dart
+/// re-exports it, and the settled [historyBreakdownFromNode] returns the same
+/// rows.
+class LiveSlot {
+  const LiveSlot({
+    required this.playerId,
+    required this.countedTenths,
+    required this.multiplier,
+    this.autoSubbedIn = false,
+  });
+
+  final String playerId;
+
+  /// What the slot added to the squad total, in tenths of a point (a bench
+  /// player who did not come on counts at the bench factor).
+  final int countedTenths;
+
+  /// The armband's multiplier on this slot: 1 normal, 2 captain, 3 triple
+  /// captain (the captain only while he played; else 1).
+  final int multiplier;
+
+  /// Filled by an automatic substitution this week.
+  final bool autoSubbedIn;
+}
+
+/// A list-ish node's children in index order: a List as-is, an index-keyed
+/// Map (RTDB hole collapsing) sorted numerically with non-index keys ignored.
+List<Object?> _rowsInOrder(Object? node) {
+  if (node is List) return node;
+  if (node is Map) {
+    final entries = node.entries
+        .map((e) => (index: int.tryParse(e.key.toString()), value: e.value))
+        .where((e) => e.index != null)
+        .toList()
+      ..sort((a, b) => a.index!.compareTo(b.index!));
+    return [for (final e in entries) e.value];
+  }
+  return const [];
+}
+
+/// Settled slot rows from `History/<gw>/<uid>.Breakdown` — or from the whole
+/// History entry, whose `Breakdown` child is then read. Rows missing the
+/// player, the counted tenths or the multiplier are skipped (never a made-up
+/// 0); absent / junk → empty (an invalid squad has no Breakdown).
+List<LiveSlot> historyBreakdownFromNode(Object? node) {
+  final rows = node is Map && node.containsKey('Breakdown')
+      ? node['Breakdown']
+      : node;
+  return [
+    for (final raw in _rowsInOrder(rows))
+      if (_slotFromRow(raw, 'playerId', 'countedTenths', 'multiplier',
+              'autoSubbedIn')
+          case final slot?)
+        slot,
+  ];
+}
+
+/// Live slot rows from `Live/Squads/<uid>.Slots` ([{p, c, x, s?}]): the same
+/// rules as [historyBreakdownFromNode] over the live node's short keys.
+List<LiveSlot> liveSlotsFromNode(Object? node) => [
+      for (final raw in _rowsInOrder(node))
+        if (_slotFromRow(raw, 'p', 'c', 'x', 's') case final slot?) slot,
+    ];
+
+LiveSlot? _slotFromRow(
+    Object? raw, String id, String tenths, String multiplier, String sub) {
+  if (raw is! Map) return null;
+  final playerId = raw[id]?.toString().trim() ?? '';
+  final counted = optInt(raw[tenths]);
+  final x = optInt(raw[multiplier]);
+  if (playerId.isEmpty || counted == null || x == null) return null;
+  return LiveSlot(
+    playerId: playerId,
+    countedTenths: counted,
+    multiplier: x,
+    autoSubbedIn: raw[sub] == true,
+  );
+}
+
 // ── Mini-leagues (P3d, spec §10) ───────────────────────────────────────────
 // `MiniLeagues/<id>` = {Name, Code (6 chars A-Z0-9), Owner, CreatedAt,
 // Members/<uid>: true} — CLIENT-written (creating = push id with own uid as
@@ -563,7 +690,7 @@ FantasyMiniLeague? miniLeagueFromNode(String id, Object? node) {
     name: name,
     code: code,
     ownerUid: node['Owner']?.toString() ?? '',
-    createdAtMs: _optInt(node['CreatedAt']),
+    createdAtMs: optInt(node['CreatedAt']),
     memberUids: members,
   );
 }
@@ -650,7 +777,7 @@ NewsPlayerCard? newsPlayerCardFromNode(Object? node) {
   } on ArgumentError {
     return null;
   }
-  final price = _optInt(node['priceTenths']);
+  final price = optInt(node['priceTenths']);
   if (price == null) return null;
   final photo = node['photoUrl']?.toString().trim();
   final rawPct = node['ownershipPct'];
@@ -663,36 +790,23 @@ NewsPlayerCard? newsPlayerCardFromNode(Object? node) {
     team: node['team']?.toString().trim() ?? '',
     photoUrl: (photo == null || photo.isEmpty) ? null : photo,
     priceTenths: price,
-    priceDeltaTenths: _optInt(node['priceDeltaTenths']),
-    gw: _optInt(node['gw']),
-    gwPoints: _optInt(node['gwPoints']),
-    seasonPoints: _optInt(node['seasonPoints']),
+    priceDeltaTenths: optInt(node['priceDeltaTenths']),
+    gw: optInt(node['gw']),
+    gwPoints: optInt(node['gwPoints']),
+    seasonPoints: optInt(node['seasonPoints']),
     ownershipPct: (pct == null || !pct.isFinite) ? null : pct,
-    goals: _optInt(node['goals']) ?? 0,
-    assists: _optInt(node['assists']) ?? 0,
+    goals: optInt(node['goals']) ?? 0,
+    assists: optInt(node['assists']) ?? 0,
   );
 }
 
 /// A post's `Players` node in display order: a List (RTDB coercion) in index
 /// order, an index-keyed Map sorted numerically by key (non-index keys
 /// ignored). Holes and malformed cards are skipped.
-List<NewsPlayerCard> newsPlayerCardsFromNode(Object? node) {
-  final children = <Object?>[];
-  if (node is List) {
-    children.addAll(node);
-  } else if (node is Map) {
-    final entries = node.entries
-        .map((e) => (index: int.tryParse(e.key.toString()), value: e.value))
-        .where((e) => e.index != null)
-        .toList()
-      ..sort((a, b) => a.index!.compareTo(b.index!));
-    children.addAll([for (final e in entries) e.value]);
-  }
-  return [
-    for (final raw in children)
-      if (newsPlayerCardFromNode(raw) case final card?) card,
-  ];
-}
+List<NewsPlayerCard> newsPlayerCardsFromNode(Object? node) => [
+      for (final raw in _rowsInOrder(node))
+        if (newsPlayerCardFromNode(raw) case final card?) card,
+    ];
 
 /// The fan-facing card header label for a post template (spec §4.2).
 /// 'free', 'ai' and anything unknown read as plain "News".
@@ -753,12 +867,12 @@ List<FantasyNewsPost> newsPostsFromNode(Object? node) {
     if (title.isEmpty) return;
     final photo = raw['PhotoUrl']?.toString().trim();
     final template = raw['Template']?.toString().trim() ?? '';
-    final gw = _optInt(raw['Gw']);
+    final gw = optInt(raw['Gw']);
     out.add(FantasyNewsPost(
       id: id.toString(),
       title: title,
       body: raw['Body']?.toString() ?? '',
-      atMs: _optInt(raw['At']) ?? 0,
+      atMs: optInt(raw['At']) ?? 0,
       photoUrl: (photo == null || photo.isEmpty) ? null : photo,
       template: template.isEmpty ? 'free' : template,
       gw: (gw == null || gw <= 0) ? null : gw,
@@ -803,11 +917,17 @@ class FantasyDreamTeam {
   const FantasyDreamTeam({
     required this.players,
     this.computedAtMs,
+    this.live = false,
   });
 
   /// GK first, then DEF, then ATT (the functions' write order is preserved).
   final List<FantasyDreamTeamPlayer> players;
   final int? computedAtMs;
+
+  /// The LIVE gameweek's Team of the Week so far (the `Live/TeamOfWeek`
+  /// overlay, fantasy_live.dart), not the finalized one. Always false for a
+  /// parsed `DreamTeam` week.
+  final bool live;
 }
 
 /// One `DreamTeam/<gw>` child → team; null when unusable (no parsable
@@ -815,21 +935,9 @@ class FantasyDreamTeam {
 /// tolerates the index-keyed Map shape RTDB hands back after a hole.
 FantasyDreamTeam? dreamTeamFromNode(Object? node) {
   if (node is! Map) return null;
-  final rawPlayers = node['Players'];
-  final children = <Object?>[];
-  if (rawPlayers is List) {
-    children.addAll(rawPlayers);
-  } else if (rawPlayers is Map) {
-    // Index-keyed map: keep the functions' write order by index.
-    final entries = rawPlayers.entries
-        .map((e) => (index: int.tryParse(e.key.toString()), value: e.value))
-        .where((e) => e.index != null)
-        .toList()
-      ..sort((a, b) => a.index!.compareTo(b.index!));
-    children.addAll([for (final e in entries) e.value]);
-  }
   final players = <FantasyDreamTeamPlayer>[];
-  for (final raw in children) {
+  // A List as-is; an index-keyed Map keeps the functions' write order.
+  for (final raw in _rowsInOrder(node['Players'])) {
     if (raw is! Map) continue;
     final name = raw['name']?.toString().trim() ?? '';
     if (name.isEmpty) continue;
@@ -842,13 +950,13 @@ FantasyDreamTeam? dreamTeamFromNode(Object? node) {
     players.add(FantasyDreamTeamPlayer(
       name: name,
       position: position,
-      points: _optInt(raw['points']) ?? 0,
+      points: optInt(raw['points']) ?? 0,
     ));
   }
   if (players.isEmpty) return null;
   return FantasyDreamTeam(
     players: players,
-    computedAtMs: _optInt(node['ComputedAt']),
+    computedAtMs: optInt(node['ComputedAt']),
   );
 }
 
@@ -982,13 +1090,13 @@ FantasySquadAlert? squadAlertFromNode(Object? node) {
     ];
     final preview = kind == 'preview';
     return FantasySquadAlert(
-      gameweek: _optInt(node['Gw'] ?? node['gameweek']) ?? 0,
+      gameweek: optInt(node['Gw'] ?? node['gameweek']) ?? 0,
       kind: preview
           ? FantasySquadAlertKind.overBudgetPreview
           : FantasySquadAlertKind.invalid,
       issues: issues,
       overTenths:
-          preview ? _optInt(node['OverTenths'] ?? node['overTenths']) ?? 0 : 0,
+          preview ? optInt(node['OverTenths'] ?? node['overTenths']) ?? 0 : 0,
     );
   }
   final raw = node['Changes'];
@@ -1013,7 +1121,7 @@ FantasySquadAlert? squadAlertFromNode(Object? node) {
   }
   if (changes.isEmpty) return null;
   return FantasySquadAlert(
-    gameweek: _optInt(node['Gw']) ?? 0,
+    gameweek: optInt(node['Gw']) ?? 0,
     changes: changes,
   );
 }
@@ -1109,7 +1217,7 @@ TransferStateView? parseTransferState(Object? node) {
   final swaps = swapsGw == null ? const <String>[] : _idList(node['FreeSwaps']);
   return TransferStateView(
     free: free is num ? free.toInt() : null,
-    usedThisGw: _optInt(node['UsedThisGw']) ?? 0,
+    usedThisGw: optInt(node['UsedThisGw']) ?? 0,
     countFromGw: countFromGw,
     countFrom: countFromIds.isEmpty ? null : countFromIds,
     freeSwapsGw: swaps.isEmpty ? null : swapsGw,
@@ -1118,7 +1226,7 @@ TransferStateView? parseTransferState(Object? node) {
 }
 
 int? _positiveInt(Object? raw) {
-  final n = _optInt(raw);
+  final n = optInt(raw);
   return n != null && n > 0 ? n : null;
 }
 

@@ -756,4 +756,83 @@ void main() {
               {...(node() as Map), 'CountFrom': ['a', 'c']})));
     });
   });
+
+  // Live everywhere, Task 4: History/<gw>/<uid>.Breakdown (written by
+  // finalize since the live design, unread by the app until now) — the
+  // SETTLED per-player points the squad viewer shows for a past week, the
+  // same row shape as the live node's Squads/<uid>.Slots.
+  group('historyBreakdownFromNode (History/<gw>/<uid>.Breakdown)', () {
+    Map<String, Object?> row(String id, int tenths, int x,
+            {bool sub = false}) =>
+        {
+          'playerId': id,
+          'countedTenths': tenths,
+          'multiplier': x,
+          'autoSubbedIn': sub,
+        };
+
+    test('parses {playerId, countedTenths, multiplier, autoSubbedIn} in '
+        'pick order', () {
+      final slots = historyBreakdownFromNode([
+        row('Ava Striker', 80, 2),
+        row('Deb Rock', 30, 1, sub: true),
+        row('Bench Bob', 0, 0),
+      ]);
+      expect(slots.map((s) => s.playerId),
+          ['Ava Striker', 'Deb Rock', 'Bench Bob']);
+      expect(slots[0].countedTenths, 80);
+      expect(slots[0].multiplier, 2);
+      expect(slots[0].autoSubbedIn, isFalse);
+      expect(slots[1].autoSubbedIn, isTrue);
+      expect(slots[2].multiplier, 0);
+    });
+
+    test('tolerates the index-keyed map shape and the whole History entry',
+        () {
+      final asMap = historyBreakdownFromNode({
+        '1': row('B', 20, 1),
+        '0': row('A', 10, 1),
+      });
+      expect(asMap.map((s) => s.playerId), ['A', 'B']);
+
+      final entry = historyBreakdownFromNode({
+        'TotalTenths': 30,
+        'Breakdown': [row('A', 10, 1), row('B', 20, 1)],
+      });
+      expect(entry.map((s) => s.playerId), ['A', 'B']);
+    });
+
+    test('absent (an invalid squad has no Breakdown) / junk → empty; '
+        'malformed rows skipped', () {
+      expect(historyBreakdownFromNode(null), isEmpty);
+      expect(historyBreakdownFromNode('nope'), isEmpty);
+      expect(historyBreakdownFromNode({'TotalTenths': 0}), isEmpty);
+      final slots = historyBreakdownFromNode([
+        row('A', 10, 1),
+        {'countedTenths': 5, 'multiplier': 1}, // no player
+        {'playerId': 'B', 'multiplier': 1}, // no tenths
+        {'playerId': 'C', 'countedTenths': 5}, // no multiplier
+        'junk',
+      ]);
+      expect(slots.map((s) => s.playerId), ['A']);
+    });
+  });
+
+  group('live flag defaults (live everywhere, Task 4)', () {
+    test('official totals and dream teams are not live', () {
+      final totals = playerTotalsFromNode({
+        'Ava': {'points': 5},
+      })!;
+      expect(totals['Ava']!.live, isFalse);
+      final teams = dreamTeamsFromNode([
+        null,
+        {
+          'Players': [
+            {'name': 'Ava', 'position': 'ATT', 'points': 5},
+          ],
+        },
+      ]);
+      expect(teams[1]!.live, isFalse);
+    });
+  });
 }

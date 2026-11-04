@@ -10,6 +10,7 @@
 // add the new class's clear here and the regression test in
 // test/fantasy/fantasy_session_test.dart pins it.
 
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
@@ -24,6 +25,7 @@ import 'package:infinite_sports_flutter/profile/fantasy_profile_source.dart';
 /// the squad-viewer profile lookups and the match tab's earning memory.
 void clearFantasySessionState() {
   FantasyService.clearSessionCaches();
+  FantasyLiveFeed.clearSessionCache(); // the live gameweek's last state
   FantasyPlayersTab.clearSessionCaches(); // + games / start-hour / finished feeds
   FantasyPlayerProfilePage.clearSessionCaches(); // + schedule feed
   FantasyProfileSource.clearSessionCaches(); // + season resolution

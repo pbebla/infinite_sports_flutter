@@ -7,6 +7,13 @@
 // seed first frames so a revisited hub paints instantly while the live
 // snapshot loads behind it (same stale-while-refresh idea as
 // LeagueService.watchRosters).
+//
+// THE LIVE OVERLAY (live everywhere, fantasy_live.dart): the leaderboards,
+// player totals, dream teams and a player's weekly records join their
+// official stream with the live gameweek (FantasyLiveFeed) while one is being
+// played — the pure `mergeLive…` overlays decide, these wrappers only join.
+// The session caches below keep the OFFICIAL values (never the overlay), so a
+// cached seed can never present a stale live number as official.
 
 import 'dart:async';
 
@@ -17,6 +24,7 @@ import 'package:flutter/foundation.dart';
 import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_access.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/per_week_stream.dart';
@@ -82,6 +90,10 @@ class FantasyService {
   static final Map<String, Map<String, List<FantasyBadgeAward>>> _badgesCache =
       {};
   static final Map<String, List<FantasyBadgeAward>> _badgesForCache = {};
+  // Live everywhere: one manager's `Live/Squads/<uid>` (keyed `<root>|<uid>`);
+  // a known-ABSENT node (no live week / not scored) caches as null. The
+  // season-wide live state is FantasyLiveFeed's own session cache.
+  static final Map<String, LiveSquad?> _liveSquadCache = {};
 
   /// Clears the session caches (sign-out hygiene, tests).
   static void clearSessionCaches() {
@@ -110,6 +122,7 @@ class FantasyService {
     _badgeCatalogCache = null;
     _badgesCache.clear();
     _badgesForCache.clear();
+    _liveSquadCache.clear();
   }
 
   /// Live `Fantasy/<sport>/<season>/Config` → engine FantasyConfig + lock
@@ -145,10 +158,21 @@ class FantasyService {
     }
   }
 
-  /// Live finalized totals (`PlayerTotals`, P4 functions-written). null =
-  /// node absent (no finalized gameweeks yet) — the market hides its points/
-  /// ownership column and the Points sort on null (P3c Task 4).
+  /// Live season totals (`PlayerTotals`, P4 functions-written) with the live
+  /// gameweek overlaid while one is being played ([mergeLivePlayerTotals]:
+  /// rows with `live: true`). null = no official node (no finalized
+  /// gameweeks yet) and no live week — the market hides its points/ownership
+  /// column and the Points sort on null (P3c Task 4).
   static Stream<Map<String, FantasyPlayerTotals>?> watchPlayerTotals(
+          String sport, String season) =>
+      combineLatest2<Map<String, FantasyPlayerTotals>?, FantasyLiveState,
+          Map<String, FantasyPlayerTotals>?>(
+        _watchOfficialPlayerTotals(sport, season),
+        FantasyLiveFeed.watch(sport, season),
+        mergeLivePlayerTotals,
+      );
+
+  static Stream<Map<String, FantasyPlayerTotals>?> _watchOfficialPlayerTotals(
       String sport, String season) async* {
     final key = _root(sport, season);
     final seed = _totalsCache[key];
@@ -220,7 +244,26 @@ class FantasyService {
   /// session cache (`<root>|<name>`) so a revisited profile paints
   /// instantly. Callers (FantasyScheduleFeed) pass only weeks up to the
   /// current gameweek and resubscribe when that list changes.
+  ///
+  /// While a gameweek is live, that week's record (when it is among [weeks])
+  /// is the live one ([mergeLivePlayerWeekStats]: `live: true`, provisional
+  /// bonus flagged) — even though no official record exists yet.
   static Stream<Map<int, PlayerWeekStats>> watchPlayerWeekStatsFor(
+      String sport, String season, String name, List<int> weeks) {
+    final official =
+        _watchOfficialPlayerWeekStatsFor(sport, season, name, weeks);
+    // No weeks, nothing to overlay: no live listeners either.
+    if (weeks.isEmpty) return official;
+    return combineLatest2<Map<int, PlayerWeekStats>, FantasyLiveState,
+        Map<int, PlayerWeekStats>>(
+      official,
+      FantasyLiveFeed.watch(sport, season),
+      (stats, live) =>
+          mergeLivePlayerWeekStats(stats, live, name: name, weeks: weeks),
+    );
+  }
+
+  static Stream<Map<int, PlayerWeekStats>> _watchOfficialPlayerWeekStatsFor(
       String sport, String season, String name, List<int> weeks) {
     final root = _root(sport, season);
     return perWeekStream<PlayerWeekStats>(
@@ -582,9 +625,21 @@ class FantasyService {
   // ── Leaderboards, transparency, mini-leagues, news (P3d) ──────────────
 
   /// Live `Leaderboards` node (P4 functions-written; shape pinned in
-  /// fantasy_parsers.dart). Empty = absent (no finalized gameweek yet) —
-  /// the tab shows its friendly empty state.
+  /// fantasy_parsers.dart) with the live gameweek overlaid while one is being
+  /// played ([mergeLiveLeaderboards]: Overall, that week's rows and the rank
+  /// history's last point are the live ones, flagged `live`). Empty = absent
+  /// (no finalized gameweek yet, no live week) — the tab shows its friendly
+  /// empty state.
   static Stream<FantasyLeaderboards> watchLeaderboards(
+          String sport, String season) =>
+      combineLatest2<FantasyLeaderboards, FantasyLiveState,
+          FantasyLeaderboards>(
+        _watchOfficialLeaderboards(sport, season),
+        FantasyLiveFeed.watch(sport, season),
+        mergeLiveLeaderboards,
+      );
+
+  static Stream<FantasyLeaderboards> _watchOfficialLeaderboards(
       String sport, String season) async* {
     final key = _root(sport, season);
     final seed = _leaderboardsCache[key];
@@ -739,9 +794,20 @@ class FantasyService {
   }
 
   /// Live `DreamTeam` node, whole (P6, spec §10/§13): {gameweek: Team of the
-  /// Week}, functions-written at finalize and admin-overridable. Empty =
-  /// node absent (no finalized gameweek yet) — the hub hides the card.
+  /// Week}, functions-written at finalize and admin-overridable — with the
+  /// live gameweek's Team of the Week so far overlaid while one is being
+  /// played ([mergeLiveDreamTeams], `live: true`). Empty = node absent (no
+  /// finalized gameweek yet, no live team) — the hub hides the card.
   static Stream<Map<int, FantasyDreamTeam>> watchDreamTeams(
+          String sport, String season) =>
+      combineLatest2<Map<int, FantasyDreamTeam>, FantasyLiveState,
+          Map<int, FantasyDreamTeam>>(
+        _watchOfficialDreamTeams(sport, season),
+        FantasyLiveFeed.watch(sport, season),
+        mergeLiveDreamTeams,
+      );
+
+  static Stream<Map<int, FantasyDreamTeam>> _watchOfficialDreamTeams(
       String sport, String season) async* {
     final key = _root(sport, season);
     final seed = _dreamTeamsCache[key];
@@ -750,6 +816,32 @@ class FantasyService {
       final teams = dreamTeamsFromNode(event.snapshot.value);
       _dreamTeamsCache[key] = teams;
       yield teams;
+    }
+  }
+
+  /// One manager's live squad points (`Live/Squads/<uid>`): the net tenths,
+  /// the week's whole points and every slot's counted points while a
+  /// gameweek is being played. A single small child (read by any signed-in
+  /// user) — never the whole `Squads` node of every manager. null = no live
+  /// squad for that manager (no live week, or not scored): callers still gate
+  /// on [liveAppliesTo] over the [FantasyLiveFeed] meta. Seeded from the
+  /// session cache (`<root>|<uid>`, a known-absent node included); a stream
+  /// error is "no live" (null, logged, never cached).
+  static Stream<LiveSquad?> watchLiveSquad(
+      String sport, String season, String uid) async* {
+    final key = '${_root(sport, season)}|$uid';
+    if (_liveSquadCache.containsKey(key)) yield _liveSquadCache[key];
+    try {
+      await for (final event
+          in _ref('${_root(sport, season)}/Live/Squads/$uid').onValue) {
+        final squad = liveSquadFromNode(event.snapshot.value);
+        _liveSquadCache[key] = squad;
+        yield squad;
+      }
+    } catch (e) {
+      debugPrint('FantasyService: live squad feed failed: $e');
+      _liveSquadCache.remove(key);
+      yield null;
     }
   }
 

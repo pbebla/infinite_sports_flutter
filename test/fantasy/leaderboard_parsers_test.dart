@@ -208,6 +208,29 @@ void main() {
     });
   });
 
+  group('live flags (live everywhere, Task 4)', () {
+    test('parsed entries are official: live false, no live rank points', () {
+      final boards = leaderboardsFromNode({
+        'Overall': {
+          'u1': {'points': 40, 'rank': 1},
+        },
+        'Gameweek': {
+          '1': {
+            'u1': {'points': 40, 'rank': 1},
+          },
+        },
+        'RankHistory': {
+          'u1': {'1': 1},
+        },
+      });
+      expect(boards.overall.single.live, isFalse);
+      expect(boards.byWeek[1]!.single.live, isFalse);
+      expect(boards.isLiveRankPoint('u1', 1), isFalse);
+      expect(boards.liveRankPoints, isEmpty);
+      expect(FantasyLeaderboards.empty.liveRankPoints, isEmpty);
+    });
+  });
+
   group('managersFromNode', () {
     test('parses the whole node, skipping unusable children', () {
       final managers = managersFromNode({

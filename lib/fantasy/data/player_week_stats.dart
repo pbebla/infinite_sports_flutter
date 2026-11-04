@@ -53,6 +53,8 @@ class PlayerWeekStats {
     required this.games,
     required this.lines,
     required this.voided,
+    this.live = false,
+    this.bonusProvisional = false,
   });
 
   /// Bonus-inclusive week points (0 for a voided week — it scores zero
@@ -75,6 +77,17 @@ class PlayerWeekStats {
   /// The owner voided this gameweek: [points] is 0 and [lines] is empty, but
   /// [played] / [gamesPlayed] / [games] keep the real court record.
   final bool voided;
+
+  /// This is the LIVE gameweek's provisional record (the `Live/Players`
+  /// overlay, fantasy_live.dart), not a finalized one: the week is still in
+  /// progress and [points] / [lines] can still move. Always false for a
+  /// parsed `PlayerWeekStats` entry.
+  final bool live;
+
+  /// A live week's bonus is provisional: a game that is not Final yet pays
+  /// its bonus as if it ended now, and it can still change. Only ever true
+  /// together with [live].
+  final bool bonusProvisional;
 }
 
 int? _int(Object? raw) {
