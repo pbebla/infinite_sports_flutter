@@ -199,6 +199,7 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
   /// the live feed and the Voided set.
   late final AnswerGate _gate = AnswerGate(
     bound: widget.liveWait,
+    owner: 'MatchFantasyTab',
     onChanged: () {
       if (mounted) _recompute();
     },
@@ -338,18 +339,22 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
       ..expect('schedule')
       ..start();
     _schedule.start(); // seeds from the session cache, never notifies here
-    _liveSub = _listenViewer<FantasyLiveState>(
+    // Each viewer feed answers the gate (AnswerGate.listen: data OR error, or
+    // a feed that cannot even be created); an error is logged and leaves what
+    // the feed last said (nothing, if it never spoke) — a failed feed is
+    // "unknown", never a made-up squad or number.
+    _liveSub = _gate.listen<FantasyLiveState>(
       'live feed',
       () =>
           widget.liveStates ?? FantasyLiveFeed.watch(widget.sport, widget.season),
-      (v) => _live = v,
+      onData: (v) => _live = v,
     );
-    _voidedSub = _listenViewer<Set<int>>(
+    _voidedSub = _gate.listen<Set<int>>(
       'voided feed',
       () =>
           widget.voidedStates ??
           FantasyService.watchVoidedWeeks(widget.sport, widget.season),
-      (v) => _voided = v,
+      onData: (v) => _voided = v,
     );
     _syncWeekFeeds(); // a cached schedule answers at once
   }
@@ -379,52 +384,22 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
     _historyWeek = null;
     _watchedWeek = week;
     if (week == null) return;
-    _publishedSub = _listenViewer<FantasySquad?>(
+    _publishedSub = _gate.listen<FantasySquad?>(
       'published picks feed',
       () =>
           widget.publishedPicksFor?.call(week) ??
           FantasyService.watchPublishedPicksWeek(
               widget.sport, widget.season, _selfUid, week),
-      (v) => _published = v,
+      onData: (v) => _published = v,
     );
-    _historySub = _listenViewer<HistoryWeek?>(
+    _historySub = _gate.listen<HistoryWeek?>(
       'history week feed',
       () =>
           widget.historyWeekFor?.call(week) ??
           FantasyService.watchHistoryWeek(
               widget.sport, widget.season, _selfUid, week),
-      (v) => _historyWeek = v,
+      onData: (v) => _historyWeek = v,
     );
-  }
-
-  /// Listens to one viewer feed through the gate: an answer (data OR error, or
-  /// a feed that cannot even be created) opens its slot; an error is logged and
-  /// leaves what the feed last said (nothing, if it never spoke): a failed feed
-  /// is "unknown", never a made-up squad or number. Never throws.
-  StreamSubscription<T>? _listenViewer<T>(
-    String what,
-    Stream<T> Function() make,
-    void Function(T value) store,
-  ) {
-    _gate.expect(what);
-    void fail(Object e) {
-      debugPrint('MatchFantasyTab: $what failed: $e');
-      _gate.answer(what);
-      if (mounted) _recompute();
-    }
-
-    try {
-      return make().listen((v) {
-        if (!mounted) return;
-        store(v);
-        _gate.answer(what);
-        _recompute();
-      }, onError: fail);
-    } catch (e) {
-      debugPrint('MatchFantasyTab: $what failed: $e');
-      _gate.answer(what);
-      return null;
-    }
   }
 
   void _recompute() {

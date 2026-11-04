@@ -303,7 +303,8 @@ class LockedWeekModel {
 ///    rank, every chip "done". Invalid by History's marker.
 /// 4. Otherwise: "waiting for kickoff" only when every stream answered cleanly
 ///    ([LockedWeekSources.complete]) and nothing says a game of this week has
-///    started (no live meta of this week, no History); else exactly "Locked".
+///    started (no live meta of this week, no History, no live squad of his
+///    beside an unreadable live meta); else exactly "Locked".
 ///
 /// The court's squad is the one that was LOCKED — PublishedPicks while the
 /// week is live, History's own squad once it has settled, each falling back
@@ -367,8 +368,14 @@ LockedWeekModel resolveLockedWeek({
   }
 
   // Nothing readable. Before kickoff only if everything was read and nothing
-  // says a game has started; otherwise all we know is that it is locked.
-  final started = live.meta?.gw == week || history != null;
+  // says a game has started; otherwise all we know is that it is locked. His
+  // own live squad with NO live meta (the live feed failed — it then answers
+  // "no live week", not an error) says a week is being played: never "waiting
+  // for kickoff" during games. With another week's meta known, the live squad
+  // is that week's and says nothing about this one.
+  final started = live.meta?.gw == week ||
+      history != null ||
+      (live.meta == null && sources.liveSquad != null);
   return model(sources.complete && !started
       ? const LockedWeekView.waiting()
       : const LockedWeekView.unknown());

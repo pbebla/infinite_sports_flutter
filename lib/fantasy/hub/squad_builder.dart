@@ -169,19 +169,24 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
 
   /// The last locked-week model the hub handed down. The hub drops its model
   /// the instant editing reopens (lock + 24 h) while this builder flips on its
-  /// own 30 s ticker; until THIS builder is editable it keeps showing the last
-  /// model — never a placeholder flash in between. Cleared once editable.
+  /// own 30 s ticker; until the SCHEDULE reopens editing here it keeps showing
+  /// the last model — never a placeholder flash in between. Cleared once the
+  /// schedule is open — for a read-only manager too, whose court can never be
+  /// edited but must not keep last week's locked squad and lines.
   LockedWeekModel? _lastLocked;
 
   DateTime get _now => (widget.nowUtc ?? () => DateTime.now().toUtc())();
 
-  bool get _editable =>
-      !widget.readOnly &&
-      squadEditable(
+  /// The schedule's verdict alone (the owner's lock override, the deadline):
+  /// whether the WEEK is open for editing — what decides the locked view.
+  bool get _scheduleEditable => squadEditable(
         lockOverride: widget.lockOverride,
         gameweeks: widget.gameweeks,
         nowUtc: _now,
       );
+
+  /// Whether THIS manager can edit right now (the schedule, and a pass).
+  bool get _editable => !widget.readOnly && _scheduleEditable;
 
   @override
   void initState() {
@@ -445,16 +450,23 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
 
   @override
   Widget build(BuildContext context) {
-    final editable = _editable;
-    // Locked: the week as the hub resolved it — kept until THIS builder is
-    // editable (the hub drops it a moment before the 30 s ticker flips us).
-    if (editable) _lastLocked = null;
-    final locked = editable ? null : (widget.lockedWeek ?? _lastLocked);
+    final scheduleOpen = _scheduleEditable;
+    final editable = !widget.readOnly && scheduleOpen;
+    // Locked: the week as the hub resolved it — kept until the schedule
+    // reopens editing here (the hub drops it a moment before the 30 s ticker
+    // flips us). Schedule-only, NOT [editable]: a read-only manager (no pass)
+    // is never editable, yet once the week reopens his court is his saved
+    // squad again, with no stale locked lines.
+    if (scheduleOpen) _lastLocked = null;
+    final locked = scheduleOpen ? null : (widget.lockedWeek ?? _lastLocked);
     // The court while locked is the squad that was LOCKED (live:
     // PublishedPicks, settled: History) — NOT Squads/<uid>, which the server
     // rewrites after finalize and which keeps a chip the lock voided. Until
     // it has loaded the court is the draft's and shows no points lines.
     final lockedSquad = locked?.squad;
+    // The chip on screen: the locked squad's (null = none — a voided chip
+    // included) once it has loaded, else the draft's.
+    final shownChip = lockedSquad != null ? lockedSquad.chip : _draft.chip;
     final photoByName = {
       for (final p in widget.players)
         if (p.photoUrl != null) p.name: p.photoUrl,
@@ -582,7 +594,12 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
           const SizedBox(height: 14),
           FantasyChipRow(
             config: widget.config,
-            activeChip: _draft.chip,
+            // While locked the row shows the chip the week was LOCKED with
+            // (inert, like the court): never Squads/<uid>'s, which keeps a
+            // chip the lock voided and is switched off / restored after
+            // finalize. Until the locked squad loads, the draft's (the court
+            // falls back the same way).
+            activeChip: shownChip,
             enabled: editable,
             onChipChanged: _draft.setChip,
             // A first team has nothing to transfer, and an unknown count may
@@ -599,7 +616,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
             availability: chipAvailability(
               historyByWeek: widget.chipHistory ?? const {},
               editingGw: chipEditingGameweek(widget.gameweeks, _now),
-              armedChip: _draft.chip,
+              armedChip: shownChip,
               config: widget.config,
               voidedWeeks: widget.voidedWeeks,
             ),

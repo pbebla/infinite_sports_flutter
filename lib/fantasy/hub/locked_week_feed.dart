@@ -33,6 +33,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:infinite_sports_flutter/fantasy/data/answer_gate.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
@@ -81,27 +82,20 @@ class FantasyLockedWeekFeed {
   FantasySquad? _published;
   OverallStanding? _overall;
 
-  /// Which streams have answered (data or error), by name.
-  final Set<String> _answered = {};
-
-  /// Which streams' LAST event was a failure, by name (a later value clears it).
-  final Set<String> _failed = {};
-
-  bool _boundPassed = false;
-  bool _subscribed = false;
-
-  static const int _streamCount = 5;
+  /// This week's subscription's gate (AnswerGate — the shared defensive
+  /// listen): which streams have answered (data or error), which ones' LAST
+  /// event was a failure (a later value clears it), and the [liveWait] bound.
+  /// A fresh one per subscribed week; null while nothing is subscribed.
+  AnswerGate? _gate;
 
   final List<StreamSubscription<Object?>> _subs = [];
-  Timer? _bound;
 
   /// The locked week being listened to (null = none).
   int? get week => _week;
 
   /// The hub's reveal gate: nothing to wait for, or every stream has answered
   /// (or the bound passed).
-  bool get ready =>
-      _week == null || !_subscribed || _boundPassed || _allAnswered;
+  bool get ready => _week == null || (_gate?.ready ?? true);
 
   /// What the streams hold right now (see [resolveLockedWeek]).
   LockedWeekSources get sources => LockedWeekSources(
@@ -110,7 +104,7 @@ class FantasyLockedWeekFeed {
         history: _history,
         published: _published,
         overall: _overall,
-        complete: _subscribed && _allAnswered && _failed.isEmpty,
+        complete: (_gate?.allAnswered ?? false) && !_gate!.anyFailed,
       );
 
   /// Points the feed at locked week [week] (null = editing is open). The same
@@ -126,10 +120,6 @@ class FantasyLockedWeekFeed {
     _history = null;
     _published = null;
     _overall = null;
-    _answered.clear();
-    _failed.clear();
-    _boundPassed = false;
-    _subscribed = false;
     if (week != null) _subscribe(week);
     if (notify) onChanged();
   }
@@ -140,26 +130,18 @@ class FantasyLockedWeekFeed {
   }
 
   void _cancel() {
-    _bound?.cancel();
-    _bound = null;
+    _gate?.dispose();
+    _gate = null;
     for (final s in _subs) {
       s.cancel();
     }
     _subs.clear();
   }
 
-  bool get _allAnswered => _answered.length == _streamCount;
-
-  /// Everything answered in time: the bound has nothing left to bound.
-  void _settleBound() {
-    if (!_allAnswered) return;
-    _bound?.cancel();
-    _bound = null;
-  }
-
   void _changed() {
     if (_disposed) return;
-    _settleBound();
+    // Everything answered in time: the bound has nothing left to bound.
+    _gate?.settle();
     onChanged();
   }
 
@@ -167,38 +149,49 @@ class FantasyLockedWeekFeed {
     // Signed out: no uid, so no own nodes to read — nothing to wait for.
     final me = uid();
     if (me == null) return;
-    _subscribed = true;
-    _bound = Timer(liveWait, () {
-      _bound = null;
-      _boundPassed = true;
-      if (!_disposed) onChanged();
-    });
+    // One gate per subscribed week, bounded at [liveWait] (its clock stopped
+    // by [AnswerGate.settle] once all five answered). A stream that errors —
+    // or cannot even be created (no Firebase app in a widget test; answered
+    // at once WITHOUT notifying: the caller reads [ready] right after
+    // [setWeek], and initState must never be notified) — is logged and
+    // counts as answered with no data, but as FAILED until it delivers a
+    // value (the last good value, if any, stays).
+    final gate = _gate = AnswerGate(
+      onChanged: _changed,
+      bound: liveWait,
+      owner: 'FantasyLockedWeekFeed',
+    )..start();
+    void open<T>(
+        String what, Stream<T> Function() make, void Function(T) store) {
+      final sub = gate.listen<T>(what, make, onData: store);
+      if (sub != null) _subs.add(sub);
+    }
 
-    _open<FantasyLiveState>(
+    open<FantasyLiveState>(
       'live feed',
       () => liveStates ?? FantasyLiveFeed.watch(sport, season),
       (v) => _live = v,
     );
-    _open<LiveSquad?>(
+    open<LiveSquad?>(
       'live squad feed',
       () => liveSquadStates ?? FantasyService.watchLiveSquad(sport, season, me),
       (v) => _liveSquad = v,
     );
-    _open<FantasySquad?>(
+    open<FantasySquad?>(
       'published picks feed',
       () =>
           publishedPicksFor?.call(week) ??
           FantasyService.watchPublishedPicksWeek(sport, season, me, week),
       (v) => _published = v,
     );
-    _open<HistoryWeek?>(
+    open<HistoryWeek?>(
       'history week feed',
       () =>
           historyWeekFor?.call(week) ??
           FantasyService.watchHistoryWeek(sport, season, me, week),
       (v) => _history = v,
     );
-    _open<OverallStanding?>(
+    open<OverallStanding?>(
       'overall standing feed',
       () =>
           overallStates ??
@@ -206,37 +199,6 @@ class FantasyLockedWeekFeed {
       (v) => _overall = v,
     );
     // A stream that could not even be created already answered.
-    _settleBound();
-  }
-
-  /// Listens defensively: a stream that errors, or cannot even be created (no
-  /// Firebase app in a widget test), is logged and counts as answered with no
-  /// data — but as FAILED until it delivers a value (the last good value, if
-  /// any, stays). A failure to create is answered synchronously WITHOUT
-  /// notifying (the caller reads [ready] right after [setWeek]; initState must
-  /// never be notified).
-  void _open<T>(
-      String what, Stream<T> Function() make, void Function(T) store) {
-    void fail(Object e) {
-      debugPrint('FantasyLockedWeekFeed: $what failed: $e');
-      _answered.add(what);
-      _failed.add(what);
-    }
-
-    try {
-      _subs.add(make().listen((v) {
-        if (_disposed) return;
-        store(v);
-        _answered.add(what);
-        _failed.remove(what);
-        _changed();
-      }, onError: (Object e) {
-        if (_disposed) return;
-        fail(e);
-        _changed();
-      }));
-    } catch (e) {
-      fail(e);
-    }
+    gate.settle();
   }
 }

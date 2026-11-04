@@ -214,6 +214,7 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
   /// Voided set and one settled record per week shown.
   late final AnswerGate _gate = AnswerGate(
     bound: widget.liveWait,
+    owner: 'ManagerSquadViewerPage',
     onChanged: () {
       if (mounted) setState(() {});
     },
@@ -258,27 +259,31 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
       _syncSettledWeeks();
       setState(() {});
     });
-    _liveStateSub = _listenPoints<FantasyLiveState>(
+    // The points feeds join the reveal through the gate (AnswerGate.listen:
+    // an answer — data OR error, or a feed that cannot even be created —
+    // opens its slot; an error is logged and leaves what the feed last said
+    // unless it resets it).
+    _liveStateSub = _gate.listen<FantasyLiveState>(
       'live feed',
       () =>
           widget.liveStates ?? FantasyLiveFeed.watch(widget.sport, widget.season),
-      (v) => _liveState = v,
+      onData: (v) => _liveState = v,
     );
-    _liveWeekSquadSub = _listenPoints<LiveSquad?>(
+    _liveWeekSquadSub = _gate.listen<LiveSquad?>(
       'live squad feed',
       () =>
           widget.liveSquadStates ??
           FantasyService.watchLiveSquad(
               widget.sport, widget.season, widget.uid),
-      (v) => _liveWeekSquad = v,
-      onFail: () => _liveWeekSquad = null,
+      onData: (v) => _liveWeekSquad = v,
+      onError: () => _liveWeekSquad = null,
     );
-    _voidedSub = _listenPoints<Set<int>>(
+    _voidedSub = _gate.listen<Set<int>>(
       'voided feed',
       () =>
           widget.voidedStates ??
           FantasyService.watchVoidedWeeks(widget.sport, widget.season),
-      (v) => _voided = v,
+      onData: (v) => _voided = v,
     );
     if (widget.isSelf) {
       _liveSquad = widget.initialSquad;
@@ -358,39 +363,6 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
     }
   }
 
-  /// Listens to one of the points feeds through the reveal gate: an answer
-  /// (data OR error, or a feed that cannot even be created) opens its slot in
-  /// the gate; an error is logged and leaves what the feed last said ([onFail]
-  /// may reset it). Never throws.
-  StreamSubscription<T>? _listenPoints<T>(
-    String what,
-    Stream<T> Function() make,
-    void Function(T value) store, {
-    void Function()? onFail,
-  }) {
-    _gate.expect(what);
-    void fail(Object e) {
-      debugPrint('ManagerSquadViewerPage: $what failed: $e');
-      onFail?.call();
-      _gate.answer(what);
-      if (mounted) setState(() {});
-    }
-
-    try {
-      return make().listen((v) {
-        if (!mounted) return;
-        store(v);
-        _gate.answer(what);
-        setState(() {});
-      }, onError: fail);
-    } catch (e) {
-      debugPrint('ManagerSquadViewerPage: $what failed: $e');
-      onFail?.call();
-      _gate.answer(what);
-      return null;
-    }
-  }
-
   /// One small settled listener per week shown (`History/<gw>/<uid>`): the
   /// weeks the squad streams know. A new week (one that locks while the page
   /// is open) is subscribed at once; a week that vanished is let go.
@@ -401,14 +373,14 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
     final wanted = {...history.keys, ...published.keys};
     for (final week in wanted) {
       if (_settledSubs.containsKey(week)) continue;
-      final sub = _listenPoints<HistoryWeek?>(
+      final sub = _gate.listen<HistoryWeek?>(
         'history week $week',
         () =>
             widget.historyWeekFor?.call(week) ??
             FantasyService.watchHistoryWeek(
                 widget.sport, widget.season, widget.uid, week),
-        (v) => _settled[week] = v,
-        onFail: () => _settled[week] = null,
+        onData: (v) => _settled[week] = v,
+        onError: () => _settled[week] = null,
       );
       if (sub != null) _settledSubs[week] = sub;
     }

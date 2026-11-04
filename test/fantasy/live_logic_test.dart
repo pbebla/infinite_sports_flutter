@@ -254,6 +254,19 @@ void main() {
     });
 
     test(
+        'his own live squad answered but the live meta did not (the live feed '
+        'failed and answered "no live week") → exactly "Locked", never '
+        '"waiting for kickoff" during games', () {
+      final m = resolve(
+          sources: LockedWeekSources(
+              liveSquad: liveSquad(), published: lockedSquad()));
+      expect(m.view.kind, LockedWeekKind.unknown);
+      expect(lockedStripText(m.view), 'Locked');
+      expect(m.view.isLive, isFalse);
+      expect(m.chipTextFor('Ava'), isNull);
+    });
+
+    test(
         'a settled tombstone of THIS week with no History (a failed load) '
         'overlays nothing and says only "Locked": the week has started', () {
       final m = resolve(

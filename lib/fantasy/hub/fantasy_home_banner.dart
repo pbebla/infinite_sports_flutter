@@ -34,6 +34,7 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/answer_gate.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
@@ -126,7 +127,6 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
   // ── The live gameweek (joins the reveal) ──────────────────────────────
   StreamSubscription<FantasyLiveState>? _liveSub;
   StreamSubscription<Set<int>>? _voidedSub;
-  Timer? _liveBound;
   FantasyLiveState _live = FantasyLiveState.none;
 
   /// The owner-voided weeks, and whether a REAL answer has said so (a failed
@@ -134,17 +134,21 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
   Set<int> _voided = const {};
   bool _voidedKnown = false;
 
-  /// The live feed and the Voided set have each answered (or failed, or there
-  /// is nobody to ask) — part of the banner's single reveal.
-  bool _liveAnswered = false;
-  bool _voidedAnswered = false;
-
-  /// The 2 s global bound passed with one of them still silent: show without.
-  bool _liveBoundPassed = false;
+  /// The live feed and the Voided set join the banner's single reveal: ready
+  /// once each has answered (or failed, or there is nobody to ask — nothing is
+  /// registered then), or once the 2 s global bound passed with one of them
+  /// still silent (show without; a late value lands in place).
+  late final AnswerGate _liveGate = AnswerGate(
+    owner: 'FantasyHomeBanner',
+    onChanged: () {
+      // Both answered: the bound has nothing left to bound.
+      _liveGate.settle();
+      if (mounted) setState(() {});
+    },
+  );
   String? _uid;
 
-  bool get _liveReady =>
-      (_liveAnswered && _voidedAnswered) || _liveBoundPassed;
+  bool get _liveReady => _liveGate.ready;
 
   FantasyConfigState? get _config => _schedule.config;
   List<Gameweek> get _gameweeks => _schedule.gameweeks ?? const [];
@@ -167,7 +171,7 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
     _schedule.dispose();
     _seasonFinished.dispose();
     _ticker?.cancel();
-    _liveBound?.cancel();
+    _liveGate.dispose();
     _liveSub?.cancel();
     _voidedSub?.cancel();
     super.dispose();
@@ -192,63 +196,29 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
   /// lands in place.
   void _startLive() {
     final uid = _signedInUid();
-    if (uid == null || uid.isEmpty) {
-      _liveAnswered = true;
-      _voidedAnswered = true;
-      return;
-    }
+    if (uid == null || uid.isEmpty) return;
     _uid = uid;
-    _liveBound = Timer(kLiveJoinWait, () {
-      _liveBound = null;
-      _liveBoundPassed = true;
-      if (mounted) setState(() {});
-    });
-    // Both answered: the bound has nothing left to bound.
-    void settleBound() {
-      if (!_liveAnswered || !_voidedAnswered) return;
-      _liveBound?.cancel();
-      _liveBound = null;
-    }
-
-    try {
-      _liveSub = (widget.liveStates ??
-              FantasyLiveFeed.watch(widget.sport, widget.season))
-          .listen((state) {
-        _live = state;
-        _liveAnswered = true;
-        settleBound();
-        if (mounted) setState(() {});
-      }, onError: (Object e) {
-        debugPrint('FantasyHomeBanner: live feed failed: $e');
-        _liveAnswered = true;
-        settleBound();
-        if (mounted) setState(() {});
-      });
-    } catch (e) {
-      debugPrint('FantasyHomeBanner: live feed failed: $e');
-      _liveAnswered = true;
-    }
-    try {
-      _voidedSub = (widget.voidedStates ??
-              FantasyService.watchVoidedWeeks(widget.sport, widget.season))
-          .listen((weeks) {
+    _liveGate.start();
+    _liveSub = _liveGate.listen<FantasyLiveState>(
+      'live feed',
+      () =>
+          widget.liveStates ?? FantasyLiveFeed.watch(widget.sport, widget.season),
+      onData: (state) => _live = state,
+    );
+    // An error leaves the set UNKNOWN, not "none voided": no week is called
+    // live without it.
+    _voidedSub = _liveGate.listen<Set<int>>(
+      'voided feed',
+      () =>
+          widget.voidedStates ??
+          FantasyService.watchVoidedWeeks(widget.sport, widget.season),
+      onData: (weeks) {
         _voided = weeks;
         _voidedKnown = true;
-        _voidedAnswered = true;
-        settleBound();
-        if (mounted) setState(() {});
-      }, onError: (Object e) {
-        // Unknown, not "none voided": no week is called live without it.
-        debugPrint('FantasyHomeBanner: voided feed failed: $e');
-        _voidedAnswered = true;
-        settleBound();
-        if (mounted) setState(() {});
-      });
-    } catch (e) {
-      debugPrint('FantasyHomeBanner: voided feed failed: $e');
-      _voidedAnswered = true;
-    }
-    settleBound();
+      },
+    );
+    // A feed that could not even be created already answered.
+    _liveGate.settle();
   }
 
   DateTime get _now => (widget.nowUtc ?? () => DateTime.now().toUtc())();
