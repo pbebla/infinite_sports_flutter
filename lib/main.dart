@@ -13,6 +13,7 @@ import 'package:infinite_sports_flutter/misc/home_nav.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/notification_router.dart';
 import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
+import 'package:infinite_sports_flutter/misc/rtdb_emulator.dart';
 import 'package:infinite_sports_flutter/misc/server_time.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
@@ -41,6 +42,9 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  // Demo builds only (--dart-define=RTDB_EMULATOR=1): use the local database
+  // emulator. The normal build skips this entirely. Before any database use.
+  connectRtdbEmulatorIfRequested(FirebaseDatabase.instance);
   // Start listening to Firebase server-time offset so live match clocks
   // stay accurate even when the device clock differs from server time.
   initServerTimeOffset();
