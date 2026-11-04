@@ -22,6 +22,7 @@
 
 import 'dart:math';
 
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/transfers.dart';
@@ -166,7 +167,7 @@ String? transferLineText(TransferPreview p) {
     case TransferPreviewKind.counted:
       if (p.costPoints > 0) {
         return '${p.used} ${p.used == 1 ? 'transfer' : 'transfers'} · '
-            '${p.free} free · −${p.costPoints} pts this week';
+            '${p.free} free · −${pointsText(p.costPoints)} this week';
       }
       return '${p.used} of ${p.free} free '
           '${p.free == 1 ? 'transfer' : 'transfers'} used';

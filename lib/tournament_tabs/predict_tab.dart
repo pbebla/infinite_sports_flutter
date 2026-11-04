@@ -1,5 +1,6 @@
 import 'dart:collection';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/points_text.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/leaderboard_entry.dart';
@@ -93,7 +94,7 @@ class _PredictTabState extends State<PredictTab> {
         final displayPts = pts ?? 0;
         final label = pts == null
             ? '— pts'
-            : '$displayPts ${displayPts == 1 ? 'pt' : 'pts'}';
+            : pointsText(displayPts);
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
           decoration: BoxDecoration(

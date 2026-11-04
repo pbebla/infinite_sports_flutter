@@ -128,7 +128,8 @@ class MarketPlayerSheet extends StatelessWidget {
               const SizedBox(height: 8),
               Text(
                 [
-                  '${totals?.points ?? 0} fantasy pts',
+                  '${totals?.points ?? 0} fantasy '
+                      '${pointsUnit(totals?.points ?? 0)}',
                   if (totals?.ownershipPct != null)
                     'owned by ${totals!.ownershipPct!.toStringAsFixed(0)}%',
                 ].join(' · '),

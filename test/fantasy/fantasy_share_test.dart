@@ -229,6 +229,13 @@ void main() {
             points: 512,
             seasonLabel: 'Futsal Season 15'),
         'Infinite Fantasy · My rank · #10 of 21 · 512 pts (Futsal Season 15)');
+    expect(
+        myRankShareCaption(
+            rank: 1,
+            managerCount: 2,
+            points: 1,
+            seasonLabel: 'Futsal Season 15'),
+        'Infinite Fantasy · My rank · #1 of 2 · 1 pt (Futsal Season 15)');
     expect(fantasySeasonLabel('Futsal', '15'), 'Futsal Season 15');
   });
 

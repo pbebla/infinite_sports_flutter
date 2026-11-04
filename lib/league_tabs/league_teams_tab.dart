@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/league_team_detail.dart';
 import 'package:infinite_sports_flutter/misc/league_form.dart';
+import 'package:infinite_sports_flutter/misc/points_text.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/widgets/form_chips.dart';
@@ -75,7 +76,8 @@ class LeagueTeamsTab extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'W${team.wins} D${team.draws} L${team.losses} · ${team.points} pts',
+                          'W${team.wins} D${team.draws} L${team.losses} · '
+                          '${pointsText(team.points)}',
                           style: TextStyle(
                             fontSize: 12,
                             color: Theme.of(context)

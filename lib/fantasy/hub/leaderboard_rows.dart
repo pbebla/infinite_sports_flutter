@@ -50,6 +50,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/badge_shelf.dart'
     show BadgeCountChip, kBadgeCountChipHeight, kBadgeCountChipWidth;
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
@@ -341,7 +342,7 @@ class _LeaderboardRowTileState extends State<LeaderboardRowTile> {
           ),
           const SizedBox(width: 8),
           Text(
-            '${row.points} pts',
+            pointsText(row.points),
             style: TextStyle(
               fontSize: 13.5,
               fontWeight: FontWeight.w800,

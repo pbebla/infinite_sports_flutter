@@ -307,7 +307,7 @@ class NewsPlayerCompactRow extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Text(
-            points == null ? '–' : '$points pts',
+            points == null ? '–' : pointsText(points),
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w800,

@@ -31,6 +31,7 @@
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
@@ -68,8 +69,8 @@ String myRankShareCaption({
   required int points,
   required String seasonLabel,
 }) =>
-    'Infinite Fantasy · My rank · #$rank of $managerCount · $points pts '
-    '($seasonLabel)';
+    'Infinite Fantasy · My rank · #$rank of $managerCount · '
+    '${pointsText(points)} ($seasonLabel)';
 
 /// The app's dark theme, keeping the host's font family + fallbacks (so a
 /// story renders in the same typeface as the app — and tests can supply real
@@ -323,7 +324,7 @@ class TeamOfWeekStoryCard extends StatelessWidget {
                 chipAvatarSize: 48,
                 weekPointsFor: (name) {
                   final points = court.pointsByName[name];
-                  return points == null ? null : '$points pts';
+                  return points == null ? null : pointsText(points);
                 },
                 photoUrlFor: photoUrlFor,
               ),
@@ -475,7 +476,7 @@ class RankStoryCard extends StatelessWidget {
                   child: _StoryStat(
                     label: 'Total points',
                     value: '${row.points}',
-                    unit: 'pts',
+                    unit: pointsUnit(row.points),
                     color: scheme.onSurface,
                   ),
                 ),

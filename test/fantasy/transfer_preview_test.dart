@@ -8,6 +8,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/transfer_dialogs.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/transfer_preview.dart';
 
 void main() {
@@ -138,6 +139,13 @@ void main() {
   });
 
   group('counted: used vs free', () {
+    test('a one-point hit (a 1-point transfer cost) reads "−1 pt"', () {
+      const p = TransferPreview(
+          kind: TransferPreviewKind.counted, used: 3, free: 2, costPoints: 1);
+      expect(transferLineText(p), '3 transfers · 2 free · −1 pt this week');
+      expect(pointsHitSaveLabel(p), 'Save (−1 pt)');
+    });
+
     test('no changes: 0 of 2 free transfers used', () {
       final p = preview(baseline);
       expect(p.kind, TransferPreviewKind.counted);

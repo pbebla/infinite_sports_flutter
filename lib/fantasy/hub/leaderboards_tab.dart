@@ -57,6 +57,7 @@ import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
@@ -758,7 +759,7 @@ class _GameweekSummaryCard extends StatelessWidget {
               ),
               children: [
                 const TextSpan(text: 'Average '),
-                TextSpan(text: '${summary.average} pts', style: strong),
+                TextSpan(text: pointsText(summary.average), style: strong),
                 const TextSpan(text: ' · Highest '),
                 TextSpan(text: '${summary.highest}', style: strong),
                 TextSpan(text: ' (${summary.highestWho})'),

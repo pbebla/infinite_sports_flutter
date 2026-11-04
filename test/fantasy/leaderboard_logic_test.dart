@@ -557,6 +557,15 @@ void main() {
       expect(voided.label, 'Average 0 pts · Highest 0 (2 managers)');
     });
 
+    test('an average of exactly one point reads "1 pt"', () {
+      final summary = gameweekSummary([
+        row('a', points: 2, team: 'A'),
+        row('b', points: 0, team: 'B'),
+      ])!;
+      expect(summary.average, 1);
+      expect(summary.label, 'Average 1 pt · Highest 2 (A)');
+    });
+
     test('no rows → no summary', () {
       expect(gameweekSummary(const []), isNull);
     });

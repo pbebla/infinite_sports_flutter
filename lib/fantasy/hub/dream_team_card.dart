@@ -30,6 +30,7 @@
 // sheet.
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
@@ -210,7 +211,7 @@ class _DreamTeamCardState extends State<DreamTeamCard> {
             chipAvatarSize: 44,
             weekPointsFor: (name) {
               final points = court.pointsByName[name];
-              return points == null ? null : '$points pts';
+              return points == null ? null : pointsText(points);
             },
             photoUrlFor: (name) => photoByName[name],
           ),

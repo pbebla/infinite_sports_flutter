@@ -70,6 +70,20 @@ void main() {
           "0 pts · this week didn't count");
     });
 
+    test('exactly one point (either sign) is "1 pt" — the count agrees', () {
+      expect(
+          lockedStripText(const LockedWeekView.live(weekPoints: 1, rank: 3)),
+          '1 pt · #3');
+      expect(
+          lockedStripText(const LockedWeekView.live(weekPoints: -1, rank: 9)),
+          '-1 pt · #9');
+      expect(
+          lockedStripText(const LockedWeekView.settled(weekPoints: 1, rank: 3)),
+          'Final · 1 pt · #3');
+      expect(lockedStripText(const LockedWeekView.live(weekPoints: 2)),
+          '2 pts');
+    });
+
     test('a rank that is not known yet is left out, never a made-up #0', () {
       expect(
           lockedStripText(const LockedWeekView.live(weekPoints: 9)), '9 pts');
@@ -133,6 +147,15 @@ void main() {
           chipWeekText(slot('A', 25), LivePlayerStatus.live), '2.5 pts · live');
       expect(chipWeekText(slot('A', 30), LivePlayerStatus.done), '3 pts');
       expect(chipWeekText(slot('A', 105), LivePlayerStatus.done), '10.5 pts');
+    });
+
+    test('exactly one point is "1 pt"; a half point stays plural', () {
+      expect(chipWeekText(slot('A', 10), LivePlayerStatus.done), '1 pt');
+      expect(
+          chipWeekText(slot('A', 10), LivePlayerStatus.live), '1 pt · live');
+      expect(chipWeekText(slot('A', -10), LivePlayerStatus.done), '-1 pt');
+      expect(chipWeekText(slot('A', 5), LivePlayerStatus.done), '0.5 pts');
+      expect(chipWeekText(slot('A', 15), LivePlayerStatus.done), '1.5 pts');
     });
 
     test('a negative week reads as a negative number', () {
@@ -600,6 +623,11 @@ void main() {
       final live = liveWith({'me': const LiveBoardRow(o: 7, r: 12, w: 0)});
       expect(liveBannerLine(live: live, uid: 'me'), 'GW3 live · 0 pts · #12');
     });
+
+    test('one point is "1 pt"', () {
+      final live = liveWith({'me': const LiveBoardRow(o: 7, r: 12, w: 1)});
+      expect(liveBannerLine(live: live, uid: 'me'), 'GW3 live · 1 pt · #12');
+    });
   });
 
   // ── Task 7: the squad viewer's week line ───────────────────────────────
@@ -617,6 +645,14 @@ void main() {
           const LockedWeekView.settled(weekPoints: 34, rank: 5))!;
       expect(strip.text, 'Final · 34 pts');
       expect(strip.live, isFalse);
+    });
+
+    test('one point is "1 pt"', () {
+      expect(viewerWeekStrip(const LockedWeekView.live(weekPoints: 1))!.text,
+          '1 pt');
+      expect(
+          viewerWeekStrip(const LockedWeekView.settled(weekPoints: -1))!.text,
+          'Final · -1 pt');
     });
 
     test('a zero is a number', () {
@@ -670,6 +706,16 @@ void main() {
               uid: 'me',
               voidedWeeks: const {}),
           'Your gameweek so far: 0 pts · #12');
+    });
+
+    test('one point is "1 pt"', () {
+      expect(
+          matchWeekStrip(
+              live: live({'me': const LiveBoardRow(o: 7, r: 12, w: 1)}),
+              week: 3,
+              uid: 'me',
+              voidedWeeks: const {}),
+          'Your gameweek so far: 1 pt · #12');
     });
 
     test('only while THIS game\'s gameweek is the live one: another week, '

@@ -7,6 +7,7 @@ import 'package:infinite_sports_flutter/misc/league_stat_categories.dart';
 import 'package:infinite_sports_flutter/misc/league_form.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/notification_topics.dart';
+import 'package:infinite_sports_flutter/misc/points_text.dart';
 import 'package:infinite_sports_flutter/misc/top_stats.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -268,7 +269,8 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage>
                       const SkeletonBox(width: 170, height: 12)
                     else
                       Text(
-                        'W${team.wins} D${team.draws} L${team.losses} · ${team.points} pts · Season ${widget.season}',
+                        'W${team.wins} D${team.draws} L${team.losses} · '
+                        '${pointsText(team.points)} · Season ${widget.season}',
                         style: TextStyle(color: muted, fontSize: 12),
                       ),
                     if (form.isNotEmpty) ...[

@@ -12,6 +12,7 @@
 // `await showDialog`.
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/transfer_preview.dart';
@@ -24,7 +25,8 @@ String pointsHitBody(TransferPreview p) =>
     '${p.costPoints == 1 ? 'point' : 'points'} this week.';
 
 /// "Save (−4 pts)" — the confirm button carries the cost.
-String pointsHitSaveLabel(TransferPreview p) => 'Save (−${p.costPoints} pts)';
+String pointsHitSaveLabel(TransferPreview p) =>
+    'Save (−${pointsText(p.costPoints)})';
 
 /// Asks before a save whose cost went UP. [preview] is the counted preview
 /// of the squad about to be saved. true = save it; anything else = don't.

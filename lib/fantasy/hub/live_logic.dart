@@ -34,6 +34,7 @@
 // A failed or unknown load, or a started week we cannot read, says exactly
 // "Locked". A number is never made up.
 
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
@@ -115,11 +116,14 @@ class LockedWeekView {
     case LockedWeekKind.live:
       final m = v.movement;
       return (
-        main: '${v.weekPoints} pts$rank',
+        main: '${pointsText(v.weekPoints!)}$rank',
         movement: m == null || m == 0 ? null : movementLabel(m),
       );
     case LockedWeekKind.settled:
-      return (main: 'Final · ${v.weekPoints} pts$rank', movement: null);
+      return (
+        main: 'Final · ${pointsText(v.weekPoints!)}$rank',
+        movement: null
+      );
     case LockedWeekKind.voided:
       return (main: 'Voided · this week counts 0', movement: null);
     case LockedWeekKind.invalid:
@@ -147,9 +151,9 @@ String lockedStripText(LockedWeekView v) {
 ({String text, bool live})? viewerWeekStrip(LockedWeekView v) {
   switch (v.kind) {
     case LockedWeekKind.live:
-      return (text: '${v.weekPoints} pts', live: true);
+      return (text: pointsText(v.weekPoints!), live: true);
     case LockedWeekKind.settled:
-      return (text: 'Final · ${v.weekPoints} pts', live: false);
+      return (text: 'Final · ${pointsText(v.weekPoints!)}', live: false);
     case LockedWeekKind.voided:
     case LockedWeekKind.invalid:
       return (text: lockedStripText(v), live: false);
@@ -182,7 +186,7 @@ String? liveBannerLine({
   final row = live.board[uid];
   final points = row?.w;
   if (row == null || points == null) return null;
-  return 'GW$week live · $points pts · #${row.r}';
+  return 'GW$week live · ${pointsText(points)} · #${row.r}';
 }
 
 /// The match tab's line under its header, verbatim from the plan: `Your
@@ -208,26 +212,22 @@ String? matchWeekStrip({
   final row = live.board[uid];
   final points = row?.w;
   if (row == null || points == null) return null;
-  return 'Your gameweek so far: $points pts · #${row.r}';
+  return 'Your gameweek so far: ${pointsText(points)} · #${row.r}';
 }
 
 // ── The chip ───────────────────────────────────────────────────────────────
 
-/// Tenths of a point → "8", "2.5", "-0.5": one decimal only when not whole
-/// (a bench player's half points).
-String _points(int tenths) =>
-    tenths % 10 == 0 ? '${tenths ~/ 10}' : (tenths / 10).toStringAsFixed(1);
-
 /// A court chip's week line for one player: `Not started` · `{pts} pts · live`
-/// · `{pts} pts` · `Out`. [slot] is his counted row (the captain's multiplier,
+/// · `{pts} pts` · `Out` — the unit agrees with the count (`1 pt`; a bench
+/// player's half points stay `2.5 pts`, fantasy_format.pointsTenthsText). [slot] is his counted row (the captain's multiplier,
 /// the bench factor and any auto-sub already applied); null (he is not in the
 /// squad's rows) → no text.
 String? chipWeekText(LiveSlot? slot, LivePlayerStatus st) {
   if (slot == null) return null;
   return switch (st) {
     LivePlayerStatus.pending => 'Not started',
-    LivePlayerStatus.live => '${_points(slot.countedTenths)} pts · live',
-    LivePlayerStatus.done => '${_points(slot.countedTenths)} pts',
+    LivePlayerStatus.live => '${pointsTenthsText(slot.countedTenths)} · live',
+    LivePlayerStatus.done => pointsTenthsText(slot.countedTenths),
     LivePlayerStatus.out => 'Out',
   };
 }

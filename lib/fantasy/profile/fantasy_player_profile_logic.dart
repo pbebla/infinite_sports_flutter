@@ -397,9 +397,6 @@ String sourceLineLabel(SourceTotal s) => s.key == 'bonus'
     ? (s.provisional ? '${s.label} (provisional)' : s.label)
     : '${s.label} ×${s.count}';
 
-/// "52 pts" / "1 pt" / "-1 pt".
-String pointsText(int points) => '$points ${points.abs() == 1 ? 'pt' : 'pts'}';
-
 /// The stat strip's move line: "▲ $0.5M this week" / "▼ $0.5M this week" /
 /// "No change"; null before the first reprice (show nothing).
 String? moveThisWeekText(int? moveTenths) {

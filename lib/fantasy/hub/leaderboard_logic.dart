@@ -14,6 +14,7 @@
 
 import 'dart:math' as math;
 
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/steady_order.dart'
@@ -345,7 +346,7 @@ class GameweekSummary {
 
   /// "Average 48 pts · Highest 96 (Sweeper Keepers) · You 52".
   String get label => [
-        'Average $average pts',
+        'Average ${pointsText(average)}',
         'Highest $highest ($highestWho)',
         if (you != null) 'You $you',
       ].join(' · ');

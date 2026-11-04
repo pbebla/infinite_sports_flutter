@@ -7,6 +7,9 @@ import 'package:intl/intl.dart';
 
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/league_time.dart';
+import 'package:infinite_sports_flutter/misc/points_text.dart';
+
+export 'package:infinite_sports_flutter/misc/points_text.dart';
 
 /// 85 → "$8.5M", 500 → "$50.0M".
 String formatMoneyTenths(int tenths) =>
@@ -20,6 +23,16 @@ String formatFormTenths(int? formTenths, {required int? games}) =>
     (games == null || games == 0 || formTenths == null)
         ? '—'
         : (formTenths / 10).toStringAsFixed(1);
+
+/// Tenths of a point → its number: "8", "2.5", "-0.5" — one decimal only
+/// when not whole (a bench player's half points).
+String formatPointsTenths(int tenths) =>
+    tenths % 10 == 0 ? '${tenths ~/ 10}' : (tenths / 10).toStringAsFixed(1);
+
+/// Tenths of a point with the unit that agrees (pointsUnit): "8 pts",
+/// "1 pt", "-1 pt", "2.5 pts", "0 pts".
+String pointsTenthsText(int tenths) =>
+    '${formatPointsTenths(tenths)} ${pointsUnit(tenths / 10)}';
 
 /// League-local lock hour → "3:00 PM" (cfg.lockHour is league wall-clock).
 String formatLockHour(int hour) {
