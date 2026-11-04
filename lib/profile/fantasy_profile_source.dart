@@ -191,13 +191,23 @@ FantasyProfileAccess? fantasyProfileAccess({
 /// (positive = climbed). All null = no entry yet (no finalized gameweek, or
 /// he has not scored) — the tab then shows copy, never made-up zeros.
 class FantasyManagerStanding {
-  const FantasyManagerStanding({this.rank, this.points, this.movement});
+  const FantasyManagerStanding({
+    this.rank,
+    this.points,
+    this.movement,
+    this.live = false,
+  });
 
   static const FantasyManagerStanding unranked = FantasyManagerStanding();
 
   final int? rank;
   final int? points;
   final int? movement;
+
+  /// The numbers are the live gameweek's provisional ones (the `Live/Board`
+  /// overlay of the boards this tab holds): the manager card carries the
+  /// shared LIVE pill.
+  final bool live;
 
   bool get ranked => rank != null;
 }
@@ -211,6 +221,7 @@ FantasyManagerStanding managerStanding(FantasyLeaderboards boards, String uid) {
         rank: e.rank ?? i + 1,
         points: e.points,
         movement: e.movement,
+        live: e.live,
       );
     }
   }

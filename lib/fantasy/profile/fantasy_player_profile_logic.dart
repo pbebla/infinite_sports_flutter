@@ -9,6 +9,14 @@
 // `PriceHistory` / `PriceChanges` week maps. A voided week scores zero
 // everywhere: it keeps its Matches row ("Week voided — 0"), its form bar
 // (flagged) and its price row, but never counts toward a season total.
+//
+// Live everywhere (Task 7): while a gameweek is being played the feeds carry
+// its provisional numbers — the week's record has `live` (and
+// `bonusProvisional` while a game that is not Final yet pays its bonus as if it
+// ended now), the totals row has `live`. The model passes those flags on
+// ([FantasyProfileModel.live], [FormBar.live], [MatchRow.live],
+// [SourceTotal.provisional]) so the widgets can mark them; a flag never changes
+// a number.
 
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
@@ -34,12 +42,21 @@ const String kFinalPriceLabel = 'Final price';
 
 /// One recent-form bar: a gameweek he has a record for.
 class FormBar {
-  const FormBar({required this.gw, required this.points, required this.voided});
+  const FormBar({
+    required this.gw,
+    required this.points,
+    required this.voided,
+    this.live = false,
+  });
   final int gw;
 
   /// Bonus-inclusive week points (0 for a voided week).
   final int points;
   final bool voided;
+
+  /// The gameweek is being played: [points] are provisional (the bar is drawn
+  /// hollow and labelled LIVE).
+  final bool live;
 }
 
 /// One source of points ("Goals ×13 — 52 pts"): a week's line, or the
@@ -49,12 +66,17 @@ class SourceTotal {
     required this.key,
     required this.count,
     required this.points,
+    this.provisional = false,
   });
 
   /// The stable server line key (`goals`, `plays`, `bonus`, …).
   final String key;
   final int count;
   final int points;
+
+  /// A BONUS line that includes a game still being played: it can change
+  /// until that game is Final. Only ever true for the `bonus` key.
+  final bool provisional;
 
   String get label => scoreSourceLabel(key);
 }
@@ -69,6 +91,7 @@ class MatchRow {
     required this.lines,
     required this.voided,
     required this.played,
+    this.live = false,
   });
 
   final int gw;
@@ -90,6 +113,9 @@ class MatchRow {
 
   /// He played at least one game that week.
   final bool played;
+
+  /// The gameweek is being played: the points and lines are provisional.
+  final bool live;
 }
 
 /// One Price-tab row: the price he had DURING [gw] (snapshotted at that
@@ -127,9 +153,14 @@ class FantasyProfileModel {
     required this.startPriceTenths,
     required this.highTenths,
     required this.lowTenths,
+    this.live = false,
   });
 
   final FantasyPlayer player;
+
+  /// The numbers include the gameweek being played (his totals row or a weekly
+  /// record is live): the stat strip carries the shared LIVE pill.
+  final bool live;
 
   /// Current price (tenths) — the live market value.
   int get priceTenths => player.priceTenths;
@@ -212,12 +243,16 @@ int _sourceRank(String key) {
   return i < 0 ? _sourceOrder.length : i;
 }
 
-/// Sums [lineMaps] per key, drops zero-point keys, sorts |points| desc.
-List<SourceTotal> _sumSources(Iterable<Map<String, ScoreSourceLine>> lineMaps) {
+/// Sums the lines of [weeks] per key, drops zero-point keys, sorts |points|
+/// desc. The bonus line is [SourceTotal.provisional] when any of the weeks
+/// pays a bonus from a game that is not Final yet (a live week).
+List<SourceTotal> _sumSources(Iterable<PlayerWeekStats> weeks) {
   final counts = <String, int>{};
   final points = <String, int>{};
-  for (final lines in lineMaps) {
-    lines.forEach((key, line) {
+  var provisionalBonus = false;
+  for (final week in weeks) {
+    if (week.live && week.bonusProvisional) provisionalBonus = true;
+    week.lines.forEach((key, line) {
       counts[key] = (counts[key] ?? 0) + line.count;
       points[key] = (points[key] ?? 0) + line.points;
     });
@@ -225,7 +260,12 @@ List<SourceTotal> _sumSources(Iterable<Map<String, ScoreSourceLine>> lineMaps) {
   final out = [
     for (final key in points.keys)
       if (points[key] != 0)
-        SourceTotal(key: key, count: counts[key]!, points: points[key]!),
+        SourceTotal(
+          key: key,
+          count: counts[key]!,
+          points: points[key]!,
+          provisional: key == 'bonus' && provisionalBonus,
+        ),
   ];
   out.sort((a, b) {
     final byPoints = b.points.abs().compareTo(a.points.abs());
@@ -259,13 +299,14 @@ FantasyProfileModel buildProfileModel({
         gw: gw,
         points: weeks[gw]!.voided ? 0 : weeks[gw]!.points,
         voided: weeks[gw]!.voided,
+        live: weeks[gw]!.live,
       ),
   ];
 
   // Season sources: non-voided weeks only.
   final sourceTotals = _sumSources([
     for (final gw in gws)
-      if (!weeks[gw]!.voided) weeks[gw]!.lines,
+      if (!weeks[gw]!.voided) weeks[gw]!,
   ]);
 
   // Matches: running season total ascending, rendered newest first.
@@ -279,9 +320,10 @@ FantasyProfileModel buildProfileModel({
       opponentsText: opponentsText(w.games),
       points: w.voided ? 0 : w.points,
       seasonToDate: running,
-      lines: w.voided ? const [] : _sumSources([w.lines]),
+      lines: w.voided ? const [] : _sumSources([w]),
       voided: w.voided,
       played: w.played,
+      live: w.live,
     ));
   }
 
@@ -331,6 +373,7 @@ FantasyProfileModel buildProfileModel({
     startPriceTenths: start,
     highTenths: high,
     lowTenths: low,
+    live: (totals?.live ?? false) || weeks.values.any((w) => w.live),
   );
 }
 
@@ -348,9 +391,11 @@ String opponentsText(List<PlayerWeekGame> games) {
   ].join(' · ');
 }
 
-/// "Goals ×13"; the bonus line's count IS its points, so it reads "Bonus".
-String sourceLineLabel(SourceTotal s) =>
-    s.key == 'bonus' ? s.label : '${s.label} ×${s.count}';
+/// "Goals ×13"; the bonus line's count IS its points, so it reads "Bonus" —
+/// "Bonus (provisional)" while a game that pays into it is still being played.
+String sourceLineLabel(SourceTotal s) => s.key == 'bonus'
+    ? (s.provisional ? '${s.label} (provisional)' : s.label)
+    : '${s.label} ×${s.count}';
 
 /// "52 pts" / "1 pt" / "-1 pt".
 String pointsText(int points) => '$points ${points.abs() == 1 ? 'pt' : 'pts'}';

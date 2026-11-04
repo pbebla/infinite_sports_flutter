@@ -139,6 +139,26 @@ String lockedStripText(LockedWeekView v) {
       : '${parts.main} ${parts.movement}';
 }
 
+/// The manager squad viewer's week line (Task 7) for the same [LockedWeekView]:
+/// `{W} pts` while the week is live (the pill renders beside it), `Final · {W}
+/// pts` once settled, and My Team's own copy for a voided or invalid week. No
+/// rank or movement — the viewer is about the squad, not the table. null = a
+/// week we cannot read yet, or before kickoff: no line at all.
+({String text, bool live})? viewerWeekStrip(LockedWeekView v) {
+  switch (v.kind) {
+    case LockedWeekKind.live:
+      return (text: '${v.weekPoints} pts', live: true);
+    case LockedWeekKind.settled:
+      return (text: 'Final · ${v.weekPoints} pts', live: false);
+    case LockedWeekKind.voided:
+    case LockedWeekKind.invalid:
+      return (text: lockedStripText(v), live: false);
+    case LockedWeekKind.waiting:
+    case LockedWeekKind.unknown:
+      return null;
+  }
+}
+
 // ── The banners ────────────────────────────────────────────────────────────
 
 /// The hub banner's and the front page banner's live line, verbatim from the
@@ -163,6 +183,32 @@ String? liveBannerLine({
   final points = row?.w;
   if (row == null || points == null) return null;
   return 'GW$week live · $points pts · #${row.r}';
+}
+
+/// The match tab's line under its header, verbatim from the plan: `Your
+/// gameweek so far: {W} pts · #{R}` — this manager's whole points so far this
+/// gameweek and his Overall rank with them, both from HIS row of the live
+/// board. Only while THIS game's gameweek ([week]) is the live one
+/// ([liveAppliesTo]: no live node, another week or the settled tombstone say
+/// nothing); null otherwise, and also for nobody signed in, no row for him, no
+/// points this week (`W` absent = no squad scored; a real 0 is a number and
+/// shows), a week the owner VOIDED (the live board says 0 pts · #1 for all of
+/// them — the Voided set, never the live record, decides) and an UNKNOWN Voided
+/// set ([voidedWeeks] null: its feed failed or has not answered — never read
+/// as "none voided").
+String? matchWeekStrip({
+  required FantasyLiveState live,
+  required int? week,
+  required String? uid,
+  required Set<int>? voidedWeeks,
+}) {
+  if (week == null || uid == null || uid.isEmpty) return null;
+  if (voidedWeeks == null || voidedWeeks.contains(week)) return null;
+  if (!liveAppliesTo(meta: live.meta, week: week)) return null;
+  final row = live.board[uid];
+  final points = row?.w;
+  if (row == null || points == null) return null;
+  return 'Your gameweek so far: $points pts · #${row.r}';
 }
 
 // ── The chip ───────────────────────────────────────────────────────────────

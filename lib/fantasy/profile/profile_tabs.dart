@@ -4,10 +4,13 @@
 // first, tap to expand; voided weeks "Week voided — 0") and Price (start /
 // current / high / low + per-week price and the move after it). Every tab is
 // a plain Column the page places in its single scroll view; empty states are
-// friendly copy, never zeros.
+// friendly copy, never zeros. Live everywhere (Task 7): the gameweek being
+// played carries the shared LIVE pill on its Matches row and its breakdown, and
+// a bonus that can still change reads "Bonus (provisional)".
 
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/profile_common.dart';
@@ -151,14 +154,26 @@ class _WeekBreakdown extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'GW${row.gw} · ${row.opponentsText}',
-            softWrap: true,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: scheme.onSurfaceVariant,
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  'GW${row.gw} · ${row.opponentsText}',
+                  softWrap: true,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              // The gameweek being played: these lines are provisional.
+              if (row.live) ...[
+                const SizedBox(width: 8),
+                FantasyLivePill(key: ValueKey('week_breakdown_live_${row.gw}')),
+              ],
+            ],
           ),
           const SizedBox(height: 4),
           ..._weekLines(context, row),
@@ -435,6 +450,12 @@ class _MatchRowCard extends StatelessWidget {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
+                        // The gameweek being played: provisional numbers.
+                        if (row.live)
+                          const Padding(
+                            padding: EdgeInsets.only(bottom: 4),
+                            child: FantasyLivePill(),
+                          ),
                         Text(
                           pointsText(row.points),
                           key: ValueKey('match_points_${row.gw}'),

@@ -3,7 +3,10 @@
 // and "GW7" under it; tapping a bar selects that week (the Overview shows its
 // breakdown). Plain widgets — no chart package. Bars use the fantasy accent
 // (gold on dark, primary red on light); a negative week is a red stub, a
-// voided week a muted stub labelled "Void".
+// voided week a muted stub labelled "Void". The gameweek being played (live
+// everywhere, Task 7) is drawn HOLLOW — a 2 px outline in the bar's own tone,
+// no fill — with a small red "LIVE" under its "GW7"; it fills in when the week
+// settles. Its points are the provisional ones.
 
 import 'dart:math' as math;
 
@@ -65,20 +68,39 @@ class FantasyFormBars extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             for (final b in bars)
               Expanded(
-                child: Text(
-                  'GW${b.gw}',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight:
-                        b.gw == selectedGw ? FontWeight.w800 : FontWeight.w600,
-                    color: b.gw == selectedGw
-                        ? scheme.onSurface
-                        : scheme.onSurfaceVariant,
-                  ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'GW${b.gw}',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: b.gw == selectedGw
+                            ? FontWeight.w800
+                            : FontWeight.w600,
+                        color: b.gw == selectedGw
+                            ? scheme.onSurface
+                            : scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    if (b.live)
+                      Text(
+                        'LIVE',
+                        key: ValueKey('form_bar_live_${b.gw}'),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5,
+                          color: fantasyDownRed(context),
+                        ),
+                      ),
+                  ],
                 ),
               ),
           ],
@@ -133,10 +155,13 @@ class _Bar extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Container(
+              key: ValueKey('form_bar_fill_${bar.gw}'),
               width: 24,
               height: height,
               decoration: BoxDecoration(
-                color: tone,
+                // The week being played is hollow: an outline, no fill.
+                color: bar.live ? null : tone,
+                border: bar.live ? Border.all(color: tone, width: 2) : null,
                 borderRadius:
                     const BorderRadius.vertical(top: Radius.circular(5)),
               ),

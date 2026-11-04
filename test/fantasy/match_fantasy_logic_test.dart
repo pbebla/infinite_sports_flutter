@@ -5,8 +5,10 @@
 // bench at face value), and the animate-on-genuine-increase session memory.
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/match/match_fantasy_logic.dart';
 
@@ -387,5 +389,207 @@ void main() {
       // Independent games never cross-talk.
       expect(recordEarningValue(store, 'g2', 5), isNull);
     });
+  });
+
+  // ── Live everywhere (Task 7) ─────────────────────────────────────────────
+
+  group('matchPhase (the header: LIVE or FINAL from the game status)', () {
+    test('1 is live, 2 is final, everything else has not started', () {
+      expect(matchPhase(1), MatchPhase.live);
+      expect(matchPhase(2), MatchPhase.finished);
+      expect(matchPhase('1'), MatchPhase.live);
+      expect(matchPhase(' 2 '), MatchPhase.finished);
+      expect(matchPhase(2.0), MatchPhase.finished);
+      expect(matchPhase(0), MatchPhase.notStarted);
+      expect(matchPhase(null), MatchPhase.notStarted);
+      expect(matchPhase('soon'), MatchPhase.notStarted);
+    });
+
+    test('agrees with matchStarted: started = live or final', () {
+      for (final s in [0, 1, 2, null, 'x', '1', '2']) {
+        expect(matchPhase(s) != MatchPhase.notStarted, matchStarted(s),
+            reason: '$s');
+      }
+    });
+  });
+
+  group('gameweekForDate (which gameweek a game belongs to)', () {
+    final gws = [
+      for (var i = 1; i <= 3; i++)
+        Gameweek(
+          number: i,
+          date: '0${i}152026',
+          lockUtc: DateTime.utc(2026, i, 15, 17),
+          opensUtc: null,
+        ),
+    ];
+
+    test('the gameweek whose match day is the game\'s date', () {
+      expect(gameweekForDate(gws, '02152026')!.number, 2);
+      expect(gameweekForDate(gws, '01152026')!.number, 1);
+    });
+
+    test('a date that is not on the schedule belongs to no gameweek', () {
+      expect(gameweekForDate(gws, '04152026'), isNull);
+      expect(gameweekForDate(const [], '01152026'), isNull);
+    });
+  });
+
+  group('matchViewerSquad (the squad this game is scored against)', () {
+    // GW1 locks Jan 15 17:00 UTC; GW2 Feb 15; GW3 Mar 15.
+    final gws = [
+      for (var i = 1; i <= 3; i++)
+        Gameweek(
+          number: i,
+          date: '0${i}152026',
+          lockUtc: DateTime.utc(2026, i, 15, 17),
+          opensUtc: null,
+        ),
+    ];
+    final locked = squad(captain: 'Alex', chip: 'tripleCaptain');
+    final saved = squad(captain: 'Dana');
+    final earlier = squad(captain: 'Gale');
+
+    MatchViewerSquad pick({
+      required int week,
+      DateTime? now,
+      FantasyLockOverride override = FantasyLockOverride.auto,
+      FantasySquad? published,
+      HistoryWeek? history,
+      FantasySquad? current,
+    }) =>
+        matchViewerSquad(
+          gameweek: gws[week - 1],
+          gameweeks: gws,
+          lockOverride: override,
+          nowUtc: now ?? DateTime.utc(2026, 2, 15, 20),
+          published: published,
+          history: history,
+          current: current,
+        );
+
+    HistoryWeek historyOf(FantasySquad? s) =>
+        HistoryWeek(slots: const [], squad: s);
+
+    test('a past game uses the squad that was LOCKED that week, not the '
+        'squad saved since (the regression)', () {
+      final r = pick(week: 1, published: locked, current: saved);
+      expect(r.source, MatchSquadSource.lockedSquad);
+      expect(r.squad, same(locked));
+      expect(r.squad!.captainId, 'Alex');
+      expect(r.squad!.chip, 'tripleCaptain');
+    });
+
+    test('PublishedPicks wins; History is the fallback; each over the '
+        'current squad', () {
+      final both = pick(
+          week: 1,
+          published: locked,
+          history: historyOf(earlier),
+          current: saved);
+      expect(both.squad, same(locked));
+
+      final historyOnly =
+          pick(week: 1, history: historyOf(earlier), current: saved);
+      expect(historyOnly.source, MatchSquadSource.lockedSquad);
+      expect(historyOnly.squad, same(earlier));
+    });
+
+    test('a locked week with no locked squad on record has NO viewer squad '
+        '(never the current one)', () {
+      final r = pick(week: 1, current: saved);
+      expect(r.squad, isNull);
+      expect(r.source, MatchSquadSource.none);
+      // History with nothing readable in it is no squad either.
+      expect(pick(week: 1, history: historyOf(null), current: saved).squad,
+          isNull);
+    });
+
+    test('Squads/<uid> only for a week that has not locked yet', () {
+      final r = pick(
+          week: 3,
+          now: DateTime.utc(2026, 2, 20),
+          current: saved);
+      expect(r.source, MatchSquadSource.currentSquad);
+      expect(r.squad, same(saved));
+      // Right up to the lock instant, and not a moment after.
+      expect(
+          pick(
+                  week: 2,
+                  now: DateTime.utc(2026, 2, 15, 16, 59),
+                  current: saved)
+              .source,
+          MatchSquadSource.currentSquad);
+      expect(
+          pick(
+                  week: 2,
+                  now: DateTime.utc(2026, 2, 15, 17),
+                  current: saved)
+              .source,
+          MatchSquadSource.none);
+    });
+
+    test('the owner\'s lock override: "locked" locks the CURRENT gameweek '
+        'only', () {
+      final now = DateTime.utc(2026, 2, 15, 12); // GW2 is current, unlocked
+      expect(
+          pick(
+                  week: 2,
+                  now: now,
+                  override: FantasyLockOverride.locked,
+                  current: saved)
+              .source,
+          MatchSquadSource.none);
+      // Another, future gameweek is not the current one.
+      expect(
+          pick(
+                  week: 3,
+                  now: now,
+                  override: FantasyLockOverride.locked,
+                  current: saved)
+              .source,
+          MatchSquadSource.currentSquad);
+    });
+
+    test('an "open" override never makes a past week editable again — the '
+        'locked squad still wins', () {
+      final r = pick(
+          week: 1,
+          override: FantasyLockOverride.open,
+          published: locked,
+          current: saved);
+      expect(r.squad, same(locked));
+      // And with nothing locked on record it is still not the current one.
+      expect(
+          pick(week: 1, override: FantasyLockOverride.open, current: saved)
+              .squad,
+          isNull);
+    });
+
+    test('an unknown gameweek (not on the schedule) has no viewer squad',
+        () {
+      final r = matchViewerSquad(
+        gameweek: null,
+        gameweeks: gws,
+        lockOverride: FantasyLockOverride.auto,
+        nowUtc: DateTime.utc(2026, 2, 15, 20),
+        published: locked,
+        current: saved,
+      );
+      expect(r.squad, isNull);
+      expect(r.source, MatchSquadSource.none);
+    });
+  });
+
+  test('the footnote ends with the My Team sentence, verbatim', () {
+    expect(kMatchFootnote,
+        endsWith(' Bonus, captain and bench counting show on My Team.'));
+    // The existing disclaimer is kept in full.
+    expect(
+        kMatchFootnote,
+        startsWith('Raw game points, live from the capture. Bench weighting, '
+            'auto-subs, vice-captain cover and the 3/2/1 bonus are applied '
+            'when the gameweek is finalized — your counted week can '
+            'differ.'));
   });
 }

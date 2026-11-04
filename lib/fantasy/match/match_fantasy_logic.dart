@@ -20,9 +20,26 @@
 // showed up lists "+1" per present player, the forfeiting team is omitted
 // (it did not play), stray recorded events are ignored, and the header
 // carries a short note (matchForfeitNote).
+//
+// LIVE EVERYWHERE (Task 7):
+//   - the header says LIVE or FINAL from the game's own status ([matchPhase]);
+//   - THE VIEWER'S SQUAD for a game is the squad that was LOCKED for that
+//     game's gameweek ([matchViewerSquad]): `PublishedPicks/<gw>/<uid>`, else
+//     `History/<gw>/<uid>`'s own squad — never `Squads/<uid>`, which holds
+//     whatever the manager saved SINCE (a past game scored against today's
+//     squad would highlight players he did not own that week, and a Triple
+//     Captain week would read ×2). `Squads/<uid>` only for a week that has
+//     not locked yet; a locked week with no locked squad on record has no
+//     viewer layer at all;
+//   - [gameweekForDate]: a game belongs to the gameweek whose match day is
+//     its date (one gameweek per match day, gameweeks.dart);
+//   - the footnote gains the My Team sentence ([kMatchFootnote]).
 
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart'
+    show FantasyLockOverride, HistoryWeek;
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/player_game_stats.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/scoring.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
@@ -40,12 +57,89 @@ bool showMatchFantasyTab({required bool configExists, required String? stage}) =
 /// 2 final; int or String tolerated like the adapters). Pre-kickoff the tab
 /// shows its "points land here live" face instead of a wall of default
 /// appearance points.
-bool matchStarted(Object? status) {
+bool matchStarted(Object? status) => matchPhase(status) != MatchPhase.notStarted;
+
+/// Where a game is, from its raw `status` (1 live, 2 final; int or String
+/// tolerated like the adapters; anything else has not started). The tab's
+/// header reads this: LIVE (the shared pill) or FINAL.
+enum MatchPhase { notStarted, live, finished }
+
+MatchPhase matchPhase(Object? status) {
   final s = status is num
       ? status.toInt()
       : int.tryParse(status?.toString().trim() ?? '') ?? 0;
-  return s >= 1;
+  if (s >= 2) return MatchPhase.finished;
+  if (s == 1) return MatchPhase.live;
+  return MatchPhase.notStarted;
 }
+
+/// The gameweek a game belongs to: the one whose match day is the game's
+/// [dateKey] (`MMDDYYYY`, the key it lives under). null = the date is not on
+/// the schedule (or the schedule is not known).
+Gameweek? gameweekForDate(List<Gameweek> gameweeks, String dateKey) {
+  for (final g in gameweeks) {
+    if (g.date == dateKey) return g;
+  }
+  return null;
+}
+
+/// Where the viewer's squad for a game came from.
+enum MatchSquadSource {
+  /// The squad that was LOCKED for the game's gameweek (PublishedPicks, else
+  /// History).
+  lockedSquad,
+
+  /// `Squads/<uid>`: the week has not locked yet, so what he has saved IS his
+  /// squad for it.
+  currentSquad,
+
+  /// No viewer squad: the week is locked and none is on record, or the
+  /// gameweek is unknown.
+  none,
+}
+
+typedef MatchViewerSquad = ({FantasySquad? squad, MatchSquadSource source});
+
+/// The viewer's squad for a game in [gameweek]: [published] (the lock's
+/// snapshot, `PublishedPicks/<gw>/<uid>`), else [history]'s own squad
+/// (`History/<gw>/<uid>`), else — only while the week has not locked yet —
+/// [current] (`Squads/<uid>`). A locked week with nothing on record, and a
+/// game whose gameweek is unknown, have no viewer squad: never the current one.
+///
+/// Locked = the clock is at or past the gameweek's lock, or the owner's lock
+/// override says "locked" and this is the CURRENT gameweek (an "open" override
+/// never makes a past week editable again — and where a locked squad exists it
+/// wins whatever the override says).
+MatchViewerSquad matchViewerSquad({
+  required Gameweek? gameweek,
+  required List<Gameweek> gameweeks,
+  required FantasyLockOverride lockOverride,
+  required DateTime nowUtc,
+  FantasySquad? published,
+  HistoryWeek? history,
+  FantasySquad? current,
+}) {
+  if (gameweek == null) {
+    return (squad: null, source: MatchSquadSource.none);
+  }
+  final lockedSquad = published ?? history?.squad;
+  if (lockedSquad != null) {
+    return (squad: lockedSquad, source: MatchSquadSource.lockedSquad);
+  }
+  final locked = !nowUtc.isBefore(gameweek.lockUtc) ||
+      (lockOverride == FantasyLockOverride.locked &&
+          currentGameweek(gameweeks, nowUtc)?.number == gameweek.number);
+  if (locked) return (squad: null, source: MatchSquadSource.none);
+  return (squad: current, source: MatchSquadSource.currentSquad);
+}
+
+/// The tab's footnote: the raw-points disclaimer, and (Fable S2) where the
+/// counted numbers live.
+const String kMatchFootnote =
+    'Raw game points, live from the capture. Bench weighting, auto-subs, '
+    'vice-captain cover and the 3/2/1 bonus are applied when the gameweek is '
+    'finalized — your counted week can differ. Bonus, captain and bench '
+    'counting show on My Team.';
 
 /// Port of the Manager's absent-only attendance node (team{n}attendance):
 /// ABSENT players only, stored as name -> false (string 'false' tolerated);

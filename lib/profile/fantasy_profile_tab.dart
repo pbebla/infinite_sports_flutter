@@ -19,6 +19,9 @@
 // ellipsized or underlined; colours from the theme's colorScheme (the
 // fantasy accent / up-down tones are the hub's brightness-aware pairs);
 // the page keeps the tab alive so flipping tabs never replays the fade.
+// Live everywhere (Task 7): while a gameweek is being played the player card
+// (his totals or a weekly record are live; the live week's bar is hollow) and
+// the manager card (his Overall row is live) each carry the shared LIVE pill.
 
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart'
@@ -35,6 +38,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart'
     show movementDirection, movementLabel, rankSeriesFor;
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart'
     show movementColor;
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/manager_squad_viewer.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_page.dart'
@@ -185,6 +189,29 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
+/// A card's section label, with the shared LIVE pill at its right edge while
+/// the card's numbers are the gameweek being played's (live everywhere,
+/// Task 7).
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader(this.text, {required this.live, required this.pillKey});
+
+  final String text;
+  final bool live;
+  final Key pillKey;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!live) return _SectionLabel(text);
+    return Row(
+      children: [
+        Expanded(child: _SectionLabel(text)),
+        const SizedBox(width: 8),
+        FantasyLivePill(key: pillKey),
+      ],
+    );
+  }
+}
+
 /// One "value over label" strip cell; "—" values stay muted-looking by
 /// content alone (the label says what is missing).
 class _Cell extends StatelessWidget {
@@ -294,7 +321,12 @@ class _PlayerCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _SectionLabel('Fantasy Player'),
+            _SectionHeader(
+              'Fantasy Player',
+              // His numbers include the gameweek being played.
+              live: model.live,
+              pillKey: const ValueKey('fantasy_player_live_pill'),
+            ),
             const SizedBox(height: 10),
             Text(
               teamLine,
@@ -456,7 +488,12 @@ class _ManagerCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _SectionLabel('Fantasy Manager'),
+            _SectionHeader(
+              'Fantasy Manager',
+              // His rank and points are the live gameweek's provisional ones.
+              live: standing.live,
+              pillKey: const ValueKey('fantasy_manager_live_pill'),
+            ),
             const SizedBox(height: 10),
             Text(
               teamName ?? kFantasyUnnamedTeam,

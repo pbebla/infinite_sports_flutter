@@ -12,22 +12,52 @@
 // vice promotion and the 3/2/1 bonus are WEEKLY concepts the server applies
 // at finalize, so the counted week can differ. The footer says so in-app.
 //
+// LIVE EVERYWHERE (Task 7):
+//   (a) the header says LIVE (the shared pill) or FINAL from the game's own
+//       status — live and final used to render identically;
+//   (b) the viewer's squad for a game is the squad that was LOCKED for the
+//       game's gameweek — `PublishedPicks/<gw>/<uid>`, else `History/<gw>/<uid>`
+//       — read per week (one small node each, never the whole PublishedPicks
+//       or History); `Squads/<uid>` only for a week that has not locked, and a
+//       locked week with no locked squad on record has no viewer layer (the
+//       logic is match_fantasy_logic.matchViewerSquad). Before, a past game was
+//       scored against whatever he had saved since;
+//   (c) while the game's gameweek is live, a strip under the header: `Your
+//       gameweek so far: {W} pts · #{R}` from his row of the live board (a
+//       voided week and an unknown Voided set say nothing);
+//   (d) the footnote gains `Bonus, captain and bench counting show on My
+//       Team.` — this tab shows RAW per-game points, My Team the counted ones.
+// The new feeds (the schedule that places the game in its gameweek, the locked
+// squad, the week's record, the live feed, the Voided set) join the tab's
+// single reveal through an [AnswerGate]: an error counts as an answer (the
+// viewer layer is then simply absent — never a wrong squad), bounded at the
+// global 2 s; a late answer lands in place. Signed out: none of it.
+//
 // House rules: streams only (no RTDB .get()); SINGLE fade reveal once the
 // game node + players + squad streams have all landed; theme-safe both modes
 // via colorScheme + the shared fantasy accent; names wrap, never underlined;
 // glass-navbar bottom clearance; the earning chip's counter animates 250ms
 // on a GENUINE increase only — a stream reconnect or page re-push re-delivers
-// the same value and never replays the tween (session memory keyed by game).
+// the same value and never replays the tween (session memory keyed by game;
+// only ever fed REAL values — never one worked out before the locked squad
+// was known).
 
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/answer_gate.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/match/match_fantasy_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_page.dart';
@@ -50,6 +80,14 @@ class MatchFantasyTab extends StatefulWidget {
     this.onOpenHub,
     this.earningStore,
     this.profileOpener,
+    this.gameweekStates,
+    this.publishedPicksFor,
+    this.historyWeekFor,
+    this.liveStates,
+    this.voidedStates,
+    this.selfUidOverride,
+    this.nowUtc,
+    this.liveWait = kLiveJoinWait,
   });
 
   final String sport;
@@ -80,6 +118,36 @@ class MatchFantasyTab extends StatefulWidget {
   /// Test seam replacing [openFantasyPlayerProfile] (a points row's tap).
   final FantasyProfileOpener? profileOpener;
 
+  // ── Live everywhere (Task 7) — test seams, null = the real feeds ────────
+
+  /// Replaces the config-derived schedule that places the game in its
+  /// gameweek (the shared [FantasyScheduleFeed]).
+  final Stream<List<Gameweek>>? gameweekStates;
+
+  /// The squad that was LOCKED for a week: `PublishedPicks/<gw>/<uid>`
+  /// ([FantasyService.watchPublishedPicksWeek]).
+  final Stream<FantasySquad?> Function(int week)? publishedPicksFor;
+
+  /// That week's settled `History/<gw>/<uid>`
+  /// ([FantasyService.watchHistoryWeek]) — the locked squad's fallback.
+  final Stream<HistoryWeek?> Function(int week)? historyWeekFor;
+
+  /// The season's live gameweek ([FantasyLiveFeed.watch]).
+  final Stream<FantasyLiveState>? liveStates;
+
+  /// The season's owner-voided weeks ([FantasyService.watchVoidedWeeks]).
+  final Stream<Set<int>>? voidedStates;
+
+  /// '' = signed out (no viewer layer, nothing of his is read).
+  final String? selfUidOverride;
+
+  /// The clock (null = real UTC now): decides whether the game's gameweek has
+  /// locked.
+  final DateTime Function()? nowUtc;
+
+  /// The bound on the new feeds' first answers (the global 2 s).
+  final Duration liveWait;
+
   /// Last-shown earning value per game this session (see
   /// [recordEarningValue]).
   static final Map<String, int> sessionEarnings = {};
@@ -99,8 +167,87 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
   StreamSubscription<List<FantasyPlayer>>? _playersSub;
   StreamSubscription<FantasySquad?>? _squadSub;
 
+  // ── Live everywhere (Task 7) ────────────────────────────────────────────
+
+  /// The signed-in user's uid ('' = signed out). Best-effort (the other
+  /// fantasy screens' convention): widget tests never touch FirebaseAuth — a
+  /// missing seam degrades to "signed out", not a throw.
+  late final String _selfUid = () {
+    final override = widget.selfUidOverride;
+    if (override != null) return override;
+    try {
+      return FirebaseAuth.instance.currentUser?.uid ?? '';
+    } catch (_) {
+      return '';
+    }
+  }();
+
+  bool get _signedIn => _selfUid.isNotEmpty;
+
+  /// Places the game in its gameweek (the shared Config → schedule feed, which
+  /// also session-caches it). Only used while someone is signed in.
+  late final FantasyScheduleFeed<Object?> _schedule = FantasyScheduleFeed(
+    sport: widget.sport,
+    season: widget.season,
+    owner: 'MatchFantasyTab',
+    onChanged: _scheduleChanged,
+    gameweekStates: widget.gameweekStates,
+    nowUtc: widget.nowUtc,
+  );
+
+  /// The reveal gate over the schedule, the locked squad, the week's record,
+  /// the live feed and the Voided set.
+  late final AnswerGate _gate = AnswerGate(
+    bound: widget.liveWait,
+    onChanged: () {
+      if (mounted) _recompute();
+    },
+  );
+
+  FantasyLiveState _live = FantasyLiveState.none;
+
+  /// The owner-voided weeks; null = unknown (feed failed or not answered yet):
+  /// the week strip then says nothing.
+  Set<int>? _voided;
+
+  /// The squad that was locked for the game's gameweek, and that week's
+  /// settled record (its squad is the fallback).
+  FantasySquad? _published;
+  HistoryWeek? _historyWeek;
+
+  /// The gameweek the per-week feeds listen to (null = none yet / the game's
+  /// date is not on the schedule).
+  int? _watchedWeek;
+  StreamSubscription<FantasySquad?>? _publishedSub;
+  StreamSubscription<HistoryWeek?>? _historySub;
+  StreamSubscription<FantasyLiveState>? _liveSub;
+  StreamSubscription<Set<int>>? _voidedSub;
+
+  DateTime get _now => (widget.nowUtc ?? () => DateTime.now().toUtc())();
+
+  /// The game's gameweek; null = unknown (schedule not answered, failed, or
+  /// the date is not on it).
+  Gameweek? get _gameweek =>
+      gameweekForDate(_schedule.gameweeks ?? const [], widget.dateKey);
+
+  /// The viewer's squad for THIS game — see [matchViewerSquad]. Nobody signed
+  /// in has none.
+  FantasySquad? get _viewerSquad {
+    if (!_signedIn) return null;
+    return matchViewerSquad(
+      gameweek: _gameweek,
+      gameweeks: _schedule.gameweeks ?? const [],
+      lockOverride: widget.configState.lockOverride,
+      nowUtc: _now,
+      published: _published,
+      history: _historyWeek,
+      current: _squad,
+    ).squad;
+  }
+
   // Memoized off the streams (the tournamentdetail.dart lag-fix rule:
   // recompute on stream events / input changes, never in build).
+  FantasySquad? _viewer; // the squad the rows and the chip are about
   MatchFantasyPoints _rows = MatchFantasyPoints.empty;
   String? _forfeitNote; // spec §8a header note; null = a normal game
   int _earning = 0;
@@ -113,11 +260,18 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
   Map<String, int> get _store =>
       widget.earningStore ?? MatchFantasyTab.sessionEarnings;
 
-  bool get _ready => _gameLoaded && _players != null && _squadLoaded;
+  /// The viewer layer (his squad for the game, the week strip) has what it
+  /// needs: his saved squad is known and every new feed answered (or the bound
+  /// passed). Until then nothing of his is worked out or remembered.
+  bool get _viewerLayerReady => _squadLoaded && _gate.ready;
+
+  bool get _ready =>
+      _gameLoaded && _players != null && _squadLoaded && _gate.ready;
 
   @override
   void initState() {
     super.initState();
+    if (_signedIn) _startViewerFeeds();
     _gameSub = (widget.gameNodeStates ??
             FantasyService.watchGameNode(widget.sport, widget.season,
                 widget.dateKey, widget.gameIndex))
@@ -164,7 +318,113 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
     _gameSub?.cancel();
     _playersSub?.cancel();
     _squadSub?.cancel();
+    _publishedSub?.cancel();
+    _historySub?.cancel();
+    _liveSub?.cancel();
+    _voidedSub?.cancel();
+    _schedule.dispose();
+    _gate.dispose();
     super.dispose();
+  }
+
+  // ── The viewer's feeds (Task 7) ─────────────────────────────────────────
+
+  /// Subscribes what the viewer layer reads, behind the reveal gate: the
+  /// schedule (to place the game in its gameweek), the live feed and the Voided
+  /// set now, the locked squad and the week's record once the gameweek is
+  /// known ([_syncWeekFeeds]).
+  void _startViewerFeeds() {
+    _gate
+      ..expect('schedule')
+      ..start();
+    _schedule.start(); // seeds from the session cache, never notifies here
+    _liveSub = _listenViewer<FantasyLiveState>(
+      'live feed',
+      () =>
+          widget.liveStates ?? FantasyLiveFeed.watch(widget.sport, widget.season),
+      (v) => _live = v,
+    );
+    _voidedSub = _listenViewer<Set<int>>(
+      'voided feed',
+      () =>
+          widget.voidedStates ??
+          FantasyService.watchVoidedWeeks(widget.sport, widget.season),
+      (v) => _voided = v,
+    );
+    _syncWeekFeeds(); // a cached schedule answers at once
+  }
+
+  /// The schedule changed (an emission, an error): place the game again.
+  void _scheduleChanged() {
+    if (!mounted) return;
+    _syncWeekFeeds();
+    _recompute();
+  }
+
+  /// Once the schedule is known (an error leaves it empty: then no week is
+  /// known and there is no viewer layer), listens to the locked squad and the
+  /// settled record of the game's OWN gameweek — one small node each, never
+  /// the whole `PublishedPicks` / `History`. A different week (the schedule
+  /// moved) drops the old week's data at once.
+  void _syncWeekFeeds() {
+    final gameweeks = _schedule.gameweeks;
+    if (gameweeks == null) return; // not answered yet
+    _gate.answer('schedule');
+    final week = gameweekForDate(gameweeks, widget.dateKey)?.number;
+    if (week == _watchedWeek) return;
+    _publishedSub?.cancel();
+    _historySub?.cancel();
+    _publishedSub = _historySub = null;
+    _published = null;
+    _historyWeek = null;
+    _watchedWeek = week;
+    if (week == null) return;
+    _publishedSub = _listenViewer<FantasySquad?>(
+      'published picks feed',
+      () =>
+          widget.publishedPicksFor?.call(week) ??
+          FantasyService.watchPublishedPicksWeek(
+              widget.sport, widget.season, _selfUid, week),
+      (v) => _published = v,
+    );
+    _historySub = _listenViewer<HistoryWeek?>(
+      'history week feed',
+      () =>
+          widget.historyWeekFor?.call(week) ??
+          FantasyService.watchHistoryWeek(
+              widget.sport, widget.season, _selfUid, week),
+      (v) => _historyWeek = v,
+    );
+  }
+
+  /// Listens to one viewer feed through the gate: an answer (data OR error, or
+  /// a feed that cannot even be created) opens its slot; an error is logged and
+  /// leaves what the feed last said (nothing, if it never spoke): a failed feed
+  /// is "unknown", never a made-up squad or number. Never throws.
+  StreamSubscription<T>? _listenViewer<T>(
+    String what,
+    Stream<T> Function() make,
+    void Function(T value) store,
+  ) {
+    _gate.expect(what);
+    void fail(Object e) {
+      debugPrint('MatchFantasyTab: $what failed: $e');
+      _gate.answer(what);
+      if (mounted) _recompute();
+    }
+
+    try {
+      return make().listen((v) {
+        if (!mounted) return;
+        store(v);
+        _gate.answer(what);
+        _recompute();
+      }, onError: fail);
+    } catch (e) {
+      debugPrint('MatchFantasyTab: $what failed: $e');
+      _gate.answer(what);
+      return null;
+    }
   }
 
   void _recompute() {
@@ -174,6 +434,8 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
       setState(() {});
       return;
     }
+    // THE viewer's squad for this game: the one locked for its gameweek.
+    final viewer = _viewerSquad;
     final points = matchGamePoints(
       gameNode: node,
       rosterNamesByTeam: widget.rosterNamesByTeam,
@@ -185,18 +447,19 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
       rosterNamesByTeam: widget.rosterNamesByTeam,
       players: players,
       config: widget.configState.config,
-      squad: _squad,
+      squad: viewer,
     );
-    // The chip only exists once the viewer's squad has streamed in — and the
-    // session store must only ever hold REAL values: recording an interim 0
-    // while the squad is still loading would make the next recompute (or the
-    // next page open) replay a bogus 0 → N tween.
+    // The chip only exists once the viewer's squad for this game is known (his
+    // saved squad has streamed in AND the locked-squad feeds have answered) —
+    // and the session store must only ever hold REAL values: recording an
+    // interim number worked out from the wrong squad (or an interim 0) would
+    // make the next recompute (or the next page open) replay a bogus tween.
     int earning = _earning;
     int? animateFrom = _animateFrom;
-    if (_squadLoaded && _squad != null) {
+    if (_viewerLayerReady && viewer != null) {
       earning = viewerEarningPoints(
         gamePointsByName: points,
-        squad: _squad,
+        squad: viewer,
         config: widget.configState.config,
       );
       // Genuine-increase detection (house motion rule): the session store
@@ -208,6 +471,7 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
     }
     final forfeitNote = matchForfeitNote(node);
     setState(() {
+      _viewer = viewer;
       _rows = rows;
       _forfeitNote = forfeitNote;
       _earning = earning;
@@ -270,14 +534,31 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
           onOpenHub: _openHub);
     }
 
-    final hasChip = _squad != null;
-    final multiplier =
-        captainMultiplierFor(_squad, widget.configState.config);
+    // The viewer's squad for THIS game (the one locked for its gameweek).
+    final hasChip = _viewer != null;
+    final multiplier = captainMultiplierFor(_viewer, widget.configState.config);
+    // The gameweek's own line, while it is live (null = nothing to say).
+    final weekLine = _signedIn
+        ? matchWeekStrip(
+            live: _live,
+            week: _gameweek?.number,
+            uid: _selfUid,
+            voidedWeeks: _voided,
+          )
+        : null;
     return ListView(
       key: const ValueKey('match_fantasy_ready'),
       padding: EdgeInsets.fromLTRB(
           12, 12, 12, 24 + MediaQuery.paddingOf(context).bottom),
       children: [
+        // The header: where the game is (LIVE or FINAL), then — while the
+        // gameweek is live — what the viewer's gameweek has scored so far.
+        _StatusHeader(phase: matchPhase(node['status'])),
+        const SizedBox(height: 10),
+        if (weekLine != null) ...[
+          _WeekStrip(text: weekLine),
+          const SizedBox(height: 12),
+        ],
         // Forfeit (spec §8a): say so up top, before any "+1" row.
         if (_forfeitNote != null) ...[
           _ForfeitNote(text: _forfeitNote!),
@@ -321,9 +602,7 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
         ],
         const SizedBox(height: 14),
         Text(
-          'Raw game points, live from the capture. Bench weighting, '
-          'auto-subs, vice-captain cover and the 3/2/1 bonus are applied '
-          'when the gameweek is finalized — your counted week can differ.',
+          kMatchFootnote,
           key: const ValueKey('match_fantasy_footnote'),
           softWrap: true,
           style: TextStyle(
@@ -335,6 +614,78 @@ class _MatchFantasyTabState extends State<MatchFantasyTab> {
         const SizedBox(height: 12),
         _OpenHubButton(onPressed: _openHub),
       ],
+    );
+  }
+}
+
+/// The tab's header (live everywhere, Task 7): LIVE (the shared pill) while the
+/// game is being played, FINAL once it is over — from the game's own status.
+/// Live and final used to render identically.
+class _StatusHeader extends StatelessWidget {
+  const _StatusHeader({required this.phase});
+
+  final MatchPhase phase;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final Widget label;
+    if (phase == MatchPhase.live) {
+      label = const FantasyLivePill(key: ValueKey('match_fantasy_live_pill'));
+    } else {
+      // Final: the pill's twin in the neutral ink — it is over, nothing moves.
+      final ink = scheme.onSurfaceVariant;
+      label = Container(
+        key: const ValueKey('match_fantasy_final'),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: ink.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: ink.withValues(alpha: 0.45)),
+        ),
+        child: Text(
+          'FINAL',
+          style: TextStyle(
+            fontSize: 10.5,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.6,
+            height: 1.1,
+            color: ink,
+          ),
+        ),
+      );
+    }
+    return Align(alignment: Alignment.centerLeft, child: label);
+  }
+}
+
+/// `Your gameweek so far: {W} pts · #{R}` under the header while the gameweek
+/// is live: a neutral surface, wraps, both themes.
+class _WeekStrip extends StatelessWidget {
+  const _WeekStrip({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const ValueKey('match_fantasy_week_strip'),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        text,
+        key: const ValueKey('match_fantasy_week_strip_text'),
+        softWrap: true,
+        style: TextStyle(
+          fontSize: 13.5,
+          fontWeight: FontWeight.w700,
+          color: scheme.onSurface,
+        ),
+      ),
     );
   }
 }

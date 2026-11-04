@@ -20,6 +20,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
@@ -87,6 +89,11 @@ void main() {
     List<RankPoint>? rankSeries,
     Stream<List<RankPoint>>? rankStates,
     Future<void> Function(BuildContext buttonContext)? onShareRank,
+    Stream<FantasyLiveState>? liveStates,
+    Stream<LiveSquad?>? liveSquadStates,
+    Stream<HistoryWeek?> Function(int week)? historyWeekFor,
+    Stream<Set<int>>? voidedStates,
+    Duration liveWait = kLiveJoinWait,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -126,6 +133,14 @@ void main() {
         rankSeries: rankSeries,
         rankStates: rankStates,
         onShareRank: onShareRank,
+        // Default: no live week, nothing voided, no settled week records —
+        // each answered at once (a cache-seeded feed).
+        liveStates: liveStates ?? Stream.value(FantasyLiveState.none),
+        liveSquadStates: liveSquadStates ?? Stream<LiveSquad?>.value(null),
+        historyWeekFor:
+            historyWeekFor ?? (_) => Stream<HistoryWeek?>.value(null),
+        voidedStates: voidedStates ?? Stream.value(const <int>{}),
+        liveWait: liveWait,
       ),
     ));
   }
@@ -812,5 +827,441 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('viewer_no_squad')), findsOneWidget);
     expect(find.byKey(const ValueKey('viewer_unrevealed')), findsNothing);
+  });
+
+  // ── Live everywhere (Task 7) ─────────────────────────────────────────────
+  //
+  // Per-player points on the court for EVERY week shown: a live week from the
+  // live feed (Live/Squads/<uid> + the players' statuses), a settled week from
+  // History/<gw>/<uid>'s Breakdown; the week line `{W} pts` (with the LIVE
+  // pill) / `Final · {W} pts`; "Voided" only ever from the Voided set.
+  group('live everywhere (Task 7): points on the court', () {
+    late StreamController<FantasyLiveState> liveFeed;
+    late StreamController<LiveSquad?> liveSquad;
+    late StreamController<Set<int>> voided;
+    late Map<int, StreamController<HistoryWeek?>> weekFeeds;
+    late List<int> asked;
+
+    setUp(() {
+      liveFeed = StreamController<FantasyLiveState>.broadcast();
+      liveSquad = StreamController<LiveSquad?>.broadcast();
+      voided = StreamController<Set<int>>.broadcast();
+      weekFeeds = {};
+      asked = [];
+    });
+
+    tearDown(() {
+      liveFeed.close();
+      liveSquad.close();
+      voided.close();
+      for (final c in weekFeeds.values) {
+        c.close();
+      }
+    });
+
+    Stream<HistoryWeek?> weekFeed(int week) {
+      asked.add(week);
+      return (weekFeeds[week] ??=
+              StreamController<HistoryWeek?>.broadcast())
+          .stream;
+    }
+
+    FantasySquad oldCrew() => squad('Old Keeper');
+
+    FantasySquad crew({String? chip}) => FantasySquad(
+          picks: const [
+            SquadPick(
+                playerId: 'Pub Keeper',
+                position: FantasyPosition.gk,
+                priceTenths: 50),
+            SquadPick(
+                playerId: 'Pub Striker',
+                position: FantasyPosition.att,
+                priceTenths: 70),
+            SquadPick(
+                playerId: 'Bench Att',
+                position: FantasyPosition.att,
+                priceTenths: 40,
+                bench: true),
+          ],
+          captainId: 'Pub Striker',
+          viceId: 'Pub Keeper',
+          chip: chip,
+        );
+
+    LiveSlot slot(String id, int tenths, {int x = 1}) =>
+        LiveSlot(playerId: id, countedTenths: tenths, multiplier: x);
+
+    LivePlayer lp(LivePlayerStatus st) => LivePlayer(
+        pts: 0, st: st, total: 0, form: 0, ppg: 0, games: 0, own: 0);
+
+    /// GW2 is being played: the keeper and the (captain) striker are on the
+    /// court, the bench player's game is still to come.
+    FantasyLiveState liveWeek2({
+      LivePlayerStatus bench = LivePlayerStatus.pending,
+    }) =>
+        FantasyLiveState(
+          meta: const LiveMeta(gw: 2, state: LiveState.live),
+          players: {
+            'Pub Keeper': lp(LivePlayerStatus.live),
+            'Pub Striker': lp(LivePlayerStatus.live),
+            'Bench Att': lp(bench),
+          },
+        );
+
+    LiveSquad week2Points() => LiveSquad(totalTenths: 200, week: 20, slots: [
+          slot('Pub Keeper', 40),
+          slot('Pub Striker', 160, x: 2),
+          slot('Bench Att', 0),
+        ]);
+
+    HistoryWeek settled(FantasySquad squad,
+            {required int tenths, required List<LiveSlot> slots}) =>
+        HistoryWeek(slots: slots, totalTenths: tenths, squad: squad);
+
+    Future<void> frames(WidgetTester tester) async {
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+    }
+
+    /// Opens ANOTHER manager's page on GW2 (published) with GW1 in History,
+    /// and lets the feeds answer: [live] / [squad] / [voidedWeeks] (null =
+    /// does not answer), the GW1 and GW2 settled records.
+    Future<void> land(
+      WidgetTester tester, {
+      FantasyLiveState live = FantasyLiveState.none,
+      LiveSquad? squad,
+      bool answerSquad = true,
+      Set<int>? voidedWeeks = const {},
+      HistoryWeek? gw1,
+      HistoryWeek? gw2,
+      Map<int, FantasySquad>? publishedWeeks,
+      bool answerHistory = true,
+    }) async {
+      published.add(publishedWeeks ?? {2: crew()});
+      history.add({1: oldCrew()});
+      await tester.pump();
+      liveFeed.add(live);
+      if (answerSquad) liveSquad.add(squad);
+      if (voidedWeeks != null) voided.add(voidedWeeks);
+      if (answerHistory) {
+        weekFeeds[1]?.add(gw1);
+        weekFeeds[2]?.add(gw2);
+      }
+      await frames(tester);
+    }
+
+    Future<void> pumpPoints(
+      WidgetTester tester, {
+      bool isSelf = false,
+      FantasySquad? initialSquad,
+      Size size = const Size(420, 1300),
+      Brightness brightness = Brightness.light,
+      Duration liveWait = kLiveJoinWait,
+    }) =>
+        pumpViewer(tester,
+            isSelf: isSelf,
+            initialSquad: initialSquad,
+            size: size,
+            brightness: brightness,
+            liveStates: liveFeed.stream,
+            liveSquadStates: liveSquad.stream,
+            historyWeekFor: weekFeed,
+            voidedStates: voided.stream,
+            liveWait: liveWait);
+
+    // The skeleton is up AND the content is not in the tree (the reveal's
+    // AnimatedSwitcher keeps the outgoing skeleton during a cross-fade).
+    void expectHeld() {
+      expect(byKey('viewer_skeleton'), findsOneWidget);
+      expect(byKey('viewer_content'), findsNothing);
+    }
+
+    Finder strip() => byKey('viewer_week_strip');
+    String stripText(WidgetTester tester) =>
+        tester.widget<Text>(byKey('viewer_week_strip_text')).data!;
+    Finder pills() => find.descendant(
+        of: byKey('viewer_week_strip'), matching: find.byType(FantasyLivePill));
+
+    final week1Rows = [slot('Old Keeper', 120, x: 2)];
+
+    testWidgets(
+        'a SETTLED week shows each player\'s counted points from History\'s '
+        'Breakdown and "Final · {W} pts" — no pill', (tester) async {
+      await pumpPoints(tester);
+      await land(tester,
+          publishedWeeks: const {},
+          gw1: settled(oldCrew(), tenths: 340, slots: week1Rows));
+
+      // Opens on the latest week (GW1: the only one).
+      expect(find.text('Gameweek 1 squad'), findsOneWidget);
+      expect(find.text('12 pts'), findsOneWidget); // the keeper's counted row
+      expect(stripText(tester), 'Final · 34 pts');
+      expect(pills(), findsNothing);
+      expect(find.text('LIVE'), findsNothing);
+    });
+
+    testWidgets(
+        'a LIVE week shows each player\'s points from the live feed with '
+        'their status, and "{W} pts" with the LIVE pill (no rank)',
+        (tester) async {
+      await pumpPoints(tester);
+      await land(tester, live: liveWeek2(), squad: week2Points());
+
+      expect(find.text('Gameweek 2 squad'), findsOneWidget);
+      expect(find.text('4 pts · live'), findsOneWidget);
+      expect(find.text('16 pts · live'), findsOneWidget); // captain, x2 in
+      expect(find.text('Not started'), findsOneWidget); // the bench player
+      expect(stripText(tester), '20 pts');
+      expect(pills(), findsOneWidget);
+      expect(find.text('LIVE'), findsOneWidget);
+      expect(find.textContaining('#'), findsNothing);
+    });
+
+    testWidgets('bench halves read with one decimal ("2.5 pts")',
+        (tester) async {
+      await pumpPoints(tester);
+      await land(tester,
+          live: liveWeek2(bench: LivePlayerStatus.done),
+          squad: LiveSquad(totalTenths: 225, week: 22, slots: [
+            slot('Pub Keeper', 40),
+            slot('Pub Striker', 160, x: 2),
+            slot('Bench Att', 25),
+          ]));
+      expect(find.text('2.5 pts'), findsOneWidget);
+      expect(stripText(tester), '22 pts');
+    });
+
+    testWidgets(
+        'browsing: each week reads its own source — GW1 from History, '
+        'GW2 live — and every week shown has its settled record asked for, '
+        'one small node each', (tester) async {
+      await pumpPoints(tester);
+      await land(tester,
+          live: liveWeek2(),
+          squad: week2Points(),
+          gw1: settled(oldCrew(), tenths: 340, slots: week1Rows));
+
+      expect(asked.toSet(), {1, 2}, reason: 'one node per week, not History');
+      expect(stripText(tester), '20 pts');
+
+      await tester.tap(byKey('viewer_week_1'));
+      await frames(tester);
+      expect(find.text('Gameweek 1 squad'), findsOneWidget);
+      expect(stripText(tester), 'Final · 34 pts');
+      expect(find.text('12 pts'), findsOneWidget);
+      expect(find.text('4 pts · live'), findsNothing);
+
+      await tester.tap(byKey('viewer_week_2'));
+      await frames(tester);
+      expect(stripText(tester), '20 pts');
+      expect(find.text('12 pts'), findsNothing);
+    });
+
+    testWidgets(
+        'the live week settles while the page is open: the strip turns '
+        '"Final · {W} pts", the pill goes, History\'s numbers take over',
+        (tester) async {
+      await pumpPoints(tester);
+      await land(tester, live: liveWeek2(), squad: week2Points());
+      expect(pills(), findsOneWidget);
+
+      // finalize: History first, then the tombstone.
+      weekFeeds[2]!.add(settled(crew(), tenths: 230, slots: [
+        slot('Pub Keeper', 50),
+        slot('Pub Striker', 180, x: 2),
+        slot('Bench Att', 0),
+      ]));
+      liveFeed.add(const FantasyLiveState(
+          meta: LiveMeta(gw: 2, state: LiveState.settled)));
+      liveSquad.add(null);
+      await frames(tester);
+
+      expect(stripText(tester), 'Final · 23 pts');
+      expect(pills(), findsNothing);
+      expect(find.text('5 pts'), findsOneWidget);
+      expect(find.text('18 pts'), findsOneWidget);
+      expect(find.text('4 pts · live'), findsNothing);
+    });
+
+    testWidgets(
+        'a VOIDED week (from the Voided set, never the live record) says '
+        'so: no per-player lines and never "0 pts"', (tester) async {
+      await pumpPoints(tester);
+      await land(tester,
+          live: liveWeek2(),
+          squad: LiveSquad(totalTenths: 0, week: 0, slots: [
+            slot('Pub Keeper', 0),
+            slot('Pub Striker', 0, x: 2),
+            slot('Bench Att', 0),
+          ]),
+          voidedWeeks: {2});
+
+      expect(stripText(tester), 'Voided · this week counts 0');
+      expect(pills(), findsNothing);
+      expect(find.textContaining(' pts'), findsNothing,
+          reason: 'a voided week shows no counted points');
+      expect(find.text('Not started'), findsNothing);
+    });
+
+    testWidgets(
+        'a failed Voided feed during a live week is UNKNOWN: no lines and '
+        'no strip (never a number that may be a voided week\'s)',
+        (tester) async {
+      await pumpPoints(tester);
+      published.add({2: crew()});
+      history.add({1: oldCrew()});
+      await tester.pump();
+      liveFeed.add(liveWeek2());
+      liveSquad.add(week2Points());
+      voided.addError(StateError('rules'));
+      weekFeeds[1]?.add(null);
+      weekFeeds[2]?.add(null);
+      await frames(tester);
+
+      expect(byKey('viewer_content'), findsOneWidget);
+      expect(strip(), findsNothing);
+      expect(find.textContaining(' pts'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+        'a settled week whose History record cannot be read shows no '
+        'numbers rather than wrong ones', (tester) async {
+      await pumpPoints(tester);
+      published.add(const {});
+      history.add({1: oldCrew()});
+      await tester.pump();
+      liveFeed.add(FantasyLiveState.none);
+      liveSquad.add(null);
+      voided.add(const {});
+      weekFeeds[1]!.addError(StateError('network'));
+      await frames(tester);
+
+      expect(byKey('viewer_content'), findsOneWidget);
+      expect(strip(), findsNothing);
+      expect(find.textContaining(' pts'), findsNothing);
+    });
+
+    testWidgets(
+        'one reveal: the skeleton holds until the live feed, the live '
+        'squad, the Voided set and the weeks\' records have answered, then '
+        'the lines are already there', (tester) async {
+      await pumpPoints(tester);
+      published.add({2: crew()});
+      history.add({1: oldCrew()});
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expectHeld();
+
+      liveFeed.add(liveWeek2());
+      await tester.pump();
+      expectHeld();
+      liveSquad.add(week2Points());
+      voided.add(const {});
+      await tester.pump();
+      expectHeld();
+      weekFeeds[1]!.add(null);
+      await tester.pump();
+      expectHeld();
+      weekFeeds[2]!.add(null);
+      // The first frame with the content in the tree already has the lines.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(byKey('viewer_content'), findsOneWidget);
+      expect(find.text('4 pts · live'), findsOneWidget);
+      expect(stripText(tester), '20 pts');
+    });
+
+    testWidgets(
+        'bounded: live silent for 2 s reveals the squad without points, '
+        'and a late answer lands in place — the skeleton never comes back',
+        (tester) async {
+      await pumpPoints(tester);
+      published.add({2: crew()});
+      history.add({1: oldCrew()});
+      await tester.pump(const Duration(milliseconds: 1900));
+      expectHeld();
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(byKey('viewer_content'), findsOneWidget);
+      expect(strip(), findsNothing);
+
+      liveFeed.add(liveWeek2());
+      liveSquad.add(week2Points());
+      voided.add(const {});
+      await frames(tester);
+      expect(byKey('viewer_skeleton'), findsNothing);
+      expect(stripText(tester), '20 pts');
+      expect(find.text('4 pts · live'), findsOneWidget);
+    });
+
+    testWidgets(
+        'a week locking while the page is open never brings the skeleton '
+        'back', (tester) async {
+      await pumpPoints(tester);
+      await land(tester, live: liveWeek2(), squad: week2Points());
+      expect(byKey('viewer_content'), findsOneWidget);
+
+      published.add({2: crew(), 3: crew()});
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(byKey('viewer_skeleton'), findsNothing);
+      expect(byKey('viewer_content'), findsOneWidget);
+    });
+
+    group('your own page, the "Now" face', () {
+      testWidgets(
+          'while the live week is being played and "Now" is the squad that '
+          'was locked, it shows the live points too', (tester) async {
+        await pumpPoints(tester, isSelf: true, initialSquad: crew());
+        await land(tester, live: liveWeek2(), squad: week2Points());
+
+        await frames(tester);
+
+        expect(byKey('viewer_week_now'), findsOneWidget);
+        expect(find.text('Current squad'), findsOneWidget);
+        expect(find.text('4 pts · live'), findsOneWidget);
+        expect(stripText(tester), '20 pts');
+        expect(pills(), findsOneWidget);
+      });
+
+      testWidgets(
+          '"Now" with a different squad than the locked one shows no points '
+          '(they belong to the locked squad)', (tester) async {
+        await pumpPoints(tester, isSelf: true, initialSquad: squad('Fresh Keeper'));
+        await land(tester, live: liveWeek2(), squad: week2Points());
+
+        expect(find.text('Current squad'), findsOneWidget);
+        expect(strip(), findsNothing);
+        expect(find.textContaining(' pts'), findsNothing);
+      });
+
+      testWidgets('"Now" with no live week shows no points', (tester) async {
+        await pumpPoints(tester, isSelf: true, initialSquad: crew());
+        await land(tester, live: FantasyLiveState.none, squad: null);
+        expect(find.text('Current squad'), findsOneWidget);
+        expect(strip(), findsNothing);
+      });
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets(
+          '360 px: the live strip, the pill and the lines fit, no overflow '
+          '— $brightness', (tester) async {
+        await pumpPoints(tester,
+            size: const Size(360, 900), brightness: brightness);
+        await land(tester, live: liveWeek2(), squad: week2Points());
+        expect(find.text('4 pts · live'), findsOneWidget);
+        expect(pills(), findsOneWidget);
+        final r = tester.getRect(strip());
+        expect(r.left, greaterThanOrEqualTo(0));
+        expect(r.right, lessThanOrEqualTo(360));
+        await tester.drag(byKey('viewer_content'), const Offset(0, -600));
+        await frames(tester);
+        expect(tester.takeException(), isNull);
+      });
+    }
   });
 }

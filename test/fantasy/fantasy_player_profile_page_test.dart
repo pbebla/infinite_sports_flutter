@@ -19,6 +19,7 @@ import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart'
     show fantasyDownRed;
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart'
     show fantasyAccent;
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
@@ -1020,6 +1021,274 @@ void main() {
         expect(t.style?.decoration ?? TextDecoration.none, TextDecoration.none,
             reason: '"${t.data}" must not be underlined');
       }
+    }
+  });
+
+  // ── Live everywhere (Task 7) ─────────────────────────────────────────────
+  //
+  // While a gameweek is being played his week record and totals are the live
+  // ones: the shared LIVE pill on the stat strip, the live week's form bar
+  // hollow with a LIVE label, the bonus line "Bonus (provisional)".
+  group('live everywhere (Task 7)', () {
+    PlayerWeekStats liveWeek(int pts,
+            {Map<String, ScoreSourceLine> lines = const {},
+            bool bonusProvisional = false}) =>
+        PlayerWeekStats(
+          points: pts,
+          played: true,
+          gamesPlayed: 1,
+          games: const [],
+          lines: lines,
+          voided: false,
+          live: true,
+          bonusProvisional: bonusProvisional,
+        );
+
+    const settledTwo = ScoreSourceLine(count: 1, points: 2);
+
+    Map<int, PlayerWeekStats> weeksWithLive({bool provisional = true}) => {
+          1: _week(2, lines: const {'plays': settledTwo}),
+          2: _week(8, lines: const {
+            'plays': settledTwo,
+            'goals': ScoreSourceLine(count: 1, points: 6),
+            'bonus': ScoreSourceLine(count: 3, points: 3),
+          }),
+          3: liveWeek(9,
+              lines: const {
+                'plays': settledTwo,
+                'goals': ScoreSourceLine(count: 1, points: 6),
+                'bonus': ScoreSourceLine(count: 1, points: 1),
+              },
+              bonusProvisional: provisional),
+        };
+
+    const liveTotals = {
+      _name: FantasyPlayerTotals(
+          points: 70,
+          ownershipPct: 55,
+          formTenths: 67,
+          ppgTenths: 53,
+          games: 13,
+          live: true),
+    };
+
+    /// emitAll + fixed frames (the LIVE pill pulses: pumpAndSettle never
+    /// returns while one is on screen).
+    Future<void> emitLive(
+      WidgetTester tester, {
+      Map<String, FantasyPlayerTotals>? totalsValue = liveTotals,
+      Map<int, PlayerWeekStats>? weeksValue,
+    }) async {
+      config.add(FantasyConfigState(
+          config: FantasyConfig.futsalDefault(),
+          lockOverride: FantasyLockOverride.open));
+      gameweeks.add(_gameweeks(3));
+      players.add(market);
+      totals.add(totalsValue);
+      history.add(const {
+        1: {_name: 70},
+        2: {_name: 70},
+        3: {_name: 75},
+      });
+      changes.add(const {
+        1: {'Other Def': 2},
+        2: {_name: 5},
+      });
+      rosters.add({
+        'Ishtar': [_rosterRow(_name, 'Ishtar', number: '3')],
+      });
+      games.add(const []);
+      teams.add(const []);
+      watchlist.add(const {});
+      await tester.pump();
+      weekStats.add(weeksValue ?? weeksWithLive());
+      await tester.pump();
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+    }
+
+    Future<void> frames(WidgetTester tester) async {
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+    }
+
+    Finder stripPill() => find.descendant(
+        of: key('profile_stat_strip'), matching: find.byType(FantasyLivePill));
+
+    testWidgets('the stat strip carries the LIVE pill while the numbers are '
+        'live', (tester) async {
+      await pumpPage(tester);
+      await emitLive(tester);
+      expect(stripPill(), findsOneWidget);
+      expect(find.text('LIVE'), findsWidgets);
+      // The numbers themselves are the live ones, in place.
+      expect(tester.widget<Text>(key('profile_total')).data, '70');
+    });
+
+    testWidgets('a live week record alone (totals official) also marks it',
+        (tester) async {
+      await pumpPage(tester);
+      await emitLive(tester, totalsValue: const {
+        _name: FantasyPlayerTotals(points: 64, formTenths: 67, games: 12),
+      });
+      expect(stripPill(), findsOneWidget);
+    });
+
+    testWidgets('no pill, no label, no hollow bar when nothing is live',
+        (tester) async {
+      await pumpPage(tester);
+      await emitAll(tester);
+      expect(stripPill(), findsNothing);
+      expect(find.byType(FantasyLivePill), findsNothing);
+      expect(key('form_bar_live_3'), findsNothing);
+    });
+
+    testWidgets('the pill goes when the week settles (the official numbers '
+        'take over)', (tester) async {
+      await pumpPage(tester);
+      await emitLive(tester);
+      expect(stripPill(), findsOneWidget);
+
+      totals.add(const {
+        _name: FantasyPlayerTotals(points: 70, formTenths: 67, games: 13),
+      });
+      weekStats.add({
+        1: _week(2, lines: const {'plays': settledTwo}),
+        2: _week(8, lines: const {'plays': settledTwo}),
+        3: _week(9, lines: const {'plays': settledTwo}),
+      });
+      await frames(tester);
+      expect(stripPill(), findsNothing);
+      expect(key('form_bar_live_3'), findsNothing);
+    });
+
+    group('the form bars', () {
+      BoxDecoration barDecoration(WidgetTester tester, int gw) =>
+          tester.widget<Container>(key('form_bar_fill_$gw')).decoration!
+              as BoxDecoration;
+
+      testWidgets('the live week\'s bar is HOLLOW (outline only) with a '
+          'LIVE label; the settled bars are solid', (tester) async {
+        await pumpPage(tester);
+        await emitLive(tester);
+
+        final live = barDecoration(tester, 3);
+        expect(live.color, isNull, reason: 'hollow: no fill');
+        expect(live.border, isNotNull);
+        expect((live.border! as Border).top.width, 2);
+        for (final gw in [1, 2]) {
+          final solid = barDecoration(tester, gw);
+          expect(solid.color, isNotNull, reason: 'GW$gw is solid');
+          expect(solid.border, isNull);
+          expect(key('form_bar_live_$gw'), findsNothing);
+        }
+        expect(key('form_bar_live_3'), findsOneWidget);
+        expect(tester.widget<Text>(key('form_bar_live_3')).data, 'LIVE');
+        // The GW number is still there; its points are the live ones.
+        expect(find.text('GW3'), findsOneWidget);
+        expect(tester.widget<Text>(key('form_bar_value_3')).data, '9');
+      });
+
+      testWidgets('the hollow outline is the bar\'s own tone (the accent)',
+          (tester) async {
+        await pumpPage(tester);
+        await emitLive(tester);
+        final ctx = tester.element(key('form_bar_fill_3'));
+        final live = barDecoration(tester, 3);
+        expect((live.border! as Border).top.color, fantasyAccent(ctx));
+        expect(barDecoration(tester, 2).color, fantasyAccent(ctx));
+      });
+
+      testWidgets('tapping the live bar still selects the week',
+          (tester) async {
+        await pumpPage(tester);
+        await emitLive(tester);
+        await tester.tap(key('form_bar_3'));
+        await frames(tester);
+        expect(key('week_breakdown'), findsOneWidget);
+        expect(find.textContaining('GW3'), findsWidgets);
+      });
+    });
+
+    group('the provisional bonus', () {
+      testWidgets('the live week\'s breakdown reads "Bonus (provisional)", '
+          'a settled week plain "Bonus"', (tester) async {
+        await pumpPage(tester);
+        await emitLive(tester);
+
+        await tester.tap(key('form_bar_3'));
+        await frames(tester);
+        expect(find.text('Bonus (provisional)'), findsOneWidget);
+        expect(find.text('Bonus'), findsNothing);
+
+        await tester.tap(key('form_bar_2'));
+        await frames(tester);
+        expect(find.text('Bonus'), findsOneWidget);
+        expect(find.text('Bonus (provisional)'), findsNothing);
+      });
+
+      testWidgets('a live week whose bonus is final reads plain "Bonus"',
+          (tester) async {
+        await pumpPage(tester);
+        await emitLive(tester, weeksValue: weeksWithLive(provisional: false));
+        await tester.tap(key('form_bar_3'));
+        await frames(tester);
+        expect(find.text('Bonus'), findsOneWidget);
+        expect(find.text('Bonus (provisional)'), findsNothing);
+      });
+
+      testWidgets('the Stats tab\'s season bonus is flagged while a live '
+          'bonus is in it', (tester) async {
+        await pumpPage(tester);
+        await emitLive(tester);
+        await tester.tap(key('profile_tab_stats'));
+        await frames(tester);
+        expect(find.text('Bonus (provisional)'), findsOneWidget);
+      });
+
+      testWidgets('the Matches tab: the live week\'s row carries the pill '
+          'and its expanded bonus line is provisional', (tester) async {
+        await pumpPage(tester);
+        await emitLive(tester);
+        await tester.tap(key('profile_tab_matches'));
+        await frames(tester);
+        expect(
+            find.descendant(
+                of: key('match_row_3'), matching: find.byType(FantasyLivePill)),
+            findsOneWidget);
+        expect(
+            find.descendant(
+                of: key('match_row_2'), matching: find.byType(FantasyLivePill)),
+            findsNothing);
+
+        await tester.tap(key('match_row_3'));
+        await frames(tester);
+        expect(find.text('Bonus (provisional)'), findsOneWidget);
+      });
+    });
+
+    for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+      testWidgets('360 px: the pill, the hollow bar and the labels never '
+          'overflow — $mode', (tester) async {
+        await pumpPage(tester, size: const Size(360, 780), themeMode: mode);
+        await emitLive(tester);
+        expect(tester.takeException(), isNull);
+        final strip = tester.getRect(key('profile_stat_strip'));
+        expect(strip.left, greaterThanOrEqualTo(0));
+        expect(strip.right, lessThanOrEqualTo(360));
+        await tester.tap(key('form_bar_3'));
+        await frames(tester);
+        for (final tab in ['stats', 'matches', 'price', 'overview']) {
+          await tester.tap(key('profile_tab_$tab'));
+          await frames(tester);
+          expect(tester.takeException(), isNull, reason: tab);
+        }
+        await tester.drag(key('profile_scroll'), const Offset(0, -500));
+        await frames(tester);
+        expect(tester.takeException(), isNull);
+      });
     }
   });
 }

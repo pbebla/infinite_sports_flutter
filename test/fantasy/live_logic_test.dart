@@ -588,4 +588,138 @@ void main() {
       expect(liveBannerLine(live: live, uid: 'me'), 'GW3 live · 0 pts · #12');
     });
   });
+
+  // ── Task 7: the squad viewer's week line ───────────────────────────────
+
+  group('viewerWeekStrip (the manager squad viewer\'s week line)', () {
+    test('live: "{W} pts" with the pill — no rank, no movement', () {
+      final strip = viewerWeekStrip(
+          const LockedWeekView.live(weekPoints: 34, rank: 5, movement: 2))!;
+      expect(strip.text, '34 pts');
+      expect(strip.live, isTrue);
+    });
+
+    test('settled: "Final · {W} pts", no pill', () {
+      final strip = viewerWeekStrip(
+          const LockedWeekView.settled(weekPoints: 34, rank: 5))!;
+      expect(strip.text, 'Final · 34 pts');
+      expect(strip.live, isFalse);
+    });
+
+    test('a zero is a number', () {
+      expect(viewerWeekStrip(const LockedWeekView.live(weekPoints: 0))!.text,
+          '0 pts');
+      expect(
+          viewerWeekStrip(const LockedWeekView.settled(weekPoints: 0))!.text,
+          'Final · 0 pts');
+    });
+
+    test('voided and invalid weeks say so, like My Team', () {
+      expect(viewerWeekStrip(const LockedWeekView.voided())!.text,
+          'Voided · this week counts 0');
+      expect(viewerWeekStrip(const LockedWeekView.invalid())!.text,
+          "0 pts · this week didn't count");
+      expect(viewerWeekStrip(const LockedWeekView.voided())!.live, isFalse);
+    });
+
+    test('a week we cannot read, or before kickoff, has no line at all', () {
+      expect(viewerWeekStrip(const LockedWeekView.unknown()), isNull);
+      expect(viewerWeekStrip(const LockedWeekView.waiting()), isNull);
+    });
+  });
+
+  // ── Task 7: the match tab's week strip ─────────────────────────────────
+
+  group('matchWeekStrip (the match tab\'s line under the header)', () {
+    const meta = LiveMeta(gw: 3, state: LiveState.live);
+
+    FantasyLiveState live(Map<String, LiveBoardRow> board,
+            {LiveMeta? withMeta = meta}) =>
+        FantasyLiveState(meta: withMeta, board: board);
+
+    const row = LiveBoardRow(o: 120, r: 5, w: 34);
+
+    test('verbatim: "Your gameweek so far: {W} pts · #{R}"', () {
+      expect(
+          matchWeekStrip(
+              live: live({'me': row}),
+              week: 3,
+              uid: 'me',
+              voidedWeeks: const {}),
+          'Your gameweek so far: 34 pts · #5');
+    });
+
+    test('a zero is a number, never hidden', () {
+      expect(
+          matchWeekStrip(
+              live: live({'me': const LiveBoardRow(o: 7, r: 12, w: 0)}),
+              week: 3,
+              uid: 'me',
+              voidedWeeks: const {}),
+          'Your gameweek so far: 0 pts · #12');
+    });
+
+    test('only while THIS game\'s gameweek is the live one: another week, '
+        'a settled tombstone or no live node says nothing', () {
+      String? strip(FantasyLiveState l, {int week = 3}) => matchWeekStrip(
+          live: l, week: week, uid: 'me', voidedWeeks: const {});
+      expect(strip(live({'me': row}), week: 2), isNull);
+      expect(
+          strip(live({'me': row},
+              withMeta: const LiveMeta(gw: 3, state: LiveState.settled))),
+          isNull);
+      expect(strip(FantasyLiveState.none), isNull);
+      expect(strip(live({'me': row}, withMeta: null)), isNull);
+    });
+
+    test('nobody signed in, no board row, or no points this week (no squad '
+        'scored): no strip', () {
+      final l = live({'me': row});
+      expect(
+          matchWeekStrip(
+              live: l, week: 3, uid: null, voidedWeeks: const {}),
+          isNull);
+      expect(
+          matchWeekStrip(live: l, week: 3, uid: '', voidedWeeks: const {}),
+          isNull);
+      expect(
+          matchWeekStrip(
+              live: l, week: 3, uid: 'nobody', voidedWeeks: const {}),
+          isNull);
+      expect(
+          matchWeekStrip(
+              live: live({'me': const LiveBoardRow(o: 1, r: 1)}),
+              week: 3,
+              uid: 'me',
+              voidedWeeks: const {}),
+          isNull);
+      expect(
+          matchWeekStrip(
+              live: l, week: null, uid: 'me', voidedWeeks: const {}),
+          isNull);
+    });
+
+    test('a VOIDED week (the Voided set, never the live record that says '
+        '0 pts · #1) has no strip; another week\'s void changes nothing',
+        () {
+      final l = live({'me': const LiveBoardRow(o: 7, r: 1, w: 0)});
+      expect(
+          matchWeekStrip(live: l, week: 3, uid: 'me', voidedWeeks: {3}),
+          isNull);
+      expect(
+          matchWeekStrip(live: l, week: 3, uid: 'me', voidedWeeks: {2}),
+          'Your gameweek so far: 0 pts · #1');
+    });
+
+    test('an UNKNOWN Voided set (its feed failed or has not answered) is '
+        'never "none voided": no strip', () {
+      expect(
+          matchWeekStrip(
+              live: live({'me': row}),
+              week: 3,
+              uid: 'me',
+              voidedWeeks: null),
+          isNull);
+    });
+  });
 }

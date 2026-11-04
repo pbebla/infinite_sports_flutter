@@ -18,6 +18,8 @@ import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/market_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/market_player_sheet.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart'
+    show fantasyAccent;
 import 'package:infinite_sports_flutter/fantasy/hub/players_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
@@ -1397,4 +1399,424 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  // ── Live everywhere (Task 7) ─────────────────────────────────────────────
+  //
+  // The Players market while a gameweek is being played: the LIVE pill by the
+  // sort bar, points and form moving IN PLACE, and the owner's steady-order
+  // rule — rows re-order at once on a sort tap, at the top or on (re)open;
+  // otherwise "Order changed · tap to refresh" under the sort bar; never under
+  // a moving finger.
+  group('live everywhere (Task 7)', () {
+    // 30 attackers P01..P30 (a list long enough to scroll), all eligible.
+    final names = [
+      for (var i = 1; i <= 30; i++) 'P${i.toString().padLeft(2, '0')}'
+    ];
+    final liveMarket = [
+      for (final n in names) player(n, FantasyPosition.att, 50, team: 'Team A'),
+      player('Gus Glove', FantasyPosition.gk, 45, team: 'Team B'),
+    ];
+
+    /// Points descend with the list: P01 is the leader. [boost] gives one
+    /// player a big new total (the goal that just went in).
+    Map<String, FantasyPlayerTotals> liveTotals({
+      String? boost,
+      bool live = true,
+      int form = 40,
+    }) =>
+        {
+          for (final (i, n) in names.indexed)
+            n: FantasyPlayerTotals(
+              points: n == boost ? 500 : 300 - i * 5,
+              ownershipPct: 10,
+              formTenths: n == boost ? 90 : form,
+              ppgTenths: 40,
+              games: 8,
+              live: live,
+            ),
+          'Gus Glove': FantasyPlayerTotals(
+              points: 2, ownershipPct: 1, formTenths: 10, games: 8, live: live),
+        };
+
+    /// Lands every feed WITHOUT pumpAndSettle (a live pill pulses forever,
+    /// which never settles).
+    Future<void> landLive(WidgetTester tester,
+        Map<String, FantasyPlayerTotals>? totalsValue) async {
+      totals.add(totalsValue);
+      changes.add(const {});
+      games.add(const []);
+      watchlist.add(const {});
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    Future<void> settle(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    /// Settles with the pill pulsing: a few fixed frames instead of
+    /// pumpAndSettle (which never returns while a LIVE pill is on screen).
+    Future<void> frames(WidgetTester tester) async {
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+    }
+
+    /// The player rows built right now, top to bottom.
+    List<String> shown(WidgetTester tester) {
+      final rows = find
+          .byWidgetPredicate((w) =>
+              w is InkWell &&
+              w.key is ValueKey<String> &&
+              (w.key! as ValueKey<String>).value.startsWith('market_row_'))
+          .evaluate()
+          .map((e) => (
+                (e.widget.key! as ValueKey<String>)
+                    .value
+                    .substring('market_row_'.length),
+                tester.getTopLeft(find.byWidget(e.widget)).dy,
+              ))
+          .toList()
+        ..sort((a, b) => a.$2.compareTo(b.$2));
+      return [for (final r in rows) r.$1];
+    }
+
+    Finder pill() => find.byKey(const ValueKey('order_changed_pill'));
+    const pillText = 'Order changed · tap to refresh';
+    final list = find.byKey(const ValueKey('market_list'));
+    String textOf(WidgetTester tester, String key) =>
+        tester.widget<Text>(find.byKey(ValueKey(key))).data!;
+
+    Future<void> scrollDown(WidgetTester tester) async {
+      await tester.drag(list, const Offset(0, -800));
+      await frames(tester);
+    }
+
+    Future<void> pumpLive(WidgetTester tester,
+            {Size size = const Size(420, 900),
+            ThemeMode themeMode = ThemeMode.light}) =>
+        pumpTab(tester,
+            marketPlayers: liveMarket, size: size, themeMode: themeMode);
+
+    group('the LIVE pill', () {
+      testWidgets(
+          'shows by the sort bar while the totals are live, and not when '
+          'they are the official ones', (tester) async {
+        await pumpLive(tester);
+        await landLive(tester, liveTotals(live: false));
+        expect(find.byKey(const ValueKey('market_live_pill')), findsNothing);
+        expect(find.text('LIVE'), findsNothing);
+
+        totals.add(liveTotals());
+        await settle(tester);
+        expect(find.byKey(const ValueKey('market_live_pill')), findsOneWidget);
+        expect(find.text('LIVE'), findsOneWidget);
+        // By the sort bar: just under it, inside the market's width.
+        final bar =
+            tester.getRect(find.byKey(const ValueKey('market_sort_points')));
+        final p =
+            tester.getRect(find.byKey(const ValueKey('market_live_pill')));
+        expect(p.top, greaterThanOrEqualTo(bar.bottom));
+        expect(p.top - bar.bottom, lessThan(24));
+
+        // The week settles: the official numbers, no pill.
+        totals.add(liveTotals(live: false));
+        await settle(tester);
+        expect(find.byKey(const ValueKey('market_live_pill')), findsNothing);
+      });
+
+      testWidgets('no totals at all (before Gameweek 1): no pill',
+          (tester) async {
+        await pumpLive(tester);
+        await landLive(tester, null);
+        expect(find.byKey(const ValueKey('market_live_pill')), findsNothing);
+      });
+    });
+
+    group('numbers move in place', () {
+      testWidgets(
+          'points and form of a row change with a live emission; at the '
+          'top the order follows at once', (tester) async {
+        await pumpLive(tester);
+        await landLive(tester, liveTotals());
+        expect(textOf(tester, 'market_points_P03'), '290 pts');
+        expect(textOf(tester, 'market_form_P03'), '4.0 form');
+        expect(shown(tester).first, 'P01');
+
+        totals.add(liveTotals(boost: 'P03'));
+        await settle(tester);
+
+        expect(textOf(tester, 'market_points_P03'), '500 pts');
+        expect(textOf(tester, 'market_form_P03'), '9.0 form');
+        expect(shown(tester).first, 'P03',
+            reason: 'at the top: the new order applies at once');
+        expect(pill(), findsNothing);
+      });
+    });
+
+    group('the steady order', () {
+      testWidgets(
+          'scrolled down: the numbers change, the rows do NOT jump and '
+          '"Order changed · tap to refresh" shows under the sort bar',
+          (tester) async {
+        await pumpLive(tester);
+        await landLive(tester, liveTotals());
+        await scrollDown(tester);
+        final before = shown(tester);
+        expect(before.first, isNot('P01'));
+        final probe = before[3];
+        final probeIndex = names.indexOf(probe);
+        expect(textOf(tester, 'market_points_$probe'),
+            '${300 - probeIndex * 5} pts');
+        expect(find.text(pillText), findsNothing);
+
+        // P30 scores big: the new leader on points.
+        totals.add(liveTotals(boost: 'P30'));
+        await frames(tester);
+
+        expect(shown(tester), before, reason: 'the rows must not jump');
+        expect(find.text(pillText), findsOneWidget);
+        // Under the sort bar, over the list's top, inside the width.
+        final bar =
+            tester.getRect(find.byKey(const ValueKey('market_sort_points')));
+        final r = tester.getRect(pill());
+        expect(r.top, greaterThan(bar.bottom));
+        expect(r.left, greaterThanOrEqualTo(0));
+        expect(r.right, lessThanOrEqualTo(420));
+      });
+
+      testWidgets(
+          'a number that moves on a visible row changes in place while '
+          'the order waits', (tester) async {
+        await pumpLive(tester);
+        await landLive(tester, liveTotals());
+        await scrollDown(tester);
+        final before = shown(tester);
+        final probe = before[2];
+
+        // The probe himself scores: his number moves, his row stays put.
+        totals.add(liveTotals(boost: probe));
+        await frames(tester);
+
+        expect(textOf(tester, 'market_points_$probe'), '500 pts');
+        expect(textOf(tester, 'market_form_$probe'), '9.0 form');
+        expect(shown(tester), before);
+        expect(find.text(pillText), findsOneWidget);
+      });
+
+      testWidgets(
+          'the pill does not push the list: nothing under it moves when '
+          'it appears', (tester) async {
+        await pumpLive(tester);
+        await landLive(tester, liveTotals());
+        await scrollDown(tester);
+        final probe = shown(tester)[2];
+        final y =
+            tester.getTopLeft(find.byKey(ValueKey('market_row_$probe'))).dy;
+
+        totals.add(liveTotals(boost: 'P30'));
+        await frames(tester);
+
+        expect(find.text(pillText), findsOneWidget);
+        expect(
+            tester.getTopLeft(find.byKey(ValueKey('market_row_$probe'))).dy, y);
+      });
+
+      testWidgets(
+          'tapping the pill re-orders by the live numbers and the pill '
+          'goes', (tester) async {
+        await pumpLive(tester);
+        await landLive(tester, liveTotals());
+        await scrollDown(tester);
+        totals.add(liveTotals(boost: 'P30'));
+        await frames(tester);
+
+        await tester.tap(pill());
+        await frames(tester);
+
+        expect(find.text(pillText), findsNothing);
+        // The list is still scrolled; the rows on screen are a window of the
+        // new order (P30 first, then P01...).
+        final trueOrder = ['P30', ...names.where((n) => n != 'P30')];
+        final now = shown(tester);
+        final start = trueOrder.indexOf(now.first);
+        expect(now, trueOrder.sublist(start, start + now.length));
+      });
+
+      testWidgets('at the top the new order applies at once, no pill',
+          (tester) async {
+        await pumpLive(tester);
+        await landLive(tester, liveTotals());
+        totals.add(liveTotals(boost: 'P30'));
+        await frames(tester);
+        expect(shown(tester).first, 'P30');
+        expect(find.text(pillText), findsNothing);
+      });
+
+      testWidgets(
+          'scrolling back to the top applies the waiting order by itself',
+          (tester) async {
+        await pumpLive(tester);
+        await landLive(tester, liveTotals());
+        await scrollDown(tester);
+        totals.add(liveTotals(boost: 'P30'));
+        await frames(tester);
+        expect(find.text(pillText), findsOneWidget);
+
+        await tester.drag(list, const Offset(0, 2500));
+        await frames(tester);
+
+        expect(find.text(pillText), findsNothing);
+        expect(shown(tester).first, 'P30');
+      });
+
+      testWidgets(
+          'never re-orders under a moving finger: at the top but dragging, '
+          'the order waits until the finger is up', (tester) async {
+        await pumpLive(tester);
+        await landLive(tester, liveTotals());
+
+        final gesture = await tester.startGesture(tester.getCenter(list));
+        await gesture.moveBy(const Offset(0, 40));
+        await tester.pump();
+        totals.add(liveTotals(boost: 'P30'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+
+        expect(shown(tester).first, 'P01', reason: 'finger is down');
+        expect(find.text(pillText), findsOneWidget);
+
+        await gesture.up();
+        await frames(tester);
+        expect(shown(tester).first, 'P30');
+        expect(find.text(pillText), findsNothing);
+      });
+
+      testWidgets(
+          'a sort tap re-sorts by the LIVE numbers at once, even scrolled '
+          'down with an order waiting', (tester) async {
+        await pumpLive(tester);
+        await landLive(tester, liveTotals());
+        await scrollDown(tester);
+        // Form is live too: P30 now has the best form (9.0), the rest 4.0.
+        totals.add(liveTotals(boost: 'P30'));
+        await frames(tester);
+        expect(find.text(pillText), findsOneWidget);
+
+        await tester.tap(find.byKey(const ValueKey('market_sort_form')));
+        await frames(tester);
+
+        expect(find.text(pillText), findsNothing);
+        await tester.drag(list, const Offset(0, 2500));
+        await frames(tester);
+        // Form, highest first: P30 (9.0), then the 4.0 tie A-Z.
+        expect(shown(tester).take(3).toList(), ['P30', 'P01', 'P02']);
+      });
+
+      testWidgets('a position filter pick applies the newest order at once',
+          (tester) async {
+        await pumpLive(tester);
+        await landLive(tester, liveTotals());
+        await scrollDown(tester);
+        totals.add(liveTotals(boost: 'P30'));
+        await frames(tester);
+        expect(find.text(pillText), findsOneWidget);
+
+        await tester.tap(find.byKey(const ValueKey('market_pos_ATT')));
+        await frames(tester);
+
+        expect(find.text(pillText), findsNothing);
+        await tester.drag(list, const Offset(0, 2500));
+        await frames(tester);
+        expect(shown(tester).first, 'P30');
+      });
+
+      testWidgets('(re)opening the tab shows the latest order at once',
+          (tester) async {
+        await pumpLive(tester);
+        await landLive(tester, liveTotals(boost: 'P30'));
+        expect(shown(tester).first, 'P30');
+        expect(find.text(pillText), findsNothing);
+      });
+
+      testWidgets(
+          'an order that comes back to the shown one withdraws the pill',
+          (tester) async {
+        await pumpLive(tester);
+        await landLive(tester, liveTotals());
+        await scrollDown(tester);
+        totals.add(liveTotals(boost: 'P30'));
+        await frames(tester);
+        expect(find.text(pillText), findsOneWidget);
+
+        totals.add(liveTotals());
+        await frames(tester);
+        expect(find.text(pillText), findsNothing);
+      });
+
+      testWidgets(
+          'rows are keyed by player id: a re-order moves the row, it does '
+          'not rebuild it for another player', (tester) async {
+        await pumpLive(tester);
+        await landLive(tester, liveTotals());
+        final element =
+            tester.element(find.byKey(const ValueKey('market_row_P02')));
+
+        totals.add(liveTotals(boost: 'P03'));
+        await frames(tester);
+
+        expect(shown(tester).take(3).toList(), ['P03', 'P01', 'P02']);
+        expect(
+            identical(
+                tester.element(find.byKey(const ValueKey('market_row_P02'))),
+                element),
+            isTrue);
+      });
+
+      for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+        testWidgets('the pill is the accent colour, readable, at 360 px — '
+            '$mode', (tester) async {
+          await pumpLive(tester, size: const Size(360, 760), themeMode: mode);
+          await landLive(tester, liveTotals());
+          await scrollDown(tester);
+          totals.add(liveTotals(boost: 'P30'));
+          await frames(tester);
+
+          final accent = fantasyAccent(tester.element(pill()));
+          final material = tester.widget<Material>(find
+              .descendant(of: pill(), matching: find.byType(Material))
+              .first);
+          expect(material.color, accent);
+          final label = tester.widget<Text>(
+              find.descendant(of: pill(), matching: find.text(pillText)));
+          final fg = label.style!.color!;
+          final lighter =
+              fg.computeLuminance() > accent.computeLuminance() ? fg : accent;
+          final darker = identical(lighter, fg) ? accent : fg;
+          final contrast = (lighter.computeLuminance() + 0.05) /
+              (darker.computeLuminance() + 0.05);
+          expect(contrast, greaterThanOrEqualTo(4.5));
+          final r = tester.getRect(pill());
+          expect(r.left, greaterThanOrEqualTo(0));
+          expect(r.right, lessThanOrEqualTo(360));
+          expect(tester.takeException(), isNull);
+        });
+
+        testWidgets(
+            '360 px: the live pill, the market and the rows never overflow '
+            '— $mode', (tester) async {
+          await pumpLive(tester, size: const Size(360, 760), themeMode: mode);
+          await landLive(tester, liveTotals());
+          expect(
+              find.byKey(const ValueKey('market_live_pill')), findsOneWidget);
+          expect(tester.takeException(), isNull);
+          final p =
+              tester.getRect(find.byKey(const ValueKey('market_live_pill')));
+          expect(p.left, greaterThanOrEqualTo(0));
+          expect(p.right, lessThanOrEqualTo(360));
+        });
+      }
+    });
+  });
 }

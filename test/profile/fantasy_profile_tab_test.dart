@@ -2010,4 +2010,166 @@ void main() {
       });
     }
   });
+
+  // ── Live everywhere (Task 7) ─────────────────────────────────────────────
+  //
+  // While a gameweek is being played the Fantasy tab's player and manager
+  // cards carry the shared LIVE pill (their numbers are the live ones, moving
+  // in place); official numbers, no pill.
+  group('live everywhere (Task 7)', () {
+    const liveTotals = {
+      _name: FantasyPlayerTotals(
+          points: 70,
+          ownershipPct: 55,
+          formTenths: 67,
+          ppgTenths: 53,
+          games: 13,
+          live: true),
+    };
+
+    PlayerWeekStats liveWeek(int pts) => PlayerWeekStats(
+          points: pts,
+          played: true,
+          gamesPlayed: 1,
+          games: const [],
+          lines: const {},
+          voided: false,
+          live: true,
+        );
+
+    FantasyLeaderboards liveBoards({bool live = true}) => FantasyLeaderboards(
+          overall: [
+            const FantasyLeaderboardEntry(
+                uid: 'a', points: 95, rank: 1, live: true),
+            FantasyLeaderboardEntry(
+                uid: _uid, points: 85, rank: 2, movement: 3, live: live),
+          ],
+          byWeek: const {},
+        );
+
+    /// Opens the Fantasy tab WITHOUT pumpAndSettle: a LIVE pill pulses
+    /// forever, which never settles.
+    Future<void> openLive(WidgetTester tester) async {
+      await tester.tap(fantasyTab());
+      await settle(tester);
+    }
+
+    Finder playerPill() => find.descendant(
+        of: key('fantasy_player_card'), matching: find.byType(FantasyLivePill));
+    Finder managerPill() => find.descendant(
+        of: key('fantasy_manager_card'),
+        matching: find.byType(FantasyLivePill));
+
+    test('managerStanding carries the board row\'s live flag', () {
+      final live = managerStanding(liveBoards(), _uid);
+      expect(live.live, isTrue);
+      expect(live.rank, 2);
+      expect(live.points, 85);
+      expect(managerStanding(liveBoards(live: false), _uid).live, isFalse);
+      expect(managerStanding(FantasyLeaderboards.empty, _uid).live, isFalse);
+    });
+
+    testWidgets('the player card carries the pill while his totals are live',
+        (tester) async {
+      await pumpProfile(tester);
+      await landEligibility(tester, asPlayer: true);
+      await landContent(tester, player: true, totalsValue: liveTotals);
+      await openLive(tester);
+      expect(playerPill(), findsOneWidget);
+      expect(find.text('70'), findsOneWidget); // the live total, in place
+    });
+
+    testWidgets('a live week record alone also marks the player card',
+        (tester) async {
+      await pumpProfile(tester);
+      await landEligibility(tester, asPlayer: true);
+      await landContent(tester, player: true, weeksValue: {
+        1: _week(2),
+        2: liveWeek(9),
+      });
+      await openLive(tester);
+      expect(playerPill(), findsOneWidget);
+      // His live week's bar is hollow and labelled, here too.
+      expect(key('form_bar_live_2'), findsOneWidget);
+    });
+
+    testWidgets('official numbers: no pill on the player card',
+        (tester) async {
+      await pumpProfile(tester);
+      await landEligibility(tester, asPlayer: true);
+      await landContent(tester, player: true);
+      await openFantasyTab(tester);
+      expect(playerPill(), findsNothing);
+      expect(find.byType(FantasyLivePill), findsNothing);
+    });
+
+    testWidgets('the manager card carries the pill while his row is live',
+        (tester) async {
+      await pumpProfile(tester);
+      await landEligibility(tester, asManager: topCats);
+      await landContent(tester, managerRole: true, boardsValue: liveBoards());
+      await openLive(tester);
+      expect(managerPill(), findsOneWidget);
+      expect(find.text('#2'), findsOneWidget);
+      expect(find.text('85'), findsOneWidget);
+    });
+
+    testWidgets('official standing: no pill on the manager card',
+        (tester) async {
+      await pumpProfile(tester);
+      await landEligibility(tester, asManager: topCats);
+      await landContent(tester,
+          managerRole: true, boardsValue: liveBoards(live: false));
+      await openFantasyTab(tester);
+      expect(managerPill(), findsNothing);
+    });
+
+    testWidgets('the pill goes when the week settles (the board turns '
+        'official)', (tester) async {
+      await pumpProfile(tester);
+      await landEligibility(tester, asManager: topCats);
+      await landContent(tester, managerRole: true, boardsValue: liveBoards());
+      await openLive(tester);
+      expect(managerPill(), findsOneWidget);
+
+      boards.add(liveBoards(live: false));
+      await settle(tester);
+      expect(managerPill(), findsNothing);
+    });
+
+    for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+      testWidgets('360 px: both cards with their pills fit — $mode',
+          (tester) async {
+        await pumpProfile(tester,
+            size: const Size(360, 900), themeMode: mode);
+        await landEligibility(tester,
+            asPlayer: true,
+            asManager: const FantasyManager(
+                teamName: '$_longTeam $_longTeam', nameFlagged: false),
+            linkedTeam: _longTeam,
+            marketValue: [
+              _player(_name, FantasyPosition.def, 75, team: _longTeam),
+              ...market.skip(1),
+            ]);
+        await landContent(tester,
+            player: true,
+            managerRole: true,
+            totalsValue: liveTotals,
+            boardsValue: liveBoards());
+        await openLive(tester);
+
+        expect(playerPill(), findsOneWidget);
+        expect(managerPill(), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        for (final pill in [playerPill(), managerPill()]) {
+          final r = tester.getRect(pill);
+          expect(r.left, greaterThanOrEqualTo(0));
+          expect(r.right, lessThanOrEqualTo(360));
+        }
+        await tester.drag(key('fantasy_tab_ready'), const Offset(0, -600));
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+      });
+    }
+  });
 }

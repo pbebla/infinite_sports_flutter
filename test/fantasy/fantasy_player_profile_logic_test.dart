@@ -418,4 +418,102 @@ void main() {
     expect(model.formBars.firstWhere((b) => b.gw == 2).voided, isTrue);
     expect(model.priceRows.map((r) => r.gw), contains(2));
   });
+
+  // ── Live everywhere (Task 7) ───────────────────────────────────────────
+
+  group('live week (the in-progress gameweek on the profile)', () {
+    PlayerWeekStats liveWeek(
+      int points, {
+      Map<String, ScoreSourceLine> lines = const {},
+      bool bonusProvisional = false,
+    }) =>
+        PlayerWeekStats(
+          points: points,
+          played: true,
+          gamesPlayed: 1,
+          games: const [],
+          lines: lines,
+          voided: false,
+          live: true,
+          bonusProvisional: bonusProvisional,
+        );
+
+    test('model.live: a live totals row, or a live week record', () {
+      expect(_build().live, isFalse);
+      expect(
+          _build(
+              totals: const FantasyPlayerTotals(points: 5, live: true)).live,
+          isTrue);
+      expect(
+          _build(
+              totals: const FantasyPlayerTotals(points: 5, live: false)).live,
+          isFalse);
+      expect(_build(weeks: {1: _week(5), 2: liveWeek(3)}).live, isTrue);
+      expect(_build(weeks: {1: _week(5), 2: _week(3)}).live, isFalse);
+    }, );
+
+    test('only the live week\'s form bar is live (the newest, flagged), '
+        'its points still count', () {
+      final model = _build(weeks: {1: _week(5), 2: liveWeek(7)});
+      expect(model.formBars.map((b) => b.live).toList(), [false, true]);
+      expect(model.formBars.last.points, 7);
+    });
+
+    test('the live week\'s Matches row is flagged live, season-to-date '
+        'includes it', () {
+      final model = _build(weeks: {1: _week(5), 2: liveWeek(7)});
+      expect(model.matchRows.map((r) => (r.gw, r.live)).toList(),
+          [(2, true), (1, false)]);
+      expect(model.matchRows.first.seasonToDate, 12);
+    });
+
+    test('a provisional bonus is labelled on the week\'s bonus line and in '
+        'the season sources — and nowhere else', () {
+      final model = _build(weeks: {
+        1: _week(8, lines: {'goals': _l(1, 4), 'bonus': _l(3, 3)}),
+        2: liveWeek(9, lines: {
+          'goals': _l(1, 4),
+          'bonus': _l(2, 2),
+        }, bonusProvisional: true),
+      });
+      final live = model.matchRows.first;
+      expect(live.gw, 2);
+      expect({for (final l in live.lines) l.key: l.provisional},
+          {'goals': false, 'bonus': true});
+      // The settled week's bonus is final.
+      expect(model.matchRows.last.lines.every((l) => !l.provisional), isTrue);
+      // Season totals carry the live week's provisional bonus: flagged.
+      final bonus = model.sourceTotals.firstWhere((s) => s.key == 'bonus');
+      expect(bonus.points, 5);
+      expect(bonus.provisional, isTrue);
+      expect(model.sourceTotals.firstWhere((s) => s.key == 'goals').provisional,
+          isFalse);
+    });
+
+    test('a live week whose bonus is not provisional (its game is Final) '
+        'reads plain "Bonus"', () {
+      final model = _build(weeks: {
+        2: liveWeek(9, lines: {'bonus': _l(2, 2)}),
+      });
+      expect(model.matchRows.first.lines.single.provisional, isFalse);
+      expect(
+          sourceLineLabel(model.matchRows.first.lines.single), 'Bonus');
+    });
+
+    test('sourceLineLabel: "Bonus (provisional)" only for a provisional '
+        'bonus', () {
+      expect(
+          sourceLineLabel(const SourceTotal(
+              key: 'bonus', count: 2, points: 2, provisional: true)),
+          'Bonus (provisional)');
+      expect(
+          sourceLineLabel(const SourceTotal(key: 'bonus', count: 3, points: 3)),
+          'Bonus');
+      // Never on another source, whatever the flag.
+      expect(
+          sourceLineLabel(const SourceTotal(
+              key: 'goals', count: 2, points: 8, provisional: true)),
+          'Goals ×2');
+    });
+  });
 }

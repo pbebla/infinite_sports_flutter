@@ -35,6 +35,18 @@
 // "no data" instead of holding the skeleton. Session caches make a revisit
 // paint at once.
 //
+// Live everywhere (Task 7): while a gameweek is being played the totals feed
+// carries the live numbers (`FantasyPlayerTotals.live`), so a LIVE pill sits
+// under the sort bar and every row's points and form move IN PLACE the moment
+// they arrive. The ORDER of the rows follows the owner's steady-order rule,
+// "like ESPN and the Premier League — numbers move, rows don't jump", the same
+// helper and the same scroll tracking as the leaderboards (steady_order.dart,
+// steady_scroll.dart): the rows re-order at once on a sort tap or a filter /
+// search change (the fan asked for a new view), when the list is at the top,
+// and when the tab is (re)opened; otherwise "Order changed · tap to refresh"
+// floats under the sort bar and re-orders on its tap — and never under a
+// moving finger. Rows are keyed by player id, so a re-order moves the row.
+//
 // House rules: colorScheme + fantasy accent both themes (gold on dark, the
 // primary red on light); names wrap, never underlined; glass-navbar bottom
 // clearance; initials avatar fallback; 250ms fades, zero under reduced
@@ -52,11 +64,16 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/data/next_game.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart'
+    show OrderChangedPill;
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/market_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/price_movers_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/steady_order.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/steady_scroll.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_page.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/profile_common.dart';
@@ -209,6 +226,15 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
   Set<String> _watchlist = const {};
   bool _watchlistLoaded = false;
 
+  /// The order the market rows are drawn in (player names — the eligible rows
+  /// then the guests) under the steady-order rule: see the file header.
+  final SteadyOrder<String> _order = SteadyOrder<String>();
+
+  /// Where the list is and whether a finger is on it (steady_scroll.dart),
+  /// read from the list's own notifications — no owned ScrollController, so
+  /// the list stays on the route's primary one (iOS status-bar tap to top).
+  final SteadyScrollTracker _scroll = SteadyScrollTracker();
+
   /// The live feed of the "View all" sheet (it mounts its own builder; the
   /// tab's subscriptions fan out here).
   final StreamController<PriceMovesSnapshot?> _movesForSheet =
@@ -256,6 +282,8 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
     super.initState();
     widget.draft.addListener(_onDraftChanged);
     _seedFromSession();
+    // The tab is being (re)opened: the first order is the newest one.
+    _reorder(atTop: true);
     _subscribeMarketFeeds();
     _seasonFinished.start();
     _leagueGames.start();
@@ -293,6 +321,9 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
       setState(() {
         _totals = totals;
         _totalsLoaded = true;
+        // Numbers move in place at once; the ORDER waits unless the list is
+        // at the top and nobody is scrolling it.
+        _reorder(atTop: _scroll.atTop);
       });
       _pushMovesForSheet();
     }, onError: (Object _) {
@@ -326,6 +357,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
       setState(() {
         _watchlist = names;
         _watchlistLoaded = true;
+        _reorder(atTop: _scroll.atTop);
       });
     }, onError: (Object _) {
       if (mounted) setState(() => _watchlistLoaded = true);
@@ -339,8 +371,11 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
       old.draft.removeListener(_onDraftChanged);
       widget.draft.addListener(_onDraftChanged);
     }
-    // The broadcast stream delivers asynchronously — safe mid-build.
-    if (old.players != widget.players) _pushMovesForSheet();
+    if (old.players != widget.players) {
+      _reorder(atTop: _scroll.atTop);
+      // The broadcast stream delivers asynchronously — safe mid-build.
+      _pushMovesForSheet();
+    }
   }
 
   void _onDraftChanged() {
@@ -368,6 +403,41 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
         descending: FantasyPlayersTab.sessionDescending,
         hasTotals: _totals != null,
       );
+
+  bool get _signedIn => _selfUid.isNotEmpty;
+
+  /// The market under every current input (search, position, ★, sort,
+  /// totals): the TRUE order, newest numbers.
+  ({List<FantasyPlayer> eligible, List<FantasyPlayer> ineligible})
+      _composeMarket() {
+    final sort = _sort;
+    return composeMarket(
+      players: widget.players,
+      query: _search.text,
+      position: _positionFilter,
+      sort: sort.sort,
+      descending: sort.descending,
+      totals: _totals,
+      watchlist: _watchlist,
+      watchlistOnly: _signedIn && _watchlistOnly,
+    );
+  }
+
+  /// Feeds the steady order the market's true order right now. [atTop] true
+  /// applies it at once (the list is at the top and nobody is scrolling it,
+  /// or the fan just asked for a new view: a sort tap, a filter, a search);
+  /// false parks it behind "Order changed · tap to refresh". The caller
+  /// repaints.
+  void _reorder({required bool atTop}) {
+    final market = _composeMarket();
+    _order.update([
+      for (final p in market.eligible) p.name,
+      for (final p in market.ineligible) p.name,
+    ], atTop: atTop);
+  }
+
+  /// Any live row in the totals: the numbers are the in-progress gameweek's.
+  bool get _live => _totals?.values.any((t) => t.live) ?? false;
 
   /// Every move of the latest reprice for players in the market; null
   /// before any reprice, when the latest one moved nobody, or once the season
@@ -401,6 +471,8 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
     setState(() {
       FantasyPlayersTab.sessionSort = next.sort;
       FantasyPlayersTab.sessionDescending = next.descending;
+      // He asked for this order: show it now, by the live numbers.
+      _reorder(atTop: true);
     });
   }
 
@@ -408,7 +480,29 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
     setState(() {
       if (_searchOpen) _search.clear();
       _searchOpen = !_searchOpen;
+      _reorder(atTop: true);
     });
+  }
+
+  /// "Order changed · tap to refresh" was tapped (or the list came to rest at
+  /// the top): apply the waiting order.
+  void _refreshOrder() {
+    setState(_order.refresh);
+  }
+
+  /// A scroll came to rest at the top with an order waiting: apply it.
+  /// Deferred — scroll notifications can fire during layout.
+  void _applyWaitingAtRest() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _order.hasPending && _scroll.atTop) _refreshOrder();
+    });
+  }
+
+  bool _onScroll(ScrollNotification n) {
+    // Only THIS list's own vertical scroll counts; the tracker knows. True =
+    // it just came to rest at the top.
+    if (_scroll.onScroll(n) && _order.hasPending) _applyWaitingAtRest();
+    return false;
   }
 
   void _add(FantasyPlayer player) {
@@ -472,17 +566,32 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
     final scheme = Theme.of(context).colorScheme;
     final editable = _editable;
     final sort = _sort;
-    final signedIn = _selfUid.isNotEmpty;
+    final signedIn = _signedIn;
     final watchlistOnly = signedIn && _watchlistOnly;
-    final market = composeMarket(
-      players: widget.players,
-      query: _search.text,
-      position: _positionFilter,
-      sort: sort.sort,
-      descending: sort.descending,
-      totals: _totals,
-      watchlist: _watchlist,
-      watchlistOnly: watchlistOnly,
+    // The newest numbers decide WHO is in the market; the steady order
+    // decides the order they are drawn in (a member the order does not know
+    // yet — it only happens between an input change and its re-order — is
+    // appended in its true place, never dropped).
+    final trueMarket = _composeMarket();
+    final byName = {
+      for (final p in [...trueMarket.eligible, ...trueMarket.ineligible])
+        p.name: p,
+    };
+    final drawn = <String>[
+      for (final name in _order.applied)
+        if (byName.containsKey(name)) name,
+    ];
+    final drawnSet = drawn.toSet();
+    drawn.addAll(byName.keys.where((name) => !drawnSet.contains(name)));
+    final market = (
+      eligible: [
+        for (final name in drawn)
+          if (byName[name]!.eligible) byName[name]!,
+      ],
+      ineligible: [
+        for (final name in drawn)
+          if (!byName[name]!.eligible) byName[name]!,
+      ],
     );
     // Season over: no price-move arrows (rows) and no Risers / Fallers card.
     final latest = _seasonFinished.finished
@@ -521,6 +630,14 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
     final guestCount =
         market.ineligible.isEmpty ? 0 : 1 + market.ineligible.length;
     final itemCount = mainCount + cardCount + guestCount;
+    // Where each player's row sits, by its key (the list's re-order lookup).
+    final guestStart = mainCount + cardCount + 1;
+    final rowIndex = <Key, int>{
+      for (final (i, p) in market.eligible.indexed)
+        ValueKey<String>('market_row_${p.name}'): i,
+      for (final (i, p) in market.ineligible.indexed)
+        ValueKey<String>('market_row_${p.name}'): guestStart + i,
+    };
 
     return Column(
       key: const ValueKey('players_market'),
@@ -534,7 +651,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
               key: const ValueKey('market_search'),
               controller: _search,
               autofocus: true,
-              onChanged: (_) => setState(() {}),
+              onChanged: (_) => setState(() => _reorder(atTop: true)),
               decoration: InputDecoration(
                 hintText: 'Search players or teams',
                 prefixIcon: const Icon(Icons.search, size: 20),
@@ -546,6 +663,21 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
             ),
           ),
         _sortBar(context, sort),
+        // Live everywhere: while a gameweek is being played the points and
+        // form below are its provisional numbers.
+        AnimatedSwitcher(
+          duration: appear,
+          child: _live
+              ? const Padding(
+                  key: ValueKey('market_live_row'),
+                  padding: EdgeInsets.fromLTRB(12, 8, 12, 0),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: FantasyLivePill(key: ValueKey('market_live_pill')),
+                  ),
+                )
+              : const SizedBox.shrink(key: ValueKey('no_market_live_row')),
+        ),
         // Cross-tab honesty (Task 1): the market edits the draft, the SAVE
         // lives on My Team — say so whenever the draft is dirty.
         AnimatedSwitcher(
@@ -588,42 +720,83 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
         ),
         const SizedBox(height: 4),
         Expanded(
-          child: ListView.builder(
-            key: const ValueKey('market_list'),
-            padding: EdgeInsets.fromLTRB(
-                0, 4, 0, 24 + MediaQuery.paddingOf(context).bottom),
-            itemCount: itemCount,
-            itemBuilder: (context, i) {
-              if (i < mainCount) {
-                return rowCount == 0
-                    ? _EmptyMarket(
-                        watchlistEmpty: watchlistOnly && _watchlist.isEmpty,
-                      )
-                    : row(market.eligible[i]);
-              }
-              var k = i - mainCount;
-              if (moves != null && k == 0) {
-                return Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-                  child: PriceMoversCard(
-                    key: const ValueKey('price_movers_card'),
-                    gameweek: moves.gameweek,
-                    movers: computePriceMovers(
-                      latest!.changes,
-                      widget.players,
-                      _totals,
-                      position: _positionFilter?.db,
-                    ),
-                    position: _positionFilter?.db,
-                    onOpenPlayer: _openPlayer,
-                    onViewAll: _openAllMoves,
+          child: Stack(
+            children: [
+              NotificationListener<ScrollMetricsNotification>(
+                // The content grew or shrank under the viewport: the offset
+                // may have been clamped without a scroll.
+                onNotification: (n) {
+                  _scroll.onMetrics(n);
+                  return false;
+                },
+                child: NotificationListener<ScrollNotification>(
+                  onNotification: _onScroll,
+                  child: ListView.builder(
+                    key: const ValueKey('market_list'),
+                    padding: EdgeInsets.fromLTRB(
+                        0, 4, 0, 24 + MediaQuery.paddingOf(context).bottom),
+                    itemCount: itemCount,
+                    // A re-order moves a row's tile with its player instead
+                    // of re-using it for somebody else.
+                    findChildIndexCallback: (key) => rowIndex[key],
+                    itemBuilder: (context, i) {
+                      if (i < mainCount) {
+                        return rowCount == 0
+                            ? _EmptyMarket(
+                                watchlistEmpty:
+                                    watchlistOnly && _watchlist.isEmpty,
+                              )
+                            : row(market.eligible[i]);
+                      }
+                      var k = i - mainCount;
+                      if (moves != null && k == 0) {
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+                          child: PriceMoversCard(
+                            key: const ValueKey('price_movers_card'),
+                            gameweek: moves.gameweek,
+                            movers: computePriceMovers(
+                              latest!.changes,
+                              widget.players,
+                              _totals,
+                              position: _positionFilter?.db,
+                            ),
+                            position: _positionFilter?.db,
+                            onOpenPlayer: _openPlayer,
+                            onViewAll: _openAllMoves,
+                          ),
+                        );
+                      }
+                      k -= cardCount;
+                      if (k == 0) return const _NotEligibleDivider();
+                      return row(market.ineligible[k - 1]);
+                    },
                   ),
-                );
-              }
-              k -= cardCount;
-              if (k == 0) return const _NotEligibleDivider();
-              return row(market.ineligible[k - 1]);
-            },
+                ),
+              ),
+              // A new order is waiting (the fan is scrolled away or scrolling):
+              // floats over the top of the list, under the sort bar — it never
+              // pushes the rows.
+              Positioned(
+                top: 8,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: AnimatedSwitcher(
+                    duration: reduceMotion
+                        ? Duration.zero
+                        : const Duration(milliseconds: 200),
+                    child: _order.hasPending
+                        ? OrderChangedPill(
+                            key: const ValueKey('order_changed_pill_shown'),
+                            onTap: _refreshOrder,
+                          )
+                        : const SizedBox.shrink(
+                            key: ValueKey('no_order_changed_pill')),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -656,7 +829,10 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
                       semanticsLabel: label == 'All'
                           ? 'All positions'
                           : '${positionLabel(pos!)}s',
-                      onTap: () => setState(() => _positionFilter = pos),
+                      onTap: () => setState(() {
+                        _positionFilter = pos;
+                        _reorder(atTop: true);
+                      }),
                       child: Text(label),
                     ),
                     const SizedBox(width: 6),
@@ -666,8 +842,10 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
                       key: const ValueKey('market_watchlist_chip'),
                       selected: _watchlistOnly,
                       semanticsLabel: 'Watchlist',
-                      onTap: () =>
-                          setState(() => _watchlistOnly = !_watchlistOnly),
+                      onTap: () => setState(() {
+                        _watchlistOnly = !_watchlistOnly;
+                        _reorder(atTop: true);
+                      }),
                       child: Icon(
                         _watchlistOnly
                             ? Icons.star_rounded

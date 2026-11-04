@@ -50,7 +50,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:infinite_sports_flutter/fantasy/hub/badge_shelf.dart'
     show BadgeCountChip, kBadgeCountChipHeight, kBadgeCountChipWidth;
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
@@ -58,6 +57,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/steady_order.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/steady_scroll.dart';
 
 /// How long a moved row stays tinted.
 const Duration kRowTintHold = Duration(milliseconds: 800);
@@ -67,10 +67,6 @@ const Duration kRankCrossFade = Duration(milliseconds: 250);
 
 /// The moved-row tint's strength.
 const double kRowTintAlpha = 0.18;
-
-/// How near the top (logical px) still counts as "at the top" — a hair of
-/// slop so a settled list that sits a pixel off 0 still follows the rule.
-const double kListTopSlop = 2;
 
 /// The pill that appears while a new order waits (the owner's copy).
 const String kOrderChangedCopy = 'Order changed · tap to refresh';
@@ -512,18 +508,14 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
   final GlobalKey _ownKey = GlobalKey();
   bool _pinned = false;
 
-  /// The list's scroll offset as of its last scroll / metrics notification
-  /// (0 until it scrolls). Read from notifications, NOT from an owned
-  /// ScrollController: the list stays on the route's PrimaryScrollController,
-  /// so iOS's tap-the-status-bar-to-scroll-to-top keeps working on it.
-  double _pixels = 0;
+  /// Where the list is and whether a finger is on it (steady_scroll.dart).
+  /// Read from notifications, NOT from an owned ScrollController: the list
+  /// stays on the route's PrimaryScrollController, so iOS's
+  /// tap-the-status-bar-to-scroll-to-top keeps working on it.
+  final SteadyScrollTracker _scroll = SteadyScrollTracker();
 
   /// The order the rows are drawn in (uids); see the class doc.
   final SteadyOrder<String> _order = SteadyOrder<String>();
-
-  /// The fan is dragging or flinging the list (user-driven scrolling that has
-  /// not come to rest): never re-order under a moving finger.
-  bool _userScrolling = false;
 
   /// The rows that just moved, by uid, and the serial that tells a tile it is
   /// a NEW move.
@@ -541,18 +533,13 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
   void didUpdateWidget(RankedLeaderboardList old) {
     super.didUpdateWidget(old);
     final before = List<String>.of(_order.applied);
-    _order.update(_uids(widget.rows), atTop: _atTop);
+    _order.update(_uids(widget.rows), atTop: _scroll.atTop);
     _noteMoves(old.rows, before);
     _scheduleCheck();
   }
 
   static List<String> _uids(List<LeaderboardRowData> rows) =>
       [for (final row in rows) row.uid];
-
-  /// At the top and nobody is scrolling: a new order may be applied now.
-  bool get _atTop {
-    return !_userScrolling && _pixels <= kListTopSlop;
-  }
 
   /// Works out which rows moved between the previous rows / order and the
   /// current ones (a rank number changed, or the order moved them) and hands
@@ -587,26 +574,14 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
   /// Deferred — scroll notifications can fire during layout.
   void _applyWaitingAtRest() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _order.hasPending && _atTop) _refresh();
+      if (mounted && _order.hasPending && _scroll.atTop) _refresh();
     });
   }
 
   bool _onScroll(ScrollNotification n) {
-    // Only THIS list's own vertical scroll (not the week chips' strip).
-    if (n.depth == 0 && n.metrics.axis == Axis.vertical) {
-      _pixels = n.metrics.pixels;
-      if (n is ScrollStartNotification && n.dragDetails != null) {
-        // A finger has started dragging (before its first movement counts).
-        _userScrolling = true;
-      } else if (n is UserScrollNotification) {
-        _userScrolling = n.direction != ScrollDirection.idle;
-      } else if (n is ScrollEndNotification) {
-        _userScrolling = false;
-        if (_order.hasPending && n.metrics.pixels <= kListTopSlop) {
-          _applyWaitingAtRest();
-        }
-      }
-    }
+    // Only THIS list's own vertical scroll counts (not the week chips'
+    // strip) — the tracker knows; true = it just came to rest at the top.
+    if (_scroll.onScroll(n) && _order.hasPending) _applyWaitingAtRest();
     // Scroll notifications can fire DURING viewport layout — reading
     // render-box geometry there asserts. Defer to after the frame.
     _scheduleCheck();
@@ -681,9 +656,7 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
           // The content grew or shrank under the viewport: the offset may
           // have been clamped without a scroll.
           onNotification: (n) {
-            if (n.depth == 0 && n.metrics.axis == Axis.vertical) {
-              _pixels = n.metrics.pixels;
-            }
+            _scroll.onMetrics(n);
             return false;
           },
           child: NotificationListener<ScrollNotification>(
@@ -724,7 +697,7 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
                   ? Duration.zero
                   : const Duration(milliseconds: 200),
               child: _order.hasPending
-                  ? _OrderChangedPill(
+                  ? OrderChangedPill(
                       key: const ValueKey('order_changed_pill_shown'),
                       onTap: _refresh,
                     )
@@ -768,11 +741,11 @@ class _RankedLeaderboardListState extends State<RankedLeaderboardList> {
 }
 
 /// "Order changed · tap to refresh": the accent-coloured pill that floats over
-/// the top of a list whose order is being held still. Filled with the fantasy
-/// accent (gold in dark, the primary red in light) with whichever of black /
-/// white reads on it.
-class _OrderChangedPill extends StatelessWidget {
-  const _OrderChangedPill({super.key, required this.onTap});
+/// the top of a list whose order is being held still (the leaderboards and the
+/// Players market share it). Filled with the fantasy accent (gold in dark, the
+/// primary red in light) with whichever of black / white reads on it.
+class OrderChangedPill extends StatelessWidget {
+  const OrderChangedPill({super.key, required this.onTap});
 
   final VoidCallback onTap;
 

@@ -14,6 +14,28 @@
 // Leaderboards/RankHistory), so it is part of the first paint — it joins the
 // same single reveal, never pops in after it.
 //
+// Live everywhere (Task 7): every court chip carries that player's counted
+// points for the week shown, and a line above the court says what the week
+// scored — `{W} pts` with the shared LIVE pill while the week is being played,
+// `Final · {W} pts` once settled (the manager's own `History/<gw>/<uid>`
+// Breakdown), My Team's "Voided" / "didn't count" copy for those weeks.
+//   • a LIVE week reads `Live/Squads/<uid>` + the live feed's player statuses;
+//   • a SETTLED week reads that one week's `History/<gw>/<uid>` — one small
+//     listener per week shown (watchHistoryWeek), never the whole History;
+//   • "Voided" comes only from the Voided set (`watchVoidedWeeks`), never from
+//     a live per-player record (a live record in a voided week reads "not
+//     voided, 0"): while that set is unknown (its feed failed or has not
+//     answered) NO points are shown — never a number that may be a voided
+//     week's;
+//   • the resolver is My Team's ([resolveLockedWeek]), so the two screens can
+//     never disagree about a week;
+//   • your own "Now" face shows the live points of the week being played when
+//     the squad on it IS the squad that was locked (same picks); otherwise
+//     they belong to the locked squad and are not drawn on a different one.
+// The new streams join the page's single reveal (an [AnswerGate]: every feed
+// answered, an error counts as an answer, bounded at the global 2 s; latched,
+// so a week that locks while the page is open never brings the skeleton back).
+//
 // House rules: streams only; single fade reveal (skeleton until every stream
 // — the badge feeds included; a failing badge feed counts as "none" — has
 // emitted once); theme-safe court (FantasyCourtView, onSlotTap null = no
@@ -24,7 +46,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/answer_gate.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart'
+    show HistoryWeek;
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
@@ -33,6 +59,8 @@ import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/badge_shelf.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/rank_history_chart.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
@@ -64,6 +92,11 @@ class ManagerSquadViewerPage extends StatefulWidget {
     this.rankSeries,
     this.rankStates,
     this.onShareRank,
+    this.liveStates,
+    this.liveSquadStates,
+    this.historyWeekFor,
+    this.voidedStates,
+    this.liveWait = kLiveJoinWait,
   });
 
   final String sport;
@@ -125,6 +158,25 @@ class ManagerSquadViewerPage extends StatefulWidget {
   /// the button's context (the iPad share anchor). null = no share action.
   final Future<void> Function(BuildContext buttonContext)? onShareRank;
 
+  // ── Live everywhere (Task 7) — test seams, null = the real feeds ────────
+
+  /// The season's live gameweek ([FantasyLiveFeed.watch]).
+  final Stream<FantasyLiveState>? liveStates;
+
+  /// The viewed manager's `Live/Squads/<uid>`
+  /// ([FantasyService.watchLiveSquad]).
+  final Stream<LiveSquad?>? liveSquadStates;
+
+  /// One week's settled `History/<gw>/<uid>`
+  /// ([FantasyService.watchHistoryWeek]) — asked once per week shown.
+  final Stream<HistoryWeek?> Function(int week)? historyWeekFor;
+
+  /// The season's owner-voided weeks ([FantasyService.watchVoidedWeeks]).
+  final Stream<Set<int>>? voidedStates;
+
+  /// The bound on the new feeds' first answers (the global 2 s).
+  final Duration liveWait;
+
   @override
   State<ManagerSquadViewerPage> createState() => _ManagerSquadViewerPageState();
 }
@@ -156,23 +208,78 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
   List<RankPoint>? _rankSeries;
   StreamSubscription<List<RankPoint>>? _rankSub;
 
+  // ── Live everywhere (Task 7): the points on the court ───────────────────
+
+  /// The reveal gate over the live feed, the viewed manager's live squad, the
+  /// Voided set and one settled record per week shown.
+  late final AnswerGate _gate = AnswerGate(
+    bound: widget.liveWait,
+    onChanged: () {
+      if (mounted) setState(() {});
+    },
+  );
+  FantasyLiveState _liveState = FantasyLiveState.none;
+
+  /// The viewed manager's `Live/Squads/<uid>`.
+  LiveSquad? _liveWeekSquad;
+
+  /// The owner-voided weeks; null = unknown (the feed failed or has not
+  /// answered): no points are shown while it is.
+  Set<int>? _voided;
+
+  /// Each week shown's settled `History/<gw>/<uid>` (null = none / failed).
+  final Map<int, HistoryWeek?> _settled = {};
+  final Map<int, StreamSubscription<HistoryWeek?>> _settledSubs = {};
+  StreamSubscription<FantasyLiveState>? _liveStateSub;
+  StreamSubscription<LiveSquad?>? _liveWeekSquadSub;
+  StreamSubscription<Set<int>>? _voidedSub;
+
   DateTime get _now => (widget.nowUtc ?? () => DateTime.now().toUtc())();
 
   @override
   void initState() {
     super.initState();
+    _gate.start();
     _publishedSub = (widget.publishedStates ??
             FantasyService.watchPublishedPicksFor(
                 widget.sport, widget.season, widget.uid))
         .listen((weeks) {
-      if (mounted) setState(() => _published = weeks);
+      if (!mounted) return;
+      _published = weeks;
+      _syncSettledWeeks();
+      setState(() {});
     });
     _historySub = (widget.historyStates ??
             FantasyService.watchHistoryFor(
                 widget.sport, widget.season, widget.uid))
         .listen((weeks) {
-      if (mounted) setState(() => _history = weeks);
+      if (!mounted) return;
+      _history = weeks;
+      _syncSettledWeeks();
+      setState(() {});
     });
+    _liveStateSub = _listenPoints<FantasyLiveState>(
+      'live feed',
+      () =>
+          widget.liveStates ?? FantasyLiveFeed.watch(widget.sport, widget.season),
+      (v) => _liveState = v,
+    );
+    _liveWeekSquadSub = _listenPoints<LiveSquad?>(
+      'live squad feed',
+      () =>
+          widget.liveSquadStates ??
+          FantasyService.watchLiveSquad(
+              widget.sport, widget.season, widget.uid),
+      (v) => _liveWeekSquad = v,
+      onFail: () => _liveWeekSquad = null,
+    );
+    _voidedSub = _listenPoints<Set<int>>(
+      'voided feed',
+      () =>
+          widget.voidedStates ??
+          FantasyService.watchVoidedWeeks(widget.sport, widget.season),
+      (v) => _voided = v,
+    );
     if (widget.isSelf) {
       _liveSquad = widget.initialSquad;
       _liveLoaded = widget.initialSquad != null;
@@ -251,6 +358,67 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
     }
   }
 
+  /// Listens to one of the points feeds through the reveal gate: an answer
+  /// (data OR error, or a feed that cannot even be created) opens its slot in
+  /// the gate; an error is logged and leaves what the feed last said ([onFail]
+  /// may reset it). Never throws.
+  StreamSubscription<T>? _listenPoints<T>(
+    String what,
+    Stream<T> Function() make,
+    void Function(T value) store, {
+    void Function()? onFail,
+  }) {
+    _gate.expect(what);
+    void fail(Object e) {
+      debugPrint('ManagerSquadViewerPage: $what failed: $e');
+      onFail?.call();
+      _gate.answer(what);
+      if (mounted) setState(() {});
+    }
+
+    try {
+      return make().listen((v) {
+        if (!mounted) return;
+        store(v);
+        _gate.answer(what);
+        setState(() {});
+      }, onError: fail);
+    } catch (e) {
+      debugPrint('ManagerSquadViewerPage: $what failed: $e');
+      onFail?.call();
+      _gate.answer(what);
+      return null;
+    }
+  }
+
+  /// One small settled listener per week shown (`History/<gw>/<uid>`): the
+  /// weeks the squad streams know. A new week (one that locks while the page
+  /// is open) is subscribed at once; a week that vanished is let go.
+  void _syncSettledWeeks() {
+    final published = _published;
+    final history = _history;
+    if (published == null || history == null) return;
+    final wanted = {...history.keys, ...published.keys};
+    for (final week in wanted) {
+      if (_settledSubs.containsKey(week)) continue;
+      final sub = _listenPoints<HistoryWeek?>(
+        'history week $week',
+        () =>
+            widget.historyWeekFor?.call(week) ??
+            FantasyService.watchHistoryWeek(
+                widget.sport, widget.season, widget.uid, week),
+        (v) => _settled[week] = v,
+        onFail: () => _settled[week] = null,
+      );
+      if (sub != null) _settledSubs[week] = sub;
+    }
+    for (final week in _settledSubs.keys.toList()) {
+      if (wanted.contains(week)) continue;
+      _settledSubs.remove(week)?.cancel();
+      _settled.remove(week);
+    }
+  }
+
   @override
   void dispose() {
     _publishedSub?.cancel();
@@ -259,6 +427,14 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
     _rankSub?.cancel();
     _badgesSub?.cancel();
     _badgeCatalogSub?.cancel();
+    _liveStateSub?.cancel();
+    _liveWeekSquadSub?.cancel();
+    _voidedSub?.cancel();
+    for (final sub in _settledSubs.values) {
+      sub.cancel();
+    }
+    _settledSubs.clear();
+    _gate.dispose();
     super.dispose();
   }
 
@@ -267,7 +443,8 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
       _history == null ||
       (widget.isSelf && !_liveLoaded) ||
       _badges == null ||
-      _badgeCatalog == null;
+      _badgeCatalog == null ||
+      !_gate.ready;
 
   /// The badge shelf (with its label) for the top of the page; null when
   /// nothing is earned.
@@ -310,6 +487,43 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
       child: RankHistoryPanel(
         series: series,
         onShare: widget.onShareRank,
+      ),
+    );
+  }
+
+  /// The gameweek whose points the court shows: the week picked on its chip;
+  /// on your own "Now" face, the week being played — but only when "Now" IS
+  /// the squad that was locked for it (same picks): the live points belong to
+  /// that squad and are never drawn on a different one. null = no points.
+  int? _pointsWeek(Map<int, FantasySquad> weeks) {
+    final picked = _selectedWeek;
+    if (picked != null) return picked;
+    if (!widget.isSelf) return null;
+    final live = liveWeekOf(_liveState.meta);
+    if (live == null) return null;
+    final locked = weeks[live];
+    final now = _liveSquad;
+    if (locked == null || now == null) return null;
+    Set<String> ids(FantasySquad s) => {for (final p in s.picks) p.playerId};
+    final a = ids(now);
+    final b = ids(locked);
+    return a.length == b.length && a.containsAll(b) ? live : null;
+  }
+
+  /// [week]'s points, through My Team's own resolver — null while the Voided
+  /// set is unknown (never a number that may be a voided week's).
+  LockedWeekModel? _pointsModel(int week, FantasySquad? published) {
+    final voided = _voided;
+    if (voided == null) return null;
+    return resolveLockedWeek(
+      week: week,
+      uid: widget.uid,
+      voidedWeeks: voided,
+      sources: LockedWeekSources(
+        live: _liveState,
+        liveSquad: _liveWeekSquad,
+        history: _settled[week],
+        published: published,
       ),
     );
   }
@@ -387,6 +601,13 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
 
     final squad =
         _selectedWeek == null ? _liveSquad : weeks[_selectedWeek];
+    // What the week on the court scored (points per player + the week line);
+    // null = nothing readable for it — then nothing is drawn.
+    final pointsWeek = _pointsWeek(weeks);
+    final points = pointsWeek == null
+        ? null
+        : _pointsModel(pointsWeek, weeks[pointsWeek]);
+    final weekLine = points == null ? null : viewerWeekStrip(points.view);
     final photoByName = {
       for (final p in widget.players)
         if (p.photoUrl != null) p.name: p.photoUrl,
@@ -454,6 +675,10 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
               _ChipBanner(label: chip),
               const SizedBox(height: 10),
             ],
+            if (weekLine != null) ...[
+              _WeekStrip(text: weekLine.text, live: weekLine.live),
+              const SizedBox(height: 10),
+            ],
             // The read-only court: no editing, armbands shown; a chip tap
             // opens that player's profile (round 3).
             FantasyCourtView(
@@ -464,6 +689,8 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
               viceId: squad.viceId,
               // The real armband: ×3 on a Triple Captain week.
               captainMultiplier: captainMultiplierFor(squad, widget.config),
+              // Each player's counted points for the week shown.
+              weekPointsFor: points?.chipTextFor,
               onSlotTap: null,
               onPlayerTap: widget.onOpenPlayer,
               photoUrlFor: (id) => photoByName[id],
@@ -481,6 +708,50 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
               ),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// The week's line above the court: `{W} pts` with the shared LIVE pill while
+/// the week is being played, `Final · {W} pts` once settled, My Team's copy
+/// for a voided / invalid week. Scheme colours, wraps — both themes, 360 px.
+class _WeekStrip extends StatelessWidget {
+  const _WeekStrip({required this.text, required this.live});
+
+  final String text;
+  final bool live;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const ValueKey('viewer_week_strip'),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (live) ...[
+            const FantasyLivePill(),
+            const SizedBox(width: 8),
+          ],
+          Flexible(
+            child: Text(
+              text,
+              key: const ValueKey('viewer_week_strip_text'),
+              softWrap: true,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+                color: scheme.onSurface,
+              ),
+            ),
+          ),
         ],
       ),
     );
