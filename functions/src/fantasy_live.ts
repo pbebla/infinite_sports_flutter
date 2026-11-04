@@ -8,12 +8,13 @@
 // index.ts (deploys as e.g. fantasyFutsal-onGameLive). Every write to a game
 // of the locked week's date recomputes the live week and publishes
 // Fantasy/<sport>/<season>/Live in one guarded transaction. The payload
-// gate keeps everything else free: unless the game is or was in play AND a
-// key the scorer reads changed (a clock tick, a livestream link, undo
-// bookkeeping change none), the handler returns without a single database
-// read. No secrets: a live run never pushes nor drafts. The event's own
-// time is the coalescing stamp (a run whose event an earlier-started run
-// already read past stands down before any heavy read).
+// gate keeps everything else free: unless the game counts or counted
+// (live or Final, before or after the write) AND a key the scorer reads
+// changed (a clock tick, a livestream link, undo bookkeeping change none),
+// the handler returns without a single database read. No secrets: a live
+// run never pushes nor drafts. The event's own time is the coalescing
+// stamp (a run whose event an earlier-started run already read past stands
+// down before any heavy read).
 //
 // Spec: docs/superpowers/specs/2026-11-03-fantasy-live-design.md §4–§5.
 // Plan: docs/superpowers/plans/2026-11-03-fantasy-live-everywhere.md Task 3.

@@ -36,11 +36,11 @@
 import { describe, expect, it } from 'vitest';
 import { clone, Json } from './golden_fixture';
 import {
-  maybeFinalizeGame, maybeRefreshLive, refreshLiveWeek, resettleVoidToggle,
-  runLifecycleSweep,
+  LIVE_SETTLE_HEAL_MS, maybeFinalizeGame, maybeRefreshLive, refreshLiveWeek,
+  resettleVoidToggle, runLifecycleSweep,
 } from './orchestration';
 import { FantasyTxResult } from './orchestration_db';
-import { scoringKeysChanged, SCORING_KEYS } from './live_core';
+import { liveWriteMatters, scoringKeysChanged, SCORING_KEYS } from './live_core';
 import {
   AFTER_LOCK2, F_ROOT, FakeDb, fixture, GW2_DATE, LOCK2_MS, world2,
 } from './test_support';
@@ -371,6 +371,29 @@ describe('the settle hand-over: a Meta-only tombstone (Fable L1)', () => {
     }
   });
 
+  it('3. the tombstone comes after every official write of the finalize run', async () => {
+    const db = await lockedWorld();
+    await liveWrite(db, 0, golden(0), LIVE_AT, LIVE_AT + 100);
+    await liveWrite(db, 1, golden(1), LIVE_AT + 1000, LIVE_AT + 1100);
+    db.reset();
+    await maybeFinalizeGame(db, {
+      sport: SPORT, season: SEASON, dateKey: GW2_DATE, nowUtc: new Date(LIVE_AT + HOUR),
+    });
+    const w = db.writes.map((p) => p.slice(F_ROOT.length + 1));
+    const lastLive = w.lastIndexOf('Live');
+    expect(lastLive).toBeGreaterThan(-1);
+    for (const official of [
+      /^PlayerWeeks\/2$/, /^PlayerWeekStats\/2$/, /^History\/2$/,
+      /^Leaderboards\/Gameweek\/2$/, /^Leaderboards\/Overall$/,
+      /^Leaderboards\/RankHistory$/, /^PlayerTotals$/, /^DreamTeam\/2$/,
+      /^TransferState\/.+$/,
+    ]) {
+      const at = w.map((p, i) => (official.test(p) ? i : -1)).filter((i) => i >= 0);
+      expect(at.length, String(official)).toBeGreaterThan(0);
+      expect(Math.max(...at), String(official)).toBeLessThan(lastLive);
+    }
+  });
+
   it('3. a late event or a score correction after settle never brings the week back (Review Focus 3)', async () => {
     const db = await lockedWorld();
     await playedOut(db);
@@ -545,6 +568,28 @@ describe('the trigger gate: writes that do not touch scoring cost nothing (Revie
     expect(db.f.Live).toStrictEqual(newer);
   });
 
+  it('the gate counts a game that counts or counted: a Final game reset to not started passes', () => {
+    expect(liveWriteMatters(golden(0), notStarted(0))).toBe(true); // 2 -> 0
+    expect(liveWriteMatters(oneGoal(), notStarted(0))).toBe(true); // 1 -> 0
+    expect(liveWriteMatters(notStarted(0), oneGoal())).toBe(true); // 0 -> 1
+    expect(liveWriteMatters(oneGoal(), golden(0))).toBe(true); // 1 -> 2
+    expect(liveWriteMatters(notStarted(1),
+      { ...notStarted(1), team1attendance: { Eli: false } })).toBe(false); // 0 -> 0
+    expect(liveWriteMatters(golden(0), { ...golden(0), Clock: 1 })).toBe(false);
+    expect(liveWriteMatters(notStarted(0), null)).toBe(false); // an unstarted game deleted
+  });
+
+  it('a Final game reset to not started refreshes: it counts nothing again', async () => {
+    const db = await lockedWorld();
+    await liveWrite(db, 0, golden(0), LIVE_AT, LIVE_AT + 100);
+    await liveWrite(db, 1, { ...golden(1), status: 1 }, LIVE_AT + 1000, LIVE_AT + 1100);
+    expect(db.f.Live.Players['Alex']).toMatchObject({ St: 'done', Pts: 12 });
+    expect(await liveWrite(db, 0, notStarted(0), LIVE_AT + 2000, LIVE_AT + 2100))
+      .toBe('written');
+    expect(db.f.Live.Meta.Games[0].S).toBe(0);
+    expect(db.f.Live.Players['Alex']).toMatchObject({ St: 'pending', Pts: 0 });
+  });
+
   it('scoringKeysChanged: each scoring key flips it; Clock, link and unknown keys do not', () => {
     expect([...SCORING_KEYS].sort()).toEqual([
       'Stage', 'forfeitedBy', 'status', 'team1', 'team1Score', 'team1activity',
@@ -581,6 +626,7 @@ describe('stand-downs: exactly where finalize stands down, plus no lock snapshot
     ['a TestFill season', (db) => { db.f.TestFill = { At: 1, Managers: 20 }; }],
     ['before the lock', () => undefined, new Date(LOCK2_MS - HOUR)],
     ['no PublishedPicks/<gw>', (db) => { delete db.f.PublishedPicks[2]; }],
+    ['no LockedPositions/<gw>', (db) => { delete db.f.LockedPositions[2]; }],
   ];
   for (const [label, arrange, now] of cases) {
     it(`6. ${label}: standDown, zero writes`, async () => {
@@ -596,6 +642,59 @@ describe('stand-downs: exactly where finalize stands down, plus no lock snapshot
   }
 });
 
+describe('sweep step 2d: a lost settle heals after the margin', () => {
+  it('finalize loses its hand-over: a sweep inside the margin writes nothing, one after it writes the tombstone', async () => {
+    expect(LIVE_SETTLE_HEAL_MS).toBe(10 * MIN);
+    const db = await lockedWorld();
+    await liveWrite(db, 0, golden(0), LIVE_AT, LIVE_AT + 100);
+    expect(await liveWrite(db, 1, golden(1), LIVE_AT + 1000, LIVE_AT + 1100))
+      .toBe('written'); // Live/Meta.UpdatedAt = LIVE_AT
+    // The settle's Live transaction fails once (the run died there).
+    db.beforeLiveTx = async () => { throw new Error('connection lost'); };
+    await maybeFinalizeGame(db, {
+      sport: SPORT, season: SEASON, dateKey: GW2_DATE, nowUtc: new Date(LIVE_AT + MIN),
+    });
+    expect(db.f.History[2]).toBeDefined();
+    expect(db.f.Live.Meta.State).toBe('live'); // the hand-over was lost
+    const lost = clone(db.f.Live);
+
+    db.reset();
+    await runLifecycleSweep(db, new Date(LIVE_AT + 9 * MIN), undefined, {
+      clock: clockAt(LIVE_AT + 9 * MIN + 100),
+    });
+    expect(db.f.Live).toStrictEqual(lost);
+    expect(db.writes.filter((p) => p.startsWith(`${F_ROOT}/Live`))).toEqual([]);
+    // Step 3 marks the week finalized, so step 2c never looks again.
+    expect(db.f.GwState.status).toBe('finalized');
+
+    db.reset();
+    await runLifecycleSweep(db, new Date(LIVE_AT + 11 * MIN), undefined, {
+      clock: clockAt(LIVE_AT + 11 * MIN + 100),
+    });
+    expect(db.f.Live).toStrictEqual({
+      Meta: { Gw: 2, State: 'settled', UpdatedAt: LIVE_AT + 11 * MIN },
+    });
+    expect(db.f.LiveBase).toBeUndefined();
+    // Healed: the next sweep changes nothing.
+    db.reset();
+    await runLifecycleSweep(db, new Date(LIVE_AT + 30 * MIN));
+    expect(db.writes.filter((p) => p.startsWith(`${F_ROOT}/Live`))).toEqual([]);
+  });
+
+  it('a live week without History is never tombstoned, however old its last write', async () => {
+    const db = await lockedWorld();
+    await liveWrite(db, 0, oneGoal(), LIVE_AT - 2000, LIVE_AT - 1000);
+    const live = clone(db.f.Live);
+    db.reset();
+    // An hour on with no new event (a slow game, not a lost settle).
+    await runLifecycleSweep(db, new Date(LIVE_AT + HOUR), undefined, {
+      clock: clockAt(LIVE_AT + HOUR + 100),
+    });
+    expect(db.f.Live.Meta).toMatchObject({ Gw: 2, State: 'live' });
+    expect(db.f.Live.Board).toStrictEqual(live.Board);
+  });
+});
+
 describe('sweep step 2c: the live backstop', () => {
   it('8. a lost trigger: the next sweep publishes the live week', async () => {
     const db = await lockedWorld();
@@ -606,6 +705,19 @@ describe('sweep step 2c: the live backstop', () => {
     expect(db.f.Live.Meta).toMatchObject({ Gw: 2, State: 'live', ReadAt: LIVE_AT + 100 });
     expect(db.f.Live.Players['Alex'].Pts).toBe(10);
     expect(db.f.Live.Board['alpha'].W).toBe(19);
+  });
+
+  it('8. a lost trigger on a game that went straight to Final while the other has not started: 2c refreshes', async () => {
+    const db = await lockedWorld();
+    db.date2[0] = golden(0); // Final, its trigger lost; game 1 not started
+    await runLifecycleSweep(db, new Date(LIVE_AT), undefined, {
+      clock: clockAt(LIVE_AT + 100),
+    });
+    expect(db.f.History[2]).toBeUndefined(); // not every game is Final
+    expect(db.f.Live.Meta).toMatchObject({ Gw: 2, State: 'live', ReadAt: LIVE_AT + 100 });
+    expect(db.f.Live.Meta.Games[0].S).toBe(2);
+    expect(db.f.Live.Players['Alex']).toMatchObject({ St: 'done', Pts: 12 });
+    expect(db.f.Live.Squads['alpha'].T).toBe(245); // hand math: test 5
   });
 
   it('nothing started: the sweep writes no Live', async () => {

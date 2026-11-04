@@ -195,8 +195,8 @@ describe('buildWritePlan', () => {
 
   it('live: the finalize tombstone Live is written whole; the functions-only LiveBase is not on the allowlist', () => {
     // The replay's finalize runs end with the settled tombstone (live design
-    // 2026-11-03 §4, Fable L5); a live run's LiveBase is never produced by
-    // the replay (every finalize removes it) and stays refused.
+    // 2026-11-03 §4, Fable L5); a live run's LiveBase is removed by every
+    // finalize, so a settled replay never ends holding one — refused.
     const state = { ...replayState(), Live: { Meta: { Gw: 12, State: 'settled', UpdatedAt: 1 } } };
     const plan = buildWritePlan(state, live, 1);
     expect(EXPECTED_NODES).toContain('Live');

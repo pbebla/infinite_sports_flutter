@@ -155,7 +155,9 @@
 //   TransferState, TransferCosts, PublishedPicks, Baselines, SquadAlerts).
 //   It stands down exactly where finalize does (no Config, a frozen
 //   lockOverride, TestFill, before the lock) and without the lock snapshot
-//   PublishedPicks/<gw>. Rules: signed-in read, no client write.
+//   (PublishedPicks/<gw> or LockedPositions/<gw>). A settle lost to a
+//   finalize that died before its hand-over is healed by the sweep (step
+//   2d). Rules: signed-in read, no client write.
 //
 // - LiveBase/<gw> (functions-internal; admin read, no client write): the
 //   settled base a live run resums against (live_core.ts buildLiveBase,
@@ -1618,6 +1620,12 @@ export async function resettleVoidToggle(
 
 // ── The live gameweek (live design 2026-11-03 §4) ──────────────────────────
 
+/** Sweep step 2d's margin: a 'live' node of a week whose History exists is
+ *  a LOST settle only once it is this much older than its last live write —
+ *  longer than any function run (an in-flight finalize must still land
+ *  every official node before its own tombstone). */
+export const LIVE_SETTLE_HEAL_MS = 10 * 60 * 1000;
+
 /** What a live run did:
  *  - 'written'   — Live holds this run's numbers;
  *  - 'skipped'   — no game of the date has started (this week's live node,
@@ -1659,6 +1667,7 @@ interface LiveMeta {
   live: boolean;
   settled: boolean;
   readAt: number;
+  updatedAt: number;
 }
 
 function liveMetaOf(meta: unknown): LiveMeta | null {
@@ -1668,6 +1677,7 @@ function liveMetaOf(meta: unknown): LiveMeta | null {
     live: meta['State'] === 'live',
     settled: meta['State'] === 'settled',
     readAt: toIntLoose(meta['ReadAt']),
+    updatedAt: toIntLoose(meta['UpdatedAt']),
   };
 }
 
@@ -1840,6 +1850,15 @@ export async function refreshLiveWeek(
       lctx);
     return 'standDown';
   }
+  // The locked positions (plan constraint: no snapshot, no live week) — the
+  // one read marketForGameweek's read-only path (claim false) makes, made
+  // here so the stand-down comes before any heavy read.
+  const lockedRaw = await db.read(`${root}/LockedPositions/${gw.number}`);
+  if (lockedRaw == null) {
+    log.warn('fantasy live: no lock snapshot (LockedPositions) — standing down',
+      lctx);
+    return 'standDown';
+  }
 
   const lineups = await db.read(`${sport}/${season}/Line Ups`);
   const games: Record<string, FinalizeGame> = {};
@@ -1847,7 +1866,10 @@ export async function refreshLiveWeek(
   for (const [key, node] of startedNodes) {
     games[key] = scorableGame(node, lineups, () => undefined);
   }
-  const players = await marketForGameweek(db, root, gw.number, false, log, lctx);
+  // marketForGameweek(…, claim false), from the snapshot read above.
+  const players = withLockedPositions(
+    marketPlayersOf(await db.read(`${root}/Players`)),
+    lockedPositionsOf(lockedRaw));
   const transferCostPointsByUid: Record<string, number> = {};
   for (const [u, v] of childEntries(
     await db.read(`${root}/TransferCosts/${gw.number}`))) {
@@ -1879,9 +1901,9 @@ export async function refreshLiveWeek(
 
 /** The live trigger's entry (fantasy_live.ts): a game under
  *  <sport>/<season>/Date/<dateKey> was written. The payload gate runs
- *  first — zero reads unless the game is or was in play AND a key the
- *  scorer reads changed (live_core.ts liveWriteMatters; Fable L2) — then
- *  refreshLiveWeek. 'ignored' = the gate said no. */
+ *  first — zero reads unless the game counts or counted (status 1 or 2,
+ *  after or before) AND a key the scorer reads changed (live_core.ts
+ *  liveWriteMatters; Fable L2) — then refreshLiveWeek. 'ignored' = the gate said no. */
 export async function maybeRefreshLive(
   db: FantasyDb, args: LiveWriteArgs,
 ): Promise<LiveRefreshResult | 'ignored'> {
@@ -2237,12 +2259,13 @@ async function sweepSeason(
   // 2c. Live backstop (live design 2026-11-03 §4): a lost trigger must not
   //     leave the live week behind. While the STORED GwState says the
   //     current week is locked (a previous sweep saw the lock; 'finalized'
-  //     once History exists), recompute it when a game of its date is in
-  //     play, or when every game is Final but Live never reached this
-  //     week's settled tombstone — refreshLiveWeek itself answers 'settled'
-  //     once PlayerWeeks/<gw> exists, so the backstop finalize above wins.
-  //     After the backstop (step 2), before step 3. A failure is logged and
-  //     never blocks the steps below.
+  //     once History exists), recompute it when SOME game of its date has
+  //     started (status 1 or 2) and not all of them are Final, or when every
+  //     game is Final but Live never reached this week's settled tombstone —
+  //     refreshLiveWeek itself answers 'settled' once PlayerWeeks/<gw>
+  //     exists, so the backstop finalize above wins (a lost settle is step
+  //     2d's). After the backstop (step 2), before step 3. A failure is
+  //     logged and never blocks the steps below.
   if (current) {
     try {
       const stored = await db.read(`${root}/GwState`);
@@ -2250,9 +2273,13 @@ async function sweepSeason(
         toIntLoose(stored['current']) === current.number) {
         const games = gamesOfDate(
           await db.read(`${sport}/${season}/Date/${current.date}`));
-        const inPlay = games.some((g) => toIntLoose(g['status']) === 1);
-        let due = inPlay;
-        if (!due && allGamesFinal(games)) {
+        const allFinal = allGamesFinal(games);
+        const started = games.some((g) => {
+          const s = toIntLoose(g['status']);
+          return s === 1 || s === 2;
+        });
+        let due = started && !allFinal;
+        if (!due && allFinal) {
           const meta = liveMetaOf(await db.read(`${root}/Live/Meta`));
           due = !(meta !== null && meta.gw === current.number && meta.settled);
         }
@@ -2269,6 +2296,34 @@ async function sweepSeason(
       log.warn('fantasy sweep: live backstop failed — retried by the next sweep',
         { ...ctx, error: String(err) });
     }
+  }
+
+  // 2d. Lost settle (live design §4): a finalize that died after History but
+  //     before its live hand-over (the settle is its last step and
+  //     best-effort) leaves Live 'live' for a settled week — and no live run
+  //     ever writes again (PlayerWeeks/<gw> stands them down), so phones
+  //     would show LIVE until the next week. On EVERY sweep, whatever
+  //     GwState says (step 3 flips it to 'finalized' right away): a 'live'
+  //     node of week N whose History/N exists and whose UpdatedAt is older
+  //     than LIVE_SETTLE_HEAL_MS gets the tombstone (settleLiveWeek). The
+  //     margin outlasts any in-flight finalize, which must land every
+  //     official node before the tombstone. One small read (Live/Meta) per
+  //     season when nothing is wrong. Logged; never blocks the steps below.
+  try {
+    const meta = liveMetaOf(await db.read(`${root}/Live/Meta`));
+    if (meta !== null && meta.live &&
+      nowMs - meta.updatedAt > LIVE_SETTLE_HEAL_MS &&
+      (await db.read(`${root}/History/${meta.gw}`)) != null) {
+      log.warn('fantasy sweep: settled week still live — healing the hand-over',
+        { ...ctx, gw: meta.gw });
+      await settleLiveWeek(db, {
+        sport, season, cfg, gw: meta.gw, nowUtc, log,
+        ctx: { ...ctx, gw: meta.gw }, clock: deps?.clock,
+      });
+    }
+  } catch (err) {
+    log.warn('fantasy sweep: live settle heal failed — retried by the next sweep',
+      { ...ctx, error: String(err) });
   }
 
   // 3. GwState upsert, after the backstop so a finalize lands as 'finalized'

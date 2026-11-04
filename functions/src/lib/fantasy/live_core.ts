@@ -115,9 +115,10 @@
 //
 // THE TRIGGER GATE (Fable L2): SCORING_KEYS are the game-node keys the
 // scorer reads (stats_mapper.ts, finalize_core.ts, the friendly filter
-// gamesOfDate). liveWriteMatters(before, after) — the game is or was in
-// play AND one of those keys changed — is the live trigger's payload-only
-// gate: a clock tick, a livestream link or undo bookkeeping costs nothing.
+// gamesOfDate). liveWriteMatters(before, after) — the game counts or
+// counted (status 1 or 2 after or before) AND one of those keys changed —
+// is the live trigger's payload-only gate: a clock tick, a livestream link
+// or undo bookkeeping costs nothing.
 
 import { FantasyPosition } from './fantasy_config';
 import {
@@ -526,13 +527,14 @@ export function scoringKeysChanged(before: unknown, after: unknown): boolean {
 }
 
 /** The live trigger's payload-only gate: the write can move a live number
- *  only when the game is or was in play — the after-status is 1 or 2, or
- *  the before-status was 1 (an undone kickoff) — AND a scoring key
- *  changed. False = the trigger returns with zero reads. */
+ *  only when the game counts or counted — the after-status is 1 or 2, or
+ *  the before-status was 1 or 2 (an undone kickoff, a Final game reset to
+ *  not started) — AND a scoring key changed. False = the trigger returns
+ *  with zero reads. */
 export function liveWriteMatters(before: unknown, after: unknown): boolean {
   const status = (node: unknown) =>
     (isPlainMap(node) ? toIntLoose(node['status']) : 0);
-  const inPlay = status(after) === 1 || status(after) === 2 ||
-    status(before) === 1;
+  const counts = (s: number) => s === 1 || s === 2;
+  const inPlay = counts(status(after)) || counts(status(before));
   return inPlay && scoringKeysChanged(before, after);
 }

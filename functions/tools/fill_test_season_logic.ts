@@ -73,8 +73,10 @@ export const NEVER_WRITTEN_WHOLE: readonly string[] = [
  *  Live (live design 2026-11-03 §4, Fable L5): every replayed finalize
  *  ends by writing the settled tombstone { Meta: { Gw, State: 'settled',
  *  UpdatedAt } } — always produced, a derived node like the boards. Its
- *  functions-only LiveBase is NOT listed: every finalize removes it, so a
- *  replay that produced one would mean a live run escaped the replay
+ *  functions-only LiveBase is NOT listed: the replay's sweeps build it
+ *  mid-day (step 2c, a match day with one game Final and another not
+ *  started yet) but every finalize removes it whole, so a settled replay
+ *  never ends holding one — one left over means a week never settled
  *  (fail closed). */
 export const EXPECTED_NODES: readonly string[] = [
   'Players', 'PlayerTotals', 'PlayerWeeks', 'PlayerWeekStats', 'PriceHistory',
