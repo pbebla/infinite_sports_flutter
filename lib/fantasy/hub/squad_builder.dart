@@ -87,11 +87,12 @@ class FantasySquadBuilder extends StatefulWidget {
   });
 
   /// The locked week's live / settled view (live everywhere, Task 5): the
-  /// strip's content and each court chip's week line, resolved by the hub from
-  /// its locked-week feed (live_logic.resolveLockedWeek). Only used while the
-  /// court is locked. null = nothing known yet — the strip reads "Locked ·
-  /// waiting for kickoff" and the chips stay quiet (a standalone builder, a
-  /// week with no data).
+  /// strip's content, the court's squad (the one that was LOCKED) and each chip's
+  /// week line, resolved by the hub from its locked-week feed
+  /// (live_logic.resolveLockedWeek). Only used while the court is locked, and
+  /// the last one is kept until this builder is itself editable. null = nothing
+  /// known — the strip reads just "Locked" and the court is the draft's with
+  /// no points lines (a standalone builder, a week with no data).
   final LockedWeekModel? lockedWeek;
 
   /// Paid access (spec 2026-11-01 §5): an existing manager without an
@@ -166,6 +167,12 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
   StreamSubscription<FantasySquad?>? _squadSub;
   Timer? _lockTicker;
 
+  /// The last locked-week model the hub handed down. The hub drops its model
+  /// the instant editing reopens (lock + 24 h) while this builder flips on its
+  /// own 30 s ticker; until THIS builder is editable it keeps showing the last
+  /// model — never a placeholder flash in between. Cleared once editable.
+  LockedWeekModel? _lastLocked;
+
   DateTime get _now => (widget.nowUtc ?? () => DateTime.now().toUtc())();
 
   bool get _editable =>
@@ -179,6 +186,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
   @override
   void initState() {
     super.initState();
+    _lastLocked = widget.lockedWeek;
     _attachDraft();
     // 30s tick keeps the editable/locked flip honest around the deadline
     // (same cadence as the deadline chip); cancelled in dispose.
@@ -227,6 +235,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
   @override
   void didUpdateWidget(FantasySquadBuilder old) {
     super.didUpdateWidget(old);
+    if (widget.lockedWeek != null) _lastLocked = widget.lockedWeek;
     if (old.draft != widget.draft) {
       _draft.removeListener(_onDraftChanged);
       if (_ownsDraft) _draft.dispose();
@@ -437,6 +446,15 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
   @override
   Widget build(BuildContext context) {
     final editable = _editable;
+    // Locked: the week as the hub resolved it — kept until THIS builder is
+    // editable (the hub drops it a moment before the 30 s ticker flips us).
+    if (editable) _lastLocked = null;
+    final locked = editable ? null : (widget.lockedWeek ?? _lastLocked);
+    // The court while locked is the squad that was LOCKED (live:
+    // PublishedPicks, settled: History) — NOT Squads/<uid>, which the server
+    // rewrites after finalize and which keeps a chip the lock voided. Until
+    // it has loaded the court is the draft's and shows no points lines.
+    final lockedSquad = locked?.squad;
     final photoByName = {
       for (final p in widget.players)
         if (p.photoUrl != null) p.name: p.photoUrl,
@@ -516,22 +534,28 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
                 _TransfersLine(preview: transfers),
               ],
             ] else
+              // Nothing known about the week (no model yet): just "Locked" —
+              // never a claim about kickoff.
               _LockedWeekStrip(
-                  view: widget.lockedWeek?.view ?? const LockedWeekView.waiting()),
+                  view: locked?.view ?? const LockedWeekView.unknown()),
             const SizedBox(height: 12),
           ],
           FantasyCourtView(
             config: widget.config,
             slots: _draft.slots,
-            slotPicks: _draft.picks,
-            captainId: _draft.captainId,
-            viceId: _draft.viceId,
+            slotPicks: lockedSquad == null
+                ? _draft.picks
+                : picksToSlots(lockedSquad, _draft.slots),
+            captainId: lockedSquad?.captainId ?? _draft.captainId,
+            viceId: lockedSquad?.viceId ?? _draft.viceId,
             // The REAL armband multiplier: ×3 while Triple Captain is the
-            // squad's chip, else the config's ×2.
-            captainMultiplier: captainMultiplierFor(_draft.squad, widget.config),
+            // squad's chip, else the config's ×2 — the squad on screen's.
+            captainMultiplier:
+                captainMultiplierFor(lockedSquad ?? _draft.squad, widget.config),
             // Locked: each chip carries that player's counted points (live or
-            // settled) — nothing while editing is open.
-            weekPointsFor: editable ? null : widget.lockedWeek?.chipTextFor,
+            // settled) — nothing while editing is open, and only for a squad
+            // the lines belong to (the resolver's chipTexts).
+            weekPointsFor: locked?.chipTextFor,
             onSlotTap: editable ? _onSlotTap : null,
             // Locked: viewing a profile is still allowed (filled chips only;
             // empty slots stay inert).
@@ -540,10 +564,11 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
             // initials fall back instantly when a player has none.
             photoUrlFor: (id) => photoByName[id],
             // The charged price (a held player at his baseline price) —
-            // the nameplates add up to the bar.
-            priceOf: _draft.priceOfPick,
+            // the nameplates add up to the bar. The locked squad shows what
+            // it was locked at.
+            priceOf: lockedSquad == null ? _draft.priceOfPick : null,
           ),
-          if (_draft.unplaced.isNotEmpty) ...[
+          if (_draft.unplaced.isNotEmpty && lockedSquad == null) ...[
             const SizedBox(height: 12),
             _NeedsNewSpotStrip(
               picks: _draft.unplaced,
@@ -780,7 +805,8 @@ class _TransfersLine extends StatelessWidget {
 /// The locked state's compact header (live everywhere, Task 5): what the week
 /// is doing for this manager — the LIVE pill while the numbers move, then
 /// `34 pts · #5 ▲2`, `Final · 34 pts · #5`, `Voided · this week counts 0`,
-/// `0 pts · this week didn't count`, or `Locked · waiting for kickoff`
+/// `0 pts · this week didn't count`, `Locked · waiting for kickoff` (before
+/// kickoff only) or just `Locked` (a week we cannot read)
 /// (live_logic.lockedStripText; copy pinned by live_logic_test.dart). The
 /// fantasy accent tint (gold in dark, primary red in light) like the rest of
 /// the hub; the movement reads in the leaderboard's own up / down colours

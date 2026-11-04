@@ -4,7 +4,7 @@
 // While a gameweek is locked, My Team swaps its edit header for a strip that
 // says what the week is doing, and every court chip carries that player's
 // counted points. Everything the screen shows comes from [resolveLockedWeek],
-// over the four small sources of the locked week:
+// over the small sources of the locked week:
 //
 //   LIVE (the week is being played):   Live/Squads/<uid> (the squad's points
 //     and one counted row per pick) + the live feed's Players (a status per
@@ -18,14 +18,26 @@
 // mirror — never from a live record: in a voided week the live per-player
 // record reads "not voided, GP 0" (Task 4 review).
 //
+// THE COURT is the squad that was LOCKED, never `Squads/<uid>`: the server
+// rewrites that after finalize (the spent chip switched off, so a Triple
+// Captain week would read ×2 beside a tripled total; a Free Hit manager's
+// squad restored to last week's) and it keeps a chip the lock voided. Live →
+// `PublishedPicks/<gw>/<uid>` (the lock's snapshot); settled →
+// `History/<gw>/<uid>`'s own squad. The armband and the nameplate multiplier
+// come from it too, and a chip line is only ever shown for a player IN it —
+// with no locked squad loaded the court falls back to the draft's and shows
+// no lines.
+//
 // THE COPY is the plan's, verbatim (live_logic_test.dart pins every string).
-// When nothing is known yet (before the first game started, or no feed has
-// answered), the honest default is "Locked · waiting for kickoff" — a
-// number is never made up.
+// "Locked · waiting for kickoff" is said ONLY for the genuine before-kickoff
+// state: every stream answered cleanly and nothing says a game has started.
+// A failed or unknown load, or a started week we cannot read, says exactly
+// "Locked". A number is never made up.
 
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart'
     show movementLabel;
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart'
@@ -35,8 +47,12 @@ import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart'
 
 /// What a locked week is doing for this manager.
 enum LockedWeekKind {
-  /// Nothing known yet: before the first game started.
+  /// Before the first game started: everything was read and nothing is on.
   waiting,
+
+  /// We cannot say more than "locked": a load failed or has not answered, or
+  /// a game has started and the week cannot be read (no squad, no History).
+  unknown,
 
   /// Games are being played; the numbers are provisional.
   live,
@@ -57,6 +73,8 @@ class LockedWeekView {
       {this.weekPoints, this.rank, this.movement});
 
   const LockedWeekView.waiting() : this._(LockedWeekKind.waiting);
+
+  const LockedWeekView.unknown() : this._(LockedWeekKind.unknown);
 
   /// [weekPoints] the squad's whole points so far, [rank] the Overall rank
   /// with them and [movement] the places climbed (null/0 = not shown).
@@ -92,6 +110,8 @@ class LockedWeekView {
   switch (v.kind) {
     case LockedWeekKind.waiting:
       return (main: 'Locked · waiting for kickoff', movement: null);
+    case LockedWeekKind.unknown:
+      return (main: 'Locked', movement: null);
     case LockedWeekKind.live:
       final m = v.movement;
       return (
@@ -108,8 +128,9 @@ class LockedWeekView {
 }
 
 /// The strip's whole text (see the file header for every case):
-/// `Locked · waiting for kickoff` · `34 pts · #5 ▲2` (live; the pill renders
-/// separately) · `Final · 34 pts · #5` · `Voided · this week counts 0` ·
+/// `Locked · waiting for kickoff` · `Locked` (a week we cannot read) ·
+/// `34 pts · #5 ▲2` (live; the pill renders separately) ·
+/// `Final · 34 pts · #5` · `Voided · this week counts 0` ·
 /// `0 pts · this week didn't count`.
 String lockedStripText(LockedWeekView v) {
   final parts = lockedStripParts(v);
@@ -148,7 +169,9 @@ class LockedWeekSources {
     this.live = FantasyLiveState.none,
     this.liveSquad,
     this.history,
+    this.published,
     this.overall,
+    this.complete = true,
   });
 
   /// The season's live gameweek (Meta + Board + Players).
@@ -160,17 +183,36 @@ class LockedWeekSources {
   /// The manager's own settled `History/<gw>/<uid>`.
   final HistoryWeek? history;
 
+  /// The squad that was LOCKED: his `PublishedPicks/<gw>/<uid>`.
+  final FantasySquad? published;
+
   /// The manager's official `Leaderboards/Overall/<uid>` row.
   final OverallStanding? overall;
+
+  /// Every stream answered and none failed: what is absent really is absent.
+  /// false = a load failed or has not answered, so an empty source says
+  /// nothing (the strip then says only "Locked").
+  final bool complete;
 }
 
-/// What the locked My Team shows: the strip's [view] and each pick's chip
-/// text by player id (empty when nothing counts yet or the week is void).
+/// What the locked My Team shows: the strip's [view], the squad to draw the
+/// court from ([squad]: the one that was LOCKED — null until it has loaded, the
+/// court then falls back to the draft's) and each pick's chip text by player
+/// id (empty when nothing counts yet, the week is void, or no locked squad is
+/// known to own the lines).
 class LockedWeekModel {
-  const LockedWeekModel({required this.view, this.chipTexts = const {}});
+  const LockedWeekModel({
+    required this.view,
+    this.chipTexts = const {},
+    this.squad,
+  });
 
   final LockedWeekView view;
   final Map<String, String> chipTexts;
+
+  /// The squad that was locked for the week (PublishedPicks while live,
+  /// History once settled): the court's picks, armband and chip.
+  final FantasySquad? squad;
 
   String? chipTextFor(String playerId) => chipTexts[playerId];
 }
@@ -182,11 +224,19 @@ class LockedWeekModel {
 /// 2. Live — the live meta is this week's AND still `live` ([liveAppliesTo];
 ///    a settled tombstone overlays nothing) and the manager has a live squad:
 ///    its points, the live board's rank and movement, a chip text per pick
-///    from that player's live status. A live squad with no rows is an invalid
-///    squad (a valid one always has its picks).
+///    from that player's live status (a player whose status is unknown shows
+///    no line — never a defaulted "0 pts"). A live squad with no rows is an
+///    invalid squad (a valid one always has its picks).
 /// 3. Settled — `History/<gw>/<uid>` with its net tenths: Final, the official
 ///    rank, every chip "done". Invalid by History's marker.
-/// 4. Otherwise nothing is known: waiting.
+/// 4. Otherwise: "waiting for kickoff" only when every stream answered cleanly
+///    ([LockedWeekSources.complete]) and nothing says a game of this week has
+///    started (no live meta of this week, no History); else exactly "Locked".
+///
+/// The court's squad is the one that was LOCKED — PublishedPicks while the
+/// week is live, History's own squad once it has settled, each falling back
+/// to the other — and the chip lines are filtered to the players in it; with
+/// none loaded there is no squad and no line.
 LockedWeekModel resolveLockedWeek({
   required int week,
   required String? uid,
@@ -194,48 +244,73 @@ LockedWeekModel resolveLockedWeek({
   required LockedWeekSources sources,
 }) {
   final history = sources.history;
-  if (voidedWeeks.contains(week) || (history?.voided ?? false)) {
-    return const LockedWeekModel(view: LockedWeekView.voided());
+  final live = sources.live;
+  final liveApplies = liveAppliesTo(meta: live.meta, week: week);
+  final locked = liveApplies
+      ? (sources.published ?? history?.squad)
+      : (history?.squad ?? sources.published);
+
+  LockedWeekModel model(LockedWeekView view,
+      [Map<String, String> texts = const {}]) {
+    // A line only belongs to a player in the squad on screen.
+    final ids = {
+      for (final p in locked?.picks ?? const <SquadPick>[]) p.playerId
+    };
+    return LockedWeekModel(
+      view: view,
+      squad: locked,
+      chipTexts: {
+        for (final e in texts.entries)
+          if (ids.contains(e.key)) e.key: e.value,
+      },
+    );
   }
 
-  final live = sources.live;
+  if (voidedWeeks.contains(week) || (history?.voided ?? false)) {
+    return model(const LockedWeekView.voided());
+  }
+
   final squad = sources.liveSquad;
-  if (squad != null && liveAppliesTo(meta: live.meta, week: week)) {
-    if (squad.slots.isEmpty) {
-      return const LockedWeekModel(view: LockedWeekView.invalid());
-    }
+  if (squad != null && liveApplies) {
+    if (squad.slots.isEmpty) return model(const LockedWeekView.invalid());
     final row = uid == null ? null : live.board[uid];
-    return LockedWeekModel(
-      view: LockedWeekView.live(
+    return model(
+      LockedWeekView.live(
           weekPoints: squad.week, rank: row?.r, movement: row?.m),
-      chipTexts: _chipTexts(
-          squad.slots, (id) => live.players[id]?.st ?? LivePlayerStatus.done),
+      _chipTexts(squad.slots, (id) => live.players[id]?.st),
     );
   }
 
   if (history != null) {
-    if (history.invalid) {
-      return const LockedWeekModel(view: LockedWeekView.invalid());
-    }
+    if (history.invalid) return model(const LockedWeekView.invalid());
     final tenths = history.totalTenths;
     if (tenths != null) {
-      return LockedWeekModel(
+      return model(
         // Whole points truncate toward zero, like the server's wholePoints.
-        view: LockedWeekView.settled(
+        LockedWeekView.settled(
             weekPoints: tenths ~/ 10, rank: sources.overall?.rank),
-        chipTexts: _chipTexts(history.slots, (_) => LivePlayerStatus.done),
+        _chipTexts(history.slots, (_) => LivePlayerStatus.done),
       );
     }
   }
 
-  return const LockedWeekModel(view: LockedWeekView.waiting());
+  // Nothing readable. Before kickoff only if everything was read and nothing
+  // says a game has started; otherwise all we know is that it is locked.
+  final started = live.meta?.gw == week || history != null;
+  return model(sources.complete && !started
+      ? const LockedWeekView.waiting()
+      : const LockedWeekView.unknown());
 }
 
+/// A chip text per slot; a player whose status is unknown ([statusOf] null)
+/// gets none.
 Map<String, String> _chipTexts(
-    List<LiveSlot> slots, LivePlayerStatus Function(String id) statusOf) {
+    List<LiveSlot> slots, LivePlayerStatus? Function(String id) statusOf) {
   final out = <String, String>{};
   for (final slot in slots) {
-    final text = chipWeekText(slot, statusOf(slot.playerId));
+    final status = statusOf(slot.playerId);
+    if (status == null) continue;
+    final text = chipWeekText(slot, status);
     if (text != null) out[slot.playerId] = text;
   }
   return out;

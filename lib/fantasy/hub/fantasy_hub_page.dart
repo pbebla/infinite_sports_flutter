@@ -39,8 +39,9 @@
 // is nothing to wait for.
 //
 // The locked week (live everywhere, Task 5): while My Team is locked
-// ([lockedWeekNumber]) the hub listens to the locked week's four small
+// ([lockedWeekNumber]) the hub listens to the locked week's five small
 // streams (FantasyLockedWeekFeed: the live gameweek, the own Live/Squads/<uid>,
+// the own PublishedPicks/<gw>/<uid> (the squad that was LOCKED: the court),
 // the own History/<gw>/<uid>, the own Overall rank), resolves them with the
 // Voided set into ONE LockedWeekModel (live_logic.dart) and hands it to the
 // squad builder — the strip's live / Final / Voided line and every court
@@ -141,6 +142,7 @@ class FantasyHubPage extends StatefulWidget {
     this.liveStates,
     this.liveSquadStates,
     this.historyWeekFor,
+    this.publishedPicksFor,
     this.overallStandingStates,
   });
 
@@ -236,6 +238,10 @@ class FantasyHubPage extends StatefulWidget {
   /// Replaces `FantasyService.watchHistoryWeek` (the settled week's squad).
   final Stream<HistoryWeek?> Function(int week)? historyWeekFor;
 
+  /// Replaces `FantasyService.watchPublishedPicksWeek` (the squad that was
+  /// locked — the live court).
+  final Stream<FantasySquad?> Function(int week)? publishedPicksFor;
+
   /// Replaces `FantasyService.watchOverallStanding` (the official rank).
   final Stream<OverallStanding?>? overallStandingStates;
 
@@ -278,8 +284,9 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     nowUtc: widget.nowUtc,
   );
 
-  /// The locked week's four small streams (live everywhere, Task 5): the live
-  /// gameweek, the own live squad, the own settled History week and the own
+  /// The locked week's five small streams (live everywhere, Task 5): the live
+  /// gameweek, the own live squad, the locked squad (PublishedPicks), the own
+  /// settled History week and the own
   /// official Overall rank — subscribed ONLY while a week is locked
   /// ([lockedWeekNumber]), joined to the reveal gate (bounded at 2 s) so the
   /// first painted frame already carries live numbers. Never `Squads/<uid>`
@@ -294,6 +301,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     liveStates: widget.liveStates,
     liveSquadStates: widget.liveSquadStates,
     historyWeekFor: widget.historyWeekFor,
+    publishedPicksFor: widget.publishedPicksFor,
     overallStates: widget.overallStandingStates,
   );
 

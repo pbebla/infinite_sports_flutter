@@ -841,6 +841,45 @@ void main() {
       expect(week.invalid, isFalse);
     });
 
+    test(
+        'the squad that scored the week rides along: its picks, armband and '
+        'the chip honored at the lock', () {
+      final week = historyWeekFromNode({
+        'picks': [
+          {
+            'playerId': 'Ava Striker',
+            'position': 'ATT',
+            'priceTenths': 70,
+            'bench': false
+          },
+          {
+            'playerId': 'Dom Stone',
+            'position': 'DEF',
+            'priceTenths': 50,
+            'bench': true
+          },
+        ],
+        'captainId': 'Ava Striker',
+        'viceId': 'Dom Stone',
+        'chip': 'tripleCaptain',
+        'TotalTenths': 345,
+        'Breakdown': const [],
+      })!;
+      expect(week.squad, isNotNull);
+      expect(week.squad!.chip, 'tripleCaptain');
+      expect(week.squad!.captainId, 'Ava Striker');
+      expect(week.squad!.picks.map((p) => p.playerId),
+          ['Ava Striker', 'Dom Stone']);
+      expect(week.squad!.picks.last.bench, isTrue);
+    });
+
+    test('a node with no readable squad has none (never a made-up one)', () {
+      expect(historyWeekFromNode({'TotalTenths': 5})!.squad, isNull);
+      expect(
+          historyWeekFromNode({'TotalTenths': 5, 'picks': 'junk'})!.squad,
+          isNull);
+    });
+
     test('a voided week keeps its would-have-counted slots and says so', () {
       final week = historyWeekFromNode({
         'TotalTenths': 0,

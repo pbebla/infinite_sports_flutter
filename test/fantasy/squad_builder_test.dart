@@ -329,7 +329,8 @@ void main() {
     // Header swaps to the compact live strip (same-layout decision); with
     // nothing known about the week yet it is the honest default.
     expect(find.byKey(const ValueKey('locked_live_strip')), findsOneWidget);
-    expect(find.text('Locked · waiting for kickoff'), findsOneWidget);
+    expect(find.text('Locked'), findsOneWidget);
+    expect(find.text('Locked · waiting for kickoff'), findsNothing);
     expect(find.text('Gameweek locked — live points coming here'),
         findsNothing);
     expect(find.byKey(const ValueKey('budget_bar')), findsNothing);
@@ -1983,8 +1984,9 @@ void main() {
     const live = LockedWeekView.live(weekPoints: 34, rank: 5, movement: 2);
 
     LockedWeekModel model(LockedWeekView view,
-            {Map<String, String> chips = const {}}) =>
-        LockedWeekModel(view: view, chipTexts: chips);
+            {Map<String, String> chips = const {}, FantasySquad? squad}) =>
+        LockedWeekModel(view: view, chipTexts: chips, squad: squad);
+
 
     Future<void> pumpLocked(
       WidgetTester tester,
@@ -2048,6 +2050,7 @@ void main() {
     testWidgets('every other state: no pill', (tester) async {
       for (final (view, text) in [
         (const LockedWeekView.waiting(), 'Locked · waiting for kickoff'),
+        (const LockedWeekView.unknown(), 'Locked'),
         (
           const LockedWeekView.settled(weekPoints: 34, rank: 5),
           'Final · 34 pts · #5'
@@ -2064,7 +2067,10 @@ void main() {
     testWidgets('no model at all: the honest default, no pill',
         (tester) async {
       await pumpLocked(tester, null);
-      expect(find.text('Locked · waiting for kickoff'), findsOneWidget);
+      // Nothing is known about the week: "Locked", never a claim about
+      // kickoff.
+      expect(find.text('Locked'), findsOneWidget);
+      expect(find.text('Locked · waiting for kickoff'), findsNothing);
       expect(find.byType(FantasyLivePill), findsNothing);
     });
 
@@ -2240,11 +2246,256 @@ void main() {
       expect(find.text('GK · \$5.0M · ×2'), findsOneWidget);
     });
 
-    testWidgets('the locked court shows it too', (tester) async {
+    testWidgets(
+        'a locked court with no locked squad loaded falls back to the '
+        'draft\'s squad (and its multiplier)', (tester) async {
       await pumpBuilder(tester,
           lockOverride: FantasyLockOverride.locked,
           initialSquad: fullSquad(chip: 'tripleCaptain'));
       expect(find.text('GK · \$5.0M · ×3'), findsOneWidget);
+    });
+  });
+
+  // Live everywhere, Task 5 fix round 1: while the week is locked the court
+  // is the squad that was LOCKED (PublishedPicks while live, History once
+  // settled) — never Squads/<uid>, which the server rewrites after finalize
+  // (the spent chip removed; a Free Hit week's squad replaced by last week's)
+  // and which keeps a chip the lock voided.
+  group('the locked court is the locked squad', () {
+    LockedWeekModel lockedModel(FantasySquad? squad,
+            {Map<String, String> chips = const {},
+            LockedWeekView view = const LockedWeekView.settled(
+                weekPoints: 34, rank: 5)}) =>
+        LockedWeekModel(view: view, chipTexts: chips, squad: squad);
+
+    Future<void> pumpLockedCourt(
+      WidgetTester tester, {
+      required FantasySquad saved,
+      LockedWeekModel? lockedWeek,
+      Brightness brightness = Brightness.light,
+      Size size = const Size(420, 1900),
+    }) async {
+      await pumpBuilder(tester,
+          lockOverride: FantasyLockOverride.locked,
+          initialSquad: saved,
+          lockedWeek: lockedWeek,
+          size: size,
+          brightness: brightness);
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+
+    testWidgets(
+        'a settled Triple Captain week whose Squads chip was removed by the '
+        'rollover: the nameplate reads ×3', (tester) async {
+      await pumpLockedCourt(tester,
+          saved: fullSquad(), // Squads: the chip is gone
+          lockedWeek: lockedModel(fullSquad(chip: 'tripleCaptain')));
+      expect(find.text('GK · \$5.0M · ×3'), findsOneWidget);
+      expect(find.text('GK · \$5.0M · ×2'), findsNothing);
+    });
+
+    testWidgets(
+        'a chip the lock VOIDED (Squads keeps it) is ×2 during the live '
+        'week', (tester) async {
+      await pumpLockedCourt(tester,
+          saved: fullSquad(chip: 'tripleCaptain'), // Squads: still armed
+          lockedWeek: lockedModel(fullSquad(), // PublishedPicks: stripped
+              view: const LockedWeekView.live(weekPoints: 12, rank: 3)));
+      expect(find.text('GK · \$5.0M · ×2'), findsOneWidget);
+      expect(find.text('GK · \$5.0M · ×3'), findsNothing);
+    });
+
+    testWidgets(
+        'a settled Free Hit week whose Squads was restored to last week\'s '
+        'squad: the court shows the Free Hit squad, with its points',
+        (tester) async {
+      // Squads (restored): last week's players. The Free Hit squad played.
+      final restored = FantasySquad(
+        picks: [
+          pick('Old GK', FantasyPosition.gk),
+          pick('Old Def One', FantasyPosition.def),
+          pick('Old Def Two', FantasyPosition.def),
+          pick('Old Att One', FantasyPosition.att),
+          pick('Old Att Two', FantasyPosition.att),
+          pick('Old Bench Def', FantasyPosition.def, bench: true),
+          pick('Old Bench Att', FantasyPosition.att, bench: true),
+        ],
+        captainId: 'Old GK',
+        viceId: 'Old Def One',
+      );
+      await pumpLockedCourt(tester,
+          saved: restored,
+          lockedWeek: lockedModel(fullSquad(chip: 'freeHit'), chips: {
+            'GK One': '16 pts',
+            'Def One': '4 pts',
+            'Bench Att': '2.5 pts',
+          }));
+      for (final id in [
+        'GK One',
+        'Def One',
+        'Def Two',
+        'Att One',
+        'Att Two',
+        'Bench Def',
+        'Bench Att'
+      ]) {
+        expect(find.byKey(ValueKey('squad_chip_$id')), findsOneWidget,
+            reason: id);
+      }
+      expect(find.byKey(const ValueKey('squad_chip_Old GK')), findsNothing);
+      expect(find.byKey(const ValueKey('squad_chip_Old Att Two')),
+          findsNothing);
+      Finder inChip(String id, String text) => find.descendant(
+          of: find.byKey(ValueKey('squad_chip_$id')), matching: find.text(text));
+      expect(inChip('GK One', '16 pts'), findsOneWidget);
+      expect(inChip('Def One', '4 pts'), findsOneWidget);
+      expect(inChip('Bench Att', '2.5 pts'), findsOneWidget);
+      // The Free Hit squad's own armband and ring.
+      expect(find.byKey(const ValueKey('captain_ring_GK One')), findsOneWidget);
+      // The saved squad's "Needs a new spot" strip has no business here.
+      expect(find.byKey(const ValueKey('unplaced_strip')), findsNothing);
+    });
+
+    testWidgets(
+        'the armband is the locked squad\'s: the captain ring and the vice '
+        'badge follow it, not the draft', (tester) async {
+      await pumpLockedCourt(tester,
+          saved: fullSquad(), // Squads: GK One captain, Def One vice
+          lockedWeek: lockedModel(
+              fullSquad(captainId: 'Att One', viceId: 'Att Two')));
+      expect(find.byKey(const ValueKey('captain_ring_Att One')), findsOneWidget);
+      expect(find.byKey(const ValueKey('captain_ring_GK One')), findsNothing);
+      expect(find.byKey(const ValueKey('vice_badge_Att Two')), findsOneWidget);
+    });
+
+    testWidgets(
+        'the locked squad not loaded (failed / none): the court falls back '
+        'to the draft\'s squad and shows NO chip lines', (tester) async {
+      await pumpLockedCourt(tester,
+          saved: fullSquad(chip: 'tripleCaptain'),
+          lockedWeek: lockedModel(null,
+              view: const LockedWeekView.live(weekPoints: 34, rank: 5)));
+      expect(find.byKey(const ValueKey('squad_chip_GK One')), findsOneWidget);
+      expect(find.text('GK · \$5.0M · ×3'), findsOneWidget);
+      expect(find.textContaining(' pts'), findsOneWidget,
+          reason: 'only the strip says points (34 pts · #5)');
+      expect(find.text('34 pts · #5'), findsOneWidget);
+    });
+
+    testWidgets('tapping a chip of the locked court opens his profile',
+        (tester) async {
+      final opened = <String>[];
+      await pumpBuilder(tester,
+          lockOverride: FantasyLockOverride.locked,
+          initialSquad: fullSquad(),
+          onOpenPlayer: opened.add,
+          lockedWeek: lockedModel(
+              fullSquad(chip: 'freeHit', captainId: 'Att One')));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(find.byKey(const ValueKey('squad_chip_Att One')));
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(opened, ['Att One']);
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('360 px, $brightness: the locked squad court fits, no '
+          'overflow', (tester) async {
+        await pumpLockedCourt(tester,
+            saved: fullSquad(),
+            size: const Size(360, 760),
+            brightness: brightness,
+            lockedWeek: lockedModel(fullSquad(chip: 'tripleCaptain'),
+                chips: {'GK One': '16 pts', 'Bench Att': '2.5 pts'}));
+        expect(tester.takeException(), isNull);
+        await tester.dragUntilVisible(
+            find.byKey(const ValueKey('squad_chip_Bench Att')),
+            find.byType(Scrollable).first,
+            const Offset(0, -200));
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(tester.takeException(), isNull);
+      });
+    }
+  });
+
+  // Fix round 1: the hub drops the locked-week model at lock + 24 h while the
+  // builder flips on its own 30 s ticker — no "waiting for kickoff" /
+  // placeholder flash in between: the builder keeps the last model until it
+  // is itself editable.
+  group('the builder keeps the last locked-week model until it is editable',
+      () {
+    LockedWeekModel liveModel() => LockedWeekModel(
+          view: const LockedWeekView.settled(weekPoints: 34, rank: 5),
+          chipTexts: const {'GK One': '16 pts'},
+          squad: fullSquad(chip: 'tripleCaptain'),
+        );
+
+    Widget builderApp(
+            {required FantasyLockOverride lockOverride,
+            LockedWeekModel? lockedWeek}) =>
+        MaterialApp(
+          theme: ThemeData(useMaterial3: true),
+          home: Scaffold(
+            body: FantasySquadBuilder(
+              config: FantasyConfig.futsalDefault(),
+              lockOverride: lockOverride,
+              gameweeks: const [],
+              players: players,
+              squadStates: squads.stream,
+              initialSquad: fullSquad(),
+              onSaveSquad: (_) async {},
+              chipHistory: const {},
+              lockedWeek: lockedWeek,
+            ),
+          ),
+        );
+
+    testWidgets(
+        'the model going null while the court is still locked changes '
+        'nothing on screen; once editable the strip is gone', (tester) async {
+      tester.view.physicalSize = const Size(420, 1900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(builderApp(
+          lockOverride: FantasyLockOverride.locked, lockedWeek: liveModel()));
+      expect(find.text('Final · 34 pts · #5'), findsOneWidget);
+      expect(find.text('GK · \$5.0M · ×3'), findsOneWidget);
+
+      // The hub dropped the model (editing reopened for it); the builder's
+      // own clock has not flipped yet: nothing changes, no placeholder.
+      await tester.pumpWidget(builderApp(
+          lockOverride: FantasyLockOverride.locked, lockedWeek: null));
+      expect(find.text('Final · 34 pts · #5'), findsOneWidget);
+      expect(find.text('Locked'), findsNothing);
+      expect(find.text('Locked · waiting for kickoff'), findsNothing);
+      expect(find.text('16 pts'), findsOneWidget);
+      expect(find.text('GK · \$5.0M · ×3'), findsOneWidget);
+
+      // The builder itself becomes editable: the locked header is gone.
+      await tester.pumpWidget(builderApp(
+          lockOverride: FantasyLockOverride.open, lockedWeek: null));
+      expect(find.byKey(const ValueKey('locked_live_strip')), findsNothing);
+      expect(find.byKey(const ValueKey('budget_bar')), findsOneWidget);
+      expect(find.text('16 pts'), findsNothing);
+
+      // A later lock never resurrects the old week's model.
+      await tester.pumpWidget(builderApp(
+          lockOverride: FantasyLockOverride.locked, lockedWeek: null));
+      expect(find.text('Final · 34 pts · #5'), findsNothing);
+      expect(find.text('Locked'), findsOneWidget);
+    });
+
+    testWidgets('a NEW model replaces the kept one', (tester) async {
+      tester.view.physicalSize = const Size(420, 1900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(builderApp(
+          lockOverride: FantasyLockOverride.locked, lockedWeek: liveModel()));
+      await tester.pumpWidget(builderApp(
+          lockOverride: FantasyLockOverride.locked,
+          lockedWeek: const LockedWeekModel(
+              view: LockedWeekView.voided())));
+      expect(find.text('Voided · this week counts 0'), findsOneWidget);
+      expect(find.text('Final · 34 pts · #5'), findsNothing);
     });
   });
 }

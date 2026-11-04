@@ -1,8 +1,10 @@
-// The locked My Team's feed (live everywhere, Task 5): the four SMALL streams
+// The locked My Team's feed (live everywhere, Task 5): the five SMALL streams
 // the locked week needs, subscribed only while a week is locked.
 //
 //   • the season's live gameweek (FantasyLiveFeed: Meta + Board + Players),
 //   • the manager's own `Live/Squads/<uid>` (FantasyService.watchLiveSquad),
+//   • the squad that was LOCKED: his own `PublishedPicks/<gw>/<uid>`
+//     (watchPublishedPicksWeek — one node, NEVER the whole PublishedPicks),
 //   • his own `History/<gw>/<uid>` (watchHistoryWeek — one node, NEVER the
 //     whole History),
 //   • his own `Leaderboards/Overall/<uid>` (watchOverallStanding).
@@ -17,8 +19,12 @@
 //     "waiting for kickoff" flipping to live); bounded at [liveWait] (the
 //     global 2 s live bound) — after it the hub shows what it has and a late
 //     value lands in place.
+//   • [LockedWeekSources.complete] — every stream answered AND none failed (a
+//     stream that failed counts again once it delivers). An empty source from
+//     an incomplete load says nothing, so the strip never claims "waiting for
+//     kickoff" on it.
 //   • no locked week (editing open) or nobody signed in: nothing is subscribed
-//     and nothing gates.
+//     and nothing gates (signed out reads nothing, so it is not complete).
 //   • a week change cancels everything and drops the previous week's data at
 //     once (never last week's squad under this week's title); the services'
 //     session seeds make the resubscription instant.
@@ -30,6 +36,7 @@ import 'package:flutter/foundation.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart';
 
 class FantasyLockedWeekFeed {
@@ -41,6 +48,7 @@ class FantasyLockedWeekFeed {
     this.liveStates,
     this.liveSquadStates,
     this.historyWeekFor,
+    this.publishedPicksFor,
     this.overallStates,
     this.liveWait = kLiveJoinWait,
   });
@@ -58,6 +66,7 @@ class FantasyLockedWeekFeed {
   final Stream<FantasyLiveState>? liveStates;
   final Stream<LiveSquad?>? liveSquadStates;
   final Stream<HistoryWeek?> Function(int week)? historyWeekFor;
+  final Stream<FantasySquad?> Function(int week)? publishedPicksFor;
   final Stream<OverallStanding?>? overallStates;
 
   /// How long [ready] waits for the streams' first answers.
@@ -69,14 +78,19 @@ class FantasyLockedWeekFeed {
   FantasyLiveState _live = FantasyLiveState.none;
   LiveSquad? _liveSquad;
   HistoryWeek? _history;
+  FantasySquad? _published;
   OverallStanding? _overall;
 
-  bool _liveAnswered = false;
-  bool _squadAnswered = false;
-  bool _historyAnswered = false;
-  bool _overallAnswered = false;
+  /// Which streams have answered (data or error), by name.
+  final Set<String> _answered = {};
+
+  /// Which streams' LAST event was a failure, by name (a later value clears it).
+  final Set<String> _failed = {};
+
   bool _boundPassed = false;
   bool _subscribed = false;
+
+  static const int _streamCount = 5;
 
   final List<StreamSubscription<Object?>> _subs = [];
   Timer? _bound;
@@ -94,7 +108,9 @@ class FantasyLockedWeekFeed {
         live: _live,
         liveSquad: _liveSquad,
         history: _history,
+        published: _published,
         overall: _overall,
+        complete: _subscribed && _allAnswered && _failed.isEmpty,
       );
 
   /// Points the feed at locked week [week] (null = editing is open). The same
@@ -108,9 +124,10 @@ class FantasyLockedWeekFeed {
     _live = FantasyLiveState.none;
     _liveSquad = null;
     _history = null;
+    _published = null;
     _overall = null;
-    _liveAnswered =
-        _squadAnswered = _historyAnswered = _overallAnswered = false;
+    _answered.clear();
+    _failed.clear();
     _boundPassed = false;
     _subscribed = false;
     if (week != null) _subscribe(week);
@@ -131,8 +148,7 @@ class FantasyLockedWeekFeed {
     _subs.clear();
   }
 
-  bool get _allAnswered =>
-      _liveAnswered && _squadAnswered && _historyAnswered && _overallAnswered;
+  bool get _allAnswered => _answered.length == _streamCount;
 
   /// Everything answered in time: the bound has nothing left to bound.
   void _settleBound() {
@@ -161,42 +177,33 @@ class FantasyLockedWeekFeed {
     _open<FantasyLiveState>(
       'live feed',
       () => liveStates ?? FantasyLiveFeed.watch(sport, season),
-      (v) {
-        _live = v;
-        _liveAnswered = true;
-      },
-      () => _liveAnswered = true,
+      (v) => _live = v,
     );
     _open<LiveSquad?>(
       'live squad feed',
       () => liveSquadStates ?? FantasyService.watchLiveSquad(sport, season, me),
-      (v) {
-        _liveSquad = v;
-        _squadAnswered = true;
-      },
-      () => _squadAnswered = true,
+      (v) => _liveSquad = v,
+    );
+    _open<FantasySquad?>(
+      'published picks feed',
+      () =>
+          publishedPicksFor?.call(week) ??
+          FantasyService.watchPublishedPicksWeek(sport, season, me, week),
+      (v) => _published = v,
     );
     _open<HistoryWeek?>(
       'history week feed',
       () =>
           historyWeekFor?.call(week) ??
           FantasyService.watchHistoryWeek(sport, season, me, week),
-      (v) {
-        _history = v;
-        _historyAnswered = true;
-      },
-      () => _historyAnswered = true,
+      (v) => _history = v,
     );
     _open<OverallStanding?>(
       'overall standing feed',
       () =>
           overallStates ??
           FantasyService.watchOverallStanding(sport, season, me),
-      (v) {
-        _overall = v;
-        _overallAnswered = true;
-      },
-      () => _overallAnswered = true,
+      (v) => _overall = v,
     );
     // A stream that could not even be created already answered.
     _settleBound();
@@ -204,30 +211,32 @@ class FantasyLockedWeekFeed {
 
   /// Listens defensively: a stream that errors, or cannot even be created (no
   /// Firebase app in a widget test), is logged and counts as answered with no
-  /// data — the last good value (if any) stays. A failure to create is
-  /// answered synchronously WITHOUT notifying (the caller reads [ready]
-  /// right after [setWeek]; initState must never be notified).
+  /// data — but as FAILED until it delivers a value (the last good value, if
+  /// any, stays). A failure to create is answered synchronously WITHOUT
+  /// notifying (the caller reads [ready] right after [setWeek]; initState must
+  /// never be notified).
   void _open<T>(
-    String what,
-    Stream<T> Function() make,
-    void Function(T value) onData,
-    void Function() onAnswered,
-  ) {
-    void log(Object e) => debugPrint('FantasyLockedWeekFeed: $what failed: $e');
+      String what, Stream<T> Function() make, void Function(T) store) {
+    void fail(Object e) {
+      debugPrint('FantasyLockedWeekFeed: $what failed: $e');
+      _answered.add(what);
+      _failed.add(what);
+    }
+
     try {
       _subs.add(make().listen((v) {
         if (_disposed) return;
-        onData(v);
+        store(v);
+        _answered.add(what);
+        _failed.remove(what);
         _changed();
       }, onError: (Object e) {
-        log(e);
         if (_disposed) return;
-        onAnswered();
+        fail(e);
         _changed();
       }));
     } catch (e) {
-      log(e);
-      onAnswered();
+      fail(e);
     }
   }
 }

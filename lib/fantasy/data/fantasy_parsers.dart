@@ -622,7 +622,16 @@ class HistoryWeek {
     this.totalTenths,
     this.voided = false,
     this.invalid = false,
+    this.squad,
   });
+
+  /// The squad that SCORED the week — the picks, the armband and the chip
+  /// honored at the lock, exactly as finalize wrote them (`History/<gw>/<uid>`
+  /// is the squad map plus the verdict). Unlike `Squads/<uid>`, which the
+  /// server rewrites after finalize (the spent chip switched off, a Free Hit
+  /// week's squad restored to last week's). null when the node carries no
+  /// readable squad.
+  final FantasySquad? squad;
 
   /// The Breakdown rows in pick order (empty for an invalid squad).
   final List<LiveSlot> slots;
@@ -650,6 +659,7 @@ HistoryWeek? historyWeekFromNode(Object? node) {
     voided: node['Voided'] == true,
     invalid: (issues is List && issues.isNotEmpty) ||
         (issues is Map && issues.isNotEmpty),
+    squad: squadFromNode(node),
   );
 }
 

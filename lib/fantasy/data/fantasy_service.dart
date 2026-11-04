@@ -99,6 +99,9 @@ class FantasyService {
   // (keyed `<root>|<uid>|<gw>`) and his `Leaderboards/Overall/<uid>` row
   // (keyed `<root>|<uid>`); a known-ABSENT node caches as null.
   static final Map<String, HistoryWeek?> _historyWeekCache = {};
+  // The squad that was LOCKED: one manager's `PublishedPicks/<gw>/<uid>`
+  // (keyed `<root>|<uid>|<gw>`).
+  static final Map<String, FantasySquad?> _publishedPicksWeekCache = {};
   static final Map<String, OverallStanding?> _overallStandingCache = {};
 
   /// Clears the session caches (sign-out hygiene, tests).
@@ -130,6 +133,7 @@ class FantasyService {
     _badgesForCache.clear();
     _liveSquadCache.clear();
     _historyWeekCache.clear();
+    _publishedPicksWeekCache.clear();
     _overallStandingCache.clear();
   }
 
@@ -866,6 +870,30 @@ class FantasyService {
       final settled = historyWeekFromNode(event.snapshot.value);
       _historyWeekCache[key] = settled;
       yield settled;
+    }
+  }
+
+  /// The squad that was LOCKED for one gameweek (`PublishedPicks/<gw>/<uid>`:
+  /// the lock's snapshot — picks, armband and the chip HONORED at the lock) —
+  /// the locked My Team's court while the week is being played, since
+  /// `Squads/<uid>` still holds a chip the lock may have voided and is
+  /// rewritten at finalize. A single small node (readable after the lock):
+  /// NEVER the whole `PublishedPicks` of every manager. null = no squad that
+  /// week (or not locked yet). Seeded from the session cache
+  /// (`<root>|<uid>|<gw>`, a known-absent node included); errors are
+  /// forwarded to the caller and never cached.
+  static Stream<FantasySquad?> watchPublishedPicksWeek(
+      String sport, String season, String uid, int week) async* {
+    final key = '${_root(sport, season)}|$uid|$week';
+    if (_publishedPicksWeekCache.containsKey(key)) {
+      yield _publishedPicksWeekCache[key];
+    }
+    await for (final event in _ref(
+            '${_root(sport, season)}/PublishedPicks/$week/$uid')
+        .onValue) {
+      final squad = squadFromNode(event.snapshot.value);
+      _publishedPicksWeekCache[key] = squad;
+      yield squad;
     }
   }
 

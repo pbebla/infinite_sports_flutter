@@ -8,7 +8,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart';
 
 LiveSlot slot(String id, int tenths, {int x = 1, bool sub = false}) => LiveSlot(
@@ -25,6 +27,12 @@ void main() {
     test('before any game started', () {
       expect(lockedStripText(const LockedWeekView.waiting()),
           'Locked · waiting for kickoff');
+    });
+
+    test(
+        'a week we cannot read (a failed or unknown load once a game has '
+        'started) says exactly "Locked"', () {
+      expect(lockedStripText(const LockedWeekView.unknown()), 'Locked');
     });
 
     test('live: "{W} pts · #{R}" and the movement only when it moved', () {
@@ -89,6 +97,7 @@ void main() {
       expect(const LockedWeekView.live(weekPoints: 1).isLive, isTrue);
       for (final v in [
         const LockedWeekView.waiting(),
+        const LockedWeekView.unknown(),
         const LockedWeekView.settled(weekPoints: 1),
         const LockedWeekView.voided(),
         const LockedWeekView.invalid(),
@@ -144,6 +153,22 @@ void main() {
           slot('Bench Bob', 25),
         ]);
 
+    // The squad that was LOCKED (PublishedPicks live, History settled): the
+    // players the chips' lines must belong to.
+    FantasySquad lockedSquad({String? chip, List<String>? ids}) => FantasySquad(
+          picks: [
+            for (final id in ids ?? ['Ava', 'Deb', 'Bench Bob'])
+              SquadPick(
+                  playerId: id,
+                  position: FantasyPosition.att,
+                  priceTenths: 50,
+                  bench: id == 'Bench Bob'),
+          ],
+          captainId: 'Ava',
+          viceId: 'Deb',
+          chip: chip,
+        );
+
     FantasyLiveState liveState({LiveMeta? meta = liveMeta}) => FantasyLiveState(
           meta: meta,
           board: const {
@@ -165,19 +190,30 @@ void main() {
             week: 3, uid: uid, voidedWeeks: voided, sources: sources);
 
     test(
-        'nothing known (before kickoff, or no data yet) → waiting, no chip '
-        'text', () {
+        'nothing known and everything answered (the genuine before-kickoff '
+        'state) → waiting, no chip text', () {
       final m = resolve();
       expect(lockedStripText(m.view), 'Locked · waiting for kickoff');
       expect(m.chipTextFor('Ava'), isNull);
     });
 
     test(
+        'a stream failed or has not answered, and no game is known to have '
+        'started → exactly "Locked", never "waiting for kickoff"', () {
+      final m = resolve(sources: const LockedWeekSources(complete: false));
+      expect(m.view.kind, LockedWeekKind.unknown);
+      expect(lockedStripText(m.view), 'Locked');
+      expect(m.view.isLive, isFalse);
+    });
+
+    test(
         'live: week points from the live squad, rank + movement from the '
         'live board, chip text from each player\'s live status', () {
       final m = resolve(
-          sources:
-              LockedWeekSources(live: liveState(), liveSquad: liveSquad()));
+          sources: LockedWeekSources(
+              live: liveState(),
+              liveSquad: liveSquad(),
+              published: lockedSquad()));
       expect(m.view.isLive, isTrue);
       expect(lockedStripText(m.view), '34 pts · #5 ▲2');
       expect(m.chipTextFor('Ava'), '16 pts · live');
@@ -187,28 +223,47 @@ void main() {
     });
 
     test(
-        'live: a player the live feed does not carry still shows his '
-        'counted points (done), never a made-up status', () {
+        'live: a player whose live status is unknown shows NO line — never '
+        'a defaulted "done" / "0 pts"', () {
       final m = resolve(
           sources: LockedWeekSources(
               live: FantasyLiveState(
                   meta: liveMeta,
-                  board: const {'me': LiveBoardRow(o: 1, r: 1)}),
-              liveSquad: liveSquad()));
-      expect(m.chipTextFor('Ava'), '16 pts');
+                  board: const {'me': LiveBoardRow(o: 1, r: 1)},
+                  players: {'Deb': player(LivePlayerStatus.pending)}),
+              liveSquad: liveSquad(),
+              published: lockedSquad()));
+      expect(m.chipTextFor('Ava'), isNull);
+      expect(m.chipTextFor('Bench Bob'), isNull);
+      expect(m.chipTextFor('Deb'), 'Not started');
+      // The strip still has its numbers.
+      expect(lockedStripText(m.view), '34 pts · #1');
     });
 
-    test('a settled tombstone or another week\'s meta overlays nothing', () {
-      for (final meta in [
-        settledMeta,
-        const LiveMeta(gw: 2, state: LiveState.live)
-      ]) {
-        final m = resolve(
-            sources: LockedWeekSources(
-                live: liveState(meta: meta), liveSquad: liveSquad()));
-        expect(m.view.kind, LockedWeekKind.waiting);
-        expect(m.chipTextFor('Ava'), isNull);
-      }
+    test(
+        'another week\'s live meta overlays nothing and is no sign this week '
+        'started → waiting', () {
+      final m = resolve(
+          sources: LockedWeekSources(
+              live:
+                  liveState(meta: const LiveMeta(gw: 2, state: LiveState.live)),
+              liveSquad: liveSquad(),
+              published: lockedSquad()));
+      expect(m.view.kind, LockedWeekKind.waiting);
+      expect(m.chipTextFor('Ava'), isNull);
+    });
+
+    test(
+        'a settled tombstone of THIS week with no History (a failed load) '
+        'overlays nothing and says only "Locked": the week has started', () {
+      final m = resolve(
+          sources: LockedWeekSources(
+              live: liveState(meta: settledMeta),
+              liveSquad: liveSquad(),
+              published: lockedSquad()));
+      expect(m.view.kind, LockedWeekKind.unknown);
+      expect(lockedStripText(m.view), 'Locked');
+      expect(m.chipTextFor('Ava'), isNull);
     });
 
     test(
@@ -217,10 +272,10 @@ void main() {
       final m = resolve(
         sources: LockedWeekSources(
           live: liveState(meta: settledMeta),
-          history: HistoryWeek(totalTenths: 349, slots: [
-            slot('Ava', 160, x: 2),
-            slot('Bench Bob', 25),
-          ]),
+          history: HistoryWeek(
+              totalTenths: 349,
+              slots: [slot('Ava', 160, x: 2), slot('Bench Bob', 25)],
+              squad: lockedSquad()),
           overall: const OverallStanding(rank: 4, movement: 1),
         ),
       );
@@ -281,10 +336,12 @@ void main() {
     });
 
     test(
-        'live but the manager has no live squad (no team scored) and no '
-        'History → waiting, never a made-up 0', () {
+        'live (or settled) but the manager has no live squad / no History '
+        '(no team scored, or the load failed) → "Locked": a game has '
+        'started, so never "waiting for kickoff", never a made-up 0', () {
       final m = resolve(sources: LockedWeekSources(live: liveState()));
-      expect(m.view.kind, LockedWeekKind.waiting);
+      expect(m.view.kind, LockedWeekKind.unknown);
+      expect(lockedStripText(m.view), 'Locked');
     });
 
     test(
@@ -306,11 +363,12 @@ void main() {
       expect(lockedStripText(m.view), 'Final · 12 pts');
     });
 
-    test('History without its net tenths is not a number to show → waiting',
-        () {
+    test(
+        'History without its net tenths is not a number to show → "Locked" '
+        '(the week has settled; we just cannot read it)', () {
       final m = resolve(
           sources: const LockedWeekSources(history: HistoryWeek(slots: [])));
-      expect(m.view.kind, LockedWeekKind.waiting);
+      expect(m.view.kind, LockedWeekKind.unknown);
     });
 
     test('signed out (no uid): no board row, so no rank', () {
@@ -319,6 +377,89 @@ void main() {
           sources:
               LockedWeekSources(live: liveState(), liveSquad: liveSquad()));
       expect(lockedStripText(m.view), '34 pts');
+    });
+
+    // The court shows the squad that was LOCKED, not Squads/<uid> (which the
+    // server rewrites after finalize: the spent chip removed, a Free Hit
+    // week's squad replaced by last week's).
+    group('the locked squad', () {
+      test('live: PublishedPicks is the court\'s squad', () {
+        final published = lockedSquad(chip: 'tripleCaptain');
+        final m = resolve(
+            sources: LockedWeekSources(
+                live: liveState(),
+                liveSquad: liveSquad(),
+                published: published,
+                history: HistoryWeek(
+                    totalTenths: 1, slots: const [], squad: lockedSquad())));
+        expect(identical(m.squad, published), isTrue);
+      });
+
+      test('settled: History\'s own squad (PublishedPicks as the fallback)',
+          () {
+        final fromHistory = lockedSquad(chip: 'freeHit');
+        final settled = resolve(
+            sources: LockedWeekSources(
+                history: HistoryWeek(
+                    totalTenths: 120, slots: const [], squad: fromHistory),
+                published: lockedSquad()));
+        expect(identical(settled.squad, fromHistory), isTrue);
+
+        final published = lockedSquad();
+        final noHistorySquad = resolve(
+            sources: LockedWeekSources(
+                history: const HistoryWeek(totalTenths: 120, slots: []),
+                published: published));
+        expect(identical(noHistorySquad.squad, published), isTrue);
+      });
+
+      test('before kickoff, voided and invalid weeks carry it too', () {
+        final published = lockedSquad();
+        expect(
+            identical(
+                resolve(sources: LockedWeekSources(published: published)).squad,
+                published),
+            isTrue);
+        expect(
+            identical(
+                resolve(
+                        voided: {3},
+                        sources: LockedWeekSources(published: published))
+                    .squad,
+                published),
+            isTrue);
+      });
+
+      test(
+          'none loaded (failed / no squad): no squad, and NO chip lines — '
+          'lines that do not belong to a squad on screen are never shown', () {
+        final m = resolve(
+            sources:
+                LockedWeekSources(live: liveState(), liveSquad: liveSquad()));
+        expect(m.squad, isNull);
+        expect(lockedStripText(m.view), '34 pts · #5 ▲2');
+        expect(m.chipTextFor('Ava'), isNull);
+        expect(m.chipTextFor('Deb'), isNull);
+
+        final settled = resolve(
+            sources: const LockedWeekSources(
+                history: HistoryWeek(totalTenths: 120, slots: [
+          LiveSlot(playerId: 'Ava', countedTenths: 160, multiplier: 2)
+        ])));
+        expect(settled.squad, isNull);
+        expect(settled.chipTextFor('Ava'), isNull);
+      });
+
+      test('a line is only for a player IN the locked squad', () {
+        final m = resolve(
+            sources: LockedWeekSources(
+                live: liveState(),
+                liveSquad: liveSquad(),
+                published: lockedSquad(ids: ['Ava', 'Bench Bob'])));
+        expect(m.chipTextFor('Ava'), '16 pts · live');
+        expect(m.chipTextFor('Bench Bob'), '2.5 pts');
+        expect(m.chipTextFor('Deb'), isNull);
+      });
     });
   });
 

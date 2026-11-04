@@ -56,6 +56,7 @@ void main() {
     // The locked My Team: the own settled `History/<gw>/<uid>` week and the
     // own `Leaderboards/Overall/<uid>` row.
     expect(declared, contains('_historyWeekCache'));
+    expect(declared, contains('_publishedPicksWeekCache'));
     expect(declared, contains('_overallStandingCache'));
     final clearBody =
         RegExp(r'static void clearSessionCaches\(\) \{([\s\S]*?)\n  \}')

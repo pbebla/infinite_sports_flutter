@@ -192,6 +192,7 @@ void main() {
     Stream<FantasyLiveState>? liveStates,
     Stream<LiveSquad?>? liveSquadStates,
     Stream<HistoryWeek?> Function(int week)? historyWeekFor,
+    Stream<FantasySquad?> Function(int week)? publishedPicksFor,
     Stream<OverallStanding?>? overallStandingStates,
   }) async {
     tester.view.physicalSize = size;
@@ -220,6 +221,7 @@ void main() {
         liveStates: liveStates,
         liveSquadStates: liveSquadStates,
         historyWeekFor: historyWeekFor,
+        publishedPicksFor: publishedPicksFor,
         overallStandingStates: overallStandingStates,
         priceHistoryStates: priceHistory.stream,
         createCheckoutUrl: () async {
@@ -1442,24 +1444,28 @@ void main() {
     late StreamController<LiveSquad?> liveSquadFeed;
     late StreamController<OverallStanding?> overallFeed;
     late Map<int, StreamController<HistoryWeek?>> historyFeeds;
+    late Map<int, StreamController<FantasySquad?>> publishedFeeds;
     late int liveListens;
     late List<int> historyRequests;
+    late List<int> publishedRequests;
 
     setUp(() {
       liveListens = 0;
       historyRequests = [];
+      publishedRequests = [];
       liveFeed = StreamController<FantasyLiveState>.broadcast(
           onListen: () => liveListens++);
       liveSquadFeed = StreamController<LiveSquad?>.broadcast();
       overallFeed = StreamController<OverallStanding?>.broadcast();
       historyFeeds = {};
+      publishedFeeds = {};
     });
 
     tearDown(() {
       liveFeed.close();
       liveSquadFeed.close();
       overallFeed.close();
-      for (final c in historyFeeds.values) {
+      for (final c in [...historyFeeds.values, ...publishedFeeds.values]) {
         c.close();
       }
     });
@@ -1467,6 +1473,13 @@ void main() {
     Stream<HistoryWeek?> historyFor(int week) {
       historyRequests.add(week);
       return (historyFeeds[week] ??= StreamController<HistoryWeek?>.broadcast())
+          .stream;
+    }
+
+    Stream<FantasySquad?> publishedFor(int week) {
+      publishedRequests.add(week);
+      return (publishedFeeds[week] ??=
+              StreamController<FantasySquad?>.broadcast())
           .stream;
     }
 
@@ -1486,6 +1499,7 @@ void main() {
             liveStates: liveFeed.stream,
             liveSquadStates: liveSquadFeed.stream,
             historyWeekFor: historyFor,
+            publishedPicksFor: publishedFor,
             overallStandingStates: overallFeed.stream);
 
     LiveSquad liveSquad({int week = 34}) => LiveSquad(
@@ -1530,16 +1544,26 @@ void main() {
           },
         );
 
-    HistoryWeek settledWeek() => HistoryWeek(totalTenths: 345, slots: const [
-          LiveSlot(playerId: 'Alan Keeper', countedTenths: 40, multiplier: 1),
-          LiveSlot(playerId: 'Ava Striker', countedTenths: 160, multiplier: 2),
-          LiveSlot(playerId: 'Dom Stone', countedTenths: 25, multiplier: 1),
-        ]);
+    HistoryWeek settledWeek({FantasySquad? squad}) => HistoryWeek(
+            totalTenths: 345,
+            squad: squad ?? mySquad,
+            slots: const [
+              LiveSlot(
+                  playerId: 'Alan Keeper', countedTenths: 40, multiplier: 1),
+              LiveSlot(
+                  playerId: 'Ava Striker', countedTenths: 160, multiplier: 2),
+              LiveSlot(
+                  playerId: 'Dom Stone', countedTenths: 25, multiplier: 1),
+            ]);
 
-    void answerOwn({bool withLive = true}) {
+    /// The own feeds answer: the live squad, History not written yet, the
+    /// squad that was LOCKED (PublishedPicks — [locked], default the same
+    /// squad Squads holds) and the Overall rank.
+    void answerOwn({bool withLive = true, FantasySquad? locked}) {
       if (withLive) liveFeed.add(liveState());
       liveSquadFeed.add(liveSquad());
       historyFeeds[3]?.add(null);
+      publishedFeeds[3]?.add(locked ?? mySquad);
       overallFeed.add(const OverallStanding(rank: 5, movement: 2));
     }
 
@@ -1604,8 +1628,8 @@ void main() {
       expect(sawHub, isTrue);
     });
 
-    testWidgets('live silent for 2 s: the hub reveals without it (waiting for '
-        'kickoff), and a late live lands in place', (tester) async {
+    testWidgets('live silent for 2 s: the hub reveals without it (just "Locked": '
+        'not a claim about kickoff), and a late live lands in place', (tester) async {
       await pumpLockedHub(tester);
       await land(tester, lock: FantasyLockOverride.locked);
       answerOwn(withLive: false);
@@ -1614,12 +1638,15 @@ void main() {
       await tester.pump(const Duration(milliseconds: 700));
       await settle(tester);
       expect(key('hub'), findsOneWidget);
-      expect(find.text('Locked · waiting for kickoff'), findsOneWidget);
+      // The load is incomplete (live has not answered): never "waiting for
+      // kickoff" — only what is certain.
+      expect(find.text('Locked'), findsOneWidget);
+      expect(find.text('Locked · waiting for kickoff'), findsNothing);
 
       liveFeed.add(liveState());
       await tester.pump(const Duration(milliseconds: 50));
       expect(find.text('34 pts · #5 ▲2'), findsOneWidget);
-      expect(find.text('Locked · waiting for kickoff'), findsNothing);
+      expect(find.text('Locked'), findsNothing);
     });
 
     testWidgets('settled: Final, the official rank, History points on the '
@@ -1630,6 +1657,7 @@ void main() {
       liveFeed.add(liveState(state: LiveState.settled));
       liveSquadFeed.add(null);
       historyFeeds[3]!.add(settledWeek());
+      publishedFeeds[3]!.add(null);
       overallFeed.add(const OverallStanding(rank: 4, movement: 1));
       await settle(tester);
 
@@ -1682,9 +1710,84 @@ void main() {
       liveFeed.add(liveState());
       liveSquadFeed.add(const LiveSquad(totalTenths: 0, week: 0, slots: []));
       historyFeeds[3]?.add(null);
+      publishedFeeds[3]?.add(mySquad);
       overallFeed.add(null);
       await settle(tester);
       expect(find.text("0 pts · this week didn't count"), findsOneWidget);
+    });
+
+    // The court is the squad that was LOCKED, not Squads/<uid> (which the
+    // server rewrites after finalize and which keeps a chip the lock voided).
+    FantasySquad tripleCaptainOnAxel() => FantasySquad(
+          picks: mySquad.picks,
+          captainId: 'Axel Shot',
+          viceId: 'Dana Wall',
+          chip: 'tripleCaptain',
+        );
+
+    testWidgets(
+        'live: the court, armband and ×N come from PublishedPicks, not from '
+        'the saved squad', (tester) async {
+      await pumpLockedHub(tester);
+      await land(tester, lock: FantasyLockOverride.locked); // Squads: ×2, Ava
+      answerOwn(locked: tripleCaptainOnAxel());
+      await settle(tester);
+      expect(publishedRequests, [3]);
+      expect(find.text('ATT · \$6.5M · ×3'), findsOneWidget);
+      expect(find.text('ATT · \$7.0M · ×2'), findsNothing);
+      expect(key('captain_ring_Axel Shot'), findsOneWidget);
+      expect(key('captain_ring_Ava Striker'), findsNothing);
+    });
+
+    testWidgets(
+        'settled: the court, armband and ×N come from History — the chip the '
+        'rollover removed from Squads still reads ×3', (tester) async {
+      await pumpLockedHub(tester);
+      await land(tester, lock: FantasyLockOverride.locked); // Squads: no chip
+      liveFeed.add(liveState(state: LiveState.settled));
+      liveSquadFeed.add(null);
+      historyFeeds[3]!.add(settledWeek(squad: tripleCaptainOnAxel()));
+      publishedFeeds[3]!.add(null);
+      overallFeed.add(const OverallStanding(rank: 4));
+      await settle(tester);
+      expect(find.text('Final · 34 pts · #4'), findsOneWidget);
+      expect(find.text('ATT · \$6.5M · ×3'), findsOneWidget);
+      expect(key('captain_ring_Axel Shot'), findsOneWidget);
+    });
+
+    testWidgets(
+        'a failed History read in a settled week: just "Locked", no chip '
+        'lines — never "waiting for kickoff"', (tester) async {
+      await pumpLockedHub(tester);
+      await land(tester, lock: FantasyLockOverride.locked);
+      liveFeed.add(liveState(state: LiveState.settled));
+      liveSquadFeed.add(null);
+      historyFeeds[3]!.addError(StateError('permission denied'));
+      publishedFeeds[3]!.add(null);
+      overallFeed.add(const OverallStanding(rank: 4));
+      await settle(tester);
+      expect(key('hub'), findsOneWidget);
+      expect(find.text('Locked'), findsOneWidget);
+      expect(find.text('Locked · waiting for kickoff'), findsNothing);
+      expect(
+          find.descendant(
+              of: key('squad_chip_Ava Striker'),
+              matching: find.textContaining('pts')),
+          findsNothing);
+    });
+
+    testWidgets(
+        'before kickoff with every stream answered: the genuine "waiting '
+        'for kickoff"', (tester) async {
+      await pumpLockedHub(tester);
+      await land(tester, lock: FantasyLockOverride.locked);
+      liveFeed.add(const FantasyLiveState()); // no Live node yet
+      liveSquadFeed.add(null);
+      historyFeeds[3]!.add(null);
+      publishedFeeds[3]!.add(mySquad);
+      overallFeed.add(null);
+      await settle(tester);
+      expect(find.text('Locked · waiting for kickoff'), findsOneWidget);
     });
 
     testWidgets('editing open: no locked-week stream is ever subscribed',
@@ -1750,12 +1853,16 @@ void main() {
           liveStates: liveFeed.stream,
           liveSquadStates: liveSquadFeed.stream,
           historyWeekFor: historyFor,
+          publishedPicksFor: publishedFor,
           overallStandingStates: overallFeed.stream);
       await land(tester, lock: FantasyLockOverride.locked);
       expect(key('hub'), findsOneWidget);
       expect(liveListens, 0);
       expect(historyRequests, isEmpty);
-      expect(find.text('Locked · waiting for kickoff'), findsOneWidget);
+      expect(publishedRequests, isEmpty);
+      // Nothing was read, so nothing is claimed about kickoff.
+      expect(find.text('Locked'), findsOneWidget);
+      expect(find.text('Locked · waiting for kickoff'), findsNothing);
     });
 
     for (final brightness in Brightness.values) {
