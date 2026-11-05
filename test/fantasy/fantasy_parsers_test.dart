@@ -948,4 +948,229 @@ void main() {
       expect(teams[1]!.live, isFalse);
     });
   });
+
+  // ── Schedule nodes (season setup + schedule changes, Task 1) ─────────────
+  group('lockedWeeksFromNode (LockedWeeks/<n>)', () {
+    final week1 = {'Date': '10042026', 'LockAtUtc': 1791154800000};
+    final expected1 = LockedWeek(
+        date: '10042026', lockUtc: DateTime.utc(2026, 10, 4, 23));
+
+    test('RTDB hands keys 1..n back as a List with a null index 0', () {
+      expect(lockedWeeksFromNode([null, week1]), {1: expected1});
+    });
+    test('and as a Map when the keys are not dense', () {
+      expect(lockedWeeksFromNode({'1': week1}), {1: expected1});
+      expect(
+          lockedWeeksFromNode({
+            '1': week1,
+            '3': {...week1, 'Date': '10182026'},
+          }),
+          {
+            1: expected1,
+            3: LockedWeek(
+                date: '10182026', lockUtc: DateTime.utc(2026, 10, 4, 23)),
+          });
+    });
+    test('a double epoch (web) counts; the instant is UTC', () {
+      final w = lockedWeeksFromNode([null, {...week1, 'LockAtUtc': 1791154800000.0}])[1]!;
+      expect(w.lockUtc, DateTime.utc(2026, 10, 4, 23));
+      expect(w.lockUtc.isUtc, isTrue);
+    });
+    test('Scored counts only as a literal true', () {
+      expect(lockedWeeksFromNode([null, {...week1, 'Scored': true}])[1]!.scored,
+          isTrue);
+      expect(lockedWeeksFromNode([null, {...week1, 'Scored': 'yes'}])[1]!.scored,
+          isFalse);
+      expect(lockedWeeksFromNode([null, {...week1, 'Scored': 1}])[1]!.scored,
+          isFalse);
+    });
+    test('junk is skipped, never thrown on', () {
+      expect(
+          lockedWeeksFromNode([
+            week1, // index 0 is not a week
+            null,
+            'nope',
+            {'Date': '1004', 'LockAtUtc': 1791154800000}, // not MMDDYYYY
+            {'Date': '13452026', 'LockAtUtc': 1791154800000}, // month 13
+            {'Date': '02302026', 'LockAtUtc': 1791154800000}, // Feb 30
+            {'Date': '10042026', 'LockAtUtc': '1791154800000'}, // not a number
+            {'Date': '10042026', 'LockAtUtc': double.nan},
+            {'Date': '10042026', 'LockAtUtc': 0},
+            {'Date': 10042026, 'LockAtUtc': 1791154800000}, // Date not a string
+            {'LockAtUtc': 1791154800000},
+          ]),
+          isEmpty);
+      expect(lockedWeeksFromNode({'x': week1, '-1': week1, '1.5': week1}),
+          isEmpty);
+      expect(lockedWeeksFromNode(null), isEmpty);
+      expect(lockedWeeksFromNode('nope'), isEmpty);
+      expect(lockedWeeksFromNode(7), isEmpty);
+    });
+  });
+
+  group('scheduleOverridesFromConfigNode (Config/SkippedDates, Deadlines)', () {
+    test('SkippedDates: only a literal true counts', () {
+      expect(
+          scheduleOverridesFromConfigNode({
+            'SkippedDates': {'10112026': true, '10182026': 'yes', '10252026': 1},
+          }),
+          const ScheduleOverrides(skippedDates: {'10112026'}));
+    });
+    test('Deadlines: epoch-ms numbers only, valid date keys only', () {
+      final o = scheduleOverridesFromConfigNode({
+        'Deadlines': {
+          '10112026': 1791154800000,
+          '10182026': 'x',
+          '10252026': true,
+          '11012026': '1791154800000',
+          'junk': 5,
+        },
+      });
+      expect(o.deadlineOverrides, {'10112026': DateTime.utc(2026, 10, 4, 23)});
+      expect(o.deadlineOverrides['10112026']!.isUtc, isTrue);
+    });
+    test('deadlineMinutesBeforeKickoff: default 60, clamp 0..240, ints only',
+        () {
+      int m(Object? v) => scheduleOverridesFromConfigNode(
+              {'deadlineMinutesBeforeKickoff': v})
+          .minutesBeforeKickoff;
+      expect(scheduleOverridesFromConfigNode(const {}).minutesBeforeKickoff, 60);
+      expect(m(45), 45);
+      expect(m(45.0), 45);
+      expect(m(0), 0);
+      expect(m(240), 240);
+      expect(m(999), 240);
+      expect(m(-5), 0);
+      expect(m('45'), 60);
+      expect(m(45.5), 60);
+      expect(m(double.nan), 60);
+      expect(m(1e300), 60); // not a representable integer
+      expect(m(null), 60);
+      expect(m(true), 60);
+    });
+    test('an absent or malformed Config is all defaults', () {
+      for (final node in [null, 'x', 3, [1, 2]]) {
+        expect(scheduleOverridesFromConfigNode(node), const ScheduleOverrides());
+      }
+    });
+  });
+
+  group('firstKickoffByDateFromNode (Date/<date>/<game>/Time)', () {
+    test('takes the earliest valid Time of the day, in league time', () {
+      expect(
+          firstKickoffByDateFromNode({
+            '10112026': [
+              {'Time': '7pm'},
+              {'Time': '15:30'},
+              {'Time': '14:00'},
+              {'Time': '25:00'},
+              {'Time': '14:60'},
+              {'Time': ''},
+              <String, Object>{},
+            ],
+          }),
+          {'10112026': DateTime.utc(2026, 10, 11, 21)}); // 14:00 PDT
+    });
+    test('PST dates use the winter offset', () {
+      expect(
+          firstKickoffByDateFromNode({
+            '11012026': [
+              {'Time': '14:00'}
+            ]
+          }),
+          {'11012026': DateTime.utc(2026, 11, 1, 22)});
+    });
+    test('accepts a single-digit hour and padding like the schedule display',
+        () {
+      expect(
+          firstKickoffByDateFromNode({
+            '10112026': [
+              {'Time': ' 9:05 '}
+            ]
+          }),
+          {'10112026': DateTime.utc(2026, 10, 11, 16, 5)});
+    });
+    test('no Time and no start hour -> no kickoff for that date', () {
+      expect(
+          firstKickoffByDateFromNode({
+            '10112026': [
+              {'team1': 'A'}
+            ]
+          }),
+          isEmpty);
+      expect(
+          firstKickoffByDateFromNode({
+            '10112026': [
+              {'Time': '7pm'}
+            ]
+          }, startHour: 0),
+          isEmpty);
+    });
+    test('falls back per game to the legacy derived time when startHour > 0',
+        () {
+      // game 0: '7pm' invalid -> legacy(5,0)=17:00; game 1: 15:30 stored;
+      // game 2: no Time -> legacy(5,2)=19:00. Earliest = 15:30 PDT.
+      expect(
+          firstKickoffByDateFromNode({
+            '10112026': [
+              {'Time': '7pm'},
+              {'Time': '15:30'},
+              <String, Object>{},
+            ],
+          }, startHour: 5),
+          {'10112026': DateTime.utc(2026, 10, 11, 22, 30)});
+      // only a derived time: 17:00 PDT
+      expect(
+          firstKickoffByDateFromNode({
+            '10112026': [
+              {'team1': 'A'}
+            ]
+          }, startHour: 5),
+          {'10112026': DateTime.utc(2026, 10, 12, 0)});
+    });
+    test('the legacy index is the list position (null holes still count)', () {
+      // index 1 -> legacy(3,1) = 16:00 PDT = 23:00Z
+      expect(
+          firstKickoffByDateFromNode({
+            '10112026': [null, <String, Object>{}],
+          }, startHour: 3),
+          {'10112026': DateTime.utc(2026, 10, 11, 23)});
+    });
+    test('an index-keyed Map of games uses the numeric key as the index', () {
+      // hole-collapsed node: games 0 and 2 survive; game 2 has no Time ->
+      // legacy(2,2) = 16:00 PDT; game 0 stores 17:30.
+      expect(
+          firstKickoffByDateFromNode({
+            '10112026': {
+              '0': {'Time': '17:30'},
+              '2': {'team1': 'A'},
+            },
+          }, startHour: 2),
+          {'10112026': DateTime.utc(2026, 10, 11, 23)});
+      // a non-numeric key has no index: skipped
+      expect(
+          firstKickoffByDateFromNode({
+            '10112026': {'x': <String, Object>{}},
+          }, startHour: 2),
+          isEmpty);
+    });
+    test('non-date keys and a malformed node are skipped, not thrown on', () {
+      expect(
+          firstKickoffByDateFromNode({
+            'junk': [
+              {'Time': '14:00'}
+            ]
+          }),
+          isEmpty);
+      expect(firstKickoffByDateFromNode({'10112026': 'x', '10182026': null}),
+          isEmpty);
+      expect(firstKickoffByDateFromNode(null), isEmpty);
+      expect(firstKickoffByDateFromNode('nope'), isEmpty);
+      expect(
+          firstKickoffByDateFromNode([
+            {'Time': '14:00'}
+          ]),
+          isEmpty);
+    });
+  });
 }

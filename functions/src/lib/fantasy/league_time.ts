@@ -36,10 +36,18 @@ export function isPacificDst(localDate: Date): boolean {
   return d >= start.getTime() && d < end.getTime();
 }
 
-/** UTC instant of [hour]:00 league time on a database date (MMDDYYYY). */
-export function lockInstantUtc(mmddyyyy: string, hour: number): Date {
+/** UTC instant of [hour]:[minute] league time on a database date
+ *  (MMDDYYYY). The PDT/PST offset is the one in force on that calendar date. */
+export function leagueInstantUtc(
+  mmddyyyy: string, hour: number, minute: number,
+): Date {
   const d = parseDbDate(mmddyyyy);
   const offset = isPacificDst(d) ? 7 : 8; // PDT -7, PST -8
   return new Date(Date.UTC(
-    d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), hour + offset));
+    d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), hour + offset, minute));
+}
+
+/** UTC instant of [hour]:00 league time on a database date (MMDDYYYY). */
+export function lockInstantUtc(mmddyyyy: string, hour: number): Date {
+  return leagueInstantUtc(mmddyyyy, hour, 0);
 }

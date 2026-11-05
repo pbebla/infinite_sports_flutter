@@ -1,0 +1,234 @@
+{
+  "_notes": [
+    "GOLDEN SCHEDULE — cross-engine contract for deriveGameweeks with a",
+    "GameweekSchedule (weeks freeze once locked, skipped dates, per-date",
+    "deadline overrides, kickoff-aware automatic deadline). Both twins replay",
+    "this file: lib/fantasy/engine/gameweeks.dart (test/fantasy/",
+    "gameweeks_test.dart, group golden_schedule) and functions/src/lib/",
+    "fantasy/gameweeks.ts (golden_schedule.test.ts). Every expected instant",
+    "was computed BY HAND before either engine ran — if a twin disagrees it is",
+    "the twin that is wrong; never copy actual values into this file.",
+    "",
+    "Config is not serialized: the futsal default with lockHour from the case.",
+    "Dates are Sundays in Oct/Nov 2026. Oct 4-25 is PDT (UTC-7), Nov 1 onward",
+    "is PST (UTC-8; DST ends Sun Nov 1, 2026). lockHour 16 => 4 PM league time",
+    "=> 23:00Z in PDT, 00:00Z next day in PST. A week opens at league midnight",
+    "after the PREVIOUS week's date (frozen or not): Oct 5 = 07:00Z, Oct 12 =",
+    "07:00Z, Oct 26 = 07:00Z, Nov 2 = 08:00Z.",
+    "",
+    "schedule (all optional): lockedWeeks {\"<n>\": {date, lockUtc, scored?}},",
+    "skippedDates [MMDDYYYY], deadlineOverrides {MMDDYYYY: iso},",
+    "firstKickoffUtc {MMDDYYYY: iso}, minutesBeforeKickoff (default 60).",
+    "dateNode (optional): a season Date node (date -> games). Both twins derive",
+    "firstKickoffUtc from it with firstKickoffByDate*(dateNode, startHour) and",
+    "merge it into the schedule; an explicit schedule.firstKickoffUtc entry",
+    "wins on a clash. startHour (optional, default 0) is the season Start",
+    "Time used for the legacy derived kickoff of games with no stored Time.",
+    "",
+    "Rules replayed: frozen weeks = lockedWeeks 1..L while every key is present",
+    "(first gap ends it); later dates = distinct, calendar-sorted, not skipped,",
+    "strictly after the last frozen date; lock = override ?? min(lockHour,",
+    "firstKickoff - minutes)."
+  ],
+  "cases": [
+    {
+      "name": "plain",
+      "dates": ["10042026", "10112026", "10182026"],
+      "lockHour": 16,
+      "expected": [
+        {"number": 1, "date": "10042026", "lockUtc": "2026-10-04T23:00:00Z", "opensUtc": null, "frozen": false},
+        {"number": 2, "date": "10112026", "lockUtc": "2026-10-11T23:00:00Z", "opensUtc": "2026-10-05T07:00:00Z", "frozen": false},
+        {"number": 3, "date": "10182026", "lockUtc": "2026-10-18T23:00:00Z", "opensUtc": "2026-10-12T07:00:00Z", "frozen": false}
+      ]
+    },
+    {
+      "name": "unsorted and duplicate dates",
+      "dates": ["10182026", "10042026", "10112026", "10042026"],
+      "lockHour": 16,
+      "expected": [
+        {"number": 1, "date": "10042026", "lockUtc": "2026-10-04T23:00:00Z", "opensUtc": null, "frozen": false},
+        {"number": 2, "date": "10112026", "lockUtc": "2026-10-11T23:00:00Z", "opensUtc": "2026-10-05T07:00:00Z", "frozen": false},
+        {"number": 3, "date": "10182026", "lockUtc": "2026-10-18T23:00:00Z", "opensUtc": "2026-10-12T07:00:00Z", "frozen": false}
+      ]
+    },
+    {
+      "name": "skipped",
+      "dates": ["10042026", "10112026", "10182026"],
+      "lockHour": 16,
+      "schedule": {"skippedDates": ["10112026"]},
+      "expected": [
+        {"number": 1, "date": "10042026", "lockUtc": "2026-10-04T23:00:00Z", "opensUtc": null, "frozen": false},
+        {"number": 2, "date": "10182026", "lockUtc": "2026-10-18T23:00:00Z", "opensUtc": "2026-10-05T07:00:00Z", "frozen": false}
+      ]
+    },
+    {
+      "name": "override",
+      "dates": ["10042026", "10112026", "10182026"],
+      "lockHour": 16,
+      "schedule": {"deadlineOverrides": {"10112026": "2026-10-11T20:30:00Z"}},
+      "expected": [
+        {"number": 1, "date": "10042026", "lockUtc": "2026-10-04T23:00:00Z", "opensUtc": null, "frozen": false},
+        {"number": 2, "date": "10112026", "lockUtc": "2026-10-11T20:30:00Z", "opensUtc": "2026-10-05T07:00:00Z", "frozen": false},
+        {"number": 3, "date": "10182026", "lockUtc": "2026-10-18T23:00:00Z", "opensUtc": "2026-10-12T07:00:00Z", "frozen": false}
+      ]
+    },
+    {
+      "name": "early kickoff",
+      "dates": ["10042026", "10112026", "10182026"],
+      "lockHour": 16,
+      "schedule": {"firstKickoffUtc": {"10112026": "2026-10-11T22:30:00Z"}, "minutesBeforeKickoff": 60},
+      "expected": [
+        {"number": 1, "date": "10042026", "lockUtc": "2026-10-04T23:00:00Z", "opensUtc": null, "frozen": false},
+        {"number": 2, "date": "10112026", "lockUtc": "2026-10-11T21:30:00Z", "opensUtc": "2026-10-05T07:00:00Z", "frozen": false},
+        {"number": 3, "date": "10182026", "lockUtc": "2026-10-18T23:00:00Z", "opensUtc": "2026-10-12T07:00:00Z", "frozen": false}
+      ]
+    },
+    {
+      "name": "late kickoff",
+      "dates": ["10042026", "10112026", "10182026"],
+      "lockHour": 16,
+      "schedule": {"firstKickoffUtc": {"10112026": "2026-10-12T01:00:00Z"}, "minutesBeforeKickoff": 60},
+      "expected": [
+        {"number": 1, "date": "10042026", "lockUtc": "2026-10-04T23:00:00Z", "opensUtc": null, "frozen": false},
+        {"number": 2, "date": "10112026", "lockUtc": "2026-10-11T23:00:00Z", "opensUtc": "2026-10-05T07:00:00Z", "frozen": false},
+        {"number": 3, "date": "10182026", "lockUtc": "2026-10-18T23:00:00Z", "opensUtc": "2026-10-12T07:00:00Z", "frozen": false}
+      ]
+    },
+    {
+      "name": "kickoff minutes 30",
+      "dates": ["10042026", "10112026", "10182026"],
+      "lockHour": 16,
+      "schedule": {"firstKickoffUtc": {"10112026": "2026-10-11T22:30:00Z"}, "minutesBeforeKickoff": 30},
+      "expected": [
+        {"number": 1, "date": "10042026", "lockUtc": "2026-10-04T23:00:00Z", "opensUtc": null, "frozen": false},
+        {"number": 2, "date": "10112026", "lockUtc": "2026-10-11T22:00:00Z", "opensUtc": "2026-10-05T07:00:00Z", "frozen": false},
+        {"number": 3, "date": "10182026", "lockUtc": "2026-10-18T23:00:00Z", "opensUtc": "2026-10-12T07:00:00Z", "frozen": false}
+      ]
+    },
+    {
+      "name": "frozen, day gone",
+      "dates": ["10112026", "10182026"],
+      "lockHour": 16,
+      "schedule": {"lockedWeeks": {"1": {"date": "10042026", "lockUtc": "2026-10-04T23:00:00Z"}}},
+      "expected": [
+        {"number": 1, "date": "10042026", "lockUtc": "2026-10-04T23:00:00Z", "opensUtc": null, "frozen": true},
+        {"number": 2, "date": "10112026", "lockUtc": "2026-10-11T23:00:00Z", "opensUtc": "2026-10-05T07:00:00Z", "frozen": false},
+        {"number": 3, "date": "10182026", "lockUtc": "2026-10-18T23:00:00Z", "opensUtc": "2026-10-12T07:00:00Z", "frozen": false}
+      ]
+    },
+    {
+      "name": "frozen, past day inserted",
+      "dates": ["10042026", "10072026", "10112026", "10182026"],
+      "lockHour": 16,
+      "schedule": {"lockedWeeks": {
+        "1": {"date": "10042026", "lockUtc": "2026-10-04T23:00:00Z"},
+        "2": {"date": "10112026", "lockUtc": "2026-10-11T21:30:00Z"}
+      }},
+      "expected": [
+        {"number": 1, "date": "10042026", "lockUtc": "2026-10-04T23:00:00Z", "opensUtc": null, "frozen": true},
+        {"number": 2, "date": "10112026", "lockUtc": "2026-10-11T21:30:00Z", "opensUtc": "2026-10-05T07:00:00Z", "frozen": true},
+        {"number": 3, "date": "10182026", "lockUtc": "2026-10-18T23:00:00Z", "opensUtc": "2026-10-12T07:00:00Z", "frozen": false}
+      ]
+    },
+    {
+      "name": "gap in frozen",
+      "dates": ["10042026", "10112026", "10182026"],
+      "lockHour": 16,
+      "schedule": {"lockedWeeks": {"2": {"date": "10112026", "lockUtc": "2026-10-11T21:30:00Z"}}},
+      "expected": [
+        {"number": 1, "date": "10042026", "lockUtc": "2026-10-04T23:00:00Z", "opensUtc": null, "frozen": false},
+        {"number": 2, "date": "10112026", "lockUtc": "2026-10-11T23:00:00Z", "opensUtc": "2026-10-05T07:00:00Z", "frozen": false},
+        {"number": 3, "date": "10182026", "lockUtc": "2026-10-18T23:00:00Z", "opensUtc": "2026-10-12T07:00:00Z", "frozen": false}
+      ]
+    },
+    {
+      "name": "skip does not unfreeze",
+      "dates": ["10042026", "10112026", "10182026"],
+      "lockHour": 16,
+      "schedule": {
+        "lockedWeeks": {"1": {"date": "10042026", "lockUtc": "2026-10-04T23:00:00Z", "scored": true}},
+        "skippedDates": ["10042026"]
+      },
+      "expected": [
+        {"number": 1, "date": "10042026", "lockUtc": "2026-10-04T23:00:00Z", "opensUtc": null, "frozen": true},
+        {"number": 2, "date": "10112026", "lockUtc": "2026-10-11T23:00:00Z", "opensUtc": "2026-10-05T07:00:00Z", "frozen": false},
+        {"number": 3, "date": "10182026", "lockUtc": "2026-10-18T23:00:00Z", "opensUtc": "2026-10-12T07:00:00Z", "frozen": false}
+      ]
+    },
+    {
+      "name": "override beats kickoff",
+      "dates": ["10042026", "10112026", "10182026"],
+      "lockHour": 16,
+      "schedule": {
+        "firstKickoffUtc": {"10112026": "2026-10-11T22:30:00Z"},
+        "minutesBeforeKickoff": 60,
+        "deadlineOverrides": {"10112026": "2026-10-11T23:30:00Z"}
+      },
+      "expected": [
+        {"number": 1, "date": "10042026", "lockUtc": "2026-10-04T23:00:00Z", "opensUtc": null, "frozen": false},
+        {"number": 2, "date": "10112026", "lockUtc": "2026-10-11T23:30:00Z", "opensUtc": "2026-10-05T07:00:00Z", "frozen": false},
+        {"number": 3, "date": "10182026", "lockUtc": "2026-10-18T23:00:00Z", "opensUtc": "2026-10-12T07:00:00Z", "frozen": false}
+      ]
+    },
+    {
+      "name": "legacy start time",
+      "dates": ["10042026", "10112026", "10182026"],
+      "lockHour": 16,
+      "startHour": 2,
+      "dateNode": {
+        "10042026": [{"team1": "A", "team2": "B", "status": 0}],
+        "10112026": [{"team1": "A", "team2": "B", "status": 0}],
+        "10182026": [{"team1": "A", "team2": "B", "status": 0}]
+      },
+      "expected": [
+        {"number": 1, "date": "10042026", "lockUtc": "2026-10-04T20:00:00Z", "opensUtc": null, "frozen": false},
+        {"number": 2, "date": "10112026", "lockUtc": "2026-10-11T20:00:00Z", "opensUtc": "2026-10-05T07:00:00Z", "frozen": false},
+        {"number": 3, "date": "10182026", "lockUtc": "2026-10-18T20:00:00Z", "opensUtc": "2026-10-12T07:00:00Z", "frozen": false}
+      ]
+    },
+    {
+      "name": "stored time, earliest game wins",
+      "dates": ["10042026", "10112026", "10182026"],
+      "lockHour": 16,
+      "dateNode": {
+        "10112026": [
+          {"team1": "A", "team2": "B", "Time": "7pm"},
+          {"team1": "C", "team2": "D", "Time": "15:30"},
+          {"team1": "E", "team2": "F", "Time": "14:00"}
+        ]
+      },
+      "expected": [
+        {"number": 1, "date": "10042026", "lockUtc": "2026-10-04T23:00:00Z", "opensUtc": null, "frozen": false},
+        {"number": 2, "date": "10112026", "lockUtc": "2026-10-11T20:00:00Z", "opensUtc": "2026-10-05T07:00:00Z", "frozen": false},
+        {"number": 3, "date": "10182026", "lockUtc": "2026-10-18T23:00:00Z", "opensUtc": "2026-10-12T07:00:00Z", "frozen": false}
+      ]
+    },
+    {
+      "name": "explicit kickoff beats dateNode",
+      "dates": ["10042026", "10112026", "10182026"],
+      "lockHour": 16,
+      "schedule": {"firstKickoffUtc": {"10112026": "2026-10-11T22:30:00Z"}},
+      "dateNode": {
+        "10112026": [{"team1": "A", "team2": "B", "Time": "14:00"}]
+      },
+      "expected": [
+        {"number": 1, "date": "10042026", "lockUtc": "2026-10-04T23:00:00Z", "opensUtc": null, "frozen": false},
+        {"number": 2, "date": "10112026", "lockUtc": "2026-10-11T21:30:00Z", "opensUtc": "2026-10-05T07:00:00Z", "frozen": false},
+        {"number": 3, "date": "10182026", "lockUtc": "2026-10-18T23:00:00Z", "opensUtc": "2026-10-12T07:00:00Z", "frozen": false}
+      ]
+    },
+    {
+      "name": "dst crossover with kickoff",
+      "dates": ["10252026", "11012026", "11082026"],
+      "lockHour": 16,
+      "dateNode": {
+        "11012026": [{"team1": "A", "team2": "B", "Time": "14:00"}]
+      },
+      "expected": [
+        {"number": 1, "date": "10252026", "lockUtc": "2026-10-25T23:00:00Z", "opensUtc": null, "frozen": false},
+        {"number": 2, "date": "11012026", "lockUtc": "2026-11-01T21:00:00Z", "opensUtc": "2026-10-26T07:00:00Z", "frozen": false},
+        {"number": 3, "date": "11082026", "lockUtc": "2026-11-09T00:00:00Z", "opensUtc": "2026-11-02T08:00:00Z", "frozen": false}
+      ]
+    }
+  ]
+}

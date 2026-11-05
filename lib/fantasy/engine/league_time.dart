@@ -24,9 +24,14 @@ bool isPacificDst(DateTime localDate) {
   return !d.isBefore(start) && d.isBefore(end);
 }
 
-/// UTC instant of [hour]:00 league time on a database date (MMDDYYYY).
-DateTime lockInstantUtc(String mmddyyyy, {required int hour}) {
+/// UTC instant of [hour]:[minute] league time on a database date (MMDDYYYY).
+/// The PDT/PST offset is the one in force on that calendar date.
+DateTime leagueInstantUtc(String mmddyyyy, int hour, int minute) {
   final d = parseDbDate(mmddyyyy);
   final offset = isPacificDst(d) ? 7 : 8; // PDT -7, PST -8
-  return DateTime.utc(d.year, d.month, d.day, hour + offset);
+  return DateTime.utc(d.year, d.month, d.day, hour + offset, minute);
 }
+
+/// UTC instant of [hour]:00 league time on a database date (MMDDYYYY).
+DateTime lockInstantUtc(String mmddyyyy, {required int hour}) =>
+    leagueInstantUtc(mmddyyyy, hour, 0);

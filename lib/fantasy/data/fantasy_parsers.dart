@@ -8,6 +8,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/parse_ints.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/league_time.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 
 /// `Config.lockOverride` (plan P3a): the owner's escape hatch over the
@@ -322,6 +323,159 @@ List<String> dateKeysFromNode(Object? node) {
     for (final e in node.entries)
       if (e.value != null) e.key.toString(),
   ];
+}
+
+// ── Gameweek schedule nodes (season setup + schedule changes) ──────────────
+// Twin of functions/src/lib/fantasy/orchestration_db.ts (lockedWeeksOf,
+// scheduleOverridesOf, firstKickoffByDateOf): same shapes, same junk rules.
+
+final _dbDateShape = RegExp(r'^\d{8}$');
+final _digitsOnly = RegExp(r'^\d+$');
+final _hhmmShape = RegExp(r'^(\d{1,2}):(\d{2})$');
+
+/// Largest integer both twins (Dart ints, JS numbers) hold exactly.
+const _maxSafeInt = 9007199254740991;
+
+/// True for a string that is a real MMDDYYYY calendar date.
+bool _isDbDate(Object? raw) {
+  if (raw is! String || !_dbDateShape.hasMatch(raw)) return false;
+  final d = parseDbDate(raw);
+  return d.month == int.parse(raw.substring(0, 2)) &&
+      d.day == int.parse(raw.substring(2, 4));
+}
+
+/// A positive epoch-milliseconds NUMBER (an int, or a double on the web) as a
+/// UTC instant; null for anything else (strings, bools, NaN, <= 0, or past
+/// the DateTime range) so a junk node is skipped, never thrown on.
+DateTime? _epochMsToUtc(Object? raw) {
+  if (raw is! num || !raw.isFinite || raw <= 0 || raw > 8640000000000000) {
+    return null;
+  }
+  return DateTime.fromMillisecondsSinceEpoch(raw.toInt(), isUtc: true);
+}
+
+/// The children of a node RTDB may hand back as a List (null-padded, index =
+/// key) or an int-keyed Map, with their numeric index. Non-numeric Map keys
+/// have no index and are skipped.
+Iterable<MapEntry<int, Object?>> _indexedChildren(Object? node) sync* {
+  if (node is List) {
+    for (var i = 0; i < node.length; i++) {
+      yield MapEntry(i, node[i]);
+    }
+  } else if (node is Map) {
+    for (final e in node.entries) {
+      final key = e.key.toString();
+      final index = _digitsOnly.hasMatch(key) ? int.tryParse(key) : null;
+      if (index != null) yield MapEntry(index, e.value);
+    }
+  }
+}
+
+/// `Fantasy/<sport>/<season>/LockedWeeks` — the frozen-week ledger:
+/// `<n>` → `{Date: 'MMDDYYYY', LockAtUtc: <epoch ms>, Scored?: true}`.
+/// Gameweek numbers are small ints, so RTDB list-coerces the node (index =
+/// week, index 0 null); a List and an int-keyed Map both parse. An entry that
+/// isn't week >= 1, isn't a map, has no valid Date or no numeric LockAtUtc is
+/// skipped; `Scored` counts only as a literal `true`.
+Map<int, LockedWeek> lockedWeeksFromNode(Object? node) {
+  final out = <int, LockedWeek>{};
+  for (final e in _indexedChildren(node)) {
+    final week = e.value;
+    if (e.key < 1 || week is! Map) continue;
+    final date = week['Date'];
+    final lockUtc = _epochMsToUtc(week['LockAtUtc']);
+    if (!_isDbDate(date) || lockUtc == null) continue;
+    out[e.key] = LockedWeek(
+      date: date as String,
+      lockUtc: lockUtc,
+      scored: week['Scored'] == true,
+    );
+  }
+  return out;
+}
+
+/// The schedule bits of `Fantasy/<sport>/<season>/Config`:
+/// `SkippedDates/<MMDDYYYY> = true` (only a literal `true` counts),
+/// `Deadlines/<MMDDYYYY> = <epoch ms number>` (anything else is ignored) and
+/// `deadlineMinutesBeforeKickoff` (an integer, default 60, clamped 0..240; a
+/// non-integer reads as the default).
+ScheduleOverrides scheduleOverridesFromConfigNode(Object? configNode) {
+  if (configNode is! Map) return const ScheduleOverrides();
+  final skipped = <String>{};
+  final skippedNode = configNode['SkippedDates'];
+  if (skippedNode is Map) {
+    skippedNode.forEach((date, v) {
+      if (v == true && _isDbDate(date)) skipped.add(date as String);
+    });
+  }
+  final deadlines = <String, DateTime>{};
+  final deadlinesNode = configNode['Deadlines'];
+  if (deadlinesNode is Map) {
+    deadlinesNode.forEach((date, v) {
+      final at = _epochMsToUtc(v);
+      if (at != null && _isDbDate(date)) deadlines[date as String] = at;
+    });
+  }
+  var minutes = 60;
+  final rawMinutes = configNode['deadlineMinutesBeforeKickoff'];
+  if (rawMinutes is num &&
+      rawMinutes.isFinite &&
+      rawMinutes.abs() <= _maxSafeInt &&
+      rawMinutes == rawMinutes.truncate()) {
+    final n = rawMinutes.toInt();
+    minutes = n < 0 ? 0 : (n > 240 ? 240 : n);
+  }
+  return ScheduleOverrides(
+    skippedDates: skipped,
+    deadlineOverrides: deadlines,
+    minutesBeforeKickoff: minutes,
+  );
+}
+
+/// League-time instant of a valid 'H:mm' / 'HH:mm' (24 h) string on [date];
+/// null when [hhmm] is not a valid time.
+DateTime? _kickoffFromHHmm(String date, String hhmm) {
+  final m = _hhmmShape.firstMatch(hhmm.trim());
+  if (m == null) return null;
+  final h = int.parse(m.group(1)!);
+  final min = int.parse(m.group(2)!);
+  if (h > 23 || min > 59) return null;
+  return leagueInstantUtc(date, h, min);
+}
+
+/// The earliest kickoff of each match date of a season's
+/// `/<sport>/<season>/Date` node (the input of
+/// [GameweekSchedule.firstKickoffUtc]). A game's kickoff is its stored `Time`
+/// ('HH:mm', 24 h, league time) when valid; otherwise — only when
+/// [startHour] (the season Start Time) is > 0 — the legacy derived time
+/// [legacyKickoffHHmm] of its index (List position, or the numeric key of an
+/// index-keyed Map); otherwise it has none. A date with no kickoff at all is
+/// left out, as are non-date keys and non-map games.
+Map<String, DateTime> firstKickoffByDateFromNode(
+  Object? dateNode, {
+  int startHour = 0,
+}) {
+  final out = <String, DateTime>{};
+  if (dateNode is! Map) return out;
+  for (final day in dateNode.entries) {
+    final rawDate = day.key;
+    if (!_isDbDate(rawDate)) continue;
+    final date = rawDate as String;
+    DateTime? first;
+    for (final g in _indexedChildren(day.value)) {
+      final game = g.value;
+      if (game is! Map) continue;
+      final legacy = legacyKickoffHHmm(startHour, g.key);
+      final kickoff =
+          _kickoffFromHHmm(date, (game['Time'] ?? '').toString()) ??
+              (legacy == null ? null : _kickoffFromHHmm(date, legacy));
+      if (kickoff != null && (first == null || kickoff.isBefore(first))) {
+        first = kickoff;
+      }
+    }
+    if (first != null) out[date] = first;
+  }
+  return out;
 }
 
 // ── Leaderboards (P3d) — THE PINNED NODE SHAPE ─────────────────────────────

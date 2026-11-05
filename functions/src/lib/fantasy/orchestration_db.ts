@@ -6,6 +6,11 @@
 
 import { FantasyPosition, parsePosition } from './fantasy_config';
 import { MarketPlayer } from './finalize_core';
+import {
+  DEFAULT_MINUTES_BEFORE_KICKOFF, legacyKickoffHHmm, LockedWeek,
+  ScheduleOverrides,
+} from './gameweeks';
+import { leagueInstantUtc, parseDbDate } from './league_time';
 
 /** What a FantasyDb.transaction resolved to. */
 export interface FantasyTxResult {
@@ -235,6 +240,129 @@ export function fantasySeasonsOf(fantasyNode: unknown): FantasySeasonRef[] {
  *  (fantasy_parsers.dart dateKeysFromNode parity). */
 export function dateKeysOf(dateNode: unknown): string[] {
   return childEntries(dateNode).map(([k]) => k);
+}
+
+// ── Gameweek schedule nodes (season setup + schedule changes) ──────────────
+// Twin of lib/fantasy/data/fantasy_parsers.dart (lockedWeeksFromNode,
+// scheduleOverridesFromConfigNode, firstKickoffByDateFromNode): same shapes,
+// same junk rules.
+
+/** True for a string that is a real MMDDYYYY calendar date. */
+function isDbDate(raw: unknown): raw is string {
+  if (typeof raw !== 'string' || !/^\d{8}$/.test(raw)) return false;
+  const d = parseDbDate(raw);
+  return d.getUTCMonth() + 1 === Number(raw.substring(0, 2)) &&
+    d.getUTCDate() === Number(raw.substring(2, 4));
+}
+
+/** A positive epoch-milliseconds NUMBER as a Date; null for anything else
+ *  (strings, bools, NaN, <= 0, or past the Date range) so a junk node is
+ *  skipped, never thrown on. */
+function epochMsToDate(raw: unknown): Date | null {
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0 ||
+    raw > 8640000000000000) return null;
+  return new Date(Math.trunc(raw));
+}
+
+/** childEntries with the numeric index: a node RTDB may hand back as a
+ *  null-padded List (index = key) or an int-keyed Map. Non-numeric Map keys
+ *  have no index and are skipped. */
+function indexedChildren(node: unknown): Array<[number, unknown]> {
+  const out: Array<[number, unknown]> = [];
+  for (const [key, v] of childEntries(node)) {
+    const index = /^\d+$/.test(key) ? Number(key) : NaN;
+    if (Number.isSafeInteger(index)) out.push([index, v]);
+  }
+  return out;
+}
+
+/** `Fantasy/<sport>/<season>/LockedWeeks` — the frozen-week ledger:
+ *  `<n>` -> `{Date: 'MMDDYYYY', LockAtUtc: <epoch ms>, Scored?: true}`.
+ *  Gameweek numbers are small ints, so RTDB list-coerces the node (index =
+ *  week, index 0 null): a List and an int-keyed Map both parse. An entry that
+ *  isn't week >= 1, isn't a map, has no valid Date or no numeric LockAtUtc is
+ *  skipped; `Scored` counts only as a literal `true`. */
+export function lockedWeeksOf(node: unknown): Record<number, LockedWeek> {
+  const out: Record<number, LockedWeek> = {};
+  for (const [n, week] of indexedChildren(node)) {
+    if (n < 1 || !isPlainMap(week)) continue;
+    const date = week['Date'];
+    const lockUtc = epochMsToDate(week['LockAtUtc']);
+    if (!isDbDate(date) || lockUtc === null) continue;
+    out[n] = { date, lockUtc, scored: week['Scored'] === true };
+  }
+  return out;
+}
+
+/** The schedule bits of `Fantasy/<sport>/<season>/Config`:
+ *  `SkippedDates/<MMDDYYYY> = true` (only a literal `true` counts),
+ *  `Deadlines/<MMDDYYYY> = <epoch ms number>` (anything else is ignored) and
+ *  `deadlineMinutesBeforeKickoff` (an integer, default 60, clamped 0..240; a
+ *  non-integer reads as the default). */
+export function scheduleOverridesOf(configNode: unknown): ScheduleOverrides {
+  const skippedDates = new Set<string>();
+  const deadlineOverrides: Record<string, Date> = {};
+  let minutesBeforeKickoff = DEFAULT_MINUTES_BEFORE_KICKOFF;
+  if (isPlainMap(configNode)) {
+    const skipped = configNode['SkippedDates'];
+    if (isPlainMap(skipped)) {
+      for (const [date, v] of Object.entries(skipped)) {
+        if (v === true && isDbDate(date)) skippedDates.add(date);
+      }
+    }
+    const deadlines = configNode['Deadlines'];
+    if (isPlainMap(deadlines)) {
+      for (const [date, v] of Object.entries(deadlines)) {
+        const at = epochMsToDate(v);
+        if (at !== null && isDbDate(date)) deadlineOverrides[date] = at;
+      }
+    }
+    const minutes = configNode['deadlineMinutesBeforeKickoff'];
+    if (typeof minutes === 'number' && Number.isSafeInteger(minutes)) {
+      minutesBeforeKickoff = Math.min(240, Math.max(0, minutes));
+    }
+  }
+  return { skippedDates, deadlineOverrides, minutesBeforeKickoff };
+}
+
+/** League-time instant of a valid 'H:mm' / 'HH:mm' (24 h) string on [date];
+ *  null when [hhmm] is not a valid time. */
+function kickoffFromHHmm(date: string, hhmm: string): Date | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (m === null) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return null;
+  return leagueInstantUtc(date, h, min);
+}
+
+/** The earliest kickoff of each match date of a season's
+ *  `/<sport>/<season>/Date` node (the input of
+ *  GameweekSchedule.firstKickoffUtc). A game's kickoff is its stored `Time`
+ *  ('HH:mm', 24 h, league time) when valid; otherwise — only when
+ *  [startHour] (the season Start Time) is > 0 — the legacy derived time
+ *  legacyKickoffHHmm of its index (List position, or the numeric key of an
+ *  index-keyed Map); otherwise it has none. A date with no kickoff at all is
+ *  left out, as are non-date keys and non-map games. */
+export function firstKickoffByDateOf(
+  dateNode: unknown, startHour = 0,
+): Record<string, Date> {
+  const out: Record<string, Date> = {};
+  if (!isPlainMap(dateNode)) return out;
+  for (const [date, gamesNode] of Object.entries(dateNode)) {
+    if (!isDbDate(date)) continue;
+    let first: Date | null = null;
+    for (const [index, game] of indexedChildren(gamesNode)) {
+      if (!isPlainMap(game)) continue;
+      const legacy = legacyKickoffHHmm(startHour, index);
+      const kickoff = kickoffFromHHmm(date, String(game['Time'] ?? '')) ??
+        (legacy === null ? null : kickoffFromHHmm(date, legacy));
+      if (kickoff !== null && (first === null ||
+        kickoff.getTime() < first.getTime())) first = kickoff;
+    }
+    if (first !== null) out[date] = first;
+  }
+  return out;
 }
 
 /** A league game is a fantasy event unless it is a friendly (league

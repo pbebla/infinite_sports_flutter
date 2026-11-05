@@ -2,7 +2,7 @@
 // part of the cross-engine contract (locks must fire at the same UTC moment
 // the Dart engine shows managers).
 import { describe, expect, it } from 'vitest';
-import { lockInstantUtc, parseDbDate } from './league_time';
+import { leagueInstantUtc, lockInstantUtc, parseDbDate } from './league_time';
 
 describe('league_time', () => {
   it('PST offset in January', () => {
@@ -31,5 +31,24 @@ describe('league_time', () => {
     const d = parseDbDate('05202026');
     expect([d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()])
       .toEqual([2026, 5, 20]);
+  });
+  it('leagueInstantUtc keeps minute precision with the DST rule of the day', () => {
+    // Oct 11 2026 is PDT (UTC-7): 3:30PM local = 22:30 UTC
+    expect(leagueInstantUtc('10112026', 15, 30).toISOString())
+      .toBe('2026-10-11T22:30:00.000Z');
+    // Nov 1 2026 is PST (UTC-8): 3:30PM local = 23:30 UTC
+    expect(leagueInstantUtc('11012026', 15, 30).toISOString())
+      .toBe('2026-11-01T23:30:00.000Z');
+    // late evening rolls into the next UTC day
+    expect(leagueInstantUtc('10112026', 20, 15).toISOString())
+      .toBe('2026-10-12T03:15:00.000Z');
+  });
+  it('lockInstantUtc is leagueInstantUtc on the hour', () => {
+    for (const d of ['01152026', '03072026', '03082026', '07122026', '11012026']) {
+      for (const h of [0, 9, 15, 23]) {
+        expect(lockInstantUtc(d, h).getTime())
+          .toBe(leagueInstantUtc(d, h, 0).getTime());
+      }
+    }
   });
 });
