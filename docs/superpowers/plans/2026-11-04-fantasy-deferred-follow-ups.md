@@ -9,7 +9,7 @@ The working notes from every fantasy build (`.superpowers/sdd/*`, never in git) 
 
 - **Stage-2 rules flip:** under the stage-1 root read, user data is world-readable (pre-existing, confirmed live), and new fantasy nodes inherit it, so draft `Squads/<uid>` are public before the lock. The fix is the stage-2 flip with the Phase-B store build. (Live audit C1/I1)
 - **S15 test fill vs S16:** fake S15 data is visible to all fans once S16 exists without a Fantasy Config. Before launch, run `--clear` with the latest backup, or create `Fantasy/Futsal/16/Config` before the league flips. (Live audit I2)
-- **Firestore ruleset** is the 2018 allow-all default. It's out of the fantasy scope but should be closed. (Live audit M1)
+- ~~**Firestore ruleset** is the 2018 allow-all default.~~ **Closed 2026-11-05** (owner OK): `firestore.rules` denies every client; ruleset 81ce9361 released and verified (anonymous read → 403). The database was empty and neither app ever used it. Rollback ruleset: c512b5df-3d3d-443f-89ce-9fbe37e6ea38. (Live audit M1)
 - **App Check:** callables accept invalid tokens only because enforcement is off, and neither app ships firebase_app_check. Don't enable enforcement without a provider. (Live audit I4)
 - **Dead code still awaiting an OK:** `watchPriceChanges` / `latestPriceChangesFromNode` / `FantasyPriceChange`, plus two stale comments. (`market_player_sheet.dart` was deleted 2026-11-04.) (Live audit M3)
 

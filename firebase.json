@@ -5,6 +5,9 @@
   "storage": {
     "rules": "storage.rules"
   },
+  "firestore": {
+    "rules": "firestore.rules"
+  },
   "hosting": {
     "public": "public",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"]

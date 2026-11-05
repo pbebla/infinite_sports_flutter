@@ -1,0 +1,16 @@
+rules_version = '2';
+
+// Neither app uses Cloud Firestore (no cloud_firestore in either pubspec, ever),
+// and the (default) database holds no collections. The 2018 default ruleset
+// (`allow read, write` on everything) let anyone fill it, so it is closed to
+// every client. Server code using the Admin SDK is not affected by rules.
+//
+// Rollback: re-release ruleset
+// projects/infinite-sports-app/rulesets/c512b5df-3d3d-443f-89ce-9fbe37e6ea38.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
