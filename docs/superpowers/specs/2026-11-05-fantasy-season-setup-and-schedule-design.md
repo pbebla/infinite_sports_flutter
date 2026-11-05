@@ -50,7 +50,7 @@ deriveGameweeks(matchDates, cfg, schedule) where schedule =
 - **Weeks 1..L** = the contiguous frozen prefix of `lockedWeeks`, with their stored date and deadline. A schedule edit can't renumber them.
 - **Weeks L+1..** = schedule dates strictly after the last frozen date, minus skipped dates, in date order.
   - Deadline = the owner's override for that date if set.
-  - Otherwise: the lock hour on game day, pulled earlier to `deadlineMinutesBeforeKickoff` (default 60) before the day's first stored kickoff time when that is earlier.
+  - Otherwise: the lock hour on game day, pulled earlier to `deadlineMinutesBeforeKickoff` (default 60) before the day's first kickoff when that is earlier. A game's kickoff is its stored `Time`; a game without one uses the legacy `Start Time` + index, read as PM — the same time the apps already display (Fable S2).
 - `opensUtc` and `currentGameweek` keep today's rules (open from midnight after the previous game day; "current" until 24 h after the deadline).
 - A game on a date at or before the last frozen date that isn't a frozen week's date never becomes a week. Its games don't count, and the Manager warns.
 
@@ -63,15 +63,12 @@ They are keyed by date, so a moved game day loses its override and falls back to
 
 ### 2. Cancelled after the deadline: rewind
 
-The server checks for a rewind in three places:
-- the 15-minute sweep, first thing;
-- a new date-level schedule trigger that runs only when a date's set of games or a kickoff time changed (no reads otherwise, so live score writes cost nothing);
-- a new trigger on `Fantasy/<sport>/<season>/Config` writes (no Config trigger exists today).
+The rewind runs **only in the 15-minute sweep**, first thing, before the lock step (Fable M2: a trigger-side rewind could interleave with a lock and leave a stale snapshot). The lock step re-checks `LockedWeeks/n` right before each snapshot write and skips the write when the week is no longer frozen. A new trigger on `Fantasy/<sport>/<season>/Config` writes only refreshes an **open** week's GwState, so a moved deadline reaches the save rules at once; it never rewinds.
 
 **When it rewinds:** the **latest** frozen week *n* has no History (and no `Scored`), AND one of these holds:
 - its date has no games left in the schedule;
 - its date is skipped;
-- its deadline override now lies in the future (the owner extended a deadline that already passed).
+- its deadline override now lies in the future **and no game of that day has started** (Fable M1 — nobody re-picks after seeing scores; the Manager also refuses to move a deadline past the day's first kickoff).
 
 **Why this works:** deleting `LockedWeeks/n` is what makes the rewind stick. The week list is derived from the frozen prefix plus the schedule, so once the frozen entry is gone the derived week *n* has a future deadline and the sweep no longer re-locks it.
 
@@ -80,8 +77,8 @@ The server checks for a rewind in three places:
 2. Delete `Live` if `Live/Meta.Gw == n`, and `LiveBase/n`.
 3. Delete each `SquadAlerts/<uid>` with `Gw == n` and `Kind == 'invalid'` (the lock judge's).
 4. Clear `TransferState/<uid>/ChipPlayed` for every uid in the deleted snapshot (nothing scored, so no chip was spent).
-5. Restore `Baselines` to the week-*n* editing state. Re-publish from week *n−1* through a rewind-only bypass of the never-backwards guards; for *n* = 1, remove `Baselines` (none existed before the first lock).
-6. Delete `LockedWeeks/n`, then write GwState for the new current week.
+5. Restore `Baselines` exactly (Fable M3): the lock-time publish stashes the node it overwrites as `Baselines/<uid>/Prev`; the rewind puts `Prev` back, or removes a node written for week *n*+1 that had no `Prev`. (Recomputing from week *n*−1 would keep week *n*'s sales for a manager who sat out *n*−1.)
+6. Delete `LockedWeeks/n`, then write GwState for the new current week — or `null` when no later game day exists.
 
 Managers get one push, claimed once per (*n*, cancelled date): **"GW{n} was called off — your team is open again until {deadline}."**
 
@@ -107,8 +104,8 @@ Two admin-only callables share one server implementation, so the joiner trigger 
    - blocking problems (no rosters; Config already exists; source season still holds test-fill data).
 2. **`startFantasySeason({sport, season, edits, settings})`**:
    - recomputes the preview server-side;
-   - applies the owner's edits (price snapped to step and clamped; position GK/DEF/ATT);
-   - writes `Config` (create-only) then `Players`.
+   - applies the owner's edits (price snapped to step and clamped; position GK/DEF/ATT) and the season pass;
+   - claims `StartedAt` (create-only), writes `Players`, then `Config` — so fans never see a Config without a market; a failure after the claim rolls both back.
 
 **Carry-over lookup per player:**
 - Search earlier fantasy seasons of the same sport, newest first.
@@ -120,8 +117,8 @@ Two admin-only callables share one server implementation, so the joiner trigger 
 
 **Settings:**
 - Copied from the newest earlier fantasy season's Config, with `lockOverride` set to `auto`.
-- Dropped: `lockOverrideUntil`, per-week `Deadlines`/`SkippedDates`, and `Access`.
-- **Access isn't copied** because it's a per-season business choice, and Season 15's is a $5 test value. A new season starts free, and the preview reminds the owner to set the season pass in Access & payments.
+- Dropped: `lockOverrideUntil` and per-week `Deadlines`/`SkippedDates`.
+- **Season pass pre-filled (Fable S1):** the preview carries the source season's `Access` (mode, price, Venmo/Zelle/Card, registered-players-free; never Cash, which is Manager-only), editable, and Start writes it with Config. Starting free and flipping to a pass later would, by the Free→Pass default, keep every early manager free.
 
 **Blocking problems** (Start disabled):
 - no rosters yet;
@@ -152,14 +149,14 @@ The weekly reprice runs **daily at 10:00 league time** (it runs Monday-only toda
 ### 6. Manager
 
 - **Gameweeks page:** each row shows the date and deadline ("changed" when overridden), with actions:
-  - **Change deadline** — a date-time picker limited to before the game day ends;
+  - **Change deadline** — a date-time picker limited to before the day's first kickoff (end of game day when no kickoff is known); disabled once a game of that day has started;
   - **Back to automatic**;
   - **Skip this week**, on unscored weeks;
   - a **Skipped days** list with **Bring back**.
 - **Schedule Manager:**
   - deleting or moving a game whose date is a scored fantasy week warns that fantasy points change;
   - deleting or moving the last game of a locked, unscored week says fantasy will cancel that week and reopen teams.
-- **Start fantasy season:** a card for any season with rosters and no Config. Preview table (grouped by position, editable price and position, source shown), a settings summary, and **Start**.
+- **Start fantasy season:** a card for any season with rosters and no Config. Preview table (grouped by position, editable price and position, source shown), the pre-filled season pass, a settings summary, and **Start**.
 
 ## Out of scope
 
