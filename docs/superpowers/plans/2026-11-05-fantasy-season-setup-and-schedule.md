@@ -176,6 +176,10 @@ Whole `Date` node empty → `'standDown'` + warn. Any read that throws propagate
 
 A sweep that derived before another sweep's rewind may re-claim `LockedWeeks/L` with the old date (Task 3's claim); the next sweep then rewinds again, and the `CalledOff` claim keeps the push single.
 
+**Ruling T3c — heal what a stale write can still leave behind** (a post-claim write can land inside one round trip after a completed rewind):
+- The lock step always writes `TransferCosts/<n>` — the cost map, or `null` when nobody owes anything — so a stale node can never survive a re-lock and be charged at finalize.
+- Sweep heal step (after the rewind check, while the derived current week L is `open` and not frozen): every `Baselines/<uid>` whose `ForGw === L + 1` gets `restoreBaselineAfterRewind(stored, L)` in a transaction. Otherwise a stale node would block every affected manager's Save for the whole reopened week.
+
 - [ ] **Step 1: Failing tests** (`schedule_rewind.test.ts`, FakeDb with cold-first transactions; start state: GW2 locked with snapshots, its games deleted after the deadline, next date one week later):
   - "rewinds the latest unscored week; GW2 reopens with the next date's deadline" (snapshot nodes gone; `LockedWeeks/2` gone; `GwState = {current:2, status:'open', date:<next>, lockAtUtc:<next lock>}`; one push with the exact body);
   - **[M3]** "a manager who sat out GW1 and sold players in GW2's window gets the pre-lock baseline back exactly (from Prev)"; "a manager with no Prev and ForGw 3 loses the node; ForGw 2 is left";
@@ -186,6 +190,7 @@ A sweep that derived before another sweep's rewind may re-claim `LockedWeeks/L` 
   - "never rewinds when the schedule read throws" (FakeDb read rejects → promise rejects, zero writes); "stands down when the whole schedule is empty";
   - **[M2]** "a stale re-claim of the old date is rewound again by the next sweep; exactly one push";
   - **(T3a)** "the mark refuses when History appeared after the reasons check → Rewinding removed, nothing deleted"; "a crashed rewind (node left marked) is resumed by the next sweep"; "a finalize trigger for a marked week stands down";
+  - **(T3c)** "a re-lock with no costs writes TransferCosts/<n> null over a stale node"; "a stale ForGw L+1 baseline found while week L is open is restored from Prev (or removed) by the next sweep; a correct ForGw L node is left alone";
   - "an abandoned live day (games status 1, then all moved away): Live and LiveBase/2 removed";
   - **[S3]** "no later game day → GwState null, push says plain 'GW2 was called off.'"; "upsertGwState clears ReminderSent when the open week's deadline moved later; keeps it when unchanged";
   - `refreshOpenGwState`: "a Deadlines change on the open week updates GwState.lockAtUtc"; "a locked week is left alone"; "TestFill / lockOverride 'open' → nothing";
