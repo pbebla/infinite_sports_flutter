@@ -44,10 +44,10 @@
 import { allManagers, ownersOf } from './audiences';
 import { clampText, COPY_LIMITS } from './copywriter';
 import { configFromMap } from './fantasy_config';
-import { currentGameweek, deriveGameweeks } from './gameweeks';
+import { currentGameweek } from './gameweeks';
 import type { FantasyLogger } from './orchestration';
 import {
-  childEntries, dateKeysOf, FantasyDb, fantasyRoot, isPlainMap,
+  childEntries, FantasyDb, fantasyRoot, isPlainMap, loadSeasonGameweeks,
   updateIfPresent,
 } from './orchestration_db';
 import { FantasyPusher, fantasyPushData, reminderAudience } from './pushes';
@@ -87,9 +87,9 @@ async function currentGwOf(
 ): Promise<{ hasConfig: boolean; gw: number | null }> {
   const configNode = await db.read(`${fantasyRoot(sport, season)}/Config`);
   if (!isPlainMap(configNode)) return { hasConfig: false, gw: null };
-  const dates = dateKeysOf(await db.read(`${sport}/${season}/Date`));
-  const current = currentGameweek(
-    deriveGameweeks(dates, configFromMap(configNode)), nowUtc);
+  const { gws } = await loadSeasonGameweeks(
+    db, sport, season, configFromMap(configNode), configNode);
+  const current = currentGameweek(gws, nowUtc);
   return { hasConfig: true, gw: current?.number ?? null };
 }
 

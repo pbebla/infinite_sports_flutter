@@ -3,13 +3,16 @@
 // filtering, market parsing.
 
 import { describe, expect, it } from 'vitest';
+import { configFromMap, futsalDefault } from './fantasy_config';
+import { deriveGameweeks } from './gameweeks';
 import {
   allGamesFinal, childEntries, dateKeysOf, fantasySeasonsOf,
   firstKickoffByDateOf, fullAttendance, gamesOfDate, isVoidFlag,
-  lockedWeeksOf, lockOverrideOf, marketPlayersOf, marketPricesOf,
-  parseAbsentMap, rosterNamesOf, scheduleOverridesOf, toIntLoose,
-  voidedWeeksOf,
+  loadSeasonGameweeks, lockedWeeksOf, lockOverrideOf, marketPlayersOf,
+  marketPricesOf, parseAbsentMap, rosterNamesOf, scheduleOverridesOf,
+  toIntLoose, voidedWeeksOf,
 } from './orchestration_db';
+import { FakeDb } from './test_support';
 
 describe('toIntLoose', () => {
   it('nums truncate, full int strings parse, junk is 0', () => {
@@ -334,5 +337,127 @@ describe('firstKickoffByDateOf', () => {
     expect(firstKickoffByDateOf(null)).toEqual({});
     expect(firstKickoffByDateOf('nope')).toEqual({});
     expect(firstKickoffByDateOf([{ Time: '14:00' }])).toEqual({});
+  });
+});
+
+describe('loadSeasonGameweeks', () => {
+  const OCT4 = '10042026'; // Sunday, PDT: 15:00 lock = 22:00Z
+  const OCT11 = '10112026';
+  const OCT18 = '10182026';
+  const cfg = futsalDefault();
+  const games = (time?: string) => [time === undefined ? { team1: 'A' } : { Time: time }];
+  const dateNode = () => ({
+    [OCT4]: games(), [OCT11]: games(), [OCT18]: games(),
+  });
+  const view = (gws: Array<{ number: number; date: string; lockUtc: Date; frozen: boolean }>) =>
+    gws.map((g) => [g.number, g.date, g.lockUtc.toISOString(), g.frozen]);
+
+  it('no LockedWeeks, no overrides, no kickoffs = the legacy week list', async () => {
+    const db = new FakeDb({ Futsal: { '16': { Date: dateNode() } } });
+    const { gws, dateNode: node } = await loadSeasonGameweeks(
+      db, 'Futsal', '16', cfg, {});
+    expect(gws).toEqual(deriveGameweeks(dateKeysOf(node), cfg));
+    expect(view(gws)).toEqual([
+      [1, OCT4, '2026-10-04T22:00:00.000Z', false],
+      [2, OCT11, '2026-10-11T22:00:00.000Z', false],
+      [3, OCT18, '2026-10-18T22:00:00.000Z', false],
+    ]);
+    expect(node).toEqual(dateNode());
+  });
+
+  it('a missing Date node is an empty schedule (absent, not an error)', async () => {
+    const { gws, dateNode: node } = await loadSeasonGameweeks(
+      new FakeDb({}), 'Futsal', '16', cfg, {});
+    expect(gws).toEqual([]);
+    expect(node).toBeNull();
+  });
+
+  it('LockedWeeks freeze their weeks (a List and a Map both parse)', async () => {
+    const lockMs = Date.UTC(2026, 9, 4, 20, 30);
+    for (const locked of [
+      [null, { Date: OCT4, LockAtUtc: lockMs }],
+      { '1': { Date: OCT4, LockAtUtc: lockMs } },
+    ]) {
+      const db = new FakeDb({
+        Futsal: { '16': { Date: dateNode() } },
+        Fantasy: { Futsal: { '16': { LockedWeeks: locked } } },
+      });
+      const { gws } = await loadSeasonGameweeks(db, 'Futsal', '16', cfg, {});
+      expect(view(gws)).toEqual([
+        [1, OCT4, '2026-10-04T20:30:00.000Z', true],
+        [2, OCT11, '2026-10-11T22:00:00.000Z', false],
+        [3, OCT18, '2026-10-18T22:00:00.000Z', false],
+      ]);
+    }
+  });
+
+  it('the Config skips and deadline overrides apply', async () => {
+    const db = new FakeDb({ Futsal: { '16': { Date: dateNode() } } });
+    const override = Date.UTC(2026, 9, 18, 19);
+    const { gws } = await loadSeasonGameweeks(db, 'Futsal', '16', cfg, {
+      SkippedDates: { [OCT11]: true },
+      Deadlines: { [OCT18]: override },
+    });
+    expect(view(gws)).toEqual([
+      [1, OCT4, '2026-10-04T22:00:00.000Z', false],
+      [2, OCT18, '2026-10-18T19:00:00.000Z', false], // week 2 is Oct 18 now
+    ]);
+  });
+
+  it('a stored game Time pulls the lock to 60 minutes before the first kickoff', async () => {
+    const db = new FakeDb({
+      Futsal: { '16': { Date: { [OCT4]: games(), [OCT11]: games('13:30') } } },
+    });
+    const { gws } = await loadSeasonGameweeks(db, 'Futsal', '16', cfg, {
+      deadlineMinutesBeforeKickoff: 30,
+    });
+    expect(view(gws)).toEqual([
+      [1, OCT4, '2026-10-04T22:00:00.000Z', false],
+      // 13:30 PDT = 20:30Z, minus the 30 minutes the Config asked for
+      [2, OCT11, '2026-10-11T20:00:00.000Z', false],
+    ]);
+  });
+
+  it('Start Time gives time-less games a derived kickoff (number or string)', async () => {
+    for (const start of [1, '1']) {
+      const db = new FakeDb({
+        Futsal: { '16': { Date: { [OCT4]: games() }, 'Start Time': start } },
+      });
+      const { gws } = await loadSeasonGameweeks(db, 'Futsal', '16', cfg, {});
+      // game 0: 1 -> read as PM = 13:00 PDT = 20:00Z, minus the default 60 min
+      expect(view(gws)).toEqual([[1, OCT4, '2026-10-04T19:00:00.000Z', false]]);
+    }
+  });
+
+  it('a Start Time of 0, negative or junk adds no kickoff', async () => {
+    for (const start of [0, -3, 'noon', null]) {
+      const db = new FakeDb({
+        Futsal: { '16': { Date: { [OCT4]: games() }, 'Start Time': start } },
+      });
+      const { gws } = await loadSeasonGameweeks(db, 'Futsal', '16', cfg, {});
+      expect(view(gws)).toEqual([[1, OCT4, '2026-10-04T22:00:00.000Z', false]]);
+    }
+  });
+
+  it('the config lock hour is the automatic deadline when nothing is earlier', async () => {
+    const db = new FakeDb({ Futsal: { '16': { Date: { [OCT4]: games() } } } });
+    const { gws } = await loadSeasonGameweeks(
+      db, 'Futsal', '16', configFromMap({ lockHour: 12 }), {});
+    expect(view(gws)).toEqual([[1, OCT4, '2026-10-04T19:00:00.000Z', false]]);
+  });
+
+  it('a failed read propagates — an error is never "no weeks"', async () => {
+    for (const bad of ['Futsal/16/Date', 'Fantasy/Futsal/16/LockedWeeks',
+      'Futsal/16/Start Time']) {
+      class FailingDb extends FakeDb {
+        async read(path: string): Promise<unknown> {
+          if (path === bad) throw new Error(`read failed: ${path}`);
+          return super.read(path);
+        }
+      }
+      const db = new FailingDb({ Futsal: { '16': { Date: dateNode() } } });
+      await expect(loadSeasonGameweeks(db, 'Futsal', '16', cfg, {}))
+        .rejects.toThrow(`read failed: ${bad}`);
+    }
   });
 });

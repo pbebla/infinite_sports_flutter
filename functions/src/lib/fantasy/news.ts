@@ -44,7 +44,7 @@
 
 import { FetchLike } from '../support';
 import { MarketPlayer } from './finalize_core';
-import { isPacificDst, lockInstantUtc } from './league_time';
+import { leagueWallClock, lockInstantUtc } from './league_time';
 import { PlayerCard, cardsNode } from './news_cards';
 import { childEntries, isPlainMap, toIntLoose } from './orchestration_db';
 import { WEEKDAYS } from './pushes';
@@ -363,16 +363,10 @@ export function newsAutopilotConfigFrom(
   };
 }
 
-/** League-local wall clock of an instant, as a Date whose UTC fields read
- *  the league time (America/Los_Angeles via isPacificDst — the same
- *  offset rule as the lock math). Also the badges' cabinet Date. */
-export function leagueWallClock(instantUtc: Date): Date {
-  const guess = new Date(instantUtc.getTime() - 8 * 3_600_000);
-  const guessDay = new Date(Date.UTC(
-    guess.getUTCFullYear(), guess.getUTCMonth(), guess.getUTCDate()));
-  const offset = isPacificDst(guessDay) ? 7 : 8;
-  return new Date(instantUtc.getTime() - offset * 3_600_000);
-}
+// leagueWallClock lives in league_time.ts (the one place the PDT/PST offset
+// rule is written; pushes.ts formats deadlines with it too). Re-exported:
+// the badges' cabinet Date imports it from here.
+export { leagueWallClock };
 
 /** League-local calendar date (as a UTC-midnight Date) of an instant. */
 function leagueLocalDate(nowUtc: Date): Date {

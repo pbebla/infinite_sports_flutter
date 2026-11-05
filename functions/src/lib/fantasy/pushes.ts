@@ -13,7 +13,7 @@
 // adds one exception, because the week is at stake: the once-per-gameweek
 // over-budget preview ("this week's price changes put your team $X over").
 
-import { parseDbDate } from './league_time';
+import { leagueWallClock } from './league_time';
 import { childEntries, isPlainMap, toIntLoose } from './orchestration_db';
 
 export interface FantasyUserPush {
@@ -95,15 +95,19 @@ export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** The absolute league-local lock time, spec §5 style ("Sun, Oct 19 ·
- *  3:00 PM") — formatted straight from the match date + lock hour, so no
- *  timezone math can drift it. */
-export function formatDeadline(dateKey: string, lockHour: number): string {
-  const d = parseDbDate(dateKey);
-  const h12 = lockHour % 12 === 0 ? 12 : lockHour % 12;
-  const ampm = lockHour % 24 < 12 ? 'AM' : 'PM';
-  return `${WEEKDAYS[d.getUTCDay()]}, ${MONTHS[d.getUTCMonth()]} ` +
-    `${d.getUTCDate()} · ${h12}:00 ${ampm}`;
+/** The absolute league-local deadline, spec §5 style ("Sun, Oct 19 ·
+ *  3:00 PM", minutes always shown: "Sun, Oct 11 · 1:30 PM") — formatted from
+ *  the gameweek's real lock INSTANT (gw.lockUtc.getTime()), so an owner
+ *  deadline override or an early kickoff shows the time managers actually
+ *  face. The wall clock is the league's (America/Los_Angeles, the same
+ *  PDT/PST rule as the lock math: leagueWallClock). */
+export function formatDeadlineInstant(lockUtcMs: number): string {
+  const local = leagueWallClock(new Date(lockUtcMs));
+  const h = local.getUTCHours();
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  const mm = String(local.getUTCMinutes()).padStart(2, '0');
+  return `${WEEKDAYS[local.getUTCDay()]}, ${MONTHS[local.getUTCMonth()]} ` +
+    `${local.getUTCDate()} · ${h12}:${mm} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
 export function fillReminderTemplate(
@@ -151,7 +155,7 @@ export function formatMoneyTenths(tenths: number): string {
 
 /** The once-per-gameweek warning that the week's price moves put a saved
  *  squad [overTenths] over budget (orchestration.ts sweep step 3c);
- *  [deadline] = formatDeadline of the gameweek's lock. */
+ *  [deadline] = formatDeadlineInstant of the gameweek's lock. */
 export function overBudgetPreviewBody(overTenths: number, deadline: string): string {
   return "This week's price changes put your team " +
     `${formatMoneyTenths(overTenths)} over. Fix it before ${deadline} or ` +

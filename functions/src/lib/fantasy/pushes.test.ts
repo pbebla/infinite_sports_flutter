@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   adminUidsOf, DEFAULT_REMINDER_TEMPLATE, fantasyPushData,
-  fillReminderTemplate, formatDeadline, formatMoneyTenths, NEWS_READY_TITLE,
+  fillReminderTemplate, formatDeadlineInstant, formatMoneyTenths, NEWS_READY_TITLE,
   newsReadyBody, OVER_BUDGET_PREVIEW_TITLE, overBudgetPreviewBody, recapBody,
   reminderAudience, reminderConfigFrom, reminderInstantMs,
 } from './pushes';
@@ -39,15 +39,41 @@ describe('reminderConfigFrom', () => {
   });
 });
 
-describe('formatDeadline', () => {
-  it('spec §5 shape: "Sun, Jun 28 · 3:00 PM"', () => {
-    expect(formatDeadline('06282026', 15)).toBe('Sun, Jun 28 · 3:00 PM');
+describe('formatDeadlineInstant', () => {
+  it('spec §5 shape in league time: "Sun, Oct 4 · 4:00 PM" (PDT = UTC-7)', () => {
+    expect(formatDeadlineInstant(Date.UTC(2026, 9, 4, 23)))
+      .toBe('Sun, Oct 4 · 4:00 PM');
   });
 
-  it('12-hour edges', () => {
-    expect(formatDeadline('06282026', 0)).toBe('Sun, Jun 28 · 12:00 AM');
-    expect(formatDeadline('06282026', 12)).toBe('Sun, Jun 28 · 12:00 PM');
-    expect(formatDeadline('12012026', 9)).toBe('Tue, Dec 1 · 9:00 AM');
+  it('minutes are always shown: 1:30 PM, never "1 PM"', () => {
+    expect(formatDeadlineInstant(Date.parse('2026-10-11T20:30:00Z')))
+      .toBe('Sun, Oct 11 · 1:30 PM');
+    expect(formatDeadlineInstant(Date.parse('2026-10-11T22:05:00Z')))
+      .toBe('Sun, Oct 11 · 3:05 PM');
+  });
+
+  it('the fall-back day (Nov 1 2026) is PST: 16:00 PST = 2026-11-02T00:00Z', () => {
+    expect(formatDeadlineInstant(Date.parse('2026-11-02T00:00:00Z')))
+      .toBe('Sun, Nov 1 · 4:00 PM');
+  });
+
+  it('summer and winter wall clocks (PDT -7 / PST -8)', () => {
+    expect(formatDeadlineInstant(Date.UTC(2026, 5, 28, 22)))
+      .toBe('Sun, Jun 28 · 3:00 PM'); // Jun 28 15:00 PDT
+    expect(formatDeadlineInstant(Date.UTC(2026, 11, 1, 17)))
+      .toBe('Tue, Dec 1 · 9:00 AM'); // Dec 1 09:00 PST
+  });
+
+  it('12-hour edges: 12:00 AM / 12:00 PM', () => {
+    expect(formatDeadlineInstant(Date.UTC(2026, 5, 28, 7)))
+      .toBe('Sun, Jun 28 · 12:00 AM'); // 00:00 PDT
+    expect(formatDeadlineInstant(Date.UTC(2026, 5, 28, 19)))
+      .toBe('Sun, Jun 28 · 12:00 PM'); // 12:00 PDT
+  });
+
+  it('the league date, not the UTC date: 03:30Z is still the evening before', () => {
+    expect(formatDeadlineInstant(Date.UTC(2026, 6, 1, 3, 30)))
+      .toBe('Tue, Jun 30 · 8:30 PM');
   });
 });
 
@@ -109,7 +135,7 @@ describe('over-budget preview push (FPL selling, spec §4)', () => {
 
   it('the exact copy: title + body with the amount and the deadline', () => {
     expect(OVER_BUDGET_PREVIEW_TITLE).toBe('Your fantasy team is over budget');
-    expect(overBudgetPreviewBody(10, formatDeadline('06282026', 15))).toBe(
+    expect(overBudgetPreviewBody(10, formatDeadlineInstant(Date.UTC(2026, 5, 28, 22)))).toBe(
       "This week's price changes put your team $1.0M over. Fix it before " +
       "Sun, Jun 28 · 3:00 PM or this week won't count.");
     expect(overBudgetPreviewBody(5, 'Sun, Oct 19 · 3:00 PM')).toBe(

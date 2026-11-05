@@ -45,15 +45,15 @@
 import {
   configFromMap, FantasyConfig, FantasyPosition, parsePosition,
 } from './fantasy_config';
-import { currentGameweek, deriveGameweeks } from './gameweeks';
+import { currentGameweek } from './gameweeks';
 import type { FantasyLogger } from './orchestration';
 import {
-  childEntries, dateKeysOf, FantasyDb, fantasyRoot, isPlainMap,
-  isTestFillSeason, lockOverrideOf, markServerSquadWrite,
+  childEntries, FantasyDb, fantasyRoot, isPlainMap, isTestFillSeason,
+  loadSeasonGameweeks, lockOverrideOf, markServerSquadWrite,
   TEST_FILL_STAND_DOWN, toIntLoose,
 } from './orchestration_db';
 import {
-  FantasyPusher, FantasyUserPush, fantasyPushData, formatDeadline,
+  FantasyPusher, FantasyUserPush, fantasyPushData, formatDeadlineInstant,
 } from './pushes';
 import { squadFromMap, validateSquad } from './squad';
 import { isIntegrityAlert } from './squad_integrity';
@@ -138,22 +138,28 @@ export function squadAlertBody(changes: PositionChange[], deadline: string): str
  *  (no GwState yet) the schedule's current/first gameweek. */
 export interface AlertTarget {
   gw: number;
-  /** Match date (MMDDYYYY) for the deadline text; null = unknown. */
-  date: string | null;
+  /** The week's lock instant (epoch ms) for the deadline text — GwState's
+   *  lockAtUtc, i.e. the deadline the sweep last published (overrides and
+   *  early kickoffs included); null = unknown ("the deadline"). */
+  lockUtcMs: number | null;
 }
 
 async function alertTargetOf(
   db: FantasyDb, sport: string, season: string, cfg: FantasyConfig,
-  gwState: unknown, nowUtc: Date,
+  configNode: Record<string, unknown>, gwState: unknown, nowUtc: Date,
 ): Promise<AlertTarget> {
   if (isPlainMap(gwState) && toIntLoose(gwState['current']) > 0) {
-    const date = String(gwState['date'] ?? '');
-    return { gw: toIntLoose(gwState['current']), date: date.length === 8 ? date : null };
+    const lockAt = toIntLoose(gwState['lockAtUtc']);
+    return {
+      gw: toIntLoose(gwState['current']),
+      lockUtcMs: lockAt > 0 ? lockAt : null,
+    };
   }
-  const gws = deriveGameweeks(
-    dateKeysOf(await db.read(`${sport}/${season}/Date`)), cfg);
+  const { gws } = await loadSeasonGameweeks(
+    db, sport, season, cfg, configNode);
   const g = currentGameweek(gws, nowUtc) ?? gws[0];
-  return g ? { gw: g.number, date: g.date } : { gw: 1, date: null };
+  return g ? { gw: g.number, lockUtcMs: g.lockUtc.getTime() }
+    : { gw: 1, lockUtcMs: null };
 }
 
 export interface ApplyPositionChangesArgs {
@@ -182,8 +188,8 @@ export async function applyPositionChanges(
   const relabelled: string[] = [];
   const alerted: string[] = [];
   const messages: FantasyUserPush[] = [];
-  const deadline = target.date !== null
-    ? formatDeadline(target.date, cfg.lockHour) : 'the deadline';
+  const deadline = target.lockUtcMs !== null
+    ? formatDeadlineInstant(target.lockUtcMs) : 'the deadline';
 
   for (const [uid, raw] of childEntries(await db.read(`${root}/Squads`))) {
     if (!isPlainMap(raw)) continue;
@@ -346,7 +352,8 @@ export async function handlePositionWrite(
   await applyPositionChanges(db, {
     sport, season, cfg,
     changes: [{ player: name, from, to }],
-    target: await alertTargetOf(db, sport, season, cfg, gwState, args.nowUtc),
+    target: await alertTargetOf(
+      db, sport, season, cfg, configNode, gwState, args.nowUtc),
     nowUtc: args.nowUtc, log, pusher: args.pusher,
   });
   return 'applied';

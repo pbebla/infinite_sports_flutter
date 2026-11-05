@@ -86,12 +86,11 @@
 // ours (Source 'auto' + the same TrophyId).
 
 import { FantasyConfig } from './fantasy_config';
-import { deriveGameweeks } from './gameweeks';
 import { leagueWallClock } from './news';
 import type { FantasyLogger } from './orchestration';
 import {
-  childEntries, dateKeysOf, FantasyDb, fantasyRoot, gamesOfDate, isPlainMap,
-  isTestFillSeason, toIntLoose,
+  childEntries, FantasyDb, fantasyRoot, gamesOfDate, isPlainMap,
+  isTestFillSeason, loadSeasonGameweeks, toIntLoose,
 } from './orchestration_db';
 import { FantasySquad, squadFromMap } from './squad';
 import { isInvalidRow } from './squad_integrity';
@@ -683,10 +682,11 @@ export async function settleSeasonBadges(
   // inactive badge's awards stay) — skip the season reads.
   if (autoBadges(catalog, SEASON_RULES).length === 0) return 'settled';
 
-  const dateNode = await db.read(`${sport}/${season}/Date`);
+  const configNode = await db.read(`${root}/Config`);
+  const { gws, dateNode } = await loadSeasonGameweeks(
+    db, sport, season, cfg, isPlainMap(configNode) ? configNode : {});
   const dates = new Map(childEntries(dateNode));
-  const scoreable = deriveGameweeks(dateKeysOf(dateNode), cfg)
-    .filter((g) => gamesOfDate(dates.get(g.date)).length > 0);
+  const scoreable = gws.filter((g) => gamesOfDate(dates.get(g.date)).length > 0);
 
   const finalized = new Set<number>();
   const historyWeeksByUid: Record<string, number[]> = {};

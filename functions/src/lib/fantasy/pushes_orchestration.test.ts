@@ -127,6 +127,53 @@ describe('sendReminderNow (callable core)', () => {
   });
 });
 
+describe('deadline text follows the real schedule (not the config lock hour)', () => {
+  // World: GW2 = Sun Jun 28, config lock hour 15 (22:00Z).
+  const NOW = new Date(Date.UTC(2026, 5, 24, 12));
+
+  it('an owner deadline override is the reminder deadline and moves its instant', async () => {
+    // 16:30 league time (23:30Z) instead of 15:00.
+    const db = withManagers(new FakeDb(world2({ gw2Status: 1 })));
+    db.data.Fantasy.Futsal['15'].Config.Deadlines = {
+      [GW2_DATE]: Date.UTC(2026, 5, 28, 23, 30),
+    };
+    const pusher = new FakePusher();
+    // The reminder instant (3 h before the lock) moved to 20:30Z: 20:00Z is
+    // too early, 20:30Z fires.
+    await runLifecycleSweep(
+      db, new Date(Date.UTC(2026, 5, 28, 20)), undefined, { pusher });
+    expect(pusher.sends).toEqual([]);
+    await runLifecycleSweep(
+      db, new Date(Date.UTC(2026, 5, 28, 20, 30)), undefined, { pusher });
+    expect(pusher.sends[0][0].body).toBe('Your fantasy squad is untouched ' +
+      'this week — deadline Sun, Jun 28 · 4:30 PM.');
+    // The published GwState carries the same instant.
+    expect(await db.read(`${F_ROOT}/GwState`)).toMatchObject({
+      current: 2, lockAtUtc: Date.UTC(2026, 5, 28, 23, 30),
+    });
+  });
+
+  it('sendReminderNow: an early first kickoff pulls the shown deadline in', async () => {
+    const db = withManagers(new FakeDb(world2({ gw2Status: 1 })));
+    // First game 13:00 PDT; the default 60 minutes before = 12:00 PDT.
+    db.data.Futsal['15'].Date[GW2_DATE][0].Time = '13:00';
+    const pusher = new FakePusher();
+    await sendReminderNow(db, pusher, {
+      sport: 'Futsal', season: '15', nowUtc: NOW,
+    });
+    expect(pusher.sends[0][0].body).toBe('Your fantasy squad is untouched ' +
+      'this week — deadline Sun, Jun 28 · 12:00 PM.');
+  });
+
+  it('sendReminderNow: a skipped match day is not a gameweek', async () => {
+    const db = withManagers(new FakeDb(world2({ gw2Status: 1 })));
+    db.data.Fantasy.Futsal['15'].Config.SkippedDates = { [GW2_DATE]: true };
+    await expect(sendReminderNow(db, new FakePusher(), {
+      sport: 'Futsal', season: '15', nowUtc: NOW,
+    })).rejects.toThrow('No current gameweek');
+  });
+});
+
 describe('weekly recap (finalize epilogue)', () => {
   it('spec format per manager, once per gameweek', async () => {
     const db = new FakeDb(world2());

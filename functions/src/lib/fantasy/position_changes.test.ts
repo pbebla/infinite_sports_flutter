@@ -142,6 +142,28 @@ describe('open window: relabel + alert + push', () => {
       .toBe('Bea moved to ATT — rearrange your team before Sun, Jun 21 · 3:00 PM');
   });
 
+  it('the deadline text is the published lock instant (GwState.lockAtUtc), not the config lock hour', async () => {
+    const db = world3();
+    // The week's deadline was moved to 16:30 league time (23:30Z).
+    db.data.Fantasy.Futsal['15'].GwState.lockAtUtc = Date.UTC(2026, 5, 28, 23, 30);
+    const pusher = new FakePusher();
+    await movePlayer(db, 'Bea', 'ATT', OPEN_NOW, pusher);
+    expect(pusher.sends[0][0].body)
+      .toBe('Bea moved to ATT — rearrange your team before Sun, Jun 28 · 4:30 PM');
+  });
+
+  it('pre-season: the first-week deadline comes from the real schedule (overrides apply)', async () => {
+    const db = world3();
+    delete db.data.Fantasy.Futsal['15'].GwState;
+    db.data.Fantasy.Futsal['15'].Config.Deadlines = {
+      '06212026': Date.UTC(2026, 5, 21, 19, 30), // 12:30 PM PDT
+    };
+    const pusher = new FakePusher();
+    await movePlayer(db, 'Bea', 'ATT', new Date(Date.UTC(2026, 5, 15)), pusher);
+    expect(pusher.sends[0][0].body)
+      .toBe('Bea moved to ATT — rearrange your team before Sun, Jun 21 · 12:30 PM');
+  });
+
   it('ignores creations/deletions/no-ops; a frozen machine stands down', async () => {
     const db = world3();
     const call = (before: unknown, after: unknown) => handlePositionWrite(db, {

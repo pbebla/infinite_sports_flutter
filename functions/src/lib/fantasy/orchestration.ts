@@ -217,9 +217,7 @@ import {
 import {
   computeGameweekFinalize, FinalizeGame, MarketPlayer,
 } from './finalize_core';
-import {
-  currentGameweek, deriveGameweeks, Gameweek, gameweekStatusAt,
-} from './gameweeks';
+import { currentGameweek, Gameweek, gameweekStatusAt } from './gameweeks';
 import {
   buildLiveBase, computeLiveWeek, LiveBase, LiveGameStatus, LiveOutput,
   liveWriteMatters,
@@ -234,20 +232,20 @@ import {
 } from './news_cards';
 import { sendDueScheduledMessages } from './messages';
 import {
-  allGamesFinal, childEntries, dateKeysOf, FantasyDb, fantasyRoot,
+  allGamesFinal, childEntries, FantasyDb, fantasyRoot,
   fantasySeasonsOf, fullAttendance, gamesOfDate, isPlainMap,
   isServerSquadWrite, isTestFillSeason, isVoidFlag, keyedGamesOfDate,
-  lockedPositionsOf, lockOverrideOf, marketPlayersOf, marketPricesOf,
-  markServerSquadWrite, parseAbsentMap, positionsSnapshotOf, rosterNamesOf,
-  SERVER_WRITE_KEY, TEST_FILL_STAND_DOWN, toIntLoose, updateIfPresent,
-  voidedWeeksOf, withLockedPositions,
+  loadSeasonGameweeks, lockedPositionsOf, lockOverrideOf, marketPlayersOf,
+  marketPricesOf, markServerSquadWrite, parseAbsentMap, positionsSnapshotOf,
+  rosterNamesOf, SERVER_WRITE_KEY, TEST_FILL_STAND_DOWN, toIntLoose,
+  updateIfPresent, voidedWeeksOf, withLockedPositions,
 } from './orchestration_db';
 import { applyDelta, repriceDeltas } from './pricing';
 import {
   adminUidsOf, FantasyPusher, fantasyPushData, fillReminderTemplate,
-  formatDeadline, NEWS_READY_TITLE, newsReadyBody, OVER_BUDGET_PREVIEW_TITLE,
-  overBudgetPreviewBody, RECAP_TITLE, recapBody, REMINDER_TITLE,
-  reminderAudience, reminderConfigFrom, reminderInstantMs,
+  formatDeadlineInstant, NEWS_READY_TITLE, newsReadyBody,
+  OVER_BUDGET_PREVIEW_TITLE, overBudgetPreviewBody, RECAP_TITLE, recapBody,
+  REMINDER_TITLE, reminderAudience, reminderConfigFrom, reminderInstantMs,
 } from './pushes';
 import {
   applyPendingPositionChanges, positionWindowOf,
@@ -539,8 +537,8 @@ function hasKey(m: Record<string, unknown>, key: string): boolean {
 async function previewOverBudget(
   db: FantasyDb, root: string, cfg: FantasyConfig,
   args: {
-    sport: string; season: string; gw: number; date: string; nowMs: number;
-    pusher?: FantasyPusher;
+    sport: string; season: string; gw: number; lockUtcMs: number;
+    nowMs: number; pusher?: FantasyPusher;
   },
   log: FantasyLogger, ctx: Record<string, unknown>,
 ): Promise<void> {
@@ -558,7 +556,7 @@ async function previewOverBudget(
   const inputs = await loadIntegrityInputs(db, root, Object.keys(squads), gw);
   const claimsNode = pusher ? await db.read(`${root}/PreviewPushed/${gw}`) : null;
   const claimed: Record<string, unknown> = isPlainMap(claimsNode) ? claimsNode : {};
-  const deadline = formatDeadline(args.date, cfg.lockHour);
+  const deadline = formatDeadlineInstant(args.lockUtcMs);
   const data = fantasyPushData(args.sport, args.season, gw);
   let alerted = 0;
   let cleared = 0;
@@ -1312,7 +1310,7 @@ export async function finalizeGameweek(
   // badges: a failure is logged and never fails the finalize.
   try {
     await settleLiveWeek(db, {
-      sport, season, cfg, gw: gw.number, nowUtc: args.nowUtc, log, ctx,
+      sport, season, gw: gw.number, nowUtc: args.nowUtc, log, ctx,
       clock: args.deps?.clock,
     });
   } catch (err) {
@@ -1528,8 +1526,7 @@ export async function maybeFinalizeGame(
   }
   const cfg = configFromMap(configNode);
 
-  const dates = dateKeysOf(await db.read(`${sport}/${season}/Date`));
-  const gws = deriveGameweeks(dates, cfg);
+  const { gws } = await loadSeasonGameweeks(db, sport, season, cfg, configNode);
   const gw = gws.find((g) => g.date === dateKey);
   if (!gw) return;
   if (gw.lockUtc.getTime() > nowUtc.getTime()) {
@@ -1587,9 +1584,9 @@ export async function resettleVoidToggle(
     return;
   }
   // The finalize entry is keyed by match date; map the gameweek onto it.
-  const dates = dateKeysOf(await db.read(`${sport}/${season}/Date`));
-  const gw = deriveGameweeks(dates, configFromMap(configNode))
-    .find((g) => g.number === args.gw);
+  const { gws } = await loadSeasonGameweeks(
+    db, sport, season, configFromMap(configNode), configNode);
+  const gw = gws.find((g) => g.number === args.gw);
   if (!gw) {
     log.warn('fantasy void: gameweek not in the schedule — nothing to settle',
       ctx);
@@ -1610,7 +1607,7 @@ export async function resettleVoidToggle(
     const meta = liveMetaOf(await db.read(`${root}/Live/Meta`));
     if (meta === null || !meta.live) return; // nothing live to refresh
     await refreshLiveGw(db, {
-      sport, season, cfg: configFromMap(configNode), liveGw: meta.gw,
+      sport, season, configNode, liveGw: meta.gw,
       nowUtc: args.nowUtc, log, clock: args.deps?.clock,
     }, { ...ctx, reason: 'void' });
   } catch (err) {
@@ -1803,12 +1800,14 @@ export async function refreshLiveWeek(
   }
   const cfg = configFromMap(configNode);
 
-  // ReadAt BEFORE the first game read (LIVE ORDERING). The season's Date
-  // node gives the schedule AND this date's games: one read.
+  // ReadAt BEFORE the first game read (LIVE ORDERING). The schedule loader
+  // reads the season's Date node — the schedule AND this date's games, from
+  // the SAME read — with the two tiny schedule nodes (LockedWeeks, Start
+  // Time) alongside it.
   const readAtMs = clock();
-  const datesNode = await db.read(`${sport}/${season}/Date`);
-  const gw = deriveGameweeks(dateKeysOf(datesNode), cfg)
-    .find((g) => g.date === dateKey);
+  const { gws, dateNode: datesNode } = await loadSeasonGameweeks(
+    db, sport, season, cfg, configNode);
+  const gw = gws.find((g) => g.date === dateKey);
   if (!gw) return 'standDown'; // not a scheduled match day
   if (gw.lockUtc.getTime() > nowUtc.getTime()) {
     log.info('fantasy live: date before its lock — standing down',
@@ -1917,13 +1916,14 @@ export async function maybeRefreshLive(
 async function refreshLiveGw(
   db: FantasyDb,
   a: {
-    sport: string; season: string; cfg: FantasyConfig; liveGw: number;
-    nowUtc: Date; log: FantasyLogger; clock?: () => number;
+    sport: string; season: string; configNode: Record<string, unknown>;
+    liveGw: number; nowUtc: Date; log: FantasyLogger; clock?: () => number;
   },
   ctx: Record<string, unknown>,
 ): Promise<void> {
-  const dates = dateKeysOf(await db.read(`${a.sport}/${a.season}/Date`));
-  const live = deriveGameweeks(dates, a.cfg).find((g) => g.number === a.liveGw);
+  const { gws } = await loadSeasonGameweeks(
+    db, a.sport, a.season, configFromMap(a.configNode), a.configNode);
+  const live = gws.find((g) => g.number === a.liveGw);
   if (!live) return;
   const clock = a.clock ?? Date.now;
   const result = await refreshLiveWeek(db, {
@@ -1943,7 +1943,7 @@ async function refreshLiveGw(
 async function settleLiveWeek(
   db: FantasyDb,
   a: {
-    sport: string; season: string; cfg: FantasyConfig; gw: number;
+    sport: string; season: string; gw: number;
     nowUtc: Date; log: FantasyLogger; ctx: Record<string, unknown>;
     clock?: () => number;
   },
@@ -1962,8 +1962,12 @@ async function settleLiveWeek(
   if (res.committed) a.log.info('fantasy live: week settled', a.ctx);
   await removeLiveBase(db, root);
   if (newerLiveGw === null) return;
+  // The schedule the refresh needs reads the raw Config (overrides); this
+  // is the rare path, so the one extra read is fine.
+  const configNode = await db.read(`${root}/Config`);
+  if (!isPlainMap(configNode)) return; // Config removed meanwhile
   await refreshLiveGw(db, {
-    sport: a.sport, season: a.season, cfg: a.cfg, liveGw: newerLiveGw,
+    sport: a.sport, season: a.season, configNode, liveGw: newerLiveGw,
     nowUtc: a.nowUtc, log: a.log, clock: a.clock,
   }, { ...a.ctx, reason: 'older week settled' });
 }
@@ -2181,8 +2185,7 @@ async function sweepSeason(
   }
   const cfg = configFromMap(configNode);
 
-  const dates = dateKeysOf(await db.read(`${sport}/${season}/Date`));
-  const gws = deriveGameweeks(dates, cfg);
+  const { gws } = await loadSeasonGameweeks(db, sport, season, cfg, configNode);
   const current = currentGameweek(gws, nowUtc);
 
   // 1. Lock snapshots for the current gameweek (positions, prices, then
@@ -2317,7 +2320,7 @@ async function sweepSeason(
       log.warn('fantasy sweep: settled week still live — healing the hand-over',
         { ...ctx, gw: meta.gw });
       await settleLiveWeek(db, {
-        sport, season, cfg, gw: meta.gw, nowUtc, log,
+        sport, season, gw: meta.gw, nowUtc, log,
         ctx: { ...ctx, gw: meta.gw }, clock: deps?.clock,
       });
     }
@@ -2359,7 +2362,7 @@ async function sweepSeason(
   if (status === 'open') {
     const applied = await applyPendingPositionChanges(db, {
       sport, season, cfg,
-      target: { gw: current.number, date: current.date },
+      target: { gw: current.number, lockUtcMs: current.lockUtc.getTime() },
       nowUtc, log, pusher: deps?.pusher,
     });
     if (applied > 0) {
@@ -2378,8 +2381,8 @@ async function sweepSeason(
   if (status === 'open') {
     try {
       await previewOverBudget(db, root, cfg, {
-        sport, season, gw: current.number, date: current.date, nowMs,
-        pusher: deps?.pusher,
+        sport, season, gw: current.number,
+        lockUtcMs: current.lockUtc.getTime(), nowMs, pusher: deps?.pusher,
       }, log, ctx);
     } catch (err) {
       log.warn('fantasy preview: over-budget check failed — retried by the ' +
@@ -2409,7 +2412,7 @@ async function sweepSeason(
           gw: current.number,
         });
         const body = fillReminderTemplate(
-          rCfg.template, formatDeadline(current.date, cfg.lockHour));
+          rCfg.template, formatDeadlineInstant(current.lockUtc.getTime()));
         const data = fantasyPushData(sport, season, current.number);
         const sent = await pusher.sendToUsers(audience.map((uid) => ({
           uid, title: REMINDER_TITLE, body, data,
@@ -2481,8 +2484,8 @@ export async function sendReminderNow(
     throw new Error(`No fantasy Config for ${sport}/${season}`);
   }
   const cfg = configFromMap(configNode);
-  const dates = dateKeysOf(await db.read(`${sport}/${season}/Date`));
-  const current = currentGameweek(deriveGameweeks(dates, cfg), args.nowUtc);
+  const { gws } = await loadSeasonGameweeks(db, sport, season, cfg, configNode);
+  const current = currentGameweek(gws, args.nowUtc);
   if (!current) {
     throw new Error(`No current gameweek for ${sport}/${season}`);
   }
@@ -2498,7 +2501,7 @@ export async function sendReminderNow(
   });
   const rCfg = reminderConfigFrom(configNode['Reminder']);
   const body = fillReminderTemplate(
-    rCfg.template, formatDeadline(current.date, cfg.lockHour));
+    rCfg.template, formatDeadlineInstant(current.lockUtc.getTime()));
   const data = fantasyPushData(sport, season, current.number);
   const sent = await pusher.sendToUsers(uids.map((uid) => ({
     uid, title: REMINDER_TITLE, body, data,

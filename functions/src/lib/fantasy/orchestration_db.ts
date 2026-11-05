@@ -4,11 +4,13 @@
 // injected-fetch idea applied to RTDB). The real adapter over an admin
 // Reference lives in src/fantasy_adapter.ts.
 
-import { FantasyPosition, parsePosition } from './fantasy_config';
+import {
+  FantasyConfig, FantasyPosition, parsePosition,
+} from './fantasy_config';
 import { MarketPlayer } from './finalize_core';
 import {
-  DEFAULT_MINUTES_BEFORE_KICKOFF, legacyKickoffHHmm, LockedWeek,
-  ScheduleOverrides,
+  DEFAULT_MINUTES_BEFORE_KICKOFF, deriveGameweeks, Gameweek, legacyKickoffHHmm,
+  LockedWeek, ScheduleOverrides,
 } from './gameweeks';
 import { leagueInstantUtc, parseDbDate } from './league_time';
 
@@ -363,6 +365,43 @@ export function firstKickoffByDateOf(
     if (first !== null) out[date] = first;
   }
   return out;
+}
+
+/** THE one place the server decides a season's gameweek list. Every job that
+ *  needs the weeks — sweep, finalize, void re-settle, live, reminders,
+ *  manager messages, position alerts, season badges — gets them here, so they
+ *  all agree on what the managers see (guarded by schedule_guard.test.ts).
+ *
+ *  Reads the season's Date node (`<sport>/<season>/Date`), the frozen-week
+ *  ledger (`Fantasy/<sport>/<season>/LockedWeeks`) and the season Start Time
+ *  (`<sport>/<season>/Start Time`: > 0 gives games without a stored `Time` a
+ *  legacy derived kickoff; absent/junk/<= 0 = none), and feeds
+ *  deriveGameweeks those plus the owner's overrides from the raw Config node
+ *  ([configNode]: SkippedDates, Deadlines, deadlineMinutesBeforeKickoff).
+ *  With no LockedWeeks, no overrides and no kickoffs it is exactly the legacy
+ *  "one gameweek per match date, locking at cfg.lockHour".
+ *
+ *  A failed read THROWS and propagates: an error is not a fact — a read that
+ *  could not complete must never become "no weeks" (the caller aborts the
+ *  step rather than acting on an empty schedule). Returns the Date node too,
+ *  for callers that read the games of a date from the same snapshot. */
+export async function loadSeasonGameweeks(
+  db: FantasyDb, sport: string, season: string, cfg: FantasyConfig,
+  configNode: Record<string, unknown>,
+): Promise<{ gws: Gameweek[]; dateNode: unknown }> {
+  // Three independent reads, issued together: a failed one rejects the lot.
+  const [dateNode, lockedNode, startTime] = await Promise.all([
+    db.read(`${sport}/${season}/Date`),
+    db.read(`${fantasyRoot(sport, season)}/LockedWeeks`),
+    db.read(`${sport}/${season}/Start Time`),
+  ]);
+  const startHour = toIntLoose(startTime);
+  const gws = deriveGameweeks(dateKeysOf(dateNode), cfg, {
+    lockedWeeks: lockedWeeksOf(lockedNode),
+    ...scheduleOverridesOf(configNode),
+    firstKickoffUtc: firstKickoffByDateOf(dateNode, startHour > 0 ? startHour : 0),
+  });
+  return { gws, dateNode };
 }
 
 /** A league game is a fantasy event unless it is a friendly (league

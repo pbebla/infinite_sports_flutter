@@ -51,3 +51,16 @@ export function leagueInstantUtc(
 export function lockInstantUtc(mmddyyyy: string, hour: number): Date {
   return leagueInstantUtc(mmddyyyy, hour, 0);
 }
+
+/** League-local wall clock of a UTC instant, as a Date whose UTC fields read
+ *  the league time (America/Los_Angeles, via isPacificDst — the same offset
+ *  rule as the lock math). The inverse of leagueInstantUtc, for formatting an
+ *  instant the way the league lives it. TS-only (no Dart twin: the apps
+ *  format with intl). */
+export function leagueWallClock(instantUtc: Date): Date {
+  const guess = new Date(instantUtc.getTime() - 8 * 3_600_000);
+  const guessDay = new Date(Date.UTC(
+    guess.getUTCFullYear(), guess.getUTCMonth(), guess.getUTCDate()));
+  const offset = isPacificDst(guessDay) ? 7 : 8;
+  return new Date(instantUtc.getTime() - offset * 3_600_000);
+}
