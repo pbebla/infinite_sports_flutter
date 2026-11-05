@@ -160,7 +160,10 @@ currentGameweek / statusAt: unchanged
 
 Whole `Date` node empty → `'standDown'` + warn. Any read that throws propagates.
 
-**Rewind steps** (in order; each idempotent; a crash is retried by the next sweep):
+**Rewind steps** (in order; each idempotent; a crash is retried by the next sweep) — **Ruling T3a (mark first, delete the ledger last):**
+- M. Transaction on `LockedWeeks/L`: set `Rewinding: true` only when the node exists, its `Date == L.date` and it is not `Scored` (otherwise return `'none'`). Task 3 already makes every lock-step write refuse a marked node (`freezesWeek`), and makes each snapshot write delete itself if the week turned un-frozen right after it landed. Then re-read `History/L`: present → remove `Rewinding` and return `'none'` (a finalize won the race; the week counts).
+- A sweep that finds `LockedWeeks/L` already marked `Rewinding` (a rewind that crashed mid-way) resumes the rewind from step 0 without re-checking the reasons.
+- `maybeFinalizeGame` and the sweep's finalize backstop stand down for a week whose `LockedWeeks` node is marked `Rewinding`.
 0. Read `PublishedPicks/L` and keep its uids.
 1. Delete `PublishedPicks/L`, `LockedPositions/L`, `PriceHistory/L`, `TransferCosts/L`, `ReminderSent/L`.
 2. If `Live/Meta.Gw == L` delete `Live`; delete `LiveBase/L`.
@@ -182,6 +185,7 @@ A sweep that derived before another sweep's rewind may re-claim `LockedWeeks/L` 
   - "never rewinds a scored week (History present) or a Scored marker";
   - "never rewinds when the schedule read throws" (FakeDb read rejects → promise rejects, zero writes); "stands down when the whole schedule is empty";
   - **[M2]** "a stale re-claim of the old date is rewound again by the next sweep; exactly one push";
+  - **(T3a)** "the mark refuses when History appeared after the reasons check → Rewinding removed, nothing deleted"; "a crashed rewind (node left marked) is resumed by the next sweep"; "a finalize trigger for a marked week stands down";
   - "an abandoned live day (games status 1, then all moved away): Live and LiveBase/2 removed";
   - **[S3]** "no later game day → GwState null, push says plain 'GW2 was called off.'"; "upsertGwState clears ReminderSent when the open week's deadline moved later; keeps it when unchanged";
   - `refreshOpenGwState`: "a Deadlines change on the open week updates GwState.lockAtUtc"; "a locked week is left alone"; "TestFill / lockOverride 'open' → nothing";
