@@ -12,7 +12,10 @@ import {
   FantasyLogger, maybeFinalizeGame, publishSaleBaselines, recordSquadSave,
   runLifecycleSweep, runMondayReprice,
 } from './orchestration';
-import { FantasyDb, FantasyTxResult } from './orchestration_db';
+import { configFromMap } from './fantasy_config';
+import {
+  FantasyDb, FantasyTxResult, loadSeasonGameweeks,
+} from './orchestration_db';
 import {
   AFTER_LOCK2, F_ROOT, FakeDb as ColdFakeDb, FakePusher, fixtureSquad,
   GW1_DATE, GW2_DATE, LOCK2_MS, world2,
@@ -726,10 +729,15 @@ describe('Baselines/<uid> (FPL selling: last locked prices + realized)', () => {
     delete t(db).Squads.alpha;
     t(db).Squads.churn = { picks: 'junk', captainId: 'x', viceId: 'x', realizedTenths: 999 };
     await runLifecycleSweep(db, AFTER_LOCK2);
-    expect(await db.read(`${F_ROOT}/Baselines/alpha`))
-      .toEqual({ ForGw: 3, RealizedTenths: -15, Prices: {} });
-    expect(await db.read(`${F_ROOT}/Baselines/churn`))
-      .toEqual({ ForGw: 3, RealizedTenths: 7, Prices: {} });
+    // (The lock stashes the node it replaces as Prev — the rewind's undo.)
+    expect(await db.read(`${F_ROOT}/Baselines/alpha`)).toEqual({
+      ForGw: 3, RealizedTenths: -15, Prices: {},
+      Prev: { ForGw: 2, RealizedTenths: -15, Prices: GW1_ALPHA },
+    });
+    expect(await db.read(`${F_ROOT}/Baselines/churn`)).toEqual({
+      ForGw: 3, RealizedTenths: 7, Prices: {},
+      Prev: { ForGw: 2, RealizedTenths: 7, Prices: GW1_CHURN },
+    });
   });
 
   it('the lock judge takes the realized money from Baselines/<uid> when it is '
@@ -746,9 +754,12 @@ describe('Baselines/<uid> (FPL selling: last locked prices + realized)', () => {
       .toMatchObject({ Invalid: ['overBudget'], realizedTenths: -15 });
     expect(await db.read(`${F_ROOT}/SquadAlerts/dave`))
       .toMatchObject({ Gw: 2, Kind: 'invalid', Issues: ['overBudget'] });
-    // The Invalid week passes the running total on, with no trusted prices.
-    expect(await db.read(`${F_ROOT}/Baselines/dave`))
-      .toEqual({ ForGw: 3, RealizedTenths: -15, Prices: {} });
+    // The Invalid week passes the running total on, with no trusted prices
+    // (the GW2 node it replaced is stashed as Prev).
+    expect(await db.read(`${F_ROOT}/Baselines/dave`)).toEqual({
+      ForGw: 3, RealizedTenths: -15, Prices: {},
+      Prev: { ForGw: 2, RealizedTenths: -15, Prices: {} },
+    });
 
     // At 485 (Eli at 60) the same manager is clean, still at -15.
     const clean = lockOnly();
@@ -918,6 +929,327 @@ describe('Baselines/<uid> (FPL selling: last locked prices + realized)', () => {
     await finalizeGw(db, GW2_DATE);
     expect(await db.read(`${F_ROOT}/Baselines/alpha`))
       .toEqual({ ForGw: 3, RealizedTenths: 0, Prices: GW1_ALPHA });
+  });
+
+  // [M3] (season setup + schedule plan 2026-11-05, Task 3): the lock-time
+  // publish keeps the node it overwrites as Baselines/<uid>/Prev, so a
+  // rewind of a called-off week (Task 4) restores it EXACTLY — recomputing
+  // is lossy (a manager with no squad carries RealizedTenths from the
+  // stored node). Finalize-time publishes drop it: a scored week is never
+  // rewound.
+  /** The lock of GW2 over stored GW2 baselines: alpha sells Alex (bought
+   *  95, now 105: +5) for Ben (85); dave sat GW1 out carrying -15 (RTDB
+   *  pruned his empty Prices); boost's stored node still carries a stash of
+   *  its own (never nested). */
+  const lockOverStoredBaselines = async () => {
+    const db = lockOnly();
+    t(db).Managers = { dave: { TeamName: 'Dave XI' } };
+    t(db).Baselines = {
+      alpha: { ForGw: 2, RealizedTenths: 0, Prices: GW1_ALPHA },
+      boost: {
+        ForGw: 2, RealizedTenths: 0, Prices: GW1_BOOST,
+        Prev: { ForGw: 1, RealizedTenths: 0, Prices: {} },
+      },
+      dave: { ForGw: 2, RealizedTenths: -15 },
+    };
+    t(db).Players.Alex.priceTenths = 105;
+    t(db).Squads.alpha.picks[4] =
+      { playerId: 'Ben', position: 'ATT', priceTenths: 85, bench: false };
+    t(db).Squads.alpha.viceId = 'Ben';
+    await runLifecycleSweep(db, AFTER_LOCK2);
+    return db;
+  };
+  const ALPHA_GW2 = { Eli: 55, Dana: 80, Eva: 50, Ezra: 65, Ben: 85, Will: 60, Wren: 75 };
+
+  it('[M3] the lock stashes the previous baseline as Prev', async () => {
+    const db = await lockOverStoredBaselines();
+    expect(await db.read(`${F_ROOT}/Baselines/alpha`)).toEqual({
+      ForGw: 3, RealizedTenths: 5, Prices: ALPHA_GW2,
+      Prev: { ForGw: 2, RealizedTenths: 0, Prices: GW1_ALPHA },
+    });
+    // Exactly {ForGw, RealizedTenths, Prices} of the stored node — its own
+    // Prev is never nested.
+    expect(await db.read(`${F_ROOT}/Baselines/boost`)).toEqual({
+      ForGw: 3, RealizedTenths: 0, Prices: GW1_BOOST,
+      Prev: { ForGw: 2, RealizedTenths: 0, Prices: GW1_BOOST },
+    });
+    expect(await db.read(`${F_ROOT}/Baselines/dave`)).toEqual({
+      ForGw: 3, RealizedTenths: -15, Prices: {},
+      Prev: { ForGw: 2, RealizedTenths: -15, Prices: {} },
+    });
+  });
+
+  it('[M3] no previous baseline → no Prev', async () => {
+    const db = lockOnly(); // no Baselines node at all before the GW2 lock
+    t(db).Managers = { dave: { TeamName: 'Dave XI' } };
+    await runLifecycleSweep(db, AFTER_LOCK2);
+    for (const uid of ['alpha', 'boost', 'churn', 'dave']) {
+      const node = await db.read(`${F_ROOT}/Baselines/${uid}`) as Json;
+      expect(node['ForGw'], uid).toBe(3);
+      expect(Object.keys(node), uid).not.toContain('Prev');
+    }
+  });
+
+  it('[M3] finalize drops Prev', async () => {
+    const db = await lockOverStoredBaselines();
+    for (const g of db.data.Futsal['15'].Date[GW2_DATE]) g.status = 2;
+    await finalizeGw(db, GW2_DATE);
+    expect(await db.read(`${F_ROOT}/Baselines/alpha`))
+      .toEqual({ ForGw: 3, RealizedTenths: 5, Prices: ALPHA_GW2 });
+    expect(await db.read(`${F_ROOT}/Baselines/boost`))
+      .toEqual({ ForGw: 3, RealizedTenths: 0, Prices: GW1_BOOST });
+    expect(await db.read(`${F_ROOT}/Baselines/dave`))
+      .toEqual({ ForGw: 3, RealizedTenths: -15, Prices: {} });
+    // ...and a rerun (score edit) writes nothing more.
+    db.writes = [];
+    await finalizeGw(db, GW2_DATE);
+    expect(baselineWrites(db)).toEqual([]);
+  });
+
+  it('[M3] a concurrent second lock-time publish writes nothing (the stash '
+    + 'survives)', async () => {
+    const db = await lockOverStoredBaselines();
+    const after = JSON.stringify(t(db).Baselines);
+    // A second lock-time publish that read alpha's node BEFORE the first
+    // one landed: its guarded transaction then sees the fresh node.
+    const stale = { ForGw: 2, RealizedTenths: 0, Prices: GW1_ALPHA };
+    const realRead = db.read.bind(db);
+    let calls = 0;
+    db.read = async (p: string) =>
+      p === `${F_ROOT}/Baselines/alpha` && calls++ === 0 ? clone(stale) : realRead(p);
+    db.writes = [];
+    await publishSaleBaselines(db, F_ROOT, 2, undefined, {}, { stashPrev: true });
+    expect(calls).toBeGreaterThan(1); // it did reach the transaction
+    expect(baselineWrites(db)).toEqual([]);
+    expect(JSON.stringify(t(db).Baselines)).toBe(after);
+    expect(t(db).Baselines.alpha.Prev)
+      .toEqual({ ForGw: 2, RealizedTenths: 0, Prices: GW1_ALPHA });
+  });
+});
+
+// ── LockedWeeks: a gameweek freezes when it locks (season setup + schedule
+// plan 2026-11-05, Task 3) ─────────────────────────────────────────────────
+//
+// LockedWeeks/<n> = {Date, LockAtUtc, Scored?}: the lock's FIRST write, so
+// later schedule edits can never renumber or re-time a locked week; finalize
+// marks it Scored. [M2] Every snapshot write re-checks it first, so a sweep
+// that started before a rewind (Task 4 deletes LockedWeeks/<n>) leaves no
+// stale snapshot behind.
+
+describe('LockedWeeks: a gameweek freezes when it locks', () => {
+  // 2026-10-04 and 10-11 are Sundays (PDT): lockHour 15 => lock 22:00Z.
+  const D1 = '10042026';
+  const D2 = '10112026';
+  const LOCK1_MS = Date.UTC(2026, 9, 4, 22);
+  const LOCK2_OCT_MS = Date.UTC(2026, 9, 11, 22);
+  const AFTER1 = new Date(Date.UTC(2026, 9, 4, 23));
+  const LATER1 = new Date(Date.UTC(2026, 9, 4, 23, 15));
+  const t = (db: ColdFakeDb) => db.data.Fantasy.Futsal['15'];
+  /** The production world moved to October: D1 holds the golden games at
+   *  [status] (1 = live: the sweep locks, nothing finalizes), D2 the same
+   *  games not started. */
+  const octWorld = (status = 1): ColdFakeDb => {
+    const w = world({ gameStatus: status });
+    const games = w.Futsal['15'].Date[DATE_KEY] as Json[];
+    const later = clone(games);
+    for (const g of later) g['status'] = 0;
+    w.Futsal['15'].Date = { [D1]: games, [D2]: later };
+    return new ColdFakeDb(w);
+  };
+  const logSpy = () => {
+    const infos: string[] = [];
+    const warns: string[] = [];
+    const log: FantasyLogger = {
+      info: (m) => { infos.push(m); },
+      warn: (m) => { warns.push(m); },
+    };
+    return { infos, warns, log };
+  };
+  const lockedWeekWrites = (db: ColdFakeDb) =>
+    db.writes.filter((w) => w.includes('/LockedWeeks/'));
+  const FROZEN = 'fantasy lock: week frozen on another date — lock step skipped';
+  const NO_LONGER = 'fantasy lock: week no longer frozen — snapshot skipped';
+
+  it('the lock writes LockedWeeks/1 before PublishedPicks (its first lock write)', async () => {
+    const db = octWorld();
+    await runLifecycleSweep(db, AFTER1);
+    expect(await db.read(`${F_ROOT}/LockedWeeks/1`))
+      .toEqual({ Date: D1, LockAtUtc: LOCK1_MS });
+    const at = (p: string) => db.writes.indexOf(`${F_ROOT}/${p}`);
+    // The first write under the season of this sweep.
+    expect(db.writes.find((w) => w.startsWith(`${F_ROOT}/`)))
+      .toBe(`${F_ROOT}/LockedWeeks/1`);
+    for (const p of ['LockedPositions/1', 'PriceHistory/1', 'PublishedPicks/1']) {
+      expect(at(p), p).toBeGreaterThan(at('LockedWeeks/1'));
+    }
+  });
+
+  it('a second sweep never rewrites LockedWeeks', async () => {
+    const db = octWorld();
+    await runLifecycleSweep(db, AFTER1);
+    // The owner changes the lock hour afterwards: the frozen week keeps the
+    // instant it actually locked at (18:00 would put it back in the future).
+    t(db).Config.lockHour = 18;
+    await runLifecycleSweep(db, LATER1);
+    expect(lockedWeekWrites(db)).toEqual([`${F_ROOT}/LockedWeeks/1`]);
+    expect(await db.read(`${F_ROOT}/LockedWeeks/1`))
+      .toEqual({ Date: D1, LockAtUtc: LOCK1_MS });
+    expect((await db.read(`${F_ROOT}/GwState`) as Json)['status']).toBe('locked');
+  });
+
+  it('a lost claim with a different Date aborts the lock step', async () => {
+    const db = octWorld();
+    const realClaim = db.writeIfAbsent.bind(db);
+    const other = { Date: D2, LockAtUtc: LOCK2_OCT_MS };
+    db.writeIfAbsent = async (p: string, v: unknown) => {
+      // Another sweep, on another schedule, froze GW1 a moment earlier.
+      if (p === `${F_ROOT}/LockedWeeks/1`) await db.write(p, other);
+      return realClaim(p, v);
+    };
+    const spy = logSpy();
+    await runLifecycleSweep(db, AFTER1, spy.log);
+    expect(await db.read(`${F_ROOT}/LockedWeeks/1`)).toEqual(other);
+    for (const p of ['LockedPositions', 'PriceHistory', 'PublishedPicks',
+      'TransferCosts', 'TransferState', 'Baselines']) {
+      expect(await db.read(`${F_ROOT}/${p}`), p).toBeNull();
+    }
+    expect(spy.warns).toContain(FROZEN);
+  });
+
+  it('a lost claim on the SAME Date (an earlier sweep froze it) carries on', async () => {
+    const db = octWorld();
+    const realClaim = db.writeIfAbsent.bind(db);
+    db.writeIfAbsent = async (p: string, v: unknown) => {
+      if (p === `${F_ROOT}/LockedWeeks/1`) await db.write(p, clone(v));
+      return realClaim(p, v);
+    };
+    const spy = logSpy();
+    await runLifecycleSweep(db, AFTER1, spy.log);
+    expect(await db.read(`${F_ROOT}/PublishedPicks/1`)).not.toBeNull();
+    expect(await db.read(`${F_ROOT}/LockedPositions/1`)).not.toBeNull();
+    expect(await db.read(`${F_ROOT}/PriceHistory/1`)).not.toBeNull();
+    expect(spy.warns).not.toContain(FROZEN);
+  });
+
+  it('[M2] a stale sweep whose LockedWeeks/1 is deleted between its claim and '
+    + 'its snapshot writes no PublishedPicks/1', async () => {
+    const db = octWorld();
+    const realClaim = db.writeIfAbsent.bind(db);
+    db.writeIfAbsent = async (p: string, v: unknown) => {
+      const won = await realClaim(p, v);
+      // A rewind (Task 4) lands right after our claim.
+      if (won && p === `${F_ROOT}/LockedWeeks/1`) await db.write(p, null);
+      return won;
+    };
+    const spy = logSpy();
+    await runLifecycleSweep(db, AFTER1, spy.log);
+    for (const p of ['LockedWeeks/1', 'LockedPositions', 'PriceHistory',
+      'PublishedPicks', 'TransferCosts', 'TransferState', 'SquadAlerts',
+      'Baselines']) {
+      expect(await db.read(`${F_ROOT}/${p}`), p).toBeNull();
+    }
+    expect(spy.warns.filter((m) => m === NO_LONGER)).toHaveLength(3);
+  });
+
+  it('[M2] the re-check sits right before the PublishedPicks claim: a rewind '
+    + 'while the picks are judged leaves no picks and nothing after them', async () => {
+    const db = octWorld();
+    const realRead = db.read.bind(db);
+    db.read = async (p: string) => {
+      // TransferState is read while the lock accounting judges the squads.
+      if (p === `${F_ROOT}/TransferState`) {
+        await db.write(`${F_ROOT}/LockedWeeks/1`, null);
+      }
+      return realRead(p);
+    };
+    const spy = logSpy();
+    await runLifecycleSweep(db, AFTER1, spy.log);
+    // Positions + prices landed before the rewind (Task 4 deletes them).
+    expect(await db.read(`${F_ROOT}/LockedPositions/1`)).not.toBeNull();
+    expect(await db.read(`${F_ROOT}/PriceHistory/1`)).not.toBeNull();
+    for (const p of ['PublishedPicks', 'TransferCosts', 'TransferState',
+      'SquadAlerts', 'Baselines']) {
+      expect(await db.read(`${F_ROOT}/${p}`), p).toBeNull();
+    }
+    expect(spy.warns).toContain(NO_LONGER);
+  });
+
+  it('finalize marks Scored (after History lands); a rerun writes nothing there', async () => {
+    const db = octWorld(2); // final: the sweep locks, then its backstop finalizes
+    await runLifecycleSweep(db, AFTER1);
+    expect(await db.read(`${F_ROOT}/History/1`)).not.toBeNull();
+    expect(await db.read(`${F_ROOT}/LockedWeeks/1`))
+      .toEqual({ Date: D1, LockAtUtc: LOCK1_MS, Scored: true });
+    expect(db.writes.lastIndexOf(`${F_ROOT}/LockedWeeks/1`))
+      .toBeGreaterThan(db.writes.indexOf(`${F_ROOT}/History/1`));
+
+    db.writes = [];
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: D1, nowUtc: LATER1,
+    });
+    expect(db.writes).toContain(`${F_ROOT}/History/1`);
+    expect(lockedWeekWrites(db)).toEqual([]);
+  });
+
+  it('pre-feature season gets the full node at finalize', async () => {
+    // world2: GW1 was locked + scored before LockedWeeks existed.
+    const db = new ColdFakeDb(world2());
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: GW1_DATE, nowUtc: AFTER_LOCK2,
+    });
+    expect(await db.read(`${F_ROOT}/LockedWeeks/1`)).toEqual({
+      Date: GW1_DATE, LockAtUtc: Date.UTC(2026, 5, 21, 22), Scored: true,
+    });
+  });
+
+  it('a first finalize that outran every sweep claims the week the same way', async () => {
+    const db = new ColdFakeDb(world2({ gw2Status: 2 }));
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: GW2_DATE, nowUtc: AFTER_LOCK2,
+    });
+    expect(await db.read(`${F_ROOT}/LockedWeeks/2`))
+      .toEqual({ Date: GW2_DATE, LockAtUtc: LOCK2_MS, Scored: true });
+    const at = (p: string) => db.writes.indexOf(`${F_ROOT}/${p}`);
+    expect(at('LockedWeeks/2')).toBeGreaterThanOrEqual(0);
+    expect(at('LockedPositions/2')).toBeGreaterThan(at('LockedWeeks/2'));
+    expect(at('PriceHistory/2')).toBeGreaterThan(at('LockedWeeks/2'));
+  });
+
+  it('a first finalize whose claim finds ANOTHER date takes no snapshot and '
+    + 'marks nothing Scored (warned), but still scores the day', async () => {
+    const db = new ColdFakeDb(world2({ gw2Status: 2 }));
+    const other = { Date: '07052026', LockAtUtc: Date.UTC(2026, 6, 5, 22) };
+    const realClaim = db.writeIfAbsent.bind(db);
+    db.writeIfAbsent = async (p: string, v: unknown) => {
+      if (p === `${F_ROOT}/LockedWeeks/2`) await db.write(p, other);
+      return realClaim(p, v);
+    };
+    const spy = logSpy();
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: GW2_DATE, nowUtc: AFTER_LOCK2,
+      log: spy.log,
+    });
+    expect(await db.read(`${F_ROOT}/History/2`)).not.toBeNull();
+    expect(await db.read(`${F_ROOT}/LockedPositions/2`)).toBeNull();
+    expect(await db.read(`${F_ROOT}/PriceHistory/2`)).toBeNull();
+    expect(await db.read(`${F_ROOT}/LockedWeeks/2`)).toEqual(other);
+    expect(spy.warns).toContain(FROZEN);
+    expect(spy.warns).toContain(
+      'fantasy finalize: LockedWeeks holds another date — not marked Scored');
+  });
+
+  it('the week list stays frozen when the locked day disappears', async () => {
+    const db = octWorld();
+    await runLifecycleSweep(db, AFTER1); // GW1 locks
+    delete db.data.Futsal['15'].Date[D1]; // the game day is removed
+    const configNode = t(db).Config;
+    const { gws } = await loadSeasonGameweeks(
+      db, 'Futsal', '15', configFromMap(configNode), configNode);
+    expect(gws.map((g) => [g.number, g.date, g.lockUtc.getTime(), g.frozen]))
+      .toEqual([
+        [1, D1, LOCK1_MS, true],
+        [2, D2, LOCK2_OCT_MS, false],
+      ]);
   });
 });
 

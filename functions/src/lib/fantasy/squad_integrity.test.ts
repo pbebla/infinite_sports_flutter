@@ -14,7 +14,8 @@ import {
   IntegrityInputs, integrityMarketOf, integrityVerdictOf, invalidAlertNode,
   invalidIssuesOf, isIntegrityAlert, isPreviewAlert, judgeSale, judgeSquad,
   overBudgetTenthsOf, picksAtJudgedPrices, previewAlertNode, priceSnapshotOf,
-  sameBaselineNode, sameInvalidAlert, samePreviewAlert, squadIntegrityIssues,
+  lockTimePrevOf, sameBaselineNode, sameInvalidAlert, samePreviewAlert,
+  squadIntegrityIssues,
 } from './squad_integrity';
 import { annotateSquadIntegrity, lockAccounting } from './transfer_state';
 
@@ -440,6 +441,50 @@ describe('Baselines/<uid>: baselineNodeOf', () => {
     expect(baselineForGwOf({ ForGw: '10' })).toBeNull();
     expect(baselineForGwOf({})).toBeNull();
     expect(baselineForGwOf(null)).toBeNull();
+  });
+
+  // [M3] (season setup + schedule plan 2026-11-05, Task 3): the lock-time
+  // publish stashes the node it replaces as Prev; a finalize-time publish
+  // writes none (and drops a stored one).
+  it('sameBaselineNode: a stored Prev makes a finalize-time (plain) call '
+    + 'rewrite; a lock-time (stashPrev) call ignores it', () => {
+    const node = baselineNodeOf({ ...alpha(), realizedTenths: 7 }, 5);
+    const withPrev = {
+      ...clone(node), Prev: { ForGw: 4, RealizedTenths: 0, Prices: { Alex: 95 } },
+    };
+    expect(sameBaselineNode(withPrev, node)).toBe(false);
+    expect(sameBaselineNode({ ...clone(node), Prev: 'junk' }, node)).toBe(false);
+    expect(sameBaselineNode(withPrev, node, { stashPrev: true })).toBe(true);
+    expect(sameBaselineNode(clone(node), node, { stashPrev: true })).toBe(true);
+    // The three money fields still decide.
+    expect(sameBaselineNode({ ...withPrev, RealizedTenths: 8 }, node,
+      { stashPrev: true })).toBe(false);
+  });
+
+  it('lockTimePrevOf: an earlier week node is stashed as exactly '
+    + '{ForGw, RealizedTenths, Prices} — never its own Prev', () => {
+    const stored = {
+      ForGw: 4, RealizedTenths: -15, Prices: { Alex: 95, Sam: 85 },
+      Prev: { ForGw: 3, RealizedTenths: 0, Prices: {} },
+    };
+    expect(lockTimePrevOf(stored, 5))
+      .toEqual({ ForGw: 4, RealizedTenths: -15, Prices: { Alex: 95, Sam: 85 } });
+    // RTDB never stores an empty map: no Prices / no RealizedTenths read
+    // as {} / 0 (what every reader sees).
+    expect(lockTimePrevOf({ ForGw: 4 }, 5))
+      .toEqual({ ForGw: 4, RealizedTenths: 0, Prices: {} });
+  });
+
+  it('lockTimePrevOf: no stored baseline (or junk) → none; a node already FOR '
+    + 'this week keeps the stash it carries; a later week → none', () => {
+    expect(lockTimePrevOf(null, 5)).toBeNull();
+    expect(lockTimePrevOf({ RealizedTenths: 3 }, 5)).toBeNull(); // no ForGw
+    expect(lockTimePrevOf('junk', 5)).toBeNull();
+    const kept = { ForGw: 4, RealizedTenths: -15, Prices: { Alex: 95 } };
+    expect(lockTimePrevOf({ ForGw: 5, RealizedTenths: 0, Prev: kept }, 5))
+      .toEqual(kept);
+    expect(lockTimePrevOf({ ForGw: 5, RealizedTenths: 0 }, 5)).toBeNull();
+    expect(lockTimePrevOf({ ForGw: 6, RealizedTenths: 0, Prev: kept }, 5)).toBeNull();
   });
 });
 

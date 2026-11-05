@@ -444,6 +444,9 @@
           "LockedPositions": {
             ".read": true
           },
+          "LockedWeeks": {
+            ".read": "auth != null"
+          },
           "History": {
             ".read": true
           },

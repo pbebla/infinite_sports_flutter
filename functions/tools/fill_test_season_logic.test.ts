@@ -76,6 +76,7 @@ function replayState(): Record<string, unknown> {
     ReminderSent: [null, { At: 1 }],
     NewsDrafted: [null, { At: 1 }],
     LockedPositions: [null, { 'GK Player 00': 'GK' }],
+    LockedWeeks: [null, { Date: '09062026', LockAtUtc: 1788735600000, Scored: true }],
     TransferState: { [REAL]: { Free: 2 }, 'test-01': { Free: 3 } },
     // Client / owner inputs the replay's state also carries: never written.
     Watchlists: { [REAL]: { 'GK Player 00': true } },
@@ -125,7 +126,8 @@ describe('buildWritePlan', () => {
 
     // Derived nodes + every done-marker.
     for (const node of ['Players', 'PlayerTotals', 'History', 'GwState', 'Repriced',
-      'RecapSent', 'ReminderSent', 'NewsDrafted', 'LockedPositions', 'TransferState']) {
+      'RecapSent', 'ReminderSent', 'NewsDrafted', 'LockedPositions', 'LockedWeeks',
+      'TransferState']) {
       expect(paths).toContain(`${ROOT}/${node}`);
     }
     // Client / owner inputs never.

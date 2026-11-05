@@ -267,12 +267,32 @@ export function baselineRealizedFor(inputs: IntegrityInputs, uid: string): numbe
 // RealizedTenths back when ForGw is the week it judges, so the app and the
 // server count the same money. Read by lib/fantasy/engine/selling.dart
 // saleBaselineFromNode.
+//
+// THE PREV STASH ([M3], season setup + schedule plan 2026-11-05): the
+// LOCK-time write also keeps the node it replaced as `Prev: { ForGw,
+// RealizedTenths, Prices }` (lockTimePrevOf), so the sweep's rewind of a
+// called-off week restores it EXACTLY (recomputing is lossy: a manager with
+// no squad carries RealizedTenths from the stored node — baselineNodeOf).
+// Finalize-time writes carry no Prev and drop a stored one (a scored week is
+// never rewound). Every reader of Baselines reads named keys only, so Prev
+// is invisible to them (baselineForGwOf / baselineRealizedTenthsOf here,
+// selling.dart saleBaselineFromNode, tools/client_draft_money.ts).
+
+/** A Baselines/<uid>/Prev stash: exactly the replaced node's three money
+ *  fields — never its own Prev. */
+export interface SaleBaselinePrev {
+  ForGw: number;
+  RealizedTenths: number;
+  Prices: Record<string, number>;
+}
 
 /** One Baselines/<uid> node as the server writes it. */
 export interface SaleBaselineNode {
   ForGw: number;
   RealizedTenths: number;
   Prices: Record<string, number>;
+  /** Lock-time writes only: the node this one replaced (THE PREV STASH). */
+  Prev?: SaleBaselinePrev;
 }
 
 /** A finite number truncated toward zero (Dart `.toInt()`), else null. */
@@ -329,11 +349,47 @@ export function baselineNodeOf(
   return { ForGw: forGw, RealizedTenths: realizedOf(effectiveRaw), Prices: prices };
 }
 
+/** [stored] as a Prev stash: its ForGw, RealizedTenths (absent/junk = 0,
+ *  as every reader reads it) and its numeric Prices (RTDB-pruned = {});
+ *  null when it is not a baseline (no numeric ForGw). Its own Prev is
+ *  never carried. */
+function baselineAsPrev(stored: unknown): SaleBaselinePrev | null {
+  const forGw = baselineForGwOf(stored);
+  if (forGw === null || !isPlainMap(stored)) return null;
+  const prices: Record<string, number> = {};
+  for (const [id, v] of childEntries(stored['Prices'])) {
+    if (typeof v === 'number') prices[id] = v;
+  }
+  return {
+    ForGw: forGw, RealizedTenths: baselineRealizedTenthsOf(stored), Prices: prices,
+  };
+}
+
+/** The Prev a LOCK-time write of a node FOR gameweek [forGw] carries, given
+ *  the [stored] node it replaces (THE PREV STASH):
+ *  - stored FOR an earlier week -> that node itself (baselineAsPrev);
+ *  - stored FOR [forGw] already (this lock wrote it before) -> the stash it
+ *    already carries, kept — it still names the node before this lock;
+ *  - no stored baseline, or one for a later week -> none (null). */
+export function lockTimePrevOf(stored: unknown, forGw: number): SaleBaselinePrev | null {
+  const storedFor = baselineForGwOf(stored);
+  if (storedFor === null || !isPlainMap(stored)) return null;
+  if (storedFor < forGw) return baselineAsPrev(stored);
+  if (storedFor === forGw) return baselineAsPrev(stored['Prev']);
+  return null;
+}
+
 /** Whether a stored Baselines/<uid> node already says exactly [node] (a
  *  rerun writes nothing). RTDB never stores an empty map, so a stored node
- *  without Prices equals Prices {}. */
-export function sameBaselineNode(stored: unknown, node: SaleBaselineNode): boolean {
+ *  without Prices equals Prices {}. Only the three money fields are
+ *  compared; a stored Prev (THE PREV STASH) is ignored by a lock-time call
+ *  ([opts.stashPrev]) and makes any other call rewrite (a finalize-time
+ *  write drops it). */
+export function sameBaselineNode(
+  stored: unknown, node: SaleBaselineNode, opts: { stashPrev?: boolean } = {},
+): boolean {
   if (!isPlainMap(stored)) return false;
+  if (opts.stashPrev !== true && stored['Prev'] != null) return false;
   if (stored['ForGw'] !== node.ForGw ||
     stored['RealizedTenths'] !== node.RealizedTenths) {
     return false;

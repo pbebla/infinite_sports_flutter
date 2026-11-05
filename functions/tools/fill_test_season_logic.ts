@@ -77,13 +77,18 @@ export const NEVER_WRITTEN_WHOLE: readonly string[] = [
  *  mid-day (step 2c, a match day with one game Final and another not
  *  started yet) but every finalize removes it whole, so a settled replay
  *  never ends holding one — one left over means a week never settled
- *  (fail closed). */
+ *  (fail closed).
+ *
+ *  LockedWeeks (season setup + schedule plan 2026-11-05): every replayed
+ *  lock freezes its week ({ Date, LockAtUtc }) and every replayed finalize
+ *  marks it Scored — always produced, the engine's frozen-week ledger (a
+ *  derived node like LockedPositions). */
 export const EXPECTED_NODES: readonly string[] = [
   'Players', 'PlayerTotals', 'PlayerWeeks', 'PlayerWeekStats', 'PriceHistory',
   'PriceChanges', 'Leaderboards', 'History', 'PublishedPicks', 'DreamTeam',
-  'TransferState', 'TransferCosts', 'GwState', 'LockedPositions', 'Repriced',
-  'RecapSent', 'NewsDrafted', 'ReminderSent', 'Badges', 'BadgePushClaims',
-  'Baselines', 'SquadAlerts', 'PreviewPushed', 'Live',
+  'TransferState', 'TransferCosts', 'GwState', 'LockedPositions', 'LockedWeeks',
+  'Repriced', 'RecapSent', 'NewsDrafted', 'ReminderSent', 'Badges',
+  'BadgePushClaims', 'Baselines', 'SquadAlerts', 'PreviewPushed', 'Live',
 ];
 
 export interface PlanEntry {

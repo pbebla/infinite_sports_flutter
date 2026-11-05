@@ -49,6 +49,25 @@
 //   week never uses a later position; weeks locked before this snapshot
 //   existed fall back to the live Players positions. Public read.
 //
+// - LockedWeeks/<n> = { Date:'MMDDYYYY', LockAtUtc:int (epoch ms),
+//   Scored?:true } — the frozen-week ledger (season setup + schedule plan
+//   2026-11-05; parsed by orchestration_db.ts lockedWeeksOf, honoured by
+//   loadSeasonGameweeks): once a week locks, its date and deadline no
+//   longer follow the match calendar or the config, so a later schedule
+//   edit can never renumber or re-time it. Claimed set-if-absent as the
+//   lock's FIRST write (claimLockedWeek: sweep step 1, and a first finalize
+//   that outran every sweep — marketForGameweek); a claim lost to ANOTHER
+//   date takes no snapshot (warned), one lost to the same date (an earlier
+//   or concurrent claim) carries on. [M2] Every lock snapshot write
+//   (LockedPositions, PriceHistory, the PublishedPicks claim) re-reads it
+//   right before writing and writes nothing once it no longer freezes the
+//   week's date (stillFrozen): the sweep's rewind of a called-off week
+//   deletes it, and a sweep that started before that rewind must not leave
+//   a stale snapshot behind (a stale PublishedPicks/<n> would silently
+//   become the week's picks). Every finalize run that wrote History marks
+//   it Scored:true (markWeekScored; a week locked before the ledger existed
+//   gets the full node then). Rules: signed-in read, no client write.
+//
 // - Repriced/<gw> = { At:int, Manual?:true, Voided?:true } — the Monday
 //   job's done-flag. Manual:true records "admin had set
 //   PriceChanges/<gw>/Manual, the job stood down"; Voided:true records "the
@@ -86,8 +105,11 @@
 //   week is kept; no-op when unchanged). No squad, or an unreadable one,
 //   carries the previous
 //   RealizedTenths with Prices {}. The lock judge reads RealizedTenths back
-//   when ForGw is the week it judges (loadIntegrityInputs). Rules: read own
-//   + admin, no client write (like TransferState).
+//   when ForGw is the week it judges (loadIntegrityInputs). The LOCK-time
+//   write also stashes the node it replaced as Prev: { ForGw,
+//   RealizedTenths, Prices } (squad_integrity.ts THE PREV STASH) — the
+//   rewind's exact undo; finalize-time writes drop it. Every reader ignores
+//   Prev. Rules: read own + admin, no client write (like TransferState).
 //
 // - TransferCosts/<gw>/<uid> = int points (functions-internal, like
 //   PlayerWeeks): the week's transfer charge frozen at lock — the
@@ -256,8 +278,9 @@ import {
 import {
   baselineForGwOf, baselineNodeOf, baselineRealizedTenthsOf,
   integrityMarketOf, IntegrityInputs, integrityVerdictOf, invalidAlertNode,
-  isIntegrityAlert, isPreviewAlert, judgeSquad, overBudgetTenthsOf,
-  previewAlertNode, priceSnapshotOf, sameBaselineNode, sameInvalidAlert,
+  isIntegrityAlert, isPreviewAlert, judgeSquad, lockTimePrevOf,
+  overBudgetTenthsOf, previewAlertNode, priceSnapshotOf, sameBaselineNode,
+  sameInvalidAlert,
   samePreviewAlert, SquadIntegrityIssue,
 } from './squad_integrity';
 import { parseForfeitedBy } from './stats_mapper';
@@ -430,11 +453,23 @@ async function loadIntegrityInputs(
  *  is left alone, and a stored node that already says the same is not
  *  rewritten (reruns write nothing). The per-node check runs again inside
  *  a transaction, so a newer baseline landing in between survives. One
- *  manager's failure is logged and never stops the others. */
+ *  manager's failure is logged and never stops the others.
+ *
+ *  THE PREV STASH ([M3], squad_integrity.ts): the lock-time call
+ *  ([opts.stashPrev], from snapshotPublishedPicks) gives every node it
+ *  writes `Prev` = the node it replaces (lockTimePrevOf: none when there
+ *  was none), so the sweep's rewind of a called-off week restores it
+ *  exactly; its equality check ignores Prev, so a second lock-time run — a
+ *  concurrent one too, whose transaction re-runs on the fresh node — writes
+ *  nothing and keeps the stash. Every other call (finalize) writes nodes
+ *  WITHOUT Prev and rewrites a stored node that carries one: a scored week
+ *  is never rewound. */
 export async function publishSaleBaselines(
   db: FantasyDb, root: string, gw: number,
   log: FantasyLogger = silent, ctx: Record<string, unknown> = {},
+  opts: { stashPrev?: boolean } = {},
 ): Promise<void> {
+  const stashPrev = opts.stashPrev === true;
   const forGw = gw + 1;
   // A node FOR a week before the next lock is never read (the app sees it
   // as stale and blocks the Save; the judge reads only ForGw === the week
@@ -460,12 +495,17 @@ export async function publishSaleBaselines(
     try {
       const effective = await effectiveSquadAfterWeek(db, root, uid, gw);
       // undefined = leave the stored node alone (newer, or already equal).
-      // A first (cold) run sees null and proposes the node — never aborts.
+      // A first (cold) run sees null and proposes the node (no Prev) —
+      // never aborts; RTDB re-runs it on the real node, which decides.
       const next = (stored: unknown): unknown => {
         const storedFor = baselineForGwOf(stored);
         if (storedFor !== null && storedFor > forGw) return undefined;
         const node = baselineNodeOf(effective, forGw, stored);
-        return sameBaselineNode(stored, node) ? undefined : node;
+        if (stashPrev) {
+          const prev = lockTimePrevOf(stored, forGw);
+          if (prev !== null) node.Prev = prev;
+        }
+        return sameBaselineNode(stored, node, { stashPrev }) ? undefined : node;
       };
       if (next(await db.read(path)) === undefined) continue;
       if ((await db.transaction(path, next)).committed) written++;
@@ -1093,8 +1133,9 @@ export async function finalizeGameweek(
   const firstRun = historyThisGw == null;
 
   // The market at this week's LOCKED positions (LockedPositions/<gw>); a
-  // first run that outran every sweep claims the snapshot itself.
-  const players = await marketForGameweek(db, root, gw.number, firstRun, log, ctx);
+  // first run that outran every sweep freezes the week (LockedWeeks/<gw>)
+  // and claims the snapshot itself.
+  const players = await marketForGameweek(db, root, gw, firstRun, log, ctx);
   let source = 'publishedPicks';
   let squadsByUid = mapChildren(await db.read(`${root}/PublishedPicks/${gw.number}`));
   if (Object.keys(squadsByUid).length === 0) {
@@ -1233,6 +1274,16 @@ export async function finalizeGameweek(
     await db.write(`${root}/Leaderboards/Gameweek/${gw.number}`, out.gameweekBoard);
     await db.write(`${root}/Leaderboards/Overall`, out.overallBoard);
     await db.write(`${root}/Leaderboards/RankHistory`, out.rankHistory);
+    // The week's points are final: LockedWeeks/<gw>.Scored (the rewind
+    // never touches a scored week). Every run — a rerun of a scored week
+    // writes nothing. Logged, never fails the finalize (History itself is
+    // the other "scored" fact).
+    try {
+      await markWeekScored(db, root, gw, log, ctx);
+    } catch (err) {
+      log.warn('fantasy finalize: Scored mark failed — the next finalize ' +
+        'run retries', { ...ctx, error: String(err) });
+    }
   } else {
     log.warn('fantasy finalize: no manager squads to score', { ...ctx, source });
   }
@@ -1972,20 +2023,113 @@ async function settleLiveWeek(
   }, { ...a.ctx, reason: 'older week settled' });
 }
 
+// ── Frozen weeks (LockedWeeks — season setup + schedule plan 2026-11-05) ──
+
+/** The LockedWeeks/<n> node that freezes [gw] as it is now. */
+function lockedWeekNode(gw: Gameweek): { Date: string; LockAtUtc: number } {
+  return { Date: gw.date, LockAtUtc: gw.lockUtc.getTime() };
+}
+
+/** Whether a stored LockedWeeks/<n> value freezes [gw]'s date. */
+function freezesWeek(node: unknown, gw: Gameweek): boolean {
+  return isPlainMap(node) && node['Date'] === gw.date;
+}
+
+/** The lock's FIRST write: freezes gameweek [gw] as LockedWeeks/<n> =
+ *  { Date, LockAtUtc }, set-if-absent (one read when it is already there —
+ *  every sweep of the locked window). True when the ledger now freezes
+ *  gw's date: our claim, or an earlier / concurrent one on the same date (a
+ *  lost claim with the SAME Date is normal). False — warned, and the caller
+ *  takes no snapshot — when it holds ANOTHER date for this number (a
+ *  schedule the caller did not derive from: a stale sweep, or a week left
+ *  unfrozen by a gap in a pre-ledger season) or junk. */
+async function claimLockedWeek(
+  db: FantasyDb, root: string, gw: Gameweek,
+  log: FantasyLogger, ctx: Record<string, unknown>,
+): Promise<boolean> {
+  const path = `${root}/LockedWeeks/${gw.number}`;
+  let stored = await db.read(path);
+  if (stored == null) {
+    if (await db.writeIfAbsent(path, lockedWeekNode(gw))) {
+      log.info('fantasy lock: week frozen', {
+        ...ctx, gw: gw.number, date: gw.date, lockAtUtc: gw.lockUtc.getTime(),
+      });
+      return true;
+    }
+    stored = await db.read(path); // lost the claim: to whom?
+  }
+  if (freezesWeek(stored, gw)) return true;
+  log.warn('fantasy lock: week frozen on another date — lock step skipped', {
+    ...ctx, gw: gw.number, date: gw.date,
+    frozenDate: isPlainMap(stored) ? stored['Date'] ?? null : null,
+  });
+  return false;
+}
+
+/** [M2] The re-check right before each lock snapshot write: true while
+ *  LockedWeeks/<n> still freezes [gw]'s date. False — warned, write
+ *  nothing — once it is gone or holds another date: the sweep's rewind of a
+ *  called-off week deleted it after this run derived its weeks, and a stale
+ *  snapshot must never survive the rewind. One small read per snapshot. */
+async function stillFrozen(
+  db: FantasyDb, root: string, gw: Gameweek,
+  log: FantasyLogger, ctx: Record<string, unknown>,
+): Promise<boolean> {
+  if (freezesWeek(await db.read(`${root}/LockedWeeks/${gw.number}`), gw)) {
+    return true;
+  }
+  log.warn('fantasy lock: week no longer frozen — snapshot skipped',
+    { ...ctx, gw: gw.number, date: gw.date });
+  return false;
+}
+
+/** After History/<gw> lands: LockedWeeks/<n>.Scored = true. Absent (a week
+ *  locked before the ledger existed) -> the full node { Date, LockAtUtc,
+ *  Scored: true }; already Scored -> nothing written; a node freezing
+ *  ANOTHER date (or junk) is left alone, warned — it is not this week's.
+ *  One transaction: its cold first run sees null and proposes the full
+ *  node, and RTDB re-runs it on the real value when one exists. */
+async function markWeekScored(
+  db: FantasyDb, root: string, gw: Gameweek,
+  log: FantasyLogger, ctx: Record<string, unknown>,
+): Promise<void> {
+  let otherDate: unknown = undefined;
+  await db.transaction(`${root}/LockedWeeks/${gw.number}`, (current) => {
+    otherDate = undefined; // every (re-)run decides afresh
+    if (current === null || current === undefined) {
+      return { ...lockedWeekNode(gw), Scored: true };
+    }
+    if (!freezesWeek(current, gw)) {
+      otherDate = isPlainMap(current) ? current['Date'] ?? null : null;
+      return undefined;
+    }
+    const node = current as Record<string, unknown>;
+    return node['Scored'] === true ? undefined : { ...node, Scored: true };
+  });
+  if (otherDate !== undefined) {
+    log.warn('fantasy finalize: LockedWeeks holds another date — not marked Scored',
+      { ...ctx, frozenDate: otherDate });
+  }
+}
+
 // ── Positions locked per gameweek (spec §3 revision 2026-10-28) ────────────
 
 /** Claims LockedPositions/<gw> from the live market positions, exactly once
- *  (set-if-absent, like PublishedPicks). Returns the snapshot now stored
- *  (ours or a concurrent winner's), null when the market is empty. */
+ *  (set-if-absent, like PublishedPicks), after the [M2] re-check of the
+ *  week's LockedWeeks entry. Returns the snapshot now stored (ours or a
+ *  concurrent winner's), null when the market is empty or the week is no
+ *  longer frozen. */
 async function snapshotLockedPositions(
-  db: FantasyDb, root: string, gw: number,
+  db: FantasyDb, root: string, week: Gameweek,
   log: FantasyLogger, ctx: Record<string, unknown>,
 ): Promise<unknown> {
+  const gw = week.number;
   const path = `${root}/LockedPositions/${gw}`;
   const existing = await db.read(path);
   if (existing != null) return existing;
   const snap = positionsSnapshotOf(marketPlayersOf(await db.read(`${root}/Players`)));
   if (Object.keys(snap).length === 0) return null;
+  if (!(await stillFrozen(db, root, week, log, ctx))) return null;
   if (await db.writeIfAbsent(path, snap)) {
     log.info('fantasy lock: positions locked',
       { ...ctx, gw, players: Object.keys(snap).length });
@@ -1995,9 +2139,11 @@ async function snapshotLockedPositions(
 }
 
 /** The market as gameweek [gw] is scored: live membership/eligibility with
- *  positions from LockedPositions/<gw>. [claim] (a first finalize) takes
- *  the snapshot when the lock sweep never did; otherwise a week without a
- *  snapshot (locked before this existed) falls back to live positions.
+ *  positions from LockedPositions/<gw>. [claim] (a first finalize) freezes
+ *  the week exactly as the lock does (claimLockedWeek — a ledger holding
+ *  another date takes no snapshot) and takes the snapshot when the lock
+ *  sweep never did; otherwise a week without a snapshot (locked before this
+ *  existed) falls back to live positions.
  *
  *  The same first-finalize backstop claims PriceHistory/<gw> (audit M2): a
  *  sweep outage spanning the lock AND the first finalize used to leave the
@@ -2008,14 +2154,15 @@ async function snapshotLockedPositions(
  *  claim, so a week the lock sweep already recorded is never touched; a
  *  rerun (claim false) never writes it. */
 async function marketForGameweek(
-  db: FantasyDb, root: string, gw: number, claim: boolean,
+  db: FantasyDb, root: string, gw: Gameweek, claim: boolean,
   log: FantasyLogger, ctx: Record<string, unknown>,
 ): Promise<Record<string, MarketPlayer>> {
   const players = marketPlayersOf(await db.read(`${root}/Players`));
-  const locked = claim
+  const frozen = claim && await claimLockedWeek(db, root, gw, log, ctx);
+  const locked = frozen
     ? await snapshotLockedPositions(db, root, gw, log, ctx)
-    : await db.read(`${root}/LockedPositions/${gw}`);
-  if (claim) await snapshotPriceHistory(db, root, gw, log, ctx);
+    : await db.read(`${root}/LockedPositions/${gw.number}`);
+  if (frozen) await snapshotPriceHistory(db, root, gw, log, ctx);
   return withLockedPositions(players, lockedPositionsOf(locked));
 }
 
@@ -2030,15 +2177,18 @@ async function marketForGameweek(
  *  deliberately independent of PublishedPicks: a week with no squads (which
  *  returns early in snapshotPublishedPicks) still records its prices. Every
  *  Players entry is recorded, guests (ineligible) included; an empty market
- *  writes nothing (RTDB would treat {} as a removal anyway). */
+ *  writes nothing (RTDB would treat {} as a removal anyway), and neither
+ *  does a week no longer frozen ([M2] stillFrozen, right before the claim). */
 async function snapshotPriceHistory(
-  db: FantasyDb, root: string, gw: number,
+  db: FantasyDb, root: string, week: Gameweek,
   log: FantasyLogger, ctx: Record<string, unknown>,
 ): Promise<void> {
+  const gw = week.number;
   const path = `${root}/PriceHistory/${gw}`;
   if (await db.read(path) != null) return; // cheap re-check every sweep
   const prices = marketPricesOf(await db.read(`${root}/Players`));
   if (Object.keys(prices).length === 0) return;
+  if (!(await stillFrozen(db, root, week, log, ctx))) return;
   if (await db.writeIfAbsent(path, prices)) {
     log.info('fantasy lock: prices recorded',
       { ...ctx, gw, players: Object.keys(prices).length });
@@ -2060,11 +2210,16 @@ async function snapshotPriceHistory(
  *  right: the Squads/<uid> rule rejects client saves from the lock instant
  *  (server clock) until lock + 24 h (the app's reopen), and the sweep
  *  writes the snapshot BEFORE it flips GwState to 'locked' (step 3) —
- *  keep that order. */
+ *  keep that order. [M2] The week's LockedWeeks entry is re-read right
+ *  before the claim (after the judging, so the window is as small as it
+ *  gets): a week no longer frozen gets no snapshot and nothing after it —
+ *  no TransferCosts, TransferState, SquadAlerts or Baselines writes. The
+ *  baselines are published with the Prev stash (publishSaleBaselines). */
 async function snapshotPublishedPicks(
-  db: FantasyDb, root: string, cfg: FantasyConfig, gw: number,
+  db: FantasyDb, root: string, cfg: FantasyConfig, week: Gameweek,
   nowMs: number, log: FantasyLogger, ctx: Record<string, unknown>,
 ): Promise<void> {
+  const gw = week.number;
   if (await db.read(`${root}/PublishedPicks/${gw}`) != null) return;
   // A FIRST finalize that outran every sweep already scored this week from
   // the live Squads (finalizeGameweek's fallback): its History/<gw> is the
@@ -2094,6 +2249,7 @@ async function snapshotPublishedPicks(
     // Audit I2: judge every squad before it becomes the law.
     integrity: await loadIntegrityInputs(db, root, Object.keys(squads), gw),
   });
+  if (!(await stillFrozen(db, root, week, log, ctx))) return;
   const won = await db.writeIfAbsent(`${root}/PublishedPicks/${gw}`, acc.cleanSquads);
   if (!won) return; // a concurrent sweep won the claim and did the rest
   for (const v of acc.voided) {
@@ -2110,10 +2266,11 @@ async function snapshotPublishedPicks(
     ...ctx, gw, managers: Object.keys(acc.cleanSquads).length,
   });
   // FPL selling (spec §4): every manager's Baselines/<uid> for gw + 1, from
-  // the snapshot just claimed. Best-effort here — every finalize of this
-  // week re-checks it — so a failure never fails the sweep.
+  // the snapshot just claimed, each stashing the node it replaces as Prev
+  // ([M3] — the rewind's exact undo). Best-effort here — every finalize of
+  // this week re-checks it — so a failure never fails the sweep.
   try {
-    await publishSaleBaselines(db, root, gw, log, ctx);
+    await publishSaleBaselines(db, root, gw, log, ctx, { stashPrev: true });
   } catch (err) {
     log.warn('fantasy baselines: lock-time publish failed — finalize heals',
       { ...ctx, gw, error: String(err) });
@@ -2193,10 +2350,15 @@ async function sweepSeason(
   //    than transition-edge-triggered, so a sweep that was down at the lock
   //    instant still snapshots exactly once. Prices are claimed before the
   //    picks step because that one returns early for a week with no squads.
-  if (current && gameweekStatusAt(current, nowUtc) === 'locked') {
-    await snapshotLockedPositions(db, root, current.number, log, ctx);
-    await snapshotPriceHistory(db, root, current.number, log, ctx);
-    await snapshotPublishedPicks(db, root, cfg, current.number, nowMs, log, ctx);
+  //    The week is FROZEN first (LockedWeeks/<n> — claimLockedWeek, the
+  //    lock's first write): a ledger already holding another date for this
+  //    number skips the whole step (warned), and every snapshot re-checks
+  //    the ledger right before it writes ([M2] stillFrozen).
+  if (current && gameweekStatusAt(current, nowUtc) === 'locked' &&
+    await claimLockedWeek(db, root, current, log, ctx)) {
+    await snapshotLockedPositions(db, root, current, log, ctx);
+    await snapshotPriceHistory(db, root, current, log, ctx);
+    await snapshotPublishedPicks(db, root, cfg, current, nowMs, log, ctx);
   }
 
   // 2. Finalize backstop: any lock-passed gameweek whose match day is

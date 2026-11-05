@@ -95,6 +95,12 @@ const CONTRACT: ContractEntry[] = [
     note: 'setBadgeActive: set' },
   { path: `${S}/Badges/someUid/-pushId`, kind: 'admin',
     note: 'giveBadge: push().set; removeBadgeAward: remove' },
+  // Season setup + schedule (plan 2026-11-05): the owner's per-date
+  // deadline override and skipped game day, under the admin Config grant.
+  { path: `${S}/Config/Deadlines/10042026`, kind: 'admin',
+    note: 'setDeadlineOverride: set(epoch ms) / remove()' },
+  { path: `${S}/Config/SkippedDates/10042026`, kind: 'admin',
+    note: 'setDateSkipped: set(true) / remove()' },
 
   // ── Fan app (signed-in user) — fantasy_service.dart ───────────────────────
   { path: `${S}/Squads/UID`, kind: 'own',
@@ -451,6 +457,34 @@ for (const file of RULES_FILES) {
       }
     });
 
+    // SEASON SETUP + SCHEDULE (plan 2026-11-05, Task 3): the Manager writes
+    // the owner's Config/Deadlines/<date> and Config/SkippedDates/<date> —
+    // every grant on their chain is the admin gate, so a fan can never move
+    // a deadline or skip a game day. LockedWeeks/<n> = {Date, LockAtUtc,
+    // Scored?} is the server's frozen-week ledger (functions only, Admin
+    // SDK): any signed-in user reads it (the apps' week lists), NOBODY
+    // writes it.
+    it('Config/Deadlines + SkippedDates: admin write only; LockedWeeks: signed-in read, no client write', () => {
+      for (const p of [`${S}/Config/Deadlines/10042026`, `${S}/Config/SkippedDates/10042026`]) {
+        const { links, bindings } = writeChain(rules, p);
+        const grantsSeen = links.filter((l) => typeof l.write === 'string' && l.write !== 'false');
+        expect(grantsSeen.length, `${file}: no .write on ${p}`).toBeGreaterThan(0);
+        for (const l of grantsSeen) {
+          expect(String(l.write), `${file}: non-admin .write at ${l.at} for ${p}`)
+            .toContain(ADMIN_GATE);
+        }
+        expect(links.some((l) => grants('own', l, bindings) ||
+          grants('ownerCreate', l, bindings)), `${file}: fan grant on ${p}`).toBe(false);
+      }
+      const season = rules['rules']['Fantasy']['$sport']['$season'];
+      expect(season['LockedWeeks'], `${file}: LockedWeeks`).toEqual({ '.read': 'auth != null' });
+      for (const p of [`${S}/LockedWeeks`, `${S}/LockedWeeks/3`, `${S}/LockedWeeks/3/Scored`]) {
+        const { links } = writeChain(rules, p);
+        expect(links.filter((l) => typeof l.write === 'string' && l.write !== 'false'),
+          `${file}: unexpected .write on ${p}`).toEqual([]);
+      }
+    });
+
     it('Voided: public read, admin write, each <gw> validated true', () => {
       const voided = rules['rules']['Fantasy']['$sport']['$season']['Voided'];
       expect(voided['.read']).toBe(true);
@@ -466,8 +500,8 @@ describe('rules contract: the walker itself', () => {
   it('a functions-only path has no client grant (the check can fail)', () => {
     for (const p of [`${S}/History/3/someUid`, `${S}/BadgePushClaims/u/a`,
       `${S}/TransferState/UID`, `${S}/Repriced/5`, `${S}/Baselines/UID`,
-      `${S}/Baselines/UID/RealizedTenths`, `${S}/Live/Board/UID`,
-      `${S}/LiveBase/3`]) {
+      `${S}/Baselines/UID/RealizedTenths`, `${S}/Baselines/UID/Prev`,
+      `${S}/Live/Board/UID`, `${S}/LiveBase/3`, `${S}/LockedWeeks/3`]) {
       const { links, bindings } = writeChain(rules, p);
       for (const kind of ['admin', 'own', 'ownerCreate'] as const) {
         expect(links.some((l) => grants(kind, l, bindings)), `${p} ${kind}`).toBe(false);
