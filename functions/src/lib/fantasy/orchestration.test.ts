@@ -1006,6 +1006,33 @@ describe('Baselines/<uid> (FPL selling: last locked prices + realized)', () => {
     expect(baselineWrites(db)).toEqual([]);
   });
 
+  it('[M3] a finalize that wrote NO History (nobody to score) leaves Prev '
+    + 'intact — the week is not scored, so it can still be rewound — and '
+    + 'stashes like the lock', async () => {
+    const db = new ColdFakeDb(world2({ gw2Status: 2 })); // GW2 final
+    delete t(db).Squads; // no snapshot, no History, no Squads: nobody to score
+    t(db).Managers = {
+      dave: { TeamName: 'Dave XI' }, erin: { TeamName: 'Erin Athletic' },
+    };
+    // dave: the GW2 lock already stashed his GW2 node; erin: the lock wrote
+    // nothing for her (still FOR GW2, +4 realized).
+    const daveStashed = {
+      ForGw: 3, RealizedTenths: -15, Prices: {},
+      Prev: { ForGw: 2, RealizedTenths: -15, Prices: GW1_ALPHA },
+    };
+    t(db).Baselines = {
+      dave: clone(daveStashed),
+      erin: { ForGw: 2, RealizedTenths: 4, Prices: { Sam: 85 } },
+    };
+    await finalizeGw(db, GW2_DATE);
+    expect(await db.read(`${F_ROOT}/History/2`)).toBeNull();
+    expect(await db.read(`${F_ROOT}/Baselines/dave`)).toEqual(daveStashed);
+    expect(await db.read(`${F_ROOT}/Baselines/erin`)).toEqual({
+      ForGw: 3, RealizedTenths: 4, Prices: {},
+      Prev: { ForGw: 2, RealizedTenths: 4, Prices: { Sam: 85 } },
+    });
+  });
+
   it('[M3] a concurrent second lock-time publish writes nothing (the stash '
     + 'survives)', async () => {
     const db = await lockOverStoredBaselines();
@@ -1032,9 +1059,11 @@ describe('Baselines/<uid> (FPL selling: last locked prices + realized)', () => {
 //
 // LockedWeeks/<n> = {Date, LockAtUtc, Scored?}: the lock's FIRST write, so
 // later schedule edits can never renumber or re-time a locked week; finalize
-// marks it Scored. [M2] Every snapshot write re-checks it first, so a sweep
-// that started before a rewind (Task 4 deletes LockedWeeks/<n>) leaves no
-// stale snapshot behind.
+// marks it Scored. [M2] Every lock write re-checks it first, and each
+// snapshot write re-checks it again once it landed (deleting itself when the
+// week is no longer frozen), so a sweep that started before a rewind (Task 4
+// MARKS LockedWeeks/<n> Rewinding first and deletes it last) leaves no stale
+// snapshot or lock write behind.
 
 describe('LockedWeeks: a gameweek freezes when it locks', () => {
   // 2026-10-04 and 10-11 are Sundays (PDT): lockHour 15 => lock 22:00Z.
@@ -1068,7 +1097,17 @@ describe('LockedWeeks: a gameweek freezes when it locks', () => {
   const lockedWeekWrites = (db: ColdFakeDb) =>
     db.writes.filter((w) => w.includes('/LockedWeeks/'));
   const FROZEN = 'fantasy lock: week frozen on another date — lock step skipped';
+  const REWINDING = 'fantasy lock: week being rewound — lock step skipped';
   const NO_LONGER = 'fantasy lock: week no longer frozen — snapshot skipped';
+  const REMOVED = 'fantasy lock: week no longer frozen — snapshot removed';
+  const STOPPED = 'fantasy lock: week no longer frozen — lock step stopped';
+  /** Task 4's rewind, step one: LockedWeeks/<n> marked Rewinding (written
+   *  straight into the data, as another process would). */
+  const markRewinding = (db: ColdFakeDb, n: number) => {
+    const ledger = t(db).LockedWeeks;
+    ledger[n] = { ...ledger[n], Rewinding: true };
+  };
+  const LATER_NODES = ['TransferCosts', 'TransferState', 'SquadAlerts', 'Baselines'];
 
   it('the lock writes LockedWeeks/1 before PublishedPicks (its first lock write)', async () => {
     const db = octWorld();
@@ -1131,47 +1170,150 @@ describe('LockedWeeks: a gameweek freezes when it locks', () => {
     expect(spy.warns).not.toContain(FROZEN);
   });
 
-  it('[M2] a stale sweep whose LockedWeeks/1 is deleted between its claim and '
-    + 'its snapshot writes no PublishedPicks/1', async () => {
+  it.each([
+    ['already there', false],
+    ['won the race', true],
+  ])('a ledger entry marked Rewinding is no claim (%s): the lock step writes '
+    + 'nothing', async (_label, race) => {
+    const db = octWorld();
+    const marked = { Date: D1, LockAtUtc: LOCK1_MS, Rewinding: true };
+    if (race) {
+      const realClaim = db.writeIfAbsent.bind(db);
+      db.writeIfAbsent = async (p: string, v: unknown) => {
+        if (p === `${F_ROOT}/LockedWeeks/1`) await db.write(p, clone(marked));
+        return realClaim(p, v);
+      };
+    } else {
+      t(db).LockedWeeks = { 1: clone(marked) };
+    }
+    const spy = logSpy();
+    await runLifecycleSweep(db, AFTER1, spy.log);
+    expect(await db.read(`${F_ROOT}/LockedWeeks/1`)).toEqual(marked);
+    for (const p of ['LockedPositions', 'PriceHistory', 'PublishedPicks', ...LATER_NODES]) {
+      expect(await db.read(`${F_ROOT}/${p}`), p).toBeNull();
+    }
+    expect(spy.warns).toContain(REWINDING);
+  });
+
+  it.each([
+    ['marked Rewinding (the rewind\'s first step)', 'mark'],
+    ['deleted (the rewind\'s last step)', 'delete'],
+  ])('[M2] a stale sweep whose LockedWeeks/1 is %s right after its claim '
+    + 'writes no snapshot and stops', async (_label, how) => {
     const db = octWorld();
     const realClaim = db.writeIfAbsent.bind(db);
     db.writeIfAbsent = async (p: string, v: unknown) => {
       const won = await realClaim(p, v);
-      // A rewind (Task 4) lands right after our claim.
-      if (won && p === `${F_ROOT}/LockedWeeks/1`) await db.write(p, null);
+      if (won && p === `${F_ROOT}/LockedWeeks/1`) {
+        if (how === 'mark') markRewinding(db, 1);
+        else await db.write(p, null);
+      }
       return won;
     };
     const spy = logSpy();
     await runLifecycleSweep(db, AFTER1, spy.log);
-    for (const p of ['LockedWeeks/1', 'LockedPositions', 'PriceHistory',
-      'PublishedPicks', 'TransferCosts', 'TransferState', 'SquadAlerts',
-      'Baselines']) {
+    for (const p of ['LockedPositions', 'PriceHistory', 'PublishedPicks', ...LATER_NODES]) {
       expect(await db.read(`${F_ROOT}/${p}`), p).toBeNull();
     }
-    expect(spy.warns.filter((m) => m === NO_LONGER)).toHaveLength(3);
+    // The first refused re-check stops the whole lock step.
+    expect(spy.warns.filter((m) => m === NO_LONGER)).toHaveLength(1);
   });
 
+  it.each(['LockedPositions', 'PriceHistory', 'PublishedPicks'])(
+    '[M2] a rewind mark landing between the pre-check and the %s write: the '
+    + 'stale snapshot is deleted again and the lock step stops', async (node) => {
+      const db = octWorld();
+      const realClaim = db.writeIfAbsent.bind(db);
+      db.writeIfAbsent = async (p: string, v: unknown) => {
+        // Our pre-check already passed; the rewind marks the week now.
+        if (p === `${F_ROOT}/${node}/1`) markRewinding(db, 1);
+        return realClaim(p, v);
+      };
+      const spy = logSpy();
+      await runLifecycleSweep(db, AFTER1, spy.log);
+      const path = `${F_ROOT}/${node}/1`;
+      expect(db.writes.filter((w) => w === path)).toHaveLength(2); // landed, then went
+      const order = ['LockedPositions', 'PriceHistory', 'PublishedPicks'];
+      for (const [k, n] of order.entries()) {
+        const v = await db.read(`${F_ROOT}/${n}/1`);
+        // Snapshots taken before the mark stand (the rewind deletes them).
+        if (k < order.indexOf(node)) expect(v, n).not.toBeNull();
+        else expect(v, n).toBeNull();
+      }
+      for (const p of LATER_NODES) expect(await db.read(`${F_ROOT}/${p}`), p).toBeNull();
+      expect(spy.warns.filter((m) => m === REMOVED)).toHaveLength(1);
+    });
+
   it('[M2] the re-check sits right before the PublishedPicks claim: a rewind '
-    + 'while the picks are judged leaves no picks and nothing after them', async () => {
+    + 'mark while the picks are judged leaves no picks and nothing after them', async () => {
     const db = octWorld();
     const realRead = db.read.bind(db);
     db.read = async (p: string) => {
       // TransferState is read while the lock accounting judges the squads.
-      if (p === `${F_ROOT}/TransferState`) {
-        await db.write(`${F_ROOT}/LockedWeeks/1`, null);
-      }
+      if (p === `${F_ROOT}/TransferState`) markRewinding(db, 1);
       return realRead(p);
     };
     const spy = logSpy();
     await runLifecycleSweep(db, AFTER1, spy.log);
-    // Positions + prices landed before the rewind (Task 4 deletes them).
+    // Positions + prices landed before the mark (Task 4 deletes them).
     expect(await db.read(`${F_ROOT}/LockedPositions/1`)).not.toBeNull();
     expect(await db.read(`${F_ROOT}/PriceHistory/1`)).not.toBeNull();
-    for (const p of ['PublishedPicks', 'TransferCosts', 'TransferState',
-      'SquadAlerts', 'Baselines']) {
+    expect(db.writes).not.toContain(`${F_ROOT}/PublishedPicks/1`);
+    for (const p of ['PublishedPicks', ...LATER_NODES]) {
       expect(await db.read(`${F_ROOT}/${p}`), p).toBeNull();
     }
     expect(spy.warns).toContain(NO_LONGER);
+  });
+
+  it('[M2] a rewind mark landing after the PublishedPicks claim stops every '
+    + 'later lock write: no TransferCosts, TransferState, SquadAlerts or '
+    + 'Baselines change', async () => {
+    const db = new ColdFakeDb(world2({ gw2Status: 1 })); // the GW2 lock
+    const s = t(db);
+    // Things the lock would change: alpha's stored baseline (re-published
+    // FOR GW3) and his over-budget preview (cleared by a clean lock); every
+    // squad's TransferState (frozen at the lock).
+    s.Baselines = { alpha: { ForGw: 2, RealizedTenths: 0, Prices: { Sam: 85 } } };
+    s.SquadAlerts = {
+      alpha: { Gw: 2, Kind: 'preview', Issues: ['overBudget'], OverTenths: 5, CreatedAt: 1 },
+    };
+    const before = LATER_NODES.map((n) => JSON.stringify(s[n] ?? null));
+    const realRead = db.read.bind(db);
+    let marked = false;
+    db.read = async (p: string) => {
+      const v = await realRead(p);
+      // The claim's own after-write re-check passes; the mark lands right
+      // after it.
+      if (!marked && p === `${F_ROOT}/LockedWeeks/2` && s.PublishedPicks?.[2] != null) {
+        marked = true;
+        markRewinding(db, 2);
+      }
+      return v;
+    };
+    const spy = logSpy();
+    await runLifecycleSweep(db, AFTER_LOCK2, spy.log);
+    expect(marked).toBe(true);
+    expect(await db.read(`${F_ROOT}/PublishedPicks/2`)).not.toBeNull(); // the rewind's to delete
+    expect(db.writes.filter((w) =>
+      LATER_NODES.some((n) => w.startsWith(`${F_ROOT}/${n}`)))).toEqual([]);
+    expect(LATER_NODES.map((n) => JSON.stringify(s[n] ?? null))).toEqual(before);
+    expect(spy.warns).toContain(STOPPED);
+  });
+
+  it('finalize never marks a week being rewound Scored (warned)', async () => {
+    const db = octWorld(); // games live: the sweep locks GW1
+    await runLifecycleSweep(db, AFTER1);
+    markRewinding(db, 1);
+    for (const g of db.data.Futsal['15'].Date[D1]) g.status = 2;
+    const spy = logSpy();
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: D1, nowUtc: LATER1, log: spy.log,
+    });
+    expect(await db.read(`${F_ROOT}/History/1`)).not.toBeNull();
+    expect(await db.read(`${F_ROOT}/LockedWeeks/1`))
+      .toEqual({ Date: D1, LockAtUtc: LOCK1_MS, Rewinding: true });
+    expect(spy.warns).toContain(
+      'fantasy finalize: week being rewound — not marked Scored');
   });
 
   it('finalize marks Scored (after History lands); a rerun writes nothing there', async () => {
