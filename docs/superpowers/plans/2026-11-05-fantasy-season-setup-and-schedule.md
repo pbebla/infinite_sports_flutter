@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **STATUS: awaiting Fable review. Do not execute before the owner brings back Fable's verdict.**
+> **STATUS: Fable-reviewed 2026-11-05 — approved with 4 must-fixes (M1–M4) and 5 should-fixes.** See `2026-11-05-fable-review-season-setup-and-schedule.md`. Fold M1–M4 and S1–S5 into the tasks below before executing; ruling 1 (Access not copied) is withdrawn in favour of S1.
 
 **Goal:** A fantasy season starts from a Manager button with carried-over prices and positions; mid-season roster joiners enter the market by themselves; schedule changes (cancelled, moved, skipped days, per-week deadlines) never scramble fantasy weeks, and a day cancelled after its deadline is rewound as if it never happened.
 
