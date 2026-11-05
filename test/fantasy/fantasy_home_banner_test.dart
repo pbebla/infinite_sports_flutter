@@ -87,6 +87,7 @@ void main() {
     expect(find.byKey(const ValueKey('fantasy_home_banner')), findsNothing);
 
     configs.add(state());
+    gameweeks.add(const []);
     await tester.pump();
     expect(find.byKey(const ValueKey('fantasy_home_banner')), findsOneWidget);
     expect(find.text('Fantasy is live — set your squad'), findsOneWidget);
@@ -109,6 +110,7 @@ void main() {
       expect(find.byKey(const ValueKey('fantasy_home_banner')), findsNothing);
 
       configs.add(state());
+      gameweeks.add(const []);
       await tester.pump();
       expect(find.byKey(const ValueKey('fantasy_home_banner')), findsOneWidget);
 
@@ -168,6 +170,34 @@ void main() {
       await tester.pump();
       expect(title(tester), 'GW1 locked · games today');
       expect(find.text('Fantasy is live — set your squad'), findsNothing);
+    });
+
+    testWidgets(
+        'the first reveal waits for the schedule: never "set your squad" '
+        'first, then "locked"', (tester) async {
+      await pumpBanner(tester, now: DateTime.utc(2026, 10, 19, 23));
+      configs.add(state());
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.byKey(const ValueKey('fantasy_home_banner')), findsNothing);
+
+      gameweeks.add([gw1()]);
+      await tester.pump();
+      expect(title(tester), 'GW1 locked · games today');
+    });
+
+    testWidgets(
+        'a silent schedule never holds the banner: it shows after 2 s and '
+        'the schedule lands in place', (tester) async {
+      await pumpBanner(tester, now: DateTime.utc(2026, 10, 19, 23));
+      configs.add(state());
+      await tester.pump(const Duration(milliseconds: 1900));
+      expect(find.byKey(const ValueKey('fantasy_home_banner')), findsNothing);
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(title(tester), 'Fantasy is live — set your squad');
+
+      gameweeks.add([gw1()]);
+      await tester.pump();
+      expect(title(tester), 'GW1 locked · games today');
     });
 
     testWidgets('11:59 PM on match day still says games today', (tester) async {
@@ -261,6 +291,7 @@ void main() {
       addTearDown(finished.close);
       await pumpBanner(tester, finished: finished.stream);
       configs.add(state());
+      gameweeks.add(const []);
       await tester.pump();
       expect(find.byKey(const ValueKey('fantasy_home_banner')), findsNothing);
 
@@ -340,6 +371,9 @@ void main() {
       Size size = const Size(420, 900),
       Brightness brightness = Brightness.light,
       bool finished = false,
+      Stream<HistoryWeek?> Function(int week)? historyWeekFor,
+      Stream<OverallStanding?>? overallStates,
+      DateTime Function()? clock,
     }) async {
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1.0;
@@ -356,9 +390,14 @@ void main() {
             liveStates: liveStates ?? live.stream,
             // Default: nothing voided, answered at once (a cache-seeded feed).
             voidedStates: voidedStates ?? Stream<Set<int>>.value(const {}),
+            // Default: nothing settled yet, answered at once.
+            historyWeekFor:
+                historyWeekFor ?? (_) => Stream<HistoryWeek?>.value(null),
+            overallStates:
+                overallStates ?? Stream<OverallStanding?>.value(null),
             signedInUid: () => uid,
             onOpen: opened.add,
-            nowUtc: () => DateTime.utc(2026, 10, 19, 23),
+            nowUtc: clock ?? () => DateTime.utc(2026, 10, 19, 23),
           ),
         ),
       ));
@@ -422,6 +461,7 @@ void main() {
       addTearDown(spy.close);
       await pumpLive(tester, liveStates: spy.stream, uid: null);
       configs.add(state());
+      gameweeks.add(const []);
       await tester.pump();
       expect(listened, isFalse);
       expect(title(tester), 'Fantasy is live — set your squad');
@@ -446,6 +486,7 @@ void main() {
     testWidgets('no Live node (the feed says "none"): no pill', (tester) async {
       await pumpLive(tester);
       configs.add(state());
+      gameweeks.add(const []);
       live.add(FantasyLiveState.none);
       await tester.pump();
       expect(title(tester), 'Fantasy is live — set your squad');
@@ -493,6 +534,7 @@ void main() {
       try {
         await pumpLive(tester);
         configs.add(state());
+        gameweeks.add(const []);
         live.addError(StateError('offline'));
         await tester.pump();
         expect(title(tester), 'Fantasy is live — set your squad');
@@ -561,6 +603,7 @@ void main() {
       try {
         await pumpLive(tester, voidedStates: broken.stream);
         configs.add(state());
+        gameweeks.add(const []);
         live.add(liveState());
         broken.addError(StateError('rules'));
         await tester.pump();
@@ -576,6 +619,7 @@ void main() {
         (tester) async {
       await pumpLive(tester, finished: true);
       configs.add(state());
+      gameweeks.add(const []);
       live.add(liveState());
       await tester.pump();
       expect(title(tester), 'Season over — see the final standings');
@@ -611,5 +655,228 @@ void main() {
         expect(t.style?.decoration, isNot(TextDecoration.underline));
       });
     }
+
+    // ── The final line (owner 2026-11-04) ──────────────────────────────────
+    group('final line once the week settles', () {
+      late StreamController<HistoryWeek?> history;
+      late StreamController<OverallStanding?> overall;
+      late List<int> historyWeeks;
+      var historyListening = false;
+      setUp(() {
+        historyWeeks = [];
+        historyListening = false;
+        history = StreamController<HistoryWeek?>.broadcast(
+            sync: true,
+            onListen: () => historyListening = true,
+            onCancel: () => historyListening = false);
+        overall = StreamController<OverallStanding?>.broadcast(sync: true);
+      });
+      tearDown(() {
+        history.close();
+        overall.close();
+      });
+
+      HistoryWeek week(int tenths,
+              {bool voided = false, bool invalid = false}) =>
+          HistoryWeek(
+              slots: const [],
+              totalTenths: tenths,
+              voided: voided,
+              invalid: invalid);
+
+      Stream<HistoryWeek?> historyFor(int gw) {
+        historyWeeks.add(gw);
+        return history.stream;
+      }
+
+      const settledLive = FantasyLiveState(
+          meta: LiveMeta(gw: 1, state: LiveState.settled), board: {});
+      const finalLine = 'GW1 final · 34 pts · #5';
+
+      Future<void> pumpFinal(WidgetTester tester,
+          {Stream<Set<int>>? voidedStates,
+          String? uid = 'me',
+          DateTime Function()? clock,
+          Size size = const Size(420, 900),
+          Brightness brightness = Brightness.light}) async {
+        await pumpLive(tester,
+            voidedStates: voidedStates,
+            uid: uid,
+            clock: clock,
+            size: size,
+            brightness: brightness,
+            historyWeekFor: historyFor,
+            overallStates: overall.stream);
+        configs.add(state());
+        gameweeks.add([gw1()]);
+        live.add(settledLive);
+      }
+
+      testWidgets(
+          "settled: 'GW1 final · 34 pts · #5' — My Team's numbers, no pill",
+          (tester) async {
+        await pumpFinal(tester);
+        history.add(week(345)); // net 34.5 → 34, like My Team
+        overall.add(const OverallStanding(rank: 5, movement: 2));
+        await tester.pump();
+        expect(title(tester), finalLine);
+        expect(pill(), findsNothing);
+        expect(historyWeeks, [1]);
+
+        await tester.tap(find.byKey(const ValueKey('fantasy_home_banner')));
+        expect(opened, [FantasyHubTab.myTeam]);
+      });
+
+      testWidgets(
+          'before finalize the locked line; the result lands in place when '
+          'finalize writes it', (tester) async {
+        await pumpFinal(tester);
+        history.add(null);
+        overall.add(const OverallStanding(rank: 5));
+        await tester.pump();
+        expect(title(tester), restingLocked);
+
+        history.add(week(345));
+        await tester.pump();
+        expect(title(tester), finalLine);
+      });
+
+      testWidgets('no Overall rank known: the points alone', (tester) async {
+        await pumpFinal(tester);
+        history.add(week(10));
+        overall.add(null);
+        await tester.pump();
+        expect(title(tester), 'GW1 final · 1 pt');
+      });
+
+      testWidgets('the live line wins while the week is still being played',
+          (tester) async {
+        await pumpFinal(tester);
+        history.add(week(345));
+        overall.add(const OverallStanding(rank: 5));
+        live.add(liveState(gw: 1));
+        await tester.pump();
+        expect(title(tester), 'GW1 live · 34 pts · #5');
+        expect(pill(), findsOneWidget);
+      });
+
+      testWidgets(
+          'a voided week or an invalid squad: the locked line (it counts 0; '
+          'My Team says why)', (tester) async {
+        await pumpFinal(tester, voidedStates: Stream.value(const {1}));
+        history.add(week(345));
+        overall.add(const OverallStanding(rank: 5));
+        await tester.pump();
+        expect(title(tester), restingLocked);
+
+        await tester.pumpWidget(const SizedBox());
+        await pumpFinal(tester);
+        history.add(week(0, invalid: true));
+        overall.add(const OverallStanding(rank: 5));
+        await tester.pump();
+        expect(title(tester), restingLocked);
+
+        history.add(week(345, voided: true)); // History's own flag
+        await tester.pump();
+        expect(title(tester), restingLocked);
+      });
+
+      testWidgets(
+          'a cold open joins the reveal: hidden until History answers, so the '
+          'FIRST frame already has the result', (tester) async {
+        await pumpFinal(tester);
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(
+            find.byKey(const ValueKey('fantasy_home_banner')), findsNothing);
+
+        history.add(week(345));
+        overall.add(const OverallStanding(rank: 5));
+        await tester.pump();
+        expect(title(tester), finalLine);
+      });
+
+      testWidgets(
+          'History silent for 2 s: the banner shows the locked line and the '
+          'late result lands in place', (tester) async {
+        await pumpFinal(tester);
+        await tester.pump(const Duration(milliseconds: 2100));
+        expect(title(tester), restingLocked);
+
+        history.add(week(345));
+        overall.add(const OverallStanding(rank: 5));
+        await tester.pump();
+        expect(title(tester), finalLine);
+      });
+
+      testWidgets('the next morning, until the next week opens: still final',
+          (tester) async {
+        await pumpFinal(tester, clock: () => DateTime.utc(2026, 10, 20, 18));
+        history.add(week(345));
+        overall.add(const OverallStanding(rank: 5));
+        await tester.pump();
+        expect(title(tester), finalLine);
+      });
+
+      testWidgets('the next week opening drops the line and stops listening',
+          (tester) async {
+        var now = DateTime.utc(2026, 10, 20, 21);
+        final gw2 = Gameweek(
+          number: 2,
+          date: '10262026',
+          lockUtc: DateTime.utc(2026, 10, 26, 22),
+          opensUtc: DateTime.utc(2026, 10, 20, 7),
+        );
+        await pumpLive(tester,
+            historyWeekFor: historyFor,
+            overallStates: overall.stream,
+            clock: () => now);
+        configs.add(state());
+        gameweeks.add([gw1(), gw2]);
+        live.add(settledLive);
+        history.add(week(345));
+        overall.add(const OverallStanding(rank: 5));
+        await tester.pump();
+        expect(title(tester), finalLine);
+        expect(historyListening, isTrue);
+
+        now = DateTime.utc(2026, 10, 20, 22, 1); // GW2 open, GW1's day over
+        await tester.pump(const Duration(seconds: 61)); // the 60 s refresh
+        expect(title(tester), 'Fantasy is live — set your squad');
+        expect(historyListening, isFalse);
+        expect(historyWeeks, [1]);
+      });
+
+      testWidgets('editing open, or nobody signed in: no History listener',
+          (tester) async {
+        await pumpFinal(tester, clock: () => DateTime.utc(2026, 10, 17, 12));
+        await tester.pump();
+        expect(title(tester), 'Fantasy is live — set your squad');
+        expect(historyListening, isFalse);
+
+        await tester.pumpWidget(const SizedBox());
+        await pumpFinal(tester, uid: null);
+        await tester.pump();
+        expect(title(tester), restingLocked);
+        expect(historyListening, isFalse);
+      });
+
+      for (final brightness in Brightness.values) {
+        testWidgets(
+            '360 px: the final line wraps, never overflows — $brightness',
+            (tester) async {
+          await pumpFinal(tester,
+              size: const Size(360, 640), brightness: brightness);
+          history.add(week(1345));
+          overall.add(const OverallStanding(rank: 128));
+          await tester.pump();
+          expect(tester.takeException(), isNull);
+          expect(title(tester), 'GW1 final · 134 pts · #128');
+          final r = tester.getRect(
+              find.byKey(const ValueKey('fantasy_home_banner_title')));
+          expect(r.left, greaterThanOrEqualTo(0));
+          expect(r.right, lessThanOrEqualTo(360));
+        });
+      }
+    });
   });
 }

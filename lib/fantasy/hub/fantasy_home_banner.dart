@@ -19,6 +19,13 @@
 // next morning until the next week opens (the hub's own chip), and "Squads
 // locked by the league" under the owner's lock override.
 //
+// Once that locked week has SETTLED (finalize ran) the title is his final
+// result instead — `GW2 final · 34 pts · #5`, exactly My Team's settled strip
+// (finalBannerLine) — from match night until the next week opens. His own
+// `History/<gw>/<uid>` and Overall row are listened to only while the week is
+// locked (one node each), and they join the first reveal (bounded 2 s) with
+// the schedule, so a cold open never shows "set your squad" or "locked" first.
+//
 // Live everywhere (Task 6): while the manager's gameweek is being played the
 // banner reads `GW3 live · 34 pts · #5` (his own row of the live board —
 // liveBannerLine) with the shared LIVE pill in place of "Fantasy is live — set
@@ -52,7 +59,7 @@ import 'package:infinite_sports_flutter/fantasy/engine/league_time.dart'
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart'
-    show liveBannerLine;
+    show finalBannerLine, liveBannerLine;
 import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 
@@ -66,6 +73,8 @@ class FantasyHomeBanner extends StatefulWidget {
     this.finishedStates,
     this.liveStates,
     this.voidedStates,
+    this.historyWeekFor,
+    this.overallStates,
     this.signedInUid,
     this.onOpen,
     this.nowUtc,
@@ -86,6 +95,11 @@ class FantasyHomeBanner extends StatefulWidget {
 
   /// Replaces `FantasyService.watchVoidedWeeks` (the owner-voided weeks).
   final Stream<Set<int>>? voidedStates;
+
+  /// Replace `FantasyService.watchHistoryWeek` / `watchOverallStanding` (his
+  /// own settled week and Overall row, for the final line).
+  final Stream<HistoryWeek?> Function(int week)? historyWeekFor;
+  final Stream<OverallStanding?>? overallStates;
 
   /// The signed-in uid (null / empty = nobody); null seam = FirebaseAuth.
   final String? Function()? signedInUid;
@@ -110,6 +124,7 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
     season: widget.season,
     owner: 'FantasyHomeBanner',
     onChanged: () {
+      _syncFinalWeek();
       if (mounted) setState(() {});
     },
     configStates: widget.configStates,
@@ -158,6 +173,22 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
 
   bool get _liveReady => _liveGate.ready;
 
+  // ── The settled week's final line (joins the first reveal) ────────────
+  int? _finalWeek; // the locked week listened to (null = none)
+  AnswerGate? _finalGate;
+  StreamSubscription<HistoryWeek?>? _historySub;
+  StreamSubscription<OverallStanding?>? _overallSub;
+  HistoryWeek? _history;
+  OverallStanding? _overall;
+
+  /// The banner has shown once: later waits never hide it again.
+  bool _revealed = false;
+
+  /// The schedule's first answer joins the first reveal, bounded like the
+  /// live feeds: a silent schedule never holds the banner back.
+  Timer? _scheduleWait;
+  bool _scheduleWaitPassed = false;
+
   FantasyConfigState? get _config => _schedule.config;
   List<Gameweek> get _gameweeks => _schedule.gameweeks ?? const [];
 
@@ -167,10 +198,18 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
     _schedule.start();
     _seasonFinished.start();
     _startLive();
+    _syncFinalWeek();
+    _scheduleWait = Timer(kLiveJoinWait, () {
+      _scheduleWaitPassed = true;
+      if (mounted && _schedule.gameweeks == null) setState(() {});
+    });
     // 60s refresh keeps the countdown text honest (information, not
     // decoration — no per-tick animation); cancelled in dispose.
     _ticker = Timer.periodic(const Duration(seconds: 60), (_) {
-      if (mounted && _config != null) setState(() {});
+      if (mounted && _config != null) {
+        _syncFinalWeek(); // the lock / the next week opening moves it
+        setState(() {});
+      }
     });
   }
 
@@ -182,6 +221,8 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
     _liveGate.dispose();
     _liveSub?.cancel();
     _voidedSub?.cancel();
+    _cancelFinal();
+    _scheduleWait?.cancel();
     super.dispose();
   }
 
@@ -251,6 +292,66 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
     );
   }
 
+  /// The current gameweek while it is LOCKED under the automatic lock (its
+  /// deadline → the next week opening); null otherwise.
+  Gameweek? _lockedGameweek() {
+    if (_config?.lockOverride != FantasyLockOverride.auto) return null;
+    final now = _now;
+    final gw = currentGameweek(_gameweeks, now);
+    return gw != null && gw.statusAt(now) == GameweekStatus.locked ? gw : null;
+  }
+
+  /// Listens to his own `History/<gw>/<uid>` and Overall row while the
+  /// current gameweek is locked and someone is signed in — the only time the
+  /// final line can show. A week change drops the old week's numbers at once;
+  /// an error keeps the last good value (a final score stays true).
+  void _syncFinalWeek() {
+    final uid = _uid;
+    final week = uid == null ? null : _lockedGameweek()?.number;
+    if (week == _finalWeek) return;
+    _cancelFinal();
+    _finalWeek = week;
+    if (uid == null || week == null) return;
+    late final AnswerGate gate;
+    gate = AnswerGate(
+      owner: 'FantasyHomeBanner',
+      onChanged: () {
+        gate.settle();
+        if (mounted) setState(() {});
+      },
+    );
+    _finalGate = gate..start();
+    _historySub = gate.listen<HistoryWeek?>(
+      'history feed',
+      () =>
+          widget.historyWeekFor?.call(week) ??
+          FantasyService.watchHistoryWeek(
+              widget.sport, widget.season, uid, week),
+      onData: (v) => _history = v,
+    );
+    _overallSub = gate.listen<OverallStanding?>(
+      'overall feed',
+      () =>
+          widget.overallStates ??
+          FantasyService.watchOverallStanding(
+              widget.sport, widget.season, uid),
+      onData: (v) => _overall = v,
+    );
+    // A feed that could not even be created already answered.
+    gate.settle();
+  }
+
+  void _cancelFinal() {
+    _historySub?.cancel();
+    _overallSub?.cancel();
+    _historySub = null;
+    _overallSub = null;
+    _finalGate?.dispose();
+    _finalGate = null;
+    _history = null;
+    _overall = null;
+  }
+
   /// "GW3 locks in 2d 4h" while the current gameweek is OPEN under the
   /// automatic lock; null in every other state (the banner stays slim) —
   /// and always once the season is over.
@@ -281,13 +382,10 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
       case FantasyLockOverride.locked:
         return 'Squads locked by the league';
       case FantasyLockOverride.auto:
-        final now = _now;
-        final gw = currentGameweek(_gameweeks, now);
-        if (gw == null || gw.statusAt(now) != GameweekStatus.locked) {
-          return setYourSquad;
-        }
+        final gw = _lockedGameweek();
+        if (gw == null) return setYourSquad;
         // Hour 24 = the midnight that ends match day, league time.
-        final matchDay = now.isBefore(lockInstantUtc(gw.date, hour: 24));
+        final matchDay = _now.isBefore(lockInstantUtc(gw.date, hour: 24));
         return matchDay
             ? 'GW${gw.number} locked · games today'
             : 'GW${gw.number} locked';
@@ -296,9 +394,19 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
 
   @override
   Widget build(BuildContext context) {
-    if (_config == null || !_seasonFinished.ready || !_liveReady) {
+    // The FIRST reveal also waits for the schedule (the title depends on it)
+    // and a locked week's final numbers (each bounded 2 s), so its first frame
+    // already says the right thing; after it, late values land in place.
+    final firstFrameReady =
+        (_schedule.gameweeks != null || _scheduleWaitPassed) &&
+            (_finalGate?.ready ?? true);
+    if (_config == null ||
+        !_seasonFinished.ready ||
+        !_liveReady ||
+        (!_revealed && !firstFrameReady)) {
       return const SizedBox.shrink();
     }
+    _revealed = true;
     final accent = FantasyBanner.accent(context);
     final finished = _seasonFinished.finished;
     // The live line (never once the season is over): his row of the live
@@ -306,6 +414,18 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
     final liveLine = finished || !_voidedKnown
         ? null
         : liveBannerLine(live: _live, uid: _uid, voidedWeeks: _voided);
+    // Once the locked week has settled: his final result (never over a live
+    // line, never once the season is over, never with the Voided set unknown).
+    final finalWeek = _finalWeek;
+    final finalLine =
+        liveLine != null || finished || !_voidedKnown || finalWeek == null
+            ? null
+            : finalBannerLine(
+                week: finalWeek,
+                uid: _uid,
+                history: _history,
+                overall: _overall,
+                voidedWeeks: _voided);
     final deadline = liveLine == null ? _deadlineText() : null;
 
     return Padding(
@@ -360,7 +480,7 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
                           )
                         else
                           Text(
-                            _restingTitle(),
+                            finalLine ?? _restingTitle(),
                             key: const ValueKey('fantasy_home_banner_title'),
                             // Wraps, never underlined (house rules).
                             softWrap: true,

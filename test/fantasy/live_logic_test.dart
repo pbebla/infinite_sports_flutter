@@ -630,6 +630,60 @@ void main() {
     });
   });
 
+  group('finalBannerLine (the home banner once the week settles)', () {
+    HistoryWeek week(int? tenths,
+            {bool voided = false, bool invalid = false}) =>
+        HistoryWeek(
+            slots: const [],
+            totalTenths: tenths,
+            voided: voided,
+            invalid: invalid);
+    const rank5 = OverallStanding(rank: 5, movement: 2);
+
+    String? line(HistoryWeek? h,
+            {OverallStanding? overall = rank5, Set<int> voided = const {}}) =>
+        finalBannerLine(
+            week: 2,
+            uid: 'me',
+            history: h,
+            overall: overall,
+            voidedWeeks: voided);
+
+    test('"GW{n} final · {W} pts · #{R}": My Team\'s settled numbers', () {
+      // Net tenths truncate toward zero, like the server's wholePoints.
+      expect(line(week(345)), 'GW2 final · 34 pts · #5');
+      expect(
+          lockedStripText(resolveLockedWeek(
+                  week: 2,
+                  uid: 'me',
+                  voidedWeeks: const {},
+                  sources:
+                      LockedWeekSources(history: week(345), overall: rank5))
+              .view),
+          'Final · 34 pts · #5');
+    });
+
+    test('one point, zero and a transfer-hit minus are all real numbers', () {
+      expect(line(week(10)), 'GW2 final · 1 pt · #5');
+      expect(line(week(0)), 'GW2 final · 0 pts · #5');
+      expect(line(week(-40)), 'GW2 final · -4 pts · #5');
+    });
+
+    test('no Overall rank known: the points alone', () {
+      expect(line(week(345), overall: null), 'GW2 final · 34 pts');
+    });
+
+    test('none before finalize, without TotalTenths, voided or invalid', () {
+      expect(line(null), isNull);
+      expect(line(week(null)), isNull);
+      expect(line(week(345), voided: {2}), isNull);
+      expect(line(week(345, voided: true)), isNull);
+      expect(line(week(0, invalid: true)), isNull);
+      // Another week's void changes nothing.
+      expect(line(week(345), voided: {1}), 'GW2 final · 34 pts · #5');
+    });
+  });
+
   // ── Task 7: the squad viewer's week line ───────────────────────────────
 
   group('viewerWeekStrip (the manager squad viewer\'s week line)', () {

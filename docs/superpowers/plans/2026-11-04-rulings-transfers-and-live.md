@@ -88,3 +88,7 @@ Every decision Opus made on your behalf while the two plans were built, in order
       - The next morning, until the next week opens at 3 PM, it says plain "GW2 locked", the same as My Team.
       - When you lock the league by hand, it says "Squads locked by the league".
     - *If wrong:* one word change.
+    - **Final line added 2026-11-04 (your OK).**
+      - Once the week's points are final, the banner shows your result instead, for example "GW2 final · 34 pts · #5". It's the same numbers as My Team, and it stays until the next week opens on Monday at 3 PM.
+      - A voided week or a team that didn't count keeps "GW2 locked"; My Team explains why.
+      - Fans with no team see "GW2 locked".

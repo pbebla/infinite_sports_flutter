@@ -189,6 +189,31 @@ String? liveBannerLine({
   return 'GW$week live · ${pointsText(points)} · #${row.r}';
 }
 
+/// The front page banner's line once the locked [week] has SETTLED (owner
+/// 2026-11-04): `GW{n} final · {W} pts · #{R}` — exactly My Team's settled
+/// strip ([resolveLockedWeek] decides): his own `History/<gw>/<uid>` net
+/// points and his official Overall rank (left off when unknown). null — the
+/// banner keeps its locked line — before finalize (no History), for a week
+/// the owner voided (the Voided set or History's own flag) or a squad judged
+/// invalid: both count 0 and My Team says why.
+String? finalBannerLine({
+  required int week,
+  required String? uid,
+  required HistoryWeek? history,
+  required OverallStanding? overall,
+  required Set<int> voidedWeeks,
+}) {
+  final view = resolveLockedWeek(
+    week: week,
+    uid: uid,
+    voidedWeeks: voidedWeeks,
+    sources: LockedWeekSources(history: history, overall: overall),
+  ).view;
+  if (view.kind != LockedWeekKind.settled) return null;
+  final rank = view.rank == null ? '' : ' · #${view.rank}';
+  return 'GW$week final · ${pointsText(view.weekPoints!)}$rank';
+}
+
 /// The match tab's line under its header, verbatim from the plan: `Your
 /// gameweek so far: {W} pts · #{R}` — this manager's whole points so far this
 /// gameweek and his Overall rank with them, both from HIS row of the live
