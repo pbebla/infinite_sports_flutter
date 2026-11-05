@@ -157,6 +157,87 @@ void main() {
         findsNothing);
   });
 
+  group('locked: never "set your squad" while saving is shut (owner 2026-11-04)',
+      () {
+    testWidgets('lock → midnight on match day: "GW1 locked · games today"',
+        (tester) async {
+      // 4 PM PDT on match day, an hour after the 3 PM lock.
+      await pumpBanner(tester, now: DateTime.utc(2026, 10, 19, 23));
+      configs.add(state());
+      gameweeks.add([gw1()]);
+      await tester.pump();
+      expect(title(tester), 'GW1 locked · games today');
+      expect(find.text('Fantasy is live — set your squad'), findsNothing);
+    });
+
+    testWidgets('11:59 PM on match day still says games today', (tester) async {
+      await pumpBanner(tester, now: DateTime.utc(2026, 10, 20, 6, 59));
+      configs.add(state());
+      gameweeks.add([gw1()]);
+      await tester.pump();
+      expect(title(tester), 'GW1 locked · games today');
+    });
+
+    testWidgets(
+        'the next morning, before the next week opens: plain "GW1 locked"',
+        (tester) async {
+      // 00:00 and 2:59 PM PDT the day after (lock + 24 h = 3 PM).
+      for (final now in [
+        DateTime.utc(2026, 10, 20, 7),
+        DateTime.utc(2026, 10, 20, 21, 59),
+      ]) {
+        await pumpBanner(tester, now: now);
+        configs.add(state());
+        gameweeks.add([gw1()]);
+        await tester.pump();
+        expect(title(tester), 'GW1 locked', reason: '$now');
+      }
+    });
+
+    testWidgets('league override: locked says so, open still invites a save',
+        (tester) async {
+      await pumpBanner(tester); // GW1 open by the clock
+      configs.add(state(FantasyLockOverride.locked));
+      gameweeks.add([gw1()]);
+      await tester.pump();
+      expect(title(tester), 'Squads locked by the league');
+      expect(find.byKey(const ValueKey('fantasy_home_banner_deadline')),
+          findsNothing);
+
+      configs.add(state(FantasyLockOverride.open));
+      await tester.pump();
+      expect(title(tester), 'Fantasy is live — set your squad');
+    });
+
+    testWidgets('season over wins over a locked week', (tester) async {
+      await pumpBanner(tester,
+          now: DateTime.utc(2026, 10, 19, 23),
+          finished: Stream<bool>.value(true));
+      configs.add(state());
+      gameweeks.add([gw1()]);
+      await tester.pump();
+      expect(title(tester), 'Season over — see the final standings');
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('360 px: the locked line wraps, never overflows — $brightness',
+          (tester) async {
+        await pumpBanner(tester,
+            now: DateTime.utc(2026, 10, 19, 23),
+            size: const Size(360, 640),
+            brightness: brightness);
+        configs.add(state());
+        gameweeks.add([gw1()]);
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        final r = tester
+            .getRect(find.byKey(const ValueKey('fantasy_home_banner_title')));
+        expect(r.left, greaterThanOrEqualTo(0));
+        expect(r.right, lessThanOrEqualTo(360));
+      });
+    }
+  });
+
   group('season over (Opus audit Minor 8)', () {
     testWidgets(
         '"Season over — see the final standings", no deadline chip, the tap '
@@ -246,6 +327,9 @@ void main() {
         FantasyLiveState(meta: LiveMeta(gw: gw, state: state), board: board);
 
     const liveLine = 'GW3 live · 34 pts · #5';
+    // The clock below is an hour after GW1's lock on match day: with the
+    // schedule loaded, the no-live-line title is the locked one.
+    const restingLocked = 'GW1 locked · games today';
 
     // The pill pulses forever: pump fixed durations, never pumpAndSettle.
     Future<void> pumpLive(
@@ -318,14 +402,14 @@ void main() {
       gameweeks.add([gw1()]);
       live.add(liveState(board: const {'me': LiveBoardRow(o: 120, r: 5)}));
       await tester.pump();
-      expect(title(tester), 'Fantasy is live — set your squad');
+      expect(title(tester), restingLocked);
       expect(pill(), findsNothing);
 
       live.add(liveState(board: const {
         'someone': LiveBoardRow(o: 1, r: 1, w: 9),
       }));
       await tester.pump();
-      expect(title(tester), 'Fantasy is live — set your squad');
+      expect(title(tester), restingLocked);
       expect(pill(), findsNothing);
     });
 
@@ -355,7 +439,7 @@ void main() {
 
       live.add(liveState(state: LiveState.settled, board: const {}));
       await tester.pump();
-      expect(title(tester), 'Fantasy is live — set your squad');
+      expect(title(tester), restingLocked);
       expect(pill(), findsNothing);
     });
 
@@ -394,7 +478,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 1900));
       expect(find.byKey(const ValueKey('fantasy_home_banner')), findsNothing);
       await tester.pump(const Duration(milliseconds: 200));
-      expect(title(tester), 'Fantasy is live — set your squad');
+      expect(title(tester), restingLocked);
 
       live.add(liveState());
       await tester.pump();
@@ -427,7 +511,7 @@ void main() {
       gameweeks.add([gw1()]);
       live.add(liveState());
       await tester.pump();
-      expect(title(tester), 'Fantasy is live — set your squad');
+      expect(title(tester), restingLocked);
       expect(pill(), findsNothing);
     });
 
@@ -459,7 +543,7 @@ void main() {
       gameweeks.add([gw1()]);
       live.add(liveState());
       await tester.pump(const Duration(milliseconds: 2100));
-      expect(title(tester), 'Fantasy is live — set your squad');
+      expect(title(tester), restingLocked);
 
       late.add(const {});
       await tester.pump();

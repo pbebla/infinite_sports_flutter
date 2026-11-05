@@ -84,3 +84,7 @@ Every decision Opus made on your behalf while the two plans were built, in order
 24. **One home-banner line is left for your words.**
     - Between the deadline and kickoff it still says "Fantasy is live — set your squad". It gets replaced by the live line at kickoff.
     - *If wrong:* that line shows for an hour or so before games.
+    - **Done 2026-11-04 with your wording.** On match day after the deadline it says "GW2 locked · games today". I also fixed two more times it wrongly said "set your squad":
+      - The next morning, until the next week opens at 3 PM, it says plain "GW2 locked", the same as My Team.
+      - When you lock the league by hand, it says "Squads locked by the league".
+    - *If wrong:* one word change.

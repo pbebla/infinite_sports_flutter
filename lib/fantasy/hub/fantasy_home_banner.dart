@@ -13,6 +13,12 @@
 // Leaderboards (Overall). The banner waits for that flag too (session-cached,
 // a failing feed = not finished), so its copy never flips after it shows.
 //
+// "Set your squad" only while saving is actually possible (owner's wording
+// 2026-11-04): once the current gameweek locks the banner says so — "GW2
+// locked · games today" on match day (league time), plain "GW2 locked" the
+// next morning until the next week opens (the hub's own chip), and "Squads
+// locked by the league" under the owner's lock override.
+//
 // Live everywhere (Task 6): while the manager's gameweek is being played the
 // banner reads `GW3 live · 34 pts · #5` (his own row of the live board —
 // liveBannerLine) with the shared LIVE pill in place of "Fantasy is live — set
@@ -41,6 +47,8 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/engine/league_time.dart'
+    show lockInstantUtc;
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart'
@@ -260,6 +268,32 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
         '${formatCountdown(gw.lockUtc.difference(now))}';
   }
 
+  /// The title whenever there is no live line: never "set your squad" while
+  /// the squad can't be saved.
+  String _restingTitle() {
+    if (_seasonFinished.finished) {
+      return 'Season over — see the final standings';
+    }
+    const setYourSquad = 'Fantasy is live — set your squad';
+    switch (_config?.lockOverride ?? FantasyLockOverride.auto) {
+      case FantasyLockOverride.open:
+        return setYourSquad;
+      case FantasyLockOverride.locked:
+        return 'Squads locked by the league';
+      case FantasyLockOverride.auto:
+        final now = _now;
+        final gw = currentGameweek(_gameweeks, now);
+        if (gw == null || gw.statusAt(now) != GameweekStatus.locked) {
+          return setYourSquad;
+        }
+        // Hour 24 = the midnight that ends match day, league time.
+        final matchDay = now.isBefore(lockInstantUtc(gw.date, hour: 24));
+        return matchDay
+            ? 'GW${gw.number} locked · games today'
+            : 'GW${gw.number} locked';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_config == null || !_seasonFinished.ready || !_liveReady) {
@@ -326,9 +360,7 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
                           )
                         else
                           Text(
-                            finished
-                                ? 'Season over — see the final standings'
-                                : 'Fantasy is live — set your squad',
+                            _restingTitle(),
                             key: const ValueKey('fantasy_home_banner_title'),
                             // Wraps, never underlined (house rules).
                             softWrap: true,
