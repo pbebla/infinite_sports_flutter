@@ -393,6 +393,12 @@ export { onFantasyVoidWritten } from './fantasy_void';
 
 export { onFantasyConfigWritten } from './fantasy_schedule';
 
+// ---- Infinite Fantasy (season setup + schedule plan 2026-11-05, Task 6): the
+// Manager previews and starts a season — carry-over prices and positions, the
+// season pass pre-filled ----
+
+export { previewFantasySeason, startFantasySeason } from './fantasy_season';
+
 // ---- Infinite Fantasy (spec §3): holder protection on position changes ----
 
 export { onFantasyPositionWritten } from './fantasy_positions';

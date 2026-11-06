@@ -14,7 +14,9 @@
 //  - cfg.lockHour is only the AUTOMATIC deadline's default; only the engine
 //    (gameweeks.ts) and the config parser (fantasy_config.ts) may read it.
 //    news.ts has its own publish slot and never reads it, so it is
-//    whitelisted for the day it needs to.
+//    whitelisted for the day it needs to. season_start.ts is whitelisted
+//    because the Manager's Start preview SHOWS the setting a new season
+//    copies (settings.lockHour); it never computes a deadline from it.
 //
 // This test greps the non-test sources under functions/src and names every
 // offending file:line, so a future change that reintroduces one of these
@@ -107,9 +109,9 @@ describe('schedule guard', () => {
       'Offending call sites:', hits)).toEqual([]);
   });
 
-  it('cfg.lockHour is read only by gameweeks.ts, fantasy_config.ts and news.ts', () => {
+  it('cfg.lockHour is read only by gameweeks.ts, fantasy_config.ts, news.ts and season_start.ts', () => {
     const hits = offenders(/\.lockHour\b/,
-      ['gameweeks.ts', 'fantasy_config.ts', 'news.ts']);
+      ['gameweeks.ts', 'fantasy_config.ts', 'news.ts', 'season_start.ts']);
     expect(hits, failure(
       'cfg.lockHour is only the automatic deadline default — read the ' +
       'gameweek\'s lockUtc instead (it also honours overrides and early ' +

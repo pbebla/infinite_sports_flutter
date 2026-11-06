@@ -14,7 +14,9 @@ function intDiv(a: number, b: number): number {
   return Math.trunc(a / b);
 }
 
-function snap(tenths: number, cfg: FantasyConfig): number {
+/** Whole tenths to the nearest price step, then clamped into
+ *  [priceMin, priceMax]. Callers with a fractional value round it first. */
+export function snapPrice(tenths: number, cfg: FantasyConfig): number {
   const step = cfg.priceStepTenths;
   // Dart: ((tenths + step ~/ 2) ~/ step) * step
   const snapped = intDiv(tenths + intDiv(step, 2), step) * step;
@@ -42,7 +44,7 @@ export function openingPrices(
     // so Math.round (half toward +inf) is identical.
     const tenths = cfg.priceMinTenths +
       Math.round((cfg.priceMaxTenths - cfg.priceMinTenths) * t);
-    out[id] = snap(tenths, cfg);
+    out[id] = snapPrice(tenths, cfg);
   }
   return out;
 }
