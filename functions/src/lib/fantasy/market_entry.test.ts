@@ -195,7 +195,7 @@ describe('loadCarryOver', () => {
     expect(carry('Robert', 'u2')?.priceTenths).toBe(70);
   });
 
-  it('the uid in an older season beats a same-name entry of a newer one', async () => {
+  it('a newer season\'s name match beats an older season\'s uid match when the newer entry has no conflicting uid', async () => {
     const db = new FakeDb({
       Futsal: { 14: { 'Line Ups': { T: { Ben: { UID: 'u7' } } } } },
       Fantasy: { Futsal: {
@@ -204,8 +204,54 @@ describe('loadCarryOver', () => {
       } },
     });
     const carry = await loadCarryOver(db, 'Futsal', '16');
-    expect(carry('Ben', 'u7')).toEqual({ priceTenths: 80, position: 'DEF', season: '14' });
+    // Season 15 is checked first: no uid match there, and its 'ben' carries no
+    // uid of its own, so the name match wins over season 14's uid match.
+    expect(carry('Ben', 'u7')).toEqual({ priceTenths: 100, position: 'GK', season: '15' });
     expect(carry('Ben', null)?.season).toBe('15');
+  });
+
+  it('within one season the uid match beats a same-name entry of another uid', async () => {
+    const db = new FakeDb({
+      Fantasy: { Futsal: { 15: { Players: players({
+        Ben: { position: 'GK', priceTenths: 100, eligible: true, uid: 'u1' },
+        'Ben R': { position: 'DEF', priceTenths: 80, eligible: true, uid: 'u7' },
+      }) } } },
+    });
+    const carry = await loadCarryOver(db, 'Futsal', '16');
+    expect(carry('Ben', 'u7')).toEqual({ priceTenths: 80, position: 'DEF', season: '15' });
+  });
+
+  it('a same-name entry linked to a different uid is not matched (namesake)', async () => {
+    const db = new FakeDb({
+      Futsal: { 15: { 'Line Ups': { T: { Cal: { UID: 'u1' } } } } },
+      Fantasy: { Futsal: { 15: { Players: players({
+        Ben: { position: 'GK', priceTenths: 100, eligible: true, uid: 'u1' },
+        Cal: { position: 'DEF', priceTenths: 90, eligible: true }, // linked via Line Ups
+        Dee: { position: 'ATT', priceTenths: 70, eligible: true },
+      }) } } },
+    });
+    const carry = await loadCarryOver(db, 'Futsal', '16');
+    expect(carry('Ben', 'u2')).toBeNull(); // a different Ben
+    expect(carry('Cal', 'u2')).toBeNull(); // linked through that season's Line Ups
+    expect(carry('Ben', 'u1')?.priceTenths).toBe(100); // the same Ben
+    expect(carry('Ben', null)?.priceTenths).toBe(100); // no uid to contradict it
+    expect(carry('Dee', 'u2')?.priceTenths).toBe(70); // an unlinked entry is no namesake
+  });
+
+  it('a namesake in a newer season is skipped: the older season decides', async () => {
+    const db = new FakeDb({
+      Fantasy: { Futsal: {
+        14: { Players: players({ Ben: { position: 'DEF', priceTenths: 60, eligible: true } }) },
+        15: { Players: players({
+          Ben: { position: 'GK', priceTenths: 100, eligible: true, uid: 'u1' },
+        }) },
+      } },
+    });
+    const carry = await loadCarryOver(db, 'Futsal', '16');
+    // 15: this Ben is another uid's (skip). 14: an unlinked 'Ben' -> match.
+    expect(carry('Ben', 'u2')).toEqual({ priceTenths: 60, position: 'DEF', season: '14' });
+    // The real u1 is still found in 15.
+    expect(carry('Ben', 'u1')?.season).toBe('15');
   });
 
   it('only seasons below the one being started count, and only with a Players node', async () => {

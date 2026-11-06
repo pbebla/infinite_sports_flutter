@@ -16,6 +16,7 @@ import { makeLeagueTriggers } from './league_watch';
 import { makeInsiderVerifyTrigger } from './insiders_verify';
 import { makeFantasyFinalizeTrigger } from './fantasy_finalize';
 import { makeFantasyLiveTrigger } from './fantasy_live';
+import { makeFantasyRosterTrigger } from './fantasy_roster';
 
 admin.initializeApp();
 
@@ -361,18 +362,24 @@ export { fantasyLifecycleSweep, fantasyMondayReprice } from './fantasy_lifecycle
  *  ... (makeLeagueTriggers convention: sport baked into the path). Both
  *  handlers no-op for seasons without a Fantasy/<sport>/<season>/Config;
  *  onGameLive returns with zero reads unless a scoring key of a game in
- *  play changed. */
+ *  play changed. onLineupsWritten (fantasyFutsal-onLineupsWritten, ...: a
+ *  player added to a team mid-season joins the market, Task 7 of the season
+ *  setup plan) returns with zero reads unless a roster's player keys or UIDs
+ *  changed. */
 export const fantasyFutsal = {
   ...makeFantasyFinalizeTrigger('Futsal'),
   ...makeFantasyLiveTrigger('Futsal'),
+  ...makeFantasyRosterTrigger('Futsal'),
 };
 export const fantasyBasketball = {
   ...makeFantasyFinalizeTrigger('Basketball'),
   ...makeFantasyLiveTrigger('Basketball'),
+  ...makeFantasyRosterTrigger('Basketball'),
 };
 export const fantasyFlagFootball = {
   ...makeFantasyFinalizeTrigger('Flag Football'),
   ...makeFantasyLiveTrigger('Flag Football'),
+  ...makeFantasyRosterTrigger('Flag Football'),
 };
 
 // ---- Infinite Fantasy P4 (E): transfer accounting on squad saves ----

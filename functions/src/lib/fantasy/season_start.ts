@@ -39,7 +39,8 @@ import {
 } from './fantasy_config';
 import {
   CarryOver, FantasyPosition, loadCarryOverIndex, MarketEntry,
-  mapRegistrationPosition, positionAveragePrice, rosterOf, signupPositionField,
+  mapRegistrationPosition, positionAveragePrice, readProfilePhoto, readSignupPosition,
+  rosterOf,
 } from './market_entry';
 import type { FantasyLogger } from './orchestration';
 import {
@@ -256,17 +257,13 @@ async function planSeason(db: FantasyDb, sport: string, season: string): Promise
     return true;
   });
 
-  const field = signupPositionField(sport);
   const partial = await Promise.all(roster.map(async (p) => {
     const carried: CarryOver | null = carry.lookup(p.name, p.uid);
-    const [photoRaw, signupRaw] = await Promise.all([
-      p.uid === null ? null : db.read(`PublicProfiles/${p.uid}/ProfileUrl`),
-      carried !== null || p.uid === null ? null
-        : db.read(`Users/${p.uid}/Information/${field}`),
+    const [photoUrl, signup] = await Promise.all([
+      p.uid === null ? null : readProfilePhoto(db, p.uid),
+      carried !== null || p.uid === null ? '' : readSignupPosition(db, sport, p.uid),
     ]);
-    const photo = typeof photoRaw === 'string' ? photoRaw.trim() : '';
-    const signup = signupRaw === null || signupRaw === undefined ? '' : String(signupRaw);
-    return { p, carried, photoUrl: photo.length > 0 ? photo : null, signup };
+    return { p, carried, photoUrl, signup };
   }));
 
   // The average is over the RETURNING players only — brand-new rows never

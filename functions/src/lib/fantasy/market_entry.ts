@@ -11,9 +11,10 @@
 //
 // Pure TS behind the FantasyDb seam — no firebase imports.
 
-import { FantasyConfig, FantasyPosition, parsePosition } from './fantasy_config';
+import { FantasyConfig, FantasyPosition } from './fantasy_config';
 import {
-  childEntries, FantasyDb, fantasyRoot, isPlainMap, toIntLoose,
+  childEntries, FantasyDb, fantasyRoot, isPlainMap, marketPlayersOf, marketPricesOf,
+  toIntLoose,
 } from './orchestration_db';
 import { snapPrice } from './pricing';
 
@@ -52,6 +53,26 @@ export function signupPositionField(sport: string): string {
   return `${sport.replace(/\s+/g, '')}Position`;
 }
 
+/** A player's profile photo (`PublicProfiles/<uid>/ProfileUrl`), trimmed;
+ *  null when there is none or it is blank. A failed read throws — a photo
+ *  that could not be read is not "no photo". */
+export async function readProfilePhoto(db: FantasyDb, uid: string): Promise<string | null> {
+  const raw = await db.read(`PublicProfiles/${uid}/ProfileUrl`);
+  const photo = typeof raw === 'string' ? raw.trim() : '';
+  return photo.length > 0 ? photo : null;
+}
+
+/** A player's sign-up position as the registration form stored it
+ *  (`Users/<uid>/Information/<Sport>Position`, e.g. 'Defender;Striker');
+ *  '' when there is none. Feed it to mapRegistrationPosition. A failed read
+ *  throws. */
+export async function readSignupPosition(
+  db: FantasyDb, sport: string, uid: string,
+): Promise<string> {
+  const raw = await db.read(`Users/${uid}/Information/${signupPositionField(sport)}`);
+  return raw === null || raw === undefined ? '' : String(raw);
+}
+
 // ── Market entries and the position average ────────────────────────────────
 
 /** One market player as the pricing needs it. */
@@ -62,23 +83,14 @@ export interface MarketEntry {
 }
 
 /** The market (Fantasy/<sport>/<season>/Players) as {name -> MarketEntry}.
- *  Entries with an unusable position are skipped (marketPlayersOf parity);
- *  a missing price reads 0. */
+ *  Built from the finalizer's own parsers (marketPlayersOf: entries with an
+ *  unusable position are skipped; marketPricesOf: a missing price reads 0), so
+ *  the market is parsed in exactly one place. */
 export function marketEntriesOf(playersNode: unknown): Record<string, MarketEntry> {
+  const prices = marketPricesOf(playersNode);
   const out: Record<string, MarketEntry> = {};
-  for (const [name, raw] of childEntries(playersNode)) {
-    if (!isPlainMap(raw)) continue;
-    let position: FantasyPosition;
-    try {
-      position = parsePosition(String(raw['position'] ?? ''));
-    } catch {
-      continue;
-    }
-    out[name] = {
-      position,
-      priceTenths: toIntLoose(raw['priceTenths']),
-      eligible: raw['eligible'] === true,
-    };
+  for (const [name, p] of Object.entries(marketPlayersOf(playersNode))) {
+    out[name] = { position: p.position, priceTenths: prices[name] ?? 0, eligible: p.eligible };
   }
   return out;
 }
@@ -117,7 +129,7 @@ function isGuestName(name: string): boolean {
 }
 
 /** A Line Ups UID: blank, '0' or absent means "not linked". */
-function uidOf(raw: unknown): string | null {
+export function uidOf(raw: unknown): string | null {
   if (raw === null || raw === undefined) return null;
   const uid = String(raw).trim();
   return uid.length === 0 || uid === '0' ? null : uid;
@@ -160,9 +172,17 @@ function nameKey(name: string): string {
   return name.trim().toLowerCase();
 }
 
+/** One earlier season's entry by name: the carry-over plus whether the entry
+ *  is linked to ANY uid (its Players `uid` field or that season's Line Ups
+ *  UID). */
+interface NamedCarry {
+  carry: CarryOver;
+  linked: boolean;
+}
+
 interface SeasonIndex {
   byUid: Map<string, CarryOver>;
-  byName: Map<string, CarryOver>;
+  byName: Map<string, NamedCarry>;
 }
 
 /** One earlier season's market, indexed by uid (a Players `uid` field, or
@@ -171,29 +191,26 @@ interface SeasonIndex {
  *  skipped (it carries nothing over). */
 function indexSeason(season: string, playersNode: unknown, lineupsNode: unknown): SeasonIndex {
   const byUid = new Map<string, CarryOver>();
-  const byName = new Map<string, CarryOver>();
-  const byExactName = new Map<string, CarryOver>();
+  const byName = new Map<string, NamedCarry>();
+  const byExactName = new Map<string, NamedCarry>();
+  const market = marketEntriesOf(playersNode);
   for (const [name, raw] of childEntries(playersNode)) {
-    if (!isPlainMap(raw)) continue;
-    let position: FantasyPosition;
-    try {
-      position = parsePosition(String(raw['position'] ?? ''));
-    } catch {
-      continue;
-    }
-    const priceTenths = toIntLoose(raw['priceTenths']);
-    if (priceTenths <= 0) continue;
-    const entry: CarryOver = { priceTenths, position, season };
-    byExactName.set(name, entry);
-    if (!byName.has(nameKey(name))) byName.set(nameKey(name), entry);
+    const m = Object.hasOwn(market, name) ? market[name] : undefined;
+    if (m === undefined || m.priceTenths <= 0 || !isPlainMap(raw)) continue;
     const uid = uidOf(raw['uid']);
-    if (uid !== null && !byUid.has(uid)) byUid.set(uid, entry);
+    const named: NamedCarry = {
+      carry: { priceTenths: m.priceTenths, position: m.position, season },
+      linked: uid !== null,
+    };
+    byExactName.set(name, named);
+    if (!byName.has(nameKey(name))) byName.set(nameKey(name), named);
+    if (uid !== null && !byUid.has(uid)) byUid.set(uid, named.carry);
   }
   for (const player of rosterOf(lineupsNode)) {
-    const entry = byExactName.get(player.name);
-    if (player.uid !== null && entry !== undefined && !byUid.has(player.uid)) {
-      byUid.set(player.uid, entry);
-    }
+    const named = byExactName.get(player.name);
+    if (player.uid === null || named === undefined) continue;
+    named.linked = true;
+    if (!byUid.has(player.uid)) byUid.set(player.uid, named.carry);
   }
   return { byUid, byName };
 }
@@ -210,10 +227,17 @@ function earlierSeasons(season: string): string[] {
 
 /** loadCarryOver plus the source season. For s = season-1 down to 1: when
  *  Fantasy/<sport>/<s>/Players exists the season counts — its market and its
- *  Line Ups (<sport>/<s>/Line Ups) are read. A player is matched by uid first
- *  (that season's Line Ups uid -> name, or a Players `uid` field) in ANY
- *  counted season, newest first; failing that by trimmed lowercase name,
- *  newest first. A failed read throws (an error is not "no history"). */
+ *  Line Ups (<sport>/<s>/Line Ups) are read.
+ *
+ *  A player is matched SEASON BY SEASON, newest first, and the first season
+ *  that matches wins (T6c ruling 2026-11-05): within a season by uid (that
+ *  season's Line Ups uid -> name, or a Players `uid` field), else by trimmed
+ *  lowercase name — unless that season's same-name entry is linked to a
+ *  DIFFERENT uid (a namesake, not the same person). A player with no uid has
+ *  nothing to contradict the entry, so a name still matches. A newer season's
+ *  unlinked same-name entry therefore beats an older season's uid match.
+ *
+ *  A failed read throws (an error is not "no history"). */
 export async function loadCarryOverIndex(
   db: FantasyDb, sport: string, season: string,
 ): Promise<CarryOverIndex> {
@@ -232,16 +256,16 @@ export async function loadCarryOverIndex(
   return {
     sourceSeason,
     lookup: (name, uid) => {
-      if (uid !== null) {
-        for (const idx of seasons) {
-          const hit = idx.byUid.get(uid);
-          if (hit !== undefined) return hit;
-        }
-      }
       const key = nameKey(name);
       for (const idx of seasons) {
-        const hit = idx.byName.get(key);
-        if (hit !== undefined) return hit;
+        if (uid !== null) {
+          const byUid = idx.byUid.get(uid);
+          if (byUid !== undefined) return byUid;
+        }
+        const named = idx.byName.get(key);
+        // A uid that did not match above AND an entry linked to some uid:
+        // that entry belongs to someone else.
+        if (named !== undefined && !(uid !== null && named.linked)) return named.carry;
       }
       return null;
     },
