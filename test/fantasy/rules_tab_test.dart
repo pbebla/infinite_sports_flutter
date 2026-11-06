@@ -24,6 +24,7 @@ void main() {
     Widget Function()? supportPageBuilder,
     double width = 800,
     ThemeData? theme,
+    Map<String, dynamic>? configMap,
   }) async {
     // Tall viewport so the lazy ListView builds every rules section.
     tester.view.physicalSize = Size(width, 6000);
@@ -35,7 +36,7 @@ void main() {
       home: Scaffold(
         body: FantasyRulesTab(
           configStates: controller.stream,
-          initialState: _state(defaultMap),
+          initialState: _state(configMap ?? defaultMap),
           gameweeks: gameweeks,
           nowUtc: () => DateTime.utc(2026, 7, 3, 12),
           supportPageBuilder: supportPageBuilder,
@@ -166,9 +167,9 @@ void main() {
       'Changed your mind? Put a player you sold this week back before the '
           'deadline and the sale is undone — he keeps the price you paid and '
           'no transfer is used.',
-      'Prices change on Monday morning. If a change puts your saved team '
-          'over budget, you\'ll get a message so you can fix it before the '
-          'deadline.',
+      'Prices change the morning after each game day. If a change puts your '
+          'saved team over budget, you\'ll get a message so you can fix it '
+          'before the deadline.',
     ];
 
     testWidgets('shows the Selling copy and drops the old "current price" line',
@@ -217,6 +218,141 @@ void main() {
         }
         // No RenderFlex / layout overflow anywhere on the page.
         expect(tester.takeException(), isNull);
+
+        await controller.close();
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+  });
+
+  // Season setup + schedule changes (Task 9): every game day is a gameweek,
+  // the deadline can be moved or pulled before an early kickoff, a called-off
+  // day is skipped, prices move the morning after each game day.
+  group('schedule copy: game days, moved deadlines, called-off days', () {
+    String deadlinesCopy(String margin) =>
+        'Each game day is one gameweek. Your team locks at 3:00 PM league '
+        'time (America/Los_Angeles) on game day — or $margin before that '
+        'day\'s first game if it starts earlier — and reopens 24 hours '
+        'later. The league can move a deadline; the countdown always shows '
+        'the real one. Late joiners start scoring from their first '
+        'completed gameweek.';
+
+    testWidgets('Deadlines: the exact copy, an hour for the default 60',
+        (tester) async {
+      final controller = await pumpRules(tester);
+      expect(find.text(deadlinesCopy('an hour')), findsOneWidget);
+      await controller.close();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('Deadlines: the margin is the live config\'s, in minutes',
+        (tester) async {
+      final controller = await pumpRules(tester,
+          configMap: {...defaultMap, 'deadlineMinutesBeforeKickoff': 45});
+      expect(find.text(deadlinesCopy('45 minutes')), findsOneWidget);
+      expect(find.textContaining('an hour before'), findsNothing);
+
+      // ...and a changed margin re-renders from the stream.
+      // (Two pumps each: the stream event lands in a microtask the first
+      // pump flushes only after it decided there was no frame to build.)
+      controller
+          .add(_state({...defaultMap, 'deadlineMinutesBeforeKickoff': 90}));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text(deadlinesCopy('90 minutes')), findsOneWidget);
+
+      controller
+          .add(_state({...defaultMap, 'deadlineMinutesBeforeKickoff': 60}));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text(deadlinesCopy('an hour')), findsOneWidget);
+
+      await controller.close();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('Deadlines: the lock hour is the live config\'s',
+        (tester) async {
+      final controller =
+          await pumpRules(tester, configMap: {...defaultMap, 'lockHour': 18});
+      expect(find.textContaining('locks at 6:00 PM league time'),
+          findsOneWidget);
+      await controller.close();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('Prices: they move the morning after each game day',
+        (tester) async {
+      final controller = await pumpRules(tester);
+      expect(
+          find.textContaining('The morning after each game day, prices move '
+              'on performance: score well compared with other players in '
+              'YOUR position and your price rises one step; fall behind and '
+              'it drops one.'),
+          findsOneWidget);
+      expect(find.textContaining('Every Monday'), findsNothing);
+      await controller.close();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('FAQ: a called-off day is skipped; voided weeks unchanged',
+        (tester) async {
+      final controller = await pumpRules(tester);
+      expect(find.text('What if a match day is cancelled or voided?'),
+          findsOneWidget);
+      expect(
+          find.text('If a whole game day is called off, that gameweek is '
+              'skipped as if it never happened: your team, transfers and '
+              'chips stay as you set them, no points hit is charged, and '
+              'teams reopen until the next game day\'s deadline. If only '
+              'some games are played, those count that week and the rest '
+              'count in the week they\'re played. If games move onto a day '
+              'that already has games, that gameweek has both rounds — '
+              'those teams play twice. A voided gameweek scores nobody — no '
+              'points gained or lost, and chips played that week are '
+              'returned.'),
+          findsOneWidget);
+      await controller.close();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('no page copy still promises a Monday', (tester) async {
+      final controller = await pumpRules(tester);
+      expect(find.textContaining('Monday'), findsNothing);
+      await controller.close();
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('fits at 360 px wide in ${brightness.name} mode',
+          (tester) async {
+        final controller = await pumpRules(
+          tester,
+          width: 360,
+          theme: ThemeData(
+            useMaterial3: true,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color.fromRGBO(208, 0, 0, 1),
+              brightness: brightness,
+            ),
+          ),
+          configMap: {...defaultMap, 'deadlineMinutesBeforeKickoff': 45},
+        );
+        expect(find.text(deadlinesCopy('45 minutes')), findsOneWidget);
+        expect(find.textContaining('The morning after each game day'),
+            findsOneWidget);
+        expect(find.textContaining('If a whole game day is called off'),
+            findsOneWidget);
+        // No RenderFlex / layout overflow anywhere on the page.
+        expect(tester.takeException(), isNull);
+
+        // The new copy is drawn in the theme's own text colors, never a
+        // hard-coded light-palette fill.
+        final scheme =
+            Theme.of(tester.element(find.byType(Scaffold))).colorScheme;
+        final deadlines =
+            tester.widget<Text>(find.text(deadlinesCopy('45 minutes')));
+        expect(deadlines.style!.color, scheme.onSurfaceVariant);
 
         await controller.close();
         await tester.pumpWidget(const SizedBox());

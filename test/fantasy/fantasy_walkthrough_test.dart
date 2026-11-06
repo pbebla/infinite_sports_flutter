@@ -66,6 +66,44 @@ void main() {
     expect(find.textContaining('3:00 PM'), findsNothing);
   });
 
+  // Season setup + schedule changes (Task 9): there is no fixed weekday any
+  // more — every game day is a gameweek and the squad reopens the next day.
+  for (final brightness in Brightness.values) {
+    testWidgets(
+        'deadline card says game day / the next day, exact copy, 360 px '
+        '${brightness.name}', (tester) async {
+      tester.view.physicalSize = const Size(360, 740);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(
+          useMaterial3: true,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color.fromRGBO(208, 0, 0, 1),
+            brightness: brightness,
+          ),
+        ),
+        home: Scaffold(
+          body: FantasyWalkthrough(config: cfg, onDone: () {}),
+        ),
+      ));
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Beat the deadline'), findsOneWidget);
+      expect(
+          find.text('Your squad locks at 3:00 PM league time on game day and '
+              'reopens for changes the next day. Make your moves before the '
+              'whistle.'),
+          findsOneWidget);
+      expect(find.textContaining('Monday'), findsNothing);
+      expect(find.textContaining('usually Sunday'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('Skip finishes immediately from the first card',
       (tester) async {
     var done = 0;

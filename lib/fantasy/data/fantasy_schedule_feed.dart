@@ -3,9 +3,11 @@
 // lines:
 //
 //   [FantasyScheduleFeed]: `Fantasy/<sport>/<season>/Config` → the schedule's
-//   gameweeks (derived from the league's dates WITH the config's lock hour)
-//   → optionally ONE per-gameweek listener (a player's weekly records, the
-//   manager's chip history).
+//   gameweeks (derived from the league's dates, the server's frozen weeks and
+//   the legacy start time, WITH the config's lock hour and the owner's
+//   schedule overrides — `FantasyService.watchGameweeks`) → optionally ONE
+//   per-gameweek listener (a player's weekly records, the manager's chip
+//   history).
 //
 //   [FantasyLeagueGamesFeed]: the season's legacy start hour → the league
 //   games derived with it.
@@ -23,9 +25,11 @@
 //     good value kept; with nothing good yet the gates still open ("no
 //     data"), never an eternal skeleton; a stream that cannot even be
 //     created (no Firebase app in a widget test) degrades the same way;
-//   • the schedule resubscribes only when the lock hour changes; the
-//     per-week listener only when the week numbers (or its key) change, and
-//     keeps its last data until the new listener answers;
+//   • the schedule resubscribes only when the lock hour or the owner's
+//     schedule overrides change (moved deadlines, skipped days, the kickoff
+//     margin — every one of them moves a week); the per-week listener only
+//     when the week numbers (or its key) change, and keeps its last data
+//     until the new listener answers;
 //   • the per-week listener covers only the weeks UP TO the current
 //     gameweek (`currentGameweek`; all of them once the season is over) —
 //     a week that hasn't locked can't have History / PlayerWeekStats yet, so
@@ -119,10 +123,11 @@ class FantasyScheduleFeed<W> {
   final Stream<List<Gameweek>>? gameweekStates;
 
   /// Test seam replacing ONLY `FantasyService.watchGameweeks(sport, season,
-  /// config)` — the Config → schedule wiring itself still runs (lock-hour
-  /// resubscribe, clear on a null Config, the session cache). Ignored when
-  /// [gameweekStates] is given.
-  final Stream<List<Gameweek>> Function(FantasyConfig config)? gameweeksFor;
+  /// config, overrides)` — the Config → schedule wiring itself still runs
+  /// (lock-hour / overrides resubscribe, clear on a null Config, the session
+  /// cache). Ignored when [gameweekStates] is given.
+  final Stream<List<Gameweek>> Function(
+      FantasyConfig config, ScheduleOverrides overrides)? gameweeksFor;
 
   /// The per-week listener's name in log lines ("week stats feed").
   final String weekLabel;
@@ -154,7 +159,10 @@ class FantasyScheduleFeed<W> {
   bool _configLoaded = false;
   bool _configAbsent = false;
   List<Gameweek>? _gameweeks;
-  int? _lockHour; // the lock hour the derived schedule listens with
+  // What the derived schedule listens with: the lock hour and the owner's
+  // overrides (null = not listening). Records compare by value, and
+  // ScheduleOverrides has value equality, so an equal re-emit is a no-op.
+  (int, ScheduleOverrides)? _scheduleKey;
 
   Stream<W> Function(List<int> weeks)? _weekFeed;
   Object? _weekKey;
@@ -269,18 +277,23 @@ class FantasyScheduleFeed<W> {
       if (_derived) {
         _gameweeksSub?.cancel();
         _gameweeksSub = null;
-        _lockHour = null;
+        _scheduleKey = null;
         _gameweeks = const [];
       }
-    } else if (_derived && _lockHour != state.config.lockHour) {
-      // Deadlines move only with the lock hour: other config tweaks keep the
-      // running schedule listener.
-      _lockHour = state.config.lockHour;
-      _gameweeksSub?.cancel();
-      final config = state.config;
-      _listenSchedule(() =>
-          gameweeksFor?.call(config) ??
-          FantasyService.watchGameweeks(sport, season, config));
+    } else if (_derived) {
+      // Weeks and deadlines move only with the lock hour and the owner's
+      // schedule overrides: other config tweaks keep the running schedule
+      // listener.
+      final key = (state.config.lockHour, state.schedule);
+      if (_scheduleKey != key) {
+        _scheduleKey = key;
+        _gameweeksSub?.cancel();
+        final config = state.config;
+        final overrides = state.schedule;
+        _listenSchedule(() =>
+            gameweeksFor?.call(config, overrides) ??
+            FantasyService.watchGameweeks(sport, season, config, overrides));
+      }
     }
     onConfig?.call(state);
     _syncWeeks();

@@ -131,9 +131,16 @@ class _FantasyDeadlineChipState extends State<FantasyDeadlineChip> {
               formatAbsoluteLock(gw),
             );
           case GameweekStatus.upcoming:
+            // A week opens at league midnight after the previous game day,
+            // so it names that weekday — game days are not always Sundays.
+            // (An upcoming week always has an opens instant: only GW1 has
+            // none, and it is open from launch.)
+            final opens = gw.opensUtc;
             return (
               Icons.schedule,
-              'GW${gw.number} opens Monday',
+              opens == null
+                  ? 'GW${gw.number} opens soon'
+                  : 'GW${gw.number} opens ${formatOpensWeekday(opens)}',
               'locks ${formatAbsoluteLock(gw)}',
             );
           case GameweekStatus.locked:

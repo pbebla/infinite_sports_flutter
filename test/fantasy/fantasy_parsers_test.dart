@@ -23,6 +23,22 @@ void main() {
       expect(state.config.budgetTenths, 500);
       expect(state.config.scoring[FantasyPosition.gk]!.goal, 10);
     });
+    test('carries the owner schedule overrides next to the engine config', () {
+      final node = FantasyConfig.futsalDefault().toMap()
+        ..['Deadlines'] = {'10042026': 1791154800000}
+        ..['SkippedDates'] = {'10112026': true}
+        ..['deadlineMinutesBeforeKickoff'] = 45;
+      final schedule = configStateFromNode(node)!.schedule;
+      expect(schedule.deadlineOverrides,
+          {'10042026': DateTime.utc(2026, 10, 4, 23)});
+      expect(schedule.skippedDates, {'10112026'});
+      expect(schedule.minutesBeforeKickoff, 45);
+    });
+    test('no schedule keys = the empty overrides (a 60 minute margin)', () {
+      final state = configStateFromNode(FantasyConfig.futsalDefault().toMap())!;
+      expect(state.schedule, const ScheduleOverrides());
+      expect(state.schedule.minutesBeforeKickoff, 60);
+    });
     test('absent lockOverride = auto (production behavior)', () {
       final state = configStateFromNode(FantasyConfig.futsalDefault().toMap());
       expect(state!.lockOverride, FantasyLockOverride.auto);
@@ -168,6 +184,35 @@ void main() {
         'photoUrl': '  ',
       })!;
       expect(blank.photoUrl, isNull);
+    });
+    // [S5] The Manager now also writes the linked account's `uid` into a
+    // market row. The app does not read it: the row still parses with every
+    // field, and the player's own map never echoes a stray key.
+    test('a `uid` key on the market row is ignored, never an error', () {
+      final p = FantasyPlayer.fromNode('P1', {
+        'position': 'DEF',
+        'priceTenths': 70,
+        'eligible': true,
+        'teamName': 'Hakkari',
+        'uid': 'abc123',
+      })!;
+      expect(p.name, 'P1');
+      expect(p.position, FantasyPosition.def);
+      expect(p.priceTenths, 70);
+      expect(p.eligible, isTrue);
+      expect(p.teamName, 'Hakkari');
+      expect(p.toMap().containsKey('uid'), isFalse);
+      expect(
+          playersFromNode({
+            'P1': {
+              'position': 'DEF',
+              'priceTenths': 70,
+              'eligible': true,
+              'teamName': 'Hakkari',
+              'uid': 'abc123',
+            },
+          }).map((e) => e.name),
+          ['P1']);
     });
   });
 
@@ -554,6 +599,142 @@ void main() {
     });
   });
 
+  // ── The app derives the SAME week list as the server (Task 9) ────────────
+  group('startHourFromNode (<sport>/<season>/Start Time)', () {
+    test('an int, or a numeric string, is the hour', () {
+      expect(startHourFromNode(17), 17);
+      expect(startHourFromNode('17'), 17);
+      expect(startHourFromNode(' 18 '), 18);
+    });
+    test('absent, junk, zero or negative reads as 0 (no derived kickoff)', () {
+      expect(startHourFromNode(null), 0);
+      expect(startHourFromNode('noon'), 0);
+      expect(startHourFromNode(true), 0);
+      expect(startHourFromNode([17]), 0);
+      expect(startHourFromNode(0), 0);
+      expect(startHourFromNode(-3), 0);
+      expect(startHourFromNode('-3'), 0);
+    });
+  });
+
+  group('gameweeksFromNodes (Date + LockedWeeks + Start Time + overrides)', () {
+    final cfg = FantasyConfig.futsalDefault(); // locks at 15:00 league time
+    // Oct 2026 is PDT: 15:00 league = 22:00 UTC.
+    List<Gameweek> derive({
+      Object? dates,
+      Object? locked,
+      Object? start,
+      ScheduleOverrides overrides = const ScheduleOverrides(),
+    }) =>
+        gameweeksFromNodes(
+          dateNode: dates,
+          lockedWeeksNode: locked,
+          startTimeNode: start,
+          config: cfg,
+          overrides: overrides,
+        );
+    Map<String, Object?> days(List<String> keys) => {
+          for (final k in keys)
+            k: [
+              {'team1': 'A', 'team2': 'B'}
+            ],
+        };
+    String view(Gameweek g) =>
+        '${g.number} ${g.date} ${g.lockUtc.toIso8601String()}'
+        '${g.frozen ? ' frozen' : ''}';
+
+    test('nothing stored: one gameweek per match date at the lock hour', () {
+      expect(derive(dates: days(['10112026', '10042026'])).map(view), [
+        '1 10042026 2026-10-04T22:00:00.000Z',
+        '2 10112026 2026-10-11T22:00:00.000Z',
+      ]);
+    });
+
+    test(
+        'a LockedWeeks entry keeps GW1 frozen after its date leaves the '
+        'schedule', () {
+      final gws = derive(
+        dates: days(['10112026']), // the Oct 4 game day was removed
+        locked: [
+          null,
+          {'Date': '10042026', 'LockAtUtc': 1791154800000}, // Oct 4 23:00Z
+        ],
+      );
+      expect(gws.map(view), [
+        '1 10042026 2026-10-04T23:00:00.000Z frozen',
+        '2 10112026 2026-10-11T22:00:00.000Z',
+      ]);
+      expect(gws[1].opensUtc, DateTime.utc(2026, 10, 5, 7)); // Oct 5 00:00 PDT
+    });
+
+    test('a List-shaped LockedWeeks node (keys 1..n) parses', () {
+      final gws = derive(
+        dates: days(['10182026']),
+        locked: [
+          null,
+          {'Date': '10042026', 'LockAtUtc': 1791154800000},
+          {'Date': '10112026', 'LockAtUtc': 1791759600000, 'Scored': true},
+        ],
+      );
+      expect(gws.map((g) => (g.number, g.date, g.frozen)), [
+        (1, '10042026', true),
+        (2, '10112026', true),
+        (3, '10182026', false),
+      ]);
+    });
+
+    test('an override moves the countdown for that date only', () {
+      final moved = DateTime.utc(2026, 10, 11, 18, 30);
+      final gws = derive(
+        dates: days(['10042026', '10112026']),
+        overrides: ScheduleOverrides(deadlineOverrides: {'10112026': moved}),
+      );
+      expect(gws[0].lockUtc, DateTime.utc(2026, 10, 4, 22));
+      expect(gws[1].lockUtc, moved);
+    });
+
+    test('a skipped date drops out and later weeks renumber', () {
+      final gws = derive(
+        dates: days(['10042026', '10112026', '10182026']),
+        overrides: const ScheduleOverrides(skippedDates: {'10112026'}),
+      );
+      expect(gws.map((g) => (g.number, g.date)),
+          [(1, '10042026'), (2, '10182026')]);
+    });
+
+    test('games without a stored Time use Start Time for the kickoff deadline',
+        () {
+      // Start Time 1 + game index 0, read as PM = 13:00 PDT = 20:00Z, and the
+      // default hour's margin pulls the deadline to 19:00Z (before 22:00Z).
+      expect(derive(dates: days(['10042026']), start: 1).single.lockUtc,
+          DateTime.utc(2026, 10, 4, 19));
+      expect(derive(dates: days(['10042026']), start: '1').single.lockUtc,
+          DateTime.utc(2026, 10, 4, 19));
+      // No / junk / non-positive Start Time: no derived kickoff.
+      for (final none in [null, 0, -3, 'noon']) {
+        expect(derive(dates: days(['10042026']), start: none).single.lockUtc,
+            DateTime.utc(2026, 10, 4, 22),
+            reason: '$none');
+      }
+    });
+
+    test('a stored game Time wins over Start Time; the margin is the '
+        "override's", () {
+      final dates = {
+        '10042026': [
+          {'team1': 'A', 'team2': 'B', 'Time': '13:30'},
+        ],
+      };
+      // 13:30 PDT = 20:30Z, minus 30 minutes.
+      final gws = derive(
+        dates: dates,
+        start: 17,
+        overrides: const ScheduleOverrides(minutesBeforeKickoff: 30),
+      );
+      expect(gws.single.lockUtc, DateTime.utc(2026, 10, 4, 20));
+    });
+  });
+
   group('effectiveGameweekStatus', () {
     final cfg = FantasyConfig.futsalDefault();
     final gws = deriveGameweeks(['06282026', '07052026'], cfg);
@@ -619,6 +800,66 @@ void main() {
       final cfg = FantasyConfig.futsalDefault();
       final gw = deriveGameweeks(['01112026'], cfg).single;
       expect(formatAbsoluteLock(gw), 'Sun, Jan 11 · 3:00 PM');
+    });
+    // The offset follows the lock INSTANT, not the match date: a deadline the
+    // league moves across a clock change must read the wall clock it really
+    // is (the display used to take the offset from `gw.date`).
+    group('absolute lock follows lockUtc across a clock change', () {
+      Gameweek gwAt(String date, DateTime lockUtc) => Gameweek(
+          number: 1, date: date, lockUtc: lockUtc, opensUtc: null);
+
+      test('Nov 1 2026 (fall back): a 16:00 PST lock reads 4:00 PM', () {
+        // 16:00 PST = 00:00 UTC on Nov 2 (the clocks fell back that morning).
+        final lock = DateTime.utc(2026, 11, 2);
+        expect(formatAbsoluteLock(gwAt('11012026', lock)),
+            'Sun, Nov 1 · 4:00 PM');
+        // The same instant on a gameweek dated the day BEFORE the change (a
+        // moved deadline): the PDT offset of Oct 31 would read 5:00 PM.
+        expect(formatAbsoluteLock(gwAt('10312026', lock)),
+            'Sun, Nov 1 · 4:00 PM');
+      });
+      test('Mar 8 2026 (spring forward): a 15:00 PDT lock reads 3:00 PM', () {
+        // 15:00 PDT = 22:00 UTC; the match date Mar 7 is still PST.
+        final lock = DateTime.utc(2026, 3, 8, 22);
+        expect(formatAbsoluteLock(gwAt('03072026', lock)),
+            'Sun, Mar 8 · 3:00 PM');
+      });
+      test('the transition itself: 01:59 PST vs 03:00 PDT on Mar 8', () {
+        expect(leagueLocalLock(gwAt('03082026', DateTime.utc(2026, 3, 8, 9, 59))),
+            DateTime.utc(2026, 3, 8, 1, 59));
+        expect(leagueLocalLock(gwAt('03082026', DateTime.utc(2026, 3, 8, 10))),
+            DateTime.utc(2026, 3, 8, 3));
+      });
+      test('the transition itself: 01:30 PDT then 01:30 PST on Nov 1', () {
+        expect(leagueLocalLock(gwAt('11012026', DateTime.utc(2026, 11, 1, 8, 30))),
+            DateTime.utc(2026, 11, 1, 1, 30));
+        expect(leagueLocalLock(gwAt('11012026', DateTime.utc(2026, 11, 1, 9, 30))),
+            DateTime.utc(2026, 11, 1, 1, 30));
+      });
+    });
+    test('the league-time weekday of an instant (the chip says when it opens)',
+        () {
+      // Mon Nov 2 2026 00:00 PST = 08:00 UTC.
+      expect(formatLeagueWeekday(DateTime.utc(2026, 11, 2, 8)), 'Monday');
+      // Thu Nov 5 00:00 PST = 08:00 UTC; the UTC day is Thursday too, but at
+      // 03:00 UTC it is still Wednesday evening in Los Angeles.
+      expect(formatLeagueWeekday(DateTime.utc(2026, 11, 5, 8)), 'Thursday');
+      expect(formatLeagueWeekday(DateTime.utc(2026, 11, 5, 3)), 'Wednesday');
+    });
+    test('the weekday a week opens on is the real day, even across a clock '
+        'change', () {
+      final cfg = FantasyConfig.futsalDefault();
+      String opens(List<String> dates) =>
+          formatOpensWeekday(deriveGameweeks(dates, cfg)[1].opensUtc!);
+      expect(opens(['11012026', '11082026']), 'Monday'); // Sun Nov 1 game day
+      expect(opens(['11042026', '11112026']), 'Thursday');
+      // The engine puts "league midnight" at the calendar date's offset: an
+      // hour early on spring-forward day. The week after Saturday Mar 7
+      // still opens on Sunday Mar 8...
+      expect(opens(['03072026', '03142026']), 'Sunday');
+      // ...and after Saturday Oct 31 it opens on Sunday Nov 1 (the day the
+      // clocks fall back).
+      expect(opens(['10312026', '11072026']), 'Sunday');
     });
     test('countdown buckets', () {
       expect(formatCountdown(const Duration(seconds: 40)), 'under a minute');

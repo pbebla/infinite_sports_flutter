@@ -27,13 +27,16 @@ enum FantasyLockOverride {
 
 /// The streamed `Fantasy/<sport>/<season>/Config` node: the engine config the
 /// Rules page renders from (spec §10a) plus the lock override — and the
-/// paid-access block (`Config/Access`, spec 2026-11-01 §3), which rides the
-/// same subscription so the hub's gate needs no second listener.
+/// paid-access block (`Config/Access`, spec 2026-11-01 §3) and the owner's
+/// schedule overrides (`Config/Deadlines`, `SkippedDates`,
+/// `deadlineMinutesBeforeKickoff`), which ride the same subscription so the
+/// hub's gate and the week list need no second listener.
 class FantasyConfigState {
   const FantasyConfigState({
     required this.config,
     required this.lockOverride,
     this.access = FantasyAccessConfig.free,
+    this.schedule = const ScheduleOverrides(),
   });
   final FantasyConfig config;
 
@@ -43,6 +46,10 @@ class FantasyConfigState {
 
   /// Free / season pass (absent block = free, today's behaviour).
   final FantasyAccessConfig access;
+
+  /// The owner's moved deadlines, skipped game days and kickoff margin: what
+  /// the week list is derived with besides the lock hour (absent = none).
+  final ScheduleOverrides schedule;
 }
 
 /// null when the node is absent/malformed — absence is meaningful: it gates
@@ -54,6 +61,7 @@ FantasyConfigState? configStateFromNode(Object? node, {DateTime? now}) {
     config: FantasyConfig.fromMap(node),
     lockOverride: _effectiveLockOverride(node, now ?? DateTime.now()),
     access: accessConfigFromNode(node['Access']),
+    schedule: scheduleOverridesFromConfigNode(node),
   );
 }
 
@@ -476,6 +484,48 @@ Map<String, DateTime> firstKickoffByDateFromNode(
     if (first != null) out[date] = first;
   }
   return out;
+}
+
+/// The season's legacy Start Time (`<sport>/<season>/Start Time`, an hour):
+/// an int, or a numeric string; anything else — absent, junk, zero or
+/// negative — is 0, "no start time" (then a game without a stored `Time` has
+/// no derived kickoff). Server parity with `toIntLoose(startTime)` clamped at
+/// 0 in orchestration_db.ts.
+int startHourFromNode(Object? node) {
+  final hour = tolerantInt(node) ?? 0;
+  return hour > 0 ? hour : 0;
+}
+
+/// THE one place the app decides a season's gameweek list — the twin of the
+/// server's `loadSeasonGameweeks`, so the countdown, the lock screens and the
+/// server's own jobs all agree on which game days are weeks, their numbers
+/// and their deadlines. Takes the raw nodes: the season's `Date`, the frozen
+/// `LockedWeeks` ledger, the legacy `Start Time`, plus the owner's
+/// [overrides] from the Config and the [config]'s lock hour.
+///
+/// Weeks the server has already locked keep their stored date and lock
+/// instant (a later schedule edit never renumbers or re-times them); the rest
+/// follow the match calendar minus skipped days, with a moved deadline where
+/// the owner set one and an earlier one before an early first kickoff.
+List<Gameweek> gameweeksFromNodes({
+  required Object? dateNode,
+  required Object? lockedWeeksNode,
+  required Object? startTimeNode,
+  required FantasyConfig config,
+  required ScheduleOverrides overrides,
+}) {
+  return deriveGameweeks(
+    dateKeysFromNode(dateNode),
+    config,
+    GameweekSchedule(
+      lockedWeeks: lockedWeeksFromNode(lockedWeeksNode),
+      skippedDates: overrides.skippedDates,
+      deadlineOverrides: overrides.deadlineOverrides,
+      firstKickoffUtc: firstKickoffByDateFromNode(dateNode,
+          startHour: startHourFromNode(startTimeNode)),
+      minutesBeforeKickoff: overrides.minutesBeforeKickoff,
+    ),
+  );
 }
 
 // ── Leaderboards (P3d) — THE PINNED NODE SHAPE ─────────────────────────────

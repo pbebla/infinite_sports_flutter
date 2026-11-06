@@ -28,6 +28,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
+import 'package:infinite_sports_flutter/fantasy/data/gameweek_nodes_stream.dart';
 import 'package:infinite_sports_flutter/fantasy/data/per_week_stream.dart';
 import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
@@ -930,13 +931,29 @@ class FantasyService {
         .map((event) => event.snapshot.value);
   }
 
-  /// Live gameweeks derived from the REAL season schedule (one per match
-  /// day, spec §5): streams `/<sport>/<season>/Date` keys through the
-  /// engine's deriveGameweeks with [config]'s lock hour. Callers resubscribe
-  /// when the config changes (the hub does — lockHour moves every deadline).
-  static Stream<List<Gameweek>> watchGameweeks(
-      String sport, String season, FantasyConfig config) {
-    return _ref('/$sport/$season/Date').onValue.map((event) =>
-        deriveGameweeks(dateKeysFromNode(event.snapshot.value), config));
+  /// Live gameweeks derived from the REAL season schedule (one per game day,
+  /// spec §5), exactly as the server derives them: the season's
+  /// `/<sport>/<season>/Date`, the frozen-week ledger
+  /// `Fantasy/<sport>/<season>/LockedWeeks` and the legacy
+  /// `/<sport>/<season>/Start Time` (a game without a stored time takes its
+  /// kickoff from it), through the engine's deriveGameweeks with [config]'s
+  /// lock hour and the owner's [overrides] (moved deadlines, skipped days,
+  /// the kickoff margin).
+  ///
+  /// Emits only once all three nodes have answered, then on every change; an
+  /// error on any of them is forwarded as an error, never as "no weeks"
+  /// (gameweeksFromNodeStreams). Callers resubscribe when the lock hour or the
+  /// overrides change (FantasyScheduleFeed does — they move every deadline).
+  static Stream<List<Gameweek>> watchGameweeks(String sport, String season,
+      FantasyConfig config, ScheduleOverrides overrides) {
+    Stream<Object?> node(String path) =>
+        _ref(path).onValue.map((event) => event.snapshot.value);
+    return gameweeksFromNodeStreams(
+      dates: node('/$sport/$season/Date'),
+      lockedWeeks: node('${_root(sport, season)}/LockedWeeks'),
+      startTime: node('/$sport/$season/Start Time'),
+      config: config,
+      overrides: overrides,
+    );
   }
 }

@@ -14,6 +14,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart';
+import 'package:infinite_sports_flutter/fantasy/data/gameweek_nodes_stream.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_logic.dart';
@@ -31,9 +32,12 @@ List<Gameweek> _gws(int count) => [
         ),
     ];
 
-FantasyConfigState _config(int lockHour) => FantasyConfigState(
+FantasyConfigState _config(int lockHour,
+        {ScheduleOverrides schedule = const ScheduleOverrides()}) =>
+    FantasyConfigState(
       config: FantasyConfig.fromMap({'lockHour': lockHour}),
       lockOverride: FantasyLockOverride.open,
+      schedule: schedule,
     );
 
 /// A legacy game with NO stored time: its time is derived from [startHour]
@@ -70,6 +74,7 @@ void main() {
     late StreamController<FantasyConfigState?> config;
     late List<StreamController<List<Gameweek>>> schedules;
     late List<int> scheduleLockHours;
+    late List<ScheduleOverrides> scheduleOverrides;
     late List<bool> scheduleCancelled;
     late List<List<int>> weekRequests;
     late List<StreamController<Map<int, int>>> weekFeeds;
@@ -79,6 +84,7 @@ void main() {
       config = StreamController<FantasyConfigState?>.broadcast();
       schedules = [];
       scheduleLockHours = [];
+      scheduleOverrides = [];
       scheduleCancelled = [];
       weekRequests = [];
       weekFeeds = [];
@@ -87,9 +93,11 @@ void main() {
 
     tearDown(() => config.close());
 
-    Stream<List<Gameweek>> derived(FantasyConfig cfg) {
+    Stream<List<Gameweek>> derived(
+        FantasyConfig cfg, ScheduleOverrides overrides) {
       final i = schedules.length;
       scheduleLockHours.add(cfg.lockHour);
+      scheduleOverrides.add(overrides);
       scheduleCancelled.add(false);
       final c = StreamController<List<Gameweek>>.broadcast(
           onCancel: () => scheduleCancelled[i] = true);
@@ -145,6 +153,69 @@ void main() {
       await pumpEventQueue();
       expect(scheduleLockHours, [15, 16]);
       expect(scheduleCancelled, [true, false]);
+    });
+
+    // Task 9: the owner's schedule overrides (moved deadlines, skipped days,
+    // the kickoff margin) move the weeks exactly as the lock hour does, so a
+    // change of any of them re-derives; an equal re-emit does not.
+    test('a Config change of Deadlines resubscribes; an equal re-emit does not',
+        () async {
+      final f = feed();
+      final moved = DateTime.utc(2026, 11, 4, 2);
+      config.add(_config(15));
+      await pumpEventQueue();
+      expect(scheduleOverrides, [const ScheduleOverrides()]);
+      schedules[0].add(_gws(2));
+      await pumpEventQueue();
+
+      config.add(_config(15,
+          schedule: ScheduleOverrides(deadlineOverrides: {'11042026': moved})));
+      await pumpEventQueue();
+      expect(scheduleLockHours, [15, 15]);
+      expect(scheduleOverrides.last.deadlineOverrides, {'11042026': moved});
+      expect(scheduleCancelled, [true, false]);
+      // The schedule on screen stays until the new listener answers.
+      expect(f.gameweeks, hasLength(2));
+
+      // A NEW but equal ScheduleOverrides: value equality, no resubscribe.
+      config.add(_config(15,
+          schedule: ScheduleOverrides(
+              deadlineOverrides: {'11042026': DateTime.utc(2026, 11, 4, 2)})));
+      await pumpEventQueue();
+      expect(scheduleOverrides, hasLength(2));
+      expect(scheduleCancelled, [true, false]);
+
+      // A skipped date and a new margin each re-derive too.
+      config.add(_config(15,
+          schedule: ScheduleOverrides(
+              deadlineOverrides: {'11042026': moved},
+              skippedDates: const {'11112026'})));
+      await pumpEventQueue();
+      expect(scheduleOverrides, hasLength(3));
+      expect(scheduleOverrides.last.skippedDates, {'11112026'});
+      config.add(_config(15,
+          schedule: ScheduleOverrides(
+              deadlineOverrides: {'11042026': moved},
+              skippedDates: const {'11112026'},
+              minutesBeforeKickoff: 30)));
+      await pumpEventQueue();
+      expect(scheduleOverrides, hasLength(4));
+      expect(scheduleOverrides.last.minutesBeforeKickoff, 30);
+      expect(scheduleCancelled, [true, true, true, false]);
+    });
+
+    test('a REAL null Config then the same overrides: a fresh listener',
+        () async {
+      feed();
+      config.add(_config(15,
+          schedule: const ScheduleOverrides(skippedDates: {'11112026'})));
+      await pumpEventQueue();
+      config.add(null);
+      await pumpEventQueue();
+      config.add(_config(15,
+          schedule: const ScheduleOverrides(skippedDates: {'11112026'})));
+      await pumpEventQueue();
+      expect(scheduleOverrides, hasLength(2));
     });
 
     test(
@@ -366,7 +437,7 @@ void main() {
         owner: 'TestOwner',
         onChanged: () => changes++,
         configStates: config.stream,
-        gameweeksFor: (_) => throw StateError('no app'),
+        gameweeksFor: (_, __) => throw StateError('no app'),
         weekFeed: (_) => throw StateError('no app either'),
       );
       addTearDown(f.dispose);
@@ -457,6 +528,246 @@ void main() {
       // The file's setUp captures debugPrint; a widget test must hand it
       // back inside its own body (the binding checks before tearDown runs).
       debugPrint = originalDebugPrint;
+    });
+  });
+
+  // Task 9: the app's schedule is derived from THREE live nodes — the season's
+  // Date, the server's frozen-week ledger (LockedWeeks) and the legacy Start
+  // Time — and is shown only once all three have answered.
+  group('gameweeksFromNodeStreams (Date + LockedWeeks + Start Time)', () {
+    final cfg = FantasyConfig.futsalDefault();
+    late StreamController<Object?> dates;
+    late StreamController<Object?> locked;
+    late StreamController<Object?> start;
+    late List<List<Gameweek>> emitted;
+    late List<Object> errors;
+    StreamSubscription<List<Gameweek>>? sub;
+
+    Map<String, Object?> days(List<String> keys) => {
+          for (final k in keys)
+            k: [
+              {'team1': 'A', 'team2': 'B'}
+            ],
+        };
+    List<String> dateList(List<Gameweek> g) => [for (final x in g) x.date];
+
+    void listen({ScheduleOverrides overrides = const ScheduleOverrides()}) {
+      sub = gameweeksFromNodeStreams(
+        dates: dates.stream,
+        lockedWeeks: locked.stream,
+        startTime: start.stream,
+        config: cfg,
+        overrides: overrides,
+      ).listen(emitted.add, onError: (Object e) => errors.add(e));
+    }
+
+    // Broadcast: a controller no test listened to must still close in tearDown
+    // (a single-subscription one never completes close() without a listener).
+    setUp(() {
+      dates = StreamController<Object?>.broadcast();
+      locked = StreamController<Object?>.broadcast();
+      start = StreamController<Object?>.broadcast();
+      emitted = [];
+      errors = [];
+    });
+
+    tearDown(() async {
+      await sub?.cancel();
+      await dates.close();
+      await locked.close();
+      await start.close();
+    });
+
+    test('emits nothing until ALL THREE have answered (null = answered)',
+        () async {
+      listen();
+      dates.add(days(['10042026']));
+      await pumpEventQueue();
+      expect(emitted, isEmpty); // Date alone is not a schedule
+      locked.add(null); // no LockedWeeks node yet: that is an answer
+      await pumpEventQueue();
+      expect(emitted, isEmpty);
+      start.add(null); // no Start Time: an answer too
+      await pumpEventQueue();
+      expect(emitted, hasLength(1));
+      expect(dateList(emitted.single), ['10042026']);
+    });
+
+    test('the order the three answer in does not matter', () async {
+      listen();
+      start.add(1);
+      locked.add(null);
+      await pumpEventQueue();
+      expect(emitted, isEmpty);
+      dates.add(days(['10042026']));
+      await pumpEventQueue();
+      expect(emitted, hasLength(1));
+    });
+
+    test('re-derives on every later event of any of the three', () async {
+      listen();
+      dates.add(days(['10042026']));
+      locked.add(null);
+      start.add(null);
+      await pumpEventQueue();
+      expect(emitted, hasLength(1));
+
+      // The server locks week 1: the ledger now freezes it, then the owner
+      // moves the (now past) game day out of the schedule.
+      locked.add([
+        null,
+        {'Date': '10042026', 'LockAtUtc': 1791154800000},
+      ]);
+      await pumpEventQueue();
+      expect(emitted, hasLength(2));
+      expect(emitted.last.single.frozen, isTrue);
+
+      dates.add(days(['10112026']));
+      await pumpEventQueue();
+      expect(emitted, hasLength(3));
+      expect(dateList(emitted.last), ['10042026', '10112026']);
+      expect(emitted.last.first.frozen, isTrue);
+      expect(emitted.last.first.lockUtc, DateTime.utc(2026, 10, 4, 23));
+
+      // Start Time arriving late changes a deadline: game 0 at 13:00 PDT,
+      // an hour of margin -> 19:00Z.
+      start.add(1);
+      await pumpEventQueue();
+      expect(emitted.last.last.lockUtc, DateTime.utc(2026, 10, 11, 19));
+    });
+
+    test('games without a stored Time use Start Time for the kickoff deadline',
+        () async {
+      listen();
+      dates.add(days(['10042026']));
+      locked.add(null);
+      start.add('1'); // a numeric string counts, as on the server
+      await pumpEventQueue();
+      expect(emitted.single.single.lockUtc, DateTime.utc(2026, 10, 4, 19));
+    });
+
+    test('an override moves the countdown, a skipped date renumbers', () async {
+      listen(
+        overrides: ScheduleOverrides(
+          deadlineOverrides: {'10182026': DateTime.utc(2026, 10, 18, 17)},
+          skippedDates: const {'10112026'},
+        ),
+      );
+      dates.add(days(['10042026', '10112026', '10182026']));
+      locked.add(null);
+      start.add(null);
+      await pumpEventQueue();
+      final gws = emitted.single;
+      expect(gws.map((g) => (g.number, g.date)),
+          [(1, '10042026'), (2, '10182026')]);
+      expect(gws[1].lockUtc, DateTime.utc(2026, 10, 18, 17));
+    });
+
+    test('an error on ANY node is forwarded and never becomes "no weeks"',
+        () async {
+      for (final failing in [0, 1, 2]) {
+        emitted.clear();
+        errors.clear();
+        await sub?.cancel();
+        final controllers = [
+          StreamController<Object?>.broadcast(),
+          StreamController<Object?>.broadcast(),
+          StreamController<Object?>.broadcast(),
+        ];
+        sub = gameweeksFromNodeStreams(
+          dates: controllers[0].stream,
+          lockedWeeks: controllers[1].stream,
+          startTime: controllers[2].stream,
+          config: cfg,
+          overrides: const ScheduleOverrides(),
+        ).listen(emitted.add, onError: (Object e) => errors.add(e));
+        controllers[failing].addError(StateError('denied-$failing'));
+        await pumpEventQueue();
+        expect(errors.map((e) => e.toString()), [contains('denied-$failing')],
+            reason: 'node $failing');
+        expect(emitted, isEmpty, reason: 'node $failing');
+        await sub?.cancel();
+        sub = null;
+        for (final c in controllers) {
+          await c.close();
+        }
+      }
+    });
+
+    test('a derive that throws (a junk date key) is an error, not a schedule',
+        () async {
+      listen();
+      dates.add({
+        'junk': [
+          {'team1': 'A', 'team2': 'B'}
+        ]
+      });
+      locked.add(null);
+      start.add(null);
+      await pumpEventQueue();
+      expect(emitted, isEmpty);
+      expect(errors, hasLength(1));
+    });
+
+    test('cancelling cancels all three listeners', () async {
+      var cancelled = 0;
+      final a = StreamController<Object?>.broadcast(onCancel: () => cancelled++);
+      final b = StreamController<Object?>.broadcast(onCancel: () => cancelled++);
+      final c = StreamController<Object?>.broadcast(onCancel: () => cancelled++);
+      final s = gameweeksFromNodeStreams(
+        dates: a.stream,
+        lockedWeeks: b.stream,
+        startTime: c.stream,
+        config: cfg,
+        overrides: const ScheduleOverrides(),
+      ).listen((_) {});
+      await s.cancel();
+      expect(cancelled, 3);
+    });
+
+    test(
+        'the feed waits for all three streams: no reveal on Date alone, then '
+        'the week list appears at once', () async {
+      FantasyScheduleFeed.clearSessionCache();
+      final config = StreamController<FantasyConfigState?>.broadcast();
+      addTearDown(config.close);
+      var changes = 0;
+      final f = FantasyScheduleFeed<Map<int, int>>(
+        sport: 'Futsal',
+        season: '15',
+        owner: 'TestOwner',
+        onChanged: () => changes++,
+        configStates: config.stream,
+        gameweeksFor: (cfg, overrides) => gameweeksFromNodeStreams(
+          dates: dates.stream,
+          lockedWeeks: locked.stream,
+          startTime: start.stream,
+          config: cfg,
+          overrides: overrides,
+        ),
+        nowUtc: () => DateTime.utc(2027, 1, 1),
+      );
+      addTearDown(f.dispose);
+      f.start();
+      config.add(_config(15));
+      await pumpEventQueue();
+      expect(f.gameweeks, isNull);
+
+      dates.add(days(['10042026', '10112026']));
+      await pumpEventQueue();
+      expect(f.gameweeks, isNull); // not on Date alone
+      locked.add([
+        null,
+        {'Date': '10042026', 'LockAtUtc': 1791154800000},
+      ]);
+      await pumpEventQueue();
+      expect(f.gameweeks, isNull); // not on Date + LockedWeeks either
+      final before = changes;
+      start.add(0);
+      await pumpEventQueue();
+      expect(f.gameweeks!.map((g) => g.number), [1, 2]);
+      expect(f.gameweeks!.first.frozen, isTrue);
+      expect(changes, before + 1); // ONE reveal, not piecemeal
     });
   });
 

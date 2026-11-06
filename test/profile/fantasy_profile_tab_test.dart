@@ -882,7 +882,7 @@ void main() {
           configStates: config.stream,
           // gameweekStates deliberately null: the source derives the schedule
           // itself from the config (FantasyService.watchGameweeks' seam).
-          gameweeksFor: (cfg) {
+          gameweeksFor: (cfg, overrides) {
             final i = schedules.length;
             scheduleLockHours.add(cfg.lockHour);
             scheduleCancelled.add(false);

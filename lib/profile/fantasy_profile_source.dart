@@ -98,11 +98,12 @@ class FantasyProfileSeams {
   /// Replaces the config-derived schedule gameweeks.
   final Stream<List<Gameweek>>? gameweekStates;
 
-  /// Replaces `FantasyService.watchGameweeks(sport, season, config)` ONLY
-  /// (the config → schedule wiring itself still runs): lets a test drive the
-  /// real lock-hour resubscribe / cache / clear branch. Ignored when
-  /// [gameweekStates] is given.
-  final Stream<List<Gameweek>> Function(FantasyConfig config)? gameweeksFor;
+  /// Replaces `FantasyService.watchGameweeks(sport, season, config,
+  /// overrides)` ONLY (the config → schedule wiring itself still runs): lets
+  /// a test drive the real lock-hour / overrides resubscribe / cache / clear
+  /// branch. Ignored when [gameweekStates] is given.
+  final Stream<List<Gameweek>> Function(
+      FantasyConfig config, ScheduleOverrides overrides)? gameweeksFor;
   final Stream<Map<String, FantasyPlayerTotals>?>? totalsStates;
   final Stream<Map<int, Map<String, int>>>? priceChangeStates;
 

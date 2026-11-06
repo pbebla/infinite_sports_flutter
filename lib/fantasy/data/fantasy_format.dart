@@ -1,12 +1,11 @@
 // Fantasy display formatting (P3a Task 1) — pure helpers shared by the hub
 // header, Rules tab and (P3b) squad builder. Money is engine tenths
 // ($0.1M units); times are LEAGUE time (America/Los_Angeles, spec §5) — the
-// engine's league_time offset math, never the phone's timezone.
+// Pacific offset in force at the instant, never the phone's timezone.
 
 import 'package:intl/intl.dart';
 
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
-import 'package:infinite_sports_flutter/fantasy/engine/league_time.dart';
 import 'package:infinite_sports_flutter/misc/points_text.dart';
 
 export 'package:infinite_sports_flutter/misc/points_text.dart';
@@ -40,12 +39,53 @@ String formatLockHour(int hour) {
   return '$h12:00 ${hour < 12 ? 'AM' : 'PM'}';
 }
 
-/// A gameweek's lock instant as league wall-clock (UTC minus the Pacific
-/// offset in force on its match day).
-DateTime leagueLocalLock(Gameweek gw) {
-  final offset = isPacificDst(parseDbDate(gw.date)) ? 7 : 8;
-  return gw.lockUtc.subtract(Duration(hours: offset));
+/// The first Sunday on or after [month]/[day] of [year], as a UTC date.
+DateTime _sundayOnOrAfter(int year, int month, int day) {
+  var d = DateTime.utc(year, month, day);
+  while (d.weekday != DateTime.sunday) {
+    d = d.add(const Duration(days: 1));
+  }
+  return d;
 }
+
+/// True when Pacific Daylight Time is in force at the UTC INSTANT [utc]: from
+/// 02:00 PST (10:00 UTC) on the 2nd Sunday of March to 02:00 PDT (09:00 UTC)
+/// on the 1st Sunday of November. An instant — not a calendar date — decides:
+/// a deadline the league moves across a clock change must read the wall clock
+/// it really is.
+bool _isPdtAt(DateTime utc) {
+  final u = utc.toUtc();
+  final start =
+      _sundayOnOrAfter(u.year, 3, 8).add(const Duration(hours: 10));
+  final end = _sundayOnOrAfter(u.year, 11, 1).add(const Duration(hours: 9));
+  return !u.isBefore(start) && u.isBefore(end);
+}
+
+/// A UTC instant as league wall-clock (America/Los_Angeles): a UTC DateTime
+/// whose fields read the Pacific time at that instant — format it with
+/// DateFormat, never `.toLocal()` (that would be the PHONE's zone).
+DateTime leagueWallClock(DateTime utc) =>
+    utc.toUtc().subtract(Duration(hours: _isPdtAt(utc) ? 7 : 8));
+
+/// A gameweek's lock instant as league wall-clock. The offset comes from the
+/// lock INSTANT itself, never from the gameweek's match date: the league can
+/// move a deadline onto another day, across a clock change.
+DateTime leagueLocalLock(Gameweek gw) => leagueWallClock(gw.lockUtc);
+
+/// The full English weekday of [utc] in league time ("Monday") — when a week
+/// opens is a league-midnight instant, and the weekday it falls on is the
+/// league's, not the phone's.
+String formatLeagueWeekday(DateTime utc) =>
+    DateFormat('EEEE').format(leagueWallClock(utc));
+
+/// The weekday a gameweek opens on ("Monday"): the league day its
+/// [Gameweek.opensUtc] belongs to. That instant is "league midnight", which
+/// the engine places with the offset of the calendar DATE — on the two
+/// clock-change days that is an hour early (23:00 the night before when the
+/// clocks spring forward) — so the day is read an hour past it: always the
+/// day the week really opens.
+String formatOpensWeekday(DateTime opensUtc) =>
+    formatLeagueWeekday(opensUtc.add(const Duration(hours: 1)));
 
 /// Absolute deadline text, spec §5's example form: "Sun, Oct 19 · 3:00 PM".
 String formatAbsoluteLock(Gameweek gw) {

@@ -19,11 +19,12 @@ void main() {
     WidgetTester tester, {
     required FantasyLockOverride override,
     required DateTime now,
+    List<Gameweek>? weeks,
   }) async {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
         body: FantasyDeadlineChip(
-          gameweeks: gameweeks,
+          gameweeks: weeks ?? gameweeks,
           lockOverride: override,
           nowUtc: () => now,
         ),
@@ -70,6 +71,72 @@ void main() {
     await pumpChip(tester,
         override: FantasyLockOverride.auto, now: DateTime.utc(2026, 8, 1));
     expect(find.text('Season complete'), findsOneWidget);
+    await teardown(tester);
+  });
+
+  // The week reopens at league midnight after the PREVIOUS game day, so the
+  // chip names that weekday — not a hard-coded Monday. An upcoming week is
+  // reachable once the league moves a deadline to before its game day began.
+  group('upcoming week: "opens <weekday>" follows the real game day', () {
+    // GW1 is Wednesday Nov 4 2026, its deadline moved to Tuesday 18:00 PST
+    // (Nov 4 02:00 UTC); GW2 is the next Wednesday. GW2 opens at league
+    // midnight after Nov 4: Thursday Nov 5 00:00 PST = 08:00 UTC.
+    final weeks = deriveGameweeks(
+      ['11042026', '11112026'],
+      cfg,
+      GameweekSchedule(
+          deadlineOverrides: {'11042026': DateTime.utc(2026, 11, 4, 2)}),
+    );
+
+    testWidgets('chip says opens Thursday for a Wednesday game day',
+        (tester) async {
+      // Wednesday 20:00 PST: GW1's day is over (24 h past its moved lock) and
+      // GW2 has not opened yet.
+      await pumpChip(tester,
+          weeks: weeks,
+          override: FantasyLockOverride.auto,
+          now: DateTime.utc(2026, 11, 5, 4));
+      expect(find.text('GW2 opens Thursday'), findsOneWidget);
+      expect(find.text('GW2 opens Monday'), findsNothing);
+      // The line under it is the REAL deadline of that week.
+      expect(find.text('locks Wed, Nov 11 · 3:00 PM'), findsOneWidget);
+      await teardown(tester);
+    });
+
+    testWidgets('a Sunday game day still reads Monday', (tester) async {
+      // GW1 Sun Nov 8, deadline moved to Saturday 10:00 PST (18:00 UTC);
+      // GW2 the Sunday after opens Mon Nov 9 00:00 PST = 08:00 UTC.
+      final sunday = deriveGameweeks(
+        ['11082026', '11152026'],
+        cfg,
+        GameweekSchedule(
+            deadlineOverrides: {'11082026': DateTime.utc(2026, 11, 7, 18)}),
+      );
+      await pumpChip(tester,
+          weeks: sunday,
+          override: FantasyLockOverride.auto,
+          now: DateTime.utc(2026, 11, 9, 4)); // Sunday 20:00 PST
+      expect(find.text('GW2 opens Monday'), findsOneWidget);
+      await teardown(tester);
+    });
+  });
+
+  testWidgets('the deadline text follows the lock instant across a clock '
+      'change (Nov 1 2026, fall back)', (tester) async {
+    // A deadline moved onto Sunday Nov 1 16:00 PST (00:00 UTC Nov 2) for a
+    // game day dated BEFORE the change. Reading the offset off the match date
+    // would show 5:00 PM.
+    final moved = deriveGameweeks(
+      ['10312026'],
+      cfg,
+      GameweekSchedule(
+          deadlineOverrides: {'10312026': DateTime.utc(2026, 11, 2)}),
+    );
+    await pumpChip(tester,
+        weeks: moved,
+        override: FantasyLockOverride.auto,
+        now: DateTime.utc(2026, 11, 1, 12));
+    expect(find.text('Sun, Nov 1 · 4:00 PM'), findsOneWidget);
     await teardown(tester);
   });
 

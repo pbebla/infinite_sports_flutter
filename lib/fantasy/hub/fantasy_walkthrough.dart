@@ -60,8 +60,8 @@ class _FantasyWalkthroughState extends State<FantasyWalkthrough> {
         icon: Icons.timer_outlined,
         title: 'Beat the deadline',
         body: 'Your squad locks at ${formatLockHour(cfg.lockHour)} league '
-            'time on match day — usually Sunday — and reopens for changes '
-            'on Monday. Make your moves before the whistle.',
+            'time on game day and reopens for changes the next day. Make '
+            'your moves before the whistle.',
       ),
       const _WalkthroughCard(
         icon: Icons.sports_soccer,

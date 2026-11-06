@@ -13,6 +13,14 @@ import 'package:infinite_sports_flutter/fantasy/engine/transfers.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart';
 import 'package:infinite_sports_flutter/support/support_form_page.dart';
 
+/// The Deadlines copy's margin before an early first game: "an hour" for the
+/// default 60, otherwise whole minutes ("45 minutes").
+String _kickoffMargin(int minutes) => switch (minutes) {
+      60 => 'an hour',
+      1 => '1 minute',
+      _ => '$minutes minutes',
+    };
+
 class FantasyRulesTab extends StatelessWidget {
   const FantasyRulesTab({
     super.key,
@@ -141,11 +149,14 @@ class _RulesBody extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _Body(
-                'Editing opens Monday and locks at '
+                'Each game day is one gameweek. Your team locks at '
                 '${formatLockHour(cfg.lockHour)} league time '
-                '(America/Los_Angeles) on match day, then reopens the '
-                'following Monday. One gameweek per real match day. Late '
-                'joiners start scoring from their first completed gameweek.',
+                '(America/Los_Angeles) on game day — or '
+                '${_kickoffMargin(state.schedule.minutesBeforeKickoff)} '
+                'before that day\'s first game if it starts earlier — and '
+                'reopens 24 hours later. The league can move a deadline; the '
+                'countdown always shows the real one. Late joiners start '
+                'scoring from their first completed gameweek.',
               ),
               const SizedBox(height: 12),
               FantasyDeadlineChip(
@@ -218,11 +229,11 @@ class _RulesBody extends StatelessWidget {
           child: _Body(
             'Prices run ${formatMoneyTenths(cfg.priceMinTenths)} to '
             '${formatMoneyTenths(cfg.priceMaxTenths)} in '
-            '${formatMoneyTenths(cfg.priceStepTenths)} steps. Every Monday '
-            'prices move on performance: score well compared with other '
-            'players in YOUR position and your price rises one step; fall '
-            'behind and it drops one. Brand-new players start around '
-            '${formatMoneyTenths(cfg.rookiePriceTenths)}.',
+            '${formatMoneyTenths(cfg.priceStepTenths)} steps. The morning '
+            'after each game day, prices move on performance: score well '
+            'compared with other players in YOUR position and your price '
+            'rises one step; fall behind and it drops one. Brand-new players '
+            'start around ${formatMoneyTenths(cfg.rookiePriceTenths)}.',
           ),
         ),
         // FPL selling rule — keep half of any rise (rounded down to $0.1M),
@@ -251,9 +262,9 @@ class _RulesBody extends StatelessWidget {
               ),
               SizedBox(height: 10),
               _Body(
-                'Prices change on Monday morning. If a change puts your '
-                'saved team over budget, you\'ll get a message so you can '
-                'fix it before the deadline.',
+                'Prices change the morning after each game day. If a change '
+                'puts your saved team over budget, you\'ll get a message so '
+                'you can fix it before the deadline.',
               ),
             ],
           ),
@@ -297,8 +308,17 @@ class _RulesBody extends StatelessWidget {
               ),
               _Faq(
                 q: 'What if a match day is cancelled or voided?',
-                a: 'A voided gameweek scores nobody — no points gained or '
-                    'lost, and chips played that week are returned.',
+                a: 'If a whole game day is called off, that gameweek is '
+                    'skipped as if it never happened: your team, transfers '
+                    'and chips stay as you set them, no points hit is '
+                    'charged, and teams reopen until the next game day\'s '
+                    'deadline. If only some games are played, those count '
+                    'that week and the rest count in the week they\'re '
+                    'played. If games move onto a day that already has '
+                    'games, that gameweek has both rounds — those teams play '
+                    'twice. A voided gameweek scores nobody — no points '
+                    'gained or lost, and chips played that week are '
+                    'returned.',
               ),
             ],
           ),

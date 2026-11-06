@@ -59,6 +59,50 @@ void main() {
       final b = saleBaselineFromNode({'ForGw': 2})!;
       expect(b.prices, isEmpty);
     });
+    // [M3] The server keeps the baseline it replaced under `Prev` so a
+    // rewind can restore it. The app only ever reads the current one.
+    test('a `Prev` child is ignored: the current baseline is what counts', () {
+      final b = saleBaselineFromNode({
+        'ForGw': 4,
+        'Prices': {'A': 80, 'B': 60},
+        'RealizedTenths': 5,
+        'Prev': {
+          'ForGw': 3,
+          'Prices': {'A': 70, 'C': 90},
+          'RealizedTenths': -20,
+        },
+      })!;
+      expect(b.forGw, 4);
+      expect(b.prices, {'A': 80, 'B': 60});
+      expect(b.realizedTenths, 5);
+    });
+    test('a node holding only `Prev` is not a baseline', () {
+      expect(
+          saleBaselineFromNode({
+            'Prev': {
+              'ForGw': 3,
+              'Prices': {'A': 70},
+            },
+          }),
+          isNull);
+      expect(
+          saleBaselineStateFromNode({
+            'Prev': {'ForGw': 3, 'Prices': {'A': 70}},
+          }).degraded,
+          isTrue);
+    });
+    test('the feed state of a node with a `Prev` child is the current one',
+        () {
+      final state = saleBaselineStateFromNode({
+        'ForGw': 4,
+        'Prices': {'A': 80},
+        'Prev': {'ForGw': 3, 'Prices': {'A': 70}},
+      });
+      expect(state.loaded, isTrue);
+      expect(state.degraded, isFalse);
+      expect(state.baseline!.forGw, 4);
+      expect(state.baseline!.prices, {'A': 80});
+    });
   });
 
   group('saleBaselineStateFromNode', () {
