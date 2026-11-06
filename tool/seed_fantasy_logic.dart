@@ -199,3 +199,28 @@ Map<String, Map<String, Object>> buildPlayersNode({
 /// task 0 — lets the owner edit squads although every S15 date is past).
 Map<String, dynamic> buildConfigNode({String lockOverride = 'open'}) =>
     FantasyConfig.futsalDefault().toMap()..['lockOverride'] = lockOverride;
+
+/// Refusal for the seed CLI: a season that already has a market (or config)
+/// must never be overwritten — the PUT would reset every live price. Returns
+/// null when the seed may write: both nodes absent, or [force] (throwaway test
+/// seasons only). The message is season-agnostic; the CLI prefixes the season
+/// path, e.g. `Fantasy/Futsal/16 already has a market (Players) …`.
+String? seedRefusal({
+  required Object? existingPlayers,
+  required Object? existingConfig,
+  required bool force,
+}) {
+  if (force) return null;
+  final hasPlayers = existingPlayers != null;
+  final hasConfig = existingConfig != null;
+  if (!hasPlayers && !hasConfig) return null;
+  final what = hasPlayers && hasConfig
+      ? 'Players and Config'
+      : hasPlayers
+          ? 'Players'
+          : 'Config';
+  final noun = hasPlayers ? 'a market' : 'a season config';
+  return 'already has $noun ($what) — refusing to overwrite. '
+      'Real seasons start from the Manager (Fantasy → Start fantasy season). '
+      'Pass --force-reseed only for a throwaway test season.';
+}

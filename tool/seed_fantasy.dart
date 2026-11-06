@@ -3,7 +3,7 @@
 // opening-price math. Pure Dart (dart:io HttpClient over the RTDB REST API),
 // no Flutter — runnable from the repo root:
 //
-//   dart run tool/seed_fantasy.dart <sport> <season> [adminToken] [--dry]
+//   dart run tool/seed_fantasy.dart <sport> <season> [adminToken] [--dry] [--force-reseed]
 //
 //   dart run tool/seed_fantasy.dart Futsal 15 --dry        # read-only summary
 //   dart run tool/seed_fantasy.dart Futsal 15 <token>      # seed the test bed
@@ -11,8 +11,12 @@
 // --dry prints the full summary (players per position, price spread, flagged
 // entries) and performs NO writes; a real run additionally PUTs the Config and
 // Players nodes with the admin OAuth access token in an
-// `Authorization: Bearer` header (never in the URL). Launch data for a future
-// season is a re-run of this tool against that season (plan P3a).
+// `Authorization: Bearer` header (never in the URL).
+//
+// REFUSES (exit 1, dry runs included) when the season already has a Players or
+// Config node: a PUT there resets every live price. Real seasons are started
+// from the Manager app (Fantasy → Start fantasy season). `--force-reseed`
+// overrides the refusal; pass it only for a throwaway test season.
 //
 // All pure logic (position mapping, aggregation, pricing, node shapes) lives
 // in seed_fantasy_logic.dart and is unit-tested in
@@ -60,9 +64,10 @@ Future<void> main(List<String> args) async {
   final flags = args.where((a) => a.startsWith('--')).toSet();
   final positional = args.where((a) => !a.startsWith('--')).toList();
   final dry = flags.contains('--dry');
+  final force = flags.contains('--force-reseed');
   if (positional.length < 2 || (!dry && positional.length < 3)) {
-    stderr.writeln(
-        'usage: dart run tool/seed_fantasy.dart <sport> <season> [adminToken] [--dry]');
+    stderr.writeln('usage: dart run tool/seed_fantasy.dart <sport> <season> '
+        '[adminToken] [--dry] [--force-reseed]');
     exit(64);
   }
   final sport = positional[0];
@@ -72,6 +77,27 @@ Future<void> main(List<String> args) async {
 
   final client = HttpClient();
   try {
+    // ── Guard: never overwrite a live market (reads only) ────────────────
+    // Both nodes are read before anything else, dry runs included, so a dry
+    // run warns exactly like a real one. A failed read throws from _get and
+    // stops the tool before any write.
+    final existingPlayers =
+        await _get(client, 'Fantasy/$sport/$season/Players');
+    final existingConfig = await _get(client, 'Fantasy/$sport/$season/Config');
+    final refusal = seedRefusal(
+      existingPlayers: existingPlayers,
+      existingConfig: existingConfig,
+      force: force,
+    );
+    if (refusal != null) {
+      stderr.writeln('Fantasy/$sport/$season $refusal');
+      exit(1);
+    }
+    if (force && (existingPlayers != null || existingConfig != null)) {
+      stdout.writeln('--force-reseed: overwriting existing '
+          'Fantasy/$sport/$season nodes.');
+    }
+
     // ── Reads ────────────────────────────────────────────────────────────
     stdout.writeln('Reading $sport/$season …');
     final lineupsNode = await _get(client, '$sport/$season/Line Ups');

@@ -232,4 +232,47 @@ void main() {
       expect(parsed.toMap(), FantasyConfig.futsalDefault().toMap());
     });
   });
+
+  group('seedRefusal', () {
+    test('absent/absent → null (fresh season, nothing to overwrite)', () {
+      expect(
+        seedRefusal(existingPlayers: null, existingConfig: null, force: false),
+        isNull,
+      );
+    });
+    test('Players present → refusal naming Players and the override', () {
+      final msg = seedRefusal(
+          existingPlayers: {'P1': {}}, existingConfig: null, force: false);
+      expect(msg, isNotNull);
+      expect(msg, contains('Players'));
+      expect(msg, isNot(contains('Config')));
+      expect(msg, contains('--force-reseed'));
+      expect(msg, contains('Manager'));
+    });
+    test('Config present alone → refusal naming Config', () {
+      final msg = seedRefusal(
+          existingPlayers: null,
+          existingConfig: {'budgetTenths': 1000},
+          force: false);
+      expect(msg, isNotNull);
+      expect(msg, contains('Config'));
+      expect(msg, isNot(contains('Players')));
+    });
+    test('both present → refusal naming both', () {
+      final msg = seedRefusal(
+          existingPlayers: {'P1': {}},
+          existingConfig: {'budgetTenths': 1000},
+          force: false);
+      expect(msg, contains('Players and Config'));
+    });
+    test('present + force → null (throwaway test season override)', () {
+      expect(
+        seedRefusal(
+            existingPlayers: {'P1': {}},
+            existingConfig: {'budgetTenths': 1000},
+            force: true),
+        isNull,
+      );
+    });
+  });
 }
