@@ -4,7 +4,9 @@
 // imports it.
 
 import { clone, Json, loadGoldenFixture } from './golden_fixture';
-import { FantasyDb, FantasyTxResult } from './orchestration_db';
+import {
+  childEntries, FantasyDb, FantasyTxResult, nodeExists,
+} from './orchestration_db';
 import { FantasyPusher, FantasyUserPush } from './pushes';
 import { pickIdsOf } from './transfer_state';
 
@@ -19,6 +21,16 @@ export const F_ROOT = 'Fantasy/Futsal/15';
 export class FakeDb implements FantasyDb {
   data: Record<string, any>;
   writes: string[] = [];
+  /** Every read the ENGINE made through the seam, in order: `read:<path>`,
+   *  `exists:<path>`, `keys:<path>` (a transaction's or writeIfAbsent's own
+   *  internal read is not one). Tests assert what was — and was not — read. */
+  reads: string[] = [];
+  /** Keys-only read, like production's `?shallow=true`. Reassignable so a
+   *  test can make it throw or remove it (the childKeysOf fallback). */
+  childKeys: ((path: string) => Promise<string[]>) | undefined = async (path) => {
+    this.reads.push(`keys:${path}`);
+    return childEntries(this.lookup(path)).map(([k]) => k);
+  };
 
   constructor(seed: Record<string, any>) {
     this.data = seed;
@@ -28,7 +40,30 @@ export class FakeDb implements FantasyDb {
     return path.split('/').filter((p) => p.length > 0);
   }
 
+  private quiet = false;
+
   async read(path: string): Promise<unknown> {
+    if (!this.quiet) this.reads.push(`read:${path}`);
+    return this.lookup(path);
+  }
+
+  /** The seam's own read inside writeIfAbsent / transaction: it still goes
+   *  through this.read (existing tests hook that) but is not an engine read,
+   *  so it is not recorded. The flag is consumed by read()'s synchronous
+   *  start, so it can never swallow a concurrent engine read. */
+  private innerRead(path: string): Promise<unknown> {
+    this.quiet = true;
+    const pending = this.read(path);
+    this.quiet = false;
+    return pending;
+  }
+
+  async exists(path: string): Promise<boolean> {
+    this.reads.push(`exists:${path}`);
+    return nodeExists(this.lookup(path));
+  }
+
+  private lookup(path: string): unknown {
     let node: any = this.data;
     for (const p of this.parts(path)) {
       if (node === null || node === undefined || typeof node !== 'object') {
@@ -58,7 +93,7 @@ export class FakeDb implements FantasyDb {
   }
 
   async writeIfAbsent(path: string, value: unknown): Promise<boolean> {
-    if ((await this.read(path)) !== null) return false;
+    if ((await this.innerRead(path)) !== null) return false;
     await this.write(path, value);
     return true;
   }
@@ -66,7 +101,7 @@ export class FakeDb implements FantasyDb {
   async transaction(
     path: string, update: (current: unknown) => unknown,
   ): Promise<FantasyTxResult> {
-    const current = await this.read(path);
+    const current = await this.innerRead(path);
     // Real RTDB runs the update FIRST on its local cache, which is always
     // empty in a Cloud Function, and asks the server only when that guess
     // returns a value. An update that aborts on that null never sees the

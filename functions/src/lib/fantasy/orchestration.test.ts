@@ -14,7 +14,7 @@ import {
 } from './orchestration';
 import { configFromMap } from './fantasy_config';
 import {
-  FantasyDb, FantasyTxResult, loadSeasonGameweeks,
+  FantasyDb, FantasyTxResult, loadSeasonGameweeks, nodeExists,
 } from './orchestration_db';
 import {
   AFTER_LOCK2, F_ROOT, FakeDb as ColdFakeDb, FakePusher, fixtureSquad,
@@ -56,6 +56,10 @@ class FakeDb implements FantasyDb {
       node = Array.isArray(node) ? node[Number(p)] : node[p];
     }
     return node === undefined ? null : node;
+  }
+
+  async exists(path: string): Promise<boolean> {
+    return nodeExists(await this.read(path));
   }
 
   async write(path: string, value: unknown): Promise<void> {

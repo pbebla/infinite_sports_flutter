@@ -13,6 +13,7 @@ import {
   LockedWeek, ScheduleOverrides,
 } from './gameweeks';
 import { leagueInstantUtc, parseDbDate } from './league_time';
+import type { FantasyLogger } from './orchestration';
 
 /** What a FantasyDb.transaction resolved to. */
 export interface FantasyTxResult {
@@ -27,6 +28,21 @@ export interface FantasyTxResult {
 export interface FantasyDb {
   /** Snapshot value at [path]; null when absent. */
   read(path: string): Promise<unknown>;
+  /** Whether [path] holds any data — for "is week N scored / snapshotted?"
+   *  checks that never need the contents. Production downloads at most ONE
+   *  child (a one-child query), not the whole node. An empty map is absent
+   *  (RTDB never stores one).
+   *  CONTAINER NODES ONLY (a map or list: History/<n>, PublishedPicks/<n>).
+   *  The production query sees a scalar leaf as absent (probed on the RTDB
+   *  emulator; the SDK's limited-query filter turns a leaf into an empty
+   *  node), while the in-memory dbs say true — so never call this on a
+   *  scalar such as a timestamp or flag; `(await read(path)) != null` is
+   *  the check for those. */
+  exists(path: string): Promise<boolean>;
+  /** The child KEYS of [path] without their values (RTDB `?shallow=true`) —
+   *  season discovery only. Optional: absent (tests, a db without it) or
+   *  failing, callers use childKeysOf, which falls back to a full read. */
+  childKeys?(path: string): Promise<string[]>;
   /** set() — null removes. */
   write(path: string, value: unknown): Promise<void>;
   /** Transactional set-if-absent; true when this call won the claim. */
@@ -100,6 +116,66 @@ export function childEntries(node: unknown): Array<[string, unknown]> {
     return Object.entries(node).filter(([, v]) => v !== null);
   }
   return [];
+}
+
+/** Whether a snapshot value is a node RTDB would hold: a scalar always, a
+ *  map or list only with at least one child (RTDB never stores an empty
+ *  map). The in-memory dbs' `exists`. */
+export function nodeExists(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (Array.isArray(value) || isPlainMap(value)) {
+    return childEntries(value).length > 0;
+  }
+  return true;
+}
+
+/** The child keys in a `?shallow=true` body. The body comes in both RTDB
+ *  shapes — an object `{k: true}` or, for small-int keys, a null-padded list
+ *  (`[null, true, true]`) — and yields exactly the keys childEntries would
+ *  on the full node. Anything else (null, a leaf) has no children. */
+export function shallowKeysOf(body: unknown): string[] {
+  return childEntries(body).map(([k]) => k);
+}
+
+/** The REST URL of a keys-only (`?shallow=true`) read of [path]. Against the
+ *  RTDB emulator ([emulatorHost] = FIREBASE_DATABASE_EMULATOR_HOST) it is
+ *  `http://<host>/<path>.json?ns=<namespace>&shallow=true`, the namespace
+ *  being the database URL's `ns` parameter or its first host label — what
+ *  firebase-admin itself uses, e.g. `infinite-sports-app`, never the
+ *  project id. The URL never carries a credential. */
+export function shallowUrl(
+  databaseURL: string, path: string, emulatorHost?: string,
+): string {
+  const encoded = path.split('/').filter((p) => p.length > 0)
+    .map(encodeURIComponent).join('/');
+  const base = new URL(databaseURL);
+  if (emulatorHost) {
+    const ns = base.searchParams.get('ns') ||
+      base.hostname.split('.')[0].toLowerCase();
+    return `http://${emulatorHost}/${encoded}.json` +
+      `?ns=${encodeURIComponent(ns)}&shallow=true`;
+  }
+  return `${base.origin}/${encoded}.json?shallow=true`;
+}
+
+/** The child keys of [path], cheaply when the db can (childKeys) and exactly
+ *  as the engine always did when it cannot: a db without childKeys, or ANY
+ *  failure of it (token, network, 5xx, timeout), reads the full node and
+ *  takes its keys — with ONE warning in the failure case — so a shallow
+ *  failure can never make a season go missing. */
+export async function childKeysOf(
+  db: FantasyDb, path: string, log: FantasyLogger,
+): Promise<string[]> {
+  if (db.childKeys) {
+    try {
+      return await db.childKeys(path);
+    } catch (err) {
+      log.warn('fantasy keys: shallow read failed', {
+        path, error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return childEntries(await db.read(path)).map(([k]) => k);
 }
 
 // ── Server-originated Squads/<uid> writes ──────────────────────────────────

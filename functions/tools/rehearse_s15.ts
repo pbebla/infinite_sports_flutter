@@ -356,6 +356,11 @@ class OverlayDb implements FantasyDb {
     return this.get(p);
   }
 
+  async exists(p: string): Promise<boolean> {
+    this.readCount++;
+    return this.get(p) !== null;
+  }
+
   async write(p: string, value: unknown): Promise<void> {
     this.capture(this.pipelineWrites, 'write', p, value);
     this.assign(p, value);

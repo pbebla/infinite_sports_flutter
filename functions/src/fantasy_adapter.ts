@@ -7,7 +7,9 @@ import * as admin from 'firebase-admin';
 import * as logger from 'firebase-functions/logger';
 import type { Reference } from 'firebase-admin/database';
 import { chunk } from './lib/campaigns';
-import { FantasyDb, FantasyTxResult } from './lib/fantasy/orchestration_db';
+import {
+  FantasyDb, FantasyTxResult, shallowKeysOf, shallowUrl,
+} from './lib/fantasy/orchestration_db';
 import { FantasyLogger } from './lib/fantasy/orchestration';
 import { FantasyPusher, FantasyUserPush } from './lib/fantasy/pushes';
 import { anthropicApiKey } from './support_joke';
@@ -24,11 +26,48 @@ export function readAnthropicKey(): string {
   }
 }
 
+/** Longest a keys-only read may take before the caller falls back to a full
+ *  read (childKeysOf). */
+const SHALLOW_TIMEOUT_MS = 10_000;
+
+/** The child keys of [path] by RTDB's REST `?shallow=true` — keys only, no
+ *  values (a season node under Fantasy/<sport> is megabytes; its keys are a
+ *  few bytes). Authorised with an admin OAuth token (the default app's own
+ *  credential, cached and refreshed by the SDK); under the RTDB emulator the
+ *  emulator's `owner` token. The token goes in a header only: it is never
+ *  in the URL, a log line or an error message — a non-2xx throws with the
+ *  status alone. Any failure throws, and childKeysOf falls back to a full
+ *  read, so this can never make a season go missing. */
+async function shallowChildKeys(path: string): Promise<string[]> {
+  const app = admin.app();
+  const databaseURL = app.options.databaseURL;
+  if (!databaseURL) throw new Error('shallow read: no databaseURL');
+  const emulatorHost = process.env.FIREBASE_DATABASE_EMULATOR_HOST;
+  const token = emulatorHost
+    ? 'owner'
+    : (await app.options.credential?.getAccessToken())?.access_token;
+  if (!token) throw new Error('shallow read: no access token');
+  const res = await fetch(shallowUrl(databaseURL, path, emulatorHost), {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(SHALLOW_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`shallow read: HTTP ${res.status}`);
+  return shallowKeysOf(await res.json());
+}
+
 export function rtdbFantasyDb(root: Reference): FantasyDb {
   return {
     async read(path: string): Promise<unknown> {
       return (await root.child(path).get()).val();
     },
+    async exists(path: string): Promise<boolean> {
+      // A one-child query: at most ONE child comes down the connection the
+      // engine already holds, however big the node is. Containers only — a
+      // scalar leaf has no child, so it reads as absent (see FantasyDb).
+      const snap = await root.child(path).orderByKey().limitToFirst(1).get();
+      return snap.exists();
+    },
+    childKeys: shallowChildKeys,
     async write(path: string, value: unknown): Promise<void> {
       if (value === null || value === undefined) {
         await root.child(path).remove();
