@@ -267,7 +267,7 @@ import {
 } from './fantasy_config';
 import { FetchLike } from '../support';
 import {
-  seedBadgeCatalog, settleSeasonBadges, settleWeeklyBadges,
+  BADGE_CATALOG_PATH, seedBadgeCatalog, settleSeasonBadges, settleWeeklyBadges,
 } from './badges';
 import {
   computeGameweekFinalize, FinalizeGame, MarketPlayer,
@@ -288,13 +288,14 @@ import {
 } from './news_cards';
 import { sendDueScheduledMessages } from './messages';
 import {
-  allGamesFinal, childEntries, FantasyDb, fantasyRoot, fantasySeasonsOf,
-  freezesWeekDate, fullAttendance, gamesOfDate, isPlainMap, isRewinding,
-  isServerSquadWrite, isTestFillSeason, isVoidFlag, keyedGamesOfDate,
-  loadSeasonGameweeks, lockedPositionsOf, lockOverrideOf, marketPlayersOf,
-  marketPricesOf, markServerSquadWrite, parseAbsentMap, positionsSnapshotOf,
-  rosterNamesOf, scheduleOverridesOf, SERVER_WRITE_KEY, TEST_FILL_STAND_DOWN,
-  toIntLoose, updateIfPresent, voidedWeeksOf, withLockedPositions,
+  allGamesFinal, childEntries, FantasyDb, fantasyRoot, freezesWeekDate,
+  fullAttendance, gamesOfDate, isPlainMap, isRewinding, isServerSquadWrite,
+  isTestFillSeason, isVoidFlag, keyedGamesOfDate, latestScoredWeek,
+  listFantasySeasons, loadSeasonGameweeks, lockedPositionsOf, lockOverrideOf,
+  marketPlayersOf, marketPricesOf, markServerSquadWrite, parseAbsentMap,
+  positionsSnapshotOf, rosterNamesOf, scheduleOverridesOf, SERVER_WRITE_KEY,
+  TEST_FILL_STAND_DOWN, toIntLoose, updateIfPresent, voidedWeeksOf,
+  withLockedPositions,
 } from './orchestration_db';
 import { applyDelta, repriceDeltas } from './pricing';
 import {
@@ -2860,22 +2861,23 @@ async function sweepSeason(
 /** The 15-minute scheduled sweep over every fantasy-enabled season. One
  *  season's failure never starves the others. Every run first seeds the
  *  global badge catalog (Fantasy/BadgeCatalog, set-if-absent per starter
- *  id — owner edits are never overwritten) from the Fantasy node it reads
- *  anyway, so the catalog exists for the Manager and the fan app even while
- *  every season is paused; the sibling is skipped by fantasySeasonsOf (no
- *  Config). */
+ *  id — owner edits are never overwritten) from the catalog node itself, so
+ *  the catalog exists for the Manager and the fan app even while every
+ *  season is paused. The seasons come from listFantasySeasons — keys-only
+ *  reads down to each season's Config — never from a read of the whole
+ *  Fantasy node (every season's Players, Squads, History...); the catalog
+ *  sibling is never listed as a sport. */
 export async function runLifecycleSweep(
   db: FantasyDb, nowUtc: Date, log: FantasyLogger = silent,
   deps?: FantasyJobDeps,
 ): Promise<void> {
-  const fantasyNode = await db.read('Fantasy');
+  const catalogNode = await db.read(BADGE_CATALOG_PATH);
   try {
-    await seedBadgeCatalog(db,
-      isPlainMap(fantasyNode) ? fantasyNode['BadgeCatalog'] ?? null : null, log);
+    await seedBadgeCatalog(db, catalogNode, log);
   } catch (err) {
     log.warn('fantasy badges: catalog seeding failed', { error: String(err) });
   }
-  const seasons = fantasySeasonsOf(fantasyNode);
+  const seasons = await listFantasySeasons(db, log);
   for (const ref of seasons) {
     try {
       await sweepSeason(db, ref, nowUtc, log, deps);
@@ -2974,7 +2976,11 @@ function isBeforeLeagueToday(dateKey: string, nowUtc: Date): boolean {
 /** Hourly 10:00-15:00 league time (fantasy_lifecycle.ts — the claim below
  *  makes every attempt after a successful one a no-op): reprice the most
  *  recent FINALIZED gameweek not yet repriced — the morning after its game
- *  day, whatever the weekday.
+ *  day, whatever the weekday. That week is the highest `Scored` entry of the
+ *  small LockedWeeks ledger (latestScoredWeek; the History week KEYS only for
+ *  a season locked before the ledger existed), and the seasons come from
+ *  listFantasySeasons — the job never downloads the whole Fantasy node or a
+ *  season's History.
  *  Only when the week's date is before today (league time) AND teams have
  *  not reopened (now < lockUtc + 24 h, taken from the week's Gameweek in
  *  loadSeasonGameweeks):
@@ -2996,7 +3002,7 @@ function isBeforeLeagueToday(dateKey: string, nowUtc: Date): boolean {
 export async function runMondayReprice(
   db: FantasyDb, nowUtc: Date, log: FantasyLogger = silent,
 ): Promise<void> {
-  const seasons = fantasySeasonsOf(await db.read('Fantasy'));
+  const seasons = await listFantasySeasons(db, log);
   for (const ref of seasons) {
     const { sport, season } = ref;
     const ctx = { sport, season };
@@ -3012,11 +3018,10 @@ export async function runMondayReprice(
       }
       const cfg = configFromMap(ref.configNode);
 
-      const weeks = childEntries(await db.read(`${root}/History`))
-        .map(([k]) => Number(k))
-        .filter((w) => Number.isInteger(w));
-      if (weeks.length === 0) continue; // nothing finalized yet
-      const gw = Math.max(...weeks);
+      // The latest finalized week, from the small LockedWeeks ledger (its
+      // Scored marks) — never a read of the whole History node.
+      const gw = await latestScoredWeek(db, root, log);
+      if (gw === null) continue; // nothing finalized yet
 
       const done = await db.read(`${root}/Repriced/${gw}`);
       if (done != null) {

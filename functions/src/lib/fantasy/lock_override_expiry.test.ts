@@ -100,17 +100,19 @@ describe('sweep: expired lock override reverts to auto and the season runs', () 
     expect(db.writes).toEqual([]);
   });
 
-  /** A db whose 'Fantasy' read (the sweep's season snapshot) is taken just
-   *  BEFORE [ownerWrite] lands on Config — the owner's change races the
-   *  revert. */
+  /** A db whose FIRST read of the season's Config (the sweep's season
+   *  snapshot, taken by season discovery) is taken just BEFORE [ownerWrite]
+   *  lands on Config — the owner's change races the revert. */
   function racing(
     expiredOverride: string, ownerWrite: (config: Record<string, any>) => void,
   ): FakeDb {
     const db = overridden(expiredOverride, AFTER_LOCK2.getTime() - 1, { gw2Status: 1 });
     const read = db.read.bind(db);
+    let raced = false;
     db.read = async (path: string) => {
       const value = await read(path);
-      if (path !== 'Fantasy') return value;
+      if (path !== `${F_ROOT}/Config` || raced) return value;
+      raced = true;
       const snapshot = JSON.parse(JSON.stringify(value));
       ownerWrite(configOf(db));
       return snapshot;

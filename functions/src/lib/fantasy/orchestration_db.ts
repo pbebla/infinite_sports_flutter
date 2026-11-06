@@ -293,9 +293,12 @@ export interface FantasySeasonRef {
   configNode: Record<string, unknown>;
 }
 
-/** Every fantasy-enabled (sport, season): children of the Fantasy node that
- *  carry a Config map. Season keys are small ints, so the per-sport node WILL
- *  list-coerce — childEntries handles both shapes. */
+/** Every fantasy-enabled (sport, season) found in a WHOLE Fantasy node:
+ *  children of it that carry a Config map. Season keys are small ints, so the
+ *  per-sport node WILL list-coerce — childEntries handles both shapes.
+ *  The engine no longer reads the whole node to discover seasons (see
+ *  listFantasySeasons); this stays as the reference rule that function
+ *  matches, and the tests compare the two. */
 export function fantasySeasonsOf(fantasyNode: unknown): FantasySeasonRef[] {
   const out: FantasySeasonRef[] = [];
   for (const [sport, seasons] of childEntries(fantasyNode)) {
@@ -307,6 +310,60 @@ export function fantasySeasonsOf(fantasyNode: unknown): FantasySeasonRef[] {
     }
   }
   return out;
+}
+
+/** The one child of `Fantasy` that is a shared node, not a sport (the badge
+ *  catalog, badges.ts BADGE_CATALOG_PATH). Never listed for seasons. */
+const BADGE_CATALOG_KEY = 'BadgeCatalog';
+
+/** Every fantasy-enabled (sport, season), found WITHOUT downloading the
+ *  Fantasy node — which holds every season's Players, Squads, Leaderboards
+ *  and History (megabytes at league size, read every 15 minutes). The sport
+ *  keys and each sport's season keys come from keys-only reads
+ *  (childKeysOf: shallow when the db can, else the full node — never a
+ *  skipped season), then only each season's small `Config` is read. A season
+ *  counts iff that Config is a plain map — exactly fantasySeasonsOf's rule —
+ *  and the order is the sport keys, then each sport's season keys, as they
+ *  come back. */
+export async function listFantasySeasons(
+  db: FantasyDb, log: FantasyLogger,
+): Promise<FantasySeasonRef[]> {
+  const out: FantasySeasonRef[] = [];
+  for (const sport of await childKeysOf(db, 'Fantasy', log)) {
+    if (sport === BADGE_CATALOG_KEY) continue;
+    for (const season of await childKeysOf(db, `Fantasy/${sport}`, log)) {
+      const config = await db.read(`${fantasyRoot(sport, season)}/Config`);
+      if (!isPlainMap(config)) continue;
+      out.push({ sport, season, configNode: config });
+    }
+  }
+  return out;
+}
+
+/** The highest gameweek whose points are in, without downloading History.
+ *  The `<root>/LockedWeeks` ledger (a few hundred bytes) marks every week a
+ *  finalize landed with `Scored: true` (markWeekScored) — the answer is the
+ *  largest such week number. Only when no entry is scored (a season locked
+ *  before the ledger existed) does it fall back to the History week KEYS
+ *  (childKeysOf — never their contents) and take the largest integer one.
+ *  Null when nothing has been finalized. The ledger can list-coerce (week
+ *  numbers are small ints), so it is read with childEntries. */
+export async function latestScoredWeek(
+  db: FantasyDb, root: string, log: FantasyLogger,
+): Promise<number | null> {
+  let latest: number | null = null;
+  for (const [key, entry] of childEntries(await db.read(`${root}/LockedWeeks`))) {
+    if (!isPlainMap(entry) || entry['Scored'] !== true) continue;
+    const week = Number(key);
+    if (!Number.isInteger(week)) continue;
+    if (latest === null || week > latest) latest = week;
+  }
+  if (latest !== null) return latest;
+
+  const weeks = (await childKeysOf(db, `${root}/History`, log))
+    .map(Number)
+    .filter((w) => Number.isInteger(w));
+  return weeks.length === 0 ? null : Math.max(...weeks);
 }
 
 /** Match-day keys (MMDDYYYY) of a season's Date node
