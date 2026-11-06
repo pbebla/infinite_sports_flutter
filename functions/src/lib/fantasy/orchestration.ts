@@ -82,13 +82,17 @@
 //   stale lock writes on an open week live in schedule_rewind.ts. Rules:
 //   signed-in read, no client write.
 //
-// - Repriced/<gw> = { At:int, Manual?:true, Voided?:true } — the Monday
-//   job's done-flag. Manual:true records "admin had set
+// - Repriced/<gw> = { At:int, Manual?:true, Voided?:true, Skipped?:'late' } —
+//   the reprice job's done-flag (it runs every morning, not only Mondays).
+//   Manual:true records "admin had set
 //   PriceChanges/<gw>/Manual, the job stood down"; Voided:true records "the
 //   week was owner-voided, the job skipped it" (un-voiding later does NOT
-//   reprice retroactively — prices have moved on). While a run works the
-//   row is its claim { At, Pending:true }; a Pending row over an hour old is
-//   a dead run (warned every later Monday, never taken over — audit M5).
+//   reprice retroactively — prices have moved on); Skipped:'late' records
+//   "the week was finalized after teams had reopened (lockUtc + 24 h), so
+//   its prices were not moved" — the owner can still adjust them by hand per
+//   player. While a run works the row is its claim { At, Pending:true }; a
+//   Pending row over an hour old is a dead run (warned on every later run,
+//   never taken over — audit M5).
 //   PriceChanges/<gw> itself holds only the client contract rows: <name>:
 //   { delta:int EFFECTIVE tenths } (post-clamp; zero moves omitted — a
 //   ceiling-clamped riser is not a riser) plus the owner's Manual flag.
@@ -258,6 +262,7 @@ import {
   computeGameweekFinalize, FinalizeGame, MarketPlayer,
 } from './finalize_core';
 import { currentGameweek, Gameweek, gameweekStatusAt } from './gameweeks';
+import { leagueWallClock, parseDbDate } from './league_time';
 import {
   buildLiveBase, computeLiveWeek, LiveBase, LiveGameStatus, LiveOutput,
   liveWriteMatters,
@@ -2803,15 +2808,43 @@ export async function sendReminderNow(
   return { gw: current.number, audience: uids.length, sent };
 }
 
-// ── Phase D: Monday repricing ──────────────────────────────────────────────
+// ── Phase D: the morning-after repricing ───────────────────────────────────
+// (named for the Monday it started as: the league plays Sundays today. The
+// exported function names stay because renaming a deployed function deletes
+// and recreates it — see fantasy_lifecycle.ts.)
 
 /** How old a `Repriced/<gw> {Pending:true}` claim may get before the
- *  Monday job warns that its run died mid-way (a healthy run finalizes the
+ *  reprice job warns that its run died mid-way (a healthy run finalizes the
  *  row within seconds). */
 const STALE_REPRICE_CLAIM_MS = 60 * 60 * 1000;
 
-/** Monday 10:00 league time: reprice the most recent FINALIZED gameweek not
- *  yet repriced. Per position, repriceDeltas over ALL eligible market
+/** Teams reopen for the next week this long after a week's deadline (the
+ *  "current" window of currentGameweek, gameweeks.ts). Repricing once they
+ *  have would move prices under managers who are already planning. */
+const REPRICE_WINDOW_AFTER_LOCK_MS = 24 * 60 * 60 * 1000;
+
+/** Whether the MMDDYYYY match date [dateKey] is strictly before today in
+ *  league time (America/Los_Angeles — never the server's or UTC's calendar
+ *  day: Sunday 19:00 PDT is already Monday in UTC and still game day). */
+function isBeforeLeagueToday(dateKey: string, nowUtc: Date): boolean {
+  const wall = leagueWallClock(nowUtc);
+  const todayMs = Date.UTC(
+    wall.getUTCFullYear(), wall.getUTCMonth(), wall.getUTCDate());
+  return parseDbDate(dateKey).getTime() < todayMs;
+}
+
+/** Daily 10:00 league time: reprice the most recent FINALIZED gameweek not
+ *  yet repriced — the morning after its game day, whatever the weekday.
+ *  Only when the week's date is before today (league time) AND teams have
+ *  not reopened (now < lockUtc + 24 h, taken from the week's Gameweek in
+ *  loadSeasonGameweeks):
+ *   - the game day is still today (or later) -> nothing, tomorrow's run;
+ *   - finalized at or after lockUtc + 24 h -> Repriced/<gw> =
+ *     {Skipped:'late', At} (writeIfAbsent: a real claim is never replaced),
+ *     a warning, no price moves — the owner adjusts by hand on the Manager
+ *     Players page;
+ *   - the History week is not in the schedule (an oddity) -> warn, nothing.
+ *  Otherwise, per position, repriceDeltas over ALL eligible market
  *  players (a player with no PlayerWeeks entry scored 0 that week — absent
  *  and no-game players included at their real score), applyDelta onto
  *  Players/<name>/priceTenths, PriceChanges/<gw> rows for the client's
@@ -2849,7 +2882,7 @@ export async function runMondayReprice(
       if (done != null) {
         // Done — or claimed. A claim still Pending an hour after it was
         // taken is a run that died mid-way (audit M5): say so loudly on
-        // every later Monday, but NEVER take it over — its prices may be
+        // every later run, but NEVER take it over — its prices may be
         // half-moved, and repricing again would move them twice.
         if (isPlainMap(done) && done['Pending'] === true &&
           nowUtc.getTime() - toIntLoose(done['At']) > STALE_REPRICE_CLAIM_MS) {
@@ -2858,6 +2891,39 @@ export async function runMondayReprice(
         }
         continue;
       }
+
+      // WHEN: the morning after the week's game day, and before teams
+      // reopen. The week list comes from loadSeasonGameweeks (the week is
+      // frozen at its locked date + deadline); a read that throws aborts
+      // this season here (caught below) — never "no weeks", never "late".
+      const { gws } = await loadSeasonGameweeks(
+        db, sport, season, cfg, ref.configNode);
+      const week = gws.find((g) => g.number === gw);
+      if (week === undefined) {
+        log.warn(`fantasy reprice: no gameweek ${gw} in the schedule — ` +
+          'skipped', { ...ctx, gw });
+        continue;
+      }
+      const reopenMs = week.lockUtc.getTime() + REPRICE_WINDOW_AFTER_LOCK_MS;
+      if (nowUtc.getTime() >= reopenMs) {
+        // Finalized after teams reopened: leave the prices alone for good.
+        // writeIfAbsent so a claim another run just took is never replaced.
+        if (await db.writeIfAbsent(`${root}/Repriced/${gw}`,
+          { Skipped: 'late', At: nowUtc.getTime() })) {
+          log.warn('fantasy reprice: week finalized after teams reopened — ' +
+            'prices not moved', {
+            ...ctx, gw, date: week.date, reopenedAtUtc: reopenMs,
+          });
+        }
+        continue;
+      }
+      if (!isBeforeLeagueToday(week.date, nowUtc)) {
+        // The game day is still today: tomorrow's run reprices it.
+        log.info('fantasy reprice: game day is today — waiting for the ' +
+          'morning after', { ...ctx, gw, date: week.date });
+        continue;
+      }
+
       // Once-only CLAIM (transaction): a double-fired schedule or two
       // overlapping runs must never move prices twice. The row is written
       // {At, Pending:true} up front and finalized below; a crash in between

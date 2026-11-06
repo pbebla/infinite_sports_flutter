@@ -539,6 +539,227 @@ describe('Monday repricing (Phase D)', () => {
     await runMondayReprice(frozen, NOW);
     expect(frozen.writes).toEqual([]);
   });
+
+  // ── Season setup + schedule, Task 5: the morning after ANY game day ──────
+  // The job now runs every day at 10:00 league time. It reprices the newest
+  // finalized week only when the week's date is BEFORE today (league time)
+  // and teams have not reopened yet (now < lockUtc + 24 h); a week finalized
+  // after the reopen is skipped for good ({Skipped:'late'}), a game day that
+  // is still today waits for tomorrow's run.
+  //
+  // PDT is UTC-7, so 10:00 league time = 17:00Z. 2026-06-28 is a Sunday:
+  // Sun lock 15:00 PDT = 22:00Z -> reopen Mon 22:00Z; the Wednesday 07/01
+  // game locks Wed 22:00Z -> reopen Thu 22:00Z.
+  const SUN_10 = new Date(Date.UTC(2026, 5, 28, 17));
+  const TUE_10 = new Date(Date.UTC(2026, 5, 30, 17));
+  const WED_KEY = '07012026';
+  const WED_LOCK_MS = Date.UTC(2026, 6, 1, 22);
+  const WED_10 = new Date(Date.UTC(2026, 6, 1, 17));
+  const THU_10 = new Date(Date.UTC(2026, 6, 2, 17));
+
+  /** The golden week finalized in its production shape: the game on [dateKey]
+   *  with its frozen LockedWeeks/1 ledger entry. */
+  function frozenWeekWorld(dateKey: string, lockMs: number): FakeDb {
+    const db = repriceWorld();
+    const season = db.data.Futsal['15'];
+    season.Date = { [dateKey]: season.Date[DATE_KEY] };
+    db.data.Fantasy.Futsal['15'].LockedWeeks = {
+      1: { Date: dateKey, LockAtUtc: lockMs },
+    };
+    return db;
+  }
+
+  function recordingLog(): {
+    log: FantasyLogger;
+    warns: Array<{ m: string; c?: Record<string, unknown> }>;
+  } {
+    const warns: Array<{ m: string; c?: Record<string, unknown> }> = [];
+    return {
+      warns,
+      log: { info: () => undefined, warn: (m, c) => { warns.push({ m, c }); } },
+    };
+  }
+
+  const pricesOf = async (db: FakeDb) => Promise.all(
+    Object.keys(WEEK_POINTS).map(
+      async (n) => db.read(`${fRoot}/Players/${n}/priceTenths`)));
+
+  it('Sunday game, Monday 10:00 -> repriced (unchanged behaviour)', async () => {
+    const db = frozenWeekWorld(DATE_KEY, LOCK_MS);
+    await runMondayReprice(db, NOW);
+    expect(await db.read(`${fRoot}/Repriced/1`)).toEqual({ At: NOW.getTime() });
+    expect(await db.read(`${fRoot}/Players/Bo/priceTenths`)).toBe(80);
+    expect(await db.read(`${fRoot}/Players/Wes/priceTenths`)).toBe(60);
+    expect(await db.read(`${fRoot}/PriceChanges/1`)).not.toBeNull();
+  });
+
+  it('Wednesday game, Thursday 10:00 -> repriced', async () => {
+    const db = frozenWeekWorld(WED_KEY, WED_LOCK_MS);
+    await runMondayReprice(db, THU_10);
+    expect(await db.read(`${fRoot}/Repriced/1`)).toEqual({ At: THU_10.getTime() });
+    // Same golden hand math as the Sunday run: GK mean 5.5 -> Bo +5, Wes -5.
+    expect(await db.read(`${fRoot}/Players/Bo/priceTenths`)).toBe(80);
+    expect(await db.read(`${fRoot}/Players/Wes/priceTenths`)).toBe(60);
+    expect(await db.read(`${fRoot}/Players/Dana/priceTenths`)).toBe(85);
+    expect(await db.read(`${fRoot}/PriceChanges/1`)).toEqual({
+      Bo: { delta: 5 }, Wes: { delta: -5 }, Eli: { delta: -5 },
+      Dana: { delta: 5 }, Bea: { delta: 5 }, Will: { delta: -5 },
+      Eva: { delta: -5 }, Alex: { delta: 5 }, Ezra: { delta: -5 },
+    });
+  });
+
+  it('a daily schedule: game day waits, the morning after reprices, later days are no-ops', async () => {
+    const db = frozenWeekWorld(WED_KEY, WED_LOCK_MS);
+    const { log, warns } = recordingLog();
+
+    // Wednesday 10:00 (game day, games not played yet): nothing at all.
+    await runMondayReprice(db, WED_10, log);
+    expect(db.writes).toEqual([]);
+
+    // Thursday 10:00: repriced exactly once.
+    await runMondayReprice(db, THU_10, log);
+    expect(await db.read(`${fRoot}/Repriced/1`)).toEqual({ At: THU_10.getTime() });
+    expect(await db.read(`${fRoot}/Players/Bo/priceTenths`)).toBe(80);
+
+    // Friday, Saturday, ... Monday 10:00: byte-identical no-ops, no warnings
+    // (a done week is neither re-repriced nor marked late).
+    const before = db.snapshot();
+    for (let d = 1; d <= 4; d++) {
+      await runMondayReprice(db, new Date(THU_10.getTime() + d * 86400_000), log);
+    }
+    expect(db.snapshot()).toBe(before);
+    expect(warns).toEqual([]);
+  });
+
+  it('game day itself at 10:00 -> nothing (tomorrow\'s run), whatever the weekday', async () => {
+    const sunday = repriceWorld(); // History/1 already there, date = today
+    await runMondayReprice(sunday, SUN_10);
+    expect(sunday.writes).toEqual([]);
+    expect(await sunday.read(`${fRoot}/Repriced/1`)).toBeNull();
+    expect(await sunday.read(`${fRoot}/Players/Bo/priceTenths`)).toBe(75);
+
+    const wednesday = frozenWeekWorld(WED_KEY, WED_LOCK_MS);
+    await runMondayReprice(wednesday, WED_10);
+    expect(wednesday.writes).toEqual([]);
+  });
+
+  it('"today" is league time, not UTC: Sunday 19:00 PDT is already Monday in UTC and still game day', async () => {
+    const db = repriceWorld();
+    const sundayEvening = new Date(Date.UTC(2026, 5, 29, 2)); // Mon 02:00Z
+    await runMondayReprice(db, sundayEvening);
+    expect(db.writes).toEqual([]);
+
+    // Monday 00:30 PDT (07:30Z) is the morning after: the date is before
+    // today and the week has not reopened.
+    await runMondayReprice(db, new Date(Date.UTC(2026, 5, 29, 7, 30)));
+    expect(await db.read(`${fRoot}/Repriced/1`))
+      .toEqual({ At: Date.UTC(2026, 5, 29, 7, 30) });
+  });
+
+  it('finalized after the reopen -> Repriced {Skipped:\'late\'}, a warning, no price change', async () => {
+    const db = frozenWeekWorld(DATE_KEY, LOCK_MS);
+    const pricesBefore = await pricesOf(db);
+    const { log, warns } = recordingLog();
+    db.writes = [];
+
+    // Tuesday 10:00: teams reopened Monday 22:00Z (Sun lock + 24 h).
+    await runMondayReprice(db, TUE_10, log);
+
+    expect(await db.read(`${fRoot}/Repriced/1`))
+      .toEqual({ Skipped: 'late', At: TUE_10.getTime() });
+    expect(await pricesOf(db)).toEqual(pricesBefore);
+    expect(await db.read(`${fRoot}/PriceChanges/1`)).toBeNull();
+    expect(db.writes).toEqual([`${fRoot}/Repriced/1`]);
+    expect(warns).toHaveLength(1);
+    expect(warns[0].m).toBe(
+      'fantasy reprice: week finalized after teams reopened — prices not moved');
+    expect(warns[0].c).toMatchObject({ sport: 'Futsal', season: '15', gw: 1 });
+
+    // The mark is final: the next days are no-ops (no second write, no warn).
+    const before = db.snapshot();
+    await runMondayReprice(db, new Date(TUE_10.getTime() + 86400_000), log);
+    expect(db.snapshot()).toBe(before);
+    expect(warns).toHaveLength(1);
+  });
+
+  it('the reopen is exactly lockUtc + 24 h: one millisecond before reprices, at it is late', async () => {
+    const reopen = LOCK_MS + 24 * 3600_000;
+    const early = frozenWeekWorld(DATE_KEY, LOCK_MS);
+    await runMondayReprice(early, new Date(reopen - 1));
+    expect(await early.read(`${fRoot}/Repriced/1`)).toEqual({ At: reopen - 1 });
+    expect(await early.read(`${fRoot}/Players/Bo/priceTenths`)).toBe(80);
+
+    const late = frozenWeekWorld(DATE_KEY, LOCK_MS);
+    await runMondayReprice(late, new Date(reopen));
+    expect(await late.read(`${fRoot}/Repriced/1`))
+      .toEqual({ Skipped: 'late', At: reopen });
+    expect(await late.read(`${fRoot}/Players/Bo/priceTenths`)).toBe(75);
+  });
+
+  it('a late run never overwrites a real claim or a done row', async () => {
+    // Existing rows (done, Manual, a live Pending claim): the done-check
+    // stands down before any lateness mark is considered.
+    for (const row of [
+      { At: NOW.getTime() }, { At: NOW.getTime(), Manual: true },
+      { At: NOW.getTime(), Voided: true },
+      { At: TUE_10.getTime() - 60_000, Pending: true },
+    ]) {
+      const db = frozenWeekWorld(DATE_KEY, LOCK_MS);
+      await db.write(`${fRoot}/Repriced/1`, row);
+      db.writes = [];
+      await runMondayReprice(db, TUE_10);
+      expect(db.writes, JSON.stringify(row)).toEqual([]);
+      expect(await db.read(`${fRoot}/Repriced/1`), JSON.stringify(row)).toEqual(row);
+    }
+
+    // A claim that lands between the read and the mark (concurrent run): the
+    // mark is a writeIfAbsent, so the claim survives.
+    const raced = frozenWeekWorld(DATE_KEY, LOCK_MS);
+    const claim = { At: TUE_10.getTime() - 5, Pending: true };
+    const realRead = raced.read.bind(raced);
+    let hidden = true;
+    raced.read = async (path: string) => {
+      if (hidden && path === `${fRoot}/Repriced/1`) {
+        hidden = false;
+        // The first read (the done-check) sees nothing; the run then
+        // competes against the claim a concurrent job wrote just after.
+        raced.data.Fantasy.Futsal['15'].Repriced = { 1: claim };
+        return null;
+      }
+      return realRead(path);
+    };
+    await runMondayReprice(raced, TUE_10);
+    expect(await realRead(`${fRoot}/Repriced/1`)).toEqual(claim);
+    expect(await realRead(`${fRoot}/PriceChanges/1`)).toBeNull();
+  });
+
+  it('a History week the schedule no longer has: warn and do nothing', async () => {
+    const db = frozenWeekWorld(DATE_KEY, LOCK_MS);
+    db.data.Fantasy.Futsal['15'].History = { 3: { alpha: { TotalTenths: 350 } } };
+    const { log, warns } = recordingLog();
+    db.writes = [];
+    await runMondayReprice(db, NOW, log);
+    expect(db.writes).toEqual([]); // not even a Skipped mark
+    expect(await db.read(`${fRoot}/Repriced/3`)).toBeNull();
+    expect(warns).toHaveLength(1);
+    expect(warns[0].m).toBe(
+      'fantasy reprice: no gameweek 3 in the schedule — skipped');
+    expect(warns[0].c).toMatchObject({ sport: 'Futsal', season: '15', gw: 3 });
+  });
+
+  it('a failed schedule read aborts the season without writing or marking it late', async () => {
+    const db = frozenWeekWorld(DATE_KEY, LOCK_MS);
+    const realRead = db.read.bind(db);
+    db.read = async (path: string) => {
+      if (path === 'Futsal/15/Date') throw new Error('read timed out');
+      return realRead(path);
+    };
+    const { log, warns } = recordingLog();
+    db.writes = [];
+    await runMondayReprice(db, TUE_10, log); // would be "late" if it read fine
+    expect(db.writes).toEqual([]);
+    expect(warns.map((w) => w.m)).toEqual(['fantasy reprice: season failed']);
+  });
 });
 
 // Round 3 spec §3.2: the lock step records the price every market player has
