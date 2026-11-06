@@ -37,7 +37,11 @@
 //      deletes PublishedPicks/L — a crash in between must not lose the list.
 //   1. PublishedPicks/L, LockedPositions/L, PriceHistory/L, TransferCosts/L
 //      and ReminderSent/L removed (the reminder fires again before the new
-//      deadline).
+//      deadline), and Voided/L (ruling T4b: the void named the cancelled
+//      day — the next game day, which inherits number L, must not be zeroed;
+//      onFantasyVoidWritten fires on the removal and settles nothing, since
+//      finalize stands down for the marked week and later waits for the
+//      reopened week's lock).
 //   2. Live removed when Live/Meta.Gw == L; LiveBase/L removed.
 //   3. SquadAlerts/<uid> removed where Gw == L and Kind == 'invalid' (the
 //      lock judge's verdict; any other alert is left).
@@ -78,7 +82,16 @@
 // in flight across the rewind); every Baselines/<uid> FOR L + 1 restored
 // (otherwise it blocks that manager's Save for the whole reopened week).
 // Each removal first re-reads LockedWeeks/L: once a lock of L has begun the
-// heal keeps its hands off.
+// heal keeps its hands off. Ruling T4d: it runs only when History/L is
+// absent AND L is 1 or week L - 1 is frozen — in a season without the
+// ledger a deleted past date renumbers the weeks, and the open week can then
+// carry the number of a week that locked and scored (its snapshots and its
+// finalize-written FOR L + 1 baselines are real).
+//
+// upsertGwState never writes 'locked' or 'finalized' unless LockedWeeks/<n>
+// still freezes the week's date (ruling T4e): a sweep that passed its lock
+// step before a rewind must not write its stale 'locked' over the reopened
+// week.
 //
 // THE CONFIG TRIGGER (onFantasyConfigWritten, fantasy_schedule.ts →
 // refreshOpenGwState): a deadline moved, a day skipped or the kickoff lead /
@@ -96,7 +109,8 @@
 import { configFromMap, FantasyConfig } from './fantasy_config';
 import { currentGameweek, Gameweek, gameweekStatusAt } from './gameweeks';
 import {
-  childEntries, dateKeysOf, FantasyDb, fantasyRoot, isPlainMap, isRewinding,
+  childEntries, dateKeysOf, FantasyDb, fantasyRoot, freezesWeekDate, isPlainMap,
+  isRewinding,
   isTestFillSeason, loadSeasonGameweeks, lockedWeeksOf, lockOverrideOf,
   scheduleOverridesOf, TEST_FILL_STAND_DOWN, toIntLoose, updateIfPresent,
 } from './orchestration_db';
@@ -119,7 +133,9 @@ export function calledOffBody(gw: number, deadline: string | null): string {
 /** [M3] What a rewind of gameweek [week] does to one stored
  *  Baselines/<uid> node (pure; the transaction's update):
  *  - a node FOR week + 1 (written by week's lock) carrying a readable Prev
- *    (squad_integrity.ts THE PREV STASH) → that Prev node, exactly;
+ *    (squad_integrity.ts THE PREV STASH) → that Prev node, exactly — WITH
+ *    its own Prev (ruling T4c, THE CHAIN: one rewind pops exactly one
+ *    level, so a second called-off week right before it restores too);
  *  - a node FOR week + 1 without one (the manager had no baseline before
  *    that lock) → null (removed: "first squad, ready");
  *  - anything else → undefined (left alone).
@@ -155,6 +171,9 @@ function gwStateEquals(existing: unknown, desired: GwStateNode): boolean {
  *  Config trigger: GwState for [current] — 'open' before its lock, 'locked'
  *  after it, 'finalized' once History/<n> exists — written only when a
  *  field changed. No current week = season over: GwState left as-is.
+ *  [T4e] 'locked'/'finalized' is written only while LockedWeeks/<n> still
+ *  freezes the week's date (re-read right before; logged and skipped
+ *  otherwise — the next sweep, on a fresh week list, decides).
  *  [S3] When the stored node is the SAME week, open both before and after,
  *  and the deadline moved LATER or the date changed, ReminderSent/<n> goes
  *  first (before GwState, so a crash in between re-arms it on the next run):
@@ -183,6 +202,15 @@ export async function upsertGwState(
   };
   const existing = await db.read(`${root}/GwState`);
   if (gwStateEquals(existing, desired)) return;
+  // Ruling T4e: 'locked'/'finalized' only while the ledger still freezes
+  // this week's date — a sweep whose week list predates a rewind (or a
+  // re-dated lock) must not write its stale 'locked' over the reopened week.
+  if (status !== 'open' && !freezesWeekDate(
+    await db.read(`${root}/LockedWeeks/${current.number}`), current.date)) {
+    log.info('fantasy sweep: week no longer frozen — GwState not marked locked',
+      { ...ctx, gw: current.number, date: current.date, status });
+    return;
+  }
   if (isPlainMap(existing) && status === 'open' &&
     existing['status'] === 'open' &&
     toIntLoose(existing['current']) === desired.current &&
@@ -373,9 +401,10 @@ export async function rewindCancelledWeek(
       return next;
     });
   }
-  // 1. The lock snapshots and the reminder claim.
+  // 1. The lock snapshots, the reminder claim and the owner's void of the
+  //    cancelled day (ruling T4b).
   for (const node of ['PublishedPicks', 'LockedPositions', 'PriceHistory',
-    'TransferCosts', 'ReminderSent']) {
+    'TransferCosts', 'ReminderSent', 'Voided']) {
     await db.write(`${root}/${node}/${n}`, null);
   }
   // 2. The live week (an abandoned live day) and its settled base.
@@ -387,7 +416,9 @@ export async function rewindCancelledWeek(
       return isPlainMap(meta) && toIntLoose(meta['Gw']) === n ? null : undefined;
     });
   }
-  await db.write(`${root}/LiveBase/${n}`, null);
+  if ((await db.read(`${root}/LiveBase/${n}`)) != null) {
+    await db.write(`${root}/LiveBase/${n}`, null);
+  }
   // 3. The lock judge's Invalid verdicts for this week.
   for (const [uid, alert] of childEntries(await db.read(`${root}/SquadAlerts`))) {
     if (!isWeekInvalidAlert(alert, n)) continue;
@@ -440,17 +471,22 @@ const LOCK_SNAPSHOTS = ['PublishedPicks', 'LockedPositions', 'PriceHistory',
   'TransferCosts'];
 
 /** The sweep's heal step (see the header) for [week], the derived current
- *  week — the CALLER runs it only while that week is open and not frozen.
- *  Cheap when nothing is wrong: one small read per snapshot node, Live/Meta
- *  and the Baselines node. Before each removal LockedWeeks/<n> is re-read:
- *  once a lock of the week has begun (its claim is the lock's first write),
- *  the heal stops. */
+ *  week of [gws] — the CALLER runs it only while that week is open and not
+ *  frozen. Ruling T4d: nothing happens unless week n - 1 is frozen in [gws]
+ *  (or n is 1) and History/<n> is absent. Cheap when nothing is wrong: one
+ *  small read for History/<n>, one per snapshot node, Live/Meta and the
+ *  Baselines node. Before each removal LockedWeeks/<n> is re-read: once a
+ *  lock of the week has begun (its claim is the lock's first write), the
+ *  heal stops. */
 export async function healOpenWeek(
-  db: FantasyDb, root: string, week: Gameweek,
+  db: FantasyDb, root: string, week: Gameweek, gws: Gameweek[],
   log: FantasyLogger, ctx: Record<string, unknown>,
 ): Promise<void> {
   const n = week.number;
   const wctx = { ...ctx, gw: n, date: week.date };
+  if (week.frozen) return;
+  if (n > 1 && gws.find((g) => g.number === n - 1)?.frozen !== true) return;
+  if ((await db.read(`${root}/History/${n}`)) != null) return;
   const unlocked = async (): Promise<boolean> =>
     (await db.read(`${root}/LockedWeeks/${n}`)) == null;
 

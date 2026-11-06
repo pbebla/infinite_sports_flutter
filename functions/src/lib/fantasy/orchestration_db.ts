@@ -305,6 +305,12 @@ export function isRewinding(node: unknown): boolean {
   return isPlainMap(node) && node['Rewinding'] === true;
 }
 
+/** Whether a stored `LockedWeeks/<n>` value freezes the week dated [date]:
+ *  a map with that Date and not marked by a rewind. */
+export function freezesWeekDate(node: unknown, date: string): boolean {
+  return isPlainMap(node) && node['Date'] === date && !isRewinding(node);
+}
+
 /** The schedule bits of `Fantasy/<sport>/<season>/Config`:
  *  `SkippedDates/<MMDDYYYY> = true` (only a literal `true` counts),
  *  `Deadlines/<MMDDYYYY> = <epoch ms number>` (anything else is ignored) and

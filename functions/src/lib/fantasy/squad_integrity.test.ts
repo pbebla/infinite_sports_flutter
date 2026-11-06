@@ -14,8 +14,8 @@ import {
   IntegrityInputs, integrityMarketOf, integrityVerdictOf, invalidAlertNode,
   invalidIssuesOf, isIntegrityAlert, isPreviewAlert, judgeSale, judgeSquad,
   overBudgetTenthsOf, picksAtJudgedPrices, previewAlertNode, priceSnapshotOf,
-  lockTimePrevOf, sameBaselineNode, sameInvalidAlert, samePreviewAlert,
-  squadIntegrityIssues,
+  lockTimePrevOf, MAX_PREV_CHAIN, sameBaselineNode, sameInvalidAlert,
+  samePreviewAlert, squadIntegrityIssues,
 } from './squad_integrity';
 import { annotateSquadIntegrity, lockAccounting } from './transfer_state';
 
@@ -461,18 +461,41 @@ describe('Baselines/<uid>: baselineNodeOf', () => {
       { stashPrev: true })).toBe(false);
   });
 
-  it('lockTimePrevOf: an earlier week node is stashed as exactly '
-    + '{ForGw, RealizedTenths, Prices} — never its own Prev', () => {
+  it('lockTimePrevOf: an earlier week node is stashed as its '
+    + '{ForGw, RealizedTenths, Prices} WITH its own Prev chain (ruling T4c: '
+    + 'each rewind pops one level, so back-to-back cancellations restore '
+    + 'every level)', () => {
     const stored = {
       ForGw: 4, RealizedTenths: -15, Prices: { Alex: 95, Sam: 85 },
-      Prev: { ForGw: 3, RealizedTenths: 0, Prices: {} },
+      Prev: {
+        ForGw: 3, RealizedTenths: 0, Prices: {},
+        Prev: { ForGw: 2, RealizedTenths: -15, Prices: { Sam: 85 } },
+      },
     };
-    expect(lockTimePrevOf(stored, 5))
-      .toEqual({ ForGw: 4, RealizedTenths: -15, Prices: { Alex: 95, Sam: 85 } });
+    expect(lockTimePrevOf(stored, 5)).toEqual({
+      ForGw: 4, RealizedTenths: -15, Prices: { Alex: 95, Sam: 85 },
+      Prev: {
+        ForGw: 3, RealizedTenths: 0, Prices: {},
+        Prev: { ForGw: 2, RealizedTenths: -15, Prices: { Sam: 85 } },
+      },
+    });
     // RTDB never stores an empty map: no Prices / no RealizedTenths read
-    // as {} / 0 (what every reader sees).
+    // as {} / 0 (what every reader sees); no Prev = the chain ends.
     expect(lockTimePrevOf({ ForGw: 4 }, 5))
       .toEqual({ ForGw: 4, RealizedTenths: 0, Prices: {} });
+    // An unreadable link ends the chain there.
+    expect(lockTimePrevOf({ ForGw: 4, RealizedTenths: 1, Prev: 'junk' }, 5))
+      .toEqual({ ForGw: 4, RealizedTenths: 1, Prices: {} });
+  });
+
+  it('lockTimePrevOf: the chain keeps at most MAX_PREV_CHAIN levels (RTDB '
+    + 'nests 32 deep at most)', () => {
+    let node: Record<string, unknown> = { ForGw: 1, RealizedTenths: 0 };
+    for (let gw = 2; gw <= 20; gw++) node = { ForGw: gw, RealizedTenths: 0, Prev: node };
+    let depth = 0;
+    for (let p: any = lockTimePrevOf(node, 21); p != null; p = p.Prev) depth++;
+    expect(depth).toBe(MAX_PREV_CHAIN);
+    expect(MAX_PREV_CHAIN).toBe(8);
   });
 
   it('lockTimePrevOf: no stored baseline (or junk) → none; a node already FOR '
@@ -480,9 +503,12 @@ describe('Baselines/<uid>: baselineNodeOf', () => {
     expect(lockTimePrevOf(null, 5)).toBeNull();
     expect(lockTimePrevOf({ RealizedTenths: 3 }, 5)).toBeNull(); // no ForGw
     expect(lockTimePrevOf('junk', 5)).toBeNull();
-    const kept = { ForGw: 4, RealizedTenths: -15, Prices: { Alex: 95 } };
+    const kept = {
+      ForGw: 4, RealizedTenths: -15, Prices: { Alex: 95 },
+      Prev: { ForGw: 3, RealizedTenths: -15, Prices: {} },
+    };
     expect(lockTimePrevOf({ ForGw: 5, RealizedTenths: 0, Prev: kept }, 5))
-      .toEqual(kept);
+      .toEqual(kept); // the whole chain kept
     expect(lockTimePrevOf({ ForGw: 5, RealizedTenths: 0 }, 5)).toBeNull();
     expect(lockTimePrevOf({ ForGw: 6, RealizedTenths: 0, Prev: kept }, 5)).toBeNull();
   });

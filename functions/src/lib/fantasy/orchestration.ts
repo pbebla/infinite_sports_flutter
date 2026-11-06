@@ -272,8 +272,8 @@ import {
 } from './news_cards';
 import { sendDueScheduledMessages } from './messages';
 import {
-  allGamesFinal, childEntries, FantasyDb, fantasyRoot,
-  fantasySeasonsOf, fullAttendance, gamesOfDate, isPlainMap, isRewinding,
+  allGamesFinal, childEntries, FantasyDb, fantasyRoot, fantasySeasonsOf,
+  freezesWeekDate, fullAttendance, gamesOfDate, isPlainMap, isRewinding,
   isServerSquadWrite, isTestFillSeason, isVoidFlag, keyedGamesOfDate,
   loadSeasonGameweeks, lockedPositionsOf, lockOverrideOf, marketPlayersOf,
   marketPricesOf, markServerSquadWrite, parseAbsentMap, positionsSnapshotOf,
@@ -2064,7 +2064,7 @@ function lockedWeekNode(gw: Gameweek): { Date: string; LockAtUtc: number } {
  *  that Date and NOT marked `Rewinding: true` (the rewind's first step — a
  *  week being rewound is no claim to keep or to write under). */
 function freezesWeek(node: unknown, gw: Gameweek): boolean {
-  return isPlainMap(node) && node['Date'] === gw.date && !isRewinding(node);
+  return freezesWeekDate(node, gw.date);
 }
 
 /** Whether a rewind has marked gameweek [n] (LockedWeeks/<n>.Rewinding —
@@ -2467,12 +2467,14 @@ async function sweepSeason(
   //     the current week is open and not frozen no lock of it ever stood, so
   //     a lock write a stale sweep landed after a rewind (snapshots, a live
   //     node, a baseline FOR the next week) is undone before it can be
-  //     adopted by the real lock or block a Save. Logged; never blocks the
-  //     steps below.
+  //     adopted by the real lock or block a Save — only when week n - 1 is
+  //     frozen (or n is 1) and History/<n> is absent (ruling T4d: a season
+  //     without the ledger can renumber a scored week onto the open one).
+  //     Logged; never blocks the steps below.
   if (current && !current.frozen &&
     gameweekStatusAt(current, nowUtc) !== 'locked') {
     try {
-      await healOpenWeek(db, root, current, log, ctx);
+      await healOpenWeek(db, root, current, gws, log, ctx);
     } catch (err) {
       log.warn('fantasy heal: failed — retried by the next sweep',
         { ...ctx, gw: current.number, error: String(err) });

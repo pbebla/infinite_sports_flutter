@@ -277,13 +277,22 @@ export function baselineRealizedFor(inputs: IntegrityInputs, uid: string): numbe
 // never rewound). Every reader of Baselines reads named keys only, so Prev
 // is invisible to them (baselineForGwOf / baselineRealizedTenthsOf here,
 // selling.dart saleBaselineFromNode, tools/client_draft_money.ts).
+//
+// THE CHAIN (ruling T4c): the stash keeps the replaced node's OWN Prev
+// nested, so two locks in a row without a finalize in between (an unscored
+// week, then the next) stash two levels, and each rewind of a called-off
+// week pops exactly one (schedule_rewind.ts restoreBaselineAfterRewind) —
+// back-to-back cancellations restore every manager's money, level by level.
+// A finalize that writes History drops the whole chain, so it is normally
+// one level deep.
 
-/** A Baselines/<uid>/Prev stash: exactly the replaced node's three money
- *  fields — never its own Prev. */
+/** A Baselines/<uid>/Prev stash: the replaced node's three money fields and
+ *  — when it carried one — its own stash (THE CHAIN). */
 export interface SaleBaselinePrev {
   ForGw: number;
   RealizedTenths: number;
   Prices: Record<string, number>;
+  Prev?: SaleBaselinePrev;
 }
 
 /** One Baselines/<uid> node as the server writes it. */
@@ -349,27 +358,41 @@ export function baselineNodeOf(
   return { ForGw: forGw, RealizedTenths: realizedOf(effectiveRaw), Prices: prices };
 }
 
+/** How many levels THE CHAIN keeps (counting the stash itself). Each level
+ *  is one lock in a row without a finalize — a run this long of unscored
+ *  weeks all called off is not a real season — and RTDB refuses data nested
+ *  more than 32 levels deep (Fantasy/<sport>/<season>/Baselines/<uid> plus
+ *  every Prev plus Prices/<id>), so deeper levels are dropped. */
+export const MAX_PREV_CHAIN = 8;
+
 /** [stored] as a Prev stash: its ForGw, RealizedTenths (absent/junk = 0,
- *  as every reader reads it) and its numeric Prices (RTDB-pruned = {});
- *  null when it is not a baseline (no numeric ForGw). Its own Prev is
- *  never carried. */
-function baselineAsPrev(stored: unknown): SaleBaselinePrev | null {
+ *  as every reader reads it), its numeric Prices (RTDB-pruned = {}) and —
+ *  THE CHAIN — its own readable Prev, the same way, up to [depth] levels in
+ *  all (an unreadable link ends the chain there); null when it is not a
+ *  baseline (no numeric ForGw). */
+function baselineAsPrev(
+  stored: unknown, depth: number = MAX_PREV_CHAIN,
+): SaleBaselinePrev | null {
   const forGw = baselineForGwOf(stored);
-  if (forGw === null || !isPlainMap(stored)) return null;
+  if (depth <= 0 || forGw === null || !isPlainMap(stored)) return null;
   const prices: Record<string, number> = {};
   for (const [id, v] of childEntries(stored['Prices'])) {
     if (typeof v === 'number') prices[id] = v;
   }
-  return {
+  const out: SaleBaselinePrev = {
     ForGw: forGw, RealizedTenths: baselineRealizedTenthsOf(stored), Prices: prices,
   };
+  const inner = baselineAsPrev(stored['Prev'], depth - 1);
+  if (inner !== null) out.Prev = inner;
+  return out;
 }
 
 /** The Prev a LOCK-time write of a node FOR gameweek [forGw] carries, given
  *  the [stored] node it replaces (THE PREV STASH):
- *  - stored FOR an earlier week -> that node itself (baselineAsPrev);
+ *  - stored FOR an earlier week -> that node itself, its own Prev nested
+ *    (baselineAsPrev — THE CHAIN);
  *  - stored FOR [forGw] already (this lock wrote it before) -> the stash it
- *    already carries, kept — it still names the node before this lock;
+ *    already carries, kept whole — it still names the node before this lock;
  *  - no stored baseline, or one for a later week -> none (null). */
 export function lockTimePrevOf(stored: unknown, forGw: number): SaleBaselinePrev | null {
   const storedFor = baselineForGwOf(stored);

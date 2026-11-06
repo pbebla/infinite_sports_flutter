@@ -967,11 +967,14 @@ describe('Baselines/<uid> (FPL selling: last locked prices + realized)', () => {
       ForGw: 3, RealizedTenths: 5, Prices: ALPHA_GW2,
       Prev: { ForGw: 2, RealizedTenths: 0, Prices: GW1_ALPHA },
     });
-    // Exactly {ForGw, RealizedTenths, Prices} of the stored node — its own
-    // Prev is never nested.
+    // The stored node's {ForGw, RealizedTenths, Prices} WITH its own Prev
+    // nested (ruling T4c: a chain, so each rewind pops exactly one level).
     expect(await db.read(`${F_ROOT}/Baselines/boost`)).toEqual({
       ForGw: 3, RealizedTenths: 0, Prices: GW1_BOOST,
-      Prev: { ForGw: 2, RealizedTenths: 0, Prices: GW1_BOOST },
+      Prev: {
+        ForGw: 2, RealizedTenths: 0, Prices: GW1_BOOST,
+        Prev: { ForGw: 1, RealizedTenths: 0, Prices: {} },
+      },
     });
     expect(await db.read(`${F_ROOT}/Baselines/dave`)).toEqual({
       ForGw: 3, RealizedTenths: -15, Prices: {},

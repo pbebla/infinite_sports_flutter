@@ -15,7 +15,7 @@ import { configFromMap } from './fantasy_config';
 import { Gameweek } from './gameweeks';
 import { clone, Json } from './golden_fixture';
 import {
-  FantasyLogger, maybeFinalizeGame, runLifecycleSweep,
+  FantasyLogger, maybeFinalizeGame, resettleVoidToggle, runLifecycleSweep,
 } from './orchestration';
 import { FantasyPusher, FantasyUserPush, formatDeadlineInstant } from './pushes';
 import {
@@ -171,6 +171,19 @@ describe('restoreBaselineAfterRewind (pure)', () => {
   it('a node FOR the week after the rewound one with a Prev → the Prev node', () => {
     expect(restoreBaselineAfterRewind(
       { ForGw: 3, RealizedTenths: 5, Prices: { Ben: 85 }, Prev: prev }, 2)).toEqual(prev);
+  });
+
+  it('[T4c] pops exactly ONE level of the Prev chain: the stashed node comes '
+    + 'back with its own Prev', () => {
+    const chain = {
+      ForGw: 3, RealizedTenths: 0, Prices: {},
+      Prev: { ForGw: 2, RealizedTenths: -15, Prices: {} },
+    };
+    expect(restoreBaselineAfterRewind(
+      { ForGw: 4, RealizedTenths: 5, Prices: { Ben: 85 }, Prev: chain }, 3))
+      .toEqual(chain);
+    expect(restoreBaselineAfterRewind(chain, 2))
+      .toEqual({ ForGw: 2, RealizedTenths: -15, Prices: {} });
   });
 
   it('FOR the week after, no Prev (or an unreadable one) → removed', () => {
@@ -574,6 +587,107 @@ describe('the sweep rewinds a called-off week', () => {
     await expectRewound(db);
     expect(spy.warns).toContain('fantasy rewind: called-off push failed');
   });
+
+  it('[T4c] two called-off weeks in a row (GW3, then GW2 on the next sweep): '
+    + 'every manager\'s money comes back exactly', async () => {
+    const GW4_DATE = '07122026';
+    const LOCK4_MS = Date.UTC(2026, 6, 12, 22);
+    const db = await lockedGw2({ gw2Status: 1 }); // GW2 kicked off, never finished
+    dates(db)[GW4_DATE] = clone(dates(db)[GW3_DATE]);
+    const afterLock3 = new Date(LOCK3_MS + 60 * 60_000);
+    await runLifecycleSweep(db, afterLock3); // GW3 locks on top of unscored GW2
+    expect(t(db).LockedWeeks[3]).toEqual({ Date: GW3_DATE, LockAtUtc: LOCK3_MS });
+    // dave's carried -15, stashed one level per lock.
+    expect(t(db).Baselines.dave).toEqual({
+      ForGw: 4, RealizedTenths: -15, Prices: {},
+      Prev: {
+        ForGw: 3, RealizedTenths: -15, Prices: {},
+        Prev: { ForGw: 2, RealizedTenths: -15, Prices: {} },
+      },
+    });
+
+    delete dates(db)[GW2_DATE]; // both days called off
+    delete dates(db)[GW3_DATE];
+    const pusher = new FakePusher();
+    const t1 = new Date(afterLock3.getTime() + 60 * 60_000);
+    await runLifecycleSweep(db, t1, undefined, { pusher }); // rewinds GW3
+    expect(t(db).LockedWeeks[3]).toBeUndefined();
+    expect(t(db).LockedWeeks[2]).toEqual({ Date: GW2_DATE, LockAtUtc: LOCK2_MS });
+    await runLifecycleSweep(db, new Date(t1.getTime() + 15 * 60_000), undefined,
+      { pusher }); // rewinds GW2
+
+    expect(t(db).Baselines).toEqual({
+      ...preLockBaselines(),
+      dave: { ForGw: 2, RealizedTenths: -15, Prices: {} },
+    });
+    expect(t(db).LockedWeeks)
+      .toEqual({ 1: { Date: GW1_DATE, LockAtUtc: LOCK1_MS, Scored: true } });
+    expect(t(db).GwState).toEqual({
+      current: 2, status: 'open', lockAtUtc: LOCK4_MS, date: GW4_DATE,
+    });
+    expect(calledOffSends(pusher).map((batch) => batch[0].body)).toEqual([
+      'GW3 was called off — your team is open again until Sun, Jul 12 · 3:00 PM.',
+      'GW2 was called off — your team is open again until Sun, Jul 12 · 3:00 PM.',
+    ]);
+  });
+
+  it('[T4b] the rewind clears Voided/<n>; the void trigger that fires on the '
+    + 'removal settles nothing', async () => {
+    const db = await lockedGw2();
+    t(db).Voided = { 2: true }; // the owner voided the day...
+    for (const g of dates(db)[GW2_DATE]) g.status = 2;
+    t(db).Config.SkippedDates = { [GW2_DATE]: true }; // ...then skipped it
+    const settled = ['History/2', 'PlayerWeeks/2', 'PlayerWeekStats/2',
+      'RecapSent/2', 'NewsDrafted/2', 'Leaderboards'];
+    const realWrite = db.write.bind(db);
+    const triggerWrites: string[][] = [];
+    const fireTrigger = async () => {
+      const before = db.writes.length;
+      await resettleVoidToggle(db, {
+        sport: 'Futsal', season: '15', gw: 2, nowUtc: LATER,
+      });
+      triggerWrites.push(db.writes.slice(before));
+    };
+    db.write = async (p: string, v: unknown) => {
+      await realWrite(p, v);
+      // onFantasyVoidWritten fires on the removal (true → absent).
+      if (p === `${F_ROOT}/Voided/2` && v === null) await fireTrigger();
+    };
+    await runLifecycleSweep(db, LATER);
+    expect(await db.read(`${F_ROOT}/Voided/2`)).toBeNull();
+    expect(t(db).GwState).toMatchObject({ current: 2, status: 'open', date: GW3_DATE });
+    // ...and once more after the rewind finished.
+    db.write = realWrite;
+    await fireTrigger();
+    expect(triggerWrites).toEqual([[], []]);
+    for (const p of settled) expect(await db.read(`${F_ROOT}/${p}`), p).toBeNull();
+  });
+
+  it('[T4e] a sweep that locked before a rewind never writes \'locked\' over '
+    + 'the reopened week', async () => {
+    const db = await lockedGw2();
+    const pusher = new FakePusher();
+    const realRead = db.read.bind(db);
+    let rewound = false;
+    db.read = async (p: string) => {
+      // This sweep's lock step already passed; a concurrent sweep rewinds
+      // GW2 before this one reaches its GwState upsert (step 2d reads
+      // Live/Meta just before it).
+      if (!rewound && p === `${F_ROOT}/Live/Meta`) {
+        rewound = true;
+        db.read = realRead;
+        delete dates(db)[GW2_DATE];
+        await runLifecycleSweep(db, LATER, undefined, { pusher });
+      }
+      return realRead(p);
+    };
+    await runLifecycleSweep(db, LATER);
+    expect(rewound).toBe(true);
+    expect(t(db).GwState).toEqual({
+      current: 2, status: 'open', lockAtUtc: LOCK3_MS, date: GW3_DATE,
+    });
+    expect(calledOffSends(pusher)).toHaveLength(1);
+  });
 });
 
 describe('the heal step while the week is open and unfrozen (rulings T3c, T3d)', () => {
@@ -668,6 +782,47 @@ describe('the heal step while the week is open and unfrozen (rulings T3c, T3d)',
     expect(t(db).GwState.status).toBe('open');
     expect(await db.read(`${F_ROOT}/PublishedPicks/2`)).toBeNull();
   });
+
+  /** Week 2's lock + finalize as a season that predates the ledger left
+   *  them: snapshots, and every manager's finalize-written FOR-3 baseline
+   *  (no Prev — finalize drops it). */
+  const seedWeek2Settled = (db: FakeDb) => {
+    const s = t(db);
+    s.PublishedPicks[2] = { alpha: fixtureSquad('alpha') };
+    s.LockedPositions = { 2: { Sam: 'GK' } };
+    s.PriceHistory = { 2: { Sam: 85 } };
+    s.TransferCosts = { 2: { alpha: 4 } };
+    s.Baselines = {
+      alpha: { ForGw: 3, RealizedTenths: 0, Prices: GW1_ALPHA },
+      dave: { ForGw: 3, RealizedTenths: -15, Prices: {} },
+    };
+  };
+  const week2Nodes = (db: FakeDb) => JSON.stringify(
+    ['PublishedPicks', 'LockedPositions', 'PriceHistory', 'TransferCosts', 'Baselines']
+      .map((n) => n === 'Baselines' ? t(db)[n] : t(db)[n]?.[2] ?? null));
+
+  it('[T4d] a season with no ledger: a deleted past date renumbers the weeks, '
+    + 'the open week carries a locked week\'s number — the heal does nothing', async () => {
+    const db = world();
+    delete t(db).LockedWeeks; // the season predates LockedWeeks
+    seedWeek2Settled(db);
+    const before = week2Nodes(db);
+    const spy = logSpy();
+    await runLifecycleSweep(db, BEFORE_LOCK2, spy.log);
+    expect(week2Nodes(db)).toBe(before);
+    expect(spy.warns.filter((m) => m.startsWith('fantasy heal'))).toEqual([]);
+  });
+
+  it('[T4d] History/<n> present → the heal does nothing', async () => {
+    const db = world(); // GW1 frozen: GW2 open and unfrozen
+    seedWeek2Settled(db);
+    t(db).History[2] = { alpha: { ...fixtureSquad('alpha'), TotalTenths: 0 } };
+    const before = week2Nodes(db);
+    const spy = logSpy();
+    await runLifecycleSweep(db, BEFORE_LOCK2, spy.log);
+    expect(week2Nodes(db)).toBe(before);
+    expect(spy.warns.filter((m) => m.startsWith('fantasy heal'))).toEqual([]);
+  });
 });
 
 describe('upsertGwState', () => {
@@ -707,9 +862,28 @@ describe('upsertGwState', () => {
 
   it('a locked week reads History for finalized, as the sweep always did', async () => {
     const db = world();
+    t(db).LockedWeeks[2] = { Date: GW2_DATE, LockAtUtc: LOCK2_MS };
     await upsertGwState(db, F_ROOT, week(GW2_DATE, LOCK2_MS), AFTER_LOCK2, silent, {});
     expect(t(db).GwState.status).toBe('locked');
     expect(t(db).ReminderSent[2]).toBeDefined(); // only an OPEN week re-arms
+    t(db).History[2] = { alpha: { ...fixtureSquad('alpha'), TotalTenths: 0 } };
+    await upsertGwState(db, F_ROOT, week(GW2_DATE, LOCK2_MS), AFTER_LOCK2, silent, {});
+    expect(t(db).GwState.status).toBe('finalized');
+  });
+
+  it.each([
+    ['absent (a rewind removed it)', undefined],
+    ['marked Rewinding', { Date: GW2_DATE, LockAtUtc: LOCK2_MS, Rewinding: true }],
+    ['frozen on another date', { Date: GW3_DATE, LockAtUtc: LOCK3_MS }],
+  ])('[T4e] \'locked\' is never written while LockedWeeks/<n> is %s', async (_label, entry) => {
+    const db = world(); // GwState says GW2 open
+    if (entry !== undefined) t(db).LockedWeeks[2] = entry;
+    const spy = logSpy();
+    await upsertGwState(db, F_ROOT, week(GW2_DATE, LOCK2_MS), AFTER_LOCK2, spy.log, {});
+    expect(db.writes).toEqual([]);
+    expect(t(db).GwState.status).toBe('open');
+    expect(spy.infos).toContain(
+      'fantasy sweep: week no longer frozen — GwState not marked locked');
   });
 });
 
