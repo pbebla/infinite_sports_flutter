@@ -1,5 +1,7 @@
-// Recent-form bars (round 3, spec §4, owner mockup): the last six gameweeks
-// he has a record for, oldest → newest, the week's points on top of each bar
+// Recent-form bars (round 3, spec §4, owner mockup): every gameweek he has a
+// record for, oldest → newest. Six fit across; a longer season scrolls
+// sideways, opening on the newest week with a "Swipe for earlier weeks" hint
+// (owner 2026-11-06). The week's points sit on top of each bar
 // and "GW7" under it; tapping a bar selects that week (the Overview shows its
 // breakdown). Plain widgets — no chart package. Bars use the fantasy accent
 // (gold on dark, primary red on light); a negative week is a red stub, a
@@ -35,77 +37,127 @@ class FantasyFormBars extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final accent = fantasyAccent(context);
+    // One scale for the whole season, so a bar's height means the same thing
+    // wherever the chart is scrolled to.
     final top =
         bars.fold<int>(1, (m, b) => b.voided ? m : math.max(m, b.points));
+    final scrolls = bars.length > kProfileFormBarsVisible;
 
-    return Column(
+    return LayoutBuilder(
       key: const ValueKey('profile_form_bars'),
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            for (final b in bars)
-              Expanded(
-                child: _Bar(
-                  bar: b,
-                  height: (!b.voided && b.points > 0)
-                      ? math.max(_stub, b.points / top * maxBarHeight)
-                      : _stub,
-                  tone: b.voided
-                      ? scheme.onSurfaceVariant.withValues(alpha: 0.35)
-                      : (b.points < 0 ? fantasyDownRed(context) : accent),
-                  selected: b.gw == selectedGw,
-                  onTap: onTapBar == null ? null : () => onTapBar!(b.gw),
-                ),
-              ),
-          ],
-        ),
-        Divider(
-          height: 1,
-          thickness: 1,
-          color: scheme.outlineVariant.withValues(alpha: 0.7),
-        ),
-        const SizedBox(height: 6),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final b in bars)
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'GW${b.gw}',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: b.gw == selectedGw
-                            ? FontWeight.w800
-                            : FontWeight.w600,
-                        color: b.gw == selectedGw
-                            ? scheme.onSurface
-                            : scheme.onSurfaceVariant,
+      builder: (context, constraints) {
+        // Up to six weeks share the width; a longer season keeps the six-week
+        // slot width and scrolls sideways.
+        final width =
+            constraints.maxWidth.isFinite ? constraints.maxWidth : 336.0;
+        final slot = width /
+            (scrolls ? kProfileFormBarsVisible : math.max(1, bars.length));
+        final chart = SizedBox(
+          width: slot * bars.length,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  for (final b in bars)
+                    SizedBox(
+                      width: slot,
+                      child: _Bar(
+                        bar: b,
+                        height: (!b.voided && b.points > 0)
+                            ? math.max(_stub, b.points / top * maxBarHeight)
+                            : _stub,
+                        tone: b.voided
+                            ? scheme.onSurfaceVariant.withValues(alpha: 0.35)
+                            : (b.points < 0 ? fantasyDownRed(context) : accent),
+                        selected: b.gw == selectedGw,
+                        onTap: onTapBar == null ? null : () => onTapBar!(b.gw),
                       ),
                     ),
-                    if (b.live)
-                      Text(
-                        'LIVE',
-                        key: ValueKey('form_bar_live_${b.gw}'),
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.5,
-                          color: fantasyDownRed(context),
-                        ),
-                      ),
-                  ],
-                ),
+                ],
               ),
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: scheme.outlineVariant.withValues(alpha: 0.7),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final b in bars)
+                    SizedBox(
+                      width: slot,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'GW${b.gw}',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: b.gw == selectedGw
+                                  ? FontWeight.w800
+                                  : FontWeight.w600,
+                              color: b.gw == selectedGw
+                                  ? scheme.onSurface
+                                  : scheme.onSurfaceVariant,
+                            ),
+                          ),
+                          if (b.live)
+                            Text(
+                              'LIVE',
+                              key: ValueKey('form_bar_live_${b.gw}'),
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.5,
+                                color: fantasyDownRed(context),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        );
+        if (!scrolls) return chart;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // reverse: the chart opens on its newest weeks (the right-hand
+            // end); swiping right brings the earlier ones in from the left.
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              reverse: true,
+              child: chart,
+            ),
+            const SizedBox(height: 6),
+            Row(
+              key: const ValueKey('profile_form_bars_hint'),
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.chevron_left,
+                    size: 16, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 2),
+                Text(
+                  'Swipe for earlier weeks',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
           ],
-        ),
-      ],
+        );
+      },
     );
   }
 }

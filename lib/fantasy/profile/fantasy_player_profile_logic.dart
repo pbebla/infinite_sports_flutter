@@ -26,8 +26,9 @@ import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 
-/// How many recent gameweeks the form bars show.
-const int kProfileFormBarCount = 6;
+/// How many gameweeks the form bars fit on screen at once; a longer season
+/// scrolls sideways (FantasyFormBars), opening on the latest week.
+const int kProfileFormBarsVisible = 6;
 
 /// The copy before any finalized week (spec §4) — ONLY while he has no
 /// weekly record at all ([FantasyProfileModel.hasWeeks] false).
@@ -180,8 +181,8 @@ class FantasyProfileModel {
   /// the market). False → "Points start after Gameweek 1".
   final bool hasWeeks;
 
-  /// The last [kProfileFormBarCount] weeks he has a record for, oldest →
-  /// newest.
+  /// Every week he has a record for, oldest → newest; the chart shows
+  /// [kProfileFormBarsVisible] at once and scrolls for the rest.
   final List<FormBar> formBars;
 
   /// Season points by source over non-voided weeks.
@@ -289,12 +290,10 @@ FantasyProfileModel buildProfileModel({
   final name = player.name;
   final gws = weeks.keys.toList()..sort();
 
-  // Form bars: the last N weeks present, oldest → newest.
-  final barWeeks = gws.length <= kProfileFormBarCount
-      ? gws
-      : gws.sublist(gws.length - kProfileFormBarCount);
+  // Form bars: every week he has a record for, oldest → newest (the chart
+  // scrolls when they don't all fit).
   final formBars = [
-    for (final gw in barWeeks)
+    for (final gw in gws)
       FormBar(
         gw: gw,
         points: weeks[gw]!.voided ? 0 : weeks[gw]!.points,

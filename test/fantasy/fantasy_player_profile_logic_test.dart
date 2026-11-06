@@ -175,12 +175,13 @@ void main() {
   });
 
   group('formBars', () {
-    test('last 6 weeks present, oldest to newest, capped at 6', () {
+    test('every week present, oldest to newest (the chart scrolls)', () {
       final model = _build(weeks: {
         for (var gw = 1; gw <= 8; gw++) gw: _week(gw * 2),
       });
-      expect(model.formBars.map((b) => b.gw).toList(), [3, 4, 5, 6, 7, 8]);
-      expect(model.formBars.first.points, 6);
+      expect(model.formBars.map((b) => b.gw).toList(),
+          [1, 2, 3, 4, 5, 6, 7, 8]);
+      expect(model.formBars.first.points, 2);
       expect(model.formBars.last.points, 16);
     });
 

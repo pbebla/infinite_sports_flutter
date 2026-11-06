@@ -1437,11 +1437,12 @@ void main() {
       expect(find.text('64'), findsOneWidget); // total pts
       expect(find.text('6.7'), findsOneWidget); // form
       expect(find.text('55%'), findsOneWidget); // owned
-      // Only the last six of the eight weeks.
-      expect(key('form_bar_2'), findsNothing);
-      for (final gw in [3, 4, 5, 6, 7, 8]) {
+      // All eight weeks: six fit, the chart opens on the newest and the
+      // earlier ones are a swipe away.
+      for (var gw = 1; gw <= 8; gw++) {
         expect(key('form_bar_$gw'), findsOneWidget);
       }
+      expect(key('profile_form_bars_hint'), findsOneWidget);
       expect(find.text('9'), findsOneWidget); // GW8's 8+1 on its bar
       expect(find.text('Open in Fantasy'), findsOneWidget);
     });
