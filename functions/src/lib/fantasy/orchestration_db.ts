@@ -28,16 +28,15 @@ export interface FantasyTxResult {
 export interface FantasyDb {
   /** Snapshot value at [path]; null when absent. */
   read(path: string): Promise<unknown>;
-  /** Whether [path] holds any data — for "is week N scored / snapshotted?"
-   *  checks that never need the contents. Production downloads at most ONE
-   *  child (a one-child query), not the whole node. An empty map is absent
-   *  (RTDB never stores one).
-   *  CONTAINER NODES ONLY (a map or list: History/<n>, PublishedPicks/<n>).
-   *  The production query sees a scalar leaf as absent (probed on the RTDB
+  /** Whether the MAP node at [path] has at least one child — for "is week N
+   *  scored / snapshotted?" checks that never need the contents. Production
+   *  downloads at most ONE child (a one-child query), not the whole node.
+   *  An empty map is absent (RTDB never stores one).
+   *  MAP NODES ONLY (History/<n>, PublishedPicks/<n>): a scalar leaf has no
+   *  child, so it answers false — in production (probed on the RTDB
    *  emulator; the SDK's limited-query filter turns a leaf into an empty
-   *  node), while the in-memory dbs say true — so never call this on a
-   *  scalar such as a timestamp or flag; `(await read(path)) != null` is
-   *  the check for those. */
+   *  node) and in every in-memory db, which mirror that. Use
+   *  `(await read(path)) != null` for a leaf such as a timestamp or flag. */
   exists(path: string): Promise<boolean>;
   /** The child KEYS of [path] without their values (RTDB `?shallow=true`) —
    *  season discovery only. Optional: absent (tests, a db without it) or
@@ -118,15 +117,11 @@ export function childEntries(node: unknown): Array<[string, unknown]> {
   return [];
 }
 
-/** Whether a snapshot value is a node RTDB would hold: a scalar always, a
- *  map or list only with at least one child (RTDB never stores an empty
- *  map). The in-memory dbs' `exists`. */
+/** The in-memory dbs' `exists`, mirroring production's one-child query
+ *  (FantasyDb.exists): true only for a map or list with at least one non-null
+ *  child. A scalar leaf, an empty map and an absent node are all false. */
 export function nodeExists(value: unknown): boolean {
-  if (value === null || value === undefined) return false;
-  if (Array.isArray(value) || isPlainMap(value)) {
-    return childEntries(value).length > 0;
-  }
-  return true;
+  return childEntries(value).length > 0;
 }
 
 /** The child keys in a `?shallow=true` body. The body comes in both RTDB

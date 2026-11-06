@@ -135,15 +135,48 @@ describe('shallowUrl', () => {
   });
 });
 
-describe('FakeDb.exists', () => {
-  it('is true for a present node, false for absent and for an empty map', async () => {
-    const db = new FakeDb({
-      Fantasy: { Futsal: { '15': { History: { '1': { u1: { pts: 3 } }, '2': {} } } } },
-    });
-    expect(await db.exists('Fantasy/Futsal/15/History/1')).toBe(true);
-    expect(await db.exists('Fantasy/Futsal/15/History/1/u1/pts')).toBe(true);
-    expect(await db.exists('Fantasy/Futsal/15/History/3')).toBe(false);
-    expect(await db.exists('Fantasy/Futsal/15/History/2')).toBe(false);
+describe('FakeDb.exists mirrors production (map nodes only)', () => {
+  const db = () => new FakeDb({
+    Fantasy: {
+      Futsal: {
+        '15': {
+          History: { '1': { u1: { pts: 3 } }, '2': {}, '3': { u1: null } },
+          Scalar: 5, Flag: false, Empty: '', List: [null, { v: 1 }],
+        },
+      },
+    },
+  });
+
+  it('a map with a child is true', async () => {
+    expect(await db().exists('Fantasy/Futsal/15/History/1')).toBe(true);
+    expect(await db().exists('Fantasy/Futsal/15/History')).toBe(true);
+    expect(await db().exists('Fantasy/Futsal/15/History/1/u1')).toBe(true);
+  });
+
+  it('a list-coerced node with a child is true', async () => {
+    expect(await db().exists('Fantasy/Futsal/15/List')).toBe(true);
+  });
+
+  it('a scalar leaf is false, like the production one-child query', async () => {
+    expect(await db().exists('Fantasy/Futsal/15/History/1/u1/pts')).toBe(false);
+    expect(await db().exists('Fantasy/Futsal/15/Scalar')).toBe(false);
+    expect(await db().exists('Fantasy/Futsal/15/Flag')).toBe(false);
+    expect(await db().exists('Fantasy/Futsal/15/Empty')).toBe(false);
+  });
+
+  it('an empty map (or one holding only nulls) is false', async () => {
+    expect(await db().exists('Fantasy/Futsal/15/History/2')).toBe(false);
+    expect(await db().exists('Fantasy/Futsal/15/History/3')).toBe(false);
+  });
+
+  it('an absent node is false', async () => {
+    expect(await db().exists('Fantasy/Futsal/15/History/9')).toBe(false);
+    expect(await db().exists('Fantasy/Nope/deeper')).toBe(false);
+  });
+
+  it('read() is the check for a leaf', async () => {
+    expect(await db().read('Fantasy/Futsal/15/Scalar')).toBe(5);
+    expect(await db().read('Fantasy/Futsal/15/Flag')).toBe(false);
   });
 
   it('records exists:, read: and keys: in call order', async () => {

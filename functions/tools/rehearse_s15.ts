@@ -58,7 +58,9 @@ import {
   FantasyJobDeps, FantasyLogger, maybeFinalizeGame, recordSquadSave,
   runLifecycleSweep, runMondayReprice,
 } from '../src/lib/fantasy/orchestration';
-import { FantasyDb, FantasyTxResult } from '../src/lib/fantasy/orchestration_db';
+import {
+  FantasyDb, FantasyTxResult, nodeExists,
+} from '../src/lib/fantasy/orchestration_db';
 import { PlayerGameStats, playedGame } from '../src/lib/fantasy/player_game_stats';
 import { applyDelta, openingPrices, repriceDeltas } from '../src/lib/fantasy/pricing';
 import { FantasyPusher } from '../src/lib/fantasy/pushes';
@@ -358,7 +360,7 @@ class OverlayDb implements FantasyDb {
 
   async exists(p: string): Promise<boolean> {
     this.readCount++;
-    return this.get(p) !== null;
+    return nodeExists(this.get(p));
   }
 
   async write(p: string, value: unknown): Promise<void> {
