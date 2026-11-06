@@ -2976,11 +2976,11 @@ function isBeforeLeagueToday(dateKey: string, nowUtc: Date): boolean {
 /** Hourly 10:00-15:00 league time (fantasy_lifecycle.ts — the claim below
  *  makes every attempt after a successful one a no-op): reprice the most
  *  recent FINALIZED gameweek not yet repriced — the morning after its game
- *  day, whatever the weekday. That week is the highest `Scored` entry of the
- *  small LockedWeeks ledger (latestScoredWeek; the History week KEYS only for
- *  a season locked before the ledger existed), and the seasons come from
- *  listFantasySeasons — the job never downloads the whole Fantasy node or a
- *  season's History.
+ *  day, whatever the weekday. That week is the largest week number in the
+ *  season's History (latestScoredWeek: the keys only, never the weeks'
+ *  contents — History is the truth, the LockedWeeks `Scored` mark is
+ *  warn-only), and the seasons come from listFantasySeasons — the job never
+ *  downloads the whole Fantasy node or a season's History.
  *  Only when the week's date is before today (league time) AND teams have
  *  not reopened (now < lockUtc + 24 h, taken from the week's Gameweek in
  *  loadSeasonGameweeks):
@@ -3018,8 +3018,8 @@ export async function runMondayReprice(
       }
       const cfg = configFromMap(ref.configNode);
 
-      // The latest finalized week, from the small LockedWeeks ledger (its
-      // Scored marks) — never a read of the whole History node.
+      // The latest finalized week: the largest History week number (keys
+      // only — never a read of the whole History node).
       const gw = await latestScoredWeek(db, root, log);
       if (gw === null) continue; // nothing finalized yet
 

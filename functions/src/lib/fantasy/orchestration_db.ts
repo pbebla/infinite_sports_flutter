@@ -340,26 +340,17 @@ export async function listFantasySeasons(
   return out;
 }
 
-/** The highest gameweek whose points are in, without downloading History.
- *  The `<root>/LockedWeeks` ledger (a few hundred bytes) marks every week a
- *  finalize landed with `Scored: true` (markWeekScored) — the answer is the
- *  largest such week number. Only when no entry is scored (a season locked
- *  before the ledger existed) does it fall back to the History week KEYS
- *  (childKeysOf — never their contents) and take the largest integer one.
- *  Null when nothing has been finalized. The ledger can list-coerce (week
- *  numbers are small ints), so it is read with childEntries. */
+/** The highest gameweek whose points are in (a finalize wrote its History
+ *  node), without downloading History: the largest integer key of
+ *  `<root>/History` — the week numbers only (childKeysOf: shallow keys, or
+ *  the full node when the shallow read is unavailable, which is exactly what
+ *  the reprice always did). Non-integer keys are ignored; null when nothing
+ *  has been finalized. History itself is the truth: the LockedWeeks `Scored`
+ *  mark is warn-only (markWeekScored) and nothing heals a missing one, so a
+ *  finalized week without its mark must still count. */
 export async function latestScoredWeek(
   db: FantasyDb, root: string, log: FantasyLogger,
 ): Promise<number | null> {
-  let latest: number | null = null;
-  for (const [key, entry] of childEntries(await db.read(`${root}/LockedWeeks`))) {
-    if (!isPlainMap(entry) || entry['Scored'] !== true) continue;
-    const week = Number(key);
-    if (!Number.isInteger(week)) continue;
-    if (latest === null || week > latest) latest = week;
-  }
-  if (latest !== null) return latest;
-
   const weeks = (await childKeysOf(db, `${root}/History`, log))
     .map(Number)
     .filter((w) => Number.isInteger(w));

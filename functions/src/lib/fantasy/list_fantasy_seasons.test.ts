@@ -3,7 +3,9 @@
 // read the WHOLE Fantasy node (every season's Players, Squads, Leaderboards,
 // History...) just to learn which (sport, season) pairs exist, and the reprice
 // read a season's whole History just to find its highest week. Now: keys-only
-// reads down to each season's Config, and the LockedWeeks ledger.
+// reads down to each season's Config, and the History week KEYS (the largest
+// is the latest finalized week; the LockedWeeks Scored mark is warn-only, so
+// it is never the source).
 
 import { describe, expect, it } from 'vitest';
 import { STARTER_CATALOG } from './badges';
@@ -15,7 +17,7 @@ import {
   fantasySeasonsOf, latestScoredWeek, listFantasySeasons,
 } from './orchestration_db';
 import {
-  AFTER_LOCK2, F_ROOT, FakeDb, GW1_DATE, LOCK2_MS, world2,
+  AFTER_LOCK2, F_ROOT, FakeDb, GW1_DATE, GW2_DATE, LOCK2_MS, world2,
 } from './test_support';
 
 function spyLog() {
@@ -125,91 +127,85 @@ describe('listFantasySeasons', () => {
 
 describe('latestScoredWeek', () => {
   const ROOT = 'Fantasy/Futsal/15';
-  const entry = (extra: Record<string, unknown> = {}) => ({
-    Date: GW1_DATE, LockAtUtc: 1, ...extra,
-  });
+  const week = { a: 1 };
 
-  it('is the largest week whose ledger entry is Scored, with no History read', async () => {
+  it('is the largest History week number, from the keys only', async () => {
     const db = new FakeDb({
       Fantasy: { Futsal: { '15': {
-        LockedWeeks: { 1: entry({ Scored: true }), 2: entry({ Scored: true }), 3: entry() },
-        History: { 1: { a: 1 }, 2: { a: 1 } },
-      } } },
-    });
-    expect(await latestScoredWeek(db, ROOT, silent)).toBe(2);
-    expect(db.reads).toEqual([`read:${ROOT}/LockedWeeks`]);
-    expect(db.reads.some((r) => r.includes('History'))).toBe(false);
-  });
-
-  it('compares weeks as numbers, not strings (10 beats 9)', async () => {
-    const db = new FakeDb({
-      Fantasy: { Futsal: { '15': { LockedWeeks: {
-        9: entry({ Scored: true }), 10: entry({ Scored: true }), 2: entry({ Scored: true }),
-      } } } },
-    });
-    expect(await latestScoredWeek(db, ROOT, silent)).toBe(10);
-  });
-
-  it('reads a list-coerced ledger (index = week, index 0 null)', async () => {
-    const db = new FakeDb({
-      Fantasy: { Futsal: { '15': { LockedWeeks: [
-        null, entry({ Scored: true }), entry({ Scored: true }), entry(),
-      ] } } },
-    });
-    expect(await latestScoredWeek(db, ROOT, silent)).toBe(2);
-  });
-
-  it('counts only a literal Scored: true', async () => {
-    const db = new FakeDb({
-      Fantasy: { Futsal: { '15': {
-        LockedWeeks: {
-          1: entry({ Scored: true }), 2: entry({ Scored: 'true' }),
-          3: entry({ Scored: 1 }), 4: entry({ Scored: false }),
-        },
-        History: { 1: { a: 1 } },
-      } } },
-    });
-    expect(await latestScoredWeek(db, ROOT, silent)).toBe(1);
-  });
-
-  it('falls back to the History keys when no ledger entry is scored', async () => {
-    // A season locked before the ledger existed.
-    const db = new FakeDb({
-      Fantasy: { Futsal: { '15': {
-        LockedWeeks: { 5: entry() },
-        History: { 1: { a: 1 }, 2: { a: 1 }, 3: { a: 1 }, 4: { a: 1 } },
+        History: { 1: week, 2: week, 3: week, 4: week },
       } } },
     });
     expect(await latestScoredWeek(db, ROOT, silent)).toBe(4);
     // Keys only: the History weeks' contents are never downloaded.
-    expect(db.reads).toEqual([`read:${ROOT}/LockedWeeks`, `keys:${ROOT}/History`]);
+    expect(db.reads).toEqual([`keys:${ROOT}/History`]);
+    expect(db.reads).not.toContain(`read:${ROOT}/History`);
   });
 
-  it('falls back with no ledger at all, taking the numerically largest integer key', async () => {
+  it('compares weeks as numbers, not strings (10 beats 9)', async () => {
     const db = new FakeDb({
-      Fantasy: { Futsal: { '15': {
-        History: { 2: { a: 1 }, 10: { a: 1 }, junk: { a: 1 } },
-      } } },
+      Fantasy: { Futsal: { '15': { History: { 9: week, 10: week, 2: week } } } },
     });
     expect(await latestScoredWeek(db, ROOT, silent)).toBe(10);
   });
 
-  it('is null when nothing was scored or finalized', async () => {
-    expect(await latestScoredWeek(new FakeDb({}), ROOT, silent)).toBeNull();
+  it('ignores keys that are not week numbers', async () => {
     const db = new FakeDb({
-      Fantasy: { Futsal: { '15': { LockedWeeks: { 1: entry() } } } },
+      Fantasy: { Futsal: { '15': {
+        History: { 2: week, junk: week, '2.5': week, 3: week },
+      } } },
     });
-    expect(await latestScoredWeek(db, ROOT, silent)).toBeNull();
+    expect(await latestScoredWeek(db, ROOT, silent)).toBe(3);
+    const onlyJunk = new FakeDb({
+      Fantasy: { Futsal: { '15': { History: { junk: week } } } },
+    });
+    expect(await latestScoredWeek(onlyJunk, ROOT, silent)).toBeNull();
   });
 
-  it('a failed keys read on the fallback falls back to the full History read, with one warning', async () => {
+  it('reads a list-coerced History (index = week, index 0 null)', async () => {
     const db = new FakeDb({
-      Fantasy: { Futsal: { '15': { History: { 1: { a: 1 }, 3: { a: 1 } } } } },
+      Fantasy: { Futsal: { '15': { History: [null, week, week] } } },
     });
-    db.childKeys = async () => { throw new Error('shallow read: HTTP 500'); };
+    expect(await latestScoredWeek(db, ROOT, silent)).toBe(2);
+  });
+
+  it('is null when nothing has been finalized', async () => {
+    expect(await latestScoredWeek(new FakeDb({}), ROOT, silent)).toBeNull();
+    const noHistory = new FakeDb({
+      Fantasy: { Futsal: { '15': { Config: { a: 1 } } } },
+    });
+    expect(await latestScoredWeek(noHistory, ROOT, silent)).toBeNull();
+  });
+
+  it('a finalized week counts even when its LockedWeeks Scored mark never landed', async () => {
+    // The case that rules out the ledger: markWeekScored is warn-only, so
+    // weeks 1-2 are marked and week 3 has its History but no mark. The
+    // reprice must pick 3, not the already-repriced 2.
+    const entry = (extra: Record<string, unknown> = {}) => ({
+      Date: GW1_DATE, LockAtUtc: 1, ...extra,
+    });
+    const db = new FakeDb({
+      Fantasy: { Futsal: { '15': {
+        LockedWeeks: { 1: entry({ Scored: true }), 2: entry({ Scored: true }), 3: entry() },
+        History: { 1: week, 2: week, 3: week },
+      } } },
+    });
+    expect(await latestScoredWeek(db, ROOT, silent)).toBe(3);
+    expect(db.reads.some((r) => r.includes('LockedWeeks'))).toBe(false);
+  });
+
+  it('a failed keys read falls back to the full History read: same answer, one warning', async () => {
+    const seed = () => ({
+      Fantasy: { Futsal: { '15': { History: { 1: week, 3: week } } } },
+    });
+    const viaKeys = new FakeDb(seed());
+    const viaFullRead = new FakeDb(seed());
+    viaFullRead.childKeys = async () => { throw new Error('shallow read: HTTP 500'); };
     const { log, warns } = spyLog();
-    expect(await latestScoredWeek(db, ROOT, log)).toBe(3);
+    expect(await latestScoredWeek(viaFullRead, ROOT, log))
+      .toBe(await latestScoredWeek(viaKeys, ROOT, silent));
+    expect(await latestScoredWeek(new FakeDb(seed()), ROOT, silent)).toBe(3);
     expect(warns.map((w) => w.message)).toEqual([KEYS_WARN]);
+    expect(viaFullRead.reads).toEqual([`read:${ROOT}/History`]);
   });
 });
 
@@ -287,22 +283,15 @@ describe('the sweep and the reprice never read whole season nodes', () => {
   };
   const NOW = new Date(Date.UTC(2026, 5, 22, 17)); // Monday 10:00 PDT, day after GW1
 
-  function repriceWorld(opts: { scored: boolean; keys: boolean }): FakeDb {
+  function repriceWorld(opts: { keys: boolean }): FakeDb {
     const data = world2();
-    const season = data.Fantasy.Futsal['15'];
-    season.PlayerWeeks = { 1: { ...WEEK_POINTS } };
-    // The ledger the real engine writes for a finalized week 1.
-    if (opts.scored) {
-      season.LockedWeeks = {
-        1: { Date: GW1_DATE, LockAtUtc: Date.UTC(2026, 5, 21, 22), Scored: true },
-      };
-    }
+    data.Fantasy.Futsal['15'].PlayerWeeks = { 1: { ...WEEK_POINTS } };
     const db = new FakeDb(clone(data));
     if (!opts.keys) db.childKeys = undefined;
     return db;
   }
 
-  async function expectGoldenReprice(db: FakeDb): Promise<void> {
+  async function expectGoldenReprice(db: FakeDb, gw = 1, at = NOW): Promise<void> {
     // Golden reprice hand math (fixture _notes): GK mean 5.5 -> Bo +5,
     // Wes/Eli -5; DEF mean 5.25 -> Dana/Bea +5, Will/Eva -5; ATT mean 6 ->
     // Alex +5, Ezra -5. Sam/Wren/Ben hold.
@@ -320,23 +309,11 @@ describe('the sweep and the reprice never read whole season nodes', () => {
     expect(await price('Sam')).toBe(85);
     expect(await price('Wren')).toBe(75);
     expect(await price('Ben')).toBe(85);
-    expect(await db.read(`${F_ROOT}/Repriced/1`)).toEqual({ At: NOW.getTime() });
+    expect(await db.read(`${F_ROOT}/Repriced/${gw}`)).toEqual({ At: at.getTime() });
   }
 
-  it('runMondayReprice with a scored ledger: golden prices, no read of Fantasy or History', async () => {
-    const db = repriceWorld({ scored: true, keys: true });
-    await runMondayReprice(db, NOW);
-    await expectGoldenReprice(db);
-
-    const reads = db.reads;
-    expect(reads).not.toContain('read:Fantasy');
-    expect(reads).not.toContain(`read:${F_ROOT}/History`);
-    expect(reads.some((r) => r.endsWith('/History'))).toBe(false); // nor keys:
-    expect(reads).toContain(`read:${F_ROOT}/LockedWeeks`);
-  });
-
-  it('runMondayReprice with no scored entry: golden prices via the History keys, never its contents', async () => {
-    const db = repriceWorld({ scored: false, keys: true });
+  it('runMondayReprice: golden prices from the History keys — no read of Fantasy or of History itself', async () => {
+    const db = repriceWorld({ keys: true });
     await runMondayReprice(db, NOW);
     await expectGoldenReprice(db);
 
@@ -347,15 +324,42 @@ describe('the sweep and the reprice never read whole season nodes', () => {
   });
 
   it('runMondayReprice: the same prices when keys cannot be listed (fallback = today)', async () => {
-    const viaKeys = repriceWorld({ scored: false, keys: true });
-    const viaFullRead = repriceWorld({ scored: false, keys: false });
+    const viaKeys = repriceWorld({ keys: true });
+    const viaFullRead = repriceWorld({ keys: false });
     await runMondayReprice(viaKeys, NOW);
     await runMondayReprice(viaFullRead, NOW);
     await expectGoldenReprice(viaFullRead);
     expect(viaKeys.snapshot()).toBe(viaFullRead.snapshot());
+    expect(viaFullRead.reads).toContain(`read:${F_ROOT}/History`);
   });
 
-  it('runMondayReprice: an unscored, unfinalized season does nothing', async () => {
+  it('runMondayReprice: a finalized week whose Scored mark never landed still reprices', async () => {
+    // markWeekScored is warn-only, so a week can have its History and no
+    // LockedWeeks mark. Week 1 is marked and already repriced; week 2 has
+    // History and no mark. The reprice must take week 2 (History's highest
+    // key), never stop at the already-repriced marked week 1.
+    const data = world2();
+    const season = data.Fantasy.Futsal['15'];
+    season.History[2] = clone(season.History[1]);
+    season.PlayerWeeks = { 1: { ...WEEK_POINTS }, 2: { ...WEEK_POINTS } };
+    season.LockedWeeks = {
+      1: { Date: GW1_DATE, LockAtUtc: Date.UTC(2026, 5, 21, 22), Scored: true },
+      2: { Date: GW2_DATE, LockAtUtc: LOCK2_MS },
+    };
+    const gw1RepricedAt = Date.UTC(2026, 5, 22, 17);
+    season.Repriced = { 1: { At: gw1RepricedAt } };
+    const db = new FakeDb(data);
+    const monday2 = new Date(Date.UTC(2026, 5, 29, 17)); // 10:00 PDT, day after GW2
+
+    await runMondayReprice(db, monday2);
+
+    await expectGoldenReprice(db, 2, monday2);
+    expect(await db.read(`${F_ROOT}/PriceChanges/2`)).not.toBeNull();
+    expect(await db.read(`${F_ROOT}/PriceChanges/1`)).toBeNull();
+    expect(await db.read(`${F_ROOT}/Repriced/1`)).toEqual({ At: gw1RepricedAt });
+  });
+
+  it('runMondayReprice: a season with no History does nothing', async () => {
     const data = world2();
     delete data.Fantasy.Futsal['15'].History;
     const db = new FakeDb(data);
