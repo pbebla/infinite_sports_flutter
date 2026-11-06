@@ -131,7 +131,7 @@ Every account in the 10 clusters was checked against every node that stores a pl
 
 ### Task 6: Owner runbook
 
-- [ ] **Step 1:** Add a "Merging duplicate accounts" section to `PROJECT_REFERENCE.md` (or the existing owner runbook doc) with the order: deploy Task 1 (with the branch's final review) → `npm run merge:accounts` (dry run) → owner reads it → owner's OK → `--apply` → owner checks 2–3 kept profiles on the phone (all seasons show, old account gone from search) → owner's OK → `--disable-old-logins` → tell those players to sign in with their kept email. Undo commands included.
+- [ ] **Step 1:** Create `docs/runbooks/merging-duplicate-accounts.md` (plain language, for the owner) with the order: deploy Task 1 (with the branch's final review) → `npm run merge:accounts` (dry run) → owner reads it → owner's OK → `--apply` → owner checks 2–3 kept profiles on the phone (all seasons show, old account gone from search) → owner's OK → `--disable-old-logins` → tell those players to sign in with their kept email. Undo commands included.
 - [ ] **Step 2: Commit** `docs: runbook for merging duplicate accounts`.
 
 ## Not in this plan (owner can ask for later)
