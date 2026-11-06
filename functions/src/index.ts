@@ -387,6 +387,12 @@ export { sendFantasyReminderNow } from './fantasy_push';
 
 export { onFantasyVoidWritten } from './fantasy_void';
 
+// ---- Infinite Fantasy (season setup + schedule plan 2026-11-05): an open
+// week's GwState follows the owner's deadline / skip edits at once (the
+// sweep alone rewinds a called-off week) ----
+
+export { onFantasyConfigWritten } from './fantasy_schedule';
+
 // ---- Infinite Fantasy (spec §3): holder protection on position changes ----
 
 export { onFantasyPositionWritten } from './fantasy_positions';

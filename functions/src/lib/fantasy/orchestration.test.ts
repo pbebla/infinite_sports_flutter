@@ -1171,7 +1171,7 @@ describe('LockedWeeks: a gameweek freezes when it locks', () => {
   });
 
   it.each([
-    ['already there', false],
+    ['there by the claim\'s read', false],
     ['won the race', true],
   ])('a ledger entry marked Rewinding is no claim (%s): the lock step writes '
     + 'nothing', async (_label, race) => {
@@ -1184,7 +1184,16 @@ describe('LockedWeeks: a gameweek freezes when it locks', () => {
         return realClaim(p, v);
       };
     } else {
-      t(db).LockedWeeks = { 1: clone(marked) };
+      // Marked after this sweep's rewind check and week list (Task 4: a
+      // mark already there when the sweep starts is a rewind to RESUME —
+      // schedule_rewind.test.ts), so the claim's first read finds it.
+      const realRead = db.read.bind(db);
+      db.read = async (p: string) => {
+        if (p === `${F_ROOT}/LockedWeeks/1` && t(db).LockedWeeks === undefined) {
+          t(db).LockedWeeks = { 1: clone(marked) };
+        }
+        return realRead(p);
+      };
     }
     const spy = logSpy();
     await runLifecycleSweep(db, AFTER1, spy.log);
@@ -1303,8 +1312,15 @@ describe('LockedWeeks: a gameweek freezes when it locks', () => {
   it('finalize never marks a week being rewound Scored (warned)', async () => {
     const db = octWorld(); // games live: the sweep locks GW1
     await runLifecycleSweep(db, AFTER1);
-    markRewinding(db, 1);
     for (const g of db.data.Futsal['15'].Date[D1]) g.status = 2;
+    // Task 4: finalize stands down for a week already marked (at entry and
+    // right before its first official write), so the mark lands while
+    // History is being written.
+    const realWrite = db.write.bind(db);
+    db.write = async (p: string, v: unknown) => {
+      await realWrite(p, v);
+      if (p === `${F_ROOT}/History/1`) markRewinding(db, 1);
+    };
     const spy = logSpy();
     await maybeFinalizeGame(db, {
       sport: 'Futsal', season: '15', dateKey: D1, nowUtc: LATER1, log: spy.log,

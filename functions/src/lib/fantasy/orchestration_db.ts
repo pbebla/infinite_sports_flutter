@@ -296,6 +296,15 @@ export function lockedWeeksOf(node: unknown): Record<number, LockedWeek> {
   return out;
 }
 
+/** Whether a stored `LockedWeeks/<n>` value is marked by the sweep's rewind
+ *  of a called-off week (`Rewinding: true`, its first step — see
+ *  schedule_rewind.ts). A marked entry still parses (lockedWeeksOf keeps the
+ *  week in the frozen prefix) but freezes nothing: no lock claim, re-check,
+ *  Scored mark or finalize accepts it. */
+export function isRewinding(node: unknown): boolean {
+  return isPlainMap(node) && node['Rewinding'] === true;
+}
+
 /** The schedule bits of `Fantasy/<sport>/<season>/Config`:
  *  `SkippedDates/<MMDDYYYY> = true` (only a literal `true` counts),
  *  `Deadlines/<MMDDYYYY> = <epoch ms number>` (anything else is ignored) and
@@ -384,10 +393,16 @@ export function firstKickoffByDateOf(
  *  A failed read THROWS and propagates: an error is not a fact — a read that
  *  could not complete must never become "no weeks" (the caller aborts the
  *  step rather than acting on an empty schedule). Returns the Date node too,
- *  for callers that read the games of a date from the same snapshot. */
+ *  for callers that read the games of a date from the same snapshot.
+ *
+ *  [opts.withoutLockedFrom] = n derives the weeks as they will be once
+ *  LockedWeeks/<n> and every later entry are gone — the rewind's look-ahead
+ *  (schedule_rewind.ts), which announces the reopened week's deadline before
+ *  it removes the entry. */
 export async function loadSeasonGameweeks(
   db: FantasyDb, sport: string, season: string, cfg: FantasyConfig,
   configNode: Record<string, unknown>,
+  opts: { withoutLockedFrom?: number } = {},
 ): Promise<{ gws: Gameweek[]; dateNode: unknown }> {
   // Three independent reads, issued together: a failed one rejects the lot.
   const [dateNode, lockedNode, startTime] = await Promise.all([
@@ -396,8 +411,15 @@ export async function loadSeasonGameweeks(
     db.read(`${sport}/${season}/Start Time`),
   ]);
   const startHour = toIntLoose(startTime);
+  const lockedWeeks = lockedWeeksOf(lockedNode);
+  const dropFrom = opts.withoutLockedFrom;
+  if (dropFrom !== undefined) {
+    for (const n of Object.keys(lockedWeeks).map(Number)) {
+      if (n >= dropFrom) delete lockedWeeks[n];
+    }
+  }
   const gws = deriveGameweeks(dateKeysOf(dateNode), cfg, {
-    lockedWeeks: lockedWeeksOf(lockedNode),
+    lockedWeeks,
     ...scheduleOverridesOf(configNode),
     firstKickoffUtc: firstKickoffByDateOf(dateNode, startHour > 0 ? startHour : 0),
   });

@@ -10,8 +10,13 @@
 // - GwState = { current:int, status:'open'|'locked'|'finalized',
 //   lockAtUtc:int (epoch ms of the engine lock instant), date:'MMDDYYYY' }.
 //   Server truth for the jobs — the fan countdown still derives locally from
-//   the schedule stream; no client reads this node. Written only by the
-//   sweep, only when a field actually changed (idempotent no-op otherwise).
+//   the schedule stream; no client reads this node. Written only through
+//   upsertGwState (schedule_rewind.ts) — by the sweep, the rewind of a
+//   called-off week (null when no later game day exists) and the Config
+//   trigger (an OPEN week only) — and only when a field actually changed
+//   (idempotent no-op otherwise); an open week whose deadline moved later
+//   or whose date changed also loses ReminderSent/<gw> (the reminder fires
+//   again).
 //   'finalized' means the CURRENT gameweek is locked and its History exists;
 //   when the next gameweek opens, current advances and status returns to
 //   'open'. The engine's 'upcoming' can never be the current gameweek's
@@ -70,7 +75,12 @@
 //   landed and deletes itself when a rewind got in between
 //   (guardedSnapshotClaim). Every finalize run that wrote History marks it
 //   Scored:true (markWeekScored; a week locked before the ledger existed
-//   gets the full node then). Rules: signed-in read, no client write.
+//   gets the full node then). Finalize stands down for a marked week (at
+//   entry and right before its first official write), and a sweep whose
+//   lock step stopped on a week no longer frozen writes no GwState. The
+//   rewind itself, its CalledOff/<gw>/<date> push claim and the heal of
+//   stale lock writes on an open week live in schedule_rewind.ts. Rules:
+//   signed-in read, no client write.
 //
 // - Repriced/<gw> = { At:int, Manual?:true, Voided?:true } — the Monday
 //   job's done-flag. Manual:true records "admin had set
@@ -121,6 +131,8 @@
 //   PlayerWeeks): the week's transfer charge frozen at lock — the
 //   transferCostPointsByUid seam's source on every finalize (re)run, so a
 //   score-edit rerun recharges exactly what was charged the first time.
+//   The sweep's lock always writes it (null when nobody owes anything), so
+//   a node left by a rewound lock never survives a re-lock.
 //
 // - ReminderSent/<gw> = { At:int } and RecapSent/<gw> = { At:int }
 //   (functions-internal): once-only claims for the Phase F pushes. Claimed
@@ -261,7 +273,7 @@ import {
 import { sendDueScheduledMessages } from './messages';
 import {
   allGamesFinal, childEntries, FantasyDb, fantasyRoot,
-  fantasySeasonsOf, fullAttendance, gamesOfDate, isPlainMap,
+  fantasySeasonsOf, fullAttendance, gamesOfDate, isPlainMap, isRewinding,
   isServerSquadWrite, isTestFillSeason, isVoidFlag, keyedGamesOfDate,
   loadSeasonGameweeks, lockedPositionsOf, lockOverrideOf, marketPlayersOf,
   marketPricesOf, markServerSquadWrite, parseAbsentMap, positionsSnapshotOf,
@@ -278,6 +290,9 @@ import {
 import {
   applyPendingPositionChanges, positionWindowOf,
 } from './position_changes';
+import {
+  healOpenWeek, rewindCancelledWeek, upsertGwState,
+} from './schedule_rewind';
 import {
   FantasySquad, squadFromMap, squadToMap, validateSquad,
 } from './squad';
@@ -320,20 +335,10 @@ export interface FantasyJobDeps {
   clock?: () => number;
 }
 
-export interface GwStateNode {
-  current: number;
-  status: 'open' | 'locked' | 'finalized';
-  lockAtUtc: number;
-  date: string;
-}
-
-function gwStateEquals(existing: unknown, desired: GwStateNode): boolean {
-  if (!isPlainMap(existing)) return false;
-  return toIntLoose(existing['current']) === desired.current &&
-    String(existing['status'] ?? '') === desired.status &&
-    toIntLoose(existing['lockAtUtc']) === desired.lockAtUtc &&
-    String(existing['date'] ?? '') === desired.date;
-}
+// GwState's writer (the sweep's step 3, shared with the rewind and the
+// Config trigger) lives in schedule_rewind.ts with the node's shape.
+export { upsertGwState } from './schedule_rewind';
+export type { GwStateNode } from './schedule_rewind';
 
 /** Map-shaped children only (a squad/history uid node must be a map). */
 function mapChildren(node: unknown): Record<string, unknown> {
@@ -1105,6 +1110,15 @@ export async function finalizeGameweek(
   const ctx = { sport, season, gw: gw.number, date: gw.date };
   const root = fantasyRoot(sport, season);
 
+  // A week the sweep is rewinding (its day was called off) is never scored:
+  // every entry point — the match-day trigger, the sweep's backstop, the
+  // void re-settle — stands down here, and again right before the first
+  // official write (a mark landing while this run computed).
+  if (await weekBeingRewound(db, root, gw.number)) {
+    log.info(FINALIZE_REWINDING, ctx);
+    return null;
+  }
+
   const dateNode = await db.read(`${sport}/${season}/Date/${gw.date}`);
   const gameNodes = gamesOfDate(dateNode)
     .filter((g) => toIntLoose(g['status']) === 2);
@@ -1269,6 +1283,11 @@ export async function finalizeGameweek(
     log.warn('fantasy finalize: malformed squad skipped', { ...ctx, uid, source });
   }
 
+  // The re-check right before the first official write (see the entry).
+  if (await weekBeingRewound(db, root, gw.number)) {
+    log.info(FINALIZE_REWINDING, ctx);
+    return null;
+  }
   if (Object.keys(out.playerWeeks).length > 0) {
     await db.write(`${root}/PlayerWeeks/${gw.number}`, out.playerWeeks);
   }
@@ -2045,14 +2064,19 @@ function lockedWeekNode(gw: Gameweek): { Date: string; LockAtUtc: number } {
  *  that Date and NOT marked `Rewinding: true` (the rewind's first step — a
  *  week being rewound is no claim to keep or to write under). */
 function freezesWeek(node: unknown, gw: Gameweek): boolean {
-  return isPlainMap(node) && node['Date'] === gw.date &&
-    node['Rewinding'] !== true;
+  return isPlainMap(node) && node['Date'] === gw.date && !isRewinding(node);
 }
 
-/** Whether a stored LockedWeeks/<n> value is marked by a rewind. */
-function isRewinding(node: unknown): boolean {
-  return isPlainMap(node) && node['Rewinding'] === true;
+/** Whether a rewind has marked gameweek [n] (LockedWeeks/<n>.Rewinding —
+ *  schedule_rewind.ts): finalize stands down for it. One small read. */
+async function weekBeingRewound(
+  db: FantasyDb, root: string, n: number,
+): Promise<boolean> {
+  return isRewinding(await db.read(`${root}/LockedWeeks/${n}`));
 }
+
+/** finalize's stand-down line for a week being rewound. */
+const FINALIZE_REWINDING = 'fantasy finalize: week being rewound — standing down';
 
 /** The lock's FIRST write: freezes gameweek [gw] as LockedWeeks/<n> =
  *  { Date, LockAtUtc }, set-if-absent (one read when it is already there —
@@ -2283,13 +2307,17 @@ async function snapshotPriceHistory(
  *  later lock write re-reads the entry first (TransferCosts, TransferState,
  *  SquadAlerts, Baselines): a week no longer frozen stops the rest of the
  *  lock step. The baselines are published with the Prev stash
- *  (publishSaleBaselines). */
+ *  (publishSaleBaselines). TransferCosts/<gw> is ALWAYS written (ruling
+ *  T3c) — the cost map, or null when nobody owes anything — so a stale node
+ *  a cancelled lock left behind can never survive a re-lock and be charged
+ *  at finalize. Resolves false only when the step stopped because the week
+ *  is no longer frozen (the sweep then writes no GwState this run). */
 async function snapshotPublishedPicks(
   db: FantasyDb, root: string, cfg: FantasyConfig, week: Gameweek,
   nowMs: number, log: FantasyLogger, ctx: Record<string, unknown>,
-): Promise<void> {
+): Promise<boolean> {
   const gw = week.number;
-  if (await db.read(`${root}/PublishedPicks/${gw}`) != null) return;
+  if (await db.read(`${root}/PublishedPicks/${gw}`) != null) return true;
   // A FIRST finalize that outran every sweep already scored this week from
   // the live Squads (finalizeGameweek's fallback): its History/<gw> is the
   // law for the week (effectiveSquadAfterWeek falls back to it; the fan
@@ -2300,12 +2328,12 @@ async function snapshotPublishedPicks(
   if (await db.read(`${root}/History/${gw}`) != null) {
     log.info('fantasy lock: History already written — snapshot skipped',
       { ...ctx, gw });
-    return;
+    return true;
   }
   const squads = mapChildren(await db.read(`${root}/Squads`));
   if (Object.keys(squads).length === 0) {
     log.info('fantasy lock: no squads to snapshot', { ...ctx, gw });
-    return;
+    return true;
   }
   const acc = lockAccounting({
     squadsByUid: squads,
@@ -2322,7 +2350,7 @@ async function snapshotPublishedPicks(
     db, root, week, `${root}/PublishedPicks/${gw}`, acc.cleanSquads, log, ctx);
   // 'lost': a concurrent sweep won the claim and does the rest; 'unfrozen':
   // the week is being rewound — nothing more for this lock.
-  if (claim !== 'won') return;
+  if (claim !== 'won') return claim === 'lost';
   // [M2] Every later lock write re-checks the week first; a refusal stops
   // the rest of the lock step.
   const goOn = (step: string) =>
@@ -2331,14 +2359,13 @@ async function snapshotPublishedPicks(
     log.warn('fantasy lock: chip voided — already used in this set',
       { ...ctx, gw, ...v });
   }
-  if (Object.keys(acc.costPointsByUid).length > 0) {
-    if (!(await goOn('TransferCosts'))) return;
-    await db.write(`${root}/TransferCosts/${gw}`, acc.costPointsByUid);
-  }
-  if (!(await goOn('TransferState'))) return;
+  if (!(await goOn('TransferCosts'))) return false;
+  await db.write(`${root}/TransferCosts/${gw}`,
+    Object.keys(acc.costPointsByUid).length > 0 ? acc.costPointsByUid : null);
+  if (!(await goOn('TransferState'))) return false;
   await freezeLockTransferState(db, root, cfg, gw, acc, log, ctx);
   // Alerts next: the snapshot + accounting above are what scoring needs.
-  if (!(await goOn('SquadAlerts'))) return;
+  if (!(await goOn('SquadAlerts'))) return false;
   await settleIntegrityAlerts(db, root, gw, acc, nowMs, log, ctx);
   log.info('fantasy lock: picks published', {
     ...ctx, gw, managers: Object.keys(acc.cleanSquads).length,
@@ -2347,13 +2374,14 @@ async function snapshotPublishedPicks(
   // the snapshot just claimed, each stashing the node it replaces as Prev
   // ([M3] — the rewind's exact undo). Best-effort here — every finalize of
   // this week re-checks it — so a failure never fails the sweep.
-  if (!(await goOn('Baselines'))) return;
+  if (!(await goOn('Baselines'))) return false;
   try {
     await publishSaleBaselines(db, root, gw, log, ctx, { stashPrev: true });
   } catch (err) {
     log.warn('fantasy baselines: lock-time publish failed — finalize heals',
       { ...ctx, gw, error: String(err) });
   }
+  return true;
 }
 
 async function sweepSeason(
@@ -2421,8 +2449,35 @@ async function sweepSeason(
   }
   const cfg = configFromMap(configNode);
 
+  // 0c. A called-off game day (schedule_rewind.ts — season setup + schedule
+  //     plan 2026-11-05): the latest frozen week whose day was cancelled,
+  //     skipped or moved before any game started is rewound as if it never
+  //     happened and reopens; the rest of the sweep then runs on the fresh
+  //     week list below. A season with no game day at all stands down
+  //     (warned); a read that throws gives the season up for this run.
+  const rewind = await rewindCancelledWeek(db, {
+    sport, season, cfg, configNode, nowUtc, log, pusher: deps?.pusher,
+  });
+  if (rewind === 'standDown') return;
+
   const { gws } = await loadSeasonGameweeks(db, sport, season, cfg, configNode);
   const current = currentGameweek(gws, nowUtc);
+
+  // 0d. The heal (rulings T3c/T3d, schedule_rewind.ts healOpenWeek): while
+  //     the current week is open and not frozen no lock of it ever stood, so
+  //     a lock write a stale sweep landed after a rewind (snapshots, a live
+  //     node, a baseline FOR the next week) is undone before it can be
+  //     adopted by the real lock or block a Save. Logged; never blocks the
+  //     steps below.
+  if (current && !current.frozen &&
+    gameweekStatusAt(current, nowUtc) !== 'locked') {
+    try {
+      await healOpenWeek(db, root, current, log, ctx);
+    } catch (err) {
+      log.warn('fantasy heal: failed — retried by the next sweep',
+        { ...ctx, gw: current.number, error: String(err) });
+    }
+  }
 
   // 1. Lock snapshots for the current gameweek (positions, prices, then
   //    picks), before any finalize can need them. Existence-guarded rather
@@ -2433,12 +2488,16 @@ async function sweepSeason(
   //    lock's first write): a ledger already holding another date for this
   //    number, or marked Rewinding, skips the whole step (warned), and every
   //    lock write re-checks the ledger around it ([M2] stillFrozen,
-  //    guardedSnapshotClaim) — the first refusal stops the step.
-  if (current && gameweekStatusAt(current, nowUtc) === 'locked' &&
-    await claimLockedWeek(db, root, current, log, ctx) &&
-    (await snapshotLockedPositions(db, root, current, log, ctx)).frozen &&
-    await snapshotPriceHistory(db, root, current, log, ctx)) {
-    await snapshotPublishedPicks(db, root, cfg, current, nowMs, log, ctx);
+  //    guardedSnapshotClaim) — the first refusal stops the step, and this
+  //    sweep then writes no GwState (step 3, ruling T3d): its week list is
+  //    older than the ledger, and a stale 'locked' must never land over a
+  //    rewind.
+  let lockStopped = false;
+  if (current && gameweekStatusAt(current, nowUtc) === 'locked') {
+    lockStopped = !(await claimLockedWeek(db, root, current, log, ctx) &&
+      (await snapshotLockedPositions(db, root, current, log, ctx)).frozen &&
+      await snapshotPriceHistory(db, root, current, log, ctx) &&
+      await snapshotPublishedPicks(db, root, cfg, current, nowMs, log, ctx));
   }
 
   // 2. Finalize backstop: any lock-passed gameweek whose match day is
@@ -2571,37 +2630,24 @@ async function sweepSeason(
       { ...ctx, error: String(err) });
   }
 
-  // 3. GwState upsert, after the backstop so a finalize lands as 'finalized'
-  //    in the same sweep.
-  if (!current) {
-    log.info('fantasy sweep: season over — GwState left as-is', ctx);
+  // 3. GwState upsert (schedule_rewind.ts upsertGwState), after the backstop
+  //    so a finalize lands as 'finalized' in the same sweep; season over =
+  //    left as-is. Skipped when the lock step stopped on a week no longer
+  //    frozen (step 1). The open-window steps below run only while open.
+  if (lockStopped) {
+    log.info('fantasy sweep: lock step stopped — GwState left to the next sweep',
+      { ...ctx, gw: current?.number ?? null });
     return;
   }
-  const engine = gameweekStatusAt(current, nowUtc);
-  let status: GwStateNode['status'];
-  if (engine === 'locked') {
-    const history = await db.read(`${root}/History/${current.number}`);
-    status = history != null ? 'finalized' : 'locked';
-  } else {
-    status = 'open'; // 'upcoming' is unreachable for the current gw; see header
-  }
-  const desired: GwStateNode = {
-    current: current.number,
-    status,
-    lockAtUtc: current.lockUtc.getTime(),
-    date: current.date,
-  };
-  const existing = await db.read(`${root}/GwState`);
-  if (!gwStateEquals(existing, desired)) {
-    await db.write(`${root}/GwState`, desired);
-    log.info('fantasy sweep: GwState updated', { ...ctx, ...desired });
-  }
+  await upsertGwState(db, root, current, nowUtc, log, ctx);
+  if (!current) return;
+  const open = gameweekStatusAt(current, nowUtc) !== 'locked';
 
   // 3b. Position changes deferred while the window was locked (spec §3
   //     holder protection) apply the moment it reopens: relabel holders,
   //     alert + push the ones left with an illegal formation (free swap
   //     this gameweek). position_changes.ts owns the nodes.
-  if (status === 'open') {
+  if (open) {
     const applied = await applyPendingPositionChanges(db, {
       sport, season, cfg,
       target: { gw: current.number, lockUtcMs: current.lockUtc.getTime() },
@@ -2620,7 +2666,7 @@ async function sweepSeason(
   //     slot. A 'locked' (or 'open') lockOverride and a TestFill season
   //     already stood the whole sweep down above. A failure here is logged
   //     and never blocks the reminder below.
-  if (status === 'open') {
+  if (open) {
     try {
       await previewOverBudget(db, root, cfg, {
         sport, season, gw: current.number,
@@ -2639,7 +2685,7 @@ async function sweepSeason(
   //    claim lands BEFORE the send so concurrent sweeps can never
   //    double-push; a sweep without a pusher claims nothing.
   const pusher = deps?.pusher;
-  if (pusher && status === 'open') {
+  if (pusher && open) {
     const rCfg = reminderConfigFrom(configNode['Reminder']);
     if (rCfg.enabled &&
       nowUtc.getTime() >= reminderInstantMs(current.lockUtc.getTime(), rCfg) &&
