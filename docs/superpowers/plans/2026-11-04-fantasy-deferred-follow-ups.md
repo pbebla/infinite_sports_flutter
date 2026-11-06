@@ -183,3 +183,50 @@ The working notes from every fantasy build (`.superpowers/sdd/*`, never in git) 
 
 (fix-functions-report concern 2 was closed by commit 382c081.)
 
+## Season setup + schedule build (2026-11-05)
+
+Copied verbatim from that build's ledger (owner-facing decisions are in `2026-11-05-rulings-season-setup-and-schedule.md`). The final Fable-level review judged all of these fine to defer.
+
+- Task 1: minor (deferred): friendlies-count-toward-kickoff not pinned by a doc comment + Stage:'friendly' test in either twin (orchestration_db.ts firstKickoffByDateOf, fantasy_parsers.dart firstKickoffByDateFromNode)
+- Task 1: minor (deferred): H:mm parse duplicated (gameweeks kickoff parser vs lib/misc/schedule_display.dart gameTimeText vs Manager normalizeTimeString) — cross-reference or share fan-side
+- Task 1: minor (deferred): TS Record lookups firstKickoffUtc[d]/deadlineOverrides[d] (gameweeks.ts) not hasOwn-guarded (junk 'constructor' key) — practically unreachable
+- Task 1: minor (deferred): new Dart test lines > 80 cols (dart format not run)
+- Task 2: minor (deferred): real kickoff Times + Start Time now feed live locks (S2 by design) — a season open at deploy whose first game is earlier than lockHour−60 moves its lock earlier; S15 'open', S16 has no Config, so no live impact
+- Task 2: minor (deferred): refreshLiveWeek does 3 reads per live write (+refreshLiveGw loads twice); rehearsal reads +6.4%
+- Task 2: minor (deferred): no per-job behavioural test that finalize/live/void/badges/messages honour a skip/override (guard can't catch a future site passing {} as configNode)
+- Task 2: minor (deferred): guard whitelists by basename, misses aliased imports / destructured lockHour; tools/rehearse_s15.ts:882 still derives directly without overrides/LockedWeeks
+- Task 2: minor (deferred): badges.ts imports leagueWallClock via news.ts re-export (point at league_time, drop re-export)
+- Task 2: minor (deferred): position-change alert deadline uses GwState.lockAtUtc → one sweep stale after an override (acceptable per brief)
+- Task 3: minor (deferred): guardedSnapshotClaim self-delete is an unconditional write(null) (orchestration.ts:2131) — compare-and-delete transaction would close a near-unreachable window
+- Task 3: minor (deferred): goOn('Baselines') at orchestration.ts:2350 sits outside the best-effort try/catch — a read failure now throws out of sweep step 1
+- Task 3: minor (deferred): no test pins the goOn('SquadAlerts') / goOn('Baselines') guards individually
+- Task 3: minor (deferred): claim "another date" common path (pre-read finds other date) untested; "frozen on another date" warn logs frozenDate:null on a concurrent delete; gw (Gameweek) vs gw (number) naming inconsistency
+- Task 3: minor (deferred): freezeLockTransferState / per-manager baseline transactions have 2N round-trip windows after a single check (healed by T3c/T3d at the next sweep / real lock)
+- Task 4: minor (deferred): Prev chain cut at 8 levels silently (squad_integrity.ts:377) — add a log.warn when cutting / when a restore finds no Prev
+- Task 4: minor (deferred): Voided/L deleted in rewind step 1 (schedule_rewind.ts:407) before the second scoredMeanwhile check (:439) — move after it so a finalize-wins race keeps the owner's void
+- Task 4: minor (deferred): T4e log says "not marked locked" also for 'finalized' (schedule_rewind.ts:209)
+- Task 4: minor (deferred): FakeDb.write(null) on an absent child creates empty parents (test_support.ts:47), unlike RTDB — production code adapted (LiveBase read-first)
+- Task 4: minor (deferred, from first review): cascading reorder/dup code — Live-removal + baseline-restore transactions duplicated (schedule_rewind.ts:382-390/466-475, 400-406/477-488), snapshot list twice; lockStopped broadened to claim-refused-other-date (orchestration.ts:2497); reason (a) counts map children vs derivation date keys; PlayerWeeks/L left by a finalize that died before History; no test of two concurrent rewinds or array-shaped LockedWeeks; open-week deadline moved into the past leaves GwState open ≤15 min (Manager picker is future-only)
+- Task 5: minor (deferred): late gate runs before Voided/Manual checks → a voided/Manual week finalized late is stamped Skipped:'late' (same outcome, different badge)
+- Task 5: minor (deferred): ONE attempt per window — a transient read error at the single 10:00 run leaves the week permanently Skipped:'late'; consider cron '0 10-14 * * *' (done-check + claim make repeats no-ops) — DECIDE BEFORE TASK 14
+- Task 5: minor (deferred): a History week missing from the schedule warns daily (unstamped); stale "Monday" comments in orchestration.ts/squad_integrity.ts/pricing.ts/finalize_core.ts; no PST-season or void+late tests; tools/rehearse_s15.ts reprices Mondays only
+- Task 6: minor (deferred): marketEntriesOf (market_entry.ts:67-102) unused in production + duplicates marketPlayersOf/marketPricesOf; position try/catch pattern duplicated vs positionOrNull (position_changes.ts:79) — Task 7 should reuse or remove
+- Task 6: minor (deferred): season_start.test.ts:322 uses toEqual after JSON clone — use not.toHaveProperty('uid') to pin no-undefined
+- Task 6: minor (deferred): pre-existing target Players (half-seed, no Config/StartedAt) overwritten then deleted on rollback; writeIfAbsent claim outside try; name-on-two-teams dedupe untested; clampPrice dup of pricing clamp; second seasonOf helper; access.ts TWINS note doesn't list the new validator
+- Task 7: minor (deferred): no retry on a failed roster trigger — joiner missing until the next shape change on that team (retry:true replays a stale `after`; better: reconcile rosters from the lifecycle sweep) — TRIAGE AT FINAL REVIEW
+- Task 7: minor (deferred): write phase not all-or-nothing (Promise.all writeIfAbsent; idempotent on next sync); Guest keys pass the gate (3 wasted reads)
+- Task 7: minor (deferred, plan-mandated): a uid-linked player renamed in Line Ups keeps the old market key (finalize joins by name → scores nothing until the Players key is renamed; only a warn log); trigger also runs for finished seasons with a Config
+- Task 7: minor (deferred): shared FakeDb.writeIfAbsent non-atomic (test_support.ts:60) — local CountingDb workaround
+- Task 8: minor (deferred): guard read → PUT gap is tens of seconds (2×N photo/position reads) — re-run seedRefusal right before the first _put; header examples Futsal 15 now refuse; dry run needs --force-reseed (owner-irrelevant dev tool); raw stack trace on failed read; CLI wiring untested; StartedAt not consulted
+- Task 9: minor (deferred): schedule session cache keyed sport|season can paint pre-override deadlines briefly on revisit; dead 'GW{n} opens soon' branch (deadline_chip.dart:142); fantasy_format.dart:84 comment wrong for Nov 1; tolerantInt accepts 0x11 vs server regex; stale "Monday repricing" comments (fantasy_service.dart:205,222, fantasy_parsers.dart:201); every live Date write re-derives + notifies (pre-existing)
+- Task 10: minor (deferred): Retry gives no in-progress feedback (error stays while reloading); Void/Mark-manual unavailable while the schedule errors; absent Config → spinner (pre-existing, check scaffold gating); optInt weaker second int reader; overview "locks …" text may swap once after load (un-gated)
+- Task 11: minor (deferred): stale tap after kickoff passes with no DB event → silent no-op; failed History shows no controls and no explanation (retry only invalidates schedule sources); per-card kickoff map re-parse on every Date emission; formatGameDay splits the display string; service guards untested; showNewsScheduleDialog doc still says "Schedule disabled"
+- Task 12: minor (deferred, pre-existing): Manager Add/Edit game form Stage dropdown overflows at 360 px (410 px); "Regenerate playoffs"/"Recompute bracket" row overflows 101–135 px with a bracket (tablet-only app today)
+- Task 12: minor (deferred): Replace→Generate repeats the unknown line (cosmetic); schedule_manager_page.dart:24 81 cols; pre-existing 360 px overflows (Stage dropdown, playoff button row) → candidate follow-up task
+- Task 12: minor (deferred, pre-existing): schedule row of a FINAL playoff game overflows 64 px at 360 px
+- Task 12: minor (deferred, pre-existing): _generate sets unfinished=0 when the games stream has no value (hides the not-Final banner) — same error≠fact class, not fantasy
+- Task 13: minor (deferred): _optInt toInt() throws on NaN/Infinity (unreachable via JSON); start card pops above the season bar when the pointer arrives (layout shift, no reveal gate in the scaffold); stepper steps an off-grid carried price (62 → 6.7) — server snaps
+- - Ruling R1 (parked): a finalize spanning a finished rewind plus a stale re-claim can still score the called-off day. Why: it needs three overlapping runs, and the proper fix (a claim id on every LockedWeeks entry) is a follow-up. Cost if wrong: on that rare overlap the cancelled day counts, and the owner Voids it.
+- - Ruling R2 (parked): moving the last game of the latest locked week to an EARLIER past day still says "won't count", though that day becomes the reopened week and locks at once. Why: the server is consistent; only the wording is wrong, in a rare edit. Cost if wrong: misleading warning text; follow-up uses emptiedDates.
+- - Ruling R3: keep the blanket "games have started → Bring back disabled" (it overrides T11a for started days). Why: allowing it would race an in-flight rewind. Cost if wrong: a mistaken Skip of a played day can't be undone in the app, so the owner is told.
+- - Ruling R4: the reprice window vs morning-kickoff deadlines (≤10:00 → never repriced) stays as T5a. Why: Sunday-evening futsal is unaffected. Cost if wrong: morning-game weeks need hand price edits, so the owner is told.
