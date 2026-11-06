@@ -43,7 +43,8 @@ Every account in the 10 clusters was checked against every node that stores a pl
 - **D6. Manager pickers hide merged accounts.** `MyUser` gains `mergedInto` (`String?`); every Manager screen that lets the owner *choose* an account (link player, assign trophy, add to tournament roster — the implementer lists each by its `usersProvider`/`usersStreamProvider` use) filters `mergedInto != null` out. Lookups by uid (names on old sign-ups, DOBs) keep seeing them.
 - **D7. Old logins.** After the data merge is verified, a separate `--disable-old-logins` step sets `disabled: true` on each old Firebase Auth account (Identity Toolkit `accounts:update`), reversible with `--enable-old-logins`. Without it, a person who signs in with an old email gets a fresh `Users/<old>` profile and onboarding (`lib/main.dart:197-228`) and the duplicate comes back. Owner-visible consequence: that email's login stops working; the person signs in with the kept email instead. Accounts are never deleted.
 - **D8. Left on the old account on purpose:** Sign Ups and their comments (payment history), game votes, predictions, event RSVPs, Storage profile images (their URLs are what `ProfileUrl` points to — never delete them), device tokens.
-- **D9. Mapping file.** The tool reads `functions/tools/rehearsal_out/merge_map.json` (git-ignored; holds full uids, no emails): `{ clusters: [{ who, keep, old: [uid], nameRows: [{ sport, season, team, name }] }] }`. The plan and code never contain emails; the tool never prints user field values except roster names, team names and seasons (public league data).
+- **D10. Name fix (owner decision 2026-11-06).** Robert Shamoeilzadeh's kept profile has the first name "Rabert". The merge plan for that cluster includes one extra write: `Users/<keep>/First Name = "Robert"` (the `First Name` leaf — `my_user.dart:23`, `profile_page.dart:987`). The public mirror follows through the `onUserWritten` trigger; roster keys are never renamed (D1). Allowlisted for that cluster only; backed up and undone like every other write.
+- **D9. Mapping file.** The tool reads `functions/tools/rehearsal_out/merge_map.json` (git-ignored; holds full uids, no emails): `{ clusters: [{ who, keep, old: [uid], nameRows: [{ sport, season, team, name }], firstNameFix?: string }] }`. The plan and code never contain emails; the tool never prints user field values except roster names, team names and seasons (public league data).
 
 ## Global Constraints
 
@@ -104,6 +105,7 @@ Every account in the 10 clusters was checked against every node that stores a pl
   - Already-merged snapshot → zero writes (Review Focus 3).
   - `Information`: only missing leaves copied; `Token`/email-like keys never appear in any write.
   - `assertMergePaths` rejects `Users/<keep>/Token`, `Users/<old>` whole-node deletes, and any uid not in the map.
+  - D10: a cluster with `firstNameFix: "Robert"` in the map produces exactly one `Users/<keep>/First Name` write; a cluster without it produces none; `assertMergePaths` rejects a `First Name` write for any other cluster.
 - [ ] **Step 2: Run** `npx vitest run tools/merge_accounts_logic.test.ts` — Expected: FAIL.
 - [ ] **Step 3: Implement** per D1–D4. Summary lines name person, season, team, roster name only.
 - [ ] **Step 4: Run** — Expected: PASS.
