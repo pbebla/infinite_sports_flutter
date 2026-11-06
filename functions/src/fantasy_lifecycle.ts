@@ -13,10 +13,11 @@
 //   owner's due scheduled manager messages (ScheduledPushes, messages.ts) —
 //   even for a season whose lockOverride freezes the engine.
 //
-// - fantasyMondayReprice (every day 10:00 America/Los_Angeles — league time,
-//   spec §4/§5): reprice the most recent finalized gameweek not yet
-//   repriced, on the morning after its game day (whatever the weekday) and
-//   only while teams have not reopened (lockUtc + 24 h; a week finalized
+// - fantasyMondayReprice (hourly 10:00–15:00 America/Los_Angeles — league
+//   time, spec §4/§5; final review I5): reprice the most recent finalized
+//   gameweek not yet repriced, on the morning after its game day (whatever
+//   the weekday) and only while teams have not reopened (lockUtc + 24 h; a
+//   week finalized
 //   later is marked Repriced {Skipped:'late'}, prices untouched);
 //   position-relative deltas from the week's bonus-inclusive
 //   points, applied to Players/<name>/priceTenths with floor/ceiling, logged
@@ -46,9 +47,13 @@ export const fantasyLifecycleSweep = onSchedule(
 );
 
 // The name stays `fantasyMondayReprice` although it now runs every day:
-// renaming a deployed function deletes and recreates it.
+// renaming a deployed function deletes and recreates it. It runs hourly from
+// 10:00 to 15:00 league time: a run that fails (a read that timed out) is
+// retried the same morning instead of the week turning into a permanent
+// Repriced {Skipped:'late'} the next day; once a run has claimed
+// Repriced/<gw>, every later attempt is a no-op.
 export const fantasyMondayReprice = onSchedule(
-  { schedule: 'every day 10:00', timeZone: 'America/Los_Angeles' },
+  { schedule: '0 10-15 * * *', timeZone: 'America/Los_Angeles' },
   async () => {
     const root = admin.database().ref();
     await runMondayReprice(rtdbFantasyDb(root), new Date(), fantasyLogger);

@@ -55,15 +55,17 @@
 //   existed fall back to the live Players positions. Public read.
 //
 // - LockedWeeks/<n> = { Date:'MMDDYYYY', LockAtUtc:int (epoch ms),
-//   Scored?:true } — the frozen-week ledger (season setup + schedule plan
+//   Scored?:true, Rewinding?:true, Finalizing?:int (epoch ms) } — the
+//   frozen-week ledger (season setup + schedule plan
 //   2026-11-05; parsed by orchestration_db.ts lockedWeeksOf, honoured by
 //   loadSeasonGameweeks): once a week locks, its date and deadline no
 //   longer follow the match calendar or the config, so a later schedule
 //   edit can never renumber or re-time it. Claimed set-if-absent as the
 //   lock's FIRST write (claimLockedWeek: sweep step 1, and a first finalize
 //   that outran every sweep — marketForGameweek); a claim lost to ANOTHER
-//   date takes no snapshot (warned), one lost to the same date (an earlier
-//   or concurrent claim) carries on. The sweep's rewind of a called-off
+//   date takes no snapshot (warned) — and a first finalize then stands down
+//   (final review I4) — one lost to the same date (an earlier or concurrent
+//   claim) carries on. The sweep's rewind of a called-off
 //   week MARKS the entry `Rewinding: true` first and deletes it last; a
 //   marked entry freezes nothing (freezesWeek) — no claim, no re-check, no
 //   Scored mark accepts it. [M2] A sweep that started before a rewind must
@@ -75,15 +77,24 @@
 //   landed and deletes itself when a rewind got in between
 //   (guardedSnapshotClaim). Every finalize run that wrote History marks it
 //   Scored:true (markWeekScored; a week locked before the ledger existed
-//   gets the full node then). Finalize stands down for a marked week (at
-//   entry and right before its first official write), and a sweep whose
-//   lock step stopped on a week no longer frozen writes no GwState. The
+//   gets the full node then). Finalize stands down for a marked week at
+//   entry, and its last check before its first official write is a
+//   TRANSACTION on the entry (stampFinalizing — final review I1): it stamps
+//   `Finalizing: <now>`, which the rewind's mark refuses while younger than
+//   10 minutes, and refuses itself — writing nothing — when the entry is
+//   marked, gone since the run began, or re-dated. Scored replaces the
+//   stamp (markWeekScored); a run that scores nobody removes its own. So
+//   finalize and rewind never overlap on a week. A first finalize of a
+//   SKIPPED day stands down (I2). Readers ignore both coordination keys.
+//   A sweep whose lock step stopped on a week no longer frozen writes no
+//   GwState. The
 //   rewind itself, its CalledOff/<gw>/<date> push claim and the heal of
 //   stale lock writes on an open week live in schedule_rewind.ts. Rules:
 //   signed-in read, no client write.
 //
 // - Repriced/<gw> = { At:int, Manual?:true, Voided?:true, Skipped?:'late' } —
-//   the reprice job's done-flag (it runs every morning, not only Mondays).
+//   the reprice job's done-flag (it runs every morning, not only Mondays —
+//   hourly attempts 10:00-15:00 league time, final review I5).
 //   Manual:true records "admin had set
 //   PriceChanges/<gw>/Manual, the job stood down"; Voided:true records "the
 //   week was owner-voided, the job skipped it" (un-voiding later does NOT
@@ -282,8 +293,8 @@ import {
   isServerSquadWrite, isTestFillSeason, isVoidFlag, keyedGamesOfDate,
   loadSeasonGameweeks, lockedPositionsOf, lockOverrideOf, marketPlayersOf,
   marketPricesOf, markServerSquadWrite, parseAbsentMap, positionsSnapshotOf,
-  rosterNamesOf, SERVER_WRITE_KEY, TEST_FILL_STAND_DOWN, toIntLoose,
-  updateIfPresent, voidedWeeksOf, withLockedPositions,
+  rosterNamesOf, scheduleOverridesOf, SERVER_WRITE_KEY, TEST_FILL_STAND_DOWN,
+  toIntLoose, updateIfPresent, voidedWeeksOf, withLockedPositions,
 } from './orchestration_db';
 import { applyDelta, repriceDeltas } from './pricing';
 import {
@@ -1097,6 +1108,10 @@ export interface FinalizeArgs {
   sport: string;
   season: string;
   cfg: FantasyConfig;
+  /** The raw Config node the caller derived its week list from
+   *  (SkippedDates — final review I2: a skipped day is never scored for the
+   *  first time). */
+  configNode: Record<string, unknown>;
   gw: Gameweek;
   nowUtc: Date;
   log?: FantasyLogger;
@@ -1118,8 +1133,12 @@ export async function finalizeGameweek(
   // A week the sweep is rewinding (its day was called off) is never scored:
   // every entry point — the match-day trigger, the sweep's backstop, the
   // void re-settle — stands down here, and again right before the first
-  // official write (a mark landing while this run computed).
-  if (await weekBeingRewound(db, root, gw.number)) {
+  // official write, where the run STAMPS the ledger entry by transaction
+  // (stampFinalizing — final review I1: a mark, or a whole rewind, that
+  // landed while this run computed). The entry as seen here is kept: one
+  // that existed now and is gone then was rewound.
+  const ledgerAtEntry = await db.read(`${root}/LockedWeeks/${gw.number}`);
+  if (isRewinding(ledgerAtEntry)) {
     log.info(FINALIZE_REWINDING, ctx);
     return null;
   }
@@ -1158,10 +1177,30 @@ export async function finalizeGameweek(
     .find(([w]) => Number(w) === gw.number)?.[1] ?? null;
   const firstRun = historyThisGw == null;
 
+  // A skipped game day is never scored for the FIRST time (final review
+  // I2): a frozen week keeps its place in the week list after its day is
+  // skipped, and the match-day trigger / the sweep's backstop would
+  // otherwise score it before the sweep's rewind (or, for a week that is
+  // not the latest locked one, ever). A rerun of a week already scored
+  // still re-settles (a late score correction keeps counting).
+  if (firstRun && scheduleOverridesOf(args.configNode).skippedDates.has(gw.date)) {
+    log.info('fantasy finalize: game day skipped — not scored', ctx);
+    return null;
+  }
+
   // The market at this week's LOCKED positions (LockedPositions/<gw>); a
   // first run that outran every sweep freezes the week (LockedWeeks/<gw>)
-  // and claims the snapshot itself.
+  // and claims the snapshot itself. null = that claim was refused (the
+  // ledger froze this number on another date, or a rewind marked it) or the
+  // week stopped being frozen under the claim: scoring this date now would
+  // write a History no ledger entry stands behind (final review I4) — the
+  // run stands down before its first write.
   const players = await marketForGameweek(db, root, gw, firstRun, log, ctx);
+  if (players === null) {
+    log.warn('fantasy finalize: week frozen on another date — standing down',
+      ctx);
+    return null;
+  }
   let source = 'publishedPicks';
   let squadsByUid = mapChildren(await db.read(`${root}/PublishedPicks/${gw.number}`));
   if (Object.keys(squadsByUid).length === 0) {
@@ -1288,11 +1327,14 @@ export async function finalizeGameweek(
     log.warn('fantasy finalize: malformed squad skipped', { ...ctx, uid, source });
   }
 
-  // The re-check right before the first official write (see the entry).
-  if (await weekBeingRewound(db, root, gw.number)) {
-    log.info(FINALIZE_REWINDING, ctx);
-    return null;
-  }
+  // The last check, right before the first official write (see the entry):
+  // a transaction on LockedWeeks/<gw> that stamps `Finalizing` — the
+  // rewind's mark refuses a fresh stamp — or refuses (nothing more written)
+  // when the entry is marked Rewinding, was there at our entry (or claimed
+  // by this first run) and is gone now, or holds another date.
+  const stamp = await stampFinalizing(db, root, gw,
+    ledgerAtEntry != null || firstRun, args.nowUtc.getTime(), log, ctx);
+  if (stamp === null) return null;
   if (Object.keys(out.playerWeeks).length > 0) {
     await db.write(`${root}/PlayerWeeks/${gw.number}`, out.playerWeeks);
   }
@@ -1317,6 +1359,11 @@ export async function finalizeGameweek(
     }
   } else {
     log.warn('fantasy finalize: no manager squads to score', { ...ctx, source });
+    // Nothing scored: the week stays rewindable, so our stamp goes now
+    // (only ours — a later run's stamp stays until that run is done).
+    if (stamp.stampMs !== null) {
+      await clearFinalizingStamp(db, root, gw.number, stamp.stampMs, log, ctx);
+    }
   }
 
   // FPL selling (spec §4): Baselines/<uid> for gw + 1, on EVERY run — the
@@ -1628,7 +1675,8 @@ export async function maybeFinalizeGame(
     return;
   }
   await finalizeGameweek(db, {
-    sport, season, cfg, gw, nowUtc: args.nowUtc, log, deps: args.deps,
+    sport, season, cfg, configNode, gw, nowUtc: args.nowUtc, log,
+    deps: args.deps,
   });
 }
 
@@ -2072,16 +2120,92 @@ function freezesWeek(node: unknown, gw: Gameweek): boolean {
   return freezesWeekDate(node, gw.date);
 }
 
-/** Whether a rewind has marked gameweek [n] (LockedWeeks/<n>.Rewinding —
- *  schedule_rewind.ts): finalize stands down for it. One small read. */
-async function weekBeingRewound(
-  db: FantasyDb, root: string, n: number,
-): Promise<boolean> {
-  return isRewinding(await db.read(`${root}/LockedWeeks/${n}`));
-}
-
 /** finalize's stand-down line for a week being rewound. */
 const FINALIZE_REWINDING = 'fantasy finalize: week being rewound — standing down';
+/** finalize's stand-down line for a ledger entry gone or re-dated under it. */
+const FINALIZE_UNFROZEN = 'fantasy finalize: week no longer frozen — standing down';
+
+/** [I1] The finalize's last check before its first official write: ONE
+ *  transaction on LockedWeeks/<n>, the node it shares with the rewind
+ *  (schedule_rewind.ts), so the two exclude each other.
+ *  - Marked `Rewinding` → refused (the rewind got there first).
+ *  - Absent → refused when [expected] (it existed at the finalize's entry,
+ *    or this first run claimed it: a rewind completed meanwhile — scoring
+ *    now would resurrect the entry through markWeekScored); otherwise (a
+ *    week locked before the ledger existed) the run goes on, unstamped.
+ *  - Another Date, or junk → refused.
+ *  - Already `Scored` → goes on, unstamped (the rewind never marks a scored
+ *    week; reruns write nothing here).
+ *  - Otherwise → `Finalizing: <nowMs>` stamped: the rewind's mark refuses
+ *    the week until markWeekScored replaces the stamp with Scored, the run
+ *    clears its own stamp (clearFinalizingStamp), or it goes stale
+ *    (FINALIZING_STALE_MS — a run that died).
+ *  null = refused (warned/logged; the caller writes nothing more); else
+ *  the stamp written (null = none). Cold-first safe: a null first run
+ *  proposes "no change" and RTDB re-runs it on the real value. */
+async function stampFinalizing(
+  db: FantasyDb, root: string, gw: Gameweek, expected: boolean, nowMs: number,
+  log: FantasyLogger, ctx: Record<string, unknown>,
+): Promise<{ stampMs: number | null } | null> {
+  type Verdict = 'stamped' | 'unstamped' | 'rewinding' | 'unfrozen';
+  let verdict: Verdict = 'unfrozen';
+  let seenDate: unknown = null;
+  await db.transaction(`${root}/LockedWeeks/${gw.number}`, (current) => {
+    seenDate = null; // every (re-)run decides afresh
+    if (current === null || current === undefined) {
+      verdict = expected ? 'unfrozen' : 'unstamped';
+      return null; // see FantasyDb: never abort on null
+    }
+    if (isRewinding(current)) {
+      verdict = 'rewinding';
+      return undefined;
+    }
+    if (!freezesWeek(current, gw)) {
+      verdict = 'unfrozen';
+      seenDate = isPlainMap(current) ? current['Date'] ?? null : null;
+      return undefined;
+    }
+    const node = current as Record<string, unknown>;
+    if (node['Scored'] === true) {
+      verdict = 'unstamped';
+      return undefined;
+    }
+    verdict = 'stamped';
+    return { ...node, Finalizing: nowMs };
+  });
+  switch (verdict as Verdict) {
+    case 'stamped':
+      return { stampMs: nowMs };
+    case 'unstamped':
+      return { stampMs: null };
+    case 'rewinding':
+      log.info(FINALIZE_REWINDING, ctx);
+      return null;
+    case 'unfrozen':
+      log.warn(FINALIZE_UNFROZEN, { ...ctx, frozenDate: seenDate });
+      return null;
+  }
+}
+
+/** [I1] Removes this run's own `Finalizing` stamp ([stampMs]) from
+ *  LockedWeeks/<n> — a later run's stamp (another value) is left alone. A
+ *  failure is logged: the stamp then goes stale on its own. */
+async function clearFinalizingStamp(
+  db: FantasyDb, root: string, n: number, stampMs: number,
+  log: FantasyLogger, ctx: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await updateIfPresent(db, `${root}/LockedWeeks/${n}`, (cur) => {
+      if (cur['Finalizing'] !== stampMs) return undefined;
+      const next = { ...cur };
+      delete next['Finalizing'];
+      return next;
+    });
+  } catch (err) {
+    log.warn('fantasy finalize: Finalizing stamp not cleared — it goes stale ' +
+      'on its own', { ...ctx, error: String(err) });
+  }
+}
 
 /** The lock's FIRST write: freezes gameweek [gw] as LockedWeeks/<n> =
  *  { Date, LockAtUtc }, set-if-absent (one read when it is already there —
@@ -2168,7 +2292,9 @@ async function guardedSnapshotClaim(
  *  locked before the ledger existed) -> the full node { Date, LockAtUtc,
  *  Scored: true }; already Scored -> nothing written; a node a rewind
  *  marked `Rewinding`, or one freezing ANOTHER date (or junk), is left
- *  alone, warned — it is not this week's to settle. One transaction: its
+ *  alone, warned — it is not this week's to settle. [I1] The finalize's
+ *  `Finalizing` stamp goes in the same write (Scored now keeps the rewind
+ *  away for good). One transaction: its
  *  cold first run sees null and proposes the full node, and RTDB re-runs it
  *  on the real value when one exists. */
 async function markWeekScored(
@@ -2188,8 +2314,13 @@ async function markWeekScored(
       };
       return undefined;
     }
-    const node = current as Record<string, unknown>;
-    return node['Scored'] === true ? undefined : { ...node, Scored: true };
+    // [I1] Scored replaces the finalize's Finalizing stamp (the rewind never
+    // marks a scored week, so the stamp has done its job).
+    const node: Record<string, unknown> = { ...(current as Record<string, unknown>) };
+    const stamped = 'Finalizing' in node;
+    delete node['Finalizing'];
+    if (node['Scored'] === true) return stamped ? node : undefined;
+    return { ...node, Scored: true };
   });
   const why = refused as { rewinding: boolean; frozenDate: unknown } | null;
   if (why !== null) {
@@ -2246,13 +2377,18 @@ async function snapshotLockedPositions(
 async function marketForGameweek(
   db: FantasyDb, root: string, gw: Gameweek, claim: boolean,
   log: FantasyLogger, ctx: Record<string, unknown>,
-): Promise<Record<string, MarketPlayer>> {
+): Promise<Record<string, MarketPlayer> | null> {
   const players = marketPlayersOf(await db.read(`${root}/Players`));
   let locked: unknown;
-  if (claim && await claimLockedWeek(db, root, gw, log, ctx)) {
+  if (claim) {
+    // [I4] A refused claim (another date, junk, a rewind's mark) or a week
+    // that stopped being frozen right under it = null: the finalize stands
+    // down — never History for a date the ledger does not freeze.
+    if (!(await claimLockedWeek(db, root, gw, log, ctx))) return null;
     const positions = await snapshotLockedPositions(db, root, gw, log, ctx);
+    if (!positions.frozen) return null;
     locked = positions.stored;
-    if (positions.frozen) await snapshotPriceHistory(db, root, gw, log, ctx);
+    if (!(await snapshotPriceHistory(db, root, gw, log, ctx))) return null;
   } else {
     locked = await db.read(`${root}/LockedPositions/${gw.number}`);
   }
@@ -2516,7 +2652,9 @@ async function sweepSeason(
     const games = gamesOfDate(await db.read(`${sport}/${season}/Date/${gw.date}`));
     if (!allGamesFinal(games)) continue;
     log.info('fantasy sweep: backstop finalize', { ...ctx, gw: gw.number });
-    await finalizeGameweek(db, { sport, season, cfg, gw, nowUtc, log, deps });
+    await finalizeGameweek(db, {
+      sport, season, cfg, configNode, gw, nowUtc, log, deps,
+    });
   }
 
   // 2a. Season-end badges (spec 2026-10-30 §4): the league may flag the
@@ -2833,8 +2971,10 @@ function isBeforeLeagueToday(dateKey: string, nowUtc: Date): boolean {
   return parseDbDate(dateKey).getTime() < todayMs;
 }
 
-/** Daily 10:00 league time: reprice the most recent FINALIZED gameweek not
- *  yet repriced — the morning after its game day, whatever the weekday.
+/** Hourly 10:00-15:00 league time (fantasy_lifecycle.ts — the claim below
+ *  makes every attempt after a successful one a no-op): reprice the most
+ *  recent FINALIZED gameweek not yet repriced — the morning after its game
+ *  day, whatever the weekday.
  *  Only when the week's date is before today (league time) AND teams have
  *  not reopened (now < lockUtc + 24 h, taken from the week's Gameweek in
  *  loadSeasonGameweeks):

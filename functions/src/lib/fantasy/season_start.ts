@@ -19,7 +19,9 @@
 //   the engine on, so the market is complete before anything reads it.
 //
 // NODES (under Fantasy/<sport>/<season>/):
-//   StartedAt = { At: epoch ms, By: uid }          (server-only claim)
+//   StartedAt = { At: epoch ms, By: uid }          (server-only claim; T6b:
+//               without a Config and 10 minutes old it is a Start that died —
+//               the preview ignores it and the next Start takes it over)
 //   Players   = { <name>: { position, priceTenths, eligible:true, teamName,
 //                           uid?, photoUrl? } }    (the shape the fan market parses)
 //   Config    = the newest earlier season's Config minus lockOverride,
@@ -221,11 +223,45 @@ interface SeasonPlan {
   cfg: FantasyConfig;
   /** The raw Config of the source season (null = none: defaults). */
   sourceConfig: Record<string, unknown> | null;
+  /** T6b: the StartedAt a Start that died left behind (stale, no Config) —
+   *  startSeason takes exactly this node over; null = none. */
+  staleStartedAt: unknown;
+}
+
+/** T6b: how long a StartedAt without a Config stands for "a Start under
+ *  way". A Start writes Players and Config within seconds (a callable times
+ *  out long before), so an older claim with no Config is a Start that died
+ *  without cleaning up. */
+export const STARTED_AT_STALE_MS = 10 * 60 * 1000;
+
+/** T6b: whether a stored StartedAt (with no Config next to it) is stale at
+ *  [nowMs]: its `At` is [STARTED_AT_STALE_MS] or more in the past. A node
+ *  with no numeric At (junk) is stale too: nothing says a Start is running. */
+function isStaleStartedAt(node: unknown, nowMs: number): boolean {
+  const at = isPlainMap(node) ? node['At'] : undefined;
+  return typeof at !== 'number' || !Number.isFinite(at) ||
+    nowMs - at >= STARTED_AT_STALE_MS;
+}
+
+/** Key-order-independent JSON (StartedAt compare-and-set). */
+function sameJson(a: unknown, b: unknown): boolean {
+  const canon = (v: unknown): string => {
+    if (Array.isArray(v)) return `[${v.map(canon).join(',')}]`;
+    if (isPlainMap(v)) {
+      return `{${Object.keys(v).sort()
+        .map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(',')}}`;
+    }
+    return JSON.stringify(v ?? null);
+  };
+  return canon(a) === canon(b);
 }
 
 /** Everything a Start needs, read once. Writes nothing; a read that fails
- *  throws (a missing sign-up position or photo is not a fact). */
-async function planSeason(db: FantasyDb, sport: string, season: string): Promise<SeasonPlan> {
+ *  throws (a missing sign-up position or photo is not a fact). [nowMs]
+ *  judges a StartedAt left without a Config (T6b). */
+async function planSeason(
+  db: FantasyDb, sport: string, season: string, nowMs: number,
+): Promise<SeasonPlan> {
   const root = fantasyRoot(sport, season);
   const [configNode, startedNode, dateNode, lineupsNode, carry] = await Promise.all([
     db.read(`${root}/Config`),
@@ -304,15 +340,20 @@ async function planSeason(db: FantasyDb, sport: string, season: string): Promise
   const problems: StartProblem[] = [];
   if (rows.length === 0) problems.push('noRosters');
   if (childEntries(dateNode).length === 0) problems.push('noSchedule');
-  // A Config means started; so does a StartedAt without one (a Start under
-  // way, or one that died before it could clean up).
-  if ((configNode !== null && configNode !== undefined) ||
-    (startedNode !== null && startedNode !== undefined)) problems.push('alreadyStarted');
+  // A Config means started; so does a FRESH StartedAt without one (a Start
+  // under way). T6b: a StartedAt without a Config that is STARTED_AT_STALE_MS
+  // old is a Start that died before it could clean up — not "started": the
+  // owner can Start again, and startSeason takes the stale claim over.
+  const hasConfig = configNode !== null && configNode !== undefined;
+  const hasStarted = startedNode !== null && startedNode !== undefined;
+  const startedIsStale = !hasConfig && hasStarted && isStaleStartedAt(startedNode, nowMs);
+  if (hasConfig || (hasStarted && !startedIsStale)) problems.push('alreadyStarted');
   if (sourceIsTestFill) problems.push('sourceIsTestFill');
 
   return {
     cfg,
     sourceConfig,
+    staleStartedAt: startedIsStale ? startedNode : null,
     preview: {
       sport, season,
       sourceSeason: source,
@@ -331,11 +372,12 @@ function clampPrice(tenths: number, cfg: FantasyConfig): number {
   return Math.min(Math.max(tenths, cfg.priceMinTenths), cfg.priceMaxTenths);
 }
 
-/** The Manager's preview of Starting [sport] [season]. Never writes. */
+/** The Manager's preview of Starting [sport] [season]. Never writes.
+ *  [nowMs] (default: now) judges a StartedAt left without a Config (T6b). */
 export async function buildSeasonPreview(
-  db: FantasyDb, sport: string, season: string,
+  db: FantasyDb, sport: string, season: string, nowMs: number = Date.now(),
 ): Promise<SeasonPreview> {
-  return (await planSeason(db, sport, season)).preview;
+  return (await planSeason(db, sport, season, nowMs)).preview;
 }
 
 // ── Start ───────────────────────────────────────────────────────────────────
@@ -389,8 +431,35 @@ export function parseEditsArg(raw: unknown): Record<string, RowEdit> {
   return out;
 }
 
+/** T6b: replaces the StartedAt at [path] with [claim] only while it still
+ *  holds exactly [stale]. An absent node (cleaned up meanwhile) is claimed
+ *  set-if-absent instead. True = the claim is ours. */
+async function takeOverStaleStart(
+  db: FantasyDb, path: string, stale: unknown, claim: Record<string, unknown>,
+): Promise<boolean> {
+  let verdict: 'ours' | 'absent' | 'changed' = 'changed';
+  await db.transaction(path, (current) => {
+    if (current === null || current === undefined) {
+      verdict = 'absent';
+      return null; // FantasyDb: never abort on null (a no-op when absent)
+    }
+    if (!sameJson(current, stale)) {
+      verdict = 'changed';
+      return undefined;
+    }
+    verdict = 'ours';
+    return claim;
+  });
+  switch (verdict as 'ours' | 'absent' | 'changed') {
+    case 'ours': return true;
+    case 'absent': return db.writeIfAbsent(path, claim);
+    case 'changed': return false;
+  }
+}
+
 /** Starts [sport] [season]: recompute the preview, refuse on any problem,
- *  validate the season pass, apply the owner's edits, claim StartedAt, write
+ *  validate the season pass, apply the owner's edits, claim StartedAt (or
+ *  take over a stale one — T6b), write
  *  Players, then Config. Anything that fails after the claim removes what
  *  was written (Players, StartedAt — and Config, which may have landed
  *  despite the error) and rethrows, so the owner can simply try again.
@@ -401,7 +470,8 @@ export async function startSeason(
   edits: Record<string, RowEdit>, access: AccessDraft,
   byUid: string, nowMs: number, log: FantasyLogger = silent,
 ): Promise<{ players: number }> {
-  const { preview, cfg, sourceConfig } = await planSeason(db, sport, season);
+  const { preview, cfg, sourceConfig, staleStartedAt } =
+    await planSeason(db, sport, season, nowMs);
   if (preview.problems.length > 0) throw refused(preview.problems);
   const draft = validateAccessDraft(access);
 
@@ -444,7 +514,16 @@ export async function startSeason(
   const config = newSeasonConfig(sourceConfig, accessNodeOf(draft, byUid, nowMs));
 
   const root = fantasyRoot(sport, season);
-  if (!(await db.writeIfAbsent(`${root}/StartedAt`, { At: nowMs, By: byUid }))) {
+  const claim = { At: nowMs, By: byUid };
+  if (staleStartedAt !== null) {
+    // T6b: the claim a dead Start left — replaced only while it is still
+    // that same stale node (a concurrent Start that took it over first wins).
+    if (!(await takeOverStaleStart(db, `${root}/StartedAt`, staleStartedAt, claim))) {
+      throw refused(['alreadyStarted']);
+    }
+    log.warn('fantasy season start: a stale StartedAt (a Start that died) ' +
+      'taken over', { sport, season, by: byUid, stale: staleStartedAt });
+  } else if (!(await db.writeIfAbsent(`${root}/StartedAt`, claim))) {
     throw refused(['alreadyStarted']);
   }
   let configAttempted = false;

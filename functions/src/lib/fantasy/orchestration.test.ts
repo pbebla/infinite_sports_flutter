@@ -760,6 +760,39 @@ describe('Monday repricing (Phase D)', () => {
     expect(db.writes).toEqual([]);
     expect(warns.map((w) => w.m)).toEqual(['fantasy reprice: season failed']);
   });
+
+  // Final review I5: the job tries hourly 10:00-15:00 league time
+  // (fantasy_lifecycle.ts), so a failed attempt is retried the same morning.
+  it('hourly attempts: a 10:00 run that failed before its claim is retried at '
+    + '11:00 and reprices; the 12:00 run is a no-op', async () => {
+    const db = frozenWeekWorld(DATE_KEY, LOCK_MS);
+    const realRead = db.read.bind(db);
+    let failed = false;
+    db.read = async (path: string) => {
+      if (!failed && path === 'Futsal/15/Date') {
+        failed = true;
+        throw new Error('read timed out');
+      }
+      return realRead(path);
+    };
+    const { log, warns } = recordingLog();
+    await runMondayReprice(db, NOW, log); // Monday 10:00: the read fails
+    expect(failed).toBe(true);
+    expect(await db.read(`${fRoot}/Repriced/1`)).toBeNull();
+    expect(warns.map((w) => w.m)).toEqual(['fantasy reprice: season failed']);
+
+    const eleven = new Date(NOW.getTime() + 3600_000);
+    await runMondayReprice(db, eleven, log);
+    expect(await db.read(`${fRoot}/Repriced/1`)).toEqual({ At: eleven.getTime() });
+    expect(await db.read(`${fRoot}/Players/Bo/priceTenths`)).toBe(80);
+
+    const before = db.snapshot();
+    db.writes = [];
+    await runMondayReprice(db, new Date(NOW.getTime() + 2 * 3600_000), log);
+    expect(db.writes).toEqual([]);
+    expect(db.snapshot()).toBe(before);
+    expect(warns).toHaveLength(1);
+  });
 });
 
 // Round 3 spec §3.2: the lock step records the price every market player has
@@ -1550,8 +1583,11 @@ describe('LockedWeeks: a gameweek freezes when it locks', () => {
       sport: 'Futsal', season: '15', dateKey: D1, nowUtc: LATER1, log: spy.log,
     });
     expect(await db.read(`${F_ROOT}/History/1`)).not.toBeNull();
-    expect(await db.read(`${F_ROOT}/LockedWeeks/1`))
-      .toEqual({ Date: D1, LockAtUtc: LOCK1_MS, Rewinding: true });
+    // A direct mark: the real rewind refuses a week carrying a fresh
+    // Finalizing stamp (final review I1 — schedule_rewind.test.ts).
+    expect(await db.read(`${F_ROOT}/LockedWeeks/1`)).toEqual({
+      Date: D1, LockAtUtc: LOCK1_MS, Finalizing: LATER1.getTime(), Rewinding: true,
+    });
     expect(spy.warns).toContain(
       'fantasy finalize: week being rewound — not marked Scored');
   });
@@ -1598,7 +1634,8 @@ describe('LockedWeeks: a gameweek freezes when it locks', () => {
   });
 
   it('a first finalize whose claim finds ANOTHER date takes no snapshot and '
-    + 'marks nothing Scored (warned), but still scores the day', async () => {
+    + 'stands down: no History for a date the ledger does not freeze (final '
+    + 'review I4)', async () => {
     const db = new ColdFakeDb(world2({ gw2Status: 2 }));
     const other = { Date: '07052026', LockAtUtc: Date.UTC(2026, 6, 5, 22) };
     const realClaim = db.writeIfAbsent.bind(db);
@@ -1611,13 +1648,15 @@ describe('LockedWeeks: a gameweek freezes when it locks', () => {
       sport: 'Futsal', season: '15', dateKey: GW2_DATE, nowUtc: AFTER_LOCK2,
       log: spy.log,
     });
-    expect(await db.read(`${F_ROOT}/History/2`)).not.toBeNull();
+    expect(await db.read(`${F_ROOT}/History/2`)).toBeNull();
+    expect(await db.read(`${F_ROOT}/PlayerWeeks/2`)).toBeNull();
+    expect(await db.read(`${F_ROOT}/TransferCosts/2`)).toBeNull();
     expect(await db.read(`${F_ROOT}/LockedPositions/2`)).toBeNull();
     expect(await db.read(`${F_ROOT}/PriceHistory/2`)).toBeNull();
     expect(await db.read(`${F_ROOT}/LockedWeeks/2`)).toEqual(other);
     expect(spy.warns).toContain(FROZEN);
     expect(spy.warns).toContain(
-      'fantasy finalize: LockedWeeks holds another date — not marked Scored');
+      'fantasy finalize: week frozen on another date — standing down');
   });
 
   it('the week list stays frozen when the locked day disappears', async () => {

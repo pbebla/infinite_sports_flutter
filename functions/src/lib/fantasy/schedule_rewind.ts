@@ -24,7 +24,12 @@
 // Steps (each idempotent; a crash is finished by the next sweep — ruling
 // T3a: MARK first, delete the ledger entry LAST):
 //   M. Transaction on LockedWeeks/L: `Rewinding: true`, only while it still
-//      freezes L.date and is not Scored. From here every lock-step write
+//      freezes L.date, is not Scored and carries no `Finalizing` stamp
+//      younger than 10 minutes (final review I1: LockedWeeks/L is the lock
+//      finalize and rewind share — the finalize stamps it, by transaction,
+//      right before its first official write and refuses a marked entry,
+//      so the two never overlap; an older stamp is a finalize that died and
+//      is dropped by the mark). From here every lock-step write
 //      refuses the week (orchestration.ts freezesWeek), each lock snapshot
 //      deletes itself if it lands under the mark (guardedSnapshotClaim), and
 //      finalize stands down for it. Then History/L is re-read: present = a
@@ -47,10 +52,10 @@
 //      lock judge's verdict; any other alert is left).
 //   5. [M3] Every Baselines/<uid>: restoreBaselineAfterRewind in one
 //      transaction (the lock-time Prev stash put back exactly).
-//      Then History/L is re-read once more: a finalize that passed its own
-//      check before the mark may have landed meanwhile — the week then
-//      counts (mark removed, warned; its lock snapshots are gone, so its
-//      reruns score from History).
+//      Then History/L is re-read once more — a belt-and-braces check kept
+//      from before the I1 lock (a finalize can no longer pass its stamp
+//      under the mark): History present = the week counts (mark removed,
+//      warned).
 //   8. The push, BEFORE step 6 (DOCUMENTED ORDER: once LockedWeeks/L is gone
 //      no later sweep knows a push is owed): when a pusher is injected and
 //      the CalledOff/L/<L.date> claim lands set-if-absent — every manager
@@ -109,8 +114,8 @@
 import { configFromMap, FantasyConfig } from './fantasy_config';
 import { currentGameweek, Gameweek, gameweekStatusAt } from './gameweeks';
 import {
-  childEntries, dateKeysOf, FantasyDb, fantasyRoot, freezesWeekDate, isPlainMap,
-  isRewinding,
+  childEntries, dateKeysOf, FantasyDb, finalizingFresh, fantasyRoot,
+  freezesWeekDate, isPlainMap, isRewinding,
   isTestFillSeason, loadSeasonGameweeks, lockedWeeksOf, lockOverrideOf,
   scheduleOverridesOf, TEST_FILL_STAND_DOWN, toIntLoose, updateIfPresent,
 } from './orchestration_db';
@@ -273,6 +278,10 @@ function isWeekInvalidAlert(node: unknown, gw: number): boolean {
     toIntLoose(node['Gw']) === gw;
 }
 
+/** [I1] The mark's refusal while a finalize is writing the week. */
+const FINALIZING_REFUSED =
+  'fantasy rewind: a finalize is scoring the week — the next sweep decides';
+
 /** Removes the rewind's mark again (a finalize won: the week counts). */
 async function unmarkWeek(
   db: FantasyDb, root: string, n: number, date: string,
@@ -376,13 +385,27 @@ export async function rewindCancelledWeek(
       return 'none';
     }
     if ((await db.read(`${root}/History/${n}`)) != null) return 'none';
-    // M. The mark — only while the entry still freezes this date, unscored.
-    const marked = await updateIfPresent(db, `${root}/LockedWeeks/${n}`, (cur) =>
-      cur['Date'] === week.date && cur['Scored'] !== true
-        ? { ...cur, Rewinding: true } : undefined);
+    // M. The mark — only while the entry still freezes this date, unscored,
+    //    and no finalize is writing the week right now ([I1]: a Finalizing
+    //    stamp younger than FINALIZING_STALE_MS — the two exclude each other
+    //    on this one node; an older stamp is a finalize that died, dropped).
+    let finalizing = false;
+    const marked = await updateIfPresent(db, `${root}/LockedWeeks/${n}`, (cur) => {
+      finalizing = false; // every (re-)run decides afresh
+      if (cur['Date'] !== week.date || cur['Scored'] === true) return undefined;
+      if (finalizingFresh(cur, nowMs)) {
+        finalizing = true;
+        return undefined;
+      }
+      const next: Record<string, unknown> = { ...cur, Rewinding: true };
+      delete next['Finalizing'];
+      return next;
+    });
     if (marked === null) {
-      log.info('fantasy rewind: the ledger entry changed meanwhile — the next ' +
-        'sweep decides', ctx);
+      log.info((finalizing as boolean)
+        ? FINALIZING_REFUSED
+        : 'fantasy rewind: the ledger entry changed meanwhile — the next ' +
+          'sweep decides', ctx);
       return 'none';
     }
     log.warn('fantasy rewind: game day called off — rewinding the week',

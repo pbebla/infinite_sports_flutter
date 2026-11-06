@@ -283,7 +283,9 @@ function indexedChildren(node: unknown): Array<[number, unknown]> {
  *  Gameweek numbers are small ints, so RTDB list-coerces the node (index =
  *  week, index 0 null): a List and an int-keyed Map both parse. An entry that
  *  isn't week >= 1, isn't a map, has no valid Date or no numeric LockAtUtc is
- *  skipped; `Scored` counts only as a literal `true`. */
+ *  skipped; `Scored` counts only as a literal `true`. The server-only
+ *  coordination keys `Rewinding` (isRewinding) and `Finalizing`
+ *  (finalizingFresh) are not part of the week and are ignored here. */
 export function lockedWeeksOf(node: unknown): Record<number, LockedWeek> {
   const out: Record<number, LockedWeek> = {};
   for (const [n, week] of indexedChildren(node)) {
@@ -303,6 +305,25 @@ export function lockedWeeksOf(node: unknown): Record<number, LockedWeek> {
  *  Scored mark or finalize accepts it. */
 export function isRewinding(node: unknown): boolean {
   return isPlainMap(node) && node['Rewinding'] === true;
+}
+
+/** [I1] How long a finalize's `Finalizing` stamp on `LockedWeeks/<n>` holds
+ *  off the rewind's mark. Far longer than any finalize run (a function
+ *  times out well before): an older stamp is a finalize that died. */
+export const FINALIZING_STALE_MS = 10 * 60 * 1000;
+
+/** [I1] Whether a stored `LockedWeeks/<n>` value carries a finalize's
+ *  `Finalizing: <epoch ms>` stamp younger than [FINALIZING_STALE_MS] at
+ *  [nowMs] — a finalize is writing the week's points right now, so the
+ *  rewind must not mark it (schedule_rewind.ts). A stamp from a clock a
+ *  little ahead counts as fresh; no stamp, or a non-numeric one, is none.
+ *  Readers of the ledger (lockedWeeksOf, freezesWeekDate, both apps'
+ *  parsers) ignore the key. */
+export function finalizingFresh(node: unknown, nowMs: number): boolean {
+  if (!isPlainMap(node)) return false;
+  const at = node['Finalizing'];
+  return typeof at === 'number' && Number.isFinite(at) &&
+    nowMs - at < FINALIZING_STALE_MS;
 }
 
 /** Whether a stored `LockedWeeks/<n>` value freezes the week dated [date]:

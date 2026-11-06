@@ -959,3 +959,264 @@ describe('scheduleConfigChanged (the Config trigger\'s zero-read gate)', () => {
     expect(scheduleConfigChanged(null, null)).toBe(false);
   });
 });
+
+// ── Final review (2026-11-05): finalize and rewind exclude each other ───────
+// I1: both write LockedWeeks/<n>, so that node is the lock. The finalize's
+// last check before its first official write is a TRANSACTION stamping
+// `Finalizing: <now>` — refused while the rewind's mark is there, or when
+// the entry it saw at its start is gone or re-dated. The rewind's mark
+// refuses while a Finalizing stamp younger than 10 minutes is there; an
+// older one is a finalize that died. I2: a skipped day is never scored for
+// the first time. I4: a first finalize whose claim finds the week frozen on
+// another date writes nothing.
+
+const FINALIZING_REFUSED =
+  'fantasy rewind: a finalize is scoring the week — the next sweep decides';
+const FINALIZE_UNFROZEN =
+  'fantasy finalize: week no longer frozen — standing down';
+const FINALIZE_REWINDING_LINE =
+  'fantasy finalize: week being rewound — standing down';
+const FINALIZE_SKIPPED = 'fantasy finalize: game day skipped — not scored';
+const FINALIZE_OTHER_DATE =
+  'fantasy finalize: week frozen on another date — standing down';
+
+const finalizeGw2 = (db: FakeDb, nowUtc: Date, log?: FantasyLogger) =>
+  maybeFinalizeGame(db, {
+    sport: 'Futsal', season: '15', dateKey: GW2_DATE, nowUtc, log,
+  });
+
+describe('[I1] finalize and rewind exclude each other on LockedWeeks/<n>', () => {
+  it('a rewind that runs while a finalize writes refuses to mark the stamped '
+    + 'week; the week scores whole and the stamp is cleared with Scored', async () => {
+    const db = await lockedGw2();
+    for (const g of dates(db)[GW2_DATE]) g.status = 2;
+    const spy = logSpy();
+    const realWrite = db.write.bind(db);
+    let result: string | null = null;
+    let stampAtHistory: unknown = null;
+    db.write = async (p: string, v: unknown) => {
+      if (result === null && p === `${F_ROOT}/History/2`) {
+        result = 'running';
+        stampAtHistory = t(db).LockedWeeks[2]?.Finalizing ?? null;
+        // The owner deletes the day and a sweep's rewind runs right now.
+        delete dates(db)[GW2_DATE];
+        result = await rewind(db, LATER, { log: spy.log });
+      }
+      return realWrite(p, v);
+    };
+    await finalizeGw2(db, LATER, spy.log);
+
+    expect(result).toBe('none');
+    expect(stampAtHistory).toBe(LATER.getTime());
+    expect(spy.infos).toContain(FINALIZING_REFUSED);
+    expect(t(db).History[2]).toBeDefined();
+    expect(t(db).LockedWeeks[2])
+      .toEqual({ Date: GW2_DATE, LockAtUtc: LOCK2_MS, Scored: true });
+    expect(await db.read(`${F_ROOT}/PublishedPicks/2`)).not.toBeNull();
+    expect(t(db).CalledOff).toBeUndefined();
+  });
+
+  it('a rewind that marked the week first: the finalize stands down at its '
+    + 'last check — no write at all, no stamp', async () => {
+    const db = await lockedGw2();
+    for (const g of dates(db)[GW2_DATE]) g.status = 2;
+    const realRead = db.read.bind(db);
+    let marked = false;
+    db.read = async (p: string) => {
+      if (!marked && p === `${F_ROOT}/DreamTeam/2`) {
+        marked = true;
+        // The sweep's mark lands while this finalize computes.
+        delete dates(db)[GW2_DATE];
+        await db.transaction(`${F_ROOT}/LockedWeeks/2`, (cur) =>
+          cur === null ? null : { ...(cur as Json), Rewinding: true });
+        db.writes = [];
+      }
+      return realRead(p);
+    };
+    const spy = logSpy();
+    await finalizeGw2(db, LATER, spy.log);
+
+    expect(marked).toBe(true);
+    expect(db.writes).toEqual([]);
+    expect(t(db).History[2]).toBeUndefined();
+    expect(t(db).LockedWeeks[2]).toEqual(
+      { Date: GW2_DATE, LockAtUtc: LOCK2_MS, Rewinding: true });
+    expect(spy.infos).toContain(FINALIZE_REWINDING_LINE);
+  });
+
+  it('a whole rewind inside one finalize\'s compute: the finalize stands down '
+    + 'and never resurrects LockedWeeks/2', async () => {
+    const db = await lockedGw2();
+    for (const g of dates(db)[GW2_DATE]) g.status = 2;
+    const realRead = db.read.bind(db);
+    let result: string | null = null;
+    db.read = async (p: string) => {
+      if (result === null && p === `${F_ROOT}/DreamTeam/2`) {
+        result = 'running';
+        db.read = realRead;
+        delete dates(db)[GW2_DATE];
+        result = await rewind(db, LATER);
+        db.writes = [];
+      }
+      return realRead(p);
+    };
+    const spy = logSpy();
+    await finalizeGw2(db, LATER, spy.log);
+
+    expect(result).toBe('rewound');
+    expect(db.writes).toEqual([]);
+    expect(t(db).History[2]).toBeUndefined();
+    expect(t(db).LockedWeeks).toEqual(
+      { 1: { Date: GW1_DATE, LockAtUtc: LOCK1_MS, Scored: true } });
+    expect(spy.warns).toContain(FINALIZE_UNFROZEN);
+  });
+
+  it('the ledger entry re-dated mid-finalize: the finalize stands down', async () => {
+    const db = await lockedGw2();
+    for (const g of dates(db)[GW2_DATE]) g.status = 2;
+    const realRead = db.read.bind(db);
+    let moved = false;
+    db.read = async (p: string) => {
+      if (!moved && p === `${F_ROOT}/DreamTeam/2`) {
+        moved = true;
+        t(db).LockedWeeks[2] = { Date: GW3_DATE, LockAtUtc: LOCK3_MS };
+        db.writes = [];
+      }
+      return realRead(p);
+    };
+    const spy = logSpy();
+    await finalizeGw2(db, LATER, spy.log);
+    expect(moved).toBe(true);
+    expect(db.writes).toEqual([]);
+    expect(t(db).LockedWeeks[2]).toEqual({ Date: GW3_DATE, LockAtUtc: LOCK3_MS });
+    expect(spy.warns).toContain(FINALIZE_UNFROZEN);
+  });
+
+  it('a fresh Finalizing stamp blocks the mark; a stale one (10 minutes or '
+    + 'more: a finalize that died) does not', async () => {
+    const db = await lockedGw2();
+    delete dates(db)[GW2_DATE];
+    t(db).LockedWeeks[2].Finalizing = LATER.getTime() - 9 * 60_000;
+    const before = clone(t(db));
+    const spy = logSpy();
+    expect(await rewind(db, LATER, { log: spy.log })).toBe('none');
+    expect(t(db)).toEqual(before);
+    expect(spy.infos).toContain(FINALIZING_REFUSED);
+
+    t(db).LockedWeeks[2].Finalizing = LATER.getTime() - 10 * 60_000;
+    expect(await rewind(db, LATER)).toBe('rewound');
+    await expectRewound(db);
+  });
+
+  it('a finalize that scores nobody clears its own stamp', async () => {
+    const db = await lockedGw2();
+    for (const g of dates(db)[GW2_DATE]) g.status = 2;
+    delete t(db).PublishedPicks[2];
+    delete t(db).Squads;
+    const realTx = db.transaction.bind(db);
+    const seen: unknown[] = [];
+    db.transaction = async (p: string, update: (c: unknown) => unknown) => {
+      const res = await realTx(p, update);
+      if (p === `${F_ROOT}/LockedWeeks/2` && res.committed) seen.push(res.value);
+      return res;
+    };
+    await finalizeGw2(db, LATER);
+    expect(t(db).History[2]).toBeUndefined();
+    expect(seen).toContainEqual(
+      { Date: GW2_DATE, LockAtUtc: LOCK2_MS, Finalizing: LATER.getTime() });
+    expect(t(db).LockedWeeks[2]).toEqual({ Date: GW2_DATE, LockAtUtc: LOCK2_MS });
+  });
+
+  it('a rerun of a scored week never stamps it', async () => {
+    const db = await lockedGw2();
+    for (const g of dates(db)[GW2_DATE]) g.status = 2;
+    await finalizeGw2(db, LATER);
+    expect(t(db).LockedWeeks[2])
+      .toEqual({ Date: GW2_DATE, LockAtUtc: LOCK2_MS, Scored: true });
+    const realTx = db.transaction.bind(db);
+    const stamped: unknown[] = [];
+    db.transaction = async (p: string, update: (c: unknown) => unknown) => {
+      const res = await realTx(p, update);
+      if (p === `${F_ROOT}/LockedWeeks/2` && res.committed) stamped.push(res.value);
+      return res;
+    };
+    dates(db)[GW2_DATE][0].team1score = 7; // a late score correction
+    db.writes = [];
+    await finalizeGw2(db, LATER2);
+    expect(db.writes).toContain(`${F_ROOT}/History/2`);
+    expect(stamped).toEqual([]);
+    expect(t(db).LockedWeeks[2])
+      .toEqual({ Date: GW2_DATE, LockAtUtc: LOCK2_MS, Scored: true });
+  });
+});
+
+describe('[I2] a skipped game day is never scored for the first time', () => {
+  it('the match-day trigger stands down for a frozen week whose day is skipped',
+    async () => {
+      const db = await lockedGw2();
+      t(db).Config.SkippedDates = { [GW2_DATE]: true };
+      for (const g of dates(db)[GW2_DATE]) g.status = 2;
+      db.writes = [];
+      const spy = logSpy();
+      await finalizeGw2(db, LATER, spy.log);
+      expect(db.writes).toEqual([]);
+      expect(t(db).History[2]).toBeUndefined();
+      expect(spy.infos).toContain(FINALIZE_SKIPPED);
+    });
+
+  it('the sweep\'s backstop stands down too (a later week locked, so the '
+    + 'rewind leaves this one be)', async () => {
+    const db = await lockedGw2();
+    const afterLock3 = new Date(LOCK3_MS + 60 * 60_000);
+    await runLifecycleSweep(db, afterLock3); // GW3 locks
+    expect(t(db).LockedWeeks[3]).toMatchObject({ Date: GW3_DATE });
+    t(db).Config.SkippedDates = { [GW2_DATE]: true };
+    for (const g of dates(db)[GW2_DATE]) g.status = 2;
+    const spy = logSpy();
+    await runLifecycleSweep(
+      db, new Date(afterLock3.getTime() + 15 * 60_000), spy.log);
+    expect(spy.infos).toContain('fantasy sweep: backstop finalize');
+    expect(spy.infos).toContain(FINALIZE_SKIPPED);
+    expect(t(db).History[2]).toBeUndefined();
+    expect(await db.read(`${F_ROOT}/PlayerWeeks/2`)).toBeNull();
+  });
+
+  it('a rerun of a week already scored still re-settles after its day is '
+    + 'skipped (a late score correction)', async () => {
+    const db = await lockedGw2();
+    for (const g of dates(db)[GW2_DATE]) g.status = 2;
+    await finalizeGw2(db, LATER);
+    expect(t(db).History[2]).toBeDefined();
+    t(db).Config.SkippedDates = { [GW2_DATE]: true };
+    dates(db)[GW2_DATE][0].team1score = 7;
+    db.writes = [];
+    await finalizeGw2(db, LATER2);
+    expect(db.writes).toContain(`${F_ROOT}/History/2`);
+  });
+});
+
+describe('[I4] a first finalize whose claim is refused writes nothing', () => {
+  it('the week frozen on another date between the week list and the claim',
+    async () => {
+      const db = world(); // no sweep ever locked GW2: no snapshot, no entry
+      for (const g of dates(db)[GW2_DATE]) g.status = 2;
+      const realRead = db.read.bind(db);
+      let hooked = false;
+      db.read = async (p: string) => {
+        if (!hooked && p === `${F_ROOT}/Players`) {
+          hooked = true;
+          // A sweep froze week 2 on another date meanwhile.
+          t(db).LockedWeeks[2] = { Date: GW3_DATE, LockAtUtc: LOCK3_MS };
+          db.writes = [];
+        }
+        return realRead(p);
+      };
+      const spy = logSpy();
+      await finalizeGw2(db, LATER, spy.log);
+      expect(hooked).toBe(true);
+      expect(db.writes).toEqual([]);
+      expect(t(db).History[2]).toBeUndefined();
+      expect(t(db).LockedWeeks[2]).toEqual({ Date: GW3_DATE, LockAtUtc: LOCK3_MS });
+      expect(spy.warns).toContain(FINALIZE_OTHER_DATE);
+    });
+});

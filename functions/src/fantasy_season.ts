@@ -66,7 +66,7 @@ export const previewFantasySeason = onCall(async (request) => {
   const { sport, season } = seasonOf(request.data);
   try {
     return await buildSeasonPreview(
-      rtdbFantasyDb(admin.database().ref()), sport, season);
+      rtdbFantasyDb(admin.database().ref()), sport, season, Date.now());
   } catch (err) {
     throw asHttpsError(err);
   }

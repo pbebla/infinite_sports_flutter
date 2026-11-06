@@ -7,7 +7,8 @@ import { configFromMap, futsalDefault } from './fantasy_config';
 import { deriveGameweeks } from './gameweeks';
 import {
   allGamesFinal, childEntries, dateKeysOf, fantasySeasonsOf,
-  firstKickoffByDateOf, fullAttendance, gamesOfDate, isVoidFlag,
+  FINALIZING_STALE_MS, finalizingFresh, firstKickoffByDateOf, freezesWeekDate,
+  fullAttendance, gamesOfDate, isRewinding, isVoidFlag,
   loadSeasonGameweeks, lockedWeeksOf, lockOverrideOf, marketPlayersOf,
   marketPricesOf, parseAbsentMap, rosterNamesOf, scheduleOverridesOf,
   toIntLoose, voidedWeeksOf,
@@ -236,6 +237,37 @@ describe('lockedWeeksOf', () => {
     expect(lockedWeeksOf(null)).toEqual({});
     expect(lockedWeeksOf('nope')).toEqual({});
     expect(lockedWeeksOf(7)).toEqual({});
+  });
+  it('[I1] the finalize\'s Finalizing stamp changes nothing a reader sees', () => {
+    const stamped = { ...week1, Finalizing: LOCK_MS + 1 };
+    expect(lockedWeeksOf([null, stamped])).toEqual({ 1: expected1 });
+    expect(lockedWeeksOf({ '1': { ...stamped, Scored: true } })[1].scored)
+      .toBe(true);
+    expect(freezesWeekDate(stamped, '10042026')).toBe(true);
+    expect(isRewinding(stamped)).toBe(false);
+  });
+});
+
+describe('finalizingFresh ([I1] the finalize stamp on LockedWeeks/<n>)', () => {
+  const at = LOCK_MS;
+  it('a stamp younger than 10 minutes is a finalize writing right now', () => {
+    expect(FINALIZING_STALE_MS).toBe(10 * 60 * 1000);
+    expect(finalizingFresh({ Finalizing: at }, at)).toBe(true);
+    expect(finalizingFresh({ Finalizing: at }, at + FINALIZING_STALE_MS - 1))
+      .toBe(true);
+    // A clock a little behind the stamping function's is still "now".
+    expect(finalizingFresh({ Finalizing: at }, at - 5000)).toBe(true);
+  });
+  it('10 minutes or older is a finalize that died: stale', () => {
+    expect(finalizingFresh({ Finalizing: at }, at + FINALIZING_STALE_MS))
+      .toBe(false);
+  });
+  it('no stamp, or junk, is no finalize', () => {
+    expect(finalizingFresh({ Date: '10042026' }, at)).toBe(false);
+    expect(finalizingFresh({ Finalizing: 'soon' }, at)).toBe(false);
+    expect(finalizingFresh({ Finalizing: true }, at)).toBe(false);
+    expect(finalizingFresh(null, at)).toBe(false);
+    expect(finalizingFresh([at], at)).toBe(false);
   });
 });
 

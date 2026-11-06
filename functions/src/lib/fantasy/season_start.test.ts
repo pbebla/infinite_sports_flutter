@@ -278,15 +278,71 @@ describe('buildSeasonPreview — problems', () => {
       .toEqual(['alreadyStarted']);
   });
 
-  it('alreadyStarted: a StartedAt claim without a Config (a Start under way or one that died)', async () => {
+  it('alreadyStarted: a fresh StartedAt claim without a Config (a Start under way)', async () => {
     const w = world();
-    w.Fantasy.Futsal[16] = { StartedAt: { At: 1, By: 'admin2' } };
+    // Started 9 minutes ago: still within a Start's lifetime.
+    w.Fantasy.Futsal[16] = { StartedAt: { At: NOW - 9 * 60_000, By: 'admin2' } };
     const db = new FakeDb(w);
-    expect((await buildSeasonPreview(db, 'Futsal', '16')).problems).toEqual(['alreadyStarted']);
+    expect((await buildSeasonPreview(db, 'Futsal', '16', NOW)).problems)
+      .toEqual(['alreadyStarted']);
     await expect(startSeason(db, 'Futsal', '16', {}, FREE, ADMIN, NOW)).rejects.toMatchObject({
       code: 'failed-precondition', details: { problems: ['alreadyStarted'] },
     });
     expect(db.writes).toEqual([]);
+    expect(db.data.Fantasy.Futsal[16].StartedAt).toEqual(
+      { At: NOW - 9 * 60_000, By: 'admin2' });
+  });
+
+  // T6b: a Start that crashed hard (no Config, no clean-up) leaves its
+  // StartedAt behind; after 10 minutes it is stale, never "already started"
+  // forever with nothing the owner can tap.
+  it('a StartedAt 10 minutes old or more with no Config is stale: the preview '
+    + 'is clean and Start takes it over', async () => {
+    const w = world();
+    const stale = { At: NOW - 10 * 60_000, By: 'admin2' };
+    w.Fantasy.Futsal[16] = { StartedAt: { ...stale }, Players: { Ghost: { priceTenths: 50 } } };
+    const db = new FakeDb(w);
+    expect((await buildSeasonPreview(db, 'Futsal', '16', NOW)).problems).toEqual([]);
+
+    const res = await startSeason(db, 'Futsal', '16', {}, FREE, ADMIN, NOW);
+    expect(res.players).toBeGreaterThan(0);
+    const season = db.data.Fantasy.Futsal[16];
+    expect(season.StartedAt).toEqual({ At: NOW, By: ADMIN });
+    expect(season.Config).toBeDefined();
+    expect(season.Players).not.toHaveProperty('Ghost'); // the dead Start's market replaced
+  });
+
+  it('a Config means started, whatever the StartedAt says', async () => {
+    const w = world();
+    w.Fantasy.Futsal[16] = {
+      Config: { lockOverride: 'auto' }, StartedAt: { At: NOW - 60 * 60_000, By: 'admin2' },
+    };
+    const db = new FakeDb(w);
+    expect((await buildSeasonPreview(db, 'Futsal', '16', NOW)).problems)
+      .toEqual(['alreadyStarted']);
+    await expect(startSeason(db, 'Futsal', '16', {}, FREE, ADMIN, NOW)).rejects.toMatchObject({
+      code: 'failed-precondition', details: { problems: ['alreadyStarted'] },
+    });
+    expect(db.writes).toEqual([]);
+  });
+
+  it('a stale StartedAt another Start took over first: alreadyStarted, theirs '
+    + 'stands', async () => {
+    const w = world();
+    w.Fantasy.Futsal[16] = { StartedAt: { At: NOW - 30 * 60_000, By: 'admin2' } };
+    const db = new FakeDb(w);
+    const realTx = db.transaction.bind(db);
+    db.transaction = async (path: string, update: (c: unknown) => unknown) => {
+      // The other Start replaced the stale node between our preview and ours.
+      if (path === `${ROOT}/StartedAt`) await db.write(path, { At: NOW - 1000, By: 'other' });
+      return realTx(path, update);
+    };
+    await expect(startSeason(db, 'Futsal', '16', {}, FREE, ADMIN, NOW)).rejects.toMatchObject({
+      code: 'failed-precondition', details: { problems: ['alreadyStarted'] },
+    });
+    expect(db.data.Fantasy.Futsal[16].StartedAt).toEqual({ At: NOW - 1000, By: 'other' });
+    expect(db.data.Fantasy.Futsal[16]).not.toHaveProperty('Players');
+    expect(db.data.Fantasy.Futsal[16]).not.toHaveProperty('Config');
   });
 
   it('sourceIsTestFill: the source season carries the TestFill marker', async () => {
