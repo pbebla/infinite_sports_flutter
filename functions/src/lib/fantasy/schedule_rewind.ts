@@ -193,8 +193,8 @@ export async function upsertGwState(
   }
   let status: GwStateNode['status'];
   if (gameweekStatusAt(current, nowUtc) === 'locked') {
-    const history = await db.read(`${root}/History/${current.number}`);
-    status = history != null ? 'finalized' : 'locked';
+    status = (await db.exists(`${root}/History/${current.number}`))
+      ? 'finalized' : 'locked';
   } else {
     // 'upcoming' is unreachable for the current gw (orchestration.ts header).
     status = 'open';
@@ -299,7 +299,7 @@ async function scoredMeanwhile(
   db: FantasyDb, root: string, n: number, date: string,
   log: FantasyLogger, ctx: Record<string, unknown>,
 ): Promise<boolean> {
-  if ((await db.read(`${root}/History/${n}`)) == null) return false;
+  if (!(await db.exists(`${root}/History/${n}`))) return false;
   await unmarkWeek(db, root, n, date);
   log.warn('fantasy rewind: the week was scored meanwhile — kept', ctx);
   return true;
@@ -384,7 +384,7 @@ export async function rewindCancelledWeek(
       log.warn('fantasy rewind: deadline moved after kickoff — not reopened', ctx);
       return 'none';
     }
-    if ((await db.read(`${root}/History/${n}`)) != null) return 'none';
+    if (await db.exists(`${root}/History/${n}`)) return 'none';
     // M. The mark — only while the entry still freezes this date, unscored,
     //    and no finalize is writing the week right now ([I1]: a Finalizing
     //    stamp younger than FINALIZING_STALE_MS — the two exclude each other
@@ -509,7 +509,7 @@ export async function healOpenWeek(
   const wctx = { ...ctx, gw: n, date: week.date };
   if (week.frozen) return;
   if (n > 1 && gws.find((g) => g.number === n - 1)?.frozen !== true) return;
-  if ((await db.read(`${root}/History/${n}`)) != null) return;
+  if (await db.exists(`${root}/History/${n}`)) return;
   const unlocked = async (): Promise<boolean> =>
     (await db.read(`${root}/LockedWeeks/${n}`)) == null;
 

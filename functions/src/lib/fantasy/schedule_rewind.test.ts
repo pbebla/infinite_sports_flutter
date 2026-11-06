@@ -1220,3 +1220,67 @@ describe('[I4] a first finalize whose claim is refused writes nothing', () => {
       expect(spy.warns).toContain(FINALIZE_OTHER_DATE);
     });
 });
+
+describe('scored-week checks are existence queries (scale fixes D4)', () => {
+  const HIST2 = `${F_ROOT}/History/2`;
+  const WHOLE_WEEK_READ = /\/(History|PublishedPicks)\/\d+$/;
+  const silent: FantasyLogger = { info: () => undefined, warn: () => undefined };
+  const wholeWeekReads = (db: FakeDb) =>
+    db.reads.filter((r) => r.startsWith('read:') && WHOLE_WEEK_READ.test(r));
+  const week = (): Gameweek => ({
+    number: 2, date: GW2_DATE, lockUtc: new Date(LOCK2_MS),
+    opensUtc: new Date(Date.UTC(2026, 5, 22, 7)), frozen: false,
+  });
+
+  it('upsertGwState asks whether History/<n> exists; it never downloads it', async () => {
+    const db = world();
+    t(db).LockedWeeks[2] = { Date: GW2_DATE, LockAtUtc: LOCK2_MS };
+    await upsertGwState(db, F_ROOT, week(), AFTER_LOCK2, silent, {});
+    expect(t(db).GwState.status).toBe('locked');
+    expect(db.reads).toContain(`exists:${HIST2}`);
+    t(db).History[2] = { alpha: { ...fixtureSquad('alpha'), TotalTenths: 0 } };
+    await upsertGwState(db, F_ROOT, week(), AFTER_LOCK2, silent, {});
+    expect(t(db).GwState.status).toBe('finalized');
+    expect(db.reads.filter((r) => r === `exists:${HIST2}`)).toHaveLength(2);
+    expect(wholeWeekReads(db)).toEqual([]);
+  });
+
+  it('the rewind\'s unscored check (before the mark) is an existence query', async () => {
+    const db = await lockedGw2();
+    delete dates(db)[GW2_DATE];
+    db.reads = [];
+    await rewind(db, LATER);
+    await expectRewound(db);
+    expect(db.reads).toContain(`exists:${HIST2}`);
+    expect(db.reads.filter((r) => r === `read:${HIST2}`)).toEqual([]);
+  });
+
+  it('a History that lands while the rewind marks the week is found by an existence query too', async () => {
+    const db = await lockedGw2();
+    delete dates(db)[GW2_DATE];
+    const realTx = db.transaction.bind(db);
+    db.transaction = async (p: string, update: (c: unknown) => unknown) => {
+      if (p === `${F_ROOT}/LockedWeeks/2` && t(db).History[2] === undefined) {
+        t(db).History[2] = { alpha: { ...fixtureSquad('alpha'), TotalTenths: 0 } };
+      }
+      return realTx(p, update);
+    };
+    db.reads = [];
+    const spy = logSpy();
+    expect(await rewind(db, LATER, { log: spy.log })).toBe('none');
+    expect(spy.warns).toContain('fantasy rewind: the week was scored meanwhile — kept');
+    // Once before the mark (absent), once after it (present).
+    expect(db.reads.filter((r) => r === `exists:${HIST2}`)).toHaveLength(2);
+    expect(db.reads.filter((r) => r === `read:${HIST2}`)).toEqual([]);
+  });
+
+  it('the heal step of an open unfrozen week asks whether History/<n> exists', async () => {
+    const db = world(); // GW1 frozen: GW2 open and unfrozen
+    await runLifecycleSweep(db, BEFORE_LOCK2);
+    expect(db.reads).toContain(`exists:${HIST2}`);
+    // (The heal's orphan-snapshot loop still reads PublishedPicks/<n>: its
+    // race test hooks that read — see the report.)
+    expect(db.reads.filter((r) => r.startsWith('read:') && /\/History\/\d+$/.test(r)))
+      .toEqual([]);
+  });
+});

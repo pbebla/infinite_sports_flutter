@@ -1935,3 +1935,75 @@ describe('over-budget preview while the window is open (sweep step 3c)', () => {
     expect(step.warns.some((w) => w.m.includes('preview'))).toBe(true);
   });
 });
+
+describe('scored-week checks are existence queries (scale fixes D4)', () => {
+  const GW_DATES = ['06212026', '06282026', '07052026', '07122026', '07192026'];
+  const week = (n: number) => `${fRoot}/History/${n}`;
+  const picks = (n: number) => `${fRoot}/PublishedPicks/${n}`;
+  const WHOLE_WEEK_READ = /\/(History|PublishedPicks)\/\d+$/;
+
+  /** world2 stretched to [last] gameweeks on consecutive Sundays (all games
+   *  final, lock 22:00Z each); weeks 1..[scored] carry History and
+   *  PublishedPicks (copies of the golden GW1). */
+  function weeks(last: number, scored: number): { db: ColdFakeDb; w: Record<string, any> } {
+    const w = world2();
+    const s = w.Fantasy.Futsal['15'];
+    for (let n = 2; n <= scored; n++) {
+      s.History[n] = clone(s.History[1]);
+      s.PublishedPicks[n] = clone(s.PublishedPicks[1]);
+    }
+    for (let n = 3; n <= last; n++) {
+      w.Futsal['15'].Date[GW_DATES[n - 1]] = clone(w.Futsal['15'].Date[GW1_DATE]);
+    }
+    return { db: new ColdFakeDb(w), w };
+  }
+
+  it('five finalized weeks swept three times never download a week, and finalize nothing again', async () => {
+    const { db } = weeks(5, 5);
+    const after5 = new Date(Date.UTC(2026, 6, 19, 23)); // Sun Jul 19, an hour past lock 5
+    for (let i = 0; i < 3; i++) await runLifecycleSweep(db, after5);
+
+    expect(db.reads.filter((r) => r.startsWith('read:') && WHOLE_WEEK_READ.test(r)))
+      .toEqual([]);
+    // The backstop asks once per lock-passed week per sweep (plus the GwState
+    // upsert for the latest week): never fewer than once per sweep.
+    for (let n = 1; n <= 5; n++) {
+      expect(db.reads.filter((r) => r === `exists:${week(n)}`).length, `History/${n}`)
+        .toBeGreaterThanOrEqual(3);
+    }
+    expect(db.reads.filter((r) => r === `exists:${picks(5)}`).length)
+      .toBeGreaterThanOrEqual(3);
+    expect(db.writes.filter((p) => p.startsWith(`${fRoot}/History/`))).toEqual([]);
+    expect(db.writes.filter((p) => p.startsWith(`${fRoot}/Leaderboards`))).toEqual([]);
+  });
+
+  it('a week finalized moments ago in the same sweep is not finalized twice, and an unlocked later week is untouched', async () => {
+    // Weeks 1-2 finalized; week 3 (Jul 5) lock-passed, every game final, no
+    // History; week 4 (Jul 12) not locked yet.
+    const { db } = weeks(4, 2);
+    for (const g of db.data.Futsal['15'].Date[GW_DATES[3]] as Json[]) g['status'] = 0;
+    const afterLock3 = new Date(Date.UTC(2026, 6, 5, 23));
+
+    await runLifecycleSweep(db, afterLock3);
+    expect(db.writes.filter((p) => p === week(3))).toHaveLength(1);
+    expect((await db.read(week(3))) as Json).toBeTruthy();
+    const week4 = new RegExp(
+      `^${fRoot}/(History|PublishedPicks|LockedWeeks|LockedPositions|PriceHistory|` +
+      `TransferCosts|PlayerWeeks|PlayerWeekStats|Leaderboards/Gameweek)/4(/|$)`);
+    expect(db.writes.filter((p) => week4.test(p))).toEqual([]);
+
+    // The reads that decided it: every guard asked "exists", none downloaded
+    // the week. First look at each node is the existence query.
+    expect(db.reads.find((r) => r.endsWith('/PublishedPicks/3')))
+      .toBe(`exists:${picks(3)}`);
+    expect(db.reads.find((r) => r.endsWith('/History/3'))).toBe(`exists:${week(3)}`);
+    // History/3: the lock snapshot's guard, the backstop loop, the first-run
+    // guard and the GwState upsert; PublishedPicks/3: the snapshot's guard
+    // and the first-run guard.
+    expect(db.reads.filter((r) => r === `exists:${week(3)}`)).toHaveLength(4);
+    expect(db.reads.filter((r) => r === `exists:${picks(3)}`)).toHaveLength(2);
+
+    await runLifecycleSweep(db, afterLock3);
+    expect(db.writes.filter((p) => p === week(3))).toHaveLength(1); // not again
+  });
+});

@@ -1616,8 +1616,8 @@ export async function finalizeGameweek(
 async function mayFinalizeFirstRun(
   db: FantasyDb, root: string, gws: Gameweek[], gw: Gameweek, nowUtc: Date,
 ): Promise<boolean> {
-  if (await db.read(`${root}/History/${gw.number}`) != null) return true;
-  if (await db.read(`${root}/PublishedPicks/${gw.number}`) != null) return true;
+  if (await db.exists(`${root}/History/${gw.number}`)) return true;
+  if (await db.exists(`${root}/PublishedPicks/${gw.number}`)) return true;
   const lockPassed = gws
     .filter((g) => g.lockUtc.getTime() <= nowUtc.getTime());
   return lockPassed.length > 0 &&
@@ -2459,7 +2459,7 @@ async function snapshotPublishedPicks(
   nowMs: number, log: FantasyLogger, ctx: Record<string, unknown>,
 ): Promise<boolean> {
   const gw = week.number;
-  if (await db.read(`${root}/PublishedPicks/${gw}`) != null) return true;
+  if (await db.exists(`${root}/PublishedPicks/${gw}`)) return true;
   // A FIRST finalize that outran every sweep already scored this week from
   // the live Squads (finalizeGameweek's fallback): its History/<gw> is the
   // law for the week (effectiveSquadAfterWeek falls back to it; the fan
@@ -2467,7 +2467,7 @@ async function snapshotPublishedPicks(
   // are NOW (after the Free Hit restore and chip switch-off), re-judge them
   // from a fallback sale total (Baselines/<uid> is already FOR gw + 1) and
   // overwrite the week's baselines — so it never happens.
-  if (await db.read(`${root}/History/${gw}`) != null) {
+  if (await db.exists(`${root}/History/${gw}`)) {
     log.info('fantasy lock: History already written — snapshot skipped',
       { ...ctx, gw });
     return true;
@@ -2648,7 +2648,7 @@ async function sweepSeason(
   //    complete but lacks History (first-run guard applies).
   for (const gw of gws) {
     if (gw.lockUtc.getTime() > nowUtc.getTime()) break;
-    if (await db.read(`${root}/History/${gw.number}`) != null) continue;
+    if (await db.exists(`${root}/History/${gw.number}`)) continue;
     if (!(await mayFinalizeFirstRun(db, root, gws, gw, nowUtc))) continue;
     const games = gamesOfDate(await db.read(`${sport}/${season}/Date/${gw.date}`));
     if (!allGamesFinal(games)) continue;
@@ -2763,7 +2763,7 @@ async function sweepSeason(
     const meta = liveMetaOf(await db.read(`${root}/Live/Meta`));
     if (meta !== null && meta.live &&
       nowMs - meta.updatedAt > LIVE_SETTLE_HEAL_MS &&
-      (await db.read(`${root}/History/${meta.gw}`)) != null) {
+      (await db.exists(`${root}/History/${meta.gw}`))) {
       log.warn('fantasy sweep: settled week still live — healing the hand-over',
         { ...ctx, gw: meta.gw });
       await settleLiveWeek(db, {

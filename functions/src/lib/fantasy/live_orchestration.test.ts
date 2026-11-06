@@ -681,6 +681,25 @@ describe('sweep step 2d: a lost settle heals after the margin', () => {
     expect(db.writes.filter((p) => p.startsWith(`${F_ROOT}/Live`))).toEqual([]);
   });
 
+  it('the heal asks whether History/<n> exists; it never downloads the week', async () => {
+    const db = await lockedWorld();
+    await liveWrite(db, 0, golden(0), LIVE_AT, LIVE_AT + 100);
+    await liveWrite(db, 1, golden(1), LIVE_AT + 1000, LIVE_AT + 1100);
+    db.beforeLiveTx = async () => { throw new Error('connection lost'); };
+    await maybeFinalizeGame(db, {
+      sport: SPORT, season: SEASON, dateKey: GW2_DATE, nowUtc: new Date(LIVE_AT + MIN),
+    });
+    expect(db.f.Live.Meta.State).toBe('live'); // the hand-over was lost
+
+    db.reset();
+    await runLifecycleSweep(db, new Date(LIVE_AT + 11 * MIN), undefined, {
+      clock: clockAt(LIVE_AT + 11 * MIN + 100),
+    });
+    expect(db.f.Live.Meta.State).toBe('settled'); // healed, as before
+    expect(db.reads).toContain(`exists:${F_ROOT}/History/2`);
+    expect(db.reads).not.toContain(`read:${F_ROOT}/History/2`);
+  });
+
   it('a live week without History is never tombstoned, however old its last write', async () => {
     const db = await lockedWorld();
     await liveWrite(db, 0, oneGoal(), LIVE_AT - 2000, LIVE_AT - 1000);
