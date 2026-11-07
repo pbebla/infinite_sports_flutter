@@ -8,7 +8,7 @@ import { FantasySquad, validateSquad } from '../src/lib/fantasy/squad';
 import {
   assertEnginePaused, assertMarkerMatches, assertRequestAllowed, assertSafePaths, BACKUP_KIND,
   buildWritePlan, clearPlan, EXPECTED_NODES, fakeChildDeletes, fakeManagerDefs, fakeManagerRow,
-  FillMarketEntry, StrategyTemplate, TEST_SEASON_ROOT,
+  FAKE_UID_PATTERN, FillMarketEntry, isFakeUid, saveSpacingMs, StrategyTemplate, TEST_SEASON_ROOT,
 } from './fill_test_season_logic';
 
 const cfg = futsalDefault();
@@ -499,5 +499,57 @@ describe('fakeManagerDefs', () => {
     const p2 = fakePart(buildWritePlan(stateFor(), live, 2));
     expect(p1).toHaveLength(40);
     expect(p1).toEqual(p2);
+  });
+});
+
+describe('fakeManagerDefs: load-test names and uids', () => {
+  const loadUid = (i: number) => `load-${String(i + 1).padStart(4, '0')}`;
+  const loadNames = Array.from({ length: 1000 }, (_, i) => `Load Team ${i + 1}`);
+
+  it('uidOf + names give load-0001.. and the generated names, past the 20-name cap', () => {
+    const defs = fakeManagerDefs(1000, market(), cfg, templates, { names: loadNames, uidOf: loadUid });
+    expect(defs).toHaveLength(1000);
+    expect(defs[0].uid).toBe('load-0001');
+    expect(defs[999].uid).toBe('load-1000');
+    expect(defs[0].name).toBe('Load Team 1');
+    expect(defs[999].name).toBe('Load Team 1000');
+    expect(new Set(defs.map((d) => d.uid)).size).toBe(1000);
+    // Same seeded squad/script rules as the 20: strategies still cycle.
+    expect(defs[4].weeks).toEqual(templates[1].weeks);
+  });
+
+  it('the default stays the 20 test-NN fakes, capped at 20', () => {
+    const defs = fakeManagerDefs(20, market(), cfg, templates, {});
+    expect(defs[0].uid).toBe('test-01');
+    expect(defs[19].uid).toBe('test-20');
+    expect(() => fakeManagerDefs(21, market(), cfg, templates)).toThrow(/At most 20/);
+    // The cap follows the names given: 30 names allow 30, 31 throw.
+    const thirty = loadNames.slice(0, 30);
+    expect(fakeManagerDefs(30, market(), cfg, templates, { names: thirty })).toHaveLength(30);
+    expect(() => fakeManagerDefs(31, market(), cfg, templates, { names: thirty }))
+      .toThrow(/At most 30/);
+  });
+
+  it('FAKE_UID_PATTERN stays the fill write allowlist: load-NNNN is not a fake', () => {
+    expect(FAKE_UID_PATTERN.source).toBe(String.raw`^test-\d{2}$`);
+    expect(isFakeUid('load-0001')).toBe(false);
+    expect(isFakeUid(loadUid(999))).toBe(false);
+    expect(isFakeUid('test-07')).toBe(true);
+  });
+});
+
+describe('saveSpacingMs', () => {
+  const THREE_MIN = 3 * 60_000;
+
+  it('is exactly 3 minutes for every manager count up to 480 (the S15 fill timeline is unchanged)', () => {
+    for (let n = 1; n <= 480; n++) expect(saveSpacingMs(n), `n=${n}`).toBe(THREE_MIN);
+  });
+
+  it('shrinks past 480 so every client save lands inside one 24 h window', () => {
+    expect(saveSpacingMs(1000)).toBe(86_400);
+    expect(saveSpacingMs(481)).toBeLessThan(THREE_MIN);
+    for (const n of [481, 500, 1000, 2500]) {
+      expect(saveSpacingMs(n) * n).toBeLessThanOrEqual(24 * 60 * 60_000);
+    }
   });
 });

@@ -585,24 +585,41 @@ function retargetWeeks(
   return out;
 }
 
+/** Gap between two managers' client saves in the replay: 3 minutes, shrunk
+ *  once there are more than 480 managers so every save of a week still lands
+ *  inside one 24 h window (the replay opens a week a day after the previous
+ *  lock). For 1..480 managers (the S15 fill's 20 + any real ones) it is
+ *  exactly 3 minutes, so that timeline never changes. */
+export function saveSpacingMs(count: number): number {
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+  return Math.min(3 * MIN, Math.floor((24 * HOUR) / count));
+}
+
 /** [count] fake managers test-01.. with fixed fun names, seeded squads and
- *  the rehearsal's strategies cycled (manager i plays template i % n). */
+ *  the rehearsal's strategies cycled (manager i plays template i % n).
+ *  [opts] is for the load test only: [names] replaces the 20 fun names (the
+ *  cap becomes its length) and [uidOf] the test-NN uids (e.g. load-0001).
+ *  Left out, the output is exactly what the fill tool has always used. */
 export function fakeManagerDefs(
   count: number, market: Record<string, FillMarketEntry>, formation: FillFormation,
   templates: readonly StrategyTemplate[],
+  opts: { names?: readonly string[]; uidOf?: (i: number) => string } = {},
 ): FakeManagerDef[] {
-  if (count > FAKE_TEAM_NAMES.length) {
-    throw new Error(`At most ${FAKE_TEAM_NAMES.length} fake managers (asked ${count}).`);
+  const names = opts.names ?? FAKE_TEAM_NAMES;
+  const uidOf = opts.uidOf ?? fakeUid;
+  if (count > names.length) {
+    throw new Error(`At most ${names.length} fake managers (asked ${count}).`);
   }
   if (templates.length === 0) throw new Error('No strategy templates.');
   const out: FakeManagerDef[] = [];
   for (let i = 0; i < count; i++) {
-    const uid = fakeUid(i);
+    const uid = uidOf(i);
     const t = templates[i % templates.length];
     const initial = seededInitialSquad(market, formation, `fantasy-test-fill/${uid}`);
     out.push({
       uid,
-      name: FAKE_TEAM_NAMES[i],
+      name: names[i],
       persona: `cycled from: ${t.persona}`,
       initial,
       weeks: retargetWeeks(t.weeks, initial, market),

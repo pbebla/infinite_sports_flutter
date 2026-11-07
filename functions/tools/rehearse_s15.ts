@@ -45,7 +45,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ClientDraftMoney, clientDraftMoney } from './client_draft_money';
-import { fakeManagerDefs, fakeManagerRow } from './fill_test_season_logic';
+import { fakeManagerDefs, fakeManagerRow, saveSpacingMs } from './fill_test_season_logic';
 import { pushBadgeAward } from '../src/lib/fantasy/badge_push';
 import { awardBonus, bpsScore } from '../src/lib/fantasy/bps';
 import {
@@ -803,6 +803,16 @@ interface ReplayOptions {
   /** Write rehearsal_out/{captured_writes,summary}.json + report_tables.md
    *  and print the console verdict (the rehearsal itself). */
   writeOutputs: boolean;
+  /** The db handed to each 15-minute runLifecycleSweep (the load test hands
+   *  back a read-counting wrapper). Left out, the sweep gets the replay's db
+   *  itself. Called once per sweep, in simulated order. */
+  sweepDb?: (db: FantasyDb, now: Date) => FantasyDb;
+  /** Play the league's `Finished` flag the way production does: false while
+   *  the season is played, flipped on two hours after the last game goes
+   *  final (a snapshot of a finished season carries it true from day one, so
+   *  every sweep would take the "finished, not yet settled" path). Left out,
+   *  the flag is whatever the snapshot says (the rehearsal and fill tool). */
+  finishedAtEnd?: boolean;
 }
 
 export interface ReplayResult {
@@ -833,17 +843,30 @@ export async function runReplay(opts: {
   managerCount: number;
   extraManagers?: Record<string, unknown>;
   snapshot?: Snapshot;
+  /** Load test only: team names / uids for [managerCount] past the 20 fakes
+   *  (see fakeManagerDefs). Left out = the fill tool's test-01..test-20. */
+  names?: readonly string[];
+  uidOf?: (i: number) => string;
+  /** Load test only: wraps the db each sweep reads (see ReplayOptions). */
+  sweepDb?: (db: FantasyDb, now: Date) => FantasyDb;
+  /** Load test only: the league flags `Finished` after the last game (see
+   *  ReplayOptions). */
+  finishedAtEnd?: boolean;
 }): Promise<ReplayResult> {
   const templates = MANAGERS.map((m) => ({ persona: m.persona, weeks: m.weeks }));
   return replaySeason({
     offline: opts.offline,
     snapshot: opts.snapshot,
-    managers: (market, cfg) => fakeManagerDefs(opts.managerCount, market, cfg, templates),
+    managers: (market, cfg) => fakeManagerDefs(opts.managerCount, market, cfg, templates, {
+      names: opts.names, uidOf: opts.uidOf,
+    }),
     seedManagerRows: true,
     extraManagers: opts.extraManagers,
     stubPusher: true,
     lenientTransfers: true,
     writeOutputs: false,
+    sweepDb: opts.sweepDb,
+    finishedAtEnd: opts.finishedAtEnd,
   });
 }
 
@@ -1475,9 +1498,13 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
       db.simWrite(`${LEAGUE}/Date/${date}/${idx}/status`, 0);
     }
   }
+  // Same device for the season-over flag (finishedAtEnd): off until the end.
+  const leagueFinishedPath = `${LEAGUE}/Finished`;
+  const maskFinished = opts.finishedAtEnd === true && db.get(leagueFinishedPath) === true;
+  if (maskFinished) db.simWrite(leagueFinishedPath, false);
 
   for (let t = simStart; t <= simEnd; t += 15 * MIN) {
-    at(t, 1, 'sweep', () => runJob('cron:fantasyLifecycleSweep', t, () => runLifecycleSweep(db, new Date(t), logger, deps)));
+    at(t, 1, 'sweep', () => runJob('cron:fantasyLifecycleSweep', t, () => runLifecycleSweep(opts.sweepDb ? opts.sweepDb(db, new Date(t)) : db, new Date(t), logger, deps)));
   }
   for (let d = Math.floor(simStart / DAY) * DAY; d <= simEnd; d += DAY) {
     const day = new Date(d);
@@ -1486,12 +1513,14 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
     if (t < simStart || t > simEnd) continue;
     at(t, 2, `reprice ${mmddyyyy(day)}`, () => runJob('cron:fantasyMondayReprice', t, () => runMondayReprice(db, new Date(t), logger)));
   }
+  let lastFinalAt = 0;
   for (const gw of gws) {
     const L = gw.lockUtc.getTime();
     at(L, 0, `expected-ledger lock GW${gw.number}`, async () => { for (const m of managers) expectLock(m, gw.number); });
     const games = entriesOf(childAt(originalDate, gw.date)).filter(([, g]) => isMap(g));
     games.forEach(([idx], k) => {
       const t = L + 97 * MIN + k * HOUR;
+      lastFinalAt = Math.max(lastFinalAt, t);
       at(t, 0, `final ${gw.date}#${idx}`, async () => {
         db.nowMs = t;
         db.job = 'league:live-scoring';
@@ -1504,12 +1533,23 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
       at(t, 0, `rerun ${gw.date}`, () => fireGameTrigger(gw.date, games[0][0], t, 'later edit'));
     }
   }
+  if (maskFinished) {
+    // The league flags the season over by hand, after its last game went final
+    // (so the last finalize ran before it and the next sweep settles badges).
+    const t = lastFinalAt + 2 * HOUR;
+    at(t, 0, 'league flags the season Finished', async () => {
+      db.nowMs = t;
+      db.job = 'league:season-finished';
+      db.simWrite(leagueFinishedPath, true);
+    });
+  }
+  const saveSpacing = saveSpacingMs(managers.length);
   managers.forEach((m, mi) => {
     for (const gw of gws) {
       const n = gw.number;
       if (n !== 1 && !m.weeks[n]) continue;
       const openAt = n === 1 ? firstLock - 2 * DAY : gwByNumber[n - 1].lockUtc.getTime() + DAY;
-      const t = openAt + 2 * HOUR + 7 * MIN + mi * 3 * MIN;
+      const t = openAt + 2 * HOUR + 7 * MIN + mi * saveSpacing;
       at(t, 3, `client ${m.uid} GW${n}`, () => clientWeek(m, n, t));
       if (m.weeks[n]?.undoOneNextDay) {
         const t2 = t + DAY;
@@ -1519,7 +1559,7 @@ async function replaySeasonGuarded(opts: ReplayOptions): Promise<ReplayResult> {
   });
   Object.entries(opts.extraManagers ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .forEach(([uid, raw], k) => {
-      const t = firstLock - 2 * DAY + 2 * HOUR + 7 * MIN + (managers.length + k) * 3 * MIN;
+      const t = firstLock - 2 * DAY + 2 * HOUR + 7 * MIN + (managers.length + k) * saveSpacing;
       at(t, 3, `client ${uid} GW1 (real squad)`, () => extraSave(uid, raw, t));
     });
   let preLate: Json = null;
