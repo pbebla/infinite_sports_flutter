@@ -69,9 +69,11 @@
 // end of every completed settle (a settle that ends with zero season awards
 // included; every season badge switched off included — nothing to award, but
 // the weeks are still checked first) and when the sweep finds an auto season
-// award that has no marker yet (an award only ever exists after that check
-// passed). Never for 'notOver' (a Finished season with an unfinalized week,
-// badges on or off) or 'testFill'.
+// award that has no marker yet — after re-running that same all-weeks check
+// (no reconcile: a by-hand removal stays removed), so a standing award never
+// vouches for a week that gained games since. Never for 'notOver' (a Finished
+// season with an unfinalized week, badges on or off, award or not) or
+// 'testFill'.
 // The sweep (onlyIfUnsettled) reads it right after the Finished flag and
 // answers 'alreadySettled' WITHOUT reading Badges or History — a settled
 // season no longer costs every badge of the season on every 15-minute sweep.
@@ -686,38 +688,20 @@ async function markSeasonSettled(
   await db.writeIfAbsent(`${root}/${SEASON_BADGES_SETTLED_NODE}`, nowUtc.getTime());
 }
 
-/** The season-end step (see SEASON END + TROPHY CABINET + SETTLED MARKER).
- *  'notOver' when the league has not flagged Finished or a gameweek is not
- *  finalized yet; 'alreadySettled' in sweep mode once the settled marker or
- *  a season award exists; 'testFill' for a TestFill season (see TEST
- *  SEASONS): no season award, no Users/* write, nothing read beyond the
- *  marker. */
-export async function settleSeasonBadges(
-  db: FantasyDb, args: SeasonBadgesArgs,
-): Promise<'notOver' | 'alreadySettled' | 'settled' | 'testFill'> {
+/** Whether the season is over: every scoreable gameweek of the fantasy
+ *  season finalized (see SEASON END). The reads and the check behind both the
+ *  full settle and the sweep's backfill — one copy. Over: the season's week
+ *  numbers and each manager's scored weeks (for Ever Present). Not over:
+ *  nothing finalized yet, or a scoreable week still missing (an overdue one
+ *  is logged — stuck — on every check). */
+async function seasonProgress(
+  db: FantasyDb, args: SeasonBadgesArgs, root: string,
+): Promise<{ over: false } | {
+  over: true; allWeeks: number[]; historyWeeksByUid: Record<string, number[]>;
+}> {
   const { sport, season, cfg } = args;
   const log = args.log ?? silent;
-  const root = fantasyRoot(sport, season);
   const ctx = { sport, season };
-
-  if (await isTestFillSeason(db, root)) {
-    log.info('fantasy badges: TestFill season — season badges and trophy ' +
-      'cabinet skipped', ctx);
-    return 'testFill';
-  }
-  if ((await db.read(`${sport}/${season}/Finished`)) !== true) return 'notOver';
-  // The marker is a number, so it is read (`!= null`), never `exists()`.
-  if (args.onlyIfUnsettled &&
-    (await db.read(`${root}/${SEASON_BADGES_SETTLED_NODE}`)) != null) {
-    return 'alreadySettled';
-  }
-  const existing = badgesByUidOf(await db.read(`${root}/Badges`));
-  if (args.onlyIfUnsettled && hasAutoSeasonAward(existing)) {
-    await markSeasonSettled(db, root, args.nowUtc); // backfill: settled before the marker
-    return 'alreadySettled';
-  }
-  const catalog = catalogOf(await db.read(BADGE_CATALOG_PATH));
-
   const configNode = await db.read(`${root}/Config`);
   const { gws, dateNode } = await loadSeasonGameweeks(
     db, sport, season, cfg, isPlainMap(configNode) ? configNode : {});
@@ -744,7 +728,7 @@ export async function settleSeasonBadges(
   // for), so they are not part of it, neither for the end condition nor
   // for Ever Present. Nothing finalized at all = nothing to award.
   const scored = scoreable.filter((g) => finalized.has(g.number));
-  if (scored.length === 0) return 'notOver';
+  if (scored.length === 0) return { over: false };
   const start = Math.min(...scored.map((g) => g.number));
   const seasonWeeks = scoreable.filter((g) => g.number >= start);
   const missing = seasonWeeks.filter((g) => !finalized.has(g.number));
@@ -758,8 +742,56 @@ export async function settleSeasonBadges(
       log.warn('fantasy badges: season Finished but gameweeks not finalized — ' +
         'season badges wait', { ...ctx, missing: overdue });
     }
-    return 'notOver';
+    return { over: false };
   }
+  return {
+    over: true,
+    allWeeks: seasonWeeks.map((g) => g.number),
+    historyWeeksByUid,
+  };
+}
+
+/** The season-end step (see SEASON END + TROPHY CABINET + SETTLED MARKER).
+ *  'notOver' when the league has not flagged Finished or a gameweek is not
+ *  finalized yet; 'alreadySettled' in sweep mode once the settled marker
+ *  exists, or a season award stands on a season that is over (the marker is
+ *  then backfilled); 'testFill' for a TestFill season (see TEST
+ *  SEASONS): no season award, no Users/* write, nothing read beyond the
+ *  marker. */
+export async function settleSeasonBadges(
+  db: FantasyDb, args: SeasonBadgesArgs,
+): Promise<'notOver' | 'alreadySettled' | 'settled' | 'testFill'> {
+  const { sport, season } = args;
+  const log = args.log ?? silent;
+  const root = fantasyRoot(sport, season);
+  const ctx = { sport, season };
+
+  if (await isTestFillSeason(db, root)) {
+    log.info('fantasy badges: TestFill season — season badges and trophy ' +
+      'cabinet skipped', ctx);
+    return 'testFill';
+  }
+  if ((await db.read(`${sport}/${season}/Finished`)) !== true) return 'notOver';
+  // The marker is a number, so it is read (`!= null`), never `exists()`.
+  if (args.onlyIfUnsettled &&
+    (await db.read(`${root}/${SEASON_BADGES_SETTLED_NODE}`)) != null) {
+    return 'alreadySettled';
+  }
+  const existing = badgesByUidOf(await db.read(`${root}/Badges`));
+  if (args.onlyIfUnsettled && hasAutoSeasonAward(existing)) {
+    // An award stands but no marker (settled before the marker existed, or a
+    // week gained games since — scoreable weeks come from the Date nodes):
+    // the marker says "over AND settled", so the weeks are checked first. No
+    // reconcile here — the sweep keeps respecting a by-hand removal.
+    if (!(await seasonProgress(db, args, root)).over) return 'notOver';
+    await markSeasonSettled(db, root, args.nowUtc);
+    return 'alreadySettled';
+  }
+  const catalog = catalogOf(await db.read(BADGE_CATALOG_PATH));
+
+  const progress = await seasonProgress(db, args, root);
+  if (!progress.over) return 'notOver';
+  const { allWeeks, historyWeeksByUid } = progress;
   // Every season badge switched off: nothing to award or take away (an
   // inactive badge's awards stay) — skip the boards. The season is settled
   // all the same, but only now: the marker means the season is OVER (every
@@ -768,7 +800,6 @@ export async function settleSeasonBadges(
     await markSeasonSettled(db, root, args.nowUtc);
     return 'settled';
   }
-  const allWeeks = seasonWeeks.map((g) => g.number);
 
   const overallBoard: Record<string, { rank: number }> = {};
   for (const [uid, row] of childEntries(await db.read(`${root}/Leaderboards/Overall`))) {

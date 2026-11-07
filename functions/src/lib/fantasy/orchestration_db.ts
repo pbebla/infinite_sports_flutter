@@ -280,8 +280,9 @@ export async function isTestFillSeason(db: FantasyDb, root: string): Promise<boo
  *  production). Written set-if-absent only after the all-weeks-finalized
  *  check has passed: at the end of every completed settle (zero season awards
  *  and every season badge switched off included) and when the sweep finds an
- *  auto season award without it. Never for a season with an unfinalized
- *  week; deleted whenever a re-settle takes season awards away. */
+ *  auto season award without it (it re-runs the same check first, without
+ *  reconciling). Never for a season with an unfinalized week; deleted
+ *  whenever a re-settle takes season awards away. */
 export const SEASON_BADGES_SETTLED_NODE = 'SeasonBadgesSettledAt';
 
 /** One `Voided/<gw>` leaf: ONLY a literal boolean true voids the week (the

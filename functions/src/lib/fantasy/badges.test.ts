@@ -948,6 +948,29 @@ describe('season-end marker (Fantasy/<sport>/<season>/SeasonBadgesSettledAt, D6)
     expect(db.reads).not.toContain(`read:${F_ROOT}/History`);
   });
 
+  it('a standing award but no marker never vouches for a week that gained games since', async () => {
+    const db = settledWorld();
+    await finalizeGw2(db); // the season settled: awards and marker
+    await db.write(MARKER, null); // ...before the marker existed
+    // A scoreable game appeared on a later match day: GW3, not finalized.
+    db.data.Futsal['15'].Date['07052026'] = [clone(db.data.Futsal['15'].Date[GW2_DATE][0])];
+    const awards = JSON.stringify(await db.read(B));
+    db.writes = [];
+    expect(await settleSeasonBadges(db, sweepArgs(db))).toBe('notOver');
+    expect(await db.read(MARKER)).toBeNull();
+    expect(db.writes).toEqual([]); // no marker, no Badges write
+    expect(JSON.stringify(await db.read(B))).toBe(awards);
+    // GW3 finalizes (History/3 lands): the sweep now stamps the marker — and
+    // only that: it never reconciles, so a by-hand removal stays removed.
+    await db.write(`${F_ROOT}/History/3`, clone(await db.read(`${F_ROOT}/History/2`)));
+    await db.write(`${B}/churn/champion_season`, null);
+    db.writes = [];
+    expect(await settleSeasonBadges(db, sweepArgs(db))).toBe('alreadySettled');
+    expect(db.writes).toEqual([MARKER]);
+    expect(await db.read(MARKER)).toBe(AFTER_LOCK2.getTime());
+    expect(await db.read(`${B}/churn/champion_season`)).toBeNull();
+  });
+
   it('a finalize-style call (no onlyIfUnsettled) ignores the marker and re-settles', async () => {
     const db = settledWorld();
     await finalizeGw2(db);
