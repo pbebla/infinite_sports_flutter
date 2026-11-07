@@ -43,7 +43,14 @@
 // week answers null; a week that LOCKS while the sheet is open appears live),
 // never the whole nodes of every manager. The page resubscribes when the SET
 // of gameweek numbers changes and keeps what it shows while the new
-// subscription answers.
+// subscription answers. Both squad feeds join the reveal through the same
+// [AnswerGate] as the others: a feed that ERRORS answers (the error is logged,
+// the last good value stays) and one that is silent is bounded at the same
+// 2 s, so the sheet never hangs on the skeleton. If a squad feed has still
+// said nothing readable by then, the page reveals "Couldn't load this team."
+// (the badge shelf above it) - an error is not a fact: never an empty squad
+// or the "revealed at lock" message for a team that simply did not load. Data
+// that arrives later replaces that line live.
 //
 // House rules: streams only; single fade reveal (skeleton until every stream
 // — the badge feeds included; a failing badge feed counts as "none" — has
@@ -225,9 +232,9 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
 
   // ── Live everywhere (Task 7): the points on the court ───────────────────
 
-  /// The reveal gate over the live feed, the viewed manager's live squad and
-  /// the Voided set (the two squad feeds hold the reveal themselves: the page
-  /// stays on the skeleton until both have answered in full).
+  /// The reveal gate over the two squad feeds (published picks, History),
+  /// the live feed, the viewed manager's live squad and the Voided set: an
+  /// error counts as an answer, a silent feed is bounded at [liveWait].
   late final AnswerGate _gate = AnswerGate(
     bound: widget.liveWait,
     owner: 'ManagerSquadViewerPage',
@@ -376,44 +383,44 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
     return true;
   }
 
-  /// (Re)opens this manager's `PublishedPicks/<gw>/<uid>` feed — one small
-  /// listener per gameweek number, never the whole node. What is shown stays
-  /// until the new subscription answers (nothing is cleared here).
+  /// (Re)opens this manager's `PublishedPicks/<gw>/<uid>` feed - one small
+  /// listener per gameweek number, never the whole node - through the reveal
+  /// gate (an error answers, logged; the last good value stays). What is shown
+  /// stays until the new subscription answers (nothing is cleared here).
   void _listenPublished() {
     _publishedSub?.cancel();
-    _publishedSub = (widget.publishedStates ??
-            FantasyService.watchPublishedPicksFor(widget.sport, widget.season,
-                widget.uid, _weekNumbers(widget.gameweeks),
-                watchNode: widget.watchNode))
-        .listen((published) {
-      if (!mounted) return;
-      setState(() => _published = published);
-    }, onError: (Object e) {
-      debugPrint('ManagerSquadViewerPage: published picks feed failed: $e');
-    });
+    _publishedSub = _gate.listen<Map<int, FantasySquad>>(
+      'published picks feed',
+      () =>
+          widget.publishedStates ??
+          FantasyService.watchPublishedPicksFor(widget.sport, widget.season,
+              widget.uid, _weekNumbers(widget.gameweeks),
+              watchNode: widget.watchNode),
+      onData: (published) => _published = published,
+    );
   }
 
-  /// (Re)opens this manager's `History/<gw>/<uid>` feed — one small listener
-  /// per gameweek number. Each week arrives parsed once: its squad feeds the
-  /// browsable weeks ([_history]), the whole record the points ([_settled]).
+  /// (Re)opens this manager's `History/<gw>/<uid>` feed - one small listener
+  /// per gameweek number - through the reveal gate. Each week arrives parsed
+  /// once: its squad feeds the browsable weeks ([_history]), the whole record
+  /// the points ([_settled]).
   void _listenHistory() {
     _historySub?.cancel();
-    _historySub = (widget.historyStates ??
-            FantasyService.watchHistoryFor(widget.sport, widget.season,
-                widget.uid, _weekNumbers(widget.gameweeks),
-                watchNode: widget.watchNode))
-        .listen((weeks) {
-      if (!mounted) return;
-      setState(() {
+    _historySub = _gate.listen<Map<int, HistoryWeek>>(
+      'history feed',
+      () =>
+          widget.historyStates ??
+          FantasyService.watchHistoryFor(widget.sport, widget.season,
+              widget.uid, _weekNumbers(widget.gameweeks),
+              watchNode: widget.watchNode),
+      onData: (weeks) {
         _settled = weeks;
         _history = {
           for (final e in weeks.entries)
             if (e.value.squad != null) e.key: e.value.squad!,
         };
-      });
-    }, onError: (Object e) {
-      debugPrint('ManagerSquadViewerPage: history feed failed: $e');
-    });
+      },
+    );
   }
 
   @override
@@ -445,13 +452,17 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
     super.dispose();
   }
 
+  /// The skeleton: until every stream has answered (the two squad feeds
+  /// included - an error answers) or the gate's bound passed.
   bool get _loading =>
-      _published == null ||
-      _history == null ||
       (widget.isSelf && !_liveLoaded) ||
       _badges == null ||
       _badgeCatalog == null ||
       !_gate.ready;
+
+  /// A squad feed has said nothing readable (it errored or was silent past
+  /// the bound, and has not delivered since): the team is UNKNOWN, not empty.
+  bool get _teamUnreadable => _published == null || _history == null;
 
   /// The badge shelf (with its label) for the top of the page; null when
   /// nothing is earned.
@@ -556,32 +567,58 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
     );
   }
 
+  /// [message] alone, or under the manager's badge shelf when he has one
+  /// (badges are public whenever earned and have their own feeds).
+  Widget _messagePage(BuildContext context, Widget? badgeSection,
+      Widget message, Key scrollKey) {
+    if (badgeSection == null) return message;
+    return SingleChildScrollView(
+      key: scrollKey,
+      padding: EdgeInsets.fromLTRB(
+          12, 12, 12, 24 + MediaQuery.paddingOf(context).bottom),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [badgeSection, message],
+      ),
+    );
+  }
+
   Widget _content(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final badgeSection = _badgeSection(context);
+    // A squad feed errored / stayed silent past the bound: say so - never an
+    // empty squad or "revealed at lock" for a team that did not load. The
+    // data that arrives later replaces this live.
+    if (_teamUnreadable) {
+      return _messagePage(
+        context,
+        badgeSection,
+        const _ViewerMessage(
+          key: ValueKey('viewer_load_failed'),
+          icon: Icons.cloud_off_outlined,
+          message: "Couldn't load this team.",
+        ),
+        const ValueKey('viewer_load_failed_scroll'),
+      );
+    }
     final weeks =
         mergeManagerWeeks(history: _history!, published: _published!);
     final sortedWeeks = weeks.keys.toList()..sort();
-    final badgeSection = _badgeSection(context);
     final rankSection = _rankSection();
 
     // Nothing browsable for another manager = their current week hasn't
     // locked yet (spec §9's anti-copying, enforced by the data itself).
     // Badges are public whenever earned: the shelf stays above the message.
     if (!widget.isSelf && sortedWeeks.isEmpty) {
-      const message = _ViewerMessage(
-        key: ValueKey('viewer_unrevealed'),
-        icon: Icons.lock_clock,
-        message: 'Picks are revealed when the gameweek locks.',
-      );
-      if (badgeSection == null) return message;
-      return SingleChildScrollView(
-        key: const ValueKey('viewer_unrevealed_scroll'),
-        padding: EdgeInsets.fromLTRB(
-            12, 12, 12, 24 + MediaQuery.paddingOf(context).bottom),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [badgeSection, message],
+      return _messagePage(
+        context,
+        badgeSection,
+        const _ViewerMessage(
+          key: ValueKey('viewer_unrevealed'),
+          icon: Icons.lock_clock,
+          message: 'Picks are revealed when the gameweek locks.',
         ),
+        const ValueKey('viewer_unrevealed_scroll'),
       );
     }
 

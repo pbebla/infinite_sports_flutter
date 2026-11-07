@@ -55,12 +55,24 @@ class FakeNodes {
 
   void emit(String path, Object? value) => byPath[path]!.add(value);
 
-  /// Answers every opened path that has not been answered with null.
+  /// Sends null on the CURRENT controller of every opened path - answered
+  /// or not (an answered week is overwritten with null, so call it BEFORE
+  /// the weeks that should carry data). After a re-subscription `byPath`
+  /// holds the new generation: the old controllers are no longer reached.
   void answerAllNull() {
     for (final c in byPath.values) {
       c.add(null);
     }
   }
+
+  /// [answerAllNull] for every path except [silent] (left unanswered).
+  void answerAllNullExcept(Set<String> silent) {
+    byPath.forEach((path, c) {
+      if (!silent.contains(path)) c.add(null);
+    });
+  }
+
+  void fail(String path) => byPath[path]!.addError(StateError('denied'));
 
   Future<void> close() async {
     for (final c in byPath.values) {
@@ -257,12 +269,17 @@ void main() {
     setUp(() => weeks = ValueNotifier(gameweeks(3)));
     tearDown(() => weeks.dispose());
 
-    Future<void> pump(WidgetTester tester) async {
-      tester.view.physicalSize = const Size(420, 1200);
+    Future<void> pump(
+      WidgetTester tester, {
+      Size size = const Size(420, 1200),
+      Brightness brightness = Brightness.light,
+      List<FantasyBadgeAward> badges = const [],
+    }) async {
+      tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(MaterialApp(
-        theme: ThemeData(useMaterial3: true),
+        theme: ThemeData(useMaterial3: true, brightness: brightness),
         home: ValueListenableBuilder<List<Gameweek>>(
           valueListenable: weeks,
           builder: (_, list, __) => ManagerSquadViewerPage(
@@ -277,7 +294,7 @@ void main() {
             watchNode: nodes.watch,
             // 2026-01-15: GW2 is the current week.
             nowUtc: () => DateTime.utc(2026, 1, 15, 12),
-            badgeStates: Stream<List<FantasyBadgeAward>>.value(const []),
+            badgeStates: Stream<List<FantasyBadgeAward>>.value(badges),
             badgeCatalogStates:
                 Stream<FantasyBadgeCatalog>.value(badgeCatalogFromNode(null)),
             liveStates: Stream.value(FantasyLiveState.none),
@@ -359,8 +376,9 @@ void main() {
       expect(nodes.opened.where((o) => o == p('History', 1)), hasLength(1));
     });
 
-    testWidgets('gameweeks growing from 3 to 4 weeks adds ONE listener per '
-        'feed and keeps the shown squad (no blank frame)', (tester) async {
+    testWidgets('gameweeks growing from 3 to 4 weeks reopens each feed over '
+        'the 4 weeks (4 + 4 opened, the 6 old listeners released) and keeps '
+        'the shown squad (no blank frame)', (tester) async {
       await pump(tester);
       nodes.answerAllNull();
       nodes.emit(p('PublishedPicks', 2), squad('Shown Keeper').toMap());
@@ -383,8 +401,9 @@ void main() {
       expect(find.byKey(const ValueKey('viewer_skeleton')), findsNothing);
       expect(find.byKey(const ValueKey('viewer_unrevealed')), findsNothing);
 
-      // The set changed, so each feed was re-opened over the 4 weeks: the
-      // new subscriptions open 4 + 4 nodes (the 6 old ones were released).
+      // The set changed, so each feed was reopened over the 4 weeks: the
+      // new subscriptions open 4 + 4 nodes (the 6 old ones were released,
+      // asserted below).
       expect(nodes.opened.length, before + 8);
       expect(nodes.opened.where((o) => o == p('PublishedPicks', 4)),
           hasLength(1));
@@ -400,6 +419,153 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('squad_chip_Shown Keeper')),
           findsOneWidget);
+    });
+
+    group('a squad feed that errors or stays silent (an error is not a '
+        'fact)', () {
+      Finder byKey(String key) => find.byKey(ValueKey(key));
+
+      void expectUnreadable(WidgetTester tester) {
+        expect(byKey('viewer_skeleton'), findsNothing);
+        expect(byKey('viewer_load_failed'), findsOneWidget);
+        expect(find.text("Couldn't load this team."), findsOneWidget);
+        // Never an empty squad, never the "revealed at lock" claim, no
+        // court, no points.
+        expect(byKey('viewer_unrevealed'), findsNothing);
+        expect(find.text('Picks are revealed when the gameweek locks.'),
+            findsNothing);
+        expect(byKey('viewer_content'), findsNothing);
+        expect(byKey('viewer_week_strip'), findsNothing);
+        expect(find.textContaining(' pts'), findsNothing);
+        expect(tester.takeException(), isNull);
+      }
+
+      testWidgets('(a) one History week errors before its first answer: the '
+          'sheet reveals (the error answers), says so, and shows no points '
+          'and no "no team" claim', (tester) async {
+        await pump(tester);
+        nodes.answerAllNullExcept({p('History', 2)});
+        nodes.fail(p('History', 2));
+        await tester.pumpAndSettle();
+        expectUnreadable(tester);
+      });
+
+      testWidgets('(b) the same for one PublishedPicks week', (tester) async {
+        await pump(tester);
+        nodes.answerAllNullExcept({p('PublishedPicks', 3)});
+        nodes.fail(p('PublishedPicks', 3));
+        await tester.pumpAndSettle();
+        expectUnreadable(tester);
+      });
+
+      testWidgets('a feed that stays SILENT is bounded at 2 s: the skeleton '
+          'until then, then the failure line', (tester) async {
+        await pump(tester);
+        nodes.answerAllNullExcept({p('History', 1)});
+        await tester.pump(const Duration(milliseconds: 1900));
+        expect(byKey('viewer_skeleton'), findsOneWidget);
+        expect(byKey('viewer_load_failed'), findsNothing);
+
+        await tester.pump(const Duration(milliseconds: 200));
+        await tester.pumpAndSettle();
+        expectUnreadable(tester);
+      });
+
+      testWidgets('(c) data arriving after the failure replaces it, live: '
+          'History', (tester) async {
+        await pump(tester);
+        nodes.answerAllNullExcept({p('History', 2)});
+        nodes.fail(p('History', 2));
+        await tester.pumpAndSettle();
+        expectUnreadable(tester);
+
+        // The week answers after all: its record is the squad AND points.
+        nodes.emit(p('History', 2), {
+          ...squad('Late Keeper').toMap(),
+          'TotalTenths': 340,
+          'Breakdown': [
+            {'playerId': 'Late Keeper', 'countedTenths': 120, 'multiplier': 2},
+          ],
+        });
+        await tester.pumpAndSettle();
+
+        expect(byKey('viewer_load_failed'), findsNothing);
+        expect(byKey('viewer_skeleton'), findsNothing);
+        expect(byKey('squad_chip_Late Keeper'), findsOneWidget);
+        expect(find.text('Gameweek 2 squad'), findsOneWidget);
+        expect(find.text('Final · 34 pts'), findsOneWidget);
+      });
+
+      testWidgets('(c) data arriving after the failure replaces it, live: '
+          'PublishedPicks (after a silent feed)', (tester) async {
+        await pump(tester);
+        nodes.answerAllNullExcept({p('PublishedPicks', 2)});
+        await tester.pump(const Duration(seconds: 3));
+        await tester.pumpAndSettle();
+        expectUnreadable(tester);
+
+        nodes.emit(p('PublishedPicks', 2), squad('Locked Keeper').toMap());
+        await tester.pumpAndSettle();
+
+        expect(byKey('viewer_load_failed'), findsNothing);
+        expect(byKey('squad_chip_Locked Keeper'), findsOneWidget);
+        expect(find.text('Gameweek 2 squad'), findsOneWidget);
+      });
+
+      testWidgets("the manager's badge shelf stays above the failure line",
+          (tester) async {
+        await pump(tester, badges: const [
+          FantasyBadgeAward(
+              id: 'captainGenius_gw1', badgeId: 'captainGenius', gw: 1),
+        ]);
+        nodes.answerAllNullExcept({p('History', 2)});
+        nodes.fail(p('History', 2));
+        await tester.pumpAndSettle();
+
+        expect(byKey('viewer_load_failed_scroll'), findsOneWidget);
+        expect(byKey('badge_shelf'), findsOneWidget);
+        expect(byKey('viewer_load_failed'), findsOneWidget);
+        expect(tester.getTopLeft(byKey('badge_shelf')).dy,
+            lessThan(tester.getTopLeft(byKey('viewer_load_failed')).dy));
+      });
+
+      for (final brightness in Brightness.values) {
+        testWidgets('360 px, $brightness: the failure line fits, no '
+            'overflow', (tester) async {
+          await pump(tester,
+              size: const Size(360, 700), brightness: brightness);
+          nodes.answerAllNullExcept({p('History', 2)});
+          nodes.fail(p('History', 2));
+          await tester.pumpAndSettle();
+
+          expectUnreadable(tester);
+          final line = find.text("Couldn't load this team.");
+          final rect = tester.getRect(line);
+          expect(rect.left, greaterThanOrEqualTo(0));
+          expect(rect.right, lessThanOrEqualTo(360));
+          // Scheme colour (readable in both themes), not a fixed fill.
+          expect(
+              tester.widget<Text>(line).style!.color,
+              Theme.of(tester.element(byKey('viewer_load_failed')))
+                  .colorScheme
+                  .onSurfaceVariant);
+        });
+      }
+
+      testWidgets('an error AFTER good data keeps what the feed last said '
+          '(no failure line for a team that did load)', (tester) async {
+        await pump(tester);
+        nodes.answerAllNullExcept({p('PublishedPicks', 2)});
+        nodes.emit(p('PublishedPicks', 2), squad('Shown Keeper').toMap());
+        await tester.pumpAndSettle();
+        expect(byKey('squad_chip_Shown Keeper'), findsOneWidget);
+
+        nodes.fail(p('PublishedPicks', 2));
+        await tester.pumpAndSettle();
+
+        expect(byKey('viewer_load_failed'), findsNothing);
+        expect(byKey('squad_chip_Shown Keeper'), findsOneWidget);
+      });
     });
 
     testWidgets('a rebuild with the SAME gameweek numbers opens nothing new',

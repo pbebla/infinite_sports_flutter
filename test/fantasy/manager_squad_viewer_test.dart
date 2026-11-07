@@ -687,6 +687,25 @@ void main() {
         findsOneWidget);
   });
 
+  testWidgets('a squad feed that errors before its first answer: the page '
+      'says it could not load the team (never "revealed at lock"), and later '
+      'data replaces the line', (tester) async {
+    await pumpViewer(tester);
+    published.add(const {});
+    history.addError(StateError('rules'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('viewer_skeleton')), findsNothing);
+    expect(find.byKey(const ValueKey('viewer_load_failed')), findsOneWidget);
+    expect(find.text("Couldn't load this team."), findsOneWidget);
+    expect(find.byKey(const ValueKey('viewer_unrevealed')), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    history.add(bareWeeks({1: squad('Old Keeper')}));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('viewer_load_failed')), findsNothing);
+    expect(find.byKey(const ValueKey('squad_chip_Old Keeper')), findsOneWidget);
+  });
+
   testWidgets('current week from PublishedPicks (wins over History on the '
       'same week), earlier weeks from History; chips browse the full '
       'history; the court is read-only with armbands', (tester) async {
