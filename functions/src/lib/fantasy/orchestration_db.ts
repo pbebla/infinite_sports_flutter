@@ -269,6 +269,18 @@ export async function isTestFillSeason(db: FantasyDb, root: string): Promise<boo
   return (await db.read(`${root}/${TEST_FILL_NODE}`)) != null;
 }
 
+/** The season-end badge marker: `Fantasy/<sport>/<season>/SeasonBadgesSettledAt`
+ *  = epoch ms of the settle that produced the season's auto awards (badges.ts
+ *  settleSeasonBadges, D6 of the 2026-11-06 scale fixes). Present = the
+ *  season's badges are settled, so the sweep's "already settled?" check
+ *  answers from this one number instead of reading every badge of the
+ *  season. It is a bare number — a scalar leaf — so ask `(await db.read(path))
+ *  != null`, NEVER `db.exists(path)` (a map-node test: false for a number in
+ *  production). Written set-if-absent when settle finds or creates an auto
+ *  season award (or has no season badge to award); deleted whenever a
+ *  re-settle takes season awards away. */
+export const SEASON_BADGES_SETTLED_NODE = 'SeasonBadgesSettledAt';
+
 /** One `Voided/<gw>` leaf: ONLY a literal boolean true voids the week (the
  *  Manager writes true or removes the node — fantasy_admin_models.dart
  *  voidedGwsFromNode `raw == true` parity); absent/false/junk = counts. */

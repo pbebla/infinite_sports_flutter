@@ -82,13 +82,21 @@ export const NEVER_WRITTEN_WHOLE: readonly string[] = [
  *  LockedWeeks (season setup + schedule plan 2026-11-05): every replayed
  *  lock freezes its week ({ Date, LockAtUtc }) and every replayed finalize
  *  marks it Scored — always produced, the engine's frozen-week ledger (a
- *  derived node like LockedPositions). */
+ *  derived node like LockedPositions).
+ *
+ *  SeasonBadgesSettledAt (scale fixes 2026-11-06, D6): the engine's
+ *  season-end done-marker — a bare epoch-ms number the replay's
+ *  settleSeasonBadges stamps next to the season awards in Badges. Produced
+ *  only when the replayed season is flagged Finished (the S15 snapshot's
+ *  `Futsal/15/Finished`); it travels with Badges whole, and a TestFill
+ *  season's engine ignores both anyway (settleSeasonBadges stands down). */
 export const EXPECTED_NODES: readonly string[] = [
   'Players', 'PlayerTotals', 'PlayerWeeks', 'PlayerWeekStats', 'PriceHistory',
   'PriceChanges', 'Leaderboards', 'History', 'PublishedPicks', 'DreamTeam',
   'TransferState', 'TransferCosts', 'GwState', 'LockedPositions', 'LockedWeeks',
   'Repriced', 'RecapSent', 'NewsDrafted', 'ReminderSent', 'Badges',
   'BadgePushClaims', 'Baselines', 'SquadAlerts', 'PreviewPushed', 'Live',
+  'SeasonBadgesSettledAt',
 ];
 
 export interface PlanEntry {

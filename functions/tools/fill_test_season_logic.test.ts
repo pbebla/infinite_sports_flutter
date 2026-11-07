@@ -195,6 +195,18 @@ describe('buildWritePlan', () => {
     expect(plan.find((e) => e.path === `${ROOT}/Baselines`)!.value).toEqual(state.Baselines);
   });
 
+  it('the season-end marker the replay of a Finished season produces is written whole, with Badges', () => {
+    // The replay runs the real engine over the S15 snapshot (Finished
+    // included): settleSeasonBadges stamps SeasonBadgesSettledAt next to the
+    // season awards it writes. Unlisted, that one node refused the whole plan.
+    const state = { ...replayState(), SeasonBadgesSettledAt: 1_790_000_000_000 };
+    const plan = buildWritePlan(state, live, 1);
+    expect(EXPECTED_NODES).toContain('SeasonBadgesSettledAt');
+    expect(plan.find((e) => e.path === `${ROOT}/SeasonBadgesSettledAt`)!.value)
+      .toBe(1_790_000_000_000);
+    expect(() => assertSafePaths([{ path: `${ROOT}/SeasonBadgesSettledAt` }])).not.toThrow();
+  });
+
   it('live: the finalize tombstone Live is written whole; the functions-only LiveBase is not on the allowlist', () => {
     // The replay's finalize runs end with the settled tombstone (live design
     // 2026-11-03 §4, Fable L5); a live run's LiveBase is removed by every

@@ -62,6 +62,21 @@
 // Paused seasons (lockOverride open/locked) compute nothing — finalize and
 // the sweep stand down before either step.
 //
+// SETTLED MARKER (D6, 2026-11-06): `<root>/SeasonBadgesSettledAt` = epoch ms
+// (orchestration_db.ts SEASON_BADGES_SETTLED_NODE). Set-if-absent whenever
+// settle finds or creates an auto season award, and when every season badge
+// is switched off (nothing to award — the season IS settled); never for
+// 'notOver' or 'testFill'. The sweep (onlyIfUnsettled) reads it right after
+// the Finished flag and answers 'alreadySettled' WITHOUT reading Badges or
+// History — a settled season no longer costs every badge of the season on
+// every 15-minute sweep. An absent marker is the old path (it backfills the
+// marker the first time it sees an auto season award). A finalize rerun
+// (onlyIfUnsettled false) ignores the marker and re-settles as ever. Every
+// writer that takes season awards away deletes it first (a re-settle that
+// removes awards: before its first removal; it is set again after, with the
+// settle that stands). The weekly reconcile only ever removes `_gw<N>`
+// awards, so it leaves the marker alone.
+//
 // TEST SEASONS (audit I5, 2026-10-31): a season carrying the TestFill marker
 // (orchestration_db.ts TEST_FILL_NODE — tools/fill_test_season.ts) never
 // settles season badges and NEVER writes a trophy cabinet: its History and
@@ -90,7 +105,7 @@ import { leagueWallClock } from './news';
 import type { FantasyLogger } from './orchestration';
 import {
   childEntries, FantasyDb, fantasyRoot, gamesOfDate, isPlainMap,
-  isTestFillSeason, loadSeasonGameweeks, toIntLoose,
+  isTestFillSeason, loadSeasonGameweeks, SEASON_BADGES_SETTLED_NODE, toIntLoose,
 } from './orchestration_db';
 import { FantasySquad, squadFromMap } from './squad';
 import { isInvalidRow } from './squad_integrity';
@@ -648,19 +663,36 @@ export interface SeasonBadgesArgs {
   onlyIfUnsettled?: boolean;
 }
 
+/** Whether an auto season award stands in [existing] — or, with [changes]
+ *  (a reconcile's writes and removals, season scope: every write is an auto
+ *  season award), once they are applied. */
 function hasAutoSeasonAward(
   existing: Record<string, Record<string, Record<string, unknown>>>,
+  changes?: AwardChanges,
 ): boolean {
-  return Object.values(existing).some((byId) => Object.entries(byId)
+  if ((changes?.writes.length ?? 0) > 0) return true;
+  const removed = new Set((changes?.removes ?? []).map((r) => `${r.uid}/${r.awardId}`));
+  return Object.entries(existing).some(([uid, byId]) => Object.entries(byId)
     .some(([id, row]) => row['Source'] === 'auto' &&
-      id === seasonAwardId(String(row['Badge'] ?? ''))));
+      id === seasonAwardId(String(row['Badge'] ?? '')) &&
+      !removed.has(`${uid}/${id}`)));
 }
 
-/** The season-end step (see SEASON END + TROPHY CABINET). 'notOver' when
- *  the league has not flagged Finished or a gameweek is not finalized yet;
- *  'alreadySettled' in sweep mode once a season award exists; 'testFill'
- *  for a TestFill season (see TEST SEASONS): no season award, no Users/*
- *  write, nothing read beyond the marker. */
+/** Stamps the settled marker (see SETTLED MARKER), set-if-absent: a rerun
+ *  that changes nothing writes nothing, and the stamp keeps the instant of
+ *  the settle that made it. */
+async function markSeasonSettled(
+  db: FantasyDb, root: string, nowUtc: Date,
+): Promise<void> {
+  await db.writeIfAbsent(`${root}/${SEASON_BADGES_SETTLED_NODE}`, nowUtc.getTime());
+}
+
+/** The season-end step (see SEASON END + TROPHY CABINET + SETTLED MARKER).
+ *  'notOver' when the league has not flagged Finished or a gameweek is not
+ *  finalized yet; 'alreadySettled' in sweep mode once the settled marker or
+ *  a season award exists; 'testFill' for a TestFill season (see TEST
+ *  SEASONS): no season award, no Users/* write, nothing read beyond the
+ *  marker. */
 export async function settleSeasonBadges(
   db: FantasyDb, args: SeasonBadgesArgs,
 ): Promise<'notOver' | 'alreadySettled' | 'settled' | 'testFill'> {
@@ -675,12 +707,24 @@ export async function settleSeasonBadges(
     return 'testFill';
   }
   if ((await db.read(`${sport}/${season}/Finished`)) !== true) return 'notOver';
+  // The marker is a number, so it is read (`!= null`), never `exists()`.
+  if (args.onlyIfUnsettled &&
+    (await db.read(`${root}/${SEASON_BADGES_SETTLED_NODE}`)) != null) {
+    return 'alreadySettled';
+  }
   const existing = badgesByUidOf(await db.read(`${root}/Badges`));
-  if (args.onlyIfUnsettled && hasAutoSeasonAward(existing)) return 'alreadySettled';
+  if (args.onlyIfUnsettled && hasAutoSeasonAward(existing)) {
+    await markSeasonSettled(db, root, args.nowUtc); // backfill: settled before the marker
+    return 'alreadySettled';
+  }
   const catalog = catalogOf(await db.read(BADGE_CATALOG_PATH));
   // Every season badge switched off: nothing to award or take away (an
-  // inactive badge's awards stay) — skip the season reads.
-  if (autoBadges(catalog, SEASON_RULES).length === 0) return 'settled';
+  // inactive badge's awards stay) — skip the season reads. The season is
+  // settled all the same.
+  if (autoBadges(catalog, SEASON_RULES).length === 0) {
+    await markSeasonSettled(db, root, args.nowUtc);
+    return 'settled';
+  }
 
   const configNode = await db.read(`${root}/Config`);
   const { gws, dateNode } = await loadSeasonGameweeks(
@@ -734,6 +778,12 @@ export async function settleSeasonBadges(
     overallBoard, historyWeeksByUid, allWeeks, catalog, nowMs: args.nowUtc.getTime(),
   });
   const changes = reconcileAwards({ existing, desired, catalog, scope: { kind: 'season' } });
+  // A re-settle that takes season awards away drops the marker FIRST: until
+  // the settle below completes (and sets it again) nothing vouches for the
+  // half-changed awards — a crash in between leaves the sweep to look.
+  if (changes.removes.length > 0) {
+    await db.write(`${root}/${SEASON_BADGES_SETTLED_NODE}`, null);
+  }
   const res = await applyChanges(db, root, changes);
 
   // Trophy cabinet: every podium award now held gets its copy (set-if-
@@ -771,5 +821,8 @@ export async function settleSeasonBadges(
   if (res.written > 0 || res.removed > 0 || cabinet > 0) {
     log.info('fantasy badges: season awards settled', { ...ctx, ...res, cabinet });
   }
+  // Last, after the cabinet: a failing stamp loses nothing but the shortcut
+  // (the next sweep sees the awards and stamps it).
+  if (hasAutoSeasonAward(existing, changes)) await markSeasonSettled(db, root, args.nowUtc);
   return 'settled';
 }
