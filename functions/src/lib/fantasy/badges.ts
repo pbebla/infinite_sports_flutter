@@ -63,11 +63,15 @@
 // the sweep stand down before either step.
 //
 // SETTLED MARKER (D6, 2026-11-06): `<root>/SeasonBadgesSettledAt` = epoch ms
-// (orchestration_db.ts SEASON_BADGES_SETTLED_NODE). Set-if-absent at the end
-// of EVERY completed settle (the full settle ran, or every season badge is
-// switched off — nothing to award — and the season IS settled; a settle that
-// ends with zero season awards included) and when the sweep finds an auto
-// season award that has no marker yet; never for 'notOver' or 'testFill'.
+// (orchestration_db.ts SEASON_BADGES_SETTLED_NODE). It means: the season is
+// OVER — every scoreable week finalized — AND its badges are settled. So it
+// is set-if-absent only once the all-weeks-finalized check has passed: at the
+// end of every completed settle (a settle that ends with zero season awards
+// included; every season badge switched off included — nothing to award, but
+// the weeks are still checked first) and when the sweep finds an auto season
+// award that has no marker yet (an award only ever exists after that check
+// passed). Never for 'notOver' (a Finished season with an unfinalized week,
+// badges on or off) or 'testFill'.
 // The sweep (onlyIfUnsettled) reads it right after the Finished flag and
 // answers 'alreadySettled' WITHOUT reading Badges or History — a settled
 // season no longer costs every badge of the season on every 15-minute sweep.
@@ -713,13 +717,6 @@ export async function settleSeasonBadges(
     return 'alreadySettled';
   }
   const catalog = catalogOf(await db.read(BADGE_CATALOG_PATH));
-  // Every season badge switched off: nothing to award or take away (an
-  // inactive badge's awards stay) — skip the season reads. The season is
-  // settled all the same.
-  if (autoBadges(catalog, SEASON_RULES).length === 0) {
-    await markSeasonSettled(db, root, args.nowUtc);
-    return 'settled';
-  }
 
   const configNode = await db.read(`${root}/Config`);
   const { gws, dateNode } = await loadSeasonGameweeks(
@@ -762,6 +759,14 @@ export async function settleSeasonBadges(
         'season badges wait', { ...ctx, missing: overdue });
     }
     return 'notOver';
+  }
+  // Every season badge switched off: nothing to award or take away (an
+  // inactive badge's awards stay) — skip the boards. The season is settled
+  // all the same, but only now: the marker means the season is OVER (every
+  // scoreable week finalized) AND settled, never just "no badge to award".
+  if (autoBadges(catalog, SEASON_RULES).length === 0) {
+    await markSeasonSettled(db, root, args.nowUtc);
+    return 'settled';
   }
   const allWeeks = seasonWeeks.map((g) => g.number);
 

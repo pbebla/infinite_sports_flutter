@@ -86,10 +86,12 @@ export const NEVER_WRITTEN_WHOLE: readonly string[] = [
  *
  *  SeasonBadgesSettledAt (scale fixes 2026-11-06, D6): the engine's
  *  season-end done-marker — a bare epoch-ms number the replay's
- *  settleSeasonBadges stamps next to the season awards in Badges. Produced
- *  only when the replayed season is flagged Finished (the S15 snapshot's
- *  `Futsal/15/Finished`); it travels with Badges whole, and a TestFill
- *  season's engine ignores both anyway (settleSeasonBadges stands down). */
+ *  settleSeasonBadges stamps once the replayed season is over (Finished and
+ *  every scoreable week finalized) and its badges are settled, whether or not
+ *  that settle awarded anything. Produced only when the replayed season is
+ *  flagged Finished (the S15 snapshot's `Futsal/15/Finished`); it travels
+ *  with Badges whole, and a TestFill season's engine ignores both anyway
+ *  (settleSeasonBadges stands down). */
 export const EXPECTED_NODES: readonly string[] = [
   'Players', 'PlayerTotals', 'PlayerWeeks', 'PlayerWeekStats', 'PriceHistory',
   'PriceChanges', 'Leaderboards', 'History', 'PublishedPicks', 'DreamTeam',

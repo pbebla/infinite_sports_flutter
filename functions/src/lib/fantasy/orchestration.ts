@@ -2660,8 +2660,10 @@ async function sweepSeason(
 
   // 2a. Season-end badges (spec 2026-10-30 §4): the league may flag the
   //     season Finished AFTER its last finalize, so the sweep checks too —
-  //     but only settles a season holding no auto season award yet (every
-  //     later re-settle comes from a finalize rerun; badges.ts SEASON END).
+  //     but only settles a season that is not marked settled and holds no
+  //     auto season award yet (the SeasonBadgesSettledAt marker answers
+  //     first, without reading Badges or History; every later re-settle comes
+  //     from a finalize rerun; badges.ts SEASON END + SETTLED MARKER).
   //     Before the season-over return below, which is exactly when it fires.
   //     A failure is logged (the next sweep retries — still unsettled) and
   //     never blocks the steps below.

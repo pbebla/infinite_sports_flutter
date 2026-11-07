@@ -1030,19 +1030,22 @@ describe('season-end marker (Fantasy/<sport>/<season>/SeasonBadgesSettledAt, D6)
     expect(await db.read(MARKER)).toBe(123);
   });
 
-  it('a Finished season whose settle awards nobody still gets the marker, and the next sweep reads no Badges/History', async () => {
-    const data = world2();
-    data.Futsal['15'].Finished = true;
-    // Ever Present off, and no Overall board to rank: every gameweek is
-    // finalized and the full settle runs, but nobody earns a season award.
+  it('a from-scratch settle that awards nobody still gets the marker, and the next sweep reads no Badges/History', async () => {
+    const data = world2(); // Finished NOT set yet: no season award can exist
+    // Ever Present off; with no Overall board nobody can rank either.
     data.Fantasy.BadgeCatalog = { everPresent: { ...STARTER_CATALOG.everPresent, Active: false } };
     const db = new FakeDb(data);
     await finalizeGw2(db);
+    expect(await db.read(MARKER)).toBeNull();
+    expect(JSON.stringify(await db.read(B))).not.toContain('_season');
     await db.write(`${F_ROOT}/Leaderboards/Overall`, null);
-    await db.write(MARKER, null);
+    await db.write(B, null); // no auto season award has ever existed
+    db.data.Futsal['15'].Finished = true;
     db.writes = [];
-    expect(await settleSeasonBadges(db, finalizeArgs(db))).toBe('settled');
-    expect(JSON.stringify(await db.read(B))).not.toContain('_season'); // zero season awards
+    // The sweep's own call: no marker, no award -> the full settle runs, awards nobody.
+    expect(await settleSeasonBadges(db, sweepArgs(db))).toBe('settled');
+    expect(db.writes.filter((p) => p.startsWith(B))).toEqual([]); // zero awards written
+    expect(await db.read(B)).toBeNull();
     expect(await db.read(MARKER)).toBe(AFTER_LOCK2.getTime());
     db.reads = [];
     db.writes = [];
@@ -1061,11 +1064,38 @@ describe('season-end marker (Fantasy/<sport>/<season>/SeasonBadgesSettledAt, D6)
         .filter(([, e]) => (SEASON_RULES as readonly string[]).includes(String(e.Rule)))
         .map(([id, e]) => [id, { ...e, Active: false }]));
     const db = new FakeDb(data);
+    await finalizeGw2(db); // the last week: the season is over, nothing to award
+    expect(JSON.stringify(await db.read(B))).not.toContain('_season');
+    expect(await db.read(MARKER)).toBe(AFTER_LOCK2.getTime());
+    await db.write(MARKER, null);
     expect(await settleSeasonBadges(db, finalizeArgs(db))).toBe('settled');
     expect(await db.read(MARKER)).toBe(AFTER_LOCK2.getTime());
     db.reads = [];
     expect(await settleSeasonBadges(db, sweepArgs(db))).toBe('alreadySettled');
     expect(db.reads).not.toContain(`read:${B}`);
+  });
+
+  it('Finished, a scoreable week not finalized, every season badge off: notOver and no marker', async () => {
+    const data = world2();
+    data.Futsal['15'].Finished = true;
+    data.Fantasy.BadgeCatalog = Object.fromEntries(
+      Object.entries(STARTER_CATALOG)
+        .filter(([, e]) => (SEASON_RULES as readonly string[]).includes(String(e.Rule)))
+        .map(([id, e]) => [id, { ...e, Active: false }]));
+    const db = new FakeDb(data); // History/1 only: GW2 is lock-passed but never finalized
+    const warns: Array<{ m: string; c?: Record<string, unknown> }> = [];
+    const log = { info: () => undefined, warn: (m: string, c?: Record<string, unknown>) => { warns.push({ m, c }); } };
+    expect(await settleSeasonBadges(db, { ...finalizeArgs(db), log })).toBe('notOver');
+    expect(await settleSeasonBadges(db, { ...sweepArgs(db), log })).toBe('notOver');
+    expect(await db.read(MARKER)).toBeNull();
+    expect(db.writes).toEqual([]);
+    expect(warns.map((w) => w.c)).toEqual([
+      { sport: 'Futsal', season: '15', missing: [2] },
+      { sport: 'Futsal', season: '15', missing: [2] },
+    ]);
+    // Once GW2 finalizes, the all-off season is over and settled: now it is marked.
+    await finalizeGw2(db);
+    expect(await db.read(MARKER)).toBe(AFTER_LOCK2.getTime());
   });
 
   it('not over (not Finished, a week not finalized) and TestFill seasons never get a marker', async () => {
