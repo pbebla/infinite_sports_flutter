@@ -63,3 +63,15 @@ describe('redactEmails (keeps addresses out of stored errors and logs)', () => {
     expect(redactEmails(undefined as unknown as string)).toBe('');
   });
 });
+
+describe('redactEmails leaves no fragment of an address (fix round 1)', () => {
+  it("an apostrophe in the local part is part of the address: o'brien@x.com", () => {
+    expect(redactEmails("550 <o'brien@x.com>: rejected")).toBe('550 <[email]>: rejected');
+    expect(redactEmails("o'brien@x.com")).toBe('[email]');
+  });
+
+  it('an underscore in the domain is part of the address: a_b@my_host.example.com', () => {
+    expect(redactEmails('rejected a_b@my_host.example.com now')).toBe('rejected [email] now');
+    expect(redactEmails('a_b@my_host.example.com')).toBe('[email]');
+  });
+});

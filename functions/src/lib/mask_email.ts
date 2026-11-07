@@ -33,5 +33,5 @@ export function maskEmail(email: string): string {
  *  usually does) and must never carry one into the database or the logs. */
 export function redactEmails(text: string): string {
   return String(text ?? '')
-    .replace(/[^\s<>"'(),;:@]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*/gu, '[email]');
+    .replace(/[^\s<>"(),;:@]+@[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*/gu, '[email]');
 }

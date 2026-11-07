@@ -34,7 +34,13 @@
 //                                                whose account name matches a
 //                                                roster row of that sport held
 //                                                by another account or none
-//   npm run merge:accounts -- --notify
+//   npm run merge:accounts -- --notify [--send]
+//                                                WITHOUT --send: a PREVIEW -
+//                                                the same checks, prints what
+//                                                it would write (people by
+//                                                label, number of notices, the
+//                                                push audience size) and
+//                                                writes NOTHING. With --send:
 //                                                D11 + D12: tells the merged
 //                                                players which email to use.
 //                                                Refuses unless EVERY old
@@ -74,8 +80,9 @@
 //     it) before any network call ("fix the map file first").
 //   - A production --apply must carry --expect-plan <digest> from the dry
 //     run the owner read; it refuses before any read without it.
-//   - --notify writes only MergeNotices/<old> (old accounts whose node is
-//     absent) and the one Campaigns/<id> it computed - nothing else passes
+//   - --notify is a read-only PREVIEW (read-only client + fetch guard); only
+//     --notify --send writes, and it writes only MergeNotices/<old> (old
+//     accounts whose node is absent) and the one Campaigns/<id> it computed - nothing else passes
 //     the write guard. Its hints are the masked ones --apply already stamped
 //     on each old account; no address is read, written or printed.
 //   - Emails: looked up only for the kept accounts and masked (maskEmail)
@@ -119,7 +126,7 @@ const REG_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const STAMPS = ['MergedInto', 'MergedAt', 'MergedHint'];
 
 const USAGE = 'Usage: npm run merge:accounts [-- --apply --expect-plan <digest> | ' +
-  '-- --undo <backupFile> | -- --find-dupes <registrationId> | -- --notify] [--map <file>] ' +
+  '-- --undo <backupFile> | -- --find-dupes <registrationId> | -- --notify [--send]] [--map <file>] ' +
   '[--fake-emails] [--no-canary]';
 
 const isPlainMap = (v: unknown): v is Record<string, unknown> =>
@@ -967,11 +974,19 @@ export interface NotifyResult {
   noticesWritten: number;
   /** Old accounts whose notice was already there (left alone). */
   noticesPresent: number;
-  /** The one push campaign was written this run (false when it already existed). */
+  /** Notices a --send run would write now (the preview's count; equals noticesWritten after --send). */
+  noticesToWrite: number;
+  /** The one push campaign was written this run (false when it already existed or in a preview). */
   campaignWritten: boolean;
   campaignId: string | null;
   /** Kept accounts the push reaches. */
   audience: number;
+}
+
+export interface NotifyOptions {
+  /** false (the default) = the PREVIEW: prints what would be written and
+   *  writes nothing. Only --notify --send passes true. */
+  send: boolean;
 }
 
 /** --notify: tells the merged players which email to use. Reads the stamps
@@ -981,14 +996,19 @@ export interface NotifyResult {
  *  MergeNotices/<old> for each old account that has none and the ONE campaign
  *  (deterministic id, so a re-run finds it) when it is not there yet. Idempotent:
  *  a second run writes nothing. The trigger and the campaign sender do the
- *  actual sending - this only creates their nodes. */
-export async function notifyMerge(map: MergeMap, deps: RunDeps): Promise<NotifyResult> {
+ *  actual sending - this only creates their nodes. It SENDS people email, so
+ *  by default it is a PREVIEW (same checks, same printout, no writes); only
+ *  { send: true } (--notify --send) writes. */
+export async function notifyMerge(
+  map: MergeMap, deps: RunDeps, opts: NotifyOptions = { send: false },
+): Promise<NotifyResult> {
   const log = deps.log;
-  log(`Merge duplicate accounts - NOTIFY (${deps.target.label})`);
+  log(`Merge duplicate accounts - NOTIFY ${opts.send ? '--send' : 'PREVIEW'} (${deps.target.label})`);
   const reader = guardRest(deps.rest, { readOnly: true });
   const withOld = map.clusters.filter((c) => (c.old ?? []).length > 0);
   const result: NotifyResult = {
-    ok: true, noticesWritten: 0, noticesPresent: 0, campaignWritten: false, campaignId: null, audience: 0,
+    ok: true, noticesWritten: 0, noticesPresent: 0, noticesToWrite: 0, campaignWritten: false,
+    campaignId: null, audience: 0,
   };
   if (withOld.length === 0) {
     log('Nothing to notify - no cluster of the map has an old account.');
@@ -1031,6 +1051,7 @@ export async function notifyMerge(map: MergeMap, deps: RunDeps): Promise<NotifyR
   const campaignPresent = (await reader.get(campaignPath, { shallow: true })) !== null;
   result.campaignId = campaignId;
   result.audience = keepUids.length;
+  result.noticesToWrite = notices.length;
 
   log(`  old accounts: ${notices.length + result.noticesPresent} - ${notices.length} notice(s) to write, ` +
     `${result.noticesPresent} already there`);
@@ -1039,6 +1060,11 @@ export async function notifyMerge(map: MergeMap, deps: RunDeps): Promise<NotifyR
     (campaignPresent ? `campaign ${campaignId} already exists` : `campaign ${campaignId} to write`));
   if (notices.length === 0 && campaignPresent) {
     log('Nothing to write - every notice and the campaign are already there.');
+    return result;
+  }
+  if (!opts.send) {
+    log(`PREVIEW - nothing was written. ${notices.length} email(s) and ${campaignPresent ? 0 : 1} push campaign would go out. ` +
+      'To send exactly this: npm run merge:accounts -- --notify --send');
     return result;
   }
 
@@ -1057,6 +1083,8 @@ export async function notifyMerge(map: MergeMap, deps: RunDeps): Promise<NotifyR
   }
   log(`DONE - ${result.noticesWritten} notice(s) and ${result.campaignWritten ? 1 : 0} campaign written. ` +
     'The functions now send the emails and the push; check MergeNotices/<old>/Status and the Manager campaign list.');
+  log('Notices only send if onMergeNoticeCreated is deployed; if it was not, delete MergeNotices/<old> ' +
+    'and re-run --notify --send after deploying.');
   return result;
 }
 
@@ -1133,11 +1161,13 @@ export interface CliArgs {
   expectPlan?: string;
   fakeEmails: boolean;
   noCanary: boolean;
+  /** --notify --send: write (otherwise --notify only previews). */
+  send: boolean;
 }
 
 export function parseArgs(argv: readonly string[]): CliArgs {
   const valued = new Set(['--undo', '--find-dupes', '--map', '--expect-plan']);
-  const flags = new Set(['--apply', '--notify', '--fake-emails', '--no-canary']);
+  const flags = new Set(['--apply', '--notify', '--send', '--fake-emails', '--no-canary']);
   const got = new Map<string, string>();
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -1162,6 +1192,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   if (got.has('--map') && mode !== 'apply' && mode !== 'dry-run' && mode !== 'notify') {
     throw new Error(`--map goes with the dry run, --apply or --notify. ${USAGE}`);
   }
+  if (got.has('--send') && mode !== 'notify') throw new Error(`--send goes with --notify. ${USAGE}`);
   if (got.has('--fake-emails') && mode === 'notify') {
     throw new Error(`--fake-emails does not go with --notify (it looks up no emails). ${USAGE}`);
   }
@@ -1173,6 +1204,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     expectPlan: got.get('--expect-plan'),
     fakeEmails: got.has('--fake-emails'),
     noCanary: got.has('--no-canary'),
+    send: got.has('--send'),
   };
 }
 
@@ -1199,7 +1231,7 @@ async function main(): Promise<void> {
   checkTargetFlags(args, target);
   const token = target.kind === 'emulator' ? async (): Promise<string> => 'owner' : accessToken;
   // Read-only modes: no PUT/DELETE/other POST can leave the process.
-  const readOnly = args.mode === 'dry-run' || args.mode === 'find-dupes';
+  const readOnly = args.mode === 'dry-run' || args.mode === 'find-dupes' || (args.mode === 'notify' && !args.send);
   const restoreFetch = readOnly ? installReadOnlyFetchGuard(target) : (): void => undefined;
   const deps: RunDeps = {
     rest: httpRest(target, token),
@@ -1220,7 +1252,7 @@ async function main(): Promise<void> {
     } else if (args.mode === 'find-dupes') {
       await findDupes(args.regId as string, deps);
     } else if (args.mode === 'notify') {
-      const r = await notifyMerge(loadMap(args.mapFile), deps);
+      const r = await notifyMerge(loadMap(args.mapFile), deps, { send: args.send });
       if (!r.ok) process.exitCode = 1;
     } else if (args.mode === 'apply') {
       const r = await applyMerge(loadMap(args.mapFile), deps, { canary: !args.noCanary, expectPlan: args.expectPlan });

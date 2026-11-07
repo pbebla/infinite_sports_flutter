@@ -681,13 +681,14 @@ async function appliedDb(map: MergeMap = MAP, at = 1_762_400_000_000): Promise<M
 }
 
 const NOW = 1_762_500_000_000;
+const SEND = { send: true };
 const notifyDeps = (db: MemDb, over: Partial<RunDeps> = {}) => deps(db, { now: () => NOW, ...over });
 
 describe('--notify (D11 / D12)', () => {
   it('writes one MergeNotices/<old> per old account and ONE campaign for the kept accounts that had one', async () => {
     const db = await appliedDb();
     const d = notifyDeps(db);
-    const r = await notifyMerge(MAP, d);
+    const r = await notifyMerge(MAP, d, SEND);
     expect(r.ok).toBe(true);
     expect(r.noticesWritten).toBe(2);
     expect(r.campaignWritten).toBe(true);
@@ -718,16 +719,16 @@ describe('--notify (D11 / D12)', () => {
 
   it('a second run writes nothing (Review Focus 3)', async () => {
     const db = await appliedDb();
-    await notifyMerge(MAP, notifyDeps(db));
+    await notifyMerge(MAP, notifyDeps(db), SEND);
     db.calls = [];
     const d = notifyDeps(db, { now: () => NOW + 60_000 });
-    const r = await notifyMerge(MAP, d);
+    const r = await notifyMerge(MAP, d, SEND);
     expect(db.writes()).toEqual([]);
     expect(r).toMatchObject({ ok: true, noticesWritten: 0, campaignWritten: false });
     expect(d.lines.join('\n')).toContain('Nothing to write');
     // Even after the trigger stamped its Status on a notice, it is left alone.
     db.root.MergeNotices.oldA.Status = 'sent';
-    await notifyMerge(MAP, notifyDeps(db));
+    await notifyMerge(MAP, notifyDeps(db), SEND);
     expect(db.writes()).toEqual([]);
     expect(db.root.MergeNotices.oldA.Status).toBe('sent');
   });
@@ -735,7 +736,7 @@ describe('--notify (D11 / D12)', () => {
   it('writes only what is missing: an existing notice or campaign is left alone', async () => {
     const db = await appliedDb();
     db.root.MergeNotices = { oldA: { KeepHint: maskEmail(EMAILS.keepA), CreatedAt: 5, Status: 'sent' } };
-    await notifyMerge(MAP, notifyDeps(db));
+    await notifyMerge(MAP, notifyDeps(db), SEND);
     expect(db.writes().map((w) => w.path)).toEqual([
       'MergeNotices/oldB', `Campaigns/${mergeNoticeCampaignId(['keepA', 'keepB'])}`,
     ]);
@@ -743,36 +744,36 @@ describe('--notify (D11 / D12)', () => {
 
     const db2 = await appliedDb(MAP, 1_762_400_001_000);
     db2.root.Campaigns = { [mergeNoticeCampaignId(['keepA', 'keepB'])]: { Title: 'x', Status: 'sent' } };
-    const r2 = await notifyMerge(MAP, notifyDeps(db2));
+    const r2 = await notifyMerge(MAP, notifyDeps(db2), SEND);
     expect(db2.writes().map((w) => w.path)).toEqual(['MergeNotices/oldA', 'MergeNotices/oldB']);
     expect(r2.campaignWritten).toBe(false);
   });
 
   it('refuses unless EVERY old account is stamped, and writes nothing', async () => {
     const fresh = new MemDb(fixture()); // not applied: no stamps at all
-    await expect(notifyMerge(MAP, notifyDeps(fresh))).rejects.toThrow(/Refusing --notify.*not stamped/);
+    await expect(notifyMerge(MAP, notifyDeps(fresh), SEND)).rejects.toThrow(/Refusing --notify.*not stamped/);
     expect(fresh.writes()).toEqual([]);
 
     const half = await appliedDb();
     half.set('Users/oldB/MergedInto', null); // one of the two lost its stamp
-    await expect(notifyMerge(MAP, notifyDeps(half))).rejects.toThrow(/Carlo Gewargis: old account #1/);
+    await expect(notifyMerge(MAP, notifyDeps(half), SEND)).rejects.toThrow(/Carlo Gewargis: old account #1/);
     expect(half.writes()).toEqual([]);
     half.set('Users/oldB/MergedInto', '   ');
-    await expect(notifyMerge(MAP, notifyDeps(half))).rejects.toThrow(/not stamped/);
+    await expect(notifyMerge(MAP, notifyDeps(half), SEND)).rejects.toThrow(/not stamped/);
     expect(half.writes()).toEqual([]);
   });
 
   it('refuses an account stamped into a DIFFERENT kept account than the map says', async () => {
     const db = await appliedDb();
     db.set('Users/oldA/MergedInto', 'someoneElse');
-    await expect(notifyMerge(MAP, notifyDeps(db))).rejects.toThrow(/Hiram Alvarez: old account #1.*different account/);
+    await expect(notifyMerge(MAP, notifyDeps(db), SEND)).rejects.toThrow(/Hiram Alvarez: old account #1.*different account/);
     expect(db.writes()).toEqual([]);
   });
 
   it('refuses a stamp hint that is not masked (a raw address never goes into a notice)', async () => {
     const db = await appliedDb();
     db.set('Users/oldA/MergedHint', EMAILS.keepA);
-    const err = (await notifyMerge(MAP, notifyDeps(db)).catch((e: Error) => e)) as Error;
+    const err = (await notifyMerge(MAP, notifyDeps(db), SEND).catch((e: Error) => e)) as Error;
     expect(err.message).toMatch(/not masked/);
     expect(err.message).not.toContain(EMAILS.keepA);
     expect(db.writes()).toEqual([]);
@@ -806,7 +807,7 @@ describe('--notify (D11 / D12)', () => {
         oldC: { MergedInto: 'keepA', MergedAt: 1 }, // the kept account has no email: no hint
       },
     });
-    const r = await notifyMerge(map, notifyDeps(db));
+    const r = await notifyMerge(map, notifyDeps(db), SEND);
     expect(r.noticesWritten).toBe(3);
     expect(Object.keys(db.root.MergeNotices).sort()).toEqual(['oldA', 'oldB', 'oldC']);
     expect(db.root.MergeNotices.oldC).toEqual({ KeepHint: '', CreatedAt: NOW });
@@ -818,7 +819,7 @@ describe('--notify (D11 / D12)', () => {
   it('a map with no old accounts has nothing to notify', async () => {
     const db = new MemDb(fixture());
     const d = notifyDeps(db);
-    const r = await notifyMerge({ clusters: [MAP.clusters[2]] }, d);
+    const r = await notifyMerge({ clusters: [MAP.clusters[2]] }, d, SEND);
     expect(r).toMatchObject({ ok: true, noticesWritten: 0, campaignWritten: false });
     expect(db.calls).toEqual([]);
   });
@@ -833,5 +834,68 @@ describe('--notify (D11 / D12)', () => {
     expect(() => parseArgs(['--notify', '--fake-emails'])).toThrow(/does not go with --notify/);
     // No emails are looked up, so the emulator does not need --fake-emails for it.
     expect(() => checkTargetFlags(parseArgs(['--notify']), EMU)).not.toThrow();
+  });
+});
+
+describe('--notify fix round 1: previews by default, only --send writes', () => {
+  it('--notify alone writes NOTHING and prints exactly what --send would write', async () => {
+    const db = await appliedDb();
+    const d = notifyDeps(db);
+    const r = await notifyMerge(MAP, d); // no options: the preview
+    expect(db.writes()).toEqual([]);
+    expect(db.root.MergeNotices).toBeUndefined();
+    expect(db.root.Campaigns).toBeUndefined();
+    expect(r).toMatchObject({ ok: true, noticesWritten: 0, campaignWritten: false, noticesToWrite: 2, audience: 2 });
+    const out = d.lines.join('\n');
+    expect(out).toContain('PREVIEW - nothing was written');
+    expect(out).toContain('npm run merge:accounts -- --notify --send');
+    expect(out).toContain('2 notice(s) to write');
+    expect(out).toContain('Hiram Alvarez: old account #1');
+    expect(out).toContain('Carlo Gewargis: old account #1');
+    expect(out).toContain('push to 2 kept account(s)');
+    expect(out).not.toMatch(/wrote /);
+    expect(out).not.toMatch(RAW_EMAIL_RE);
+    expect(out).not.toMatch(/keepA|oldA|keepB|oldB|keepC/);
+  });
+
+  it('the preview is the same under the emulator, and still refuses an unstamped map', async () => {
+    const db = await appliedDb();
+    await notifyMerge(MAP, notifyDeps(db, { target: EMU }));
+    expect(db.writes()).toEqual([]);
+    const fresh = new MemDb(fixture());
+    await expect(notifyMerge(MAP, notifyDeps(fresh, { target: EMU }))).rejects.toThrow(/Refusing --notify.*not stamped/);
+    expect(fresh.writes()).toEqual([]);
+  });
+
+  it('the preview of an already-notified map says there is nothing to send', async () => {
+    const db = await appliedDb();
+    await notifyMerge(MAP, notifyDeps(db), SEND);
+    db.calls = [];
+    const d = notifyDeps(db);
+    await notifyMerge(MAP, d);
+    expect(db.writes()).toEqual([]);
+    expect(d.lines.join('\n')).toContain('Nothing to write');
+  });
+
+  it('--send writes, and its DONE message says the notices only send if the trigger is deployed', async () => {
+    const db = await appliedDb();
+    const d = notifyDeps(db);
+    const r = await notifyMerge(MAP, d, SEND);
+    expect(r).toMatchObject({ noticesWritten: 2, campaignWritten: true });
+    expect(db.writes()).toHaveLength(3);
+    const out = d.lines.join('\n');
+    expect(out).toContain('DONE - 2 notice(s) and 1 campaign written.');
+    expect(out).toContain('Notices only send if onMergeNoticeCreated is deployed');
+    expect(out).toContain('delete MergeNotices/<old> and re-run --notify --send after deploying');
+  });
+
+  it('command line: --send belongs to --notify and nothing else', () => {
+    expect(parseArgs(['--notify']).send).toBe(false);
+    expect(parseArgs(['--notify', '--send'])).toMatchObject({ mode: 'notify', send: true });
+    expect(() => parseArgs(['--send'])).toThrow(/--send goes with --notify/);
+    expect(() => parseArgs(['--apply', '--send'])).toThrow(/--send goes with --notify/);
+    expect(() => parseArgs(['--undo', 'b.json', '--send'])).toThrow(/--send goes with --notify/);
+    expect(() => parseArgs(['--notify', '--send', '--send'])).toThrow(/given twice/);
+    expect(() => checkTargetFlags(parseArgs(['--notify', '--send']), EMU)).not.toThrow();
   });
 });
