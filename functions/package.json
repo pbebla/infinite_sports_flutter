@@ -10,7 +10,8 @@
     "test": "vitest run",
     "rehearse:s15": "tsc -p tools/tsconfig.json && node tools/rehearsal_out/build/tools/rehearse_s15.js",
     "fill:s15": "tsc -p tools/tsconfig.json && node tools/rehearsal_out/build/tools/fill_test_season.js",
-    "loadtest": "tsc -p tools/tsconfig.json && node tools/rehearsal_out/build/tools/load_test.js"
+    "loadtest": "tsc -p tools/tsconfig.json && node tools/rehearsal_out/build/tools/load_test.js",
+    "merge:accounts": "tsc -p tools/tsconfig.json && node tools/rehearsal_out/build/tools/merge_accounts.js"
   },
   "dependencies": {
     "firebase-admin": "^13.0.0",

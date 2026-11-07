@@ -61,8 +61,8 @@
 
 import * as crypto from 'crypto';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
+import { accessToken } from './admin_rest';
 import {
   assertEnginePaused, assertMarkerMatches, assertRequestAllowed, assertSafePaths, BACKUP_KIND,
   buildWritePlan, canonicalJson, clearPlan, EXPECTED_NODES, fakeChildDeletes, isFakeUid,
@@ -80,12 +80,6 @@ const OUT_DIR = path.join(process.cwd(), 'tools', 'rehearsal_out');
 const SNAPSHOT_FILE = 'fill_snapshot.json';
 const LIVE_PATHS = [`${ROOT}/Squads`, `${ROOT}/Managers`, `${ROOT}/TestFill`];
 const MARKER = TEST_FILL_MARKER;
-// The public firebase-tools "installed app" OAuth client (shipped in the
-// firebase-tools source; not a secret) — what `firebase login` minted the
-// refresh token for.
-const OAUTH_CLIENT_ID = '563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com';
-const OAUTH_CLIENT_SECRET = 'j9iVZfS8kkCEFUPaAeJV0sAi';
-
 const USAGE = 'Usage: npm run fill:s15 [-- --offline | -- --apply | -- --clear <backupFile>]';
 
 const canon = canonicalJson;
@@ -106,52 +100,6 @@ function planDigest(plan: PlanEntry[]): string {
 }
 
 // ── admin REST (token never leaves this section) ───────────────────────────
-
-let tokenOnce: Promise<string> | null = null;
-
-/** One OAuth access token per run, minted on first use. */
-function accessToken(): Promise<string> {
-  return (tokenOnce ??= mintAccessToken());
-}
-
-/** The firebase-tools refresh token. The login file holds secrets, so a
- *  read or parse failure is rethrown as a GENERIC message — never the
- *  underlying error, whose text can quote the file's contents (JSON.parse
- *  echoes the offending input). */
-function readRefreshToken(file: string): unknown {
-  let parsed: any;
-  try {
-    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    throw new Error("Couldn't read the firebase-tools login file — run " +
-      '`npx firebase-tools login` again.');
-  }
-  return parsed?.tokens?.refresh_token;
-}
-
-async function mintAccessToken(): Promise<string> {
-  const file = path.join(os.homedir(), '.config', 'configstore', 'firebase-tools.json');
-  if (!fs.existsSync(file)) {
-    throw new Error('No firebase-tools login found — run `npx firebase-tools login` first.');
-  }
-  const refresh = readRefreshToken(file);
-  if (typeof refresh !== 'string' || refresh.length === 0) {
-    throw new Error('The firebase-tools login has no refresh token — run `npx firebase-tools login`.');
-  }
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token', refresh_token: refresh,
-      client_id: OAUTH_CLIENT_ID, client_secret: OAUTH_CLIENT_SECRET,
-    }).toString(),
-  });
-  const json: any = await res.json().catch(() => null);
-  if (!res.ok || typeof json?.access_token !== 'string') {
-    throw new Error(`OAuth token exchange failed (HTTP ${res.status}${json?.error ? `, ${json.error}` : ''}).`);
-  }
-  return json.access_token;
-}
 
 interface AdminRest {
   get(p: string, shallow?: boolean): Promise<unknown>;
