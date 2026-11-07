@@ -5,12 +5,13 @@
 // number is hand-computed (fixture _notes + the derivations in comments
 // below), never copied from pipeline output.
 
+import { createHash } from 'crypto';
 import { describe, expect, it } from 'vitest';
 import { STARTER_CATALOG } from './badges';
 import { clone, Json, loadGoldenFixture } from './golden_fixture';
 import {
-  FantasyLogger, maybeFinalizeGame, publishSaleBaselines, recordSquadSave,
-  runLifecycleSweep, runMondayReprice,
+  FantasyLogger, maybeFinalizeGame, pricesFingerprint, publishSaleBaselines,
+  recordSquadSave, runLifecycleSweep, runMondayReprice,
 } from './orchestration';
 import { configFromMap } from './fantasy_config';
 import {
@@ -1933,6 +1934,238 @@ describe('over-budget preview while the window is open (sweep step 3c)', () => {
       step.log, { pusher: later });
     expect(later.sends.flat().some((m) => m.title === 'Fantasy deadline')).toBe(true);
     expect(step.warns.some((w) => w.m.includes('preview'))).toBe(true);
+  });
+});
+
+describe('pricesFingerprint (scale fixes D8)', () => {
+  const sha1 = (s: string) => createHash('sha1').update(s).digest('hex');
+  const market = () => ({
+    Bea: { position: 'DEF', priceTenths: 70, eligible: true },
+    Alex: { position: 'ATT', priceTenths: 95, eligible: true },
+    Ana: { position: 'GK', priceTenths: 60, eligible: true },
+  });
+
+  it('is the sha1 of the sorted name:priceTenths lines, whatever the key order', () => {
+    const reversed = {
+      Ana: { eligible: true, priceTenths: 60, position: 'GK' },
+      Alex: { priceTenths: 95 },
+      Bea: { priceTenths: 70, position: 'DEF' },
+    };
+    expect(pricesFingerprint(market())).toBe(sha1('Alex:95\nAna:60\nBea:70'));
+    expect(pricesFingerprint(reversed)).toBe(pricesFingerprint(market()));
+  });
+
+  it('changes when any one priceTenths changes, or a player joins or leaves', () => {
+    const base = pricesFingerprint(market());
+    const seen = new Set([base]);
+    for (const name of ['Bea', 'Alex', 'Ana'] as const) {
+      const moved: Record<string, any> = market();
+      moved[name].priceTenths += 1;
+      seen.add(pricesFingerprint(moved));
+    }
+    const joined: Record<string, any> = { ...market(), Zed: { priceTenths: 40 } };
+    const left: Record<string, any> = market();
+    delete left.Ana;
+    seen.add(pricesFingerprint(joined));
+    seen.add(pricesFingerprint(left));
+    expect(seen.size).toBe(6); // the base and five different moves: all distinct
+  });
+
+  it('looks only at the price: other fields and entries without a numeric '
+    + 'priceTenths do not count', () => {
+    const noisy: Record<string, any> = {
+      ...market(),
+      Ghost: { position: 'ATT' },
+      Text: { priceTenths: '70' },
+      Nothing: { priceTenths: null },
+      NotANumber: { priceTenths: Number.NaN },
+      Scalar: 'x',
+    };
+    noisy.Bea.position = 'ATT';
+    noisy.Bea.eligible = false;
+    expect(pricesFingerprint(noisy)).toBe(pricesFingerprint(market()));
+  });
+
+  it('a missing or malformed Players node hashes as the empty market', () => {
+    for (const node of [null, undefined, 'x', 5, [], {}]) {
+      expect(pricesFingerprint(node)).toBe(sha1(''));
+    }
+  });
+});
+
+describe('over-budget preview re-checks squads only after a price move (scale fixes D8)', () => {
+  const t = (db: ColdFakeDb) => db.data.Fantasy.Futsal['15'];
+  // Saturday 15:00 league time: GW2 open, before the Sunday-noon reminder, so
+  // step 3c is the only step that reads the whole Squads node.
+  const SATURDAY = new Date(LOCK2_MS - 24 * 3600 * 1000);
+  const sweepAt = (n: number) => new Date(SATURDAY.getTime() + n * 15 * 60_000);
+  const SQUADS = `read:${F_ROOT}/Squads`;
+  const CHECK = `${F_ROOT}/SquadAlertsCheck`;
+  const squadReads = (db: ColdFakeDb) => db.reads.filter((r) => r === SQUADS).length;
+  const stamp = (db: ColdFakeDb, gw = 2) =>
+    ({ Gw: gw, PricesHash: pricesFingerprint(t(db).Players) });
+  /** alpha spends the whole 500 on Bea (70), then Bea rises to 75: over by 5. */
+  const overByFive = (db: ColdFakeDb) => {
+    t(db).Squads.alpha.picks[2] =
+      { playerId: 'Bea', position: 'DEF', priceTenths: 70, bench: false };
+    t(db).Players.Bea.priceTenths = 75;
+  };
+  const sweep = (db: ColdFakeDb, n: number, pusher?: FakePusher) =>
+    runLifecycleSweep(db, sweepAt(n), undefined, pusher ? { pusher } : undefined);
+  class FlakyDb extends ColdFakeDb {
+    failWrite: string | null = null;
+    failRead: string | null = null;
+    async write(path: string, value: unknown): Promise<void> {
+      if (path === this.failWrite) throw new Error('boom');
+      return super.write(path, value);
+    }
+    async read(path: string): Promise<unknown> {
+      if (path === this.failRead) throw new Error('boom');
+      return super.read(path);
+    }
+  }
+
+  it('three sweeps, no price move, no standing preview: Squads is read once', async () => {
+    const db = new ColdFakeDb(world2());
+    const pusher = new FakePusher();
+    await sweep(db, 0, pusher);
+    expect(squadReads(db)).toBe(1);
+    expect(await db.read(CHECK)).toEqual(stamp(db));
+    await sweep(db, 1, pusher);
+    db.reads = [];
+    await sweep(db, 2, pusher);
+    expect(squadReads(db)).toBe(0);
+    // The cheap path still asks the three small questions, nothing more.
+    expect(db.reads).toContain(`read:${CHECK}`);
+    expect(db.reads).toContain(`read:${F_ROOT}/SquadAlerts`);
+    expect(db.reads).toContain(`read:${F_ROOT}/Players`);
+    expect(db.reads.filter((r) => r.includes('PreviewPushed'))).toEqual([]);
+  });
+
+  it('a price move between sweeps: the next sweep runs the full pass and '
+    + 'stamps the new prices', async () => {
+    const db = new ColdFakeDb(world2());
+    const pusher = new FakePusher();
+    await sweep(db, 0, pusher);
+    await sweep(db, 1, pusher);
+    expect(squadReads(db)).toBe(1);
+
+    // A listing nobody holds: the market moved, no squad is affected.
+    t(db).Players.Zed = { position: 'ATT', priceTenths: 40, eligible: true };
+    await sweep(db, 2, pusher);
+    expect(squadReads(db)).toBe(2);
+    expect(await db.read(CHECK)).toEqual(stamp(db));
+    expect(await db.read(`${F_ROOT}/SquadAlerts`)).toBeNull();
+    await sweep(db, 3, pusher);
+    expect(squadReads(db)).toBe(2); // stood down again on the new prices
+
+    // A riser puts alpha over: caught by the very next sweep.
+    overByFive(db);
+    await sweep(db, 4, pusher);
+    expect(squadReads(db)).toBe(3);
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toEqual({
+      Gw: 2, Kind: 'preview', Issues: ['overBudget'], OverTenths: 5,
+      CreatedAt: sweepAt(4).getTime(),
+    });
+    expect(await db.read(CHECK)).toEqual(stamp(db));
+    expect(pusher.sends.flat().filter((m) => m.uid === 'alpha'
+      && m.title === 'Your fantasy team is over budget')).toHaveLength(1);
+  });
+
+  it('a standing preview alert: the full pass runs every sweep, so a fixed '
+    + "squad's alert clears", async () => {
+    const db = new ColdFakeDb(world2());
+    overByFive(db);
+    const pusher = new FakePusher();
+    for (let n = 0; n < 3; n++) await sweep(db, n, pusher);
+    expect(squadReads(db)).toBe(3);
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).not.toBeNull();
+
+    // The fan fixes the team; no price moved, so only the standing alert
+    // makes the sweep look.
+    t(db).Squads.alpha = fixtureSquad('alpha');
+    await sweep(db, 3, pusher);
+    expect(squadReads(db)).toBe(4);
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toBeNull();
+    await sweep(db, 4, pusher);
+    expect(squadReads(db)).toBe(4); // nothing standing any more: stood down
+  });
+
+  it('a new gameweek always runs the full pass; a matching stamp for this '
+    + 'week does not', async () => {
+    const lastWeek = new ColdFakeDb(world2());
+    t(lastWeek).SquadAlertsCheck = stamp(lastWeek, 1); // same prices, GW1
+    await sweep(lastWeek, 0);
+    expect(squadReads(lastWeek)).toBe(1);
+    expect(await lastWeek.read(CHECK)).toEqual(stamp(lastWeek, 2));
+
+    const current = new ColdFakeDb(world2());
+    t(current).SquadAlertsCheck = stamp(current, 2);
+    await sweep(current, 0);
+    expect(squadReads(current)).toBe(0);
+  });
+
+  it('a stale or malformed stamp runs the full pass and is replaced', async () => {
+    for (const bad of [
+      { Gw: 2, PricesHash: 'not-the-prices' }, { Gw: 2 }, { PricesHash: 'x' },
+      'garbage', 7,
+    ]) {
+      const db = new ColdFakeDb(world2());
+      t(db).SquadAlertsCheck = bad;
+      await sweep(db, 0);
+      expect(squadReads(db), JSON.stringify(bad)).toBe(1);
+      expect(await db.read(CHECK), JSON.stringify(bad)).toEqual(stamp(db));
+    }
+  });
+
+  it('only a PREVIEW alert forces the pass: an Invalid or position alert '
+    + 'does not', async () => {
+    const standing = [
+      { Gw: 1, Kind: 'invalid', Issues: ['overBudget'], CreatedAt: 5 },
+      { Gw: 2, Changes: [{ player: 'Wren', from: 'ATT', to: 'DEF' }], CreatedAt: 6 },
+    ];
+    for (const alert of standing) {
+      const db = new ColdFakeDb(world2());
+      t(db).SquadAlertsCheck = stamp(db);
+      t(db).SquadAlerts = { alpha: clone(alert) };
+      await sweep(db, 0, new FakePusher());
+      expect(squadReads(db), JSON.stringify(alert)).toBe(0);
+      expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toEqual(alert);
+    }
+  });
+
+  it('a pass that throws does not stamp: the next sweep retries it', async () => {
+    const db = new FlakyDb(world2());
+    overByFive(db);
+    db.failRead = `${F_ROOT}/PreviewPushed/2`;
+    const pusher = new FakePusher();
+    await sweep(db, 0, pusher);
+    expect(squadReads(db)).toBe(1);
+    expect(await db.read(CHECK)).toBeNull();
+
+    db.failRead = null;
+    await sweep(db, 1, pusher);
+    expect(squadReads(db)).toBe(2);
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).not.toBeNull();
+    expect(await db.read(CHECK)).toEqual(stamp(db));
+    expect(pusher.sends.flat().filter((m) => m.uid === 'alpha'
+      && m.title === 'Your fantasy team is over budget')).toHaveLength(1);
+  });
+
+  it("one manager's failed write is retried too: no stamp until every "
+    + 'manager was handled', async () => {
+    const db = new FlakyDb(world2());
+    overByFive(db);
+    db.failWrite = `${F_ROOT}/SquadAlerts/alpha`;
+    await sweep(db, 0, new FakePusher());
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toBeNull();
+    expect(await db.read(CHECK)).toBeNull();
+
+    db.failWrite = null; // alpha has no standing alert and prices did not move
+    await sweep(db, 1, new FakePusher());
+    expect(squadReads(db)).toBe(2);
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).not.toBeNull();
+    expect(await db.read(CHECK)).toEqual(stamp(db));
   });
 });
 

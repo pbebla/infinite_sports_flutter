@@ -269,6 +269,7 @@
 // auto-publish and the lost-settle heal. Any of those conditions failing
 // (the owner un-marks Finished, a week is rewound) = the full sweep again.
 
+import { createHash } from 'crypto';
 import {
   configFromMap, FANTASY_POSITIONS, FantasyConfig,
 } from './fantasy_config';
@@ -449,6 +450,9 @@ async function effectiveSquadAfterWeek(
  *  source the fan app shows; squad_integrity.ts baselineRealizedFor). */
 async function loadIntegrityInputs(
   db: FantasyDb, root: string, uids: string[], gw: number,
+  /** A Players node the caller already read (null = read and absent): used
+   *  as the market instead of reading it again. */
+  playersNode?: unknown,
 ): Promise<IntegrityInputs> {
   const previousByUid: Record<string, unknown> = {};
   const baselineRealizedByUid: Record<string, number> = {};
@@ -461,7 +465,8 @@ async function loadIntegrityInputs(
     }
   }
   return {
-    market: integrityMarketOf(await db.read(`${root}/Players`)),
+    market: integrityMarketOf(playersNode !== undefined
+      ? playersNode : await db.read(`${root}/Players`)),
     previousByUid,
     previousWeekPrices: gw > 1
       ? priceSnapshotOf(await db.read(`${root}/PriceHistory/${gw - 1}`)) : {},
@@ -594,6 +599,26 @@ function hasKey(m: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(m, key);
 }
 
+/** The market's price fingerprint (scale fixes D8): the sha1 hex of the
+ *  sorted `name:priceTenths` lines (joined with "\n") of every Players entry
+ *  that carries a numeric priceTenths — the one input of the over-budget
+ *  preview that moves between sweeps. Key order never matters; any price
+ *  change, a listing added or removed, changes it. Everything else on a
+ *  player (position, eligibility, team) is ignored, as are entries with no
+ *  numeric price. A missing or malformed node fingerprints as the empty
+ *  market. */
+export function pricesFingerprint(playersNode: unknown): string {
+  const lines: string[] = [];
+  for (const [name, player] of childEntries(playersNode)) {
+    if (!isPlainMap(player)) continue;
+    const tenths = player['priceTenths'];
+    if (typeof tenths === 'number' && Number.isFinite(tenths)) {
+      lines.push(`${name}:${tenths}`);
+    }
+  }
+  return createHash('sha1').update(lines.sort().join('\n')).digest('hex');
+}
+
 /** Sweep step 3c — THE OVER-BUDGET PREVIEW (FPL selling, spec §4; the
  *  contract lives in squad_integrity.ts): while gameweek [gw] is open,
  *  re-judge every saved squad with the inputs its lock will use
@@ -609,7 +634,15 @@ function hasKey(m: Record<string, unknown>, key: string): boolean {
  *    more) → a standing preview is cleared;
  *  - an Invalid or position-change alert in the slot wins: that manager is
  *    skipped (no write, no push) and re-checked by every later sweep.
- *  One manager's failure is logged and never stops the others. */
+ *  One manager's failure is logged and never stops the others.
+ *
+ *  THE GATE (scale fixes D8): the pass above reads the whole Squads node, so
+ *  a sweep runs it only when the market's prices differ from the ones
+ *  stamped by the last full pass of this gameweek (<root>/SquadAlertsCheck =
+ *  {Gw, PricesHash}; pricesFingerprint) or any preview alert is standing
+ *  (re-judged every sweep so a fixed squad's alert clears). The stamp is
+ *  written after a pass that handled every manager — a pass that throws, or
+ *  one manager's failed write, leaves it for the next sweep to retry. */
 async function previewOverBudget(
   db: FantasyDb, root: string, cfg: FantasyConfig,
   args: {
@@ -619,17 +652,42 @@ async function previewOverBudget(
   log: FantasyLogger, ctx: Record<string, unknown>,
 ): Promise<void> {
   const { gw, nowMs, pusher } = args;
-  const squads = mapChildren(await db.read(`${root}/Squads`));
+  // THE GATE (scale fixes D8): the full pass reads every saved squad, so it
+  // runs only when something it judges may have moved — the market's prices
+  // (the fingerprint differs from the one stamped after the last full pass,
+  // or no pass of this gameweek ran yet) — or a preview alert is standing
+  // (a fixed squad's alert must clear, so it is re-judged every sweep). The
+  // three reads below (SquadAlerts, Players, the stamp) are all small.
   const alertsNode = await db.read(`${root}/SquadAlerts`);
   const alerts: Record<string, unknown> = isPlainMap(alertsNode) ? alertsNode : {};
+  const playersNode = await db.read(`${root}/Players`);
+  const pricesHash = pricesFingerprint(playersNode);
+  const stored = await db.read(`${root}/SquadAlertsCheck`);
+  const stamped = isPlainMap(stored) && stored['Gw'] === gw &&
+    stored['PricesHash'] === pricesHash;
+  const standingPreview = Object.values(alerts).some(isPreviewAlert);
+  if (stamped && !standingPreview) return;
+  // The stamp is written only after a pass that handled every manager, with
+  // the very prices it judged (Players is read once above): a pass that
+  // throws, or one manager whose write failed, leaves the old stamp so the
+  // next sweep retries.
+  const stampPass = async (): Promise<void> => {
+    if (stamped) return; // a standing-preview pass at unchanged prices
+    await db.write(`${root}/SquadAlertsCheck`, { Gw: gw, PricesHash: pricesHash });
+  };
+  const squads = mapChildren(await db.read(`${root}/Squads`));
   // Every saved squad, plus every standing preview (a squad deleted since
   // the preview was written still has it cleared).
   const uids = new Set(Object.keys(squads));
   for (const [uid, node] of Object.entries(alerts)) {
     if (isPreviewAlert(node)) uids.add(uid);
   }
-  if (uids.size === 0) return;
-  const inputs = await loadIntegrityInputs(db, root, Object.keys(squads), gw);
+  if (uids.size === 0) {
+    await stampPass();
+    return;
+  }
+  const inputs = await loadIntegrityInputs(
+    db, root, Object.keys(squads), gw, playersNode);
   const claimsNode = pusher ? await db.read(`${root}/PreviewPushed/${gw}`) : null;
   const claimed: Record<string, unknown> = isPlainMap(claimsNode) ? claimsNode : {};
   const deadline = formatDeadlineInstant(args.lockUtcMs);
@@ -637,6 +695,7 @@ async function previewOverBudget(
   let alerted = 0;
   let cleared = 0;
   let pushed = 0;
+  let failed = 0;
   for (const uid of [...uids].sort()) {
     const path = `${root}/SquadAlerts/${uid}`;
     try {
@@ -667,6 +726,7 @@ async function previewOverBudget(
         body: overBudgetPreviewBody(over, deadline), data,
       }]);
     } catch (err) {
+      failed++;
       log.warn('fantasy preview: over-budget check failed for one manager — ' +
         'the others go on', { ...ctx, gw, uid, error: String(err) });
     }
@@ -675,6 +735,7 @@ async function previewOverBudget(
     log.info('fantasy preview: over-budget alerts settled',
       { ...ctx, gw, alerted, cleared, pushed });
   }
+  if (failed === 0) await stampPass();
 }
 
 /** Chips are ONE-WEEK (S15 rehearsal Bug 2, owner decision 2026-10-28):

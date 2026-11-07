@@ -253,8 +253,10 @@ describe('the sweep and the reprice never read whole season nodes', () => {
     expect(db.reads).not.toContain('read:Fantasy');
     expect(db.reads).not.toContain(`read:${F_ROOT}/History`);
     expect(db.reads.some((r) => r === `keys:${F_ROOT}/History`)).toBe(false);
-    // Only the starter catalog was written; the open week needed nothing.
-    expect(db.writes.every((p) => p.startsWith('Fantasy/BadgeCatalog/'))).toBe(true);
+    // Only the starter catalog and the first over-budget pass's stamp
+    // (scale fixes D8) were written; the open week needed nothing else.
+    expect(db.writes.every((p) => p.startsWith('Fantasy/BadgeCatalog/') ||
+      p === `${F_ROOT}/SquadAlertsCheck`)).toBe(true);
   });
 
   it('runLifecycleSweep: writes the same data as with a db that cannot list keys', async () => {
