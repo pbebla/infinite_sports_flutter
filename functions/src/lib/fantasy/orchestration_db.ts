@@ -276,9 +276,10 @@ export async function isTestFillSeason(db: FantasyDb, root: string): Promise<boo
  *  answers from this one number instead of reading every badge of the
  *  season. It is a bare number — a scalar leaf — so ask `(await db.read(path))
  *  != null`, NEVER `db.exists(path)` (a map-node test: false for a number in
- *  production). Written set-if-absent when settle finds or creates an auto
- *  season award (or has no season badge to award); deleted whenever a
- *  re-settle takes season awards away. */
+ *  production). Written set-if-absent at the end of every completed settle
+ *  (one that ends with zero season awards included) and when the sweep finds
+ *  an auto season award without it; deleted whenever a re-settle takes
+ *  season awards away. */
 export const SEASON_BADGES_SETTLED_NODE = 'SeasonBadgesSettledAt';
 
 /** One `Voided/<gw>` leaf: ONLY a literal boolean true voids the week (the

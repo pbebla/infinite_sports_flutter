@@ -964,7 +964,7 @@ describe('season-end marker (Fantasy/<sport>/<season>/SeasonBadgesSettledAt, D6)
     expect(await db.read(MARKER)).toBe(AFTER_LOCK2.getTime());
   });
 
-  it('a rerun with unchanged scores writes nothing, the marker included (it keeps its first instant)', async () => {
+  it('a rerun with unchanged scores does not rewrite the marker (it keeps its first instant)', async () => {
     const db = settledWorld();
     await finalizeGw2(db);
     db.writes = [];
@@ -989,7 +989,7 @@ describe('season-end marker (Fantasy/<sport>/<season>/SeasonBadgesSettledAt, D6)
     expect(await db.read(`${B}/boost/thirdPlace_season`)).not.toBeNull();
   });
 
-  it('if the removals crash midway the marker is already gone (nothing vouches for a half-settle)', async () => {
+  it('if a removal write fails mid-settle, the marker was already deleted (the failure is only logged)', async () => {
     class Crashing extends FakeDb {
       armed = false;
       async write(path: string, value: unknown): Promise<void> {
@@ -1028,6 +1028,29 @@ describe('season-end marker (Fantasy/<sport>/<season>/SeasonBadgesSettledAt, D6)
     })).toEqual({ written: 0, removed: 1 });
     expect(db.writes).not.toContain(MARKER);
     expect(await db.read(MARKER)).toBe(123);
+  });
+
+  it('a Finished season whose settle awards nobody still gets the marker, and the next sweep reads no Badges/History', async () => {
+    const data = world2();
+    data.Futsal['15'].Finished = true;
+    // Ever Present off, and no Overall board to rank: every gameweek is
+    // finalized and the full settle runs, but nobody earns a season award.
+    data.Fantasy.BadgeCatalog = { everPresent: { ...STARTER_CATALOG.everPresent, Active: false } };
+    const db = new FakeDb(data);
+    await finalizeGw2(db);
+    await db.write(`${F_ROOT}/Leaderboards/Overall`, null);
+    await db.write(MARKER, null);
+    db.writes = [];
+    expect(await settleSeasonBadges(db, finalizeArgs(db))).toBe('settled');
+    expect(JSON.stringify(await db.read(B))).not.toContain('_season'); // zero season awards
+    expect(await db.read(MARKER)).toBe(AFTER_LOCK2.getTime());
+    db.reads = [];
+    db.writes = [];
+    expect(await settleSeasonBadges(db, sweepArgs(db))).toBe('alreadySettled');
+    expect(db.reads).toEqual([
+      `read:${F_ROOT}/TestFill`, 'read:Futsal/15/Finished', `read:${MARKER}`,
+    ]);
+    expect(db.writes).toEqual([]);
   });
 
   it('every season badge switched off: the season is settled (nothing to award) and marked', async () => {
