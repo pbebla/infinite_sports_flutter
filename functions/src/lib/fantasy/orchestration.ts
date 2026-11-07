@@ -633,16 +633,21 @@ export function pricesFingerprint(playersNode: unknown): string {
  *  - otherwise (clean, forged-but-not-over, malformed, or no squad any
  *    more) → a standing preview is cleared;
  *  - an Invalid or position-change alert in the slot wins: that manager is
- *    skipped (no write, no push) and re-checked by every later sweep.
+ *    skipped (no write, no push) and re-checked on the next full pass (see
+ *    THE GATE: a price or budget change, a standing preview, a new week, or
+ *    a reopened week).
  *  One manager's failure is logged and never stops the others.
  *
  *  THE GATE (scale fixes D8): the pass above reads the whole Squads node, so
- *  a sweep runs it only when the market's prices differ from the ones
- *  stamped by the last full pass of this gameweek (<root>/SquadAlertsCheck =
- *  {Gw, PricesHash}; pricesFingerprint) or any preview alert is standing
- *  (re-judged every sweep so a fixed squad's alert clears). The stamp is
- *  written after a pass that handled every manager — a pass that throws, or
- *  one manager's failed write, leaves it for the next sweep to retry. */
+ *  a sweep runs it only when the market's prices or the budget differ from
+ *  the ones stamped by the last full pass of this gameweek
+ *  (<root>/SquadAlertsCheck = {Gw, PricesHash, BudgetTenths};
+ *  pricesFingerprint; an older stamp without BudgetTenths never matches) or
+ *  any preview alert is standing (re-judged every sweep so a fixed squad's
+ *  alert clears). The stamp is written after a pass that handled every
+ *  manager — a pass that throws, or one manager's failed write, leaves it
+ *  for the next sweep to retry. A rewind of the week removes it
+ *  (schedule_rewind.ts), so the reopened week runs one full pass. */
 async function previewOverBudget(
   db: FantasyDb, root: string, cfg: FantasyConfig,
   args: {
@@ -654,17 +659,19 @@ async function previewOverBudget(
   const { gw, nowMs, pusher } = args;
   // THE GATE (scale fixes D8): the full pass reads every saved squad, so it
   // runs only when something it judges may have moved — the market's prices
-  // (the fingerprint differs from the one stamped after the last full pass,
-  // or no pass of this gameweek ran yet) — or a preview alert is standing
-  // (a fixed squad's alert must clear, so it is re-judged every sweep). The
-  // three reads below (SquadAlerts, Players, the stamp) are all small.
+  // or the budget (they differ from the ones stamped after the last full
+  // pass, or no pass of this gameweek ran yet) — or a preview alert is
+  // standing (a fixed squad's alert must clear, so it is re-judged every
+  // sweep). The three reads below (SquadAlerts, Players, the stamp) are all
+  // small.
   const alertsNode = await db.read(`${root}/SquadAlerts`);
   const alerts: Record<string, unknown> = isPlainMap(alertsNode) ? alertsNode : {};
   const playersNode = await db.read(`${root}/Players`);
   const pricesHash = pricesFingerprint(playersNode);
   const stored = await db.read(`${root}/SquadAlertsCheck`);
   const stamped = isPlainMap(stored) && stored['Gw'] === gw &&
-    stored['PricesHash'] === pricesHash;
+    stored['PricesHash'] === pricesHash &&
+    stored['BudgetTenths'] === cfg.budgetTenths;
   const standingPreview = Object.values(alerts).some(isPreviewAlert);
   if (stamped && !standingPreview) return;
   // The stamp is written only after a pass that handled every manager, with
@@ -673,7 +680,9 @@ async function previewOverBudget(
   // next sweep retries.
   const stampPass = async (): Promise<void> => {
     if (stamped) return; // a standing-preview pass at unchanged prices
-    await db.write(`${root}/SquadAlertsCheck`, { Gw: gw, PricesHash: pricesHash });
+    await db.write(`${root}/SquadAlertsCheck`, {
+      Gw: gw, PricesHash: pricesHash, BudgetTenths: cfg.budgetTenths,
+    });
   };
   const squads = mapChildren(await db.read(`${root}/Squads`));
   // Every saved squad, plus every standing preview (a squad deleted since

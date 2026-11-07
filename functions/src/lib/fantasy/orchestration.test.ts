@@ -2002,8 +2002,8 @@ describe('over-budget preview re-checks squads only after a price move (scale fi
   const SQUADS = `read:${F_ROOT}/Squads`;
   const CHECK = `${F_ROOT}/SquadAlertsCheck`;
   const squadReads = (db: ColdFakeDb) => db.reads.filter((r) => r === SQUADS).length;
-  const stamp = (db: ColdFakeDb, gw = 2) =>
-    ({ Gw: gw, PricesHash: pricesFingerprint(t(db).Players) });
+  const stamp = (db: ColdFakeDb, gw = 2, budget = 500) =>
+    ({ Gw: gw, PricesHash: pricesFingerprint(t(db).Players), BudgetTenths: budget });
   /** alpha spends the whole 500 on Bea (70), then Bea rises to 75: over by 5. */
   const overByFive = (db: ColdFakeDb) => {
     t(db).Squads.alpha.picks[2] =
@@ -2105,10 +2105,49 @@ describe('over-budget preview re-checks squads only after a price move (scale fi
     expect(squadReads(current)).toBe(0);
   });
 
+  it('the budget is part of the stamp: same prices, a lowered budget runs the '
+    + 'full pass and the preview follows it', async () => {
+    const db = new ColdFakeDb(world2());
+    const pusher = new FakePusher();
+    await sweep(db, 0, pusher);
+    await sweep(db, 1, pusher);
+    expect(squadReads(db)).toBe(1);
+    expect(await db.read(CHECK)).toEqual(stamp(db, 2, 500));
+
+    // alpha's team costs 480: fine at 500, 10 over at 470. Prices did not move.
+    t(db).Config.budgetTenths = 470;
+    await sweep(db, 2, pusher);
+    expect(squadReads(db)).toBe(2);
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toMatchObject({
+      Gw: 2, Kind: 'preview', Issues: ['overBudget'], OverTenths: 10,
+    });
+    expect(await db.read(CHECK)).toEqual(stamp(db, 2, 470));
+    // Raising it back is a budget change too: the pass runs, clears alpha's
+    // alert, and the sweep after that stands down again.
+    t(db).Config.budgetTenths = 500;
+    await sweep(db, 3, pusher);
+    expect(squadReads(db)).toBe(3);
+    expect(await db.read(`${F_ROOT}/SquadAlerts/alpha`)).toBeNull();
+    expect(await db.read(CHECK)).toEqual(stamp(db, 2, 500));
+    await sweep(db, 4, pusher);
+    expect(squadReads(db)).toBe(3);
+  });
+
+  it('a stamp from before the budget was stored (no BudgetTenths) runs the '
+    + 'full pass', async () => {
+    const db = new ColdFakeDb(world2());
+    t(db).SquadAlertsCheck = {
+      Gw: 2, PricesHash: pricesFingerprint(t(db).Players),
+    };
+    await sweep(db, 0);
+    expect(squadReads(db)).toBe(1);
+    expect(await db.read(CHECK)).toEqual(stamp(db));
+  });
+
   it('a stale or malformed stamp runs the full pass and is replaced', async () => {
     for (const bad of [
-      { Gw: 2, PricesHash: 'not-the-prices' }, { Gw: 2 }, { PricesHash: 'x' },
-      'garbage', 7,
+      { Gw: 2, PricesHash: 'not-the-prices', BudgetTenths: 500 }, { Gw: 2 },
+      { PricesHash: 'x' }, 'garbage', 7,
     ]) {
       const db = new ColdFakeDb(world2());
       t(db).SquadAlertsCheck = bad;

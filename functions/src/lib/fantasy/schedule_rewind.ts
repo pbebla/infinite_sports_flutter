@@ -49,7 +49,9 @@
 //      reopened week's lock).
 //   2. Live removed when Live/Meta.Gw == L; LiveBase/L removed.
 //   3. SquadAlerts/<uid> removed where Gw == L and Kind == 'invalid' (the
-//      lock judge's verdict; any other alert is left).
+//      lock judge's verdict; any other alert is left), and SquadAlertsCheck
+//      (the over-budget preview's stamp — scale fixes D8) removed, so the
+//      reopened week runs one full preview pass.
 //   5. [M3] Every Baselines/<uid>: restoreBaselineAfterRewind in one
 //      transaction (the lock-time Prev stash put back exactly).
 //      Then History/L is re-read once more — a belt-and-braces check kept
@@ -450,6 +452,10 @@ export async function rewindCancelledWeek(
       return isWeekInvalidAlert(cur, n) ? null : undefined;
     });
   }
+  // 3b. The over-budget preview's stamp (scale fixes D8): the reopened week
+  //     must run one full preview pass, whatever stamp an earlier pass of
+  //     week n left (the Invalid verdicts just removed were its lock's).
+  await db.write(`${root}/SquadAlertsCheck`, null);
   // 5. [M3] The money baselines, exactly as before the lock.
   for (const [uid, stored] of childEntries(await db.read(`${root}/Baselines`))) {
     if (restoreBaselineAfterRewind(stored, n) === undefined) continue;

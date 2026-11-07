@@ -15,7 +15,8 @@ import { configFromMap } from './fantasy_config';
 import { Gameweek } from './gameweeks';
 import { clone, Json } from './golden_fixture';
 import {
-  FantasyLogger, maybeFinalizeGame, resettleVoidToggle, runLifecycleSweep,
+  FantasyLogger, maybeFinalizeGame, pricesFingerprint, resettleVoidToggle,
+  runLifecycleSweep,
 } from './orchestration';
 import { FantasyPusher, FantasyUserPush, formatDeadlineInstant } from './pushes';
 import {
@@ -238,6 +239,30 @@ describe('the sweep rewinds a called-off week', () => {
     await runLifecycleSweep(db, LATER2, undefined, { pusher });
     expect(db.writes.filter((w) => w.startsWith(`${F_ROOT}/`))).toEqual([]);
     expect(calledOffSends(pusher)).toHaveLength(1);
+  });
+
+  it('[D8] the rewind removes the over-budget preview stamp, so the reopened '
+    + 'week runs one full preview pass', async () => {
+    const stamp = (db: FakeDb) => ({
+      Gw: 2, PricesHash: pricesFingerprint(t(db).Players), BudgetTenths: 500,
+    });
+    // The rewind itself: a stamp left by an earlier open-window pass of GW2
+    // (same prices, same budget) is gone afterwards.
+    const direct = await lockedGw2();
+    t(direct).SquadAlertsCheck = stamp(direct);
+    delete dates(direct)[GW2_DATE];
+    expect(await rewind(direct, LATER)).toBe('rewound');
+    expect(await direct.read(`${F_ROOT}/SquadAlertsCheck`)).toBeNull();
+
+    // Through the sweep: the same sweep's step 3c reads every squad again
+    // (nothing else in it does) and stamps the reopened week.
+    const db = await lockedGw2();
+    t(db).SquadAlertsCheck = stamp(db);
+    delete dates(db)[GW2_DATE];
+    db.reads = [];
+    await runLifecycleSweep(db, LATER);
+    expect(db.reads).toContain(`read:${F_ROOT}/Squads`);
+    expect(await db.read(`${F_ROOT}/SquadAlertsCheck`)).toEqual(stamp(db));
   });
 
   it('[M3] a manager who sat out GW1 and sold players in GW2\'s window gets the '
