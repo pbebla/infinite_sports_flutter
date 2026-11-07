@@ -4,9 +4,10 @@
 // Tatari, the two name-variant clusters).
 import { isDeepStrictEqual } from 'util';
 import { describe, expect, it } from 'vitest';
+import { maskEmail } from '../src/lib/mask_email';
 import {
-  afcUidPath, assertMergePaths, buildMergePlan, fantasyConfigPath, leagueUidPath, MergeCluster,
-  MergeMap, MergeSnapshot, parseRosterUidPath, PlanWrite, playedPath, userPath,
+  afcUidPath, assertMergePaths, buildMergePlan, fantasyConfigPath, leagueUidPath, looksMasked,
+  MergeCluster, MergeMap, MergeSnapshot, parseRosterUidPath, PlanWrite, playedPath, userPath,
 } from './merge_accounts_logic';
 
 const NOW = 1_800_000_000_000;
@@ -22,10 +23,16 @@ class World {
     return this;
   }
 
-  /** A league roster row (uid null = the row exists with no UID). The
-   *  season's fantasy Config is recorded as absent unless fantasy() says so. */
+  /** A league roster row (uid null = the row exists with no UID). Carries
+   *  the row NODE (name rows are read from it) and, when it holds a uid, the
+   *  UID leaf (how old-uid rows are found). The season's fantasy Config is
+   *  recorded as absent unless fantasy() says so. */
   row(sport: string, season: string, team: string, name: string, uid: string | null): this {
-    this.nodes[leagueUidPath(sport, season, team, name)] = uid;
+    const uidPath = leagueUidPath(sport, season, team, name);
+    this.nodes[uidPath.slice(0, -'/UID'.length)] =
+      uid === null ? { Position: 'Forward' } : { UID: uid, Position: 'Forward' };
+    if (uid === null) delete this.nodes[uidPath];
+    else this.nodes[uidPath] = uid;
     const cfg = fantasyConfigPath(sport, season);
     if (!(cfg in this.nodes)) this.nodes[cfg] = null;
     return this;
@@ -66,6 +73,11 @@ function applyTo(snap: MergeSnapshot, writes: PlanWrite[]): MergeSnapshot {
     const m = /^Users\/([^/]+)\/(.+)$/.exec(w.path);
     if (!m) {
       nodes[w.path] = w.after;
+      const rowPath = w.path.slice(0, -'/UID'.length);
+      const row = nodes[rowPath];
+      if (w.path.endsWith('/UID') && row && typeof row === 'object') {
+        (row as Record<string, unknown>)['UID'] = w.after;
+      }
       continue;
     }
     const node = (nodes[userPath(m[1])] ?? {}) as Record<string, unknown>;
@@ -814,15 +826,360 @@ describe('assertMergePaths: the allowlist', () => {
     }
   });
 
-  it('a uid that is both kept and old in the map allows nothing', () => {
+  it('a uid that is both kept and old in the map allows nothing (the map itself is refused)', () => {
     const m = mapOf(cluster({ keep: 'dup', old: ['dup'] }));
     const s = new World().user('dup').hint('dup').snap();
-    expect(() => assertMergePaths([w('Users/dup/MergedInto', null, 'dup')], m, s)).toThrow(/Refusing merge path/);
+    expect(() => assertMergePaths([w('Users/dup/MergedInto', null, 'dup')], m, s)).toThrow(/Refusing merge map/);
   });
 
   it('every planned write of a bigger fixture still passes after rebuilding with a different clock', () => {
     const plan = buildMergePlan(map(), snap(), NOW + 1);
     expect(() => assertMergePaths(plan.writes, map(), snap())).not.toThrow();
     expect(plan.writes.every((x) => !isDeepStrictEqual(x.before, x.after))).toBe(true);
+  });
+});
+
+// ===================================================================
+// Fix round 1 (controller rulings 1-6 on the Task 4 review)
+// ===================================================================
+
+describe('fix 1: exact stamp before-values; only absent/null counts as missing', () => {
+  const stampWorld = (oldFields: Record<string, unknown>) => {
+    const w = new World().user('k').user('o', { 'First Name': 'O', ...oldFields }).hint('k');
+    w.row('Futsal', '9', 'Wolves', 'Ann A', 'o');
+    return w;
+  };
+  const planFor = (oldFields: Record<string, unknown>) =>
+    buildMergePlan(mapOf(cluster({ who: 'Ann A', keep: 'k', old: ['o'] })), stampWorld(oldFields).snap(), NOW);
+
+  it('a fresh old account gets the three stamps with before null', () => {
+    const stamps = planFor({}).writes.filter((x) => x.path.startsWith('Users/o/'));
+    expect(stamps).toEqual([
+      { path: 'Users/o/MergedInto', before: null, after: 'k' },
+      { path: 'Users/o/MergedAt', before: null, after: NOW },
+      { path: 'Users/o/MergedHint', before: null, after: HINT },
+    ]);
+  });
+
+  it('non-empty existing stamps count as already stamped and are left alone', () => {
+    const plan = planFor({ MergedInto: 'k', MergedAt: 123, MergedHint: 'zz••@old.example' });
+    expect(plan.refusals).toEqual([]);
+    expect(paths(plan.writes).filter((p) => p.startsWith('Users/o/'))).toEqual([]);
+  });
+
+  it('a blank or non-string stamp value refuses the cluster with a plain reason', () => {
+    const bad: Array<Record<string, unknown>> = [
+      { MergedInto: '' }, { MergedInto: '   ' }, { MergedInto: 5 }, { MergedInto: { a: 1 } },
+      { MergedAt: '' }, { MergedAt: '1800000000000' }, { MergedAt: 0 }, { MergedAt: -4 }, { MergedAt: { a: 1 } },
+      { MergedHint: '' }, { MergedHint: '  ' }, { MergedHint: 7 }, { MergedHint: ['x'] },
+    ];
+    for (const fields of bad) {
+      const plan = planFor(fields);
+      expect(plan.writes, JSON.stringify(fields)).toEqual([]);
+      expect(plan.refusals, JSON.stringify(fields)).toHaveLength(1);
+      expect(plan.refusals[0].why).toMatch(/unexpected (MergedInto|MergedAt|MergedHint) value/);
+    }
+  });
+
+  it('a stamp over a blank value is never allowlisted (before must still be empty)', () => {
+    const s = stampWorld({ MergedHint: '' }).snap();
+    const m = mapOf(cluster({ who: 'Ann A', keep: 'k', old: ['o'] }));
+    expect(() => assertMergePaths([{ path: 'Users/o/MergedHint', before: '', after: HINT }], m, s)).toThrow(/Refusing merge path/);
+  });
+});
+
+describe('fix 2: looksMasked is exactly what maskEmail produces', () => {
+  it('every maskEmail output of a valid email passes', () => {
+    const emails = [
+      'carlo11rocks@gmail.com', 'ab@x.org', 'a@x.org', 'abc@x.org', 'abcd@x.org',
+      'abcdefghij@x.org', 'abcdefghijk@x.org', 'jo@Mail.Example.CO.uk', '😀😀😀😀@x.org',
+      '@x.org', 'first.last+tag@sub.domain.co.uk', 'x_y-z@a.b',
+    ];
+    for (const e of emails) {
+      const hint = maskEmail(e);
+      expect(looksMasked(hint), hint).toBe(true);
+    }
+  });
+
+  it('a raw email, an over-long visible part, too many bullets or a bad shape fails', () => {
+    for (const bad of [
+      'carlo11rocks@gmail.com', 'carlo11rocks•@gmail.com', 'carlo•@gmail.com', 'ab@x.org', 'a@x.org',
+      '•••••••••@x.org', 'ca•••••••••@x.org', 'ca••@', 'ca••@x@y.org', 'ca••@x y.org', ' ca••@x.org',
+      '••••••', 'ca••@x.org\n', 'c•a••@x.org', '', 'ca••••••••', 42, null, undefined, {},
+    ]) {
+      expect(looksMasked(bad), String(bad)).toBe(false);
+    }
+  });
+
+  it('the planner refuses an almost-masked hint', () => {
+    const w = new World().user('k').user('o').hint('k', 'carlo11rocks•@gmail.com');
+    const plan = buildMergePlan(mapOf(cluster({ keep: 'k', old: ['o'] })), w.snap(), NOW);
+    expect(plan.writes).toEqual([]);
+    expect(plan.refusals[0].why).toMatch(/not masked/);
+  });
+});
+
+describe('fix 3: the summary says what will actually happen', () => {
+  const playedLines = (summary: string[]) => summary.filter((l) => /seasons played/.test(l));
+
+  it('one seasons-played line per planned Played write, naming the season and team', () => {
+    const plan = buildMergePlan(hiramMap(), hiramWorld().snap(), NOW);
+    const lines = playedLines(plan.summary);
+    expect(lines).toHaveLength(4);
+    expect(lines.join('\n')).toMatch(/Futsal Season 11 \(Nineveh\)/);
+    expect(plan.summary.filter((l) => /relink/.test(l))).toHaveLength(4);
+    expect(plan.summary.filter((l) => /relink/.test(l)).some((l) => /seasons played/.test(l))).toBe(false);
+  });
+
+  it('no seasons-played line when the kept account already has that team', () => {
+    const w = new World().user('k', { Played: { Futsal: { 'Season 9': 'Wolves' } } }).user('o').hint('k');
+    w.row('Futsal', '9', 'Wolves', 'Ann A', 'o');
+    const plan = buildMergePlan(mapOf(cluster({ keep: 'k', old: ['o'] })), w.snap(), NOW);
+    expect(plan.summary.some((l) => /relink Futsal Season 9, Wolves, "Ann A"/.test(l))).toBe(true);
+    expect(playedLines(plan.summary)).toEqual([]);
+  });
+
+  it('two old rows in one season on the same team: two relinks, ONE seasons-played line', () => {
+    const w = new World().user('k').user('o1').user('o2').hint('k');
+    w.row('Futsal', '9', 'Wolves', 'Ann A', 'o1');
+    w.row('Futsal', '9', 'Wolves', 'Ann Alt', 'o2');
+    const plan = buildMergePlan(mapOf(cluster({ keep: 'k', old: ['o1', 'o2'] })), w.snap(), NOW);
+    expect(plan.refusals).toEqual([]);
+    expect(plan.summary.filter((l) => /relink/.test(l))).toHaveLength(2);
+    expect(playedLines(plan.summary)).toHaveLength(1);
+    expect(plan.writes.filter((x) => x.path.includes('/Played/'))).toHaveLength(1);
+  });
+
+  it('AFC rows never claim a seasons-played entry', () => {
+    const w = new World().user('k').user('o').hint('k').afc('Spring 2025', 'Carlo G', 'o');
+    const plan = buildMergePlan(mapOf(cluster({ keep: 'k', old: ['o'] })), w.snap(), NOW);
+    expect(plan.summary.some((l) => /relink AFC San Jose "Spring 2025", "Carlo G"/.test(l))).toBe(true);
+    expect(playedLines(plan.summary)).toEqual([]);
+  });
+
+  it('an already-merged or refused cluster mentions no seasons played', () => {
+    const refused = new World().user('k', { Played: { Futsal: { 'Season 9': 'Rams' } } }).user('o').hint('k');
+    refused.row('Futsal', '9', 'Wolves', 'Ann A', 'o');
+    const plan = buildMergePlan(mapOf(cluster({ keep: 'k', old: ['o'] })), refused.snap(), NOW);
+    expect(playedLines(plan.summary)).toEqual([]);
+  });
+});
+
+describe('fix 4: name rows are read from the row NODE', () => {
+  const row = { sport: 'Futsal', season: '10', team: 'Nineveh', name: 'Robben Tatari' };
+  const rowNodePath = 'Futsal/10/Line Ups/Nineveh/Robben Tatari';
+  const m = () => mapOf(cluster({ who: 'Roben Tatari', keep: 'keepR', old: [], nameRows: [row] }));
+  const base = () => new World().user('keepR', { 'First Name': 'Roben' }).hint('keepR');
+
+  it('refuses when only the UID leaf is in the snapshot (the row node is absent)', () => {
+    const w = base();
+    w.nodes[leagueUidPath('Futsal', '10', 'Nineveh', 'Robben Tatari')] = null;
+    w.nodes[fantasyConfigPath('Futsal', '10')] = null;
+    const plan = buildMergePlan(m(), w.snap(), NOW);
+    expect(plan.writes).toEqual([]);
+    expect(plan.refusals).toHaveLength(1);
+    expect(plan.refusals[0].why).toMatch(/not found/);
+    expect(plan.refusals[0].why).toContain('Robben Tatari');
+  });
+
+  it('refuses when the row node is not a map', () => {
+    for (const bad of ['oops', 5, true, ['UID'], null]) {
+      const w = base();
+      w.row('Futsal', '10', 'Nineveh', 'Robben Tatari', null);
+      w.nodes[rowNodePath] = bad;
+      const plan = buildMergePlan(m(), w.snap(), NOW);
+      expect(plan.writes, JSON.stringify(bad)).toEqual([]);
+      expect(plan.refusals[0].why).toMatch(/not found/);
+    }
+  });
+
+  it('the relink write stays the UID leaf and its before is row.UID ?? null', () => {
+    const w = base();
+    w.row('Futsal', '10', 'Nineveh', 'Robben Tatari', null);
+    const none = buildMergePlan(m(), w.snap(), NOW);
+    expect(none.writes.find((x) => x.path.endsWith('/UID'))).toEqual({
+      path: `${rowNodePath}/UID`, before: null, after: 'keepR',
+    });
+    w.nodes[rowNodePath] = { UID: '', Position: 'Forward' };
+    const blank = buildMergePlan(m(), w.snap(), NOW);
+    expect(blank.writes.find((x) => x.path.endsWith('/UID'))).toEqual({
+      path: `${rowNodePath}/UID`, before: '', after: 'keepR',
+    });
+    expect(() => assertMergePaths(blank.writes, m(), w.snap())).not.toThrow();
+  });
+
+  it('a row node holding a third uid is refused even if the leaf key is absent', () => {
+    const w = base();
+    w.nodes[rowNodePath] = { UID: 'someoneNew' };
+    w.nodes[fantasyConfigPath('Futsal', '10')] = null;
+    const plan = buildMergePlan(m(), w.snap(), NOW);
+    expect(plan.writes).toEqual([]);
+    expect(plan.refusals[0].why).toMatch(/different account/);
+  });
+
+  it('a snapshot whose row node and UID leaf disagree is refused', () => {
+    const w = base();
+    w.row('Futsal', '10', 'Nineveh', 'Robben Tatari', null);
+    w.nodes[leagueUidPath('Futsal', '10', 'Nineveh', 'Robben Tatari')] = 'oldX';
+    const plan = buildMergePlan(m(), w.snap(), NOW);
+    expect(plan.writes).toEqual([]);
+    expect(plan.refusals[0].why).toMatch(/disagrees/);
+  });
+
+  it('assertMergePaths also needs the row node, and rejects a row/leaf disagreement', () => {
+    const w = base();
+    w.row('Futsal', '10', 'Nineveh', 'Robben Tatari', null);
+    const plan = buildMergePlan(m(), w.snap(), NOW);
+    expect(() => assertMergePaths(plan.writes, m(), w.snap())).not.toThrow();
+    const noRow = w.snap();
+    delete noRow.nodes[rowNodePath];
+    expect(() => assertMergePaths(plan.writes, m(), noRow)).toThrow(/Refusing merge path/);
+    const split = w.snap();
+    split.nodes[`${rowNodePath}/UID`] = 'oldX';
+    expect(() => assertMergePaths(plan.writes, m(), split)).toThrow(/disagrees|snapshot/);
+  });
+});
+
+describe('fix 5: assertMergePaths validates the map it is given', () => {
+  const okCluster = (over: Partial<MergeCluster> = {}) =>
+    cluster({ who: 'A', keep: 'keepA', old: ['oldA'], ...over });
+  const s = () => new World().user('keepA').user('oldA').hint('keepA').snap();
+  const bad = (m: MergeMap) => expect(() => assertMergePaths([], m, s())).toThrow(/Refusing merge map/);
+
+  it('accepts a sound map (even with no writes)', () => {
+    expect(() => assertMergePaths([], mapOf(okCluster()), s())).not.toThrow();
+    expect(() =>
+      assertMergePaths([], mapOf(okCluster(), cluster({ who: 'B', keep: 'keepB', old: [], firstNameFix: 'Robert' })), s()),
+    ).not.toThrow();
+  });
+
+  it('rejects uids that are not plain database keys', () => {
+    for (const uid of ['', 'a/b', 'a.b', 'a#b', 'a$b', 'a[b', 'a b', 'ünï', 'x'.repeat(200)]) {
+      bad(mapOf(okCluster({ keep: uid })));
+      bad(mapOf(okCluster({ old: [uid] })));
+    }
+    bad(mapOf(okCluster({ old: 'oldA' as unknown as string[] })));
+    bad({ clusters: 'nope' } as unknown as MergeMap);
+  });
+
+  it('rejects a uid in two clusters, listed twice, or as both keep and old', () => {
+    bad(mapOf(okCluster(), cluster({ who: 'B', keep: 'keepB', old: ['oldA'] })));
+    bad(mapOf(okCluster(), cluster({ who: 'B', keep: 'keepA', old: [] })));
+    bad(mapOf(okCluster(), cluster({ who: 'B', keep: 'keepB', old: ['keepA'] })));
+    bad(mapOf(okCluster({ old: ['keepA'] })));
+    bad(mapOf(okCluster({ old: ['oldA', 'oldA'] })));
+  });
+
+  it('rejects more than one cluster with a firstNameFix', () => {
+    bad(mapOf(
+      okCluster({ firstNameFix: 'Robert' }),
+      cluster({ who: 'B', keep: 'keepB', old: [], firstNameFix: 'Roberto' }),
+    ));
+  });
+
+  it('rejects a firstNameFix that is empty or holds / . # $ [ ] (or control characters)', () => {
+    for (const fix of ['', ' ', 'Rob/ert', 'Rob.ert', 'Rob#ert', 'Rob$ert', 'Rob[ert', 'Rob]ert', 'Rob\u0001', 'x'.repeat(50)]) {
+      bad(mapOf(okCluster({ firstNameFix: fix })));
+    }
+  });
+
+  it('rejects a malformed name row', () => {
+    bad(mapOf(okCluster({ nameRows: [{ sport: 'Hockey', season: '1', team: 'T', name: 'N' }] })));
+    bad(mapOf(okCluster({ nameRows: [{ sport: 'Futsal', season: 'x', team: 'T', name: 'N' }] })));
+    bad(mapOf(okCluster({ nameRows: [{ sport: 'Futsal', season: '1', team: 'T/U', name: 'N' }] })));
+    bad(mapOf(okCluster({ nameRows: [{ sport: 'Futsal', season: '1', team: 'T', name: '' }] })));
+  });
+
+  it('a bad map throws even when the writes themselves look fine', () => {
+    const w = hiramWorld();
+    const m = mapOf(
+      cluster({ who: 'Hiram', keep: 'keepH', old: ['oldH'] }),
+      cluster({ who: 'Dup', keep: 'keepZ', old: ['oldH'] }),
+    );
+    const good = buildMergePlan(hiramMap(), w.snap(), NOW);
+    expect(() => assertMergePaths(good.writes, hiramMap(), w.snap())).not.toThrow();
+    expect(() => assertMergePaths(good.writes, m, w.snap())).toThrow(/Refusing merge map/);
+  });
+
+  it('the planner agrees: a firstNameFix with banned characters, or two fixes, is refused', () => {
+    const w = new World().user('k').user('o').user('k2').user('o2').hint('k').hint('k2');
+    const one = buildMergePlan(mapOf(cluster({ keep: 'k', old: ['o'], firstNameFix: 'Rob.ert' })), w.snap(), NOW);
+    expect(one.writes).toEqual([]);
+    expect(one.refusals).toHaveLength(1);
+    const two = buildMergePlan(
+      mapOf(
+        cluster({ who: 'One', keep: 'k', old: ['o'], firstNameFix: 'Robert' }),
+        cluster({ who: 'Two', keep: 'k2', old: ['o2'], firstNameFix: 'Roberto' }),
+      ),
+      w.snap(),
+      NOW,
+    );
+    expect(two.writes).toEqual([]);
+    expect(two.refusals.map((r) => r.who).sort()).toEqual(['One', 'Two']);
+  });
+});
+
+describe('fix 6: a scalar Played / Information parent refuses the cluster (never wiped)', () => {
+  const withKeep = (fields: Record<string, unknown>) => {
+    const w = new World().user('k', { 'First Name': 'K', ...fields }).user('o', {
+      'First Name': 'O', Information: { FutsalPosition: 'Defender' },
+    }).hint('k');
+    w.row('Futsal', '9', 'Wolves', 'Ann A', 'o');
+    return w;
+  };
+  const m = () => mapOf(cluster({ who: 'Ann A', keep: 'k', old: ['o'] }));
+
+  it('Played that exists but is not a map is refused', () => {
+    for (const played of ['x', 5, true, ['a']]) {
+      const plan = buildMergePlan(m(), withKeep({ Played: played, Information: { FutsalPosition: 'Keeper' } }).snap(), NOW);
+      expect(plan.writes, JSON.stringify(played)).toEqual([]);
+      expect(plan.refusals).toHaveLength(1);
+      expect(plan.refusals[0].why).toMatch(/Played/);
+    }
+  });
+
+  it('Played/<Sport> that exists but is not a map is refused', () => {
+    const plan = buildMergePlan(m(), withKeep({ Played: { Futsal: 'x' }, Information: { FutsalPosition: 'Keeper' } }).snap(), NOW);
+    expect(plan.writes).toEqual([]);
+    expect(plan.refusals[0].why).toMatch(/Played.*Futsal|Futsal.*Played/);
+  });
+
+  it('a scalar elsewhere under Played, or null/absent parents, do not refuse', () => {
+    const fine = [{ Played: { Basketball: 'x' } }, { Played: null }, {}, { Played: { Futsal: null } }];
+    for (const f of fine) {
+      const plan = buildMergePlan(m(), withKeep({ ...f, Information: { FutsalPosition: 'Keeper' } }).snap(), NOW);
+      expect(plan.refusals, JSON.stringify(f)).toEqual([]);
+      expect(paths(plan.writes)).toContain('Users/k/Played/Futsal/Season 9');
+    }
+  });
+
+  it('a scalar Played does not matter when no Played write is planned (AFC only)', () => {
+    const w = new World().user('k', { Played: 'x' }).user('o').hint('k').afc('Spring 2025', 'Carlo G', 'o');
+    const plan = buildMergePlan(mapOf(cluster({ keep: 'k', old: ['o'] })), w.snap(), NOW);
+    expect(plan.refusals).toEqual([]);
+    expect(plan.writes).toHaveLength(1 + 3);
+  });
+
+  it('Information that exists but is not a map is refused when there is something to copy', () => {
+    for (const info of ['x', 5, ['a']]) {
+      const plan = buildMergePlan(m(), withKeep({ Information: info }).snap(), NOW);
+      expect(plan.writes, JSON.stringify(info)).toEqual([]);
+      expect(plan.refusals).toHaveLength(1);
+      expect(plan.refusals[0].why).toMatch(/Information/);
+    }
+    const nothing = new World().user('k', { Information: 'x' }).user('o').hint('k');
+    nothing.row('Futsal', '9', 'Wolves', 'Ann A', 'o');
+    expect(buildMergePlan(m(), nothing.snap(), NOW).refusals).toEqual([]);
+  });
+
+  it('assertMergePaths refuses the same writes independently', () => {
+    const relink = { path: 'Futsal/9/Line Ups/Wolves/Ann A/UID', before: 'o', after: 'k' };
+    const played = { path: 'Users/k/Played/Futsal/Season 9', before: null, after: 'Wolves' };
+    for (const fields of [{ Played: 'x' }, { Played: { Futsal: 'x' } }]) {
+      expect(() => assertMergePaths([played, relink], m(), withKeep(fields).snap())).toThrow(/Refusing merge path/);
+    }
+    const info = { path: 'Users/k/Information/FutsalPosition', before: null, after: 'Defender' };
+    expect(() => assertMergePaths([info], m(), withKeep({ Information: 'x' }).snap())).toThrow(/Refusing merge path/);
+    expect(() => assertMergePaths([played, relink, info], m(), withKeep({}).snap())).not.toThrow();
   });
 });

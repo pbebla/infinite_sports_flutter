@@ -21,11 +21,19 @@
 //   `<Sport>/<S>/Line Ups/<team>/<name>/UID` and
 //   `AFC San Jose/Seasons/<S>/Roster/<name>/UID`
 //                                    the UID leaf of every roster row that
-//                                    holds an old uid, plus every row a
-//                                    cluster's nameRows names. For a nameRow:
-//                                    string = linked, null = the row exists
-//                                    with no UID, KEY ABSENT = no such row
-//                                    (refused: a write would create a stray row);
+//                                    holds an old uid (that is how old-uid
+//                                    rows are found);
+//   `<Sport>/<S>/Line Ups/<team>/<name>`
+//                                    the roster row NODE itself (a map) of
+//                                    every row a cluster's nameRows names -
+//                                    READ THE PARENT ROW, not only the leaf.
+//                                    A name row is planned only if this is a
+//                                    map (absent or non-map = "roster row not
+//                                    found": a write would create a stray
+//                                    row); the relink write is still the
+//                                    `.../UID` leaf and its `before` is
+//                                    `row.UID ?? null`. If a UID leaf key is
+//                                    also present it must agree with the row;
 //   `Fantasy/<Sport>/<S>/Config`     for every league season a relink would
 //                                    touch: any non-null value = the Config
 //                                    exists, null = checked and absent, key
@@ -144,15 +152,12 @@ const nonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.l
 /** An absent value or a blank string: the account "lacks" it (D4). */
 const lacks = (v: unknown): boolean => v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
 
-/** A masked hint: one `@`, at least one bullet, no spaces (never a whole email). */
+/** Exactly the shape maskEmail produces: at most 2 visible characters, 1-8
+ *  bullets, one `@`, then a domain with no `@` or whitespace. A raw email
+ *  (no bullet) or `carlo11rocks•@gmail.com` (too much showing) fails. */
+const MASKED_HINT_RE = new RegExp(`^[^@\\s${MASK_BULLET}]{0,2}${MASK_BULLET}{1,8}@[^@\\s]+$`, 'u');
 export function looksMasked(hint: unknown): hint is string {
-  return (
-    typeof hint === 'string' &&
-    hint.length <= 80 &&
-    !/\s/.test(hint) &&
-    hint.includes(MASK_BULLET) &&
-    hint.split('@').length === 2
-  );
+  return typeof hint === 'string' && MASKED_HINT_RE.test(hint);
 }
 
 /** D4: may this Information leaf/value be copied? Scalar values only and
@@ -164,8 +169,14 @@ export function isCopyableInformation(leaf: string, value: unknown): boolean {
   return typeof value === 'boolean';
 }
 
+/** D10's fix value: a plain name - no surrounding spaces, no control
+ *  characters, none of `/ . # $ [ ]`. Shared by the planner and the allowlist. */
 const isValidFirstName = (v: unknown): v is string =>
-  typeof v === 'string' && v.trim() === v && v.length > 0 && v.length <= MAX_FIRST_NAME && !/[\u0000-\u001f\u007f]/.test(v);
+  typeof v === 'string' &&
+  v.trim() === v &&
+  v.length > 0 &&
+  v.length <= MAX_FIRST_NAME &&
+  !/[\u0000-\u001f\u007f/.#$[\]]/.test(v);
 
 function validNameRows(c: MergeCluster, refuse: (why: string) => void): MergeNameRow[] {
   const raw = c.nameRows ?? [];
@@ -190,6 +201,73 @@ function validNameRows(c: MergeCluster, refuse: (why: string) => void): MergeNam
   return rows;
 }
 
+const present = (v: unknown): boolean => v !== undefined && v !== null;
+
+/** Problems that make a whole map unfit to apply (checked independently by
+ *  assertMergePaths, whatever the planner did): every uid a plain database
+ *  key, none used twice (in one cluster or across clusters, as keep or old),
+ *  valid name rows, at most one cluster with a firstNameFix, and that fix a
+ *  plain name. */
+function mapProblems(map: MergeMap): string[] {
+  const out: string[] = [];
+  if (!map || !Array.isArray(map.clusters)) return ['the map has no clusters list'];
+  const firstUse = new Map<string, number>();
+  let fixes = 0;
+  map.clusters.forEach((c, i) => {
+    const tag = `cluster #${i + 1}`;
+    if (!isPlainMap(c)) {
+      out.push(`${tag} is not an object`);
+      return;
+    }
+    const uids: string[] = [];
+    if (isUid(c.keep)) uids.push(c.keep);
+    else out.push(`${tag}: the kept uid is not a valid database key`);
+    if (!Array.isArray(c.old)) out.push(`${tag}: "old" must be a list of uids`);
+    else {
+      for (const o of c.old) {
+        if (isUid(o)) uids.push(o);
+        else out.push(`${tag}: an old uid is not a valid database key`);
+      }
+    }
+    const own = new Set<string>();
+    for (const u of uids) {
+      if (own.has(u)) out.push(`${tag}: a uid is listed twice (or is both kept and old)`);
+      own.add(u);
+    }
+    for (const u of own) {
+      const first = firstUse.get(u);
+      if (first !== undefined) out.push(`${tag}: a uid also appears in cluster #${first + 1}`);
+      else firstUse.set(u, i);
+    }
+    validNameRows(c, (why) => out.push(`${tag}: ${why}`));
+    if (c.firstNameFix !== undefined) {
+      fixes++;
+      if (!isValidFirstName(c.firstNameFix)) out.push(`${tag}: firstNameFix is not a plain name`);
+    }
+  });
+  if (fixes > 1) out.push('more than one cluster has a firstNameFix (D10 allows exactly one)');
+  return out;
+}
+
+const rowPathOf = (uidPath: string): string => uidPath.slice(0, -'/UID'.length);
+
+type RowUid = { kind: 'absent' } | { kind: 'conflict' } | { kind: 'value'; value: unknown };
+
+/** What the snapshot says a roster row's UID is: the row node's `UID` (when
+ *  the row node is a map) and/or the UID leaf key (when present). When both
+ *  are there they must agree, else 'conflict'. */
+function readRowUid(snap: MergeSnapshot, uidPath: string): RowUid {
+  const row = snap.nodes[rowPathOf(uidPath)];
+  const leafPresent = hasOwn(snap.nodes, uidPath);
+  if (!isPlainMap(row) && !leafPresent) return { kind: 'absent' };
+  const fromRow = isPlainMap(row) ? row['UID'] ?? null : undefined;
+  const fromLeaf = leafPresent ? snap.nodes[uidPath] ?? null : undefined;
+  if (fromRow !== undefined && fromLeaf !== undefined && !isDeepStrictEqual(fromRow, fromLeaf)) {
+    return { kind: 'conflict' };
+  }
+  return { kind: 'value', value: fromRow !== undefined ? fromRow : fromLeaf };
+}
+
 // ---------------------------------------------------------------- planner
 
 interface RelinkTarget {
@@ -210,16 +288,21 @@ interface ClusterPlan {
   reasons: string[];
 }
 
+interface MapContext {
+  uidUse: Map<string, number>;
+  fixClusters: number;
+}
+
 function planCluster(
   c: MergeCluster,
   who: string,
   snap: MergeSnapshot,
   nowMs: number,
-  uidUse: Map<string, number>,
+  ctx: MapContext,
 ): ClusterPlan {
   const reasons: string[] = [];
   const refuse = (why: string): void => {
-    reasons.push(why);
+    if (!reasons.includes(why)) reasons.push(why);
   };
   const done = (writes: PlanWrite[] = [], summary: string[] = []): ClusterPlan => ({ writes, summary, reasons });
 
@@ -231,13 +314,18 @@ function planCluster(
   if (olds.some((o) => !isUid(o))) refuse('an old uid is missing or not a valid database key');
   if (new Set(olds).size !== olds.length) refuse('an old uid is listed twice');
   if (olds.includes(keep)) refuse('the kept uid is also listed as old');
-  if ([keep, ...olds].some((u) => (uidUse.get(u) ?? 0) > 1)) {
+  if ([keep, ...olds].some((u) => (ctx.uidUse.get(u) ?? 0) > 1)) {
     refuse('an account in this cluster also appears in another cluster');
   }
   const nameRows = validNameRows(c, refuse);
   const fix = c.firstNameFix;
   if (fix !== undefined && !isValidFirstName(fix)) {
-    refuse(`firstNameFix must be 1-${MAX_FIRST_NAME} printable characters with no surrounding spaces`);
+    refuse(
+      `firstNameFix must be 1-${MAX_FIRST_NAME} characters, no surrounding spaces and none of / . # $ [ ]`,
+    );
+  }
+  if (fix !== undefined && ctx.fixClusters > 1) {
+    refuse('more than one cluster has a firstNameFix (only one owner name fix is allowed)');
   }
   if (reasons.length > 0) return done();
 
@@ -254,9 +342,22 @@ function planCluster(
       refuse('an old account has no Users node in the snapshot');
       continue;
     }
+    // Stamp leaves: absent/null = missing; a good existing value = already
+    // stamped; anything else (blank, wrong type) is refused so `before`
+    // stays exact and an undo is exact.
     const into = node['MergedInto'];
-    if (nonEmptyString(into) && into !== keep) {
-      refuse('an old account is already merged into a different account');
+    if (present(into)) {
+      if (typeof into !== 'string' || into.trim() === '') {
+        refuse('an old account has an unexpected MergedInto value (blank or not text)');
+      } else if (into !== keep) refuse('an old account is already merged into a different account');
+    }
+    const at = node['MergedAt'];
+    if (present(at) && !(typeof at === 'number' && Number.isFinite(at) && at > 0)) {
+      refuse('an old account has an unexpected MergedAt value (not a positive number)');
+    }
+    const oldHint = node['MergedHint'];
+    if (present(oldHint) && !(typeof oldHint === 'string' && oldHint.trim() !== '')) {
+      refuse('an old account has an unexpected MergedHint value (blank or not text)');
     }
     oldNodes.push(node);
   }
@@ -270,19 +371,33 @@ function planCluster(
   const targets = new Map<string, RelinkTarget>();
   for (const path of Object.keys(snap.nodes).sort()) {
     const ref = parseRosterUidPath(path);
-    const value = snap.nodes[path];
-    if (ref && typeof value === 'string' && oldSet.has(value)) {
-      targets.set(path, { path, ref, before: value });
+    if (!ref) continue;
+    const leaf = snap.nodes[path];
+    const rowNode = snap.nodes[rowPathOf(path)];
+    const viaRow = isPlainMap(rowNode) ? rowNode['UID'] : undefined;
+    const isOurs = (v: unknown): boolean => typeof v === 'string' && oldSet.has(v);
+    if (!isOurs(leaf) && !isOurs(viaRow)) continue;
+    if (readRowUid(snap, path).kind === 'conflict') {
+      refuse(`roster row ${rowLabel(ref)}: the snapshot disagrees with itself about its UID`);
+      continue;
     }
+    targets.set(path, { path, ref, before: leaf as string });
   }
   for (const r of nameRows) {
     const path = leagueUidPath(r.sport, r.season, r.team, r.name);
     const ref: RosterRef = { kind: 'league', ...r };
-    if (!hasOwn(snap.nodes, path)) {
-      refuse(`roster row ${rowLabel(ref)} was not found in the snapshot`);
+    // The row NODE must be in the snapshot (and be a map): a UID write to a
+    // row that does not exist would create a stray roster row.
+    if (!isPlainMap(snap.nodes[rowPathOf(path)])) {
+      refuse(`roster row ${rowLabel(ref)} was not found in the snapshot (roster row not found)`);
       continue;
     }
-    const value = snap.nodes[path];
+    const got = readRowUid(snap, path);
+    if (got.kind === 'conflict') {
+      refuse(`roster row ${rowLabel(ref)}: the snapshot disagrees with itself about its UID`);
+      continue;
+    }
+    const value = got.kind === 'value' ? got.value : null;
     if (value === null || value === undefined || value === '') {
       targets.set(path, { path, ref, before: value === '' ? '' : null });
     } else if (value === keep || (typeof value === 'string' && oldSet.has(value))) {
@@ -310,9 +425,10 @@ function planCluster(
   }
 
   // ---- D3: Played entries, refusing a clash with a different team
-  const played: PlanWrite[] = [];
+  const played: Array<{ write: PlanWrite; sport: string; season: string; team: string }> = [];
   const plannedTeam = new Map<string, string>();
-  const keepPlayed = isPlainMap(keepNode['Played']) ? keepNode['Played'] : {};
+  const keepPlayedRaw = keepNode['Played'];
+  const keepPlayed = isPlainMap(keepPlayedRaw) ? keepPlayedRaw : {};
   for (const t of leagueTargets) {
     if (t.ref.kind !== 'league') continue;
     const { sport, season, team } = t.ref;
@@ -324,14 +440,38 @@ function planCluster(
       continue;
     }
     plannedTeam.set(key, team);
+    // A Played (or Played/<Sport>) that exists but is not a map would be
+    // wiped by a leaf write under it: refuse instead of planning that.
+    if (present(keepPlayedRaw) && !isPlainMap(keepPlayedRaw)) {
+      refuse("the kept account's Played value is not a map, so seasons played cannot be added without wiping it");
+      continue;
+    }
     const bySport = keepPlayed[sport];
+    if (present(bySport) && !isPlainMap(bySport)) {
+      refuse(`the kept account's Played/${sport} value is not a map, so seasons played cannot be added without wiping it`);
+      continue;
+    }
     const existing = isPlainMap(bySport) ? bySport[`Season ${season}`] : undefined;
     if (existing === undefined || existing === null) {
-      played.push({ path: playedPath(keep, sport, season), before: null, after: team });
+      played.push({ write: { path: playedPath(keep, sport, season), before: null, after: team }, sport, season, team });
     } else if (existing !== team) {
       const had = typeof existing === 'string' ? `"${existing}"` : 'another value';
       refuse(`${label}: the kept account already has ${had} for that season but the old row says "${team}"`);
     }
+  }
+
+  // D4 Information: the leaves an old account has that are safe to copy.
+  const chosen = new Map<string, unknown>();
+  for (const node of oldNodes) {
+    const info = node['Information'];
+    if (!isPlainMap(info)) continue;
+    for (const [leaf, value] of Object.entries(info)) {
+      if (isCopyableInformation(leaf, value)) chosen.set(leaf, value);
+    }
+  }
+  const keepInfoRaw = keepNode['Information'];
+  if (chosen.size > 0 && present(keepInfoRaw) && !isPlainMap(keepInfoRaw)) {
+    refuse("the kept account's Information value is not a map, so missing fields cannot be copied without wiping it");
   }
   if (reasons.length > 0) return done();
 
@@ -350,25 +490,14 @@ function planCluster(
       }
     }
   }
-  const keepInfoRaw = keepNode['Information'];
-  if (keepInfoRaw === undefined || keepInfoRaw === null || isPlainMap(keepInfoRaw)) {
-    const keepInfo = isPlainMap(keepInfoRaw) ? keepInfoRaw : {};
-    const chosen = new Map<string, unknown>();
-    for (const node of oldNodes) {
-      const info = node['Information'];
-      if (!isPlainMap(info)) continue;
-      for (const [leaf, value] of Object.entries(info)) {
-        if (isCopyableInformation(leaf, value)) chosen.set(leaf, value);
-      }
-    }
-    const copied: string[] = [];
-    for (const leaf of [...chosen.keys()].sort()) {
-      if (!lacks(keepInfo[leaf])) continue;
-      profile.push({ path: `${userPath(keep)}/Information/${leaf}`, before: keepInfo[leaf] ?? null, after: chosen.get(leaf) });
-      copied.push(leaf);
-    }
-    if (copied.length > 0) summary.push(`${who}: copy missing Information fields (${copied.join(', ')})`);
+  const keepInfo = isPlainMap(keepInfoRaw) ? keepInfoRaw : {};
+  const copied: string[] = [];
+  for (const leaf of [...chosen.keys()].sort()) {
+    if (!lacks(keepInfo[leaf])) continue;
+    profile.push({ path: `${userPath(keep)}/Information/${leaf}`, before: keepInfo[leaf] ?? null, after: chosen.get(leaf) });
+    copied.push(leaf);
   }
+  if (copied.length > 0) summary.push(`${who}: copy missing Information fields (${copied.join(', ')})`);
   if (fix !== undefined && keepNode['First Name'] !== fix) {
     profile.push({ path: `${userPath(keep)}/First Name`, before: keepNode['First Name'] ?? null, after: fix });
     summary.push(`${who}: fix the kept account's first name (owner request)`);
@@ -382,12 +511,15 @@ function planCluster(
     const node = oldNodes[i];
     const base = userPath(olds[i]);
     const before = stamps.length;
-    if (!nonEmptyString(node['MergedInto'])) stamps.push({ path: `${base}/MergedInto`, before: null, after: keep });
-    if (node['MergedAt'] === undefined || node['MergedAt'] === null) {
-      stamps.push({ path: `${base}/MergedAt`, before: null, after: nowMs });
+    // Only absent/null counts as missing (anything else was validated above).
+    if (!present(node['MergedInto'])) {
+      stamps.push({ path: `${base}/MergedInto`, before: node['MergedInto'] ?? null, after: keep });
     }
-    if (lacks(node['MergedHint'])) {
-      if (hint !== null) stamps.push({ path: `${base}/MergedHint`, before: null, after: hint });
+    if (!present(node['MergedAt'])) {
+      stamps.push({ path: `${base}/MergedAt`, before: node['MergedAt'] ?? null, after: nowMs });
+    }
+    if (!present(node['MergedHint'])) {
+      if (hint !== null) stamps.push({ path: `${base}/MergedHint`, before: node['MergedHint'] ?? null, after: hint });
       else missingHint = true;
     }
     if (stamps.length > before) stamped++;
@@ -397,11 +529,17 @@ function planCluster(
 
   // ---- assemble in the crash-safe order
   const roster: PlanWrite[] = ordered.map((t) => ({ path: t.path, before: t.before, after: keep }));
-  const rowLines = ordered.map((t) =>
-    `${who}: relink ${rowLabel(t.ref)}${t.ref.kind === 'league' ? ' and add it to seasons played' : ''}`,
+  const rowLines = ordered.map((t) => `${who}: relink ${rowLabel(t.ref)}`);
+  // One line per Played write that is really planned (not for a kept account
+  // that already has the team, and once per season).
+  const playedLines = played.map(
+    (p) => `${who}: add ${p.sport} Season ${p.season} (${p.team}) to seasons played`,
   );
-  const writes = [...played, ...profile, ...roster, ...stamps];
-  const lines = writes.length === 0 ? [`${who}: already merged - nothing to do`] : [...rowLines, ...summary];
+  const writes = [...played.map((p) => p.write), ...profile, ...roster, ...stamps];
+  const lines =
+    writes.length === 0
+      ? [`${who}: already merged - nothing to do`]
+      : [...rowLines, ...playedLines, ...summary];
   return done(writes, lines);
 }
 
@@ -417,10 +555,12 @@ export function buildMergePlan(map: MergeMap, snap: MergeSnapshot, nowMs: number
     const uids = new Set<string>([c?.keep, ...(Array.isArray(c?.old) ? c.old : [])].filter(isUid));
     for (const u of uids) uidUse.set(u, (uidUse.get(u) ?? 0) + 1);
   }
+  const fixClusters = map.clusters.filter((c) => c?.firstNameFix !== undefined).length;
+  const ctx: MapContext = { uidUse, fixClusters };
   const out: MergePlan = { writes: [], refusals: [], summary: [] };
   map.clusters.forEach((c, i) => {
     const who = typeof c?.who === 'string' && c.who.trim() !== '' ? c.who.trim() : `cluster #${i + 1}`;
-    const plan = planCluster(c, who, snap, nowMs, uidUse);
+    const plan = planCluster(c, who, snap, nowMs, ctx);
     if (plan.reasons.length > 0) {
       for (const why of plan.reasons) out.refusals.push({ who, why });
       out.summary.push(`${who}: REFUSED - nothing planned (see refusals)`);
@@ -459,6 +599,10 @@ export function assertMergePaths(
   map: MergeMap,
   snap: MergeSnapshot,
 ): void {
+  // The map is validated here too, whatever the planner did with it.
+  const problems = mapProblems(map);
+  if (problems.length > 0) throw new Error(`Refusing merge map: ${problems.join('; ')}`);
+
   const keepOf = new Map<string, MergeCluster>();
   const oldOf = new Map<string, MergeCluster>();
   for (const c of map.clusters) {
@@ -491,18 +635,26 @@ export function assertMergePaths(
     if (seen.has(path)) fail('it is written twice in one plan');
     seen.add(path);
     if (w.after === null || w.after === undefined) fail('a merge never removes data (after is null)');
-    const current = snapshotValue(snap, path);
+    const ref = parseRosterUidPath(path);
+    let current: unknown;
+    if (ref) {
+      const got = readRowUid(snap, path);
+      if (got.kind === 'conflict') fail("the snapshot disagrees with itself about this row's UID");
+      current = got.kind === 'value' ? got.value ?? null : null;
+    } else {
+      current = snapshotValue(snap, path);
+    }
     if (!isDeepStrictEqual(w.before ?? null, current)) fail('its before value no longer matches the snapshot');
 
     // ---- roster UID leaves (D1, D2)
-    const ref = parseRosterUidPath(path);
     if (ref) {
       const cluster = typeof w.after === 'string' ? keepOf.get(w.after) : undefined;
       if (!cluster || oldOf.has(w.after as string)) fail('the new UID is not a kept account of the map');
       const c = cluster as MergeCluster;
       const before = w.before ?? null;
       const fromOld = typeof before === 'string' && (c.old ?? []).includes(before);
-      const emptyNameRow = (before === null || before === '') && nameRowPaths(c).has(path) && hasOwn(snap.nodes, path);
+      const emptyNameRow =
+        (before === null || before === '') && nameRowPaths(c).has(path) && isPlainMap(snap.nodes[rowPathOf(path)]);
       if (!fromOld && !emptyNameRow) {
         fail('the row is neither held by an old account of this cluster nor one of its listed name rows');
       }
@@ -544,6 +696,8 @@ export function assertMergePaths(
 
     const c = keepOf.get(uid) as MergeCluster;
     const oldNodes = (c.old ?? []).map((o) => snap.nodes[userPath(o)]).filter(isPlainMap);
+    const keepNode = snap.nodes[userPath(uid)];
+    const keepFields = isPlainMap(keepNode) ? keepNode : {};
     const played = /^Played\/([^/]+)\/Season (\d+)$/.exec(rest);
     if (played) {
       const [, sport, season] = played;
@@ -552,6 +706,12 @@ export function assertMergePaths(
       if (w.before !== null && w.before !== undefined) fail('a Played entry is never written over a value');
       if (!relinks.has(`${uid}|${sport}|${season}|${w.after}`)) {
         fail('there is no matching roster relink in this plan for this Played entry');
+      }
+      // A leaf write under a scalar Played / Played/<Sport> would wipe it.
+      const playedRaw = keepFields['Played'];
+      if (present(playedRaw) && !isPlainMap(playedRaw)) fail("the kept account's Played is not a map");
+      if (isPlainMap(playedRaw) && present(playedRaw[sport]) && !isPlainMap(playedRaw[sport])) {
+        fail(`the kept account's Played/${sport} is not a map`);
       }
     } else if (rest === 'ProfileUrl') {
       if (typeof w.after !== 'string' || w.after.trim() === '') fail('ProfileUrl must be a non-empty string');
@@ -566,6 +726,8 @@ export function assertMergePaths(
       if (!oldNodes.some((n) => isPlainMap(n['Information']) && isDeepStrictEqual(n['Information'][leaf], w.after))) {
         fail('an Information leaf may only be copied from an old account of this cluster');
       }
+      const infoRaw = keepFields['Information'];
+      if (present(infoRaw) && !isPlainMap(infoRaw)) fail("the kept account's Information is not a map");
     } else if (rest === 'First Name') {
       if (c.firstNameFix === undefined || w.after !== c.firstNameFix) {
         fail('First Name is only written for the cluster with a firstNameFix, and only to that value');
