@@ -24,12 +24,12 @@ This batch is 10 people:
 
 The 2026-11-07 duplicate check found one more likely duplicate that is **not** part of these 10: **Parlevino Tamraz**. His roster entries (S12 Nineveh, S13 Hakkari, S14 Nimrod, S15 Ishtar) are on one account, and his Season 16 sign-up is on another.
 
-The tool refuses to touch any season that has fantasy set up, and Season 15 does (it is the test season). So merging him needs a decision from you:
+The tool won't merge him at all while any of his seasons has fantasy set up (Season 15 does, it is the test season). It refuses the whole person, not just that one season. So merging him needs a decision from you:
 
 - Which of his two accounts should be kept?
 - Should the tool be extended to handle Season 15, or should he wait until the Season 15 test data is cleared?
 
-Until you decide, he stays as two accounts. Nothing breaks. Ask Claude when you are ready.
+Until you decide, he stays as two accounts. Nothing breaks today, but decide him before you build Season 16 rosters (step 7), or his Season 16 sign-up lands on the other account. Ask Claude when you are ready.
 
 ## Before you start (once)
 
@@ -42,7 +42,7 @@ cd /c/Users/zayaa/StudioProjects/infinite_sports_flutter/functions
 Things to know:
 
 - Copy commands exactly. The two dashes before a flag (`npm run merge:accounts -- --apply`) are required.
-- The first time you run a command it spends a few seconds building the tool. That is normal. If it says `tsc` is not recognized, run `npm install` once in this folder and try again.
+- Every time you run a command it first spends a few seconds building the tool. That is normal. If it says `tsc` is not recognized, run `npm install` once in this folder and try again.
 - If a command says there is no Firebase login, log in once and run it again:
 
 ```bash
@@ -85,7 +85,7 @@ firebase deploy --only functions:onUserWritten,functions:onMergeNoticeCreated --
 
 **Recommendation: wait until the app updates are out before step 3.** Until the fan app update is on phones, someone signed in on an old account sees no message. Their account just quietly vanishes from search. If you decide to go earlier, the email in step 5 still reaches people who never open the app.
 
-**Undo:** the deploy is safe to leave in place. It does nothing until accounts are merged.
+**Undo:** the deploy is safe to leave in place. It does nothing until accounts are merged. This tool does not undo app releases. If you need to take an app update back, roll it back through your usual release process.
 
 ## Step 2: Dry run (look, don't touch)
 
@@ -102,7 +102,7 @@ It reads the live data, prints what it would do, and writes nothing. Read the pr
 - `clusters: 10 in the map - 10 planned, 0 refused, 0 with nothing to do`. In the tool's words a "cluster" is one person.
 - `writes: 69 (...)`. On 2026-11-07 this was 20 roster relinks, 16 seasons-played entries, 2 profile photo links, 30 merge stamps (10 old accounts times 3) and 1 first-name fix.
 - A **plan code** (the tool calls it the plan digest): `plan digest (MergedAt time excluded): ...`. The 2026-11-07 dry run gave `6b49644c86689a2a`. The code changes if the data or the list changes, so always use the one your latest dry run prints.
-- The last line is the apply command, already filled in with the right plan code.
+- The last line starts with "To apply exactly this plan:" and then gives the apply command, already filled in with the right plan code. In step 3 you copy only the `npm run ...` part after the colon.
 
 If the dry run shows a refusal, a different count than you expect, or an error: stop and send the printout to Claude. Don't go on.
 
@@ -112,7 +112,7 @@ If the dry run shows a refusal, a different count than you expect, or an error: 
 
 Only after you have read the dry run and said OK (and, as recommended, after the app updates are out).
 
-Copy the last line of your latest dry run. With the 2026-11-07 plan code it is:
+From the last line of your latest dry run, copy only the `npm run ...` part (not the words "To apply exactly this plan:"). With the 2026-11-07 plan code it is:
 
 ```bash
 npm run merge:accounts -- --apply --expect-plan 6b49644c86689a2a
@@ -176,6 +176,8 @@ npm run merge:accounts -- --notify
 
 You should see 10 notices to write and a push to 8 kept accounts, ending with `PREVIEW - nothing was written. 10 email(s) and 1 push campaign would go out.` If it says `Refusing --notify ... not stamped yet`, step 3 isn't finished.
 
+Before you send, make sure someone will check the support mailbox over the next few days. The emails come from the support mailer address, so replies to them land there.
+
 When you are happy, send:
 
 ```bash
@@ -184,7 +186,7 @@ npm run merge:accounts -- --notify --send
 
 What goes out:
 
-- **An email to each of the 10 old addresses.** Subject: "Your Infinite Sports accounts were combined". It says all their seasons now show on one profile and to sign in with the kept address from now on. The kept address is shown partly hidden: the first two letters, then dots, then the email provider (for example `ca` + dots + `gmail.com`). It is sent from the support mailer address, so a reply goes there.
+- **An email to each of the 10 old addresses.** Subject: "Your Infinite Sports accounts were combined". It says all their seasons now show on one profile and to sign in with the kept address from now on. The kept address is shown partly hidden: the first two letters, then dots, then the email provider (shaped like `xx` + dots + `@gmail.com`).
 - **One push to the 8 kept accounts**: "Your accounts were combined" / "All your seasons are now on this profile." It also shows in the Manager's campaign list.
 
 Then check that the emails went. In the Firebase console, open the Realtime Database, then the `MergeNotices` entry. Each old account should show `Status: sent` within a minute or two. `no-email` means that account has no email address, `failed` means the mailer failed, and `sending` stuck for a long time means a send was interrupted. Tell Claude about any of those. Don't re-run on your own.
