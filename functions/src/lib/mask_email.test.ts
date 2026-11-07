@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { maskEmail } from './mask_email';
+import { maskEmail, redactEmails } from './mask_email';
 
 describe('maskEmail (merge design D6)', () => {
   it('keeps the first 2 characters and at most 8 bullets', () => {
@@ -49,5 +49,17 @@ describe('maskEmail (merge design D6)', () => {
   it('always yields something that contains a bullet', () => {
     expect(maskEmail('q@z.io')).toContain('•');
     expect(maskEmail('someone@z.io')).toContain('•');
+  });
+});
+
+describe('redactEmails (keeps addresses out of stored errors and logs)', () => {
+  it('replaces every address-looking token and leaves the rest', () => {
+    expect(redactEmails('550 <carlo11rocks@gmail.com>: Recipient rejected, also x.y+z@mail.example.org!'))
+      .toBe('550 <[email]>: Recipient rejected, also [email]!');
+  });
+
+  it('leaves text with no address alone and tolerates non-strings', () => {
+    expect(redactEmails('connect ETIMEDOUT 10.0.0.1:587')).toBe('connect ETIMEDOUT 10.0.0.1:587');
+    expect(redactEmails(undefined as unknown as string)).toBe('');
   });
 });

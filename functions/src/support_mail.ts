@@ -14,6 +14,7 @@ import * as logger from 'firebase-functions/logger';
 import { defineSecret } from 'firebase-functions/params';
 import * as nodemailer from 'nodemailer';
 import type { Reference } from 'firebase-admin/database';
+import { maskEmail, redactEmails } from './lib/mask_email';
 import { isValidEmail, mailLogEntry, sanitizeSubject } from './lib/support';
 
 export const supportSmtpHost = defineSecret('SUPPORT_SMTP_HOST');
@@ -80,21 +81,39 @@ function getMailer(): Mailer | null {
   return { from: user, send: (options) => transport.sendMail(options) };
 }
 
-/** Sends one support email and push-logs the attempt to Support/MailLog
- *  ({To, Subject, Ok, Err?, At}). Never throws: the ticket data was written
- *  by the trigger BEFORE any mail attempt, and a mail failure is a log line,
- *  not a reason to retry the trigger. Missing secrets -> warn + no-op. */
-export async function sendSupportMail(
-  root: Reference, message: SupportMailMessage,
-): Promise<void> {
+/** How one delivery attempt ended: handed to the transport ('sent'),
+ *  not attempted because email is off ('skipped': SMTP secrets missing), or
+ *  refused/rejected/crashed ('failed'). */
+export type MailOutcome = 'sent' | 'skipped' | 'failed';
+
+export interface SendMailOptions {
+  /** The recipient is private (merge notices): the MailLog entry and the
+   *  logger carry maskEmail(to) instead of the address, and any address an
+   *  SMTP error quotes is redacted before it is stored or logged. */
+  redactRecipient?: boolean;
+}
+
+/** Sends one email, push-logs the attempt to Support/MailLog
+ *  ({To, Subject, Ok, Err?, At}) and says how it went. Never throws: the
+ *  callers' data was written BEFORE any mail attempt, and a mail failure is a
+ *  log line, not a reason to retry the trigger. Missing secrets -> warn +
+ *  'skipped'. A MailLog write that fails after a successful send still
+ *  reports 'sent' (the mail already left). */
+export async function sendMail(
+  root: Reference, message: SupportMailMessage, options: SendMailOptions = {},
+): Promise<MailOutcome> {
   const subject = sanitizeSubject(message.subject); // belt-and-braces: builders already sanitize
+  const redact = options.redactRecipient === true;
+  const shownTo = redact ? maskEmail(message.to) : message.to;
+  const shownErr = (e: string): string => (redact ? redactEmails(e) : e);
+  let outcome: MailOutcome = 'failed';
   try {
     const mailer = getMailer();
     if (!mailer) {
       logger.warn('support mail skipped — SMTP secrets not configured', {
-        to: message.to, subject,
+        to: shownTo, subject,
       });
-      return;
+      return 'skipped';
     }
 
     let ok = true;
@@ -102,7 +121,7 @@ export async function sendSupportMail(
     if (!isValidEmail(message.to)) {
       ok = false;
       err = 'invalid recipient address';
-      logger.warn('support mail refused — invalid recipient', { to: message.to, subject });
+      logger.warn('support mail refused — invalid recipient', { to: shownTo, subject });
     } else {
       try {
         await mailer.send({
@@ -114,13 +133,14 @@ export async function sendSupportMail(
         });
       } catch (sendErr) {
         ok = false;
-        err = String(sendErr);
-        logger.error('support mail send failed', { to: message.to, subject, error: err });
+        err = shownErr(String(sendErr));
+        logger.error('support mail send failed', { to: shownTo, subject, error: err });
       }
     }
+    outcome = ok ? 'sent' : 'failed';
 
     await root.child('Support/MailLog').push().set(mailLogEntry({
-      to: message.to,
+      to: shownTo,
       subject,
       ok,
       ...(err ? { err } : {}),
@@ -131,7 +151,17 @@ export async function sendSupportMail(
   } catch (outerErr) {
     // Even the MailLog write must never bubble into the trigger.
     logger.error('support mail logging failed', {
-      to: message.to, subject, error: String(outerErr),
+      to: shownTo, subject, error: shownErr(String(outerErr)),
     });
   }
+  return outcome;
+}
+
+/** Sends one support email and push-logs the attempt to Support/MailLog.
+ *  Never throws and returns nothing: the ticket data was written by the
+ *  trigger BEFORE any mail attempt (see sendMail). */
+export async function sendSupportMail(
+  root: Reference, message: SupportMailMessage,
+): Promise<void> {
+  await sendMail(root, message);
 }

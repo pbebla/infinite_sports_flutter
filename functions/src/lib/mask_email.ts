@@ -27,3 +27,11 @@ export function maskEmail(email: string): string {
   const bullets = Math.min(local.length - 2, MAX_BULLETS);
   return `${local.slice(0, 2).join('')}${MASK_BULLET.repeat(bullets)}@${domain}`;
 }
+
+/** [text] with every address-looking token replaced by `[email]`, for an
+ *  error message or log line that may quote a recipient (an SMTP rejection
+ *  usually does) and must never carry one into the database or the logs. */
+export function redactEmails(text: string): string {
+  return String(text ?? '')
+    .replace(/[^\s<>"'(),;:@]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)*/gu, '[email]');
+}

@@ -344,6 +344,12 @@ export {
 } from './support_watch';
 export { generateTicketJoke } from './support_joke';
 
+// ---- Duplicate-account merge (plan 2026-11-06): the one email to each old
+// address, sent once per MergeNotices/<oldUid> node (written by the merge
+// tool's --notify) ----
+
+export { onMergeNoticeCreated } from './merge_notice_watch';
+
 // ---- League Experience P3: league watcher + prediction scoring ----
 
 /** Grouped export -> deploys as leagueFutsal-onTeam1Score, ... (P4 landed:

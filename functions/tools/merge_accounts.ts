@@ -34,6 +34,25 @@
 //                                                whose account name matches a
 //                                                roster row of that sport held
 //                                                by another account or none
+//   npm run merge:accounts -- --notify
+//                                                D11 + D12: tells the merged
+//                                                players which email to use.
+//                                                Refuses unless EVERY old
+//                                                account of the map is stamped
+//                                                (Users/<old>/MergedInto = the
+//                                                map's kept account). Writes
+//                                                MergeNotices/<old> =
+//                                                {KeepHint, CreatedAt} for each
+//                                                old account that has none (the
+//                                                onMergeNoticeCreated trigger
+//                                                emails its Auth address, once)
+//                                                and ONE Campaigns/<id> (a push
+//                                                to the kept accounts that had
+//                                                an old account; the id derives
+//                                                from their uids, so a re-run
+//                                                finds it). A second run writes
+//                                                nothing. SENDING IS OUTWARD:
+//                                                run it only when the owner says
 //   --map <file>        another mapping file (default
 //                       tools/rehearsal_out/merge_map.json)
 //   --fake-emails       emulator only: made-up kept emails instead of
@@ -55,6 +74,10 @@
 //     it) before any network call ("fix the map file first").
 //   - A production --apply must carry --expect-plan <digest> from the dry
 //     run the owner read; it refuses before any read without it.
+//   - --notify writes only MergeNotices/<old> (old accounts whose node is
+//     absent) and the one Campaigns/<id> it computed - nothing else passes
+//     the write guard. Its hints are the masked ones --apply already stamped
+//     on each old account; no address is read, written or printed.
 //   - Emails: looked up only for the kept accounts and masked (maskEmail)
 //     inside the lookup itself; never printed, logged or stored unmasked.
 //     The tool prints roster names, team names, seasons and counts - not
@@ -69,6 +92,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { maskEmail } from '../src/lib/mask_email';
+import { mergeNoticeCampaign, mergeNoticeCampaignId } from '../src/lib/merge_notice';
 import { accessToken } from './admin_rest';
 import {
   afcUidPath, assertMergePaths, buildMergePlan, fantasyConfigPath, isCopyableInformation,
@@ -95,7 +119,7 @@ const REG_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const STAMPS = ['MergedInto', 'MergedAt', 'MergedHint'];
 
 const USAGE = 'Usage: npm run merge:accounts [-- --apply --expect-plan <digest> | ' +
-  '-- --undo <backupFile> | -- --find-dupes <registrationId>] [--map <file>] ' +
+  '-- --undo <backupFile> | -- --find-dupes <registrationId> | -- --notify] [--map <file>] ' +
   '[--fake-emails] [--no-canary]';
 
 const isPlainMap = (v: unknown): v is Record<string, unknown> =>
@@ -159,6 +183,9 @@ const READ_RULES: ReadonlyArray<{ re: RegExp; shallowOnly?: boolean }> = [
   { re: /^PublicProfiles\/[A-Za-z0-9_-]+$/, shallowOnly: true },
   { re: /^Registrations\/[A-Za-z0-9_-]+\/Config$/ },
   { re: /^Registrations\/[A-Za-z0-9_-]+\/Submissions$/, shallowOnly: true },
+  // --notify: is the notice / the campaign already there (keys only).
+  { re: /^MergeNotices\/[A-Za-z0-9_-]+$/, shallowOnly: true },
+  { re: /^Campaigns\/merge-notice-[0-9a-f]{16}$/, shallowOnly: true },
 ];
 
 export function assertReadAllowed(p: string, shallow: boolean): void {
@@ -932,6 +959,107 @@ export async function undoMerge(file: string, deps: RunDeps): Promise<UndoResult
   return result;
 }
 
+// ── notify (D11 + D12) ─────────────────────────────────────────────────────
+
+export interface NotifyResult {
+  ok: boolean;
+  /** MergeNotices/<old> nodes written this run (each makes the trigger send one email). */
+  noticesWritten: number;
+  /** Old accounts whose notice was already there (left alone). */
+  noticesPresent: number;
+  /** The one push campaign was written this run (false when it already existed). */
+  campaignWritten: boolean;
+  campaignId: string | null;
+  /** Kept accounts the push reaches. */
+  audience: number;
+}
+
+/** --notify: tells the merged players which email to use. Reads the stamps
+ *  --apply left (never an address), refuses unless EVERY old account of the
+ *  map is stamped into the map's kept account with a masked-or-absent hint,
+ *  then writes - through a guard that allows exactly these paths and no other -
+ *  MergeNotices/<old> for each old account that has none and the ONE campaign
+ *  (deterministic id, so a re-run finds it) when it is not there yet. Idempotent:
+ *  a second run writes nothing. The trigger and the campaign sender do the
+ *  actual sending - this only creates their nodes. */
+export async function notifyMerge(map: MergeMap, deps: RunDeps): Promise<NotifyResult> {
+  const log = deps.log;
+  log(`Merge duplicate accounts - NOTIFY (${deps.target.label})`);
+  const reader = guardRest(deps.rest, { readOnly: true });
+  const withOld = map.clusters.filter((c) => (c.old ?? []).length > 0);
+  const result: NotifyResult = {
+    ok: true, noticesWritten: 0, noticesPresent: 0, campaignWritten: false, campaignId: null, audience: 0,
+  };
+  if (withOld.length === 0) {
+    log('Nothing to notify - no cluster of the map has an old account.');
+    return result;
+  }
+
+  // 1. Every old account must be stamped (D5) into the map's kept account.
+  const hints = new Map<string, string>();
+  const problems: string[] = [];
+  for (const c of withOld) {
+    for (const old of c.old ?? []) {
+      const label = labelOf(userPath(old), map);
+      const into = await reader.get(`${userPath(old)}/MergedInto`);
+      const hint = await reader.get(`${userPath(old)}/MergedHint`);
+      if (!hasUidValue(into)) problems.push(`${label} is not stamped yet (no MergedInto)`);
+      else if (into !== c.keep) problems.push(`${label} is stamped into a different account than the map's kept account`);
+      else if (hint !== null && hint !== undefined && !looksMasked(hint)) problems.push(`${label} has a hint that is not masked`);
+      else hints.set(old, typeof hint === 'string' ? hint : '');
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(`Refusing --notify: ${problems.join('; ')}. Run --apply first (and check the map). Nothing was written.`);
+  }
+
+  // 2. What is missing: one notice per old account without one, and the campaign.
+  const notices: Array<{ path: string; node: Record<string, unknown>; label: string }> = [];
+  for (const c of withOld) {
+    for (const old of c.old ?? []) {
+      const path = `MergeNotices/${old}`;
+      if ((await reader.get(path, { shallow: true })) !== null) {
+        result.noticesPresent++;
+        continue;
+      }
+      notices.push({ path, label: labelOf(userPath(old), map), node: { KeepHint: hints.get(old) ?? '', CreatedAt: deps.now() } });
+    }
+  }
+  const keepUids = [...new Set(withOld.map((c) => c.keep))];
+  const campaignId = mergeNoticeCampaignId(keepUids);
+  const campaignPath = `Campaigns/${campaignId}`;
+  const campaignPresent = (await reader.get(campaignPath, { shallow: true })) !== null;
+  result.campaignId = campaignId;
+  result.audience = keepUids.length;
+
+  log(`  old accounts: ${notices.length + result.noticesPresent} - ${notices.length} notice(s) to write, ` +
+    `${result.noticesPresent} already there`);
+  for (const n of notices) log(`    notice for ${n.label}`);
+  log(`  push to ${keepUids.length} kept account(s): ` +
+    (campaignPresent ? `campaign ${campaignId} already exists` : `campaign ${campaignId} to write`));
+  if (notices.length === 0 && campaignPresent) {
+    log('Nothing to write - every notice and the campaign are already there.');
+    return result;
+  }
+
+  // 3. Write exactly those paths, notices first (each sends one email).
+  const writes = [...notices.map((n) => n.path), ...(campaignPresent ? [] : [campaignPath])];
+  const writer = guardRest(deps.rest, { readOnly: false, allowedWrites: new Set(writes) });
+  for (const n of notices) {
+    await writer.put(n.path, n.node);
+    result.noticesWritten++;
+    log(`    wrote the notice for ${n.label}`);
+  }
+  if (!campaignPresent) {
+    await writer.put(campaignPath, mergeNoticeCampaign(keepUids, deps.now()));
+    result.campaignWritten = true;
+    log(`    wrote campaign ${campaignId} (push to ${keepUids.length} kept account(s))`);
+  }
+  log(`DONE - ${result.noticesWritten} notice(s) and ${result.campaignWritten ? 1 : 0} campaign written. ` +
+    'The functions now send the emails and the push; check MergeNotices/<old>/Status and the Manager campaign list.');
+  return result;
+}
+
 // ── find-dupes (D16, read-only) ────────────────────────────────────────────
 
 export const normalizeName = (s: string): string => s.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -998,7 +1126,7 @@ export async function findDupes(regId: string, deps: RunDeps): Promise<DupeCandi
 // ── entry ──────────────────────────────────────────────────────────────────
 
 export interface CliArgs {
-  mode: 'dry-run' | 'apply' | 'undo' | 'find-dupes';
+  mode: 'dry-run' | 'apply' | 'undo' | 'find-dupes' | 'notify';
   backupFile?: string;
   regId?: string;
   mapFile: string;
@@ -1009,7 +1137,7 @@ export interface CliArgs {
 
 export function parseArgs(argv: readonly string[]): CliArgs {
   const valued = new Set(['--undo', '--find-dupes', '--map', '--expect-plan']);
-  const flags = new Set(['--apply', '--fake-emails', '--no-canary']);
+  const flags = new Set(['--apply', '--notify', '--fake-emails', '--no-canary']);
   const got = new Map<string, string>();
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -1025,14 +1153,17 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       throw new Error(`Unknown argument ${a}. ${USAGE}`);
     }
   }
-  const modes = ['--apply', '--undo', '--find-dupes'].filter((m) => got.has(m));
-  if (modes.length > 1) throw new Error(`Pick one of --apply, --undo, --find-dupes. ${USAGE}`);
+  const modes = ['--apply', '--undo', '--find-dupes', '--notify'].filter((m) => got.has(m));
+  if (modes.length > 1) throw new Error(`Pick one of --apply, --undo, --find-dupes, --notify. ${USAGE}`);
   const mode: CliArgs['mode'] = got.has('--apply') ? 'apply' : got.has('--undo') ? 'undo'
-    : got.has('--find-dupes') ? 'find-dupes' : 'dry-run';
+    : got.has('--find-dupes') ? 'find-dupes' : got.has('--notify') ? 'notify' : 'dry-run';
   if (got.has('--expect-plan') && mode !== 'apply') throw new Error(`--expect-plan goes with --apply. ${USAGE}`);
   if (got.has('--no-canary') && mode !== 'apply') throw new Error(`--no-canary goes with --apply. ${USAGE}`);
-  if (got.has('--map') && mode !== 'apply' && mode !== 'dry-run') {
-    throw new Error(`--map goes with the dry run or --apply. ${USAGE}`);
+  if (got.has('--map') && mode !== 'apply' && mode !== 'dry-run' && mode !== 'notify') {
+    throw new Error(`--map goes with the dry run, --apply or --notify. ${USAGE}`);
+  }
+  if (got.has('--fake-emails') && mode === 'notify') {
+    throw new Error(`--fake-emails does not go with --notify (it looks up no emails). ${USAGE}`);
   }
   return {
     mode,
@@ -1088,6 +1219,9 @@ async function main(): Promise<void> {
       await dryRun(loadMap(args.mapFile), deps);
     } else if (args.mode === 'find-dupes') {
       await findDupes(args.regId as string, deps);
+    } else if (args.mode === 'notify') {
+      const r = await notifyMerge(loadMap(args.mapFile), deps);
+      if (!r.ok) process.exitCode = 1;
     } else if (args.mode === 'apply') {
       const r = await applyMerge(loadMap(args.mapFile), deps, { canary: !args.noCanary, expectPlan: args.expectPlan });
       if (!r.ok) process.exitCode = 1;
