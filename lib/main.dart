@@ -23,6 +23,7 @@ import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:infinite_sports_flutter/onboarding/about_you_page.dart';
 import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
 import 'package:infinite_sports_flutter/onboarding/google_profile.dart';
+import 'package:infinite_sports_flutter/onboarding/onboarding_gate.dart';
 import 'package:infinite_sports_flutter/onboarding/profile_completion.dart';
 import 'package:infinite_sports_flutter/onboarding/welcome_page.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
@@ -459,7 +460,10 @@ class _MyHomePageState extends State<MyHomePage> {
     await prefs.subscribeAllUsers();
     final user = FirebaseAuth.instance.currentUser;
     if (!signedIn || user == null) return;
-    await _showAboutYouIfIncomplete(user.uid);
+    // A merged (old) account gets NEITHER prompt: the merged-account watcher
+    // shows its notice and signs the person out (final-review fix 1).
+    final gate = await _showAboutYouIfIncomplete(user.uid);
+    if (!gate.showsFavorites) return;
     if (await prefs.hasAnswered(user.uid)) return;
     final answered = await prefs.serverFavorites(user.uid);
     if (answered != null) return; // already has favorites recorded
@@ -484,18 +488,24 @@ class _MyHomePageState extends State<MyHomePage> {
   /// signups always collected a phone in Step 1, but Google/Apple never
   /// collect one at credential sign-in time — not that it matters here
   /// anymore, since Google/Apple new-users never reach this method.
-  Future<void> _showAboutYouIfIncomplete(String uid) async {
+  ///
+  /// Returns the gate's decision so the caller can also skip the favorites
+  /// prompt: a MERGED account (see [onboardingGateDecisionFor]) is shown
+  /// neither page — the merged-account watcher handles it.
+  Future<OnboardingGateDecision> _showAboutYouIfIncomplete(String uid) async {
     dynamic usersNode;
     try {
       final snap =
           (await FirebaseDatabase.instance.ref('Users/$uid').once()).snapshot;
       usersNode = snap.value;
     } catch (_) {
-      return; // network hiccup: don't block app entry over this check
+      // network hiccup: don't block app entry over this check
+      return OnboardingGateDecision.profileComplete;
     }
-    if (profileCompleted(usersNode)) return;
+    final decision = onboardingGateDecisionFor(usersNode);
+    if (!decision.showsAboutYou) return decision;
     final ctx = mainContext;
-    if (ctx == null || !ctx.mounted) return;
+    if (ctx == null || !ctx.mounted) return decision;
     final askPhone = needsPhoneNumber(usersNode);
     // No step labels here (not part of the 3-step signup flow); onDone pops
     // this route back to MyHomePage, then favorites logic runs as today.
@@ -508,6 +518,7 @@ class _MyHomePageState extends State<MyHomePage> {
         ),
       ),
     );
+    return decision;
   }
 
   void setTitle(String value) {
