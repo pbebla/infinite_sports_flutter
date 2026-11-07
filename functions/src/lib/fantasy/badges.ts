@@ -811,7 +811,11 @@ export async function settleSeasonBadges(
   const changes = reconcileAwards({ existing, desired, catalog, scope: { kind: 'season' } });
   // A re-settle that takes season awards away drops the marker FIRST: until
   // the settle below completes (and sets it again) nothing vouches for the
-  // half-changed awards — a crash in between leaves the sweep to look.
+  // half-changed awards. After a crash in between, the sweep does NOT redo
+  // the removal: while an auto season award survives it only re-checks the
+  // weeks and backfills the marker (no reconcile — a by-hand removal must
+  // stick); with none left it runs the full settle. Only a finalize rerun
+  // (onlyIfUnsettled false) retries the removal itself.
   if (changes.removes.length > 0) {
     await db.write(`${root}/${SEASON_BADGES_SETTLED_NODE}`, null);
   }
