@@ -7,8 +7,9 @@ import { maskEmail } from '../src/lib/mask_email';
 import { mergeNoticeCampaignId } from '../src/lib/merge_notice';
 import {
   applyMerge, BACKUP_KIND, checkTargetFlags, DB_URL, dryRun, findDupes, guardRest, HintLookup,
-  httpRest, identityToolkitHints, installReadOnlyFetchGuard, labelOf, loadMap, LOOKUP_URL, notifyMerge, parseArgs,
-  readMergeSnapshot, resolveTarget, Rest, RunDeps, Target, undoMerge,
+  httpRest, identityToolkitHints, identityToolkitSetDisabled, installLoginSwitchFetchGuard, installReadOnlyFetchGuard,
+  labelOf, loadMap, LOOKUP_URL, LoginSwitch, notifyMerge, parseArgs, readMergeSnapshot, resolveTarget, Rest, RunDeps,
+  switchOldLogins, Target, UPDATE_URL, undoMerge,
 } from './merge_accounts';
 import { looksMasked, MergeMap } from './merge_accounts_logic';
 
@@ -897,5 +898,242 @@ describe('--notify fix round 1: previews by default, only --send writes', () => 
     expect(() => parseArgs(['--undo', 'b.json', '--send'])).toThrow(/--send goes with --notify/);
     expect(() => parseArgs(['--notify', '--send', '--send'])).toThrow(/given twice/);
     expect(() => checkTargetFlags(parseArgs(['--notify', '--send']), EMU)).not.toThrow();
+  });
+});
+
+// ── old-login switch (D13): --disable-old-logins / --enable-old-logins ─────
+
+/** A recording stand-in for Identity Toolkit accounts:update. */
+function loginSwitch(failFor: string[] = []): { calls: Array<[string, boolean]>; fn: LoginSwitch } {
+  const calls: Array<[string, boolean]> = [];
+  return {
+    calls,
+    fn: async (uid, disabled) => {
+      calls.push([uid, disabled]);
+      if (failFor.includes(uid)) throw new Error('Identity Toolkit accounts:update failed (HTTP 400, USER_NOT_FOUND).');
+    },
+  };
+}
+
+const DISABLE = { disable: true, send: false };
+const ENABLE = { disable: false, send: false };
+
+describe('old-login switch (D13)', () => {
+  it("refuses unless EVERY old account is stamped into the map's kept account - and calls nothing", async () => {
+    const fresh = new MemDb(fixture()); // never applied: no stamps
+    const sw = loginSwitch();
+    await expect(switchOldLogins(MAP, deps(fresh, { setLoginDisabled: sw.fn }), { ...DISABLE, send: true }))
+      .rejects.toThrow(/Refusing --disable-old-logins.*not stamped yet.*Run --apply first.*Nothing was changed/);
+    expect(sw.calls).toEqual([]);
+    expect(fresh.writes()).toEqual([]);
+
+    // One of two stamped is still a refusal: all or nothing.
+    const half = await appliedDb();
+    half.set('Users/oldB/MergedInto', null);
+    await expect(switchOldLogins(MAP, deps(half, { setLoginDisabled: sw.fn }), { ...DISABLE, send: true }))
+      .rejects.toThrow(/Carlo Gewargis: old account #1 is not stamped yet/);
+    expect(sw.calls).toEqual([]);
+
+    // Stamped into a DIFFERENT account than the map's kept account: refused too.
+    const wrong = await appliedDb(MAP, 1_762_400_000_001);
+    wrong.set('Users/oldA/MergedInto', 'someoneElse');
+    await expect(switchOldLogins(MAP, deps(wrong, { setLoginDisabled: sw.fn }), { ...ENABLE, send: true }))
+      .rejects.toThrow(/Refusing --enable-old-logins.*Hiram Alvarez: old account #1 is stamped into a different account/);
+    expect(sw.calls).toEqual([]);
+  });
+
+  it('the preview (the default) changes nothing and prints who would be switched', async () => {
+    const db = await appliedDb();
+    const sw = loginSwitch();
+    const d = deps(db, { setLoginDisabled: sw.fn });
+    const r = await switchOldLogins(MAP, d, DISABLE);
+    expect(sw.calls).toEqual([]);
+    expect(db.writes()).toEqual([]);
+    expect(r).toMatchObject({ ok: true, toSwitch: 2, switched: 0, failed: 0 });
+    const out = d.lines.join('\n');
+    expect(out).toContain('DISABLE OLD LOGINS PREVIEW');
+    expect(out).toContain('PREVIEW - nothing was changed');
+    expect(out).toContain('2 old login(s) would be DISABLED');
+    expect(out).toContain('Hiram Alvarez: old account #1 (oldA)');
+    expect(out).toContain('Carlo Gewargis: old account #1 (oldB)');
+    expect(out).toContain('npm run merge:accounts -- --disable-old-logins --send');
+    expect(out).not.toMatch(RAW_EMAIL_RE);
+    // The enable preview points at the enable command.
+    const e = deps(db, { setLoginDisabled: sw.fn });
+    await switchOldLogins(MAP, e, ENABLE);
+    expect(e.lines.join('\n')).toContain('2 old login(s) would be ENABLED');
+    expect(e.lines.join('\n')).toContain('npm run merge:accounts -- --enable-old-logins --send');
+    expect(sw.calls).toEqual([]);
+  });
+
+  it('--send disables every old account (and only those), writing nothing to the database', async () => {
+    const db = await appliedDb();
+    const sw = loginSwitch();
+    const d = deps(db, { setLoginDisabled: sw.fn });
+    const r = await switchOldLogins(MAP, d, { ...DISABLE, send: true });
+    expect(sw.calls).toEqual([['oldA', true], ['oldB', true]]); // never keepA / keepB / keepC
+    expect(db.writes()).toEqual([]);
+    expect(r).toMatchObject({ ok: true, toSwitch: 2, switched: 2, failed: 0 });
+    const out = d.lines.join('\n');
+    expect(out).toContain('DONE - 2 old login(s) disabled');
+    expect(out).toContain('npm run merge:accounts -- --enable-old-logins --send');
+    expect(out).toContain('BEFORE --undo');
+    expect(out).not.toMatch(RAW_EMAIL_RE);
+  });
+
+  it('--enable-old-logins --send is the exact reverse and safe to repeat', async () => {
+    const db = await appliedDb();
+    const sw = loginSwitch();
+    const d = deps(db, { setLoginDisabled: sw.fn });
+    const r = await switchOldLogins(MAP, d, { ...ENABLE, send: true });
+    await switchOldLogins(MAP, d, { ...ENABLE, send: true });
+    expect(sw.calls).toEqual([['oldA', false], ['oldB', false], ['oldA', false], ['oldB', false]]);
+    expect(r).toMatchObject({ ok: true, switched: 2 });
+    expect(d.lines.join('\n')).toContain('DONE - 2 old login(s) enabled');
+    expect(db.writes()).toEqual([]);
+  });
+
+  it('prints uid prefixes only: the first 6 characters, never a whole uid', async () => {
+    const keep = 'KEEPuidABCDEFGHIJKLMNOPQRST';
+    const old1 = 'OLD1uidABCDEFGHIJKLMNOPQRST';
+    const old2 = 'OLD2uidABCDEFGHIJKLMNOPQRST';
+    const map: MergeMap = { clusters: [{ who: 'Long Uid', keep, old: [old1, old2] }] };
+    const db = new MemDb({ Users: {
+      [keep]: { 'First Name': 'Long' },
+      [old1]: { MergedInto: keep }, [old2]: { MergedInto: keep },
+    } });
+    const sw = loginSwitch([old2]);
+    const d = deps(db, { setLoginDisabled: sw.fn });
+    const r = await switchOldLogins(map, d, { ...DISABLE, send: true });
+    const out = d.lines.join('\n');
+    expect(out).toContain('(OLD1ui)');
+    expect(out).toContain('(OLD2ui)');
+    expect(out).not.toContain('OLD1uid');
+    expect(out).not.toContain('KEEPui');
+    // One failure does not stop the others; the run reports it and is not ok.
+    expect(sw.calls).toEqual([[old1, true], [old2, true]]);
+    expect(r).toMatchObject({ ok: false, switched: 1, failed: 1 });
+    expect(out).toContain('FAILED Long Uid: old account #2 (OLD2ui): Identity Toolkit accounts:update failed (HTTP 400, USER_NOT_FOUND).');
+    expect(out).toContain('1 of 2 FAILED');
+    expect(out).toContain('safe to run again');
+    expect(out).not.toContain(old2);
+  });
+
+  it('a --send run without a switch function stops before anything', async () => {
+    const db = await appliedDb();
+    await expect(switchOldLogins(MAP, deps(db), { ...DISABLE, send: true })).rejects.toThrow(/no way to reach Identity Toolkit/);
+  });
+
+  it('a map with no old account has nothing to switch', async () => {
+    const db = new MemDb(fixture());
+    const sw = loginSwitch();
+    const d = deps(db, { setLoginDisabled: sw.fn });
+    const r = await switchOldLogins({ clusters: [MAP.clusters[2]] }, d, { ...DISABLE, send: true });
+    expect(r).toMatchObject({ ok: true, toSwitch: 0, switched: 0 });
+    expect(d.lines.join('\n')).toContain('Nothing to switch');
+    expect(sw.calls).toEqual([]);
+  });
+
+  describe('identityToolkitSetDisabled (stubbed fetch)', () => {
+    let original: typeof fetch;
+    const sent: Array<{ url: string; init: any }> = [];
+    beforeEach(() => { original = globalThis.fetch; sent.length = 0; });
+    afterEach(() => { globalThis.fetch = original; });
+
+    it('POSTs { localId, disableUser } to accounts:update with the token only in the Authorization header', async () => {
+      globalThis.fetch = (async (url: any, init?: any) => {
+        sent.push({ url: String(url), init });
+        return new Response(JSON.stringify({ localId: 'oldA' }), { status: 200 });
+      }) as typeof fetch;
+      const setDisabled = identityToolkitSetDisabled(async () => 'secret-tok-9');
+      await setDisabled('oldA', true);
+      await setDisabled('oldA', false);
+      expect(UPDATE_URL).toBe('https://identitytoolkit.googleapis.com/v1/projects/infinite-sports-app/accounts:update');
+      expect(sent.map((s) => s.url)).toEqual([UPDATE_URL, UPDATE_URL]);
+      expect(sent.every((s) => s.init.method === 'POST' && s.init.headers.Authorization === 'Bearer secret-tok-9')).toBe(true);
+      expect(sent.every((s) => !s.url.includes('secret-tok-9'))).toBe(true);
+      expect(JSON.parse(sent[0].init.body)).toEqual({ localId: 'oldA', disableUser: true });
+      expect(JSON.parse(sent[1].init.body)).toEqual({ localId: 'oldA', disableUser: false });
+    });
+
+    it("an error names the status and Google's reason only - never the token, the URL or the uid", async () => {
+      globalThis.fetch = (async () => new Response(JSON.stringify({ error: { message: 'USER_NOT_FOUND' } }), { status: 400 })) as typeof fetch;
+      const e1 = await identityToolkitSetDisabled(async () => 'secret-tok-9')('oldA', true).catch((e: Error) => e);
+      expect((e1 as Error).message).toBe('Identity Toolkit accounts:update failed (HTTP 400, USER_NOT_FOUND).');
+      globalThis.fetch = (async () => { throw new Error(`connect ECONNREFUSED ${UPDATE_URL}?key=secret-tok-9`); }) as typeof fetch;
+      const e2 = await identityToolkitSetDisabled(async () => 'secret-tok-9')('oldA', true).catch((e: Error) => e);
+      expect((e2 as Error).message).toBe('Identity Toolkit accounts:update failed (network error).');
+    });
+  });
+
+  it('the login-switch fetch guard lets out the database GETs, the token exchange and the accounts:update POST - nothing else', async () => {
+    const seen: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: any, init?: any) => {
+      seen.push(`${init?.method ?? 'GET'} ${String(input)}`);
+      return new Response('null');
+    }) as typeof fetch;
+    const restore = installLoginSwitchFetchGuard(PROD);
+    try {
+      await fetch(`${DB_URL}/Users/x/MergedInto.json`);
+      await fetch('https://oauth2.googleapis.com/token', { method: 'POST', body: '' });
+      await fetch(UPDATE_URL, { method: 'POST', body: '{}' });
+      await expect(fetch(`${DB_URL}/Users/x.json`, { method: 'PUT', body: '1' })).rejects.toThrow(/Refusing PUT/);
+      await expect(fetch(`${DB_URL}/Users/x.json`, { method: 'DELETE' })).rejects.toThrow(/Refusing DELETE/);
+      await expect(fetch(`${DB_URL}/Users/x.json`, { method: 'PATCH', body: '{}' })).rejects.toThrow(/Refusing PATCH/);
+      await expect(fetch(UPDATE_URL, { method: 'GET' })).rejects.toThrow(/Refusing GET/);
+      await expect(fetch(UPDATE_URL, { method: 'PUT', body: '{}' })).rejects.toThrow(/Refusing PUT/);
+      await expect(fetch(LOOKUP_URL, { method: 'POST', body: '{}' })).rejects.toThrow(/Refusing POST/);
+      await expect(fetch('https://identitytoolkit.googleapis.com/v1/projects/other-project/accounts:update',
+        { method: 'POST', body: '{}' })).rejects.toThrow(/Refusing POST/);
+      await expect(fetch('https://identitytoolkit.googleapis.com/v1/projects/infinite-sports-app/accounts:delete',
+        { method: 'POST', body: '{}' })).rejects.toThrow(/Refusing POST/);
+      await expect(fetch('https://example.com/x', { method: 'POST' })).rejects.toThrow(/Refusing POST/);
+    } finally {
+      restore();
+      globalThis.fetch = original;
+    }
+    expect(seen).toHaveLength(3);
+    // The PREVIEW runs behind the read-only guard instead, which still refuses
+    // accounts:update (pinned by 'the read-only fetch guard lets only GETs ...').
+  });
+
+  describe('command line', () => {
+    it('parses the two flags as modes; --send belongs to --notify and these two only', () => {
+      expect(parseArgs(['--disable-old-logins'])).toMatchObject({ mode: 'disable-logins', send: false });
+      expect(parseArgs(['--enable-old-logins', '--send'])).toMatchObject({ mode: 'enable-logins', send: true });
+      expect(parseArgs(['--disable-old-logins', '--send', '--map', 'm.json'])).toMatchObject({ mapFile: 'm.json', send: true });
+      expect(() => parseArgs(['--send'])).toThrow(/--send goes with --notify, --disable-old-logins or --enable-old-logins/);
+      expect(() => parseArgs(['--apply', '--send'])).toThrow(/--send goes with/);
+    });
+
+    it('--disable-old-logins and --enable-old-logins are mutually exclusive with every other mode and each other', () => {
+      const others = [['--apply'], ['--undo', 'b.json'], ['--find-dupes', 'Futsal-16'], ['--notify']];
+      for (const flag of ['--disable-old-logins', '--enable-old-logins']) {
+        for (const o of others) {
+          expect(() => parseArgs([flag, ...o])).toThrow(/Pick one of/);
+          expect(() => parseArgs([...o, flag])).toThrow(/Pick one of/);
+        }
+      }
+      expect(() => parseArgs(['--disable-old-logins', '--enable-old-logins'])).toThrow(/Pick one of/);
+      expect(() => parseArgs(['--disable-old-logins', '--disable-old-logins'])).toThrow(/given twice/);
+    });
+
+    it('takes none of --expect-plan, --no-canary, --fake-emails (they look up no emails and apply no plan)', () => {
+      for (const flag of ['--disable-old-logins', '--enable-old-logins']) {
+        expect(() => parseArgs([flag, '--expect-plan', 'abc'])).toThrow(/--expect-plan goes with --apply/);
+        expect(() => parseArgs([flag, '--no-canary'])).toThrow(/--no-canary goes with --apply/);
+        expect(() => parseArgs([flag, '--fake-emails'])).toThrow(/--fake-emails does not go with/);
+      }
+    });
+
+    it('under the emulator the preview is fine but --send is refused (no Auth emulator: it would hit the real project)', () => {
+      for (const flag of ['--disable-old-logins', '--enable-old-logins']) {
+        expect(() => checkTargetFlags(parseArgs([flag]), EMU)).not.toThrow();
+        expect(() => checkTargetFlags(parseArgs([flag, '--send']), EMU)).toThrow(/Auth emulator/);
+        expect(() => checkTargetFlags(parseArgs([flag, '--send']), PROD)).not.toThrow();
+        expect(() => checkTargetFlags(parseArgs([flag]), PROD)).not.toThrow();
+      }
+    });
   });
 });

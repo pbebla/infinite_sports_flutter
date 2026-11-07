@@ -59,6 +59,32 @@
 //                                                finds it). A second run writes
 //                                                nothing. SENDING IS OUTWARD:
 //                                                run it only when the owner says
+//   npm run merge:accounts -- --disable-old-logins [--send]
+//   npm run merge:accounts -- --enable-old-logins [--send]
+//                                                D13. Sets `disableUser`
+//                                                true / false on every OLD
+//                                                Firebase Auth account of the
+//                                                map (Identity Toolkit
+//                                                accounts:update { localId,
+//                                                disableUser }) so an old
+//                                                email can no longer sign in
+//                                                and recreate Users/<old>.
+//                                                Reversible, idempotent, never
+//                                                a delete, never a kept
+//                                                account. WITHOUT --send: a
+//                                                PREVIEW (same checks, prints
+//                                                who by label + the first 6
+//                                                characters of the uid; no
+//                                                call). Refuses unless EVERY
+//                                                old account is stamped into
+//                                                the map's kept account (so
+//                                                run --enable-old-logins
+//                                                BEFORE --undo). Under the
+//                                                emulator only the preview
+//                                                runs (no Auth emulator).
+//                                                OWNER RULE: never run
+//                                                against production until the
+//                                                owner says so.
 //   --map <file>        another mapping file (default
 //                       tools/rehearsal_out/merge_map.json)
 //   --fake-emails       emulator only: made-up kept emails instead of
@@ -85,10 +111,16 @@
 //     accounts whose node is absent) and the one Campaigns/<id> it computed - nothing else passes
 //     the write guard. Its hints are the masked ones --apply already stamped
 //     on each old account; no address is read, written or printed.
+//   - --disable-old-logins / --enable-old-logins previews run behind the
+//     same read-only fetch guard (accounts:update refused). Only with --send
+//     does a second guard let exactly one more request out: POST
+//     accounts:update of this project. The database is only ever READ
+//     (read-only client): the switch writes nothing to it.
 //   - Emails: looked up only for the kept accounts and masked (maskEmail)
 //     inside the lookup itself; never printed, logged or stored unmasked.
 //     The tool prints roster names, team names, seasons and counts - not
-//     uids (an account is "kept account" / "old account #n").
+//     uids (an account is "kept account" / "old account #n"; the old-login
+//     switch adds the first 6 characters of an old uid, never more).
 //   - Admin calls send the firebase-tools OAuth token in an
 //     `Authorization: Bearer` header - never in a URL, log or error message.
 //   - FIREBASE_DATABASE_EMULATOR_HOST (a local host:port) switches every
@@ -113,6 +145,9 @@ export const PROJECT_ID = 'infinite-sports-app';
 export const DB_URL = `https://${PROJECT_ID}.firebaseio.com`;
 export const LOOKUP_URL =
   `https://identitytoolkit.googleapis.com/v1/projects/${PROJECT_ID}/accounts:lookup`;
+/** The ONE write the old-login switch makes (D13): Identity Toolkit accounts:update. */
+export const UPDATE_URL =
+  `https://identitytoolkit.googleapis.com/v1/projects/${PROJECT_ID}/accounts:update`;
 const OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 export const BACKUP_KIND = 'merge-accounts-backup';
 const BACKUP_VERSION = 1;
@@ -126,7 +161,8 @@ const REG_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const STAMPS = ['MergedInto', 'MergedAt', 'MergedHint'];
 
 const USAGE = 'Usage: npm run merge:accounts [-- --apply --expect-plan <digest> | ' +
-  '-- --undo <backupFile> | -- --find-dupes <registrationId> | -- --notify [--send]] [--map <file>] ' +
+  '-- --undo <backupFile> | -- --find-dupes <registrationId> | -- --notify [--send] | ' +
+  '-- --disable-old-logins [--send] | -- --enable-old-logins [--send]] [--map <file>] ' +
   '[--fake-emails] [--no-canary]';
 
 const isPlainMap = (v: unknown): v is Record<string, unknown> =>
@@ -265,6 +301,20 @@ export function httpRest(target: Target, token: () => Promise<string>): Rest {
  *  token exchange, Identity Toolkit accounts:lookup). Anything else throws
  *  before it leaves the process. Returns the undo. */
 export function installReadOnlyFetchGuard(target: Target): () => void {
+  return installFetchGuard(target, [OAUTH_TOKEN_URL, LOOKUP_URL], 'this run is read-only');
+}
+
+/** The old-login switch with --send (D13): GETs to the database, the OAuth
+ *  token exchange and POST accounts:update - exactly that endpoint and method,
+ *  nothing else (no accounts:delete, no lookup, no database write). Its
+ *  PREVIEW runs behind installReadOnlyFetchGuard instead, which refuses
+ *  accounts:update outright. Returns the undo. */
+export function installLoginSwitchFetchGuard(target: Target): () => void {
+  return installFetchGuard(target, [OAUTH_TOKEN_URL, UPDATE_URL],
+    'the old-login switch may only read the database and POST accounts:update');
+}
+
+function installFetchGuard(target: Target, allowedPosts: readonly string[], why: string): () => void {
   const original = globalThis.fetch;
   const dbOrigin = new URL(target.base).origin;
   const guarded = async (input: any, init?: any): Promise<Response> => {
@@ -273,9 +323,8 @@ export function installReadOnlyFetchGuard(target: Target): () => void {
     const method = String(init?.method ?? input?.method ?? 'GET').toUpperCase();
     const where = `${url.origin}${url.pathname}`;
     const ok = (method === 'GET' && url.origin === dbOrigin) ||
-      (method === 'POST' && where === OAUTH_TOKEN_URL) ||
-      (method === 'POST' && where === LOOKUP_URL);
-    if (!ok) throw new Error(`Refusing ${method} ${where}: this run is read-only`);
+      (method === 'POST' && allowedPosts.includes(where));
+    if (!ok) throw new Error(`Refusing ${method} ${where}: ${why}`);
     return original(input, init);
   };
   globalThis.fetch = guarded as typeof fetch;
@@ -312,6 +361,35 @@ export function identityToolkitHints(token: () => Promise<string>): HintLookup {
       }
     }
     return out;
+  };
+}
+
+/** Sets one Firebase Auth account's `disabled` flag (true = it cannot sign in). */
+export type LoginSwitch = (uid: string, disabled: boolean) => Promise<void>;
+
+/** Identity Toolkit accounts:update { localId, disableUser } with the admin
+ *  bearer token (header only). Errors name the HTTP status and Google's reason
+ *  - never the token, the URL or the uid. */
+export function identityToolkitSetDisabled(token: () => Promise<string>): LoginSwitch {
+  return async (uid, disabled) => {
+    const headers = {
+      Authorization: `Bearer ${await token()}`,
+      'Content-Type': 'application/json',
+      'x-goog-user-project': PROJECT_ID,
+    };
+    let res: Response;
+    try {
+      res = await fetch(UPDATE_URL, {
+        method: 'POST', headers, body: JSON.stringify({ localId: uid, disableUser: disabled }),
+      });
+    } catch {
+      throw new Error('Identity Toolkit accounts:update failed (network error).');
+    }
+    const json: any = await res.json().catch(() => null);
+    if (!res.ok) {
+      const why = typeof json?.error?.message === 'string' ? `, ${json.error.message.slice(0, 160)}` : '';
+      throw new Error(`Identity Toolkit accounts:update failed (HTTP ${res.status}${why}).`);
+    }
   };
 }
 
@@ -670,6 +748,9 @@ export interface RunDeps {
   sleep: (ms: number) => Promise<void>;
   outDir: string;
   target: Target;
+  /** The old-login switch's only way out (D13); main() wires Identity Toolkit
+   *  here and only for --send. A preview never needs it. */
+  setLoginDisabled?: LoginSwitch;
   /** Test seam: runs after --apply printed its plan, before the backup. */
   afterPlan?: () => Promise<void> | void;
 }
@@ -1088,6 +1169,106 @@ export async function notifyMerge(
   return result;
 }
 
+// ── old-login switch (D13) ─────────────────────────────────────────────────
+
+export interface LoginSwitchOptions {
+  /** true = --disable-old-logins, false = --enable-old-logins. */
+  disable: boolean;
+  /** false (the default of the command line) = the PREVIEW: prints who would
+   *  be switched and changes nothing. Only --send calls accounts:update. */
+  send: boolean;
+}
+
+export interface LoginSwitchResult {
+  ok: boolean;
+  /** Old accounts the map names (what a --send run switches). */
+  toSwitch: number;
+  /** accounts:update calls that succeeded this run. */
+  switched: number;
+  failed: number;
+}
+
+/** --disable-old-logins / --enable-old-logins: sets `disableUser` on every old
+ *  Firebase Auth account of the map (never a kept account, never a delete), so
+ *  signing in with an old email no longer recreates Users/<old> and onboarding
+ *  (D13). Reversible, and idempotent (setting a flag that is already set
+ *  changes nothing). Refuses unless EVERY old account is stamped
+ *  (Users/<old>/MergedInto = the map's kept account) - nothing is switched
+ *  before the data merge is applied. It changes people's ability to sign in,
+ *  so by default it is a PREVIEW (same checks, same printout, no calls); only
+ *  { send: true } calls accounts:update. The database is only ever read. */
+export async function switchOldLogins(
+  map: MergeMap, deps: RunDeps, opts: LoginSwitchOptions,
+): Promise<LoginSwitchResult> {
+  const log = deps.log;
+  const flag = opts.disable ? '--disable-old-logins' : '--enable-old-logins';
+  const WORD = opts.disable ? 'DISABLE' : 'ENABLE';
+  const past = opts.disable ? 'disabled' : 'enabled';
+  if (opts.send && !deps.setLoginDisabled) {
+    throw new Error(`Refusing ${flag} --send: no way to reach Identity Toolkit was given.`);
+  }
+  log(`Merge duplicate accounts - ${WORD} OLD LOGINS ${opts.send ? '--send' : 'PREVIEW'} (${deps.target.label})`);
+  const reader = guardRest(deps.rest, { readOnly: true });
+  const olds: Array<{ uid: string; keep: string }> = [];
+  const seen = new Set<string>();
+  for (const c of map.clusters) {
+    for (const old of c.old ?? []) {
+      if (!seen.has(old)) { seen.add(old); olds.push({ uid: old, keep: c.keep }); }
+    }
+  }
+  const result: LoginSwitchResult = { ok: true, toSwitch: olds.length, switched: 0, failed: 0 };
+  if (olds.length === 0) {
+    log('Nothing to switch - no cluster of the map has an old account.');
+    return result;
+  }
+
+  // 1. Every old account must be stamped (D5) into the map's kept account.
+  const problems: string[] = [];
+  for (const o of olds) {
+    const label = labelOf(userPath(o.uid), map);
+    const into = await reader.get(`${userPath(o.uid)}/MergedInto`);
+    if (!hasUidValue(into)) problems.push(`${label} is not stamped yet (no MergedInto)`);
+    else if (into !== o.keep) problems.push(`${label} is stamped into a different account than the map's kept account`);
+  }
+  if (problems.length > 0) {
+    throw new Error(`Refusing ${flag}: ${problems.join('; ')}. Run --apply first (and check the map). Nothing was changed.`);
+  }
+
+  // 2. Print who (labels + the first 6 characters of the uid - never an email).
+  const nameOf = (uid: string): string => `${labelOf(userPath(uid), map)} (${uid.slice(0, 6)})`;
+  log(`  ${olds.length} old login(s) ${opts.send ? `to ${WORD.toLowerCase()}` : `would be ${past.toUpperCase()}`}:`);
+  if (!opts.send) {
+    for (const o of olds) log(`    ${nameOf(o.uid)}`);
+    log(`PREVIEW - nothing was changed. To ${WORD.toLowerCase()} exactly these: npm run merge:accounts -- ${flag} --send`);
+    return result;
+  }
+
+  // 3. One accounts:update per old account; a failure does not stop the others.
+  const switchTo = deps.setLoginDisabled as LoginSwitch;
+  for (const o of olds) {
+    try {
+      await switchTo(o.uid, opts.disable);
+      result.switched++;
+      log(`    ${past} ${nameOf(o.uid)}`);
+    } catch (err) {
+      result.failed++;
+      log(`    FAILED ${nameOf(o.uid)}: ${(err as Error)?.message ?? 'unknown error'}`);
+    }
+  }
+  const other = opts.disable ? '--enable-old-logins' : '--disable-old-logins';
+  if (result.failed > 0) {
+    result.ok = false;
+    log(`INCOMPLETE - ${result.switched} old login(s) ${past}, ${result.failed} of ${olds.length} FAILED. ` +
+      `It is safe to run again (switching a login to a state it is already in changes nothing): npm run merge:accounts -- ${flag} --send`);
+    return result;
+  }
+  log(`DONE - ${result.switched} old login(s) ${past}. ` +
+    (opts.disable
+      ? `To restore them: npm run merge:accounts -- ${other} --send (do that BEFORE --undo - it needs the stamps).`
+      : `To switch them off again: npm run merge:accounts -- ${other} --send.`));
+  return result;
+}
+
 // ── find-dupes (D16, read-only) ────────────────────────────────────────────
 
 export const normalizeName = (s: string): string => s.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -1154,20 +1335,24 @@ export async function findDupes(regId: string, deps: RunDeps): Promise<DupeCandi
 // ── entry ──────────────────────────────────────────────────────────────────
 
 export interface CliArgs {
-  mode: 'dry-run' | 'apply' | 'undo' | 'find-dupes' | 'notify';
+  mode: 'dry-run' | 'apply' | 'undo' | 'find-dupes' | 'notify' | 'disable-logins' | 'enable-logins';
   backupFile?: string;
   regId?: string;
   mapFile: string;
   expectPlan?: string;
   fakeEmails: boolean;
   noCanary: boolean;
-  /** --notify --send: write (otherwise --notify only previews). */
+  /** --notify / --disable-old-logins / --enable-old-logins with --send: act (otherwise they only preview). */
   send: boolean;
 }
 
+const isLoginSwitchMode = (m: CliArgs['mode']): boolean => m === 'disable-logins' || m === 'enable-logins';
+
 export function parseArgs(argv: readonly string[]): CliArgs {
   const valued = new Set(['--undo', '--find-dupes', '--map', '--expect-plan']);
-  const flags = new Set(['--apply', '--notify', '--send', '--fake-emails', '--no-canary']);
+  const flags = new Set([
+    '--apply', '--notify', '--send', '--fake-emails', '--no-canary', '--disable-old-logins', '--enable-old-logins',
+  ]);
   const got = new Map<string, string>();
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -1183,18 +1368,26 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       throw new Error(`Unknown argument ${a}. ${USAGE}`);
     }
   }
-  const modes = ['--apply', '--undo', '--find-dupes', '--notify'].filter((m) => got.has(m));
-  if (modes.length > 1) throw new Error(`Pick one of --apply, --undo, --find-dupes, --notify. ${USAGE}`);
+  // The old-login switch is its own mode: never combined with another one.
+  const modes = ['--apply', '--undo', '--find-dupes', '--notify', '--disable-old-logins', '--enable-old-logins']
+    .filter((m) => got.has(m));
+  if (modes.length > 1) {
+    throw new Error(`Pick one of --apply, --undo, --find-dupes, --notify, --disable-old-logins, --enable-old-logins. ${USAGE}`);
+  }
   const mode: CliArgs['mode'] = got.has('--apply') ? 'apply' : got.has('--undo') ? 'undo'
-    : got.has('--find-dupes') ? 'find-dupes' : got.has('--notify') ? 'notify' : 'dry-run';
+    : got.has('--find-dupes') ? 'find-dupes' : got.has('--notify') ? 'notify'
+      : got.has('--disable-old-logins') ? 'disable-logins' : got.has('--enable-old-logins') ? 'enable-logins' : 'dry-run';
+  const switchMode = isLoginSwitchMode(mode);
   if (got.has('--expect-plan') && mode !== 'apply') throw new Error(`--expect-plan goes with --apply. ${USAGE}`);
   if (got.has('--no-canary') && mode !== 'apply') throw new Error(`--no-canary goes with --apply. ${USAGE}`);
-  if (got.has('--map') && mode !== 'apply' && mode !== 'dry-run' && mode !== 'notify') {
-    throw new Error(`--map goes with the dry run, --apply or --notify. ${USAGE}`);
+  if (got.has('--map') && mode !== 'apply' && mode !== 'dry-run' && mode !== 'notify' && !switchMode) {
+    throw new Error(`--map goes with the dry run, --apply, --notify, --disable-old-logins or --enable-old-logins. ${USAGE}`);
   }
-  if (got.has('--send') && mode !== 'notify') throw new Error(`--send goes with --notify. ${USAGE}`);
-  if (got.has('--fake-emails') && mode === 'notify') {
-    throw new Error(`--fake-emails does not go with --notify (it looks up no emails). ${USAGE}`);
+  if (got.has('--send') && mode !== 'notify' && !switchMode) {
+    throw new Error(`--send goes with --notify, --disable-old-logins or --enable-old-logins. ${USAGE}`);
+  }
+  if (got.has('--fake-emails') && (mode === 'notify' || switchMode)) {
+    throw new Error(`--fake-emails does not go with --notify, --disable-old-logins or --enable-old-logins (they look up no emails). ${USAGE}`);
   }
   return {
     mode,
@@ -1211,6 +1404,12 @@ export function parseArgs(argv: readonly string[]): CliArgs {
 /** --fake-emails and --no-canary are emulator-only; under the emulator the
  *  kept emails must be made up (never a real lookup for emulator data). */
 export function checkTargetFlags(args: CliArgs, target: Target): void {
+  // The database emulator has no Auth emulator beside it in this project: a
+  // --send would call the REAL Identity Toolkit while reading emulator data.
+  if (target.kind === 'emulator' && isLoginSwitchMode(args.mode) && args.send) {
+    throw new Error('Refusing --send under the emulator: the old-login switch calls the real Identity Toolkit ' +
+      '(there is no Auth emulator here), so it would change real accounts. Preview it instead (no --send).');
+  }
   if (target.kind !== 'emulator') {
     if (args.fakeEmails) {
       throw new Error('Refusing --fake-emails: it only works with FIREBASE_DATABASE_EMULATOR_HOST set (the emulator).');
@@ -1231,8 +1430,13 @@ async function main(): Promise<void> {
   checkTargetFlags(args, target);
   const token = target.kind === 'emulator' ? async (): Promise<string> => 'owner' : accessToken;
   // Read-only modes: no PUT/DELETE/other POST can leave the process.
-  const readOnly = args.mode === 'dry-run' || args.mode === 'find-dupes' || (args.mode === 'notify' && !args.send);
-  const restoreFetch = readOnly ? installReadOnlyFetchGuard(target) : (): void => undefined;
+  // The old-login switch with --send may also POST accounts:update (that one
+  // endpoint); its preview may not.
+  const loginSend = isLoginSwitchMode(args.mode) && args.send;
+  const readOnly = args.mode === 'dry-run' || args.mode === 'find-dupes' ||
+    ((args.mode === 'notify' || isLoginSwitchMode(args.mode)) && !args.send);
+  const restoreFetch = loginSend ? installLoginSwitchFetchGuard(target)
+    : readOnly ? installReadOnlyFetchGuard(target) : (): void => undefined;
   const deps: RunDeps = {
     rest: httpRest(target, token),
     hints: args.fakeEmails ? fakeHints : identityToolkitHints(token),
@@ -1245,6 +1449,7 @@ async function main(): Promise<void> {
       ? path.resolve(process.env.MERGE_TOOL_OUT_DIR)
       : path.join(process.cwd(), 'tools', 'rehearsal_out'),
     target,
+    ...(loginSend ? { setLoginDisabled: identityToolkitSetDisabled(token) } : {}),
   };
   try {
     if (args.mode === 'dry-run') {
@@ -1253,6 +1458,9 @@ async function main(): Promise<void> {
       await findDupes(args.regId as string, deps);
     } else if (args.mode === 'notify') {
       const r = await notifyMerge(loadMap(args.mapFile), deps, { send: args.send });
+      if (!r.ok) process.exitCode = 1;
+    } else if (isLoginSwitchMode(args.mode)) {
+      const r = await switchOldLogins(loadMap(args.mapFile), deps, { disable: args.mode === 'disable-logins', send: args.send });
       if (!r.ok) process.exitCode = 1;
     } else if (args.mode === 'apply') {
       const r = await applyMerge(loadMap(args.mapFile), deps, { canary: !args.noCanary, expectPlan: args.expectPlan });
