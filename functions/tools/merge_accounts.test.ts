@@ -977,7 +977,8 @@ describe('old-login switch (D13)', () => {
     const out = d.lines.join('\n');
     expect(out).toContain('DONE - 2 old login(s) disabled');
     expect(out).toContain('npm run merge:accounts -- --enable-old-logins --send');
-    expect(out).toContain('BEFORE --undo');
+    expect(out).toContain('works before or after --undo');
+    expect(out).not.toContain('BEFORE --undo');
     expect(out).not.toMatch(RAW_EMAIL_RE);
   });
 
@@ -1017,6 +1018,67 @@ describe('old-login switch (D13)', () => {
     expect(out).toContain('1 of 2 FAILED');
     expect(out).toContain('safe to run again');
     expect(out).not.toContain(old2);
+  });
+
+  it('--enable-old-logins accepts an ABSENT stamp (after --undo) but still refuses a stamp pointing elsewhere', async () => {
+    const at = 1_762_400_000_002;
+    const db = withMirror(new MemDb(fixture()));
+    const r = await applyMerge(MAP, deps(db, { now: () => at }), { canary: true, expectPlan: await digestOf(MAP, db.root) });
+    expect(r.ok).toBe(true);
+    await undoMerge(r.backupFile as string, deps(db));
+    expect(db.root.Users.oldA.MergedInto).toBeUndefined(); // the stamps are gone
+    expect(db.root.Users.oldB.MergedInto).toBeUndefined();
+    db.calls = [];
+    const sw = loginSwitch();
+
+    // Disabling stays strict: nothing is stamped now, so it is refused.
+    await expect(switchOldLogins(MAP, deps(db, { setLoginDisabled: sw.fn }), { ...DISABLE, send: true }))
+      .rejects.toThrow(/Refusing --disable-old-logins.*not stamped yet.*Run --apply first/);
+    expect(sw.calls).toEqual([]);
+
+    // Enabling (the undo direction) goes through, preview and --send.
+    const pv = deps(db, { setLoginDisabled: sw.fn });
+    await switchOldLogins(MAP, pv, ENABLE);
+    expect(sw.calls).toEqual([]);
+    expect(pv.lines.join('\n')).toContain('2 old login(s) would be ENABLED');
+    expect(pv.lines.join('\n')).toContain('note: 2 old account(s) carry no stamp');
+    const d = deps(db, { setLoginDisabled: sw.fn });
+    const res = await switchOldLogins(MAP, d, { ...ENABLE, send: true });
+    expect(sw.calls).toEqual([['oldA', false], ['oldB', false]]);
+    expect(res).toMatchObject({ ok: true, switched: 2 });
+    expect(d.lines.join('\n')).toContain('DONE - 2 old login(s) enabled');
+    expect(db.writes()).toEqual([]);
+
+    // A stamp that points elsewhere still refuses enable - even beside an absent one.
+    db.set('Users/oldA/MergedInto', 'someoneElse');
+    sw.calls.length = 0;
+    await expect(switchOldLogins(MAP, deps(db, { setLoginDisabled: sw.fn }), { ...ENABLE, send: true }))
+      .rejects.toThrow(/Refusing --enable-old-logins: Hiram Alvarez: old account #1 is stamped into a different account.*Nothing was changed/);
+    expect(sw.calls).toEqual([]);
+  });
+
+  it('redacts every uid from a Google error message before printing it', async () => {
+    const keep = 'KEEPuidABCDEFGHIJKLMNOPQRST';
+    const old1 = 'OLD1uidABCDEFGHIJKLMNOPQRST';
+    const old2 = 'OLD2uidABCDEFGHIJKLMNOPQRST';
+    const map: MergeMap = { clusters: [{ who: 'Long Uid', keep, old: [old1, old2] }] };
+    const db = new MemDb({ Users: { [old1]: { MergedInto: keep }, [old2]: { MergedInto: keep } } });
+    const calls: string[] = [];
+    const d = deps(db, {
+      setLoginDisabled: async (uid) => {
+        calls.push(uid);
+        throw new Error(`Identity Toolkit accounts:update failed (HTTP 400, USER ${uid} NOT_FOUND; also ${keep} and ${old1}).`);
+      },
+    });
+    const r = await switchOldLogins(map, d, { ...DISABLE, send: true });
+    const out = d.lines.join('\n');
+    expect(calls).toEqual([old1, old2]);
+    expect(r).toMatchObject({ ok: false, failed: 2 });
+    expect(out).toContain('FAILED Long Uid: old account #1 (OLD1ui): Identity Toolkit accounts:update failed (HTTP 400, USER OLD1ui NOT_FOUND; also KEEPui and OLD1ui).');
+    expect(out).toContain('FAILED Long Uid: old account #2 (OLD2ui): Identity Toolkit accounts:update failed (HTTP 400, USER OLD2ui NOT_FOUND; also KEEPui and OLD1ui).');
+    for (const u of [keep, old1, old2]) expect(out).not.toContain(u);
+    expect(out).not.toContain('OLD1uid');
+    expect(out).not.toContain('KEEPuid');
   });
 
   it('a --send run without a switch function stops before anything', async () => {

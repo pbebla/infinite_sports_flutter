@@ -75,13 +75,17 @@
 //                                                PREVIEW (same checks, prints
 //                                                who by label + the first 6
 //                                                characters of the uid; no
-//                                                call). Refuses unless EVERY
-//                                                old account is stamped into
-//                                                the map's kept account (so
-//                                                run --enable-old-logins
-//                                                BEFORE --undo). Under the
-//                                                emulator only the preview
-//                                                runs (no Auth emulator).
+//                                                call). --disable refuses
+//                                                unless EVERY old account is
+//                                                stamped into the map's kept
+//                                                account; --enable (the safe,
+//                                                undo direction) also accepts
+//                                                an ABSENT stamp (after
+//                                                --undo) but still refuses a
+//                                                stamp pointing elsewhere.
+//                                                Under the emulator only the
+//                                                preview runs (no Auth
+//                                                emulator).
 //                                                OWNER RULE: never run
 //                                                against production until the
 //                                                owner says so.
@@ -1194,7 +1198,10 @@ export interface LoginSwitchResult {
  *  (D13). Reversible, and idempotent (setting a flag that is already set
  *  changes nothing). Refuses unless EVERY old account is stamped
  *  (Users/<old>/MergedInto = the map's kept account) - nothing is switched
- *  before the data merge is applied. It changes people's ability to sign in,
+ *  before the data merge is applied. --enable-old-logins is the safe, undo
+ *  direction: it also accepts an ABSENT stamp (the merge was undone, which
+ *  removes the stamps) but still refuses a stamp that points to a different
+ *  account than the map's kept one. It changes people's ability to sign in,
  *  so by default it is a PREVIEW (same checks, same printout, no calls); only
  *  { send: true } calls accounts:update. The database is only ever read. */
 export async function switchOldLogins(
@@ -1223,19 +1230,29 @@ export async function switchOldLogins(
   }
 
   // 1. Every old account must be stamped (D5) into the map's kept account.
+  //    Enabling (the undo direction) also accepts an absent stamp.
   const problems: string[] = [];
+  let unstamped = 0;
   for (const o of olds) {
     const label = labelOf(userPath(o.uid), map);
     const into = await reader.get(`${userPath(o.uid)}/MergedInto`);
-    if (!hasUidValue(into)) problems.push(`${label} is not stamped yet (no MergedInto)`);
+    if (!opts.disable && (into === null || into === undefined)) unstamped++;
+    else if (!hasUidValue(into)) problems.push(`${label} is not stamped yet (no MergedInto)`);
     else if (into !== o.keep) problems.push(`${label} is stamped into a different account than the map's kept account`);
   }
   if (problems.length > 0) {
-    throw new Error(`Refusing ${flag}: ${problems.join('; ')}. Run --apply first (and check the map). Nothing was changed.`);
+    throw new Error(`Refusing ${flag}: ${problems.join('; ')}. ${opts.disable ? 'Run --apply first (and check the map). ' : 'Check the map. '}Nothing was changed.`);
+  }
+  if (unstamped > 0) {
+    log(`  note: ${unstamped} old account(s) carry no stamp (the merge was undone); re-enabling a login is safe either way.`);
   }
 
   // 2. Print who (labels + the first 6 characters of the uid - never an email).
   const nameOf = (uid: string): string => `${labelOf(userPath(uid), map)} (${uid.slice(0, 6)})`;
+  // Google's error text may quote the uid: every uid of the map is cut to its
+  // 6-character prefix (longest first) before anything is printed.
+  const mapUids = [...new Set(map.clusters.flatMap((c) => [c.keep, ...(c.old ?? [])]))].sort((a, b) => b.length - a.length);
+  const redact = (text: string): string => mapUids.reduce((t, u) => t.split(u).join(u.slice(0, 6)), text);
   log(`  ${olds.length} old login(s) ${opts.send ? `to ${WORD.toLowerCase()}` : `would be ${past.toUpperCase()}`}:`);
   if (!opts.send) {
     for (const o of olds) log(`    ${nameOf(o.uid)}`);
@@ -1252,7 +1269,7 @@ export async function switchOldLogins(
       log(`    ${past} ${nameOf(o.uid)}`);
     } catch (err) {
       result.failed++;
-      log(`    FAILED ${nameOf(o.uid)}: ${(err as Error)?.message ?? 'unknown error'}`);
+      log(`    FAILED ${nameOf(o.uid)}: ${redact((err as Error)?.message ?? 'unknown error')}`);
     }
   }
   const other = opts.disable ? '--enable-old-logins' : '--disable-old-logins';
@@ -1264,7 +1281,7 @@ export async function switchOldLogins(
   }
   log(`DONE - ${result.switched} old login(s) ${past}. ` +
     (opts.disable
-      ? `To restore them: npm run merge:accounts -- ${other} --send (do that BEFORE --undo - it needs the stamps).`
+      ? `To restore them: npm run merge:accounts -- ${other} --send (works before or after --undo).`
       : `To switch them off again: npm run merge:accounts -- ${other} --send.`));
   return result;
 }
