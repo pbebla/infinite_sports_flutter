@@ -8,8 +8,8 @@ import { mergeNoticeCampaignId } from '../src/lib/merge_notice';
 import {
   applyMerge, BACKUP_KIND, checkTargetFlags, DB_URL, dryRun, findDupes, guardRest, HintLookup,
   httpRest, identityToolkitHints, identityToolkitSetDisabled, installLoginSwitchFetchGuard, installReadOnlyFetchGuard,
-  labelOf, loadMap, LOOKUP_URL, LoginSwitch, notifyMerge, parseArgs, readMergeSnapshot, resolveTarget, Rest, RunDeps,
-  switchOldLogins, Target, UPDATE_URL, undoMerge,
+  labelOf, loadMap, LOOKUP_URL, LoginSwitch, notifyMerge, parseArgs, printableError, readMergeSnapshot, redactUids,
+  resolveTarget, Rest, RunDeps, runCli, switchOldLogins, Target, UPDATE_URL, undoMerge,
 } from './merge_accounts';
 import { looksMasked, MergeMap } from './merge_accounts_logic';
 
@@ -1041,7 +1041,7 @@ describe('old-login switch (D13)', () => {
     await switchOldLogins(MAP, pv, ENABLE);
     expect(sw.calls).toEqual([]);
     expect(pv.lines.join('\n')).toContain('2 old login(s) would be ENABLED');
-    expect(pv.lines.join('\n')).toContain('note: 2 old account(s) carry no stamp');
+    expect(pv.lines.join('\n')).toContain('note: 2 old account(s) not stamped (undone or never applied)');
     const d = deps(db, { setLoginDisabled: sw.fn });
     const res = await switchOldLogins(MAP, d, { ...ENABLE, send: true });
     expect(sw.calls).toEqual([['oldA', false], ['oldB', false]]);
@@ -1196,6 +1196,143 @@ describe('old-login switch (D13)', () => {
         expect(() => checkTargetFlags(parseArgs([flag, '--send']), PROD)).not.toThrow();
         expect(() => checkTargetFlags(parseArgs([flag]), PROD)).not.toThrow();
       }
+    });
+  });
+});
+
+// ── fix round 2: no mode may print a full uid (the catch redacts, once) ────
+
+describe('top-level error output prints uid prefixes only (every mode)', () => {
+  const KEEP = 'KEEPuidABCDEFGHIJKLMNOPQRST';
+  const OLD1 = 'OLD1uidABCDEFGHIJKLMNOPQRST';
+  const OLD2 = 'OLD2uidABCDEFGHIJKLMNOPQRST';
+  const FULL = [KEEP, OLD1, OLD2];
+  const CWD = path.resolve(__dirname, '..');
+  let original: typeof fetch;
+  beforeEach(() => { original = globalThis.fetch; });
+  afterEach(() => { globalThis.fetch = original; });
+
+  function mapFile(): string {
+    const f = path.join(outDir, 'long_map.json');
+    fs.writeFileSync(f, JSON.stringify({ clusters: [{ who: 'Long Uid', keep: KEEP, old: [OLD1, OLD2] }] }));
+    return f;
+  }
+
+  /** A database whose GET of any Users/<uid>/MergedInto fails (HTTP 500 or a dropped connection). */
+  function failingDb(how: 'http500' | 'dropped'): void {
+    globalThis.fetch = (async (url: any) => {
+      if (/MergedInto\.json/.test(String(url))) {
+        if (how === 'dropped') throw new Error('socket hang up');
+        return new Response('{"error":"Internal error for Users/' + OLD1 + '"}', { status: 500 });
+      }
+      return new Response('null');
+    }) as typeof fetch;
+  }
+
+  async function cli(argv: string[]): Promise<{ code: number; out: string; err: string }> {
+    const lines: string[] = [];
+    const errs: string[] = [];
+    const code = await runCli(argv, {}, {
+      cwd: CWD, token: async () => 'tok-xyz', log: (l) => lines.push(l), error: (e) => errs.push(e),
+    });
+    return { code, out: lines.join('\n'), err: errs.join('\n') };
+  }
+
+  const MODES: Array<[string, string[]]> = [
+    ['--disable-old-logins preview', ['--disable-old-logins']],
+    ['--disable-old-logins --send', ['--disable-old-logins', '--send']],
+    ['--enable-old-logins preview', ['--enable-old-logins']],
+    ['--notify preview', ['--notify']],
+    ['--notify --send', ['--notify', '--send']],
+  ];
+
+  for (const how of ['http500', 'dropped'] as const) {
+    for (const [name, flags] of MODES) {
+      it(`${name}: a preflight read that fails (${how}) prints the 6-character prefix, never the full uid`, async () => {
+        failingDb(how);
+        const r = await cli([...flags, '--map', mapFile()]);
+        expect(r.code).toBe(1);
+        expect(r.err).toContain('Users/OLD1ui/MergedInto');
+        expect(r.err).toMatch(/GET Users\/OLD1ui\/MergedInto (failed|-> HTTP 500)/);
+        for (const u of FULL) {
+          expect(r.err).not.toContain(u);
+          expect(r.out).not.toContain(u);
+        }
+        expect(r.err).not.toContain('OLD1uid');
+        expect(r.err).not.toContain('tok-xyz');
+        expect(globalThis.fetch).toBeDefined();
+      });
+    }
+  }
+
+  it('the fetch guard is restored after a failed run (the error path does not leak it)', async () => {
+    failingDb('http500');
+    const stub = globalThis.fetch;
+    await cli(['--disable-old-logins', '--map', mapFile()]);
+    expect(globalThis.fetch).toBe(stub);
+  });
+
+  it('a map that fails to load cannot print its own uids either', async () => {
+    const f = path.join(outDir, 'bad_long_map.json');
+    fs.writeFileSync(f, JSON.stringify({ clusters: [{ who: 'Bad', keep: KEEP, old: [KEEP, OLD1] }] }));
+    const r = await cli(['--disable-old-logins', '--map', f]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('Refusing merge map');
+    for (const u of FULL) expect(r.err).not.toContain(u);
+  });
+
+  it('redactUids: the given uids (any characters) and then any uid-shaped path segment, nothing else', () => {
+    expect(redactUids(`GET Users/${OLD1}/MergedInto failed`, [OLD1])).toBe('GET Users/OLD1ui/MergedInto failed');
+    // no map loaded: the 20-40 character run between slashes is cut
+    expect(redactUids(`GET Users/${OLD2}/MergedInto -> HTTP 500: Users/${KEEP}`)).toBe(
+      'GET Users/OLD2ui/MergedInto -> HTTP 500: Users/KEEPui');
+    // a uid with underscore/hyphen is covered by the map's own list
+    expect(redactUids('Users/abc_def-ghi-jkl-mno-pqr-stu/x', ['abc_def-ghi-jkl-mno-pqr-stu'])).toBe('Users/abc_de/x');
+    // short ids, season numbers, team and roster names are left alone
+    const keepAsIs = 'GET Users/oldA/MergedInto Futsal/15/Line Ups/Ashur/Hiram Alvarez/UID -> HTTP 500';
+    expect(redactUids(keepAsIs, ['oldA', 'keepA'])).toBe(keepAsIs);
+    // a run longer than 40 characters is not a uid (a digest, say)
+    const long = 'a'.repeat(64);
+    expect(redactUids(`/x/${long}/y`)).toBe(`/x/${long}/y`);
+  });
+
+  it('printableError: the stack AND the message are redacted; a message the stack lacks is added', () => {
+    const e = new Error(`GET Users/${OLD1}/MergedInto -> HTTP 500: gone`);
+    const text = printableError(e, [OLD1]);
+    expect(text).toContain('GET Users/OLD1ui/MergedInto -> HTTP 500: gone');
+    expect(text).toContain('merge_accounts.test'); // the stack frames are still printed
+    expect(text).not.toContain(OLD1);
+    const odd = new Error('first');
+    odd.message = `later ${OLD2}`;
+    const t2 = printableError(odd, [OLD2]);
+    expect(t2).toContain('later OLD2ui');
+    expect(t2).not.toContain(OLD2);
+    expect(printableError(`plain Users/${KEEP}`, [])).toBe('plain Users/KEEPui');
+    expect(printableError(undefined)).toBe('undefined');
+  });
+
+  describe('enable DONE line and the unstamped note', () => {
+    it('after an undo (not stamped): says so, and suggests no disable that would refuse', async () => {
+      const db = new MemDb({ Users: { [OLD1]: { 'First Name': 'x' } } });
+      const map: MergeMap = { clusters: [{ who: 'Long Uid', keep: KEEP, old: [OLD1] }] };
+      const sw = loginSwitch();
+      const d = deps(db, { setLoginDisabled: sw.fn });
+      await switchOldLogins(map, d, { ...ENABLE, send: true });
+      const out = d.lines.join('\n');
+      expect(out).toContain('note: 1 old account(s) not stamped (undone or never applied); re-enabling a login is safe either way.');
+      expect(out).toContain('DONE - 1 old login(s) enabled.');
+      expect(out).toContain('--disable-old-logins refuses until --apply has stamped the old accounts again');
+      expect(out).not.toContain('To switch them off again');
+      expect(out).not.toContain('carry no stamp');
+    });
+
+    it('while stamped: still offers the way back to disabled', async () => {
+      const db = await appliedDb();
+      const d = deps(db, { setLoginDisabled: loginSwitch().fn });
+      await switchOldLogins(MAP, d, { ...ENABLE, send: true });
+      const out = d.lines.join('\n');
+      expect(out).toContain('To switch them off again: npm run merge:accounts -- --disable-old-logins --send.');
+      expect(out).not.toContain('not stamped');
     });
   });
 });

@@ -125,6 +125,10 @@
 //     The tool prints roster names, team names, seasons and counts - not
 //     uids (an account is "kept account" / "old account #n"; the old-login
 //     switch adds the first 6 characters of an old uid, never more).
+//   - Every error any mode raises is caught in runCli and printed through
+//     printableError: the loaded map's uids (and any uid-shaped path
+//     segment) are cut to their first 6 characters in the message AND the
+//     stack - an RTDB error names its full "Users/<uid>/..." path.
 //   - Admin calls send the firebase-tools OAuth token in an
 //     `Authorization: Bearer` header - never in a URL, log or error message.
 //   - FIREBASE_DATABASE_EMULATOR_HOST (a local host:port) switches every
@@ -1244,15 +1248,15 @@ export async function switchOldLogins(
     throw new Error(`Refusing ${flag}: ${problems.join('; ')}. ${opts.disable ? 'Run --apply first (and check the map). ' : 'Check the map. '}Nothing was changed.`);
   }
   if (unstamped > 0) {
-    log(`  note: ${unstamped} old account(s) carry no stamp (the merge was undone); re-enabling a login is safe either way.`);
+    log(`  note: ${unstamped} old account(s) not stamped (undone or never applied); re-enabling a login is safe either way.`);
   }
 
   // 2. Print who (labels + the first 6 characters of the uid - never an email).
   const nameOf = (uid: string): string => `${labelOf(userPath(uid), map)} (${uid.slice(0, 6)})`;
   // Google's error text may quote the uid: every uid of the map is cut to its
-  // 6-character prefix (longest first) before anything is printed.
-  const mapUids = [...new Set(map.clusters.flatMap((c) => [c.keep, ...(c.old ?? [])]))].sort((a, b) => b.length - a.length);
-  const redact = (text: string): string => mapUids.reduce((t, u) => t.split(u).join(u.slice(0, 6)), text);
+  // 6-character prefix before anything is printed.
+  const mapUids = uidsOf(map);
+  const redact = (text: string): string => redactUids(text, mapUids);
   log(`  ${olds.length} old login(s) ${opts.send ? `to ${WORD.toLowerCase()}` : `would be ${past.toUpperCase()}`}:`);
   if (!opts.send) {
     for (const o of olds) log(`    ${nameOf(o.uid)}`);
@@ -1282,7 +1286,9 @@ export async function switchOldLogins(
   log(`DONE - ${result.switched} old login(s) ${past}. ` +
     (opts.disable
       ? `To restore them: npm run merge:accounts -- ${other} --send (works before or after --undo).`
-      : `To switch them off again: npm run merge:accounts -- ${other} --send.`));
+      : unstamped > 0
+        ? `(${other} refuses until --apply has stamped the old accounts again.)`
+        : `To switch them off again: npm run merge:accounts -- ${other} --send.`));
   return result;
 }
 
@@ -1350,6 +1356,47 @@ export async function findDupes(regId: string, deps: RunDeps): Promise<DupeCandi
 }
 
 // ── entry ──────────────────────────────────────────────────────────────────
+
+/** Cuts every uid in [text] to its first 6 characters: first the given uids
+ *  (the loaded map's - exact matches, any characters, longest first), then
+ *  any 20-40 character [A-Za-z0-9] run that sits right after a "/" of a path
+ *  (a Firebase uid in "Users/<uid>/MergedInto"), which covers runs with no
+ *  map loaded (--undo, --find-dupes, a malformed map). */
+export function redactUids(text: string, uids: readonly string[] = []): string {
+  const known = [...new Set(uids)].filter((u) => u.length > 6).sort((a, b) => b.length - a.length)
+    .reduce((t, u) => t.split(u).join(u.slice(0, 6)), text);
+  return known.replace(/(?<=\/)[A-Za-z0-9]{20,40}(?![A-Za-z0-9])/g, (m) => m.slice(0, 6));
+}
+
+/** What the top-level catch prints for [err]: the stack (which carries the
+ *  message), plus the message when the stack does not, with every uid cut to
+ *  its 6-character prefix. An RTDB error names its path ("GET
+ *  Users/<uid>/MergedInto -> HTTP 500"), so without this a dropped connection
+ *  or an HTTP error would print a full uid in any mode. */
+export function printableError(err: unknown, uids: readonly string[] = []): string {
+  const e = err as { stack?: unknown; message?: unknown } | null | undefined;
+  const stack = typeof e?.stack === 'string' ? e.stack : undefined;
+  const message = typeof e?.message === 'string' ? e.message : undefined;
+  const text = stack === undefined ? String(err)
+    : message !== undefined && message !== '' && !stack.includes(message) ? `${message}\n${stack}` : stack;
+  return redactUids(text, uids);
+}
+
+/** The uids of a map file that failed to load (best effort, never throws), so
+ *  the error about that very file cannot print them either. */
+function rawMapUids(file: string): string[] {
+  try {
+    const raw: any = readJsonFile(file, 'the merge map');
+    const out: string[] = [];
+    for (const c of Array.isArray(raw?.clusters) ? raw.clusters : []) {
+      if (typeof c?.keep === 'string') out.push(c.keep);
+      for (const o of Array.isArray(c?.old) ? c.old : []) if (typeof o === 'string') out.push(o);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
 
 export interface CliArgs {
   mode: 'dry-run' | 'apply' | 'undo' | 'find-dupes' | 'notify' | 'disable-logins' | 'enable-logins';
@@ -1438,66 +1485,103 @@ export function checkTargetFlags(args: CliArgs, target: Target): void {
   }
 }
 
-async function main(): Promise<void> {
-  if (!fs.existsSync(path.join(process.cwd(), 'tools', 'merge_accounts.ts'))) {
-    throw new Error('Run from functions/ (npm run merge:accounts).');
-  }
-  const args = parseArgs(process.argv.slice(2));
-  const target = resolveTarget();
-  checkTargetFlags(args, target);
-  const token = target.kind === 'emulator' ? async (): Promise<string> => 'owner' : accessToken;
-  // Read-only modes: no PUT/DELETE/other POST can leave the process.
-  // The old-login switch with --send may also POST accounts:update (that one
-  // endpoint); its preview may not.
-  const loginSend = isLoginSwitchMode(args.mode) && args.send;
-  const readOnly = args.mode === 'dry-run' || args.mode === 'find-dupes' ||
-    ((args.mode === 'notify' || isLoginSwitchMode(args.mode)) && !args.send);
-  const restoreFetch = loginSend ? installLoginSwitchFetchGuard(target)
-    : readOnly ? installReadOnlyFetchGuard(target) : (): void => undefined;
-  const deps: RunDeps = {
-    rest: httpRest(target, token),
-    hints: args.fakeEmails ? fakeHints : identityToolkitHints(token),
-    log: (line) => console.log(line),
-    now: () => Date.now(),
-    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-    // Production backups always land in tools/rehearsal_out; an emulator
-    // rehearsal may keep its own elsewhere (MERGE_TOOL_OUT_DIR).
-    outDir: target.kind === 'emulator' && process.env.MERGE_TOOL_OUT_DIR
-      ? path.resolve(process.env.MERGE_TOOL_OUT_DIR)
-      : path.join(process.cwd(), 'tools', 'rehearsal_out'),
-    target,
-    ...(loginSend ? { setLoginDisabled: identityToolkitSetDisabled(token) } : {}),
-  };
+export interface CliIo {
+  /** The directory the tool runs from (functions/). */
+  cwd: string;
+  /** The admin bearer token source (default: the firebase-tools OAuth token). */
+  token?: () => Promise<string>;
+  log: (line: string) => void;
+  /** Where the redacted text of an error goes. */
+  error: (text: string) => void;
+}
+
+/** The whole command line. Returns the exit code (0 = ok); anything thrown is
+ *  caught HERE and printed through printableError, so no mode can print a
+ *  full uid (or a stack that quotes one). */
+export async function runCli(argv: readonly string[], env: NodeJS.ProcessEnv, io: CliIo): Promise<number> {
+  let loaded: MergeMap | undefined;
+  let raw: string[] = [];
+  let restoreFetch: () => void = () => undefined;
   try {
+    if (!fs.existsSync(path.join(io.cwd, 'tools', 'merge_accounts.ts'))) {
+      throw new Error('Run from functions/ (npm run merge:accounts).');
+    }
+    const args = parseArgs(argv);
+    const target = resolveTarget(env);
+    checkTargetFlags(args, target);
+    const token = target.kind === 'emulator' ? async (): Promise<string> => 'owner' : io.token ?? accessToken;
+    const mapOf = (): MergeMap => {
+      try {
+        loaded = loadMap(args.mapFile);
+      } catch (err) {
+        raw = rawMapUids(args.mapFile);
+        throw err;
+      }
+      return loaded;
+    };
+    // Read-only modes: no PUT/DELETE/other POST can leave the process.
+    // The old-login switch with --send may also POST accounts:update (that one
+    // endpoint); its preview may not.
+    const loginSend = isLoginSwitchMode(args.mode) && args.send;
+    const readOnly = args.mode === 'dry-run' || args.mode === 'find-dupes' ||
+      ((args.mode === 'notify' || isLoginSwitchMode(args.mode)) && !args.send);
+    restoreFetch = loginSend ? installLoginSwitchFetchGuard(target)
+      : readOnly ? installReadOnlyFetchGuard(target) : (): void => undefined;
+    const deps: RunDeps = {
+      rest: httpRest(target, token),
+      hints: args.fakeEmails ? fakeHints : identityToolkitHints(token),
+      log: io.log,
+      now: () => Date.now(),
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      // Production backups always land in tools/rehearsal_out; an emulator
+      // rehearsal may keep its own elsewhere (MERGE_TOOL_OUT_DIR).
+      outDir: target.kind === 'emulator' && env.MERGE_TOOL_OUT_DIR
+        ? path.resolve(env.MERGE_TOOL_OUT_DIR)
+        : path.join(io.cwd, 'tools', 'rehearsal_out'),
+      target,
+      ...(loginSend ? { setLoginDisabled: identityToolkitSetDisabled(token) } : {}),
+    };
+    let ok = true;
     if (args.mode === 'dry-run') {
-      await dryRun(loadMap(args.mapFile), deps);
+      await dryRun(mapOf(), deps);
     } else if (args.mode === 'find-dupes') {
       await findDupes(args.regId as string, deps);
     } else if (args.mode === 'notify') {
-      const r = await notifyMerge(loadMap(args.mapFile), deps, { send: args.send });
-      if (!r.ok) process.exitCode = 1;
+      ok = (await notifyMerge(mapOf(), deps, { send: args.send })).ok;
     } else if (isLoginSwitchMode(args.mode)) {
-      const r = await switchOldLogins(loadMap(args.mapFile), deps, { disable: args.mode === 'disable-logins', send: args.send });
-      if (!r.ok) process.exitCode = 1;
+      ok = (await switchOldLogins(mapOf(), deps, { disable: args.mode === 'disable-logins', send: args.send })).ok;
     } else if (args.mode === 'apply') {
-      const r = await applyMerge(loadMap(args.mapFile), deps, { canary: !args.noCanary, expectPlan: args.expectPlan });
-      if (!r.ok) process.exitCode = 1;
+      ok = (await applyMerge(mapOf(), deps, { canary: !args.noCanary, expectPlan: args.expectPlan })).ok;
     } else {
-      const r = await undoMerge(args.backupFile as string, deps);
-      if (!r.ok) process.exitCode = 1;
+      ok = (await undoMerge(args.backupFile as string, deps)).ok;
     }
+    return ok ? 0 : 1;
+  } catch (err) {
+    // An error names a path or a label - an RTDB error names the full
+    // "Users/<uid>/..." path, so uids are cut to 6 characters (the loaded
+    // map's, and any uid-shaped path segment) in the message AND the stack.
+    // Never a URL, a token or an email.
+    io.error(printableError(err, [...(loaded ? uidsOf(loaded) : []), ...raw]));
+    return 1;
   } finally {
     restoreFetch();
   }
 }
 
+async function main(): Promise<void> {
+  process.exitCode = await runCli(process.argv.slice(2), process.env, {
+    cwd: process.cwd(),
+    log: (line) => console.log(line),
+    error: (text) => console.error(text),
+  });
+}
+
 // Runs only as the built entry point (npm run merge:accounts), never when a
 // test imports this module.
 if (/merge_accounts\.js$/.test(process.argv[1] ?? '')) {
+  // runCli prints (redacted) every error itself; this is only the last net.
   main().catch((err) => {
-    // Every error this tool raises names a path or a label - never a URL,
-    // a token or an email.
-    console.error((err as Error)?.stack ?? String(err));
+    console.error(printableError(err));
     process.exitCode = 1;
   });
 }
