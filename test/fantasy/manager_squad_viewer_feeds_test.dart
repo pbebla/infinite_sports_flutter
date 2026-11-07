@@ -11,7 +11,8 @@
 // answers null first and a squad later (the lock — Review Focus 5) landing
 // in a later emission. Then the widget over the same seam: a week that locks
 // while the sheet is open appears live, and a schedule that grows from 3 to
-// 4 gameweeks adds one listener per feed without a blank frame.
+// 4 gameweeks reopens each feed over all 4 weeks (the old listeners
+// released) without a blank frame.
 
 import 'dart:async';
 

@@ -611,9 +611,9 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
   Widget _content(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final badgeSection = _badgeSection(context);
-    // A squad feed errored / stayed silent past the bound: say so - never an
-    // empty squad or "revealed at lock" for a team that did not load. The
-    // data that arrives later replaces this live.
+    // A squad feed errored: say so - never an empty squad or "revealed at
+    // lock" for a team that did not load. The data that arrives later
+    // replaces this live.
     if (_teamUnreadable) {
       return _messagePage(
         context,
