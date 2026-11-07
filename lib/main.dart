@@ -5,6 +5,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_config/flutter_config.dart';
+import 'package:infinite_sports_flutter/account/merged_account_notice.dart';
 import 'package:infinite_sports_flutter/calendar_tab.dart';
 import 'package:infinite_sports_flutter/insiders/insider_dashboard_page.dart';
 import 'package:infinite_sports_flutter/misc/auth_gate.dart';
@@ -138,7 +139,14 @@ class AuthGate extends StatelessWidget {
         signedIn = user != null;
         return chooseRootWidget(
           user: user,
-          signedInHome: () => const MyHomePage(),
+          // A merged (duplicate) account is told once which email to use,
+          // then signed out (account-merge notice, D9). Keyed by uid so a
+          // direct account switch starts a fresh watch instead of reusing
+          // the previous user's.
+          signedInHome: () => MergedAccountWatcher(
+            key: ValueKey(user!.uid),
+            child: const MyHomePage(),
+          ),
           signedOutHome: () => WelcomePage(
             onGoogle: () => _handleGoogleSignIn(context),
             onApple: () => _handleAppleSignIn(context),
