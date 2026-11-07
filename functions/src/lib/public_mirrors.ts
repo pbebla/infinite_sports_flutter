@@ -40,16 +40,22 @@ export const PUBLIC_PROFILE_KEYS: readonly string[] = [
 /** Whitelist copy of a Users/{uid} node for PublicProfiles/{uid}.
  *
  *  Returns null when the mirror should be DELETED: null/absent source,
- *  non-map source (including RTDB array coercion), or a node carrying none
- *  of the whitelisted keys (RTDB cannot store an empty node anyway, so an
- *  empty projection and a deleted mirror are the same thing).
+ *  non-map source (including RTDB array coercion), a MERGED account (a
+ *  non-empty string MergedInto, stamped on the old uid by the merge tool —
+ *  plan docs/superpowers/plans/2026-11-06-merge-duplicate-accounts.md,
+ *  Task 1 / design D7), or a node carrying none of the whitelisted keys
+ *  (RTDB cannot store an empty node anyway, so an empty projection and a
+ *  deleted mirror are the same thing).
  *  Absent whitelisted keys are omitted; present ones are copied verbatim
  *  (Information's nested map included — spec §4 lists it as public:
- *  positions/height). */
+ *  positions/height). MergedHint, MergedAt and MergedInto are not on the
+ *  whitelist and are never copied. */
 export function publicProfileProjection(
   userNode: unknown,
 ): Record<string, unknown> | null {
   if (!isPlainMap(userNode)) return null;
+  const mergedInto = userNode['MergedInto'];
+  if (typeof mergedInto === 'string' && mergedInto.length > 0) return null;
   const out: Record<string, unknown> = {};
   for (const key of PUBLIC_PROFILE_KEYS) {
     const value = userNode[key];

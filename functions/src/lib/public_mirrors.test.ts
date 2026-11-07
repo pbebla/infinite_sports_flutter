@@ -141,6 +141,73 @@ describe('publicProfileProjection', () => {
   });
 });
 
+// Merged accounts (design D5/D7): the merge tool stamps the OLD Users/{uid}
+// with MergedInto (the kept uid), MergedAt and MergedHint. A merged account
+// must leave the public mirror entirely; MergedHint (a masked email) and the
+// other stamp leaves are never mirrored.
+describe('publicProfileProjection — merged accounts', () => {
+  it('a non-empty string MergedInto projects to null (mirror deleted)', () => {
+    expect(publicProfileProjection({ 'First Name': 'A', MergedInto: 'k' }))
+      .toBeNull();
+  });
+
+  it('a merged node is dropped even when it carries every whitelisted key', () => {
+    const stamped = {
+      ...fullUserNode(),
+      MergedInto: '-KeepUid',
+      MergedAt: 1730000000000,
+      MergedHint: 'ca••••••••@gmail.com',
+    };
+    expect(publicProfileProjection(stamped)).toBeNull();
+  });
+
+  it('without MergedInto the projection is unchanged', () => {
+    expect(publicProfileProjection({ 'First Name': 'A' }))
+      .toEqual({ 'First Name': 'A' });
+    const out = publicProfileProjection(fullUserNode())!;
+    expect(out['Played']).toBe(42);
+    expect(out['Information']).toEqual(
+      { Age: 28, Height: `5'10"`, FutsalPositions: 'Pivot;Winger' });
+  });
+
+  it('an empty-string MergedInto is not a merge', () => {
+    expect(publicProfileProjection({ 'First Name': 'A', MergedInto: '' }))
+      .toEqual({ 'First Name': 'A' });
+  });
+
+  it('a non-string MergedInto is not a merge', () => {
+    for (const value of [42, true, null, ['k'], { uid: 'k' }]) {
+      expect(
+        publicProfileProjection({ 'First Name': 'A', MergedInto: value }),
+        `MergedInto=${JSON.stringify(value)} must not count as merged`,
+      ).toEqual({ 'First Name': 'A' });
+    }
+  });
+
+  it('MergedHint never appears in a projection', () => {
+    const out = publicProfileProjection({
+      'First Name': 'A',
+      MergedHint: 'ca••••••••@gmail.com',
+    });
+    expect(out).toEqual({ 'First Name': 'A' });
+    expect(out).not.toHaveProperty(['MergedHint']);
+    expect(JSON.stringify(out)).not.toContain('gmail.com');
+    expect(PUBLIC_PROFILE_KEYS).not.toContain('MergedHint');
+  });
+
+  it('MergedInto and MergedAt are never copied into a projection', () => {
+    const out = publicProfileProjection({
+      'First Name': 'A',
+      MergedInto: '',
+      MergedAt: 1730000000000,
+    });
+    expect(out).not.toHaveProperty(['MergedInto']);
+    expect(out).not.toHaveProperty(['MergedAt']);
+    expect(PUBLIC_PROFILE_KEYS).not.toContain('MergedInto');
+    expect(PUBLIC_PROFILE_KEYS).not.toContain('MergedAt');
+  });
+});
+
 describe('registrationConfigProjection', () => {
   const config = {
     Status: 'open',
