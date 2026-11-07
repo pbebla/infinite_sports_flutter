@@ -23,6 +23,14 @@ const _bodyNoHint =
 Map<String, Object?> _merged({Object? hint = _hint}) =>
     {'MergedInto': 'keptUid', 'MergedHint': hint};
 
+/// Counts routes popped off the navigator (a page, the dialog).
+class _PopCounter extends NavigatorObserver {
+  int pops = 0;
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) => pops++;
+}
+
 void main() {
   group('mergedNoticeFor', () {
     test('merged with a hint: D9 title and body name the hidden email', () {
@@ -110,12 +118,34 @@ void main() {
   group('MergedAccountWatcher', () {
     late StreamController<Map<String, Object?>> states;
     late int signOutCalls;
+    late _PopCounter routes;
 
     setUp(() {
       states = StreamController<Map<String, Object?>>();
       signOutCalls = 0;
+      routes = _PopCounter();
     });
     tearDown(() => states.close());
+
+    // A page body with a button that pushes a page on the ROOT navigator,
+    // like the drawer's Profile / Settings / Sign Up.
+    Widget homeWithPageButton() => Builder(
+          builder: (context) => Scaffold(
+            body: Column(children: [
+              const Text('home'),
+              TextButton(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        const Scaffold(body: Text('profile page')),
+                  ),
+                ),
+                child: const Text('open'),
+              ),
+            ]),
+          ),
+        );
 
     Future<void> mount(
       WidgetTester tester, {
@@ -123,21 +153,24 @@ void main() {
       Future<void> Function()? onSignOut,
       Size size = const Size(360, 640),
       double textScale = 1.0,
+      Widget child = const Scaffold(body: Text('home')),
     }) async {
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(MaterialApp(
         theme: theme ?? lightMode,
+        navigatorObservers: [routes],
         builder: (context, child) => MediaQuery(
           data: MediaQuery.of(context)
               .copyWith(textScaler: TextScaler.linear(textScale)),
           child: child!,
         ),
         home: MergedAccountWatcher(
+          uid: 'me',
           states: states.stream,
           onSignOut: onSignOut ?? () async => signOutCalls++,
-          child: const Scaffold(body: Text('home')),
+          child: child,
         ),
       ));
     }
@@ -185,6 +218,34 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);
       expect(signOutCalls, 1);
+    });
+
+    testWidgets('OK also closes pages pushed on the root navigator, BEFORE '
+        'signing out, and signs out once', (tester) async {
+      var popsAtSignOut = -1;
+      await mount(
+        tester,
+        child: homeWithPageButton(),
+        onSignOut: () async {
+          popsAtSignOut = routes.pops;
+          signOutCalls++;
+        },
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(find.text('profile page'), findsOneWidget);
+
+      states.add(_merged());
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.text('profile page'), findsNothing);
+      expect(find.text('home'), findsOneWidget, reason: 'only the root left');
+      expect(signOutCalls, 1);
+      expect(popsAtSignOut, 2, reason: 'dialog + page popped before sign-out');
     });
 
     testWidgets('the dialog cannot be dismissed by tapping outside or back',
@@ -240,6 +301,76 @@ void main() {
       expect(states.hasListener, isTrue);
       await tester.pumpWidget(const SizedBox());
       expect(states.hasListener, isFalse);
+    });
+
+    group('watcher leaves while the dialog is open', () {
+      late ValueNotifier<bool> present;
+
+      setUp(() => present = ValueNotifier<bool>(true));
+      tearDown(() => present.dispose());
+
+      Future<void> mountToggle(
+        WidgetTester tester, {
+        Future<void> Function()? onSignOut,
+      }) async {
+        tester.view.physicalSize = const Size(360, 640);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+        await tester.pumpWidget(MaterialApp(
+          theme: lightMode,
+          home: ValueListenableBuilder<bool>(
+            valueListenable: present,
+            builder: (context, on, _) => on
+                ? MergedAccountWatcher(
+                    uid: 'me',
+                    states: states.stream,
+                    onSignOut: onSignOut ?? () async => signOutCalls++,
+                    child: homeWithPageButton(),
+                  )
+                : const Scaffold(body: Text('welcome')),
+          ),
+        ));
+      }
+
+      testWidgets('signed out from elsewhere: the stale dialog is removed, '
+          'and only that dialog', (tester) async {
+        await mountToggle(tester);
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+        states.add(_merged());
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDialog), findsOneWidget);
+
+        present.value = false; // auth flipped to signed-out
+        await tester.pumpAndSettle();
+
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(tester.takeException(), isNull);
+        // The page under the dialog was not popped by the cleanup.
+        expect(find.text('profile page'), findsOneWidget);
+        expect(signOutCalls, 0);
+      });
+
+      testWidgets('OK then the sign-out removes the watcher: ends clean on '
+          'the welcome wall', (tester) async {
+        await mountToggle(tester, onSignOut: () async {
+          signOutCalls++;
+          present.value = false; // what AuthGate does on sign-out
+        });
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+        states.add(_merged());
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('OK'));
+        await tester.pumpAndSettle();
+
+        expect(signOutCalls, 1);
+        expect(tester.takeException(), isNull);
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(find.text('profile page'), findsNothing);
+        expect(find.text('welcome'), findsOneWidget);
+      });
     });
 
     testWidgets('a state that turns merged later still shows the dialog',

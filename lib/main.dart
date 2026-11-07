@@ -140,11 +140,13 @@ class AuthGate extends StatelessWidget {
         return chooseRootWidget(
           user: user,
           // A merged (duplicate) account is told once which email to use,
-          // then signed out (account-merge notice, D9). Keyed by uid so a
-          // direct account switch starts a fresh watch instead of reusing
-          // the previous user's.
+          // then signed out (account-merge notice, D9). The uid is passed in
+          // (not re-read inside), and keys the watcher so a direct account
+          // switch starts a fresh watch instead of reusing the previous
+          // user's.
           signedInHome: () => MergedAccountWatcher(
             key: ValueKey(user!.uid),
+            uid: user.uid,
             child: const MyHomePage(),
           ),
           signedOutHome: () => WelcomePage(

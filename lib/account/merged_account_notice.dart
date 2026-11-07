@@ -13,7 +13,6 @@
 
 import 'dart:async';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/account/session_sign_out.dart';
@@ -115,16 +114,20 @@ Stream<Map<String, Object?>> combineMergedLeaves(
 /// Watches the signed-in user's merge stamp and, when it appears, shows the
 /// notice dialog once and signs the user out on OK.
 ///
-/// [states] and [onSignOut] are test seams. Defaults: the live `onValue` of
-/// `Users/<me>/MergedInto` + `MergedHint` (see [combineMergedLeaves]), and
-/// [signOutAndClearSession].
+/// [uid] is the signed-in user, handed in by AuthGate (never re-read from
+/// `FirebaseAuth.currentUser` here, where a null would silently skip the
+/// watch). [states] and [onSignOut] are test seams. Defaults: the live
+/// `onValue` of `Users/<uid>/MergedInto` + `MergedHint` (see
+/// [combineMergedLeaves]), and [signOutAndClearSession].
 class MergedAccountWatcher extends StatefulWidget {
+  final String uid;
   final Widget child;
   final Stream<Map<String, Object?>>? states;
   final Future<void> Function()? onSignOut;
 
   const MergedAccountWatcher({
     super.key,
+    required this.uid,
     required this.child,
     this.states,
     this.onSignOut,
@@ -139,22 +142,38 @@ class _MergedAccountWatcherState extends State<MergedAccountWatcher> {
   // True from the moment the dialog opens until a failed sign-out hands it
   // back: later emissions never stack a second dialog.
   bool _shown = false;
+  // The dialog's own route and the (root) navigator holding it, while it is
+  // open, so dispose can close exactly that route and nothing else.
+  Route<void>? _dialogRoute;
+  NavigatorState? _navigator;
 
   @override
   void initState() {
     super.initState();
-    _sub = (widget.states ?? _liveStates()).listen(_onState);
+    _sub = (widget.states ?? _liveStates(widget.uid)).listen(_onState);
   }
 
   @override
   void dispose() {
     _sub?.cancel();
+    // Signed out from somewhere else while the notice is still up: don't
+    // leave a stale dialog over the welcome wall. Removes only OUR route
+    // (never pops whatever else is on top), and after this frame, because
+    // the tree is locked while it unmounts.
+    final route = _dialogRoute;
+    final navigator = _navigator;
+    _dialogRoute = null;
+    _navigator = null;
+    if (route != null && navigator != null) {
+      scheduleMicrotask(() {
+        if (route.isActive && navigator.mounted) navigator.removeRoute(route);
+      });
+    }
     super.dispose();
   }
 
-  static Stream<Map<String, Object?>> _liveStates() {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null || uid.isEmpty) return const Stream.empty();
+  static Stream<Map<String, Object?>> _liveStates(String uid) {
+    if (uid.isEmpty) return const Stream.empty();
     final users = FirebaseDatabase.instance.ref('Users/$uid');
     return combineMergedLeaves(
       users.child('MergedInto').onValue.map((e) => e.snapshot.value),
@@ -174,29 +193,38 @@ class _MergedAccountWatcherState extends State<MergedAccountWatcher> {
     // Captured now: signing out swaps the whole signed-in tree away, which
     // disposes this State before the sign-out future completes.
     final signOut = widget.onSignOut ?? signOutAndClearSession;
+    _navigator = Navigator.of(context, rootNavigator: true);
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) => PopScope(
-        canPop: false,
-        child: AlertDialog(
-          scrollable: true,
-          title: Text(notice.title),
-          content: Text(notice.body),
-          actions: [
-            TextButton(
-              onPressed: () {
-                // Close the dialog FIRST: sign-out flips authStateChanges()
-                // and AuthGate can swap the content (and this dialog's
-                // ancestors) the instant it resolves.
-                Navigator.of(dialogContext).pop();
-                _signOut(signOut, notice);
-              },
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      ),
+      builder: (dialogContext) {
+        _dialogRoute = ModalRoute.of(dialogContext) as Route<void>?;
+        return PopScope(
+          canPop: false,
+          child: AlertDialog(
+            scrollable: true,
+            title: Text(notice.title),
+            content: Text(notice.body),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  // Back to the root route FIRST: this closes the dialog AND
+                  // any page pushed on the root navigator (Profile,
+                  // Settings, Sign Up... from the drawer), so nothing from
+                  // the old account is left on screen over the welcome wall.
+                  // It must happen before the sign-out, which flips
+                  // authStateChanges() and lets AuthGate swap the content
+                  // (and this dialog's ancestors) the instant it resolves.
+                  _dialogRoute = null;
+                  Navigator.of(dialogContext).popUntil((r) => r.isFirst);
+                  _signOut(signOut, notice);
+                },
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
