@@ -99,16 +99,65 @@ describe('listFantasySeasons', () => {
     expect(seasons.map((s) => s.season)).toEqual(['15', '16']);
   });
 
-  it('a failed shallow read falls back to full reads — same seasons, one warning per failed read', async () => {
+  it('a failed top-level shallow read takes every season from that ONE Fantasy read — no second pass, one warning', async () => {
+    // Final review Minor 1: the fallback costs exactly today's whole read,
+    // not that read plus every sport node again.
     const db = new FakeDb(fantasyFixture());
     db.childKeys = async () => { throw new Error('shallow read: HTTP 503'); };
     const { log, warns } = spyLog();
     const seasons = await listFantasySeasons(db, log);
     expect(seasons).toEqual(fantasySeasonsOf(fantasyFixture().Fantasy));
-    // Fantasy itself + the two sports (BadgeCatalog is never listed).
-    expect(warns.map((w) => w.message)).toEqual([KEYS_WARN, KEYS_WARN, KEYS_WARN]);
-    expect(warns.map((w) => w.context?.path))
-      .toEqual(['Fantasy', 'Fantasy/Futsal', 'Fantasy/Basketball']);
+    expect(db.reads.filter((r) => r === 'read:Fantasy')).toHaveLength(1);
+    // No sport node, no season Config: everything came from that read.
+    expect(db.reads.filter((r) => r.startsWith('read:Fantasy/'))).toEqual([]);
+    expect(warns.map((w) => w.message)).toEqual([KEYS_WARN]);
+    expect(warns.map((w) => w.context?.path)).toEqual(['Fantasy']);
+  });
+
+  it('a failed shallow read of one sport takes its seasons from that sport read — no Config reads under it', async () => {
+    const db = new FakeDb(fantasyFixture());
+    const shallow = db.childKeys!;
+    db.childKeys = async (path) => {
+      if (path === 'Fantasy/Futsal') throw new Error('shallow read: HTTP 503');
+      return shallow(path);
+    };
+    const { log, warns } = spyLog();
+    expect(await listFantasySeasons(db, log))
+      .toEqual(fantasySeasonsOf(fantasyFixture().Fantasy));
+    expect(db.reads.filter((r) => r === 'read:Fantasy/Futsal')).toHaveLength(1);
+    expect(db.reads.filter((r) => r.startsWith('read:Fantasy/Futsal/'))).toEqual([]);
+    expect(warns.map((w) => w.context?.path)).toEqual(['Fantasy/Futsal']);
+  });
+
+  it('a failed season Config read skips that season for this run, warned — the others are still listed', async () => {
+    // Final review Minor 3: one bad read never aborts the whole run.
+    const db = new FakeDb({
+      Fantasy: {
+        Futsal: { '15': { Config: { a: 1 } }, '16': { Config: { b: 2 } } },
+        Basketball: { '3': { Config: { c: 3 } } },
+      },
+    });
+    const realRead = db.read.bind(db);
+    db.read = async (path: string) => {
+      if (path === 'Fantasy/Futsal/15/Config') throw new Error('read: HTTP 503');
+      return realRead(path);
+    };
+    const { log, warns } = spyLog();
+    expect(await listFantasySeasons(db, log)).toEqual([
+      { sport: 'Futsal', season: '16', configNode: { b: 2 } },
+      { sport: 'Basketball', season: '3', configNode: { c: 3 } },
+    ]);
+    expect(warns).toEqual([{
+      message: 'fantasy sweep: season config read failed',
+      context: { sport: 'Futsal', season: '15', error: 'read: HTTP 503' },
+    }]);
+  });
+
+  it('a db without childKeys reads the Fantasy node once and nothing under it', async () => {
+    const db = new FakeDb(fantasyFixture());
+    db.childKeys = undefined;
+    await listFantasySeasons(db, silent);
+    expect(db.reads).toEqual(['read:Fantasy']);
   });
 
   it('a db without childKeys discovers the same seasons by full reads, silently', async () => {
@@ -272,7 +321,9 @@ describe('the sweep and the reprice never read whole season nodes', () => {
     db.childKeys = async () => { throw new Error('shallow read: HTTP 503'); };
     const { log, warns } = spyLog();
     await runLifecycleSweep(db, AFTER_LOCK2, log);
-    expect(warns.filter((w) => w.message === KEYS_WARN)).toHaveLength(2);
+    // Only the Fantasy keys read: the seasons then come from that one node.
+    expect(warns.filter((w) => w.message === KEYS_WARN)).toHaveLength(1);
+    expect(db.reads.filter((r) => r === 'read:Fantasy/Futsal')).toEqual([]);
     expect((await db.read(`${F_ROOT}/GwState`) as Record<string, unknown>)['status'])
       .toBe('finalized');
   });

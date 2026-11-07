@@ -161,16 +161,32 @@ export function shallowUrl(
 export async function childKeysOf(
   db: FantasyDb, path: string, log: FantasyLogger,
 ): Promise<string[]> {
+  return (await keysLook(db, path, log)).keys;
+}
+
+/** What childKeysOf found, plus the WHOLE node when it had to read it (a db
+ *  without childKeys, or a failed shallow read) — so a caller that needs
+ *  what lies below can take it from that node instead of reading it again
+ *  (listFantasySeasons: the fallback costs one whole read, never two). */
+interface KeysLook {
+  keys: string[];
+  whole?: { node: unknown };
+}
+
+async function keysLook(
+  db: FantasyDb, path: string, log: FantasyLogger,
+): Promise<KeysLook> {
   if (db.childKeys) {
     try {
-      return await db.childKeys(path);
+      return { keys: await db.childKeys(path) };
     } catch (err) {
       log.warn('fantasy keys: shallow read failed', {
         path, error: err instanceof Error ? err.message : String(err),
       });
     }
   }
-  return childEntries(await db.read(path)).map(([k]) => k);
+  const node = await db.read(path);
+  return { keys: childEntries(node).map(([k]) => k), whole: { node } };
 }
 
 // ── Server-originated Squads/<uid> writes ──────────────────────────────────
@@ -314,7 +330,8 @@ export interface FantasySeasonRef {
  *  per-sport node WILL list-coerce — childEntries handles both shapes.
  *  The engine no longer reads the whole node to discover seasons (see
  *  listFantasySeasons); this stays as the reference rule that function
- *  matches, and the tests compare the two. */
+ *  matches (the tests compare the two), and is what it falls back on when a
+ *  keys read had to download the whole node anyway. */
 export function fantasySeasonsOf(fantasyNode: unknown): FantasySeasonRef[] {
   const out: FantasySeasonRef[] = [];
   for (const [sport, seasons] of childEntries(fantasyNode)) {
@@ -340,15 +357,37 @@ const BADGE_CATALOG_KEY = 'BadgeCatalog';
  *  skipped season), then only each season's small `Config` is read. A season
  *  counts iff that Config is a plain map — exactly fantasySeasonsOf's rule —
  *  and the order is the sport keys, then each sport's season keys, as they
- *  come back. */
+ *  come back.
+ *  When a keys read had to read the whole node instead (a db without
+ *  childKeys, or a failed shallow read — warned once by keysLook), the
+ *  seasons under it come from THAT node (fantasySeasonsOf), never from a
+ *  second pass below it: a failed top-level read costs one whole Fantasy
+ *  read, exactly the pre-D3 engine, not that plus every sport node again
+ *  (final review Minor 1). A season whose Config read fails is warned and
+ *  skipped for this run; the other seasons carry on (final review Minor 3). */
 export async function listFantasySeasons(
   db: FantasyDb, log: FantasyLogger,
 ): Promise<FantasySeasonRef[]> {
+  const top = await keysLook(db, 'Fantasy', log);
+  if (top.whole) return fantasySeasonsOf(top.whole.node);
   const out: FantasySeasonRef[] = [];
-  for (const sport of await childKeysOf(db, 'Fantasy', log)) {
+  for (const sport of top.keys) {
     if (sport === BADGE_CATALOG_KEY) continue;
-    for (const season of await childKeysOf(db, `Fantasy/${sport}`, log)) {
-      const config = await db.read(`${fantasyRoot(sport, season)}/Config`);
+    const look = await keysLook(db, `Fantasy/${sport}`, log);
+    if (look.whole) {
+      out.push(...fantasySeasonsOf({ [sport]: look.whole.node }));
+      continue;
+    }
+    for (const season of look.keys) {
+      let config: unknown;
+      try {
+        config = await db.read(`${fantasyRoot(sport, season)}/Config`);
+      } catch (err) {
+        log.warn('fantasy sweep: season config read failed', {
+          sport, season, error: err instanceof Error ? err.message : String(err),
+        });
+        continue;
+      }
       if (!isPlainMap(config)) continue;
       out.push({ sport, season, configNode: config });
     }
