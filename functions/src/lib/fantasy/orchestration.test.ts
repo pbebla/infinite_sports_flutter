@@ -2007,3 +2007,215 @@ describe('scored-week checks are existence queries (scale fixes D4)', () => {
     expect(db.writes.filter((p) => p === week(3))).toHaveLength(1); // not again
   });
 });
+
+describe('a finished, settled season stands down by itself (scale fixes D7)', () => {
+  const OVER = new Date(Date.UTC(2026, 6, 15, 12)); // Jul 15: weeks 1-2 long done
+  const LOCK1_MS = Date.UTC(2026, 5, 21, 22);
+  const STAND_DOWN = 'fantasy sweep: season over — standing down';
+  /** The nodes a full sweep downloads and a stood-down season must not. */
+  const HEAVY = /\/(Date|Squads|History|Players)(\/|$)/;
+
+  /** world2 grown into a finished season: both weeks scored (History,
+   *  PublishedPicks, LockedWeeks Scored), the league flagged Finished and the
+   *  settled marker in place. */
+  function finishedSeason(): ColdFakeDb {
+    const w = world2();
+    const s = w.Fantasy.Futsal['15'];
+    s.History[2] = clone(s.History[1]);
+    s.PublishedPicks[2] = clone(s.PublishedPicks[1]);
+    s.LockedWeeks = {
+      1: { Date: GW1_DATE, LockAtUtc: LOCK1_MS, Scored: true },
+      2: { Date: GW2_DATE, LockAtUtc: LOCK2_MS, Scored: true },
+    };
+    s.SeasonBadgesSettledAt = 1;
+    w.Futsal['15'].Finished = true;
+    const db = new ColdFakeDb(w);
+    // The global catalog is seeded on every run; in place, a stood-down
+    // season writes nothing.
+    db.data.Fantasy.BadgeCatalog = clone(STARTER_CATALOG);
+    return db;
+  }
+
+  const season = (db: ColdFakeDb): Record<string, any> => db.data.Fantasy.Futsal['15'];
+
+  function capture() {
+    const infos: string[] = [];
+    const warns: string[] = [];
+    const log: FantasyLogger = {
+      info: (m) => { infos.push(m); }, warn: (m) => { warns.push(m); },
+    };
+    return { log, infos, warns };
+  }
+
+  /** Whether the sweep took the full path: it downloaded the Date node. */
+  const sweptFully = (db: ColdFakeDb) =>
+    db.reads.some((r) => r === 'read:Futsal/15/Date');
+
+  it('one sweep logs the stand-down, reads no Date, Squads, History or Players, and writes nothing', async () => {
+    const db = finishedSeason();
+    const { log, infos } = capture();
+    await runLifecycleSweep(db, OVER, log);
+
+    expect(infos).toContain(STAND_DOWN);
+    expect(db.reads.filter((r) => HEAVY.test(r))).toEqual([]);
+    expect(sweptFully(db)).toBe(false);
+    expect(db.writes).toEqual([]);
+
+    // Every later sweep is the same cheap look.
+    for (let i = 0; i < 3; i++) await runLifecycleSweep(db, OVER, log);
+    expect(db.reads.filter((r) => HEAVY.test(r))).toEqual([]);
+    expect(db.writes).toEqual([]);
+  });
+
+  it('still publishes a due news draft while standing down', async () => {
+    const db = finishedSeason();
+    season(db).News = {
+      Drafts: {
+        due: {
+          Title: 'Season review', Body: 'B', Gw: 2, CreatedAt: 1,
+          Source: 'ai', Template: 'ai', AutoPublishAt: OVER.getTime() - 1,
+        },
+        later: {
+          Title: 'Later', Body: 'B', Gw: 2, CreatedAt: 1,
+          Source: 'ai', AutoPublishAt: OVER.getTime() + 3_600_000,
+        },
+      },
+    };
+    const { log, infos } = capture();
+    await runLifecycleSweep(db, OVER, log);
+
+    expect(infos).toContain(STAND_DOWN);
+    expect(infos).toContain('fantasy news: draft auto-published');
+    expect(await db.read(`${F_ROOT}/News/Published/due`)).toEqual({
+      Title: 'Season review', Body: 'B', At: OVER.getTime(), Template: 'ai', Gw: 2,
+    });
+    expect(await db.read(`${F_ROOT}/News/Drafts/due`)).toBeNull();
+    expect(await db.read(`${F_ROOT}/News/Drafts/later`)).not.toBeNull();
+    expect(db.reads.filter((r) => HEAVY.test(r))).toEqual([]);
+  });
+
+  it('still heals a stale Live/Meta while standing down', async () => {
+    const db = finishedSeason();
+    season(db).Live = {
+      Meta: { Gw: 2, State: 'live', UpdatedAt: OVER.getTime() - 20 * 60_000 },
+    };
+    const { log, infos } = capture();
+    await runLifecycleSweep(db, OVER, log);
+
+    expect(infos).toContain(STAND_DOWN);
+    expect(season(db).Live.Meta)
+      .toEqual({ Gw: 2, State: 'settled', UpdatedAt: OVER.getTime() });
+    // The one History question the heal asks is an existence query.
+    expect(db.reads.filter((r) => HEAVY.test(r)))
+      .toEqual([`exists:${F_ROOT}/History/2`]);
+    expect(sweptFully(db)).toBe(false);
+  });
+
+  it('a fresh Live/Meta is left alone while standing down', async () => {
+    const db = finishedSeason();
+    const meta = { Gw: 2, State: 'live', UpdatedAt: OVER.getTime() - 60_000 };
+    season(db).Live = { Meta: { ...meta } };
+    await runLifecycleSweep(db, OVER);
+    expect(season(db).Live.Meta).toEqual(meta);
+  });
+
+  describe('a finished season that still needs work runs the full sweep as today', () => {
+    it('no settled marker (badges not yet settled)', async () => {
+      const db = finishedSeason();
+      delete season(db).SeasonBadgesSettledAt;
+      const { log, infos } = capture();
+      await runLifecycleSweep(db, OVER, log);
+      expect(infos).not.toContain(STAND_DOWN);
+      expect(sweptFully(db)).toBe(true);
+      // The settle the full sweep exists for ran (and stamped the marker).
+      expect(season(db).SeasonBadgesSettledAt).toBe(OVER.getTime());
+    });
+
+    it('the league is not marked Finished, marker or not', async () => {
+      const db = finishedSeason();
+      delete db.data.Futsal['15'].Finished;
+      const { log, infos } = capture();
+      await runLifecycleSweep(db, OVER, log);
+      expect(infos).not.toContain(STAND_DOWN);
+      expect(sweptFully(db)).toBe(true);
+    });
+
+    it('a week carries a Finalizing stamp', async () => {
+      const db = finishedSeason();
+      season(db).LockedWeeks[2] = {
+        Date: GW2_DATE, LockAtUtc: LOCK2_MS, Finalizing: OVER.getTime() - 60_000,
+      };
+      const { log, infos } = capture();
+      await runLifecycleSweep(db, OVER, log);
+      expect(infos).not.toContain(STAND_DOWN);
+      expect(sweptFully(db)).toBe(true);
+    });
+
+    it('a week carries a Rewinding stamp', async () => {
+      const db = finishedSeason();
+      season(db).LockedWeeks[2] = {
+        Date: GW2_DATE, LockAtUtc: LOCK2_MS, Rewinding: true,
+      };
+      const { log, infos } = capture();
+      await runLifecycleSweep(db, OVER, log);
+      expect(infos).not.toContain(STAND_DOWN);
+      expect(sweptFully(db)).toBe(true);
+    });
+
+    it('a stamp on a list-coerced LockedWeeks node (index 0 null) counts too', async () => {
+      const db = finishedSeason();
+      season(db).LockedWeeks = [
+        null,
+        { Date: GW1_DATE, LockAtUtc: LOCK1_MS, Scored: true },
+        { Date: GW2_DATE, LockAtUtc: LOCK2_MS, Rewinding: true },
+      ];
+      const { log, infos } = capture();
+      await runLifecycleSweep(db, OVER, log);
+      expect(infos).not.toContain(STAND_DOWN);
+      expect(sweptFully(db)).toBe(true);
+    });
+
+    it('a live hand-over still heals on the full path', async () => {
+      const db = finishedSeason();
+      season(db).LockedWeeks[2] = {
+        Date: GW2_DATE, LockAtUtc: LOCK2_MS, Finalizing: OVER.getTime() - 60_000,
+      };
+      season(db).Live = {
+        Meta: { Gw: 2, State: 'live', UpdatedAt: OVER.getTime() - 20 * 60_000 },
+      };
+      await runLifecycleSweep(db, OVER);
+      expect(season(db).Live.Meta.State).toBe('settled');
+    });
+  });
+
+  it('an unfinished season stops at the one Finished read: the stand-down never looks further', async () => {
+    const db = new ColdFakeDb(world2());
+    const { log, infos } = capture();
+    await runLifecycleSweep(db, AFTER_LOCK2, log);
+    expect(infos).not.toContain(STAND_DOWN);
+    expect(sweptFully(db)).toBe(true);
+    expect(db.reads).toContain('read:Futsal/15/Finished');
+    expect(db.reads).not.toContain(`read:${F_ROOT}/SeasonBadgesSettledAt`);
+  });
+
+  it('a failed read of the stand-down check warns once and sweeps in full, never skipping the season', async () => {
+    const db = finishedSeason();
+    const realRead = db.read.bind(db);
+    let thrown = false;
+    db.read = async (path: string) => {
+      if (path === 'Futsal/15/Finished' && !thrown) {
+        thrown = true;
+        throw new Error('network blip');
+      }
+      return realRead(path);
+    };
+    const { log, infos, warns } = capture();
+    await runLifecycleSweep(db, OVER, log);
+    expect(thrown).toBe(true);
+    expect(warns.filter((m) => m === 'fantasy sweep: stand-down check failed — sweeping in full'))
+      .toHaveLength(1);
+    expect(warns).not.toContain('fantasy sweep: season failed');
+    expect(infos).not.toContain(STAND_DOWN);
+    expect(sweptFully(db)).toBe(true);
+  });
+});

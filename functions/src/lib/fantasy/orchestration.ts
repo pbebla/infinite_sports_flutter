@@ -261,6 +261,13 @@
 // squads, so any rerun could otherwise write fake podiums into real trophy
 // cabinets (badges.ts TEST SEASONS). The replay itself never sees the
 // marker (its in-memory overlay is seeded from READ_PATHS only).
+//
+// A finished, settled season (scale fixes D7): the league flagged Finished,
+// the SeasonBadgesSettledAt marker in place and no LockedWeeks entry
+// Finalizing or Rewinding — the 15-minute sweep stands the season down by
+// itself (logging "season over — standing down"), running only the news
+// auto-publish and the lost-settle heal. Any of those conditions failing
+// (the owner un-marks Finished, a week is rewound) = the full sweep again.
 
 import {
   configFromMap, FANTASY_POSITIONS, FantasyConfig,
@@ -293,9 +300,9 @@ import {
   isTestFillSeason, isVoidFlag, keyedGamesOfDate, latestScoredWeek,
   listFantasySeasons, loadSeasonGameweeks, lockedPositionsOf, lockOverrideOf,
   marketPlayersOf, marketPricesOf, markServerSquadWrite, parseAbsentMap,
-  positionsSnapshotOf, rosterNamesOf, scheduleOverridesOf, SERVER_WRITE_KEY,
-  TEST_FILL_STAND_DOWN, toIntLoose, updateIfPresent, voidedWeeksOf,
-  withLockedPositions,
+  positionsSnapshotOf, rosterNamesOf, scheduleOverridesOf,
+  SEASON_BADGES_SETTLED_NODE, SERVER_WRITE_KEY, TEST_FILL_STAND_DOWN,
+  toIntLoose, updateIfPresent, voidedWeeksOf, withLockedPositions,
 } from './orchestration_db';
 import { applyDelta, repriceDeltas } from './pricing';
 import {
@@ -2526,6 +2533,130 @@ async function snapshotPublishedPicks(
   return true;
 }
 
+/** The stand-down line of a finished, settled season (sweepSeason). */
+const SEASON_OVER_STAND_DOWN = 'fantasy sweep: season over — standing down';
+
+/** D7 of the 2026-11-06 scale fixes: whether a season is over AND settled —
+ *  the league flagged `<sport>/<season>/Finished`, the badge marker
+ *  (SEASON_BADGES_SETTLED_NODE: every scoreable week finalized, badges
+ *  settled) in place, and no `LockedWeeks/<n>` carrying a `Finalizing` or
+ *  `Rewinding` stamp (a week still being scored or rewound is work). Asked
+ *  cheapest first: most seasons are mid-season and stop at the one scalar
+ *  Finished read. The marker is a scalar too, so it is read (`!= null`),
+ *  never `exists()`; LockedWeeks may list-coerce (childEntries). Any stamp
+ *  counts, stale or fresh: in doubt the season sweeps in full, exactly as
+ *  before. A failed read is the same doubt — warned once, then the full
+ *  sweep, so a blip here never skips a season. */
+async function isSeasonOverAndSettled(
+  db: FantasyDb, sport: string, season: string,
+  log: FantasyLogger, ctx: Record<string, unknown>,
+): Promise<boolean> {
+  const root = fantasyRoot(sport, season);
+  try {
+    if ((await db.read(`${sport}/${season}/Finished`)) !== true) return false;
+    if ((await db.read(`${root}/${SEASON_BADGES_SETTLED_NODE}`)) == null) {
+      return false;
+    }
+    for (const [, week] of childEntries(await db.read(`${root}/LockedWeeks`))) {
+      if (isRewinding(week)) return false;
+      if (isPlainMap(week) && week['Finalizing'] != null) return false;
+    }
+    return true;
+  } catch (err) {
+    log.warn('fantasy sweep: stand-down check failed — sweeping in full',
+      { ...ctx, error: String(err) });
+    return false;
+  }
+}
+
+/** What the sweep steps shared by the normal path and the finished-season
+ *  stand-down (publishDueNewsDrafts, healLostLiveSettle) are handed. */
+interface StandingSweepArgs {
+  sport: string;
+  season: string;
+  nowUtc: Date;
+  log: FantasyLogger;
+  /** Test seam: the settle tombstone's clock (deps.clock). */
+  clock?: () => number;
+}
+
+/** Sweep step 2b — news draft auto-publish (spec 2026-10-28 §4.4): ANY
+ *  draft — autopilot 'dreamteam'/'ai' or an owner-scheduled 'owner' post —
+ *  whose AutoPublishAt is due publishes itself to News/Published (the §4.1
+ *  post fields, news.ts publishedRowFromDraft) and leaves the queue. A draft
+ *  without AutoPublishAt waits for the owner (autopilot off or the Manager's
+ *  Auto-publish switch off); a discard deleted it. It runs on the normal
+ *  path AND while a finished season stands down (sweepSeason), so the last
+ *  gameweek's posts still ship. A draft for an owner-VOIDED week is held
+ *  (never deleted — it is the owner's queue): its week no longer counts; an
+ *  un-void releases it. The row lands set-if-absent (review 2026-10-28): a
+ *  due draft whose key is ALREADY published (a resurrected draft, a failed
+ *  draft delete) never overwrites the live post — that wiped its push stamps
+ *  and re-pushed it. Its AutoPublishAt is cleared instead, so it waits in
+ *  the owner's queue as a visible duplicate (never deleted). */
+async function publishDueNewsDrafts(
+  db: FantasyDb, a: StandingSweepArgs,
+): Promise<void> {
+  const { sport, season, nowUtc } = a;
+  const ctx = { sport, season };
+  const root = fantasyRoot(sport, season);
+  const log = a.log;
+  const voidedNow = voidedWeeksOf(await db.read(`${root}/Voided`));
+  for (const [key, draft] of childEntries(await db.read(`${root}/News/Drafts`))) {
+    if (!shouldAutoPublish(draft, nowUtc.getTime())) continue;
+    const d = draft as Record<string, unknown>;
+    if (voidedNow.includes(toIntLoose(d['Gw']))) continue;
+    const published = await db.writeIfAbsent(`${root}/News/Published/${key}`,
+      publishedRowFromDraft(d, nowUtc.getTime()));
+    if (!published) {
+      await db.write(`${root}/News/Drafts/${key}/AutoPublishAt`, null);
+      log.warn('fantasy news: draft already published — schedule cleared',
+        { ...ctx, key });
+      continue;
+    }
+    await db.write(`${root}/News/Drafts/${key}`, null);
+    log.info('fantasy news: draft auto-published',
+      { ...ctx, key, source: String(d['Source'] ?? '') });
+  }
+}
+
+/** Sweep step 2d — lost settle (live design §4): a finalize that died after
+ *  History but before its live hand-over (the settle is its last step and
+ *  best-effort) leaves Live 'live' for a settled week — and no live run ever
+ *  writes again (PlayerWeeks/<gw> stands them down), so phones would show
+ *  LIVE until the next week. On EVERY sweep, whatever GwState says (step 3
+ *  flips it to 'finalized' right away) and also while a finished season
+ *  stands down: a 'live' node of week N whose History/N exists and whose
+ *  UpdatedAt is older than LIVE_SETTLE_HEAL_MS gets the tombstone
+ *  (settleLiveWeek). The margin outlasts any in-flight finalize, which must
+ *  land every official node before the tombstone. One small read (Live/Meta)
+ *  per season when nothing is wrong. Logged; never throws, never blocks the
+ *  steps after it. */
+async function healLostLiveSettle(
+  db: FantasyDb, a: StandingSweepArgs,
+): Promise<void> {
+  const { sport, season, nowUtc, log } = a;
+  const ctx = { sport, season };
+  const root = fantasyRoot(sport, season);
+  const nowMs = nowUtc.getTime();
+  try {
+    const meta = liveMetaOf(await db.read(`${root}/Live/Meta`));
+    if (meta !== null && meta.live &&
+      nowMs - meta.updatedAt > LIVE_SETTLE_HEAL_MS &&
+      (await db.exists(`${root}/History/${meta.gw}`))) {
+      log.warn('fantasy sweep: settled week still live — healing the hand-over',
+        { ...ctx, gw: meta.gw });
+      await settleLiveWeek(db, {
+        sport, season, gw: meta.gw, nowUtc, log,
+        ctx: { ...ctx, gw: meta.gw }, clock: a.clock,
+      });
+    }
+  } catch (err) {
+    log.warn('fantasy sweep: live settle heal failed — retried by the next sweep',
+      { ...ctx, error: String(err) });
+  }
+}
+
 async function sweepSeason(
   db: FantasyDb,
   ref: { sport: string; season: string; configNode: Record<string, unknown> },
@@ -2587,6 +2718,24 @@ async function sweepSeason(
   // when auto: its History/Leaderboards/Badges are a replayed fake season.
   if (await isTestFillSeason(db, root)) {
     log.info(TEST_FILL_STAND_DOWN, { ...ctx, job: 'sweep' });
+    return;
+  }
+  // A finished, settled season stands down by itself (D7, scale fixes
+  // 2026-11-06): the league is flagged Finished, every week is scored, its
+  // badges are settled (the SeasonBadgesSettledAt marker) and no week is
+  // Finalizing or Rewinding. Nothing here changes on its own, so the full
+  // sweep below (Date, Squads, History, Players...) would only re-read it
+  // every 15 minutes. Two steps still run, the very functions the normal
+  // path calls: owner-scheduled news drafts publish (2b) and a lost live
+  // hand-over heals (2d); step 0b (scheduled messages) already ran above.
+  // The price of standing down: a game added after the season is marked
+  // Finished is not picked up while it stands down — the owner un-marks
+  // Finished first, and the next sweep then runs in full again.
+  if (await isSeasonOverAndSettled(db, sport, season, log, ctx)) {
+    log.info(SEASON_OVER_STAND_DOWN, ctx);
+    await publishDueNewsDrafts(db, { sport, season, nowUtc, log });
+    await healLostLiveSettle(db,
+      { sport, season, nowUtc, log, clock: deps?.clock });
     return;
   }
   const cfg = configFromMap(configNode);
@@ -2676,37 +2825,8 @@ async function sweepSeason(
       { ...ctx, error: String(err) });
   }
 
-  // 2b. News draft auto-publish (spec 2026-10-28 §4.4): ANY draft — autopilot
-  //     'dreamteam'/'ai' or an owner-scheduled 'owner' post — whose
-  //     AutoPublishAt is due publishes itself to News/Published (the §4.1
-  //     post fields, news.ts publishedRowFromDraft) and leaves the queue. A
-  //     draft without AutoPublishAt waits for the owner (autopilot off or
-  //     the Manager's Auto-publish switch off); a discard deleted it. Before
-  //     the season-over return, so the last gameweek's posts still ship. A
-  //     draft for an owner-VOIDED week is held (never deleted — it is the
-  //     owner's queue): its week no longer counts; an un-void releases it.
-  //     The row lands set-if-absent (review 2026-10-28): a due draft whose
-  //     key is ALREADY published (a resurrected draft, a failed draft
-  //     delete) never overwrites the live post — that wiped its push stamps
-  //     and re-pushed it. Its AutoPublishAt is cleared instead, so it waits
-  //     in the owner's queue as a visible duplicate (never deleted).
-  const voidedNow = voidedWeeksOf(await db.read(`${root}/Voided`));
-  for (const [key, draft] of childEntries(await db.read(`${root}/News/Drafts`))) {
-    if (!shouldAutoPublish(draft, nowUtc.getTime())) continue;
-    const d = draft as Record<string, unknown>;
-    if (voidedNow.includes(toIntLoose(d['Gw']))) continue;
-    const published = await db.writeIfAbsent(`${root}/News/Published/${key}`,
-      publishedRowFromDraft(d, nowUtc.getTime()));
-    if (!published) {
-      await db.write(`${root}/News/Drafts/${key}/AutoPublishAt`, null);
-      log.warn('fantasy news: draft already published — schedule cleared',
-        { ...ctx, key });
-      continue;
-    }
-    await db.write(`${root}/News/Drafts/${key}`, null);
-    log.info('fantasy news: draft auto-published',
-      { ...ctx, key, source: String(d['Source'] ?? '') });
-  }
+  // 2b. News draft auto-publish (spec 2026-10-28 §4.4) — publishDueNewsDrafts.
+  await publishDueNewsDrafts(db, { sport, season, nowUtc, log });
 
   // 2c. Live backstop (live design 2026-11-03 §4): a lost trigger must not
   //     leave the live week behind. While the STORED GwState says the
@@ -2750,33 +2870,9 @@ async function sweepSeason(
     }
   }
 
-  // 2d. Lost settle (live design §4): a finalize that died after History but
-  //     before its live hand-over (the settle is its last step and
-  //     best-effort) leaves Live 'live' for a settled week — and no live run
-  //     ever writes again (PlayerWeeks/<gw> stands them down), so phones
-  //     would show LIVE until the next week. On EVERY sweep, whatever
-  //     GwState says (step 3 flips it to 'finalized' right away): a 'live'
-  //     node of week N whose History/N exists and whose UpdatedAt is older
-  //     than LIVE_SETTLE_HEAL_MS gets the tombstone (settleLiveWeek). The
-  //     margin outlasts any in-flight finalize, which must land every
-  //     official node before the tombstone. One small read (Live/Meta) per
-  //     season when nothing is wrong. Logged; never blocks the steps below.
-  try {
-    const meta = liveMetaOf(await db.read(`${root}/Live/Meta`));
-    if (meta !== null && meta.live &&
-      nowMs - meta.updatedAt > LIVE_SETTLE_HEAL_MS &&
-      (await db.exists(`${root}/History/${meta.gw}`))) {
-      log.warn('fantasy sweep: settled week still live — healing the hand-over',
-        { ...ctx, gw: meta.gw });
-      await settleLiveWeek(db, {
-        sport, season, gw: meta.gw, nowUtc, log,
-        ctx: { ...ctx, gw: meta.gw }, clock: deps?.clock,
-      });
-    }
-  } catch (err) {
-    log.warn('fantasy sweep: live settle heal failed — retried by the next sweep',
-      { ...ctx, error: String(err) });
-  }
+  // 2d. Lost settle (live design §4) — healLostLiveSettle, on EVERY sweep.
+  await healLostLiveSettle(db,
+    { sport, season, nowUtc, log, clock: deps?.clock });
 
   // 3. GwState upsert (schedule_rewind.ts upsertGwState), after the backstop
   //    so a finalize lands as 'finalized' in the same sweep; season over =
