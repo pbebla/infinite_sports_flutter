@@ -233,12 +233,12 @@ Copied verbatim from that build's ledger (owner-facing decisions are in `2026-11
 
 ## From the scale-fixes build (2026-11-06)
 
-Left alone on purpose: each is small at league size (about 60 managers), was measured, and sits outside the scale-fixes plan. The Scale T<N> minors are copied from that build's ledger; the review of each task judged them fine to defer.
+Left alone on purpose: each is small at league size (about 60 managers) and sits outside the scale-fixes plan. Only the engine's own reads were measured (the load test and the `healOpenWeek` figures below); the Manager-screen and fan `Leaderboards` items are judged small, not measured. The Scale T<N> minors are copied from that build's ledger; the review of each task judged them fine to defer.
 
 - Manager owner screens (one device) still stream the whole `History`, `TransferCosts`, `Squads` and `TransferState` nodes. Cheap for one owner at league size; the Manager app was out of scope for the scale fixes.
 - Fans still stream the whole `Leaderboards` node (one listener per viewer). Small at league size.
 - Once-per-week whole reads that need the contents stay whole: finalize, the lock snapshot, `liveBaseFor`, `publishSaleBaselines`, and `settleSeasonBadges` when it actually settles. At 1,000 managers these are the biggest reads left (the 17.36 MB max in the load test below), but they run once a week, not per sweep.
-- `healOpenWeek` (functions/src/lib/fantasy/schedule_rewind.ts ~542) reads the whole `Baselines` node on most open-week sweeps: about 45 KB per sweep at 250 managers, about 179 KB at 1,000 (from `npm run loadtest`; about 11 KB at league size, roughly 1 MB a day per active season at 60 managers).
+- `healOpenWeek` (functions/src/lib/fantasy/schedule_rewind.ts ~542) reads the whole `Baselines` node on most open-week sweeps: about 45 KB per sweep at 250 managers, about 179 KB at 1,000 (measured by `npm run loadtest`). Extrapolated from the 250-manager run, not measured: about 11 KB per sweep at league size (60 managers), roughly 1 MB a day per active season at the 15-minute sweep cadence.
 - Load test after the fixes (`npm run loadtest -- <N> --offline`): 250 managers, median 0.11 MB per sweep (the pre-fix engine, same harness: 5.65 MB, with a whole-`Fantasy` read on every sweep). 1,000 managers, median 0.25 MB per sweep, max 17.36 MB (the weekly whole reads above), with 0 crashes, 0 invariant failures and 0 whole-`Fantasy` reads.
 - Scale T1: childKeys builds URL from admin.app() databaseURL, ignores the `root` passed to rtdbFantasyDb (fantasy_adapter.ts:62-91)
 - Scale T1: AbortSignal.timeout covers fetch only, not getAccessToken (fantasy_adapter.ts:69-73)
@@ -247,21 +247,30 @@ Left alone on purpose: each is small at league size (about 60 managers), was mea
 - Scale T1: child_keys.test.ts:183 local `db` shadows describe helper at :139
 - Scale T1: nodeExists dropped explicit null/undefined guard (relies on childEntries returning [] for undefined) — orchestration_db.ts:123-125
 - Scale T2: BADGE_CATALOG_KEY duplicates badges.ts BADGE_CATALOG_PATH literal (orchestration_db.ts:~318 vs badges.ts:133)
-- Scale T2: (plan-mandated D2/D3) if shallow fails everywhere, fallback reads Fantasy whole + each Fantasy/<sport> whole ≈ 2× today's bytes, with a warn per call
+- Scale T2: (plan-mandated D2/D3) if shallow fails everywhere, fallback reads Fantasy whole + each Fantasy/<sport> whole ≈ 2× today's bytes, with a warn per call — FIXED in the final fix wave: the seasons now come from that one whole read (one warning), and a failed season Config read skips only that season
 - Scale T2: BadgeCatalog read outside the try in runLifecycleSweep — a failing read aborts every season (not a regression)
 - Scale T2: Config reads sequential in listFantasySeasons
-- Scale T2: fantasySeasonsOf now test-only; reprice comment "History week not in schedule" wording
+- Scale T2: fantasySeasonsOf no longer test-only (the listing fallback uses it); reprice comment "History week not in schedule" wording
 - Scale T2: latestScoredWeek name now means "latest week with History"; reprice skips an unrepriced N when N+1 finalizes (pre-existing, same as old code)
 - Scale T3: schedule_rewind.ts:518 healOpenWeek loop stays read() (null in steady state; T3d test hooks read) — needs an in-code comment saying why
 - Scale T3: live_orchestration.test.ts:45 positive exists assertion is decoration (other steps also emit it); orchestration.test.ts:139-140 exact exists counts brittle by design
 - Scale T3: snapshotPriceHistory (orchestration.ts:2419) same existence shape on PriceHistory/<n> (player-scale)
 - Scale T3: stale comment above healOpenWeek ("one small read for History/<n>")
 - Scale T4: no test for a stamp/cabinet write failure (badges.ts:428-429 comment relies on it); harmless null write to an absent marker on re-settles with removals (badges.ts:405)
-- Scale T4: a crash between marker delete and stamp with one surviving auto award → next sweep backfills and won't retry the removal (same as pre-Task-4 behaviour); comments badges.ts:776-778 / orchestration.ts:2666-2667 overstate the retry
+- Scale T4: a crash between marker delete and stamp with one surviving auto award → next sweep backfills and won't retry the removal (same as pre-Task-4 behaviour); comments badges.ts:776-778 / orchestration.ts:2666-2667 overstate the retry — comment FIXED in the final fix wave (badges.ts now says only a finalize rerun retries the removal)
 - Scale T5: no test pins 0b/lockOverride/TestFill ordering vs the stand-down; marker-before-LockedWeeks order unpinned; step 2a comment "season-over return below" now ambiguous (say "step 3's"); 2b throw on stand-down path double-logs (same as normal path)
 - Scale T6: fingerprint skips numeric-string prices / doesn't see position-invalid market drops; finalize-time baseline heal not seen by the gate; untested uids.size===0 stamp path, failing stamp write, no-pusher sweep
 - Scale T6: a reopened week does not re-arm PreviewPushed/<gw>/<uid> (no second over-budget push) — pre-existing; pricesFingerprint doc may still describe the 2-field stamp
 - Scale T7: History cache seed never tested as a hit; didUpdateWidget ignores uid/sport/season changes (always pushed fresh today)
-- Scale T7: stale comments — manager_squad_viewer.dart:614 "or stayed silent past the bound"; feeds_test.dart:13-14 header "adds one listener per feed"
+- Scale T7: stale comments — manager_squad_viewer.dart:614 "or stayed silent past the bound"; feeds_test.dart:13-14 header "adds one listener per feed" — FIXED in the final fix wave
 - Scale T7: error-then-recover while the other feed is silent flashes failure → skeleton → content (rare); own page's "Now" face also blocked by an unreadable squad feed
 - Scale T8: gate passes vacuously if sweeps===0 (add a check); finishedAtEnd on-state untested; header "never writes anywhere" (online mode writes the local snapshot cache); saveSpacingMs comment loose about extras; transaction/writeIfAbsent exclusions only in a comment; gate trips only on exact read('Fantasy')
+
+### Owner notes
+
+What this build means for running the league, in plain words:
+
+- A season badge you switch on after a season has already been settled is not handed out by the automatic 15-minute check. Re-running the finalize of a week hands it out.
+- If you remove an automatic season award by hand in the Manager, it stays removed: the automatic check will not put it back (re-scoring a week decides it again).
+- A brand-new squad save that goes over budget is not re-checked straight away. It is checked again when a price or the budget changes, when a new week opens or a week is reopened, or at the lock — and the lock check always has the final say.
+- A new game day added to a season already marked Finished now works by itself: the season goes back to its full checks, opens and locks that day like any week, scores it, and then goes quiet again. You no longer need to un-mark Finished first.
