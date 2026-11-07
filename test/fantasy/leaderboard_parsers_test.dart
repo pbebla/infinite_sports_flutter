@@ -1,23 +1,11 @@
 // P3d — pure parser coverage for the new Fantasy read shapes: the PINNED
 // Leaderboards contract (Overall/<uid> {points, rank, movement};
 // Gameweek/<gw>/<uid> {points, rank} — P4 implements to THIS), the whole
-// Managers map, PublishedPicks/History squads-by-week, MiniLeagues and the
-// published News feed — each with the usual RTDB Map/List-coercion tolerance.
+// Managers map, MiniLeagues and the published News feed — each with the usual
+// RTDB Map/List-coercion tolerance.
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
-import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
-import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
-
-Map<String, dynamic> squadMap(String gk, {String? chip}) => FantasySquad(
-      picks: [
-        SquadPick(
-            playerId: gk, position: FantasyPosition.gk, priceTenths: 50),
-      ],
-      captainId: gk,
-      viceId: gk,
-      chip: chip,
-    ).toMap();
 
 void main() {
   group('leaderboardEntriesFromNode', () {
@@ -247,37 +235,6 @@ void main() {
     test('non-map parses empty', () {
       expect(managersFromNode(null), isEmpty);
       expect(managersFromNode([1]), isEmpty);
-    });
-  });
-
-  group('squadsByWeekForUid', () {
-    test('picks ONE uid out of each week', () {
-      final weeks = squadsByWeekForUid({
-        '1': {'me': squadMap('Alan'), 'other': squadMap('Gus')},
-        '2': {'other': squadMap('Gus')},
-        '3': {'me': squadMap('Beth', chip: 'benchBoost')},
-      }, 'me');
-      expect(weeks.keys, unorderedEquals([1, 3]));
-      expect(weeks[1]!.picks.single.playerId, 'Alan');
-      expect(weeks[3]!.chip, 'benchBoost');
-    });
-
-    test('tolerates the LIST-coerced node (gw keys are small ints)', () {
-      final weeks = squadsByWeekForUid([
-        null,
-        {'me': squadMap('Alan')},
-      ], 'me');
-      expect(weeks.keys, [1]);
-    });
-
-    test('malformed squads and absent weeks parse empty, never crash', () {
-      expect(squadsByWeekForUid(null, 'me'), isEmpty);
-      expect(
-          squadsByWeekForUid({
-            '1': {'me': 'junk'},
-            'x': {'me': squadMap('Alan')},
-          }, 'me'),
-          isEmpty);
     });
   });
 

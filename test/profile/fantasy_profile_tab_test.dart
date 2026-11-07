@@ -357,7 +357,7 @@ void main() {
   late StreamController<Map<int, PlayerWeekStats>> weekStats;
   late StreamController<FantasyLeaderboards> boards;
   late StreamController<Map<int, FantasySquad>> published;
-  late StreamController<Map<int, FantasySquad>> history;
+  late StreamController<Map<int, HistoryWeek>> history;
   late StreamController<FantasySquad?> viewerSquad;
   late StreamController<bool> seasonFinished;
   late FantasySeasonKey? resolved;
@@ -386,7 +386,7 @@ void main() {
     weekStats = StreamController<Map<int, PlayerWeekStats>>.broadcast();
     boards = StreamController<FantasyLeaderboards>.broadcast();
     published = StreamController<Map<int, FantasySquad>>.broadcast();
-    history = StreamController<Map<int, FantasySquad>>.broadcast();
+    history = StreamController<Map<int, HistoryWeek>>.broadcast();
     viewerSquad = StreamController<FantasySquad?>.broadcast();
     seasonFinished = StreamController<bool>.broadcast();
     resolved = (sport: 'Futsal', season: '15');

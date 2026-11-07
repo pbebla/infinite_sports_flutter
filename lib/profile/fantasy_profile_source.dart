@@ -124,7 +124,7 @@ class FantasyProfileSeams {
   /// The squad viewer's own feeds (the tab's "View team" builds the real
   /// [ManagerSquadViewerPage]; these replace its Firebase streams).
   final Stream<Map<int, FantasySquad>>? viewerPublishedStates;
-  final Stream<Map<int, FantasySquad>>? viewerHistoryStates;
+  final Stream<Map<int, HistoryWeek>>? viewerHistoryStates;
   final Stream<FantasySquad?>? viewerSquadStates;
 
   /// What a viewer court chip opens (`openFantasyPlayerProfile`'s shape).

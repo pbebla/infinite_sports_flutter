@@ -79,7 +79,7 @@ void main() {
   late StreamController<List<FantasyMiniLeague>> leagues;
   late StreamController<Map<int, FantasyDreamTeam>> dreams;
   late StreamController<Map<int, FantasySquad>> published;
-  late StreamController<Map<int, FantasySquad>> history;
+  late StreamController<Map<int, HistoryWeek>> history;
   late StreamController<FantasyAccessState> access;
   late StreamController<SaleBaselineState> sale;
   late StreamController<TransferStateView?> transfer;
@@ -131,7 +131,7 @@ void main() {
     leagues = StreamController<List<FantasyMiniLeague>>.broadcast();
     dreams = StreamController<Map<int, FantasyDreamTeam>>.broadcast();
     published = StreamController<Map<int, FantasySquad>>.broadcast();
-    history = StreamController<Map<int, FantasySquad>>.broadcast();
+    history = StreamController<Map<int, HistoryWeek>>.broadcast();
     access = StreamController<FantasyAccessState>.broadcast();
     sale = StreamController<SaleBaselineState>.broadcast();
     transferListens = 0;

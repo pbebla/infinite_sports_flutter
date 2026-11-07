@@ -43,6 +43,15 @@ FantasySquad squad(String gk, {String? chip}) => FantasySquad(
       chip: chip,
     );
 
+/// A History week as the per-week feed delivers it (D9: one parse of
+/// `History/<gw>/<uid>` into the squad AND the points) — the squad of the
+/// week, no numbers.
+HistoryWeek bare(FantasySquad s) => HistoryWeek(slots: const [], squad: s);
+
+/// [bare] for each week of [squads].
+Map<int, HistoryWeek> bareWeeks(Map<int, FantasySquad> squads) =>
+    {for (final e in squads.entries) e.key: bare(e.value)};
+
 /// Three scheduled gameweeks locking Jan 1 / Feb 1 / Mar 1 2026; the test
 /// clock sits between GW1's lock and GW2's, so GW2 is "current".
 List<Gameweek> gameweeks() => [
@@ -59,12 +68,12 @@ DateTime testNow() => DateTime.utc(2026, 1, 15, 12);
 
 void main() {
   late StreamController<Map<int, FantasySquad>> published;
-  late StreamController<Map<int, FantasySquad>> history;
+  late StreamController<Map<int, HistoryWeek>> history;
   late StreamController<FantasySquad?> live;
 
   setUp(() {
     published = StreamController<Map<int, FantasySquad>>.broadcast();
-    history = StreamController<Map<int, FantasySquad>>.broadcast();
+    history = StreamController<Map<int, HistoryWeek>>.broadcast();
     live = StreamController<FantasySquad?>.broadcast();
   });
 
@@ -91,7 +100,6 @@ void main() {
     Future<void> Function(BuildContext buttonContext)? onShareRank,
     Stream<FantasyLiveState>? liveStates,
     Stream<LiveSquad?>? liveSquadStates,
-    Stream<HistoryWeek?> Function(int week)? historyWeekFor,
     Stream<Set<int>>? voidedStates,
     Duration liveWait = kLiveJoinWait,
   }) async {
@@ -133,12 +141,11 @@ void main() {
         rankSeries: rankSeries,
         rankStates: rankStates,
         onShareRank: onShareRank,
-        // Default: no live week, nothing voided, no settled week records —
-        // each answered at once (a cache-seeded feed).
+        // Default: no live week, nothing voided — each answered at once (a
+        // cache-seeded feed). The settled week records arrive with the
+        // History feed itself.
         liveStates: liveStates ?? Stream.value(FantasyLiveState.none),
         liveSquadStates: liveSquadStates ?? Stream<LiveSquad?>.value(null),
-        historyWeekFor:
-            historyWeekFor ?? (_) => Stream<HistoryWeek?>.value(null),
         voidedStates: voidedStates ?? Stream.value(const <int>{}),
         liveWait: liveWait,
       ),
@@ -163,7 +170,7 @@ void main() {
     /// [initialSquad]).
     Future<void> land(WidgetTester tester) async {
       published.add(const {});
-      history.add({1: squad('Old Keeper')});
+      history.add(bareWeeks({1: squad('Old Keeper')}));
       await tester.pumpAndSettle();
     }
 
@@ -261,7 +268,7 @@ void main() {
           rankSeries: liveLine,
           rankStates: rank.stream);
       published.add(const {});
-      history.add({1: squad('Old Keeper')});
+      history.add(bareWeeks({1: squad('Old Keeper')}));
       // The pill pulses forever: fixed pumps, never pumpAndSettle.
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
@@ -464,7 +471,7 @@ void main() {
             onShareRank: (_) async {},
           );
           published.add(const {});
-          history.add({1: squad('Old Keeper')});
+          history.add(bareWeeks({1: squad('Old Keeper')}));
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
           expect(byKey('rank_history_panel'), findsOneWidget);
@@ -505,7 +512,7 @@ void main() {
       await pumpViewer(tester,
           badgeStates: badges.stream, badgeCatalogStates: catalog.stream);
       published.add({2: squad('Pub Keeper')});
-      history.add({1: squad('Old Keeper')});
+      history.add(bareWeeks({1: squad('Old Keeper')}));
       await tester.pump();
       // Picks landed, badges not yet: still the skeleton (no piecemeal pop).
       expect(find.byKey(const ValueKey('viewer_skeleton')), findsOneWidget);
@@ -608,7 +615,7 @@ void main() {
             badgeCatalogStates: Stream.value(catalog),
           );
           published.add(revealed ? {2: squad('Pub Keeper')} : const {});
-          history.add(revealed ? {1: squad('Old Keeper')} : const {});
+          history.add(revealed ? bareWeeks({1: squad('Old Keeper')}) : const {});
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
           expect(find.byKey(const ValueKey('badge_shelf')), findsOneWidget);
@@ -686,7 +693,8 @@ void main() {
     await pumpViewer(tester);
     // GW2 is current: a published GW2 + history GW1 and a STALE history GW2.
     published.add({2: squad('Pub Keeper', chip: 'tripleCaptain')});
-    history.add({1: squad('Old Keeper'), 2: squad('Stale Keeper')});
+    history.add(bareWeeks(
+        {1: squad('Old Keeper'), 2: squad('Stale Keeper')}));
     await tester.pumpAndSettle();
 
     // Opens on the current week — the published copy, not the stale one.
@@ -743,7 +751,7 @@ void main() {
     expect(opened, ['Pub Keeper']);
 
     // An earlier week's chips open too (browsing history).
-    history.add({1: squad('Old Keeper')});
+    history.add(bareWeeks({1: squad('Old Keeper')}));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('viewer_week_1')));
     await tester.pumpAndSettle();
@@ -781,7 +789,7 @@ void main() {
       'week', (tester) async {
     await pumpViewer(tester);
     published.add(const {});
-    history.add({1: squad('Old Keeper')});
+    history.add(bareWeeks({1: squad('Old Keeper')}));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('squad_chip_Old Keeper')), findsOneWidget);
     expect(find.text('Gameweek 1 squad'), findsOneWidget);
@@ -791,7 +799,7 @@ void main() {
       'browsable, live stream updates re-render', (tester) async {
     await pumpViewer(tester, isSelf: true, initialSquad: squad('Live Keeper'));
     published.add(const {});
-    history.add({1: squad('Old Keeper')});
+    history.add(bareWeeks({1: squad('Old Keeper')}));
     await tester.pumpAndSettle();
 
     // Defaults to the live squad.
@@ -839,32 +847,18 @@ void main() {
     late StreamController<FantasyLiveState> liveFeed;
     late StreamController<LiveSquad?> liveSquad;
     late StreamController<Set<int>> voided;
-    late Map<int, StreamController<HistoryWeek?>> weekFeeds;
-    late List<int> asked;
 
     setUp(() {
       liveFeed = StreamController<FantasyLiveState>.broadcast();
       liveSquad = StreamController<LiveSquad?>.broadcast();
       voided = StreamController<Set<int>>.broadcast();
-      weekFeeds = {};
-      asked = [];
     });
 
     tearDown(() {
       liveFeed.close();
       liveSquad.close();
       voided.close();
-      for (final c in weekFeeds.values) {
-        c.close();
-      }
     });
-
-    Stream<HistoryWeek?> weekFeed(int week) {
-      asked.add(week);
-      return (weekFeeds[week] ??=
-              StreamController<HistoryWeek?>.broadcast())
-          .stream;
-    }
 
     FantasySquad oldCrew() => squad('Old Keeper');
 
@@ -927,7 +921,8 @@ void main() {
 
     /// Opens ANOTHER manager's page on GW2 (published) with GW1 in History,
     /// and lets the feeds answer: [live] / [squad] / [voidedWeeks] (null =
-    /// does not answer), the GW1 and GW2 settled records.
+    /// does not answer), the GW1 and GW2 settled records (they ride in on
+    /// the History feed with the weeks' squads; no record = the squad only).
     Future<void> land(
       WidgetTester tester, {
       FantasyLiveState live = FantasyLiveState.none,
@@ -940,14 +935,12 @@ void main() {
       bool answerHistory = true,
     }) async {
       published.add(publishedWeeks ?? {2: crew()});
-      history.add({1: oldCrew()});
       await tester.pump();
       liveFeed.add(live);
       if (answerSquad) liveSquad.add(squad);
       if (voidedWeeks != null) voided.add(voidedWeeks);
       if (answerHistory) {
-        weekFeeds[1]?.add(gw1);
-        weekFeeds[2]?.add(gw2);
+        history.add({1: gw1 ?? bare(oldCrew()), if (gw2 != null) 2: gw2});
       }
       await frames(tester);
     }
@@ -967,7 +960,6 @@ void main() {
             brightness: brightness,
             liveStates: liveFeed.stream,
             liveSquadStates: liveSquad.stream,
-            historyWeekFor: weekFeed,
             voidedStates: voided.stream,
             liveWait: liveWait);
 
@@ -1035,15 +1027,13 @@ void main() {
 
     testWidgets(
         'browsing: each week reads its own source — GW1 from History, '
-        'GW2 live — and every week shown has its settled record asked for, '
-        'one small node each', (tester) async {
+        'GW2 live', (tester) async {
       await pumpPoints(tester);
       await land(tester,
           live: liveWeek2(),
           squad: week2Points(),
           gw1: settled(oldCrew(), tenths: 340, slots: week1Rows));
 
-      expect(asked.toSet(), {1, 2}, reason: 'one node per week, not History');
       expect(stripText(tester), '20 pts');
 
       await tester.tap(byKey('viewer_week_1'));
@@ -1068,11 +1058,14 @@ void main() {
       expect(pills(), findsOneWidget);
 
       // finalize: History first, then the tombstone.
-      weekFeeds[2]!.add(settled(crew(), tenths: 230, slots: [
-        slot('Pub Keeper', 50),
-        slot('Pub Striker', 180, x: 2),
-        slot('Bench Att', 0),
-      ]));
+      history.add({
+        1: bare(oldCrew()),
+        2: settled(crew(), tenths: 230, slots: [
+          slot('Pub Keeper', 50),
+          slot('Pub Striker', 180, x: 2),
+          slot('Bench Att', 0),
+        ]),
+      });
       liveFeed.add(const FantasyLiveState(
           meta: LiveMeta(gw: 2, state: LiveState.settled)));
       liveSquad.add(null);
@@ -1111,13 +1104,11 @@ void main() {
         (tester) async {
       await pumpPoints(tester);
       published.add({2: crew()});
-      history.add({1: oldCrew()});
+      history.add(bareWeeks({1: oldCrew()}));
       await tester.pump();
       liveFeed.add(liveWeek2());
       liveSquad.add(week2Points());
       voided.addError(StateError('rules'));
-      weekFeeds[1]?.add(null);
-      weekFeeds[2]?.add(null);
       await frames(tester);
 
       expect(byKey('viewer_content'), findsOneWidget);
@@ -1127,16 +1118,16 @@ void main() {
     });
 
     testWidgets(
-        'a settled week whose History record cannot be read shows no '
-        'numbers rather than wrong ones', (tester) async {
+        'a settled week whose History record carries no readable numbers '
+        'shows none rather than wrong ones', (tester) async {
       await pumpPoints(tester);
       published.add(const {});
-      history.add({1: oldCrew()});
+      // The squad reads, the record has no TotalTenths / Breakdown.
+      history.add(bareWeeks({1: oldCrew()}));
       await tester.pump();
       liveFeed.add(FantasyLiveState.none);
       liveSquad.add(null);
       voided.add(const {});
-      weekFeeds[1]!.addError(StateError('network'));
       await frames(tester);
 
       expect(byKey('viewer_content'), findsOneWidget);
@@ -1145,12 +1136,28 @@ void main() {
     });
 
     testWidgets(
+        'a History feed that errors is logged, never thrown - and what it '
+        'last said stays (no wrong "revealed at lock" message)',
+        (tester) async {
+      await pumpPoints(tester);
+      await land(tester, publishedWeeks: const {});
+      expect(byKey('viewer_content'), findsOneWidget);
+
+      history.addError(StateError('network'));
+      await frames(tester);
+
+      expect(tester.takeException(), isNull);
+      expect(byKey('viewer_content'), findsOneWidget);
+      expect(find.text('Gameweek 1 squad'), findsOneWidget);
+    });
+
+    testWidgets(
         'one reveal: the skeleton holds until the live feed, the live '
-        'squad, the Voided set and the weeks\' records have answered, then '
-        'the lines are already there', (tester) async {
+        'squad, the Voided set, the published weeks and the History weeks '
+        '(squads AND records) have answered, then the lines are already '
+        'there', (tester) async {
       await pumpPoints(tester);
       published.add({2: crew()});
-      history.add({1: oldCrew()});
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       expectHeld();
@@ -1162,10 +1169,8 @@ void main() {
       voided.add(const {});
       await tester.pump();
       expectHeld();
-      weekFeeds[1]!.add(null);
-      await tester.pump();
-      expectHeld();
-      weekFeeds[2]!.add(null);
+      // The History feed answers last: it carries the weeks' records.
+      history.add(bareWeeks({1: oldCrew()}));
       // The first frame with the content in the tree already has the lines.
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 20));
@@ -1180,7 +1185,7 @@ void main() {
         (tester) async {
       await pumpPoints(tester);
       published.add({2: crew()});
-      history.add({1: oldCrew()});
+      history.add(bareWeeks({1: oldCrew()}));
       await tester.pump(const Duration(milliseconds: 1900));
       expectHeld();
       await tester.pump(const Duration(milliseconds: 200));

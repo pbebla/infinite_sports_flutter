@@ -720,31 +720,10 @@ Map<String, FantasyManager> managersFromNode(Object? node) {
 
 // ── Pick transparency (P3d, spec §9) ───────────────────────────────────────
 // `PublishedPicks/<gw>/<uid>` and `History/<gw>/<uid>` both hold engine
-// FantasySquad.toMap snapshots (functions-written at lock / finalize).
-
-/// One manager's squads across a `<gw>/<uid>` node → {week: squad}.
-/// Gameweek keys are small ints, so the node may list-coerce (index = week).
-/// Malformed squads are skipped (squadFromNode's rule).
-Map<int, FantasySquad> squadsByWeekForUid(Object? node, String uid) {
-  final out = <int, FantasySquad>{};
-  void take(Object? weekNode, int week) {
-    if (weekNode is! Map) return;
-    final squad = squadFromNode(weekNode[uid]);
-    if (squad != null) out[week] = squad;
-  }
-
-  if (node is Map) {
-    node.forEach((gw, raw) {
-      final week = int.tryParse(gw.toString());
-      if (week != null) take(raw, week);
-    });
-  } else if (node is List) {
-    for (var i = 0; i < node.length; i++) {
-      take(node[i], i);
-    }
-  }
-  return out;
-}
+// FantasySquad.toMap snapshots (functions-written at lock / finalize). The
+// squad sheet reads them ONE week node at a time (FantasyService per-week
+// feeds, D9): a published week through [squadFromNode], a History week
+// through [historyWeekFromNode] (its `squad` + the points, one parse).
 
 // ── Per-player points of a squad week (live everywhere, Task 4) ────────────
 // The SAME slot rows live in two places, written by the same scoring core

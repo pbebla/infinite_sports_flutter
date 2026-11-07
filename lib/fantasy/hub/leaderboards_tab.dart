@@ -124,7 +124,7 @@ class FantasyLeaderboardsFeeds {
   /// The squad viewer's PublishedPicks / History feeds (the tab's default
   /// viewer builder hands them to ManagerSquadViewerPage).
   final Stream<Map<int, FantasySquad>>? viewerPublishedStates;
-  final Stream<Map<int, FantasySquad>>? viewerHistoryStates;
+  final Stream<Map<int, HistoryWeek>>? viewerHistoryStates;
 
   /// The share-sheet seam for the story images (null = the system sheet).
   final SharePng? shareImage;
@@ -198,7 +198,7 @@ class FantasyLeaderboardsTab extends StatefulWidget {
   /// Test seams for the DEFAULT squad viewer (ignored when
   /// [squadViewerBuilder] is given): its PublishedPicks / History feeds.
   final Stream<Map<int, FantasySquad>>? viewerPublishedStates;
-  final Stream<Map<int, FantasySquad>>? viewerHistoryStates;
+  final Stream<Map<int, HistoryWeek>>? viewerHistoryStates;
 
   /// Test seam for the Team of the Week / my-rank share images: receives the
   /// rendered PNG + caption instead of the system share sheet.

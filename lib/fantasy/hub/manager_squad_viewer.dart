@@ -20,8 +20,9 @@
 // `Final · {W} pts` once settled (the manager's own `History/<gw>/<uid>`
 // Breakdown), My Team's "Voided" / "didn't count" copy for those weeks.
 //   • a LIVE week reads `Live/Squads/<uid>` + the live feed's player statuses;
-//   • a SETTLED week reads that one week's `History/<gw>/<uid>` — one small
-//     listener per week shown (watchHistoryWeek), never the whole History;
+//   • a SETTLED week reads that one week's `History/<gw>/<uid>` — the same
+//     small per-week listener that supplies the week's squad (D9: parsed
+//     once into a [HistoryWeek]), never the whole History;
 //   • "Voided" comes only from the Voided set (`watchVoidedWeeks`), never from
 //     a live per-player record (a live record in a voided week reads "not
 //     voided, 0"): while that set is unknown (its feed failed or has not
@@ -35,6 +36,14 @@
 // The new streams join the page's single reveal (an [AnswerGate]: every feed
 // answered, an error counts as an answer, bounded at the global 2 s; latched,
 // so a week that locks while the page is open never brings the skeleton back).
+//
+// One manager, his weeks only (fantasy scale fixes, D9): the squad feeds are
+// per-gameweek listeners on `PublishedPicks/<gw>/<uid>` and
+// `History/<gw>/<uid>` over every gameweek number in [gameweeks] (a future
+// week answers null; a week that LOCKS while the sheet is open appears live),
+// never the whole nodes of every manager. The page resubscribes when the SET
+// of gameweek numbers changes and keeps what it shows while the new
+// subscription answers.
 //
 // House rules: streams only; single fade reveal (skeleton until every stream
 // — the badge feeds included; a failing badge feed counts as "none" — has
@@ -94,9 +103,9 @@ class ManagerSquadViewerPage extends StatefulWidget {
     this.onShareRank,
     this.liveStates,
     this.liveSquadStates,
-    this.historyWeekFor,
     this.voidedStates,
     this.liveWait = kLiveJoinWait,
+    this.watchNode,
   });
 
   final String sport;
@@ -120,10 +129,17 @@ class ManagerSquadViewerPage extends StatefulWidget {
   final Stream<FantasySquad?>? squadStates;
   final FantasySquad? initialSquad;
 
-  /// Test seams — null = the real FantasyService streams for [uid].
+  /// Test seams — null = the real FantasyService per-week streams for [uid]
+  /// over [gameweeks]. [historyStates] carries each week's [HistoryWeek]
+  /// (its squad AND its points: one feed, one parse).
   final Stream<Map<int, FantasySquad>>? publishedStates;
-  final Stream<Map<int, FantasySquad>>? historyStates;
+  final Stream<Map<int, HistoryWeek>>? historyStates;
   final DateTime Function()? nowUtc;
+
+  /// Test seam under the real per-week feeds: the raw node stream for a path
+  /// (null = the real RTDB listener). Unused for a feed whose
+  /// [publishedStates] / [historyStates] is given.
+  final FantasyNodeWatcher? watchNode;
 
   /// Round 3: tapping a chip on the court opens that player's fantasy
   /// profile (the hub's one opener, bound to its shared draft). The court
@@ -167,10 +183,6 @@ class ManagerSquadViewerPage extends StatefulWidget {
   /// ([FantasyService.watchLiveSquad]).
   final Stream<LiveSquad?>? liveSquadStates;
 
-  /// One week's settled `History/<gw>/<uid>`
-  /// ([FantasyService.watchHistoryWeek]) — asked once per week shown.
-  final Stream<HistoryWeek?> Function(int week)? historyWeekFor;
-
   /// The season's owner-voided weeks ([FantasyService.watchVoidedWeeks]).
   final Stream<Set<int>>? voidedStates;
 
@@ -183,6 +195,9 @@ class ManagerSquadViewerPage extends StatefulWidget {
 
 class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
   Map<int, FantasySquad>? _published;
+
+  /// The squads of the History weeks (browsable weeks) — derived from
+  /// [_settled] on every History emission.
   Map<int, FantasySquad>? _history;
   FantasySquad? _liveSquad;
   bool _liveLoaded = false;
@@ -193,7 +208,7 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
   bool _weekChosen = false;
 
   StreamSubscription<Map<int, FantasySquad>>? _publishedSub;
-  StreamSubscription<Map<int, FantasySquad>>? _historySub;
+  StreamSubscription<Map<int, HistoryWeek>>? _historySub;
   StreamSubscription<FantasySquad?>? _liveSub;
 
   /// This manager's awards + the catalog; null until loaded (a failing feed
@@ -210,8 +225,9 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
 
   // ── Live everywhere (Task 7): the points on the court ───────────────────
 
-  /// The reveal gate over the live feed, the viewed manager's live squad, the
-  /// Voided set and one settled record per week shown.
+  /// The reveal gate over the live feed, the viewed manager's live squad and
+  /// the Voided set (the two squad feeds hold the reveal themselves: the page
+  /// stays on the skeleton until both have answered in full).
   late final AnswerGate _gate = AnswerGate(
     bound: widget.liveWait,
     owner: 'ManagerSquadViewerPage',
@@ -228,9 +244,9 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
   /// answered): no points are shown while it is.
   Set<int>? _voided;
 
-  /// Each week shown's settled `History/<gw>/<uid>` (null = none / failed).
-  final Map<int, HistoryWeek?> _settled = {};
-  final Map<int, StreamSubscription<HistoryWeek?>> _settledSubs = {};
+  /// Each finalized week's `History/<gw>/<uid>` (the History feed's map: a
+  /// week with no record is absent) — the squad AND the points of the week.
+  Map<int, HistoryWeek> _settled = const {};
   StreamSubscription<FantasyLiveState>? _liveStateSub;
   StreamSubscription<LiveSquad?>? _liveWeekSquadSub;
   StreamSubscription<Set<int>>? _voidedSub;
@@ -241,24 +257,8 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
   void initState() {
     super.initState();
     _gate.start();
-    _publishedSub = (widget.publishedStates ??
-            FantasyService.watchPublishedPicksFor(
-                widget.sport, widget.season, widget.uid))
-        .listen((weeks) {
-      if (!mounted) return;
-      _published = weeks;
-      _syncSettledWeeks();
-      setState(() {});
-    });
-    _historySub = (widget.historyStates ??
-            FantasyService.watchHistoryFor(
-                widget.sport, widget.season, widget.uid))
-        .listen((weeks) {
-      if (!mounted) return;
-      _history = weeks;
-      _syncSettledWeeks();
-      setState(() {});
-    });
+    _listenPublished();
+    _listenHistory();
     // The points feeds join the reveal through the gate (AnswerGate.listen:
     // an answer — data OR error, or a feed that cannot even be created —
     // opens its slot; an error is logged and leaves what the feed last said
@@ -363,32 +363,71 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
     }
   }
 
-  /// One small settled listener per week shown (`History/<gw>/<uid>`): the
-  /// weeks the squad streams know. A new week (one that locks while the page
-  /// is open) is subscribed at once; a week that vanished is let go.
-  void _syncSettledWeeks() {
-    final published = _published;
-    final history = _history;
-    if (published == null || history == null) return;
-    final wanted = {...history.keys, ...published.keys};
-    for (final week in wanted) {
-      if (_settledSubs.containsKey(week)) continue;
-      final sub = _gate.listen<HistoryWeek?>(
-        'history week $week',
-        () =>
-            widget.historyWeekFor?.call(week) ??
-            FantasyService.watchHistoryWeek(
-                widget.sport, widget.season, widget.uid, week),
-        onData: (v) => _settled[week] = v,
-        onError: () => _settled[week] = null,
-      );
-      if (sub != null) _settledSubs[week] = sub;
+  /// Every gameweek number the page knows, sorted — the weeks both squad
+  /// feeds listen to (a week not played yet answers null).
+  static List<int> _weekNumbers(List<Gameweek> gameweeks) =>
+      ({for (final g in gameweeks) g.number}.toList()..sort());
+
+  static bool _sameWeeks(List<int> a, List<int> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
     }
-    for (final week in _settledSubs.keys.toList()) {
-      if (wanted.contains(week)) continue;
-      _settledSubs.remove(week)?.cancel();
-      _settled.remove(week);
+    return true;
+  }
+
+  /// (Re)opens this manager's `PublishedPicks/<gw>/<uid>` feed — one small
+  /// listener per gameweek number, never the whole node. What is shown stays
+  /// until the new subscription answers (nothing is cleared here).
+  void _listenPublished() {
+    _publishedSub?.cancel();
+    _publishedSub = (widget.publishedStates ??
+            FantasyService.watchPublishedPicksFor(widget.sport, widget.season,
+                widget.uid, _weekNumbers(widget.gameweeks),
+                watchNode: widget.watchNode))
+        .listen((published) {
+      if (!mounted) return;
+      setState(() => _published = published);
+    }, onError: (Object e) {
+      debugPrint('ManagerSquadViewerPage: published picks feed failed: $e');
+    });
+  }
+
+  /// (Re)opens this manager's `History/<gw>/<uid>` feed — one small listener
+  /// per gameweek number. Each week arrives parsed once: its squad feeds the
+  /// browsable weeks ([_history]), the whole record the points ([_settled]).
+  void _listenHistory() {
+    _historySub?.cancel();
+    _historySub = (widget.historyStates ??
+            FantasyService.watchHistoryFor(widget.sport, widget.season,
+                widget.uid, _weekNumbers(widget.gameweeks),
+                watchNode: widget.watchNode))
+        .listen((weeks) {
+      if (!mounted) return;
+      setState(() {
+        _settled = weeks;
+        _history = {
+          for (final e in weeks.entries)
+            if (e.value.squad != null) e.key: e.value.squad!,
+        };
+      });
+    }, onError: (Object e) {
+      debugPrint('ManagerSquadViewerPage: history feed failed: $e');
+    });
+  }
+
+  @override
+  void didUpdateWidget(ManagerSquadViewerPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The schedule gained / lost a gameweek: reopen the per-week feeds over
+    // the new set. A rebuild with the same numbers opens nothing. A feed a
+    // test injected is not week-parameterised — left alone.
+    if (_sameWeeks(_weekNumbers(oldWidget.gameweeks),
+        _weekNumbers(widget.gameweeks))) {
+      return;
     }
+    if (widget.publishedStates == null) _listenPublished();
+    if (widget.historyStates == null) _listenHistory();
   }
 
   @override
@@ -402,10 +441,6 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
     _liveStateSub?.cancel();
     _liveWeekSquadSub?.cancel();
     _voidedSub?.cancel();
-    for (final sub in _settledSubs.values) {
-      sub.cancel();
-    }
-    _settledSubs.clear();
     _gate.dispose();
     super.dispose();
   }

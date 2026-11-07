@@ -74,7 +74,7 @@ void main() {
   late StreamController<FantasySquad?> squads;
   late StreamController<Map<int, FantasyDreamTeam>> dreams;
   late StreamController<Map<int, FantasySquad>> viewerPublished;
-  late StreamController<Map<int, FantasySquad>> viewerHistory;
+  late StreamController<Map<int, HistoryWeek>> viewerHistory;
   late List<LeaderboardRowData> openedRows;
 
   setUp(() {
@@ -88,7 +88,7 @@ void main() {
     squads = StreamController<FantasySquad?>.broadcast();
     dreams = StreamController<Map<int, FantasyDreamTeam>>.broadcast();
     viewerPublished = StreamController<Map<int, FantasySquad>>.broadcast();
-    viewerHistory = StreamController<Map<int, FantasySquad>>.broadcast();
+    viewerHistory = StreamController<Map<int, HistoryWeek>>.broadcast();
     openedRows = [];
   });
 

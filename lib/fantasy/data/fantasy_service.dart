@@ -36,9 +36,18 @@ import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 
+/// The raw value stream of one RTDB node by path — the seam the per-week
+/// manager feeds read through, so a test can fake the nodes and say exactly
+/// which paths were listened to (null in production = the real listener).
+typedef FantasyNodeWatcher = Stream<Object?> Function(String path);
+
 class FantasyService {
   static DatabaseReference _ref(String path) =>
       FirebaseDatabase.instance.ref(path);
+
+  /// The real [FantasyNodeWatcher]: one onValue listener on [path].
+  static Stream<Object?> _watchNode(String path) =>
+      _ref(path).onValue.map((event) => event.snapshot.value);
 
   static String _root(String sport, String season) =>
       'Fantasy/$sport/$season';
@@ -66,6 +75,10 @@ class FantasyService {
   // `<root>|<uid>`. A known-ABSENT node is cached too (null value, present
   // key): "no alert" / "no squad yet" paints at once on a revisit.
   static final Map<String, Map<int, ChipHistoryEntry>> _chipHistoryCache = {};
+  // The squad sheet's per-week feeds for ONE manager (D9), keyed
+  // `<root>|<uid>`: his lock-published squads and his History weeks.
+  static final Map<String, Map<int, FantasySquad>> _publishedPicksForCache = {};
+  static final Map<String, Map<int, HistoryWeek>> _historyForCache = {};
   static final Map<String, FantasySquadAlert?> _squadAlertCache = {};
   static final Map<String, FantasySquad?> _mySquadCache = {};
   static final Map<String, FantasyManager?> _managerByUidCache = {};
@@ -121,6 +134,8 @@ class FantasyService {
     _playerWeekStatsCache.clear();
     _watchlistCache.clear();
     _chipHistoryCache.clear();
+    _publishedPicksForCache.clear();
+    _historyForCache.clear();
     _squadAlertCache.clear();
     _mySquadCache.clear();
     _managerByUidCache.clear();
@@ -707,19 +722,50 @@ class FantasyService {
 
   /// One manager's lock-published picks by week (`PublishedPicks/<gw>/<uid>`,
   /// spec §9: visible to others only AFTER lock — the functions only write
-  /// here at lock, so everything readable is fair game).
+  /// here at lock, so everything readable is fair game). One onValue listener
+  /// per gameweek in [weeks] on that small node — never the whole
+  /// `PublishedPicks` of every manager (the shared [perWeekStream], like
+  /// [watchChipHistoryFor]). A week that has not locked answers null (left out
+  /// of the map) and appears in a later emission the moment it locks; the map
+  /// is emitted only once EVERY week has answered (no piecemeal pops), then on
+  /// every change. Seeded from the session cache (`<root>|<uid>`). Callers
+  /// (the squad sheet) pass every gameweek number and resubscribe when that
+  /// set changes. [watchNode]: test seam (see [FantasyNodeWatcher]).
   static Stream<Map<int, FantasySquad>> watchPublishedPicksFor(
-      String sport, String season, String uid) {
-    return _ref('${_root(sport, season)}/PublishedPicks').onValue.map(
-        (event) => squadsByWeekForUid(event.snapshot.value, uid));
+      String sport, String season, String uid, List<int> weeks,
+      {FantasyNodeWatcher? watchNode}) {
+    final root = _root(sport, season);
+    final watch = watchNode ?? _watchNode;
+    return perWeekStream<FantasySquad>(
+      weeks: weeks,
+      cache: _publishedPicksForCache,
+      cacheKey: '$root|$uid',
+      watchWeek: (w) => watch('$root/PublishedPicks/$w/$uid'),
+      parse: squadFromNode,
+    );
   }
 
   /// One manager's finalized week-by-week history (`History/<gw>/<uid>`,
-  /// spec §9: browsable forever).
-  static Stream<Map<int, FantasySquad>> watchHistoryFor(
-      String sport, String season, String uid) {
-    return _ref('${_root(sport, season)}/History').onValue.map(
-        (event) => squadsByWeekForUid(event.snapshot.value, uid));
+  /// spec §9: browsable forever), one onValue listener per gameweek in
+  /// [weeks] on that small node (public read) — never the whole `History`
+  /// (the shared [perWeekStream]). Each week node is parsed ONCE into a
+  /// [HistoryWeek]: its `squad` is what the week chips browse and its points
+  /// (net tenths, Breakdown, Voided / Invalid) are what the court shows, so
+  /// the squad sheet needs no second listener per week. A week with no
+  /// record is left out; same all-answered rule, session cache
+  /// (`<root>|<uid>`) and resubscribe contract as [watchPublishedPicksFor].
+  static Stream<Map<int, HistoryWeek>> watchHistoryFor(
+      String sport, String season, String uid, List<int> weeks,
+      {FantasyNodeWatcher? watchNode}) {
+    final root = _root(sport, season);
+    final watch = watchNode ?? _watchNode;
+    return perWeekStream<HistoryWeek>(
+      weeks: weeks,
+      cache: _historyForCache,
+      cacheKey: '$root|$uid',
+      watchWeek: (w) => watch('$root/History/$w/$uid'),
+      parse: historyWeekFromNode,
+    );
   }
 
   /// One manager's finalized chips by gameweek for the chip row's real
