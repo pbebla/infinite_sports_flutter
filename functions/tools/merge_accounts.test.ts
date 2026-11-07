@@ -5,10 +5,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { maskEmail } from '../src/lib/mask_email';
 import {
   applyMerge, BACKUP_KIND, checkTargetFlags, DB_URL, dryRun, findDupes, guardRest, HintLookup,
-  installReadOnlyFetchGuard, loadMap, LOOKUP_URL, parseArgs, readMergeSnapshot, resolveTarget,
-  Rest, RunDeps, Target, undoMerge,
+  httpRest, identityToolkitHints, installReadOnlyFetchGuard, labelOf, loadMap, LOOKUP_URL, parseArgs,
+  readMergeSnapshot, resolveTarget, Rest, RunDeps, Target, undoMerge,
 } from './merge_accounts';
-import { MergeMap } from './merge_accounts_logic';
+import { looksMasked, MergeMap } from './merge_accounts_logic';
 
 // ── in-memory RTDB-like REST stub (no network) ─────────────────────────────
 
@@ -166,6 +166,12 @@ const noPublic = (root: Record<string, any>): Record<string, any> => {
 
 const RAW_EMAIL_RE = /[A-Za-z0-9._-]{3,}@/;
 
+/** The digest a dry run over [root] prints (on a copy - no calls recorded). */
+async function digestOf(map: MergeMap, root: Record<string, any>): Promise<string> {
+  const { digest } = await dryRun(map, deps(new MemDb(clone(root)), { log: () => undefined }));
+  return digest;
+}
+
 // ── snapshot + dry run ─────────────────────────────────────────────────────
 
 describe('readMergeSnapshot (the planner contract)', () => {
@@ -231,7 +237,7 @@ describe('apply + undo', () => {
     const before = fixture();
     const db = withMirror(new MemDb(fixture()));
     const d = deps(db);
-    const r = await applyMerge(MAP, d, { canary: true });
+    const r = await applyMerge(MAP, d, { canary: true, expectPlan: await digestOf(MAP, db.root) });
     expect(r.ok).toBe(true);
     expect(r.applied).toEqual(['Hiram Alvarez', 'Carlo Gewargis', 'Robert Shamoeilzadeh']);
     const u = db.root.Users;
@@ -256,7 +262,7 @@ describe('apply + undo', () => {
     // A second apply writes nothing (Review Focus 3).
     const again = deps(db, { now: () => 1_762_400_100_000 });
     const n = db.writes().length;
-    const r2 = await applyMerge(MAP, again, { canary: true });
+    const r2 = await applyMerge(MAP, again, { canary: true, expectPlan: await digestOf(MAP, db.root) });
     expect(r2.writes).toBe(0);
     expect(db.writes().length).toBe(n);
 
@@ -275,7 +281,7 @@ describe('apply + undo', () => {
     const d = deps(db, {
       afterPlan: () => { db.set('Futsal/11/Line Ups/Nineveh/Hiram A/UID', 'managerLinkedSomeoneElse'); },
     });
-    const r = await applyMerge(MAP, d, { canary: true });
+    const r = await applyMerge(MAP, d, { canary: true, expectPlan: await digestOf(MAP, db.root) });
     expect(r.ok).toBe(false);
     expect(r.refusedAtApply).toEqual(['Hiram Alvarez']);
     expect(r.applied).toEqual(['Carlo Gewargis', 'Robert Shamoeilzadeh']);
@@ -297,7 +303,7 @@ describe('apply + undo', () => {
   it('a fantasy Config that appeared since the plan refuses the cluster (D2 re-checked)', async () => {
     const db = withMirror(new MemDb(fixture()));
     const d = deps(db, { afterPlan: () => { db.set('Fantasy/Futsal/11/Config', { lockOverride: 'open' }); } });
-    const r = await applyMerge(MAP, d, { canary: true });
+    const r = await applyMerge(MAP, d, { canary: true, expectPlan: await digestOf(MAP, db.root) });
     expect(r.refusedAtApply).toEqual(['Hiram Alvarez']);
     expect(d.lines.join('\n')).toContain('Futsal Season 11 now has a fantasy Config');
   });
@@ -309,7 +315,7 @@ describe('apply + undo', () => {
     const d = deps(db, { sleep: async (ms) => { sleeps.push(ms); } });
     // The name-row cluster is listed first: the canary cluster still goes first.
     const map: MergeMap = { clusters: [MAP.clusters[2], MAP.clusters[0], MAP.clusters[1]] };
-    const r = await applyMerge(map, d, { canary: true });
+    const r = await applyMerge(map, d, { canary: true, expectPlan: await digestOf(map, db.root) });
     expect(r.ok).toBe(false);
     expect(r.stoppedByCanary).toBe(true);
     expect(r.applied).toEqual(['Hiram Alvarez']);
@@ -371,9 +377,9 @@ describe('undo refusals', () => {
 
   it("refuses another run's merge (MergedAt differs) and changes nothing", async () => {
     const db = withMirror(new MemDb(fixture()));
-    const r1 = await applyMerge(MAP, deps(db), { canary: true });
+    const r1 = await applyMerge(MAP, deps(db), { canary: true, expectPlan: await digestOf(MAP, db.root) });
     await undoMerge(r1.backupFile as string, deps(db));
-    const r2 = await applyMerge(MAP, deps(db, { now: () => 1_762_500_000_000 }), { canary: true });
+    const r2 = await applyMerge(MAP, deps(db, { now: () => 1_762_500_000_000 }), { canary: true, expectPlan: await digestOf(MAP, db.root) });
     expect(r2.ok).toBe(true);
     const snapshot = clone(db.root);
     const n = db.writes().length;
@@ -384,7 +390,7 @@ describe('undo refusals', () => {
 
   it('leaves alone (and lists) a path someone changed after the merge', async () => {
     const db = withMirror(new MemDb(fixture()));
-    const r = await applyMerge(MAP, deps(db), { canary: true });
+    const r = await applyMerge(MAP, deps(db), { canary: true, expectPlan: await digestOf(MAP, db.root) });
     db.set('Users/keepA/Information/Jersey', 10); // the player edited it since
     const d = deps(db);
     const u = await undoMerge(r.backupFile as string, d);
@@ -500,5 +506,162 @@ describe('command line', () => {
     }
     expect(seen).toHaveLength(3);
     expect(seen.every((s) => !/PUT|DELETE|PATCH|update/.test(s))).toBe(true);
+  });
+});
+
+// ── review fix round 1 ─────────────────────────────────────────────────────
+
+describe('fix round 1', () => {
+  it('a production --apply without --expect-plan refuses before any network call', async () => {
+    const db = new MemDb(fixture());
+    await expect(applyMerge(MAP, deps(db), { canary: true })).rejects.toThrow(/without --expect-plan/);
+    await expect(applyMerge(MAP, deps(db), { canary: true, expectPlan: '' })).rejects.toThrow(/run the dry run first/);
+    expect(db.calls).toEqual([]);
+    expect(() => checkTargetFlags(parseArgs(['--apply']), PROD)).toThrow(/without --expect-plan/);
+    expect(() => checkTargetFlags(parseArgs(['--apply', '--expect-plan', 'abc']), PROD)).not.toThrow();
+    // The emulator may omit it.
+    const emu = withMirror(new MemDb(fixture()));
+    expect((await applyMerge(MAP, deps(emu, { target: EMU }), { canary: true })).ok).toBe(true);
+  });
+
+  it('the backup is written atomically (no temp file left behind)', async () => {
+    const db = withMirror(new MemDb(fixture()));
+    const r = await applyMerge(MAP, deps(db), { canary: true, expectPlan: await digestOf(MAP, db.root) });
+    expect(fs.readdirSync(outDir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+    expect(JSON.parse(fs.readFileSync(r.backupFile as string, 'utf8')).kind).toBe(BACKUP_KIND);
+  });
+
+  it('an error mid-apply prints the undo command, and that undo restores what landed', async () => {
+    const before = fixture();
+    const db = withMirror(new MemDb(fixture()));
+    const digest = await digestOf(MAP, db.root);
+    let puts = 0;
+    const realPut = db.put.bind(db);
+    db.put = async (p: string, v: unknown) => {
+      if (++puts === 5) throw new Error('PUT failed: network error');
+      await realPut(p, v);
+    };
+    const d = deps(db);
+    await expect(applyMerge(MAP, d, { canary: true, expectPlan: digest })).rejects.toThrow(/network error/);
+    const out = d.lines.join('\n');
+    expect(out).toContain('STOPPED by an error after the backup was written');
+    const file = /--undo "([^"]+)"/.exec(out)?.[1] as string;
+    expect(file).toBeTruthy();
+    db.put = realPut;
+    await undoMerge(file, deps(db));
+    expect(db.root).toEqual(before);
+  });
+
+  it('with nothing for the canary to watch, a loud warning is printed and the run continues', async () => {
+    const root = fixture();
+    delete root.PublicProfiles;
+    const db = new MemDb(root);
+    const d = deps(db);
+    const r = await applyMerge(MAP, d, { canary: true, expectPlan: await digestOf(MAP, root) });
+    expect(r.ok).toBe(true);
+    expect(r.applied).toHaveLength(3);
+    expect(d.lines.join('\n')).toContain('WARNING: THE MIRROR CHECK (CANARY) IS SKIPPED FOR THIS RUN.');
+  });
+
+  it('a cluster the planner refused makes the run not ok, with a closing count; the others are written', async () => {
+    const map: MergeMap = { clusters: [...MAP.clusters, { who: 'Ghost Person', keep: 'ghostKeep', old: ['ghostOld'] }] };
+    const db = withMirror(new MemDb(fixture()));
+    const d = deps(db);
+    const r = await applyMerge(map, d, { canary: true, expectPlan: await digestOf(map, db.root) });
+    expect(r.ok).toBe(false);
+    expect(r.refusedByPlan).toEqual(['Ghost Person']);
+    expect(r.applied).toHaveLength(3);
+    expect(d.lines.join('\n')).toContain('1 cluster(s) REFUSED by the plan (see refusals) - nothing of them was written: Ghost Person');
+    // A re-run with nothing left to write is still not ok while a cluster is refused.
+    const again = deps(db, { now: () => 1_762_400_100_000 });
+    const r2 = await applyMerge(map, again, { canary: true, expectPlan: await digestOf(map, db.root) });
+    expect(r2.writes).toBe(0);
+    expect(r2.ok).toBe(false);
+    expect(again.lines.join('\n')).toContain('1 cluster(s) REFUSED by the plan');
+  });
+
+  it('unreadable map and backup files give a generic message (no JSON.parse text)', async () => {
+    const bad = path.join(outDir, 'bad.json');
+    fs.writeFileSync(bad, '{"clusters": [ "keepA-secret-snippet');
+    let mapErr = '';
+    try { loadMap(bad); } catch (e) { mapErr = (e as Error).message; }
+    expect(mapErr).toMatch(/^Couldn't read the merge map .*bad\.json - not valid JSON\.$/);
+    expect(mapErr).not.toMatch(/secret-snippet|Unexpected|position/);
+    const undoErr = ((await undoMerge(bad, deps(new MemDb(fixture()))).catch((e: Error) => e)) as Error).message;
+    expect(undoErr).toMatch(/^Couldn't read the backup .* - not valid JSON\.$/);
+    expect(undoErr).not.toMatch(/secret-snippet|Unexpected|position/);
+    expect(() => loadMap(path.join(outDir, 'missing.json'))).toThrow(/missing or cannot be opened/);
+  });
+
+  it('labelOf never prints a raw path', () => {
+    expect(labelOf('Users/keepA/Played/Futsal/Season 11', MAP)).toBe('Hiram Alvarez: kept account Played/Futsal/Season 11');
+    expect(labelOf('Users/oldA/MergedInto', MAP)).toBe('Hiram Alvarez: old account #1 MergedInto');
+    expect(labelOf('PublicProfiles/oldB', MAP)).toBe('public profile of Carlo Gewargis: old account #1');
+    expect(labelOf('Somewhere/keepA/Else', MAP)).toBe('Hiram Alvarez: an unrecognized path');
+    expect(labelOf('Users/strangerUid/Token', MAP)).toBe('an unrecognized path');
+    expect(labelOf('PublicProfiles/strangerUid', MAP)).toBe('an unrecognized path');
+    expect(labelOf('Registrations/x/Submissions', MAP)).toBe('an unrecognized path');
+  });
+});
+
+describe('network clients (stubbed fetch)', () => {
+  let original: typeof fetch;
+  const sent: Array<{ url: string; init: any }> = [];
+  beforeEach(() => { original = globalThis.fetch; sent.length = 0; });
+  afterEach(() => { globalThis.fetch = original; });
+
+  it('identityToolkitHints masks inside the lookup; no raw email reaches any output', async () => {
+    globalThis.fetch = (async (url: any, init?: any) => {
+      sent.push({ url: String(url), init });
+      const ids: string[] = JSON.parse(init.body).localId;
+      const users = ids.filter((u) => EMAILS[u]).map((u) => ({ localId: u, email: EMAILS[u], phoneNumber: '+15550100' }));
+      return new Response(JSON.stringify({ users }), { status: 200 });
+    }) as typeof fetch;
+    const lookup = identityToolkitHints(async () => 'tok-abc');
+    const got = await lookup(['keepA', 'keepB', 'nobody']);
+    expect(got).toEqual({ keepA: maskEmail(EMAILS.keepA), keepB: maskEmail(EMAILS.keepB) });
+    expect(Object.values(got).every((h) => looksMasked(h))).toBe(true);
+    expect(JSON.stringify(got)).not.toMatch(RAW_EMAIL_RE);
+    expect(sent[0].url).toBe(LOOKUP_URL);
+    expect(sent[0].init.method).toBe('POST');
+    expect(sent[0].init.headers.Authorization).toBe('Bearer tok-abc');
+
+    const db = new MemDb(fixture());
+    const d = deps(db, { hints: lookup });
+    const { plan } = await dryRun(MAP, d);
+    expect(plan.refusals).toEqual([]);
+    expect(d.lines.join('\n')).not.toMatch(RAW_EMAIL_RE);
+    expect(d.lines.join('\n')).toContain('kept-email hints found (masked, not shown): 3 of 3');
+  });
+
+  it('an Identity Toolkit error names the status only', async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({ error: { message: 'PERMISSION_DENIED' } }), { status: 403 })) as typeof fetch;
+    await expect(identityToolkitHints(async () => 'tok-abc')(['keepA'])).rejects.toThrow(/^Identity Toolkit lookup failed \(HTTP 403, PERMISSION_DENIED\)\.$/);
+  });
+
+  it('httpRest sends the token only in the Authorization header, never in the URL or an error', async () => {
+    globalThis.fetch = (async (url: any, init?: any) => {
+      sent.push({ url: String(url), init });
+      return sent.length === 3 ? new Response('{"error":"Permission denied"}', { status: 401 }) : new Response('{"a":true}');
+    }) as typeof fetch;
+    const token = 'secret-token-123';
+    const rest = httpRest(PROD, async () => token);
+    expect(await rest.get('Users/keepA', { shallow: true })).toEqual({ a: true });
+    await rest.put('Users/oldA/MergedInto', 'keepA');
+    const err = await rest.get('Users/keepB').catch((e: Error) => e);
+    expect(sent.map((s) => s.url)).toEqual([
+      `${DB_URL}/Users/keepA.json?shallow=true`,
+      `${DB_URL}/Users/oldA/MergedInto.json`,
+      `${DB_URL}/Users/keepB.json`,
+    ]);
+    expect(sent.every((s) => !s.url.includes(token) && s.init.headers.Authorization === `Bearer ${token}`)).toBe(true);
+    expect(sent[1].init.method).toBe('PUT');
+    expect(sent[1].init.body).toBe('"keepA"');
+    expect((err as Error).message).toBe('GET Users/keepB -> HTTP 401: {"error":"Permission denied"}');
+    expect((err as Error).message).not.toContain(token);
+    // The emulator: namespace in the query, never a token.
+    const emu = httpRest(EMU, async () => 'owner');
+    await emu.get('Futsal', { shallow: true });
+    expect(sent[3].url).toBe('http://127.0.0.1:9000/Futsal.json?ns=x&shallow=true');
   });
 });

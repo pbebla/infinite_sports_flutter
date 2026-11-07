@@ -9,8 +9,12 @@
 //                                                memory); prints the plan,
 //                                                the refusals and a plan
 //                                                digest; writes NOTHING
-//   npm run merge:accounts -- --apply [--expect-plan <digest>]
-//                                                re-plans, backs up every
+//   npm run merge:accounts -- --apply --expect-plan <digest>
+//                                                (the digest is REQUIRED on
+//                                                production; the emulator may
+//                                                omit it) re-plans, refuses a
+//                                                plan other than the dry
+//                                                run's, backs up every
 //                                                planned path to
 //                                                rehearsal_out/merge_backup_<ISO>.json,
 //                                                then per cluster: re-reads
@@ -47,7 +51,10 @@
 //     --find-dupes). Every PUT/DELETE must be a path of this run's plan that
 //     passed assertMergePaths, or a validated entry of the backup being
 //     undone.
-//   - A malformed map stops every mode ("fix the map file first").
+//   - A malformed map stops the dry run and --apply (the modes that read
+//     it) before any network call ("fix the map file first").
+//   - A production --apply must carry --expect-plan <digest> from the dry
+//     run the owner read; it refuses before any read without it.
 //   - Emails: looked up only for the kept accounts and masked (maskEmail)
 //     inside the lookup itself; never printed, logged or stored unmasked.
 //     The tool prints roster names, team names, seasons and counts - not
@@ -87,7 +94,7 @@ const SEASON_RE = /^\d{1,4}$/;
 const REG_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const STAMPS = ['MergedInto', 'MergedAt', 'MergedHint'];
 
-const USAGE = 'Usage: npm run merge:accounts [-- --apply [--expect-plan <digest>] | ' +
+const USAGE = 'Usage: npm run merge:accounts [-- --apply --expect-plan <digest> | ' +
   '-- --undo <backupFile> | -- --find-dupes <registrationId>] [--map <file>] ' +
   '[--fake-emails] [--no-canary]';
 
@@ -281,14 +288,26 @@ export const fakeHints: HintLookup = async (uids) => {
   return out;
 };
 
-/** The mapping file (D15). A malformed map stops every mode. */
-export function loadMap(file: string): MergeMap {
-  let raw: any;
+/** A JSON file's parsed contents. Errors are generic on purpose: neither the
+ *  fs nor the JSON.parse message (which can quote the file) is echoed. */
+export function readJsonFile(file: string, what: string): unknown {
+  let text: string;
   try {
-    raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch (err) {
-    throw new Error(`Couldn't read the merge map ${file}: ${(err as Error).message}`);
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    throw new Error(`Couldn't read ${what} ${file} - the file is missing or cannot be opened.`);
   }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Couldn't read ${what} ${file} - not valid JSON.`);
+  }
+}
+
+/** The mapping file (D15). A malformed map stops the modes that use it (the
+ *  dry run and --apply) before any network call. */
+export function loadMap(file: string): MergeMap {
+  const raw: any = readJsonFile(file, 'the merge map');
   if (!isPlainMap(raw) || !Array.isArray(raw.clusters)) {
     throw new Error(`The merge map ${file} has no "clusters" list.`);
   }
@@ -301,7 +320,12 @@ export function loadMap(file: string): MergeMap {
 const oldsOf = (map: MergeMap): string[] => map.clusters.flatMap((c) => c.old ?? []);
 const uidsOf = (map: MergeMap): string[] => [...new Set(map.clusters.flatMap((c) => [c.keep, ...(c.old ?? [])]))];
 
-/** "kept account Played/Futsal/Season 11", a roster label, ... - never a uid. */
+const clusterOfUid = (uid: string, map: MergeMap): MergeMap['clusters'][number] | undefined =>
+  map.clusters.find((x) => x.keep === uid || (x.old ?? []).includes(uid));
+
+/** "kept account Played/Futsal/Season 11", a roster label, ... - never a uid
+ *  and never a raw path: anything else is "an unrecognized path" (with the
+ *  cluster's name when a map uid is in it). */
 export function labelOf(p: string, map: MergeMap): string {
   const ref = parseRosterUidPath(p);
   if (ref) {
@@ -309,16 +333,17 @@ export function labelOf(p: string, map: MergeMap): string {
       ? `roster ${ref.sport} Season ${ref.season}, ${ref.team}, "${ref.name}"`
       : `roster AFC San Jose "${ref.season}", "${ref.name}"`;
   }
-  const m = /^Users\/([^/]+)(?:\/(.+))?$/.exec(p);
-  if (m) {
-    const c = map.clusters.find((x) => x.keep === m[1] || (x.old ?? []).includes(m[1]));
-    const who = c ? c.who : 'unknown cluster';
-    const role = c && c.keep === m[1] ? 'kept account' : `old account #${(c?.old ?? []).indexOf(m[1]) + 1}`;
-    return `${who}: ${role}${m[2] ? ` ${m[2]}` : ''}`;
+  const m = /^Users\/([^/]+)(?:\/(.+))?$/.exec(String(p));
+  const c = m ? clusterOfUid(m[1], map) : undefined;
+  if (m && c) {
+    const role = c.keep === m[1] ? 'kept account' : `old account #${(c.old ?? []).indexOf(m[1]) + 1}`;
+    return `${c.who}: ${role}${m[2] ? ` ${m[2]}` : ''}`;
   }
-  const pp = /^PublicProfiles\/([^/]+)$/.exec(p);
-  if (pp) return `public profile of ${labelOf(userPath(pp[1]), map)}`;
-  return p;
+  const pp = /^PublicProfiles\/([^/]+)$/.exec(String(p));
+  const pc = pp ? clusterOfUid(pp[1], map) : undefined;
+  if (pp && pc) return `public profile of ${labelOf(userPath(pp[1]), map)}`;
+  const known = String(p).split('/').map((seg) => clusterOfUid(seg, map)).find((x) => x !== undefined);
+  return known ? `${known.who}: an unrecognized path` : 'an unrecognized path';
 }
 
 // ── snapshot ───────────────────────────────────────────────────────────────
@@ -592,8 +617,12 @@ export function validateBackup(raw: unknown, target: Target['kind']): MergeBacku
   return raw as unknown as MergeBackup;
 }
 
+/** Atomic: a temp file in the same folder, then renamed over the backup, so
+ *  a crash mid-write never leaves a half-written backup. */
 function saveBackup(file: string, backup: MergeBackup): void {
-  fs.writeFileSync(file, JSON.stringify(backup, null, 1));
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(backup, null, 1));
+  fs.renameSync(tmp, file);
 }
 
 // ── runs ───────────────────────────────────────────────────────────────────
@@ -641,9 +670,16 @@ export interface ApplyResult {
   backupFile: string | null;
   applied: string[];
   refusedAtApply: string[];
+  /** Clusters the planner refused (nothing of them planned or written). */
+  refusedByPlan: string[];
   stoppedByCanary: boolean;
   writes: number;
 }
+
+export const EXPECT_PLAN_REQUIRED =
+  'Refusing --apply on production without --expect-plan <digest>: run the dry run first ' +
+  '(npm run merge:accounts), read it, then apply exactly that plan with ' +
+  'npm run merge:accounts -- --apply --expect-plan <the digest it printed>.';
 
 const rowPathOf = (uidPath: string): string => uidPath.slice(0, -'/UID'.length);
 
@@ -697,6 +733,9 @@ export async function applyMerge(map: MergeMap, deps: RunDeps, opts: ApplyOption
   if (!opts.canary && deps.target.kind !== 'emulator') {
     throw new Error('Refusing: the canary can only be skipped under the emulator.');
   }
+  if (deps.target.kind !== 'emulator' && (opts.expectPlan === undefined || opts.expectPlan === '')) {
+    throw new Error(EXPECT_PLAN_REQUIRED);
+  }
   const log = deps.log;
   log(`Merge duplicate accounts - APPLY (${deps.target.label})`);
   const reader = guardRest(deps.rest, { readOnly: true });
@@ -705,10 +744,19 @@ export async function applyMerge(map: MergeMap, deps: RunDeps, opts: ApplyOption
   const plan = buildMergePlan(map, snap, mergedAt);
   printPlan(map, plan, stats, log);
   const result: ApplyResult = {
-    ok: true, backupFile: null, applied: [], refusedAtApply: [], stoppedByCanary: false, writes: 0,
+    ok: true, backupFile: null, applied: [], refusedAtApply: [], refusedByPlan: [],
+    stoppedByCanary: false, writes: 0,
   };
+  result.refusedByPlan = [...new Set(plan.refusals.map((r) => r.who))];
+  const refusedLine = (): string =>
+    `${result.refusedByPlan.length} cluster(s) REFUSED by the plan (see refusals) - nothing of them was written: ` +
+    result.refusedByPlan.join(', ');
   if (plan.writes.length === 0) {
     log('Nothing to write - every cluster is already merged or refused.');
+    if (result.refusedByPlan.length > 0) {
+      log(refusedLine());
+      result.ok = false;
+    }
     return result;
   }
   assertMergePaths(plan.writes, map, snap); // throws on a malformed map or any off-list write
@@ -736,10 +784,19 @@ export async function applyMerge(map: MergeMap, deps: RunDeps, opts: ApplyOption
     }
     const first = groups.findIndex((g) => stampedOlds(g.writes).some((o) => watchable.has(o)));
     if (first > 0) groups.unshift(...groups.splice(first, 1));
-    log(first < 0
-      ? '  canary: no old account stamped by this run has a public profile entry - nothing to watch'
-      : `  canary: ${groups[0].who} goes first, then up to ` +
+    if (first < 0) {
+      log('  ********************************************************************');
+      log('  * WARNING: THE MIRROR CHECK (CANARY) IS SKIPPED FOR THIS RUN.      *');
+      log('  * No old account this run stamps has a PublicProfiles entry right  *');
+      log('  * now, so there is nothing to watch disappear. That is expected    *');
+      log('  * when re-running after a partial apply (already stamped accounts  *');
+      log('  * have left the mirror). Otherwise make sure the functions with    *');
+      log('  * the mirror change are deployed. The run continues.               *');
+      log('  ********************************************************************');
+    } else {
+      log(`  canary: ${groups[0].who} goes first, then up to ` +
         `${Math.round((opts.canaryTimeoutMs ?? CANARY_TIMEOUT_MS) / 1000)} s for its old account to leave PublicProfiles`);
+    }
   } else {
     log('  canary: OFF (--no-canary, emulator only)');
   }
@@ -768,44 +825,52 @@ export async function applyMerge(map: MergeMap, deps: RunDeps, opts: ApplyOption
   const writer = guardRest(deps.rest, {
     readOnly: false, allowedWrites: new Set(plan.writes.map((w) => w.path)),
   });
-  for (const g of groups) {
-    const changed = await changedSincePlan(writer, map, g.keep, g.writes);
-    if (changed.length > 0) {
-      log(`  ${g.who}: REFUSED at apply - changed since the plan: ${changed.join('; ')}`);
-      result.refusedAtApply.push(g.who);
-      continue;
-    }
-    assertMergePaths(g.writes, map, snap);
-    for (const w of g.writes) {
-      const entry = backup.entries.find((e) => e.path === w.path) as BackupEntry;
-      entry.attempted = true;
-      saveBackup(backupFile, backup); // recorded BEFORE the write is sent
-      await writer.put(w.path, w.after);
-      result.writes++;
-      log(`    wrote ${labelOf(w.path, map)}`);
-    }
-    result.applied.push(g.who);
+  try {
+    for (const g of groups) {
+      const changed = await changedSincePlan(writer, map, g.keep, g.writes);
+      if (changed.length > 0) {
+        log(`  ${g.who}: REFUSED at apply - changed since the plan: ${changed.join('; ')}`);
+        result.refusedAtApply.push(g.who);
+        continue;
+      }
+      assertMergePaths(g.writes, map, snap);
+      for (const w of g.writes) {
+        const entry = backup.entries.find((e) => e.path === w.path) as BackupEntry;
+        entry.attempted = true;
+        saveBackup(backupFile, backup); // recorded BEFORE the write is sent
+        await writer.put(w.path, w.after);
+        result.writes++;
+        log(`    wrote ${labelOf(w.path, map)}`);
+      }
+      result.applied.push(g.who);
 
-    const watch = stampedOlds(g.writes).filter((o) => watchable.has(o));
-    if (!canaryPending || watch.length === 0) continue;
-    canaryPending = false;
-    const c = await canaryGone(writer, watch, deps,
-      opts.canaryTimeoutMs ?? CANARY_TIMEOUT_MS, opts.canaryPollMs ?? CANARY_POLL_MS);
-    if (!c.gone) {
-      log(`  CANARY FAILED: ${g.who}'s old account is still in PublicProfiles after ` +
-        `${Math.round(c.waited / 1000)} s - the mirror change (merged accounts leave the public ` +
-        'profile mirror) is probably not deployed.');
-      log('  STOPPED before any other cluster. Undo this run, deploy the functions, then apply again:');
-      log(`  Undo: ${undoCmd}`);
-      result.ok = false;
-      result.stoppedByCanary = true;
-      return result;
+      const watch = stampedOlds(g.writes).filter((o) => watchable.has(o));
+      if (!canaryPending || watch.length === 0) continue;
+      canaryPending = false;
+      const c = await canaryGone(writer, watch, deps,
+        opts.canaryTimeoutMs ?? CANARY_TIMEOUT_MS, opts.canaryPollMs ?? CANARY_POLL_MS);
+      if (!c.gone) {
+        log(`  CANARY FAILED: ${g.who}'s old account is still in PublicProfiles after ` +
+          `${Math.round(c.waited / 1000)} s - the mirror change (merged accounts leave the public ` +
+          'profile mirror) is probably not deployed.');
+        log('  STOPPED before any other cluster. Undo this run, deploy the functions, then apply again:');
+        log(`  Undo: ${undoCmd}`);
+        result.ok = false;
+        result.stoppedByCanary = true;
+        return result;
+      }
+      log(`  canary passed: the old account left PublicProfiles (after ~${Math.round(c.waited / 1000)} s)`);
     }
-    log(`  canary passed: the old account left PublicProfiles (after ~${Math.round(c.waited / 1000)} s)`);
+  } catch (err) {
+    // The backup exists and some writes may have landed: always say how to undo.
+    log('  STOPPED by an error after the backup was written (the error follows).');
+    log(`  Undo: ${undoCmd}`);
+    throw err;
   }
-  result.ok = result.refusedAtApply.length === 0;
+  result.ok = result.refusedAtApply.length === 0 && result.refusedByPlan.length === 0;
   log(`DONE - ${result.writes} writes for ${result.applied.length} cluster(s)` +
     (result.refusedAtApply.length ? `; REFUSED at apply: ${result.refusedAtApply.join(', ')}` : '') + '.');
+  if (result.refusedByPlan.length > 0) log(refusedLine());
   log(`Undo: ${undoCmd}`);
   return result;
 }
@@ -825,12 +890,7 @@ export interface UndoResult {
  *  old account whose MergedAt is another run's refuses the whole undo. */
 export async function undoMerge(file: string, deps: RunDeps): Promise<UndoResult> {
   deps.log(`Merge duplicate accounts - UNDO (${deps.target.label})`);
-  let raw: unknown;
-  try {
-    raw = JSON.parse(fs.readFileSync(path.resolve(file), 'utf8'));
-  } catch (err) {
-    throw new Error(`Couldn't read the backup ${file}: ${(err as Error).message}`);
-  }
+  const raw = readJsonFile(path.resolve(file), 'the backup');
   const backup = validateBackup(raw, deps.target.kind); // before any network call
   const map: MergeMap = { clusters: backup.clusters.map((c) => ({ who: c.who, keep: c.keep, old: c.old })) };
   const todo = backup.entries.filter((e) => e.attempted);
@@ -993,6 +1053,7 @@ export function checkTargetFlags(args: CliArgs, target: Target): void {
       throw new Error('Refusing --fake-emails: it only works with FIREBASE_DATABASE_EMULATOR_HOST set (the emulator).');
     }
     if (args.noCanary) throw new Error('Refusing --no-canary: it only works under the emulator.');
+    if (args.mode === 'apply' && !args.expectPlan) throw new Error(EXPECT_PLAN_REQUIRED);
   } else if ((args.mode === 'dry-run' || args.mode === 'apply') && !args.fakeEmails) {
     throw new Error('Under the emulator pass --fake-emails (made-up kept emails; no real lookups).');
   }
