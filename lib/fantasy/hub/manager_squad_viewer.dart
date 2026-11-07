@@ -43,14 +43,14 @@
 // week answers null; a week that LOCKS while the sheet is open appears live),
 // never the whole nodes of every manager. The page resubscribes when the SET
 // of gameweek numbers changes and keeps what it shows while the new
-// subscription answers. Both squad feeds join the reveal through the same
-// [AnswerGate] as the others: a feed that ERRORS answers (the error is logged,
-// the last good value stays) and one that is silent is bounded at the same
-// 2 s, so the sheet never hangs on the skeleton. If a squad feed has still
-// said nothing readable by then, the page reveals "Couldn't load this team."
-// (the badge shelf above it) - an error is not a fact: never an empty squad
-// or the "revealed at lock" message for a team that simply did not load. Data
-// that arrives later replaces that line live.
+// subscription answers. The two squad feeds are NOT bounded (the 2 s gate is
+// for the points-only feeds): a slow squad feed keeps the skeleton until the
+// squad arrives, as it always did. Only an actual ERROR on a squad feed before
+// it has answered reveals "Couldn't load this team." (the badge shelf above
+// it) - an error is not a fact: never an empty squad or the "revealed at
+// lock" message for a team that did not load, and never a failure line for a
+// feed that is merely slow. The error is logged, a value the feed already
+// delivered stays, and data that arrives later replaces the line live.
 //
 // House rules: streams only; single fade reveal (skeleton until every stream
 // — the badge feeds included; a failing badge feed counts as "none" — has
@@ -216,6 +216,11 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
 
   StreamSubscription<Map<int, FantasySquad>>? _publishedSub;
   StreamSubscription<Map<int, HistoryWeek>>? _historySub;
+
+  /// A squad feed's last word was an ERROR (cleared by its next value): with
+  /// no value yet, the team is unreadable - not still loading.
+  bool _publishedFailed = false;
+  bool _historyFailed = false;
   StreamSubscription<FantasySquad?>? _liveSub;
 
   /// This manager's awards + the catalog; null until loaded (a failing feed
@@ -232,9 +237,10 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
 
   // ── Live everywhere (Task 7): the points on the court ───────────────────
 
-  /// The reveal gate over the two squad feeds (published picks, History),
-  /// the live feed, the viewed manager's live squad and the Voided set: an
-  /// error counts as an answer, a silent feed is bounded at [liveWait].
+  /// The reveal gate over the points-only feeds - the live feed, the viewed
+  /// manager's live squad and the Voided set: an error counts as an answer, a
+  /// silent feed is bounded at [liveWait]. The two squad feeds are not in it
+  /// (they hold the skeleton with no bound, see [_squadFeedsPending]).
   late final AnswerGate _gate = AnswerGate(
     bound: widget.liveWait,
     owner: 'ManagerSquadViewerPage',
@@ -384,43 +390,52 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
   }
 
   /// (Re)opens this manager's `PublishedPicks/<gw>/<uid>` feed - one small
-  /// listener per gameweek number, never the whole node - through the reveal
-  /// gate (an error answers, logged; the last good value stays). What is shown
-  /// stays until the new subscription answers (nothing is cleared here).
+  /// listener per gameweek number, never the whole node. What is shown stays
+  /// until the new subscription answers (nothing is cleared here); an error
+  /// is logged and flagged ([_publishedFailed]), a value it delivered before
+  /// stays.
   void _listenPublished() {
     _publishedSub?.cancel();
-    _publishedSub = _gate.listen<Map<int, FantasySquad>>(
-      'published picks feed',
-      () =>
-          widget.publishedStates ??
-          FantasyService.watchPublishedPicksFor(widget.sport, widget.season,
-              widget.uid, _weekNumbers(widget.gameweeks),
-              watchNode: widget.watchNode),
-      onData: (published) => _published = published,
-    );
+    _publishedSub = (widget.publishedStates ??
+            FantasyService.watchPublishedPicksFor(widget.sport, widget.season,
+                widget.uid, _weekNumbers(widget.gameweeks),
+                watchNode: widget.watchNode))
+        .listen((published) {
+      if (!mounted) return;
+      setState(() {
+        _published = published;
+        _publishedFailed = false;
+      });
+    }, onError: (Object e) {
+      debugPrint('ManagerSquadViewerPage: published picks feed failed: $e');
+      if (mounted) setState(() => _publishedFailed = true);
+    });
   }
 
   /// (Re)opens this manager's `History/<gw>/<uid>` feed - one small listener
-  /// per gameweek number - through the reveal gate. Each week arrives parsed
-  /// once: its squad feeds the browsable weeks ([_history]), the whole record
-  /// the points ([_settled]).
+  /// per gameweek number. Each week arrives parsed once: its squad feeds the
+  /// browsable weeks ([_history]), the whole record the points ([_settled]).
+  /// Errors as [_listenPublished] ([_historyFailed]).
   void _listenHistory() {
     _historySub?.cancel();
-    _historySub = _gate.listen<Map<int, HistoryWeek>>(
-      'history feed',
-      () =>
-          widget.historyStates ??
-          FantasyService.watchHistoryFor(widget.sport, widget.season,
-              widget.uid, _weekNumbers(widget.gameweeks),
-              watchNode: widget.watchNode),
-      onData: (weeks) {
+    _historySub = (widget.historyStates ??
+            FantasyService.watchHistoryFor(widget.sport, widget.season,
+                widget.uid, _weekNumbers(widget.gameweeks),
+                watchNode: widget.watchNode))
+        .listen((weeks) {
+      if (!mounted) return;
+      setState(() {
         _settled = weeks;
         _history = {
           for (final e in weeks.entries)
             if (e.value.squad != null) e.key: e.value.squad!,
         };
-      },
-    );
+        _historyFailed = false;
+      });
+    }, onError: (Object e) {
+      debugPrint('ManagerSquadViewerPage: history feed failed: $e');
+      if (mounted) setState(() => _historyFailed = true);
+    });
   }
 
   @override
@@ -452,17 +467,27 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
     super.dispose();
   }
 
-  /// The skeleton: until every stream has answered (the two squad feeds
-  /// included - an error answers) or the gate's bound passed.
+  /// The skeleton: until the two squad feeds have answered (no time bound - a
+  /// slow feed keeps it, as it always did) and the points-only feeds have
+  /// answered or the gate's bound passed.
   bool get _loading =>
+      _squadFeedsPending ||
       (widget.isSelf && !_liveLoaded) ||
       _badges == null ||
       _badgeCatalog == null ||
       !_gate.ready;
 
-  /// A squad feed has said nothing readable (it errored or was silent past
-  /// the bound, and has not delivered since): the team is UNKNOWN, not empty.
+  /// A squad feed has no value (still pending, or it errored before its
+  /// first answer): the team is UNKNOWN, never an empty squad.
   bool get _teamUnreadable => _published == null || _history == null;
+
+  /// A squad feed has not answered yet AND has not failed: still loading. One
+  /// that errored before its first answer is not pending - the failure line
+  /// shows (an error is a fact, a slow feed is not).
+  bool get _squadFeedsPending =>
+      _teamUnreadable &&
+      !((_published == null && _publishedFailed) ||
+          (_history == null && _historyFailed));
 
   /// The badge shelf (with its label) for the top of the page; null when
   /// nothing is earned.

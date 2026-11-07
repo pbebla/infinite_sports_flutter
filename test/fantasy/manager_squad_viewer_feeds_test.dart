@@ -421,8 +421,8 @@ void main() {
           findsOneWidget);
     });
 
-    group('a squad feed that errors or stays silent (an error is not a '
-        'fact)', () {
+    group('a squad feed that errors (an error is not a fact) or is merely '
+        'slow (it is not an error)', () {
       Finder byKey(String key) => find.byKey(ValueKey(key));
 
       void expectUnreadable(WidgetTester tester) {
@@ -458,17 +458,52 @@ void main() {
         expectUnreadable(tester);
       });
 
-      testWidgets('a feed that stays SILENT is bounded at 2 s: the skeleton '
-          'until then, then the failure line', (tester) async {
-        await pump(tester);
-        nodes.answerAllNullExcept({p('History', 1)});
-        await tester.pump(const Duration(milliseconds: 1900));
-        expect(byKey('viewer_skeleton'), findsOneWidget);
-        expect(byKey('viewer_load_failed'), findsNothing);
+      for (final feed in const ['History', 'PublishedPicks']) {
+        testWidgets('a silent $feed feed keeps the skeleton past the 2 s '
+            'bound and reveals once it answers (no failure line, ever)',
+            (tester) async {
+          await pump(tester);
+          nodes.answerAllNullExcept({p(feed, 1)});
 
-        await tester.pump(const Duration(milliseconds: 200));
+          // Well past the points feeds' bound: still the skeleton, and never
+          // a failure line for a feed that is merely slow.
+          for (var i = 0; i < 6; i++) {
+            await tester.pump(const Duration(seconds: 1));
+            expect(byKey('viewer_skeleton'), findsOneWidget);
+            expect(byKey('viewer_load_failed'), findsNothing);
+            expect(find.text("Couldn't load this team."), findsNothing);
+            expect(byKey('viewer_unrevealed'), findsNothing);
+          }
+
+          // It answers: the one reveal (nothing published = the lock message),
+          // and the failure line was never on screen.
+          nodes.emit(p(feed, 1), null);
+          await tester.pumpAndSettle();
+          expect(byKey('viewer_skeleton'), findsNothing);
+          expect(byKey('viewer_load_failed'), findsNothing);
+          expect(byKey('viewer_unrevealed'), findsOneWidget);
+          expect(tester.takeException(), isNull);
+        });
+      }
+
+      testWidgets('a silent feed that then DELIVERS a squad reveals the squad '
+          'directly - no failure line, no pop-in', (tester) async {
+        await pump(tester);
+        nodes.answerAllNullExcept({p('PublishedPicks', 2)});
+        for (var i = 0; i < 5; i++) {
+          await tester.pump(const Duration(seconds: 1));
+          expect(byKey('viewer_skeleton'), findsOneWidget);
+          expect(byKey('viewer_load_failed'), findsNothing);
+        }
+
+        nodes.emit(p('PublishedPicks', 2), squad('Locked Keeper').toMap());
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 20));
+        expect(byKey('viewer_load_failed'), findsNothing);
+        expect(byKey('viewer_content'), findsOneWidget);
         await tester.pumpAndSettle();
-        expectUnreadable(tester);
+        expect(byKey('squad_chip_Locked Keeper'), findsOneWidget);
+        expect(byKey('viewer_load_failed'), findsNothing);
       });
 
       testWidgets('(c) data arriving after the failure replaces it, live: '
@@ -497,10 +532,10 @@ void main() {
       });
 
       testWidgets('(c) data arriving after the failure replaces it, live: '
-          'PublishedPicks (after a silent feed)', (tester) async {
+          'PublishedPicks', (tester) async {
         await pump(tester);
         nodes.answerAllNullExcept({p('PublishedPicks', 2)});
-        await tester.pump(const Duration(seconds: 3));
+        nodes.fail(p('PublishedPicks', 2));
         await tester.pumpAndSettle();
         expectUnreadable(tester);
 
