@@ -263,11 +263,13 @@
 // marker (its in-memory overlay is seeded from READ_PATHS only).
 //
 // A finished, settled season (scale fixes D7): the league flagged Finished,
-// the SeasonBadgesSettledAt marker in place and no LockedWeeks entry
-// Finalizing or Rewinding — the 15-minute sweep stands the season down by
-// itself (logging "season over — standing down"), running only the news
-// auto-publish and the lost-settle heal. Any of those conditions failing
-// (the owner un-marks Finished, a week is rewound) = the full sweep again.
+// the SeasonBadgesSettledAt marker in place, every LockedWeeks entry Scored
+// and neither Finalizing nor Rewinding, GwState 'finalized' and no match day
+// (bar a skipped one) after the last locked week — the 15-minute sweep
+// stands the season down by itself (logging "season over — standing down"),
+// running only the news auto-publish and the lost-settle heal. Any of those
+// conditions failing (the owner un-marks Finished, a week is rewound, a game
+// day is added) = the full sweep again.
 
 import { createHash } from 'crypto';
 import {
@@ -296,10 +298,11 @@ import {
 } from './news_cards';
 import { sendDueScheduledMessages } from './messages';
 import {
-  allGamesFinal, childEntries, FantasyDb, fantasyRoot, freezesWeekDate,
-  fullAttendance, gamesOfDate, isPlainMap, isRewinding, isServerSquadWrite,
-  isTestFillSeason, isVoidFlag, keyedGamesOfDate, latestScoredWeek,
-  listFantasySeasons, loadSeasonGameweeks, lockedPositionsOf, lockOverrideOf,
+  allGamesFinal, childEntries, childKeysOf, FantasyDb, fantasyRoot,
+  freezesWeekDate, fullAttendance, gamesOfDate, isPlainMap, isRewinding,
+  isServerSquadWrite, isTestFillSeason, isVoidFlag, keyedGamesOfDate,
+  latestScoredWeek, listFantasySeasons, loadSeasonGameweeks,
+  lockedPositionsOf, lockedWeeksOf, lockOverrideOf,
   marketPlayersOf, marketPricesOf, markServerSquadWrite, parseAbsentMap,
   positionsSnapshotOf, rosterNamesOf, scheduleOverridesOf,
   SEASON_BADGES_SETTLED_NODE, SERVER_WRITE_KEY, TEST_FILL_STAND_DOWN,
@@ -2606,19 +2609,32 @@ async function snapshotPublishedPicks(
 /** The stand-down line of a finished, settled season (sweepSeason). */
 const SEASON_OVER_STAND_DOWN = 'fantasy sweep: season over — standing down';
 
-/** D7 of the 2026-11-06 scale fixes: whether a season is over AND settled —
- *  the league flagged `<sport>/<season>/Finished`, the badge marker
- *  (SEASON_BADGES_SETTLED_NODE: every scoreable week finalized, badges
- *  settled) in place, and no `LockedWeeks/<n>` carrying a `Finalizing` or
- *  `Rewinding` stamp (a week still being scored or rewound is work). Asked
- *  cheapest first: most seasons are mid-season and stop at the one scalar
- *  Finished read. The marker is a scalar too, so it is read (`!= null`),
- *  never `exists()`; LockedWeeks may list-coerce (childEntries). Any stamp
- *  counts, stale or fresh: in doubt the season sweeps in full, exactly as
- *  before. A failed read is the same doubt — warned once, then the full
- *  sweep, so a blip here never skips a season. */
+/** D7 of the 2026-11-06 scale fixes: whether a season is over AND settled,
+ *  so the full sweep provably has nothing left to do —
+ *  - the league flagged `<sport>/<season>/Finished`;
+ *  - the badge marker (SEASON_BADGES_SETTLED_NODE: every scoreable week
+ *    finalized, badges settled) is in place;
+ *  - every `LockedWeeks/<n>` is a map marked `Scored: true` and carries no
+ *    `Finalizing` or `Rewinding` stamp (a week still being scored or rewound
+ *    is work);
+ *  - the stored GwState is 'finalized' or absent (final review I1b: a league
+ *    flagged Finished before its last finalize leaves GwState 'locked' until
+ *    the full sweep's step 3 flips it);
+ *  - no league match day (`<sport>/<season>/Date` keys, keys only) falls
+ *    after the latest dated LockedWeeks entry, compared as calendar dates
+ *    the way deriveGameweeks does, except a day Config/SkippedDates skips
+ *    (final review I1a: a game day added after the season settled must open
+ *    and lock like any week, or the Date trigger scores it from live Squads
+ *    with no lock). No dated entry = nothing to measure against = work.
+ *  Asked cheapest first: most seasons are mid-season and stop at the one
+ *  scalar Finished read. The marker is a scalar too, so it is read
+ *  (`!= null`), never `exists()`; LockedWeeks may list-coerce
+ *  (childEntries). Any stamp counts, stale or fresh: in doubt the season
+ *  sweeps in full, exactly as before. A failed read is the same doubt —
+ *  warned once, then the full sweep, so a blip here never skips a season. */
 async function isSeasonOverAndSettled(
   db: FantasyDb, sport: string, season: string,
+  configNode: Record<string, unknown>,
   log: FantasyLogger, ctx: Record<string, unknown>,
 ): Promise<boolean> {
   const root = fantasyRoot(sport, season);
@@ -2627,9 +2643,24 @@ async function isSeasonOverAndSettled(
     if ((await db.read(`${root}/${SEASON_BADGES_SETTLED_NODE}`)) == null) {
       return false;
     }
-    for (const [, week] of childEntries(await db.read(`${root}/LockedWeeks`))) {
-      if (isRewinding(week)) return false;
-      if (isPlainMap(week) && week['Finalizing'] != null) return false;
+    const lockedNode = await db.read(`${root}/LockedWeeks`);
+    for (const [, week] of childEntries(lockedNode)) {
+      if (!isPlainMap(week) || week['Scored'] !== true) return false;
+      if (isRewinding(week) || week['Finalizing'] != null) return false;
+    }
+    const gwState = await db.read(`${root}/GwState`);
+    if (gwState != null &&
+      !(isPlainMap(gwState) && gwState['status'] === 'finalized')) {
+      return false;
+    }
+    const lockedDates = Object.values(lockedWeeksOf(lockedNode))
+      .map((w) => parseDbDate(w.date).getTime());
+    if (lockedDates.length === 0) return false;
+    const lastLockedMs = Math.max(...lockedDates);
+    const { skippedDates } = scheduleOverridesOf(configNode);
+    for (const day of await childKeysOf(db, `${sport}/${season}/Date`, log)) {
+      if (skippedDates.has(day)) continue;
+      if (parseDbDate(day).getTime() > lastLockedMs) return false;
     }
     return true;
   } catch (err) {
@@ -2791,17 +2822,20 @@ async function sweepSeason(
     return;
   }
   // A finished, settled season stands down by itself (D7, scale fixes
-  // 2026-11-06): the league is flagged Finished, every week is scored, its
-  // badges are settled (the SeasonBadgesSettledAt marker) and no week is
-  // Finalizing or Rewinding. Nothing here changes on its own, so the full
+  // 2026-11-06): the league is flagged Finished, its badges are settled (the
+  // SeasonBadgesSettledAt marker), every LockedWeeks entry is Scored with no
+  // Finalizing or Rewinding stamp, GwState is 'finalized' and no match day
+  // (bar a skipped one) is dated after the last locked week —
+  // isSeasonOverAndSettled. Nothing here changes on its own, so the full
   // sweep below (Date, Squads, History, Players...) would only re-read it
   // every 15 minutes. Two steps still run, the very functions the normal
   // path calls: owner-scheduled news drafts publish (2b) and a lost live
   // hand-over heals (2d); step 0b (scheduled messages) already ran above.
-  // The price of standing down: a game added after the season is marked
-  // Finished is not picked up while it stands down — the owner un-marks
-  // Finished first, and the next sweep then runs in full again.
-  if (await isSeasonOverAndSettled(db, sport, season, log, ctx)) {
+  // The guard is what keeps a late change safe (final review I1): a game day
+  // added after the season settled fails the match-day check, so the full
+  // sweep opens and locks it like any week; a league flagged Finished before
+  // its last finalize fails the GwState check until step 3 flips it.
+  if (await isSeasonOverAndSettled(db, sport, season, configNode, log, ctx)) {
     log.info(SEASON_OVER_STAND_DOWN, ctx);
     await publishDueNewsDrafts(db, { sport, season, nowUtc, log });
     await healLostLiveSettle(db,

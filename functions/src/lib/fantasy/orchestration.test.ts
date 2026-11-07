@@ -2286,10 +2286,16 @@ describe('a finished, settled season stands down by itself (scale fixes D7)', ()
   const STAND_DOWN = 'fantasy sweep: season over — standing down';
   /** The nodes a full sweep downloads and a stood-down season must not. */
   const HEAVY = /\/(Date|Squads|History|Players)(\/|$)/;
+  /** The heavy reads a sweep made. A keys-only look (`keys:`) is not one:
+   *  the stand-down's own Date question is the match-day keys. */
+  const heavyReads = (db: ColdFakeDb) =>
+    db.reads.filter((r) => !r.startsWith('keys:') && HEAVY.test(r));
+  /** A make-up game day dated after the last locked week (Sunday Jul 12). */
+  const GW3_DATE = '07122026';
 
   /** world2 grown into a finished season: both weeks scored (History,
-   *  PublishedPicks, LockedWeeks Scored), the league flagged Finished and the
-   *  settled marker in place. */
+   *  PublishedPicks, LockedWeeks Scored, GwState finalized), the league
+   *  flagged Finished and the settled marker in place. */
   function finishedSeason(): ColdFakeDb {
     const w = world2();
     const s = w.Fantasy.Futsal['15'];
@@ -2298,6 +2304,9 @@ describe('a finished, settled season stands down by itself (scale fixes D7)', ()
     s.LockedWeeks = {
       1: { Date: GW1_DATE, LockAtUtc: LOCK1_MS, Scored: true },
       2: { Date: GW2_DATE, LockAtUtc: LOCK2_MS, Scored: true },
+    };
+    s.GwState = {
+      current: 2, status: 'finalized', lockAtUtc: LOCK2_MS, date: GW2_DATE,
     };
     s.SeasonBadgesSettledAt = 1;
     w.Futsal['15'].Finished = true;
@@ -2329,13 +2338,17 @@ describe('a finished, settled season stands down by itself (scale fixes D7)', ()
     await runLifecycleSweep(db, OVER, log);
 
     expect(infos).toContain(STAND_DOWN);
-    expect(db.reads.filter((r) => HEAVY.test(r))).toEqual([]);
+    expect(heavyReads(db)).toEqual([]);
     expect(sweptFully(db)).toBe(false);
     expect(db.writes).toEqual([]);
+    // Its one look at the schedule is the match-day KEYS, plus GwState.
+    expect(db.reads.filter((r) => r.includes('Futsal/15/Date')))
+      .toEqual(['keys:Futsal/15/Date']);
+    expect(db.reads).toContain(`read:${F_ROOT}/GwState`);
 
     // Every later sweep is the same cheap look.
     for (let i = 0; i < 3; i++) await runLifecycleSweep(db, OVER, log);
-    expect(db.reads.filter((r) => HEAVY.test(r))).toEqual([]);
+    expect(heavyReads(db)).toEqual([]);
     expect(db.writes).toEqual([]);
   });
 
@@ -2363,7 +2376,7 @@ describe('a finished, settled season stands down by itself (scale fixes D7)', ()
     });
     expect(await db.read(`${F_ROOT}/News/Drafts/due`)).toBeNull();
     expect(await db.read(`${F_ROOT}/News/Drafts/later`)).not.toBeNull();
-    expect(db.reads.filter((r) => HEAVY.test(r))).toEqual([]);
+    expect(heavyReads(db)).toEqual([]);
   });
 
   it('still heals a stale Live/Meta while standing down', async () => {
@@ -2378,7 +2391,7 @@ describe('a finished, settled season stands down by itself (scale fixes D7)', ()
     expect(season(db).Live.Meta)
       .toEqual({ Gw: 2, State: 'settled', UpdatedAt: OVER.getTime() });
     // The one History question the heal asks is an existence query.
-    expect(db.reads.filter((r) => HEAVY.test(r)))
+    expect(heavyReads(db))
       .toEqual([`exists:${F_ROOT}/History/2`]);
     expect(sweptFully(db)).toBe(false);
   });
@@ -2458,6 +2471,140 @@ describe('a finished, settled season stands down by itself (scale fixes D7)', ()
       await runLifecycleSweep(db, OVER);
       expect(season(db).Live.Meta.State).toBe('settled');
     });
+
+    /** One sweep at OVER: did the season take the full path? */
+    async function fullSweepAt(db: ColdFakeDb): Promise<boolean> {
+      const { log, infos } = capture();
+      await runLifecycleSweep(db, OVER, log);
+      expect(infos.includes(STAND_DOWN)).toBe(!sweptFully(db));
+      return sweptFully(db);
+    }
+
+    it('a LockedWeeks entry not marked Scored (final review guard i)', async () => {
+      const db = finishedSeason();
+      season(db).LockedWeeks[2] = { Date: GW2_DATE, LockAtUtc: LOCK2_MS };
+      expect(await fullSweepAt(db)).toBe(true);
+    });
+
+    it('the stored GwState is not finalized (guard ii)', async () => {
+      const db = finishedSeason();
+      season(db).GwState.status = 'locked';
+      expect(await fullSweepAt(db)).toBe(true);
+    });
+
+    it('a match day dated after the last locked week (guard iii)', async () => {
+      const db = finishedSeason();
+      db.data.Futsal['15'].Date[GW3_DATE] =
+        clone(db.data.Futsal['15'].Date[GW2_DATE]);
+      expect(await fullSweepAt(db)).toBe(true);
+    });
+
+    it('no LockedWeeks entry carries a date: nothing to measure against (guard iii)', async () => {
+      const db = finishedSeason();
+      delete season(db).LockedWeeks;
+      expect(await fullSweepAt(db)).toBe(true);
+    });
+
+    it('match days compare as calendar dates, not strings (guard iii)', async () => {
+      // '01102027' sorts BEFORE '06282026' as a string but is months later.
+      const later = finishedSeason();
+      later.data.Futsal['15'].Date['01102027'] =
+        clone(later.data.Futsal['15'].Date[GW2_DATE]);
+      expect(await fullSweepAt(later)).toBe(true);
+      // '12202025' sorts AFTER it as a string but is the year before.
+      const earlier = finishedSeason();
+      earlier.data.Futsal['15'].Date['12202025'] =
+        clone(earlier.data.Futsal['15'].Date[GW2_DATE]);
+      expect(await fullSweepAt(earlier)).toBe(false);
+    });
+  });
+
+  it('a match day after the last locked week that Config/SkippedDates skips does not block the stand-down', async () => {
+    const db = finishedSeason();
+    db.data.Futsal['15'].Date[GW3_DATE] =
+      clone(db.data.Futsal['15'].Date[GW2_DATE]);
+    season(db).Config.SkippedDates = { [GW3_DATE]: true };
+    const { log, infos } = capture();
+    await runLifecycleSweep(db, OVER, log);
+    expect(infos).toContain(STAND_DOWN);
+    expect(sweptFully(db)).toBe(false);
+    expect(heavyReads(db)).toEqual([]);
+  });
+
+  // Final review I1, both reproduced: the stand-down must prove the full
+  // sweep has nothing left to do, or a season is left half-run.
+  const at = (y: number, mo: number, d: number, h: number) =>
+    new Date(Date.UTC(y, mo, d, h));
+  const writeIndex = (db: ColdFakeDb, prefix: string) =>
+    db.writes.findIndex((p) => p === prefix || p.startsWith(`${prefix}/`));
+
+  it('a game day added after the season stood down: the full sweep opens and locks it, freezing picks before scoring, then stands down again', async () => {
+    const db = finishedSeason();
+    const { log, infos } = capture();
+    await runLifecycleSweep(db, at(2026, 6, 5, 12), log); // Jul 5: stood down
+    expect(infos).toContain(STAND_DOWN);
+
+    // The league adds a make-up day (Sunday Jul 12) to the Finished season.
+    const games = clone(db.data.Futsal['15'].Date[GW2_DATE]) as Json[];
+    for (const g of games) g['status'] = 0;
+    db.data.Futsal['15'].Date[GW3_DATE] = games;
+
+    infos.length = 0;
+    await runLifecycleSweep(db, at(2026, 6, 10, 12), log); // before its lock
+    expect(infos).not.toContain(STAND_DOWN);
+    expect(season(db).GwState)
+      .toMatchObject({ current: 3, status: 'open', date: GW3_DATE });
+
+    await runLifecycleSweep(db, at(2026, 6, 12, 23), log); // after 22:00Z lock
+    expect(infos).not.toContain(STAND_DOWN);
+    expect(season(db).GwState).toMatchObject({ current: 3, status: 'locked' });
+    expect(season(db).LockedWeeks[3]).toMatchObject({ Date: GW3_DATE });
+    expect(season(db).PublishedPicks[3]).toBeDefined();
+
+    for (const g of db.data.Futsal['15'].Date[GW3_DATE]) g.status = 2;
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: GW3_DATE,
+      nowUtc: at(2026, 6, 13, 3), log,
+    });
+    expect(season(db).History[3]).toBeDefined();
+    // Scored from the frozen lock, never the live Squads fallback.
+    const history3 = writeIndex(db, `${F_ROOT}/History/3`);
+    expect(writeIndex(db, `${F_ROOT}/LockedWeeks/3`)).toBeGreaterThanOrEqual(0);
+    expect(writeIndex(db, `${F_ROOT}/PublishedPicks/3`)).toBeGreaterThanOrEqual(0);
+    expect(writeIndex(db, `${F_ROOT}/LockedWeeks/3`)).toBeLessThan(history3);
+    expect(writeIndex(db, `${F_ROOT}/PublishedPicks/3`)).toBeLessThan(history3);
+
+    // Week 3 scored and finalized: the season stands down again.
+    await runLifecycleSweep(db, at(2026, 6, 13, 4), log);
+    expect(season(db).GwState).toMatchObject({ current: 3, status: 'finalized' });
+    infos.length = 0;
+    await runLifecycleSweep(db, at(2026, 6, 20, 12), log);
+    expect(infos).toContain(STAND_DOWN);
+  });
+
+  it('Finished flagged before the last finalize: the next sweep runs in full and flips GwState to finalized, then stands down', async () => {
+    const w = world2({ gw2Status: 1 });
+    w.Futsal['15'].Finished = true;
+    const db = new ColdFakeDb(w);
+    const { log, infos } = capture();
+    await runLifecycleSweep(db, AFTER_LOCK2, log);
+    expect(season(db).GwState).toMatchObject({ current: 2, status: 'locked' });
+
+    for (const g of db.data.Futsal['15'].Date[GW2_DATE]) g.status = 2;
+    await maybeFinalizeGame(db, {
+      sport: 'Futsal', season: '15', dateKey: GW2_DATE,
+      nowUtc: new Date(AFTER_LOCK2.getTime() + 2 * 3_600_000), log,
+    });
+    // The finalize settled the season: the marker is in.
+    expect(season(db).SeasonBadgesSettledAt).toBeDefined();
+
+    infos.length = 0;
+    await runLifecycleSweep(db, new Date(AFTER_LOCK2.getTime() + 3 * 3_600_000), log);
+    expect(infos).not.toContain(STAND_DOWN);
+    expect(season(db).GwState).toMatchObject({ current: 2, status: 'finalized' });
+
+    await runLifecycleSweep(db, new Date(AFTER_LOCK2.getTime() + 30 * 3_600_000), log);
+    expect(infos).toContain(STAND_DOWN);
   });
 
   it('an unfinished season stops at the one Finished read: the stand-down never looks further', async () => {
