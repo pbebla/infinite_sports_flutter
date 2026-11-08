@@ -103,7 +103,7 @@ It reads the live data, prints what it would do, and writes nothing. Read the pr
 - `refusals: none`.
 - `clusters: 10 in the map - 10 planned, 0 refused, 0 with nothing to do`. In the tool's words a "cluster" is one person.
 - `writes: 69 (...)`. On 2026-11-07 this was 20 roster relinks, 16 seasons-played entries, 2 profile photo links, 30 merge stamps (10 old accounts times 3) and 1 first-name fix.
-- A **plan code** (the tool calls it the plan digest): `plan digest (MergedAt time excluded): ...`. The 2026-11-07 dry run gave `6b49644c86689a2a`, and the 2026-11-08 dry run gave the same code. The code changes if the data or the list changes, so always use the one your latest dry run prints.
+- A **plan code** (the tool calls it the plan digest): `plan digest (MergedAt time excluded): ...`. The 2026-11-07 dry run gave `6b49644c86689a2a`. After the final-review fixes the tool writes each old account's "merged" marker last, which changes the order of the writes the code covers, so the 2026-11-08 dry run gives `31ae18c0f5293f4a` (same 69 writes, same people). A code from before that is refused. The code changes if the data or the list changes, so always use the one your latest dry run prints.
 - The last line starts with "To apply exactly this plan:" and then gives the apply command, already filled in with the right plan code. In step 3 you copy only the `npm run ...` part after the colon.
 
 If the dry run shows a refusal, a different count than you expect, or an error: stop and send the printout to Claude. Don't go on.
@@ -114,10 +114,10 @@ If the dry run shows a refusal, a different count than you expect, or an error: 
 
 Only after you have read the dry run and said OK (and, as recommended, after the app updates are out).
 
-From the last line of your latest dry run, copy only the `npm run ...` part (not the words "To apply exactly this plan:"). With the 2026-11-07 plan code it is:
+From the last line of your latest dry run, copy only the `npm run ...` part (not the words "To apply exactly this plan:"). With the 2026-11-08 plan code it is:
 
 ```bash
-npm run merge:accounts -- --apply --expect-plan 6b49644c86689a2a
+npm run merge:accounts -- --apply --expect-plan 31ae18c0f5293f4a
 ```
 
 If your dry run printed a different code, use that one. A wrong or stale code is simply refused and nothing changes.
