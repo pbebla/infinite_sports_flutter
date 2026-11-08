@@ -7,6 +7,15 @@ import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { handleMergeNotice, MergeNoticeDeps, onMergeNoticeCreated } from './merge_notice_watch';
 
+// Everything the trigger logs, captured (final-review fix 8: logs carry a short
+// uid prefix, never the whole uid).
+const logged = vi.hoisted(() => [] as Array<{ level: string; message: string; data: Record<string, unknown> }>);
+vi.mock('firebase-functions/logger', () => ({
+  info: (message: string, data: Record<string, unknown>) => logged.push({ level: 'info', message, data }),
+  error: (message: string, data: Record<string, unknown>) => logged.push({ level: 'error', message, data }),
+  warn: (message: string, data: Record<string, unknown>) => logged.push({ level: 'warn', message, data }),
+}));
+
 const OLD_EMAIL = 'old.address.zzz@example.test';
 const HINT = 'ca••••••••@gmail.com';
 
@@ -156,6 +165,51 @@ describe('handleMergeNotice', () => {
     const h = harness({}, { MergeNotices: { oldA: { CreatedAt: 1 } } });
     await expect(handleMergeNotice(h.root, 'oldA', h.deps)).resolves.toBe('sent');
     expect(h.mails[0].message.html).toContain('please sign in with your other email.');
+  });
+});
+
+describe('the trigger logs a 6-character uid prefix, never the whole uid (final-review fix 8)', () => {
+  const LONG = 'OLDuidABCDEFGHIJKLMNOPQRST';
+  const tree = (): Tree => ({ MergeNotices: { [LONG]: { KeepHint: HINT, CreatedAt: 1 } } });
+  const everything = (): string => JSON.stringify(logged);
+
+  it("'merge notice handled' logs the prefix", async () => {
+    logged.length = 0;
+    const h = harness({}, tree());
+    await handleMergeNotice(h.root, LONG, h.deps);
+    const line = logged.find((l) => l.message === 'merge notice handled');
+    expect(line?.data).toEqual({ uid: 'OLDuid', status: 'sent' });
+    expect(everything()).not.toContain(LONG);
+    expect(everything()).not.toContain(OLD_EMAIL);
+  });
+
+  it('the emulator dry-run line logs the prefix', async () => {
+    logged.length = 0;
+    const h = harness({ emulator: true }, tree());
+    await handleMergeNotice(h.root, LONG, h.deps);
+    expect(logged.find((l) => l.message === 'DRY-RUN merge notice')?.data).toEqual({ uid: 'OLDuid' });
+    expect(everything()).not.toContain(LONG);
+  });
+
+  it('a lost status write logs the prefix too', async () => {
+    logged.length = 0;
+    const h = harness({}, tree());
+    const real = h.root.child(`MergeNotices/${LONG}`);
+    const root = {
+      child: (p: string) => (p === `MergeNotices/${LONG}`
+        ? { ...real, update: async () => { throw new Error('db down'); } } : h.root.child(p)),
+    };
+    await expect(handleMergeNotice(root as any, LONG, h.deps)).resolves.toBe('sent');
+    const line = logged.find((l) => l.message === 'merge notice status not recorded');
+    expect(line?.data).toMatchObject({ uid: 'OLDuid', status: 'sent' });
+    expect(everything()).not.toContain(LONG);
+  });
+
+  it('a uid shorter than 6 characters is logged as it is', async () => {
+    logged.length = 0;
+    const h = harness();
+    await handleMergeNotice(h.root, 'oldA', h.deps);
+    expect(logged.find((l) => l.message === 'merge notice handled')?.data).toMatchObject({ uid: 'oldA' });
   });
 });
 

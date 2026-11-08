@@ -54,6 +54,10 @@ function safeMessage(err: unknown): string {
   return redactEmails(msg).slice(0, 200) || 'unknown error';
 }
 
+/** Logs carry only the first 6 characters of an account's uid (enough to
+ *  find the notice, not enough to be one). */
+const uidPrefix = (uid: string): string => uid.slice(0, 6);
+
 export async function handleMergeNotice(
   root: Reference, uid: string, deps: MergeNoticeDeps = liveDeps(),
 ): Promise<MergeNoticeOutcome> {
@@ -67,7 +71,7 @@ export async function handleMergeNotice(
   try {
     if (deps.emulator) {
       status = 'dry-run';
-      logger.info('DRY-RUN merge notice', { uid });
+      logger.info('DRY-RUN merge notice', { uid: uidPrefix(uid) });
     } else {
       const hint = String((await noticeRef.child('KeepHint').get()).val() ?? '');
       let email: string | null = null;
@@ -101,10 +105,10 @@ export async function handleMergeNotice(
     await noticeRef.update({ Status: status, At: deps.at(), ...(error ? { Error: error } : {}) });
   } catch (err) {
     // The mail (if any) is out; a lost status must not throw into the runtime.
-    logger.error('merge notice status not recorded', { uid, status, error: safeMessage(err) });
+    logger.error('merge notice status not recorded', { uid: uidPrefix(uid), status, error: safeMessage(err) });
     return status;
   }
-  logger.info('merge notice handled', { uid, status });
+  logger.info('merge notice handled', { uid: uidPrefix(uid), status });
   return status;
 }
 
