@@ -686,31 +686,36 @@ const SEND = { send: true };
 const notifyDeps = (db: MemDb, over: Partial<RunDeps> = {}) => deps(db, { now: () => NOW, ...over });
 
 describe('--notify (D11 / D12)', () => {
-  it('writes one MergeNotices/<old> per old account and ONE campaign for the kept accounts that had one', async () => {
+  it('writes one MergeNotices/<old> per old account and one campaign PER kept account that had one', async () => {
     const db = await appliedDb();
     const d = notifyDeps(db);
     const r = await notifyMerge(MAP, d, SEND);
     expect(r.ok).toBe(true);
     expect(r.noticesWritten).toBe(2);
-    expect(r.campaignWritten).toBe(true);
-    const campaignId = mergeNoticeCampaignId(['keepA', 'keepB']);
+    expect(r.campaignsWritten).toBe(2);
+    const idA = mergeNoticeCampaignId('keepA');
+    const idB = mergeNoticeCampaignId('keepB');
     expect(db.writes()).toEqual([
       { method: 'PUT', path: 'MergeNotices/oldA' },
       { method: 'PUT', path: 'MergeNotices/oldB' },
-      { method: 'PUT', path: `Campaigns/${campaignId}` },
+      { method: 'PUT', path: `Campaigns/${idA}` },
+      { method: 'PUT', path: `Campaigns/${idB}` },
     ]);
     // The notice carries the masked hint that --apply stamped, and nothing else.
     expect(db.root.MergeNotices.oldA).toEqual({ KeepHint: maskEmail(EMAILS.keepA), CreatedAt: NOW });
     expect(db.root.MergeNotices.oldB).toEqual({ KeepHint: maskEmail(EMAILS.keepB), CreatedAt: NOW });
-    // The campaign reaches the 2 kept accounts of clusters that HAD an old
-    // account - not keepC (the name-variant cluster has no second account).
-    const campaign = parseCampaign(db.root.Campaigns[campaignId]);
-    expect(campaign).not.toBeNull();
-    expect(campaign?.audience).toEqual({ type: 'users', uids: ['keepA', 'keepB'] });
-    expect(campaign?.title).toBe('Your accounts were combined');
-    expect(campaign?.body).toBe('All your seasons are now on this profile.');
-    expect(campaign?.sendAtMs).toBe(0);
-    expect(campaign?.status).toBe('pending');
+    // Each campaign reaches exactly ONE kept account - and none exists for keepC
+    // (the name-variant cluster has no second account).
+    expect(Object.keys(db.root.Campaigns).sort()).toEqual([idA, idB].sort());
+    for (const [id, keep] of [[idA, 'keepA'], [idB, 'keepB']]) {
+      const campaign = parseCampaign(db.root.Campaigns[id]);
+      expect(campaign).not.toBeNull();
+      expect(campaign?.audience).toEqual({ type: 'users', uids: [keep] });
+      expect(campaign?.title).toBe('Your accounts were combined');
+      expect(campaign?.body).toBe('All your seasons are now on this profile.');
+      expect(campaign?.sendAtMs).toBe(0);
+      expect(campaign?.status).toBe('pending');
+    }
     // Never an address in the database or the output.
     expect(JSON.stringify([db.root.MergeNotices, db.root.Campaigns])).not.toMatch(RAW_EMAIL_RE);
     const out = d.lines.join('\n');
@@ -725,7 +730,7 @@ describe('--notify (D11 / D12)', () => {
     const d = notifyDeps(db, { now: () => NOW + 60_000 });
     const r = await notifyMerge(MAP, d, SEND);
     expect(db.writes()).toEqual([]);
-    expect(r).toMatchObject({ ok: true, noticesWritten: 0, campaignWritten: false });
+    expect(r).toMatchObject({ ok: true, noticesWritten: 0, campaignsWritten: 0, campaignsPresent: 2 });
     expect(d.lines.join('\n')).toContain('Nothing to write');
     // Even after the trigger stamped its Status on a notice, it is left alone.
     db.root.MergeNotices.oldA.Status = 'sent';
@@ -739,15 +744,56 @@ describe('--notify (D11 / D12)', () => {
     db.root.MergeNotices = { oldA: { KeepHint: maskEmail(EMAILS.keepA), CreatedAt: 5, Status: 'sent' } };
     await notifyMerge(MAP, notifyDeps(db), SEND);
     expect(db.writes().map((w) => w.path)).toEqual([
-      'MergeNotices/oldB', `Campaigns/${mergeNoticeCampaignId(['keepA', 'keepB'])}`,
+      'MergeNotices/oldB', `Campaigns/${mergeNoticeCampaignId('keepA')}`, `Campaigns/${mergeNoticeCampaignId('keepB')}`,
     ]);
     expect(db.root.MergeNotices.oldA.CreatedAt).toBe(5);
 
     const db2 = await appliedDb(MAP, 1_762_400_001_000);
-    db2.root.Campaigns = { [mergeNoticeCampaignId(['keepA', 'keepB'])]: { Title: 'x', Status: 'sent' } };
+    db2.root.Campaigns = { [mergeNoticeCampaignId('keepA')]: { Title: 'x', Status: 'sent' } };
     const r2 = await notifyMerge(MAP, notifyDeps(db2), SEND);
-    expect(db2.writes().map((w) => w.path)).toEqual(['MergeNotices/oldA', 'MergeNotices/oldB']);
-    expect(r2.campaignWritten).toBe(false);
+    expect(db2.writes().map((w) => w.path)).toEqual([
+      'MergeNotices/oldA', 'MergeNotices/oldB', `Campaigns/${mergeNoticeCampaignId('keepB')}`,
+    ]);
+    expect(r2).toMatchObject({ campaignsWritten: 1, campaignsPresent: 1 });
+  });
+
+  it('an EXTENDED map re-run pushes only the new person: nobody already notified is pushed twice', async () => {
+    const db = await appliedDb();
+    await notifyMerge(MAP, notifyDeps(db), SEND);
+    const idA = mergeNoticeCampaignId('keepA');
+    const idB = mergeNoticeCampaignId('keepB');
+    const before = JSON.stringify(db.root.Campaigns);
+    // The trigger / sender already ran for the first two people.
+    db.root.MergeNotices.oldA.Status = 'sent';
+    db.root.MergeNotices.oldB.Status = 'sent';
+
+    // One more person is merged later and the map is extended with them.
+    db.set('Users/keepD', { 'First Name': 'Player' });
+    db.set('Users/oldD', { MergedInto: 'keepD', MergedAt: 1, MergedHint: 'pl••@example.test' });
+    const extended: MergeMap = { clusters: [...MAP.clusters, { who: 'Player D', keep: 'keepD', old: ['oldD'] }] };
+    db.calls = [];
+
+    // The preview already says it: one email, one push.
+    const pd = notifyDeps(db);
+    const preview = await notifyMerge(extended, pd);
+    expect(db.writes()).toEqual([]);
+    expect(preview).toMatchObject({ noticesToWrite: 1, campaignsToWrite: 1, campaignsPresent: 2, audience: 3 });
+    expect(pd.lines.join('\n')).toContain('1 email(s) and 1 push campaign(s) would go out');
+
+    const r = await notifyMerge(extended, notifyDeps(db, { now: () => NOW + 60_000 }), SEND);
+    const idD = mergeNoticeCampaignId('keepD');
+    expect(db.writes()).toEqual([
+      { method: 'PUT', path: 'MergeNotices/oldD' },
+      { method: 'PUT', path: `Campaigns/${idD}` },
+    ]);
+    expect(r).toMatchObject({ noticesWritten: 1, campaignsWritten: 1, campaignsPresent: 2 });
+    // The first two people's campaigns were not touched, and the new one reaches only the new person.
+    const after = db.root.Campaigns as Record<string, unknown>;
+    expect(JSON.stringify({ [idA]: after[idA], [idB]: after[idB] }))
+      .toBe(JSON.stringify({ [idA]: JSON.parse(before)[idA], [idB]: JSON.parse(before)[idB] }));
+    expect(parseCampaign(after[idD])?.audience).toEqual({ type: 'users', uids: ['keepD'] });
+    expect(Object.keys(after).sort()).toEqual([idA, idB, idD].sort());
+    expect(db.root.MergeNotices.oldA.Status).toBe('sent');
   });
 
   it('refuses unless EVERY old account is stamped, and writes nothing', async () => {
@@ -784,7 +830,7 @@ describe('--notify (D11 / D12)', () => {
     const db = await appliedDb();
     const w = guardRest(db, {
       readOnly: false,
-      allowedWrites: new Set(['MergeNotices/oldA', `Campaigns/${mergeNoticeCampaignId(['keepA'])}`]),
+      allowedWrites: new Set(['MergeNotices/oldA', `Campaigns/${mergeNoticeCampaignId('keepA')}`]),
     });
     await expect(w.put('MergeNotices/oldB', {})).rejects.toThrow(/not on this run's merge allowlist/);
     await expect(w.put('Users/oldA/Token', 'x')).rejects.toThrow(/not on this run's merge allowlist/);
@@ -795,7 +841,7 @@ describe('--notify (D11 / D12)', () => {
     await expect(ro.get('MergeNotices/oldA')).rejects.toThrow(/only its keys/);
     await expect(ro.get('MergeNotices')).rejects.toThrow(/not a path the merge tool reads/);
     await expect(ro.get('Campaigns/anything')).rejects.toThrow(/not a path the merge tool reads/);
-    await expect(ro.get(`Campaigns/${mergeNoticeCampaignId(['keepA'])}`)).rejects.toThrow(/only its keys/);
+    await expect(ro.get(`Campaigns/${mergeNoticeCampaignId('keepA')}`)).rejects.toThrow(/only its keys/);
   });
 
   it('three old accounts of one person: three notices, a campaign of one', async () => {
@@ -813,7 +859,7 @@ describe('--notify (D11 / D12)', () => {
     expect(Object.keys(db.root.MergeNotices).sort()).toEqual(['oldA', 'oldB', 'oldC']);
     expect(db.root.MergeNotices.oldC).toEqual({ KeepHint: '', CreatedAt: NOW });
     const ids = Object.keys(db.root.Campaigns);
-    expect(ids).toEqual([mergeNoticeCampaignId(['keepA'])]);
+    expect(ids).toEqual([mergeNoticeCampaignId('keepA')]);
     expect(parseCampaign(db.root.Campaigns[ids[0]])?.audience.uids).toEqual(['keepA']);
   });
 
@@ -821,7 +867,7 @@ describe('--notify (D11 / D12)', () => {
     const db = new MemDb(fixture());
     const d = notifyDeps(db);
     const r = await notifyMerge({ clusters: [MAP.clusters[2]] }, d, SEND);
-    expect(r).toMatchObject({ ok: true, noticesWritten: 0, campaignWritten: false });
+    expect(r).toMatchObject({ ok: true, noticesWritten: 0, campaignsWritten: 0 });
     expect(db.calls).toEqual([]);
   });
 
@@ -846,14 +892,16 @@ describe('--notify fix round 1: previews by default, only --send writes', () => 
     expect(db.writes()).toEqual([]);
     expect(db.root.MergeNotices).toBeUndefined();
     expect(db.root.Campaigns).toBeUndefined();
-    expect(r).toMatchObject({ ok: true, noticesWritten: 0, campaignWritten: false, noticesToWrite: 2, audience: 2 });
+    expect(r).toMatchObject({
+      ok: true, noticesWritten: 0, campaignsWritten: 0, noticesToWrite: 2, campaignsToWrite: 2, audience: 2,
+    });
     const out = d.lines.join('\n');
     expect(out).toContain('PREVIEW - nothing was written');
     expect(out).toContain('npm run merge:accounts -- --notify --send');
     expect(out).toContain('2 notice(s) to write');
     expect(out).toContain('Hiram Alvarez: old account #1');
     expect(out).toContain('Carlo Gewargis: old account #1');
-    expect(out).toContain('push to 2 kept account(s)');
+    expect(out).toContain('push to 2 kept account(s), one campaign each: 2 to write');
     expect(out).not.toMatch(/wrote /);
     expect(out).not.toMatch(RAW_EMAIL_RE);
     expect(out).not.toMatch(/keepA|oldA|keepB|oldB|keepC/);
@@ -882,10 +930,10 @@ describe('--notify fix round 1: previews by default, only --send writes', () => 
     const db = await appliedDb();
     const d = notifyDeps(db);
     const r = await notifyMerge(MAP, d, SEND);
-    expect(r).toMatchObject({ noticesWritten: 2, campaignWritten: true });
-    expect(db.writes()).toHaveLength(3);
+    expect(r).toMatchObject({ noticesWritten: 2, campaignsWritten: 2 });
+    expect(db.writes()).toHaveLength(4);
     const out = d.lines.join('\n');
-    expect(out).toContain('DONE - 2 notice(s) and 1 campaign written.');
+    expect(out).toContain('DONE - 2 notice(s) and 2 campaign(s) written.');
     expect(out).toContain('Notices only send if onMergeNoticeCreated is deployed');
     expect(out).toContain('delete MergeNotices/<old> and re-run --notify --send after deploying');
   });

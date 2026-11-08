@@ -52,12 +52,15 @@
 //                                                old account that has none (the
 //                                                onMergeNoticeCreated trigger
 //                                                emails its Auth address, once)
-//                                                and ONE Campaigns/<id> (a push
-//                                                to the kept accounts that had
-//                                                an old account; the id derives
-//                                                from their uids, so a re-run
-//                                                finds it). A second run writes
-//                                                nothing. SENDING IS OUTWARD:
+//                                                and one Campaigns/<id> PER
+//                                                KEPT ACCOUNT that had an old
+//                                                account (a push to that person
+//                                                alone; the id derives from
+//                                                that uid only). A re-run - or
+//                                                a map extended with one more
+//                                                person - writes only what is
+//                                                missing, so nobody is pushed
+//                                                twice. SENDING IS OUTWARD:
 //                                                run it only when the owner says
 //   npm run merge:accounts -- --disable-old-logins [--send]
 //   npm run merge:accounts -- --enable-old-logins [--send]
@@ -112,8 +115,8 @@
 //     run the owner read; it refuses before any read without it.
 //   - --notify is a read-only PREVIEW (read-only client + fetch guard); only
 //     --notify --send writes, and it writes only MergeNotices/<old> (old
-//     accounts whose node is absent) and the one Campaigns/<id> it computed - nothing else passes
-//     the write guard. Its hints are the masked ones --apply already stamped
+//     accounts whose node is absent) and the Campaigns/<id> of each kept
+//     account that has none yet - nothing else passes the write guard. Its hints are the masked ones --apply already stamped
 //     on each old account; no address is read, written or printed.
 //   - --disable-old-logins / --enable-old-logins previews run behind the
 //     same read-only fetch guard (accounts:update refused). Only with --send
@@ -1065,10 +1068,13 @@ export interface NotifyResult {
   noticesPresent: number;
   /** Notices a --send run would write now (the preview's count; equals noticesWritten after --send). */
   noticesToWrite: number;
-  /** The one push campaign was written this run (false when it already existed or in a preview). */
-  campaignWritten: boolean;
-  campaignId: string | null;
-  /** Kept accounts the push reaches. */
+  /** Push campaigns (one per kept account) written this run (0 in a preview). */
+  campaignsWritten: number;
+  /** Kept accounts whose own campaign was already there (left alone). */
+  campaignsPresent: number;
+  /** Campaigns a --send run would write now (the preview's count). */
+  campaignsToWrite: number;
+  /** Kept accounts the push reaches (every kept account that has an old account). */
   audience: number;
 }
 
@@ -1082,9 +1088,10 @@ export interface NotifyOptions {
  *  --apply left (never an address), refuses unless EVERY old account of the
  *  map is stamped into the map's kept account with a masked-or-absent hint,
  *  then writes - through a guard that allows exactly these paths and no other -
- *  MergeNotices/<old> for each old account that has none and the ONE campaign
- *  (deterministic id, so a re-run finds it) when it is not there yet. Idempotent:
- *  a second run writes nothing. The trigger and the campaign sender do the
+ *  MergeNotices/<old> for each old account that has none and one campaign per
+ *  KEPT account (id derived from that uid alone) for each that has none yet.
+ *  Idempotent: a second run writes nothing, and a map extended with one more
+ *  person writes only that person's notice and campaign. The trigger and the campaign sender do the
  *  actual sending - this only creates their nodes. It SENDS people email, so
  *  by default it is a PREVIEW (same checks, same printout, no writes); only
  *  { send: true } (--notify --send) writes. */
@@ -1096,8 +1103,8 @@ export async function notifyMerge(
   const reader = guardRest(deps.rest, { readOnly: true });
   const withOld = map.clusters.filter((c) => (c.old ?? []).length > 0);
   const result: NotifyResult = {
-    ok: true, noticesWritten: 0, noticesPresent: 0, noticesToWrite: 0, campaignWritten: false,
-    campaignId: null, audience: 0,
+    ok: true, noticesWritten: 0, noticesPresent: 0, noticesToWrite: 0, campaignsWritten: 0,
+    campaignsPresent: 0, campaignsToWrite: 0, audience: 0,
   };
   if (withOld.length === 0) {
     log('Nothing to notify - no cluster of the map has an old account.');
@@ -1134,43 +1141,49 @@ export async function notifyMerge(
       notices.push({ path, label: labelOf(userPath(old), map), node: { KeepHint: hints.get(old) ?? '', CreatedAt: deps.now() } });
     }
   }
+  // One campaign PER KEPT ACCOUNT, its id derived from that uid alone: a re-run
+  // (or a map extended with one more person) writes campaigns only for kept
+  // accounts that have none yet, so nobody is pushed twice.
   const keepUids = [...new Set(withOld.map((c) => c.keep))];
-  const campaignId = mergeNoticeCampaignId(keepUids);
-  const campaignPath = `Campaigns/${campaignId}`;
-  const campaignPresent = (await reader.get(campaignPath, { shallow: true })) !== null;
-  result.campaignId = campaignId;
+  const campaigns: Array<{ path: string; keep: string }> = [];
+  for (const keep of keepUids) {
+    const path = `Campaigns/${mergeNoticeCampaignId(keep)}`;
+    if ((await reader.get(path, { shallow: true })) !== null) result.campaignsPresent++;
+    else campaigns.push({ path, keep });
+  }
   result.audience = keepUids.length;
   result.noticesToWrite = notices.length;
+  result.campaignsToWrite = campaigns.length;
 
   log(`  old accounts: ${notices.length + result.noticesPresent} - ${notices.length} notice(s) to write, ` +
     `${result.noticesPresent} already there`);
   for (const n of notices) log(`    notice for ${n.label}`);
-  log(`  push to ${keepUids.length} kept account(s): ` +
-    (campaignPresent ? `campaign ${campaignId} already exists` : `campaign ${campaignId} to write`));
-  if (notices.length === 0 && campaignPresent) {
-    log('Nothing to write - every notice and the campaign are already there.');
+  log(`  push to ${keepUids.length} kept account(s), one campaign each: ` +
+    `${campaigns.length} to write, ${result.campaignsPresent} already there`);
+  if (notices.length === 0 && campaigns.length === 0) {
+    log('Nothing to write - every notice and every campaign are already there.');
     return result;
   }
   if (!opts.send) {
-    log(`PREVIEW - nothing was written. ${notices.length} email(s) and ${campaignPresent ? 0 : 1} push campaign would go out. ` +
+    log(`PREVIEW - nothing was written. ${notices.length} email(s) and ${campaigns.length} push campaign(s) would go out. ` +
       'To send exactly this: npm run merge:accounts -- --notify --send');
     return result;
   }
 
   // 3. Write exactly those paths, notices first (each sends one email).
-  const writes = [...notices.map((n) => n.path), ...(campaignPresent ? [] : [campaignPath])];
+  const writes = [...notices.map((n) => n.path), ...campaigns.map((c) => c.path)];
   const writer = guardRest(deps.rest, { readOnly: false, allowedWrites: new Set(writes) });
   for (const n of notices) {
     await writer.put(n.path, n.node);
     result.noticesWritten++;
     log(`    wrote the notice for ${n.label}`);
   }
-  if (!campaignPresent) {
-    await writer.put(campaignPath, mergeNoticeCampaign(keepUids, deps.now()));
-    result.campaignWritten = true;
-    log(`    wrote campaign ${campaignId} (push to ${keepUids.length} kept account(s))`);
+  for (const c of campaigns) {
+    await writer.put(c.path, mergeNoticeCampaign(c.keep, deps.now()));
+    result.campaignsWritten++;
+    log('    wrote a push campaign for one kept account');
   }
-  log(`DONE - ${result.noticesWritten} notice(s) and ${result.campaignWritten ? 1 : 0} campaign written. ` +
+  log(`DONE - ${result.noticesWritten} notice(s) and ${result.campaignsWritten} campaign(s) written. ` +
     'The functions now send the emails and the push; check MergeNotices/<old>/Status and the Manager campaign list.');
   log('Notices only send if onMergeNoticeCreated is deployed; if it was not, delete MergeNotices/<old> ' +
     'and re-run --notify --send after deploying.');

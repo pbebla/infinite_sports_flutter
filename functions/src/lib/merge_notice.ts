@@ -41,33 +41,39 @@ export function noticeClaim(current: unknown): 'sending' | undefined {
   return current === null || current === undefined ? 'sending' : undefined;
 }
 
-// ── D12: the push to the kept accounts ────────────────────────────────────
+// ── D12: the push to each kept account ────────────────────────────────────
 
 export const MERGE_PUSH_TITLE = 'Your accounts were combined';
 export const MERGE_PUSH_BODY = 'All your seasons are now on this profile.';
 
-const uniqueSorted = (uids: readonly string[]): string[] => [...new Set(uids)].sort();
+/** A kept account's uid as a campaign key: a non-blank string, or a clear error. */
+function keptUidOf(keepUid: unknown): string {
+  if (typeof keepUid !== 'string' || keepUid.trim() === '') {
+    throw new Error('A merge-notice campaign needs a kept account (no kept account given).');
+  }
+  return keepUid;
+}
 
-/** A deterministic campaign id for this audience: the same set of kept
- *  accounts always lands on the same `Campaigns/<id>`, so a re-run of
- *  `--notify` finds the campaign it already wrote and writes nothing. */
-export function mergeNoticeCampaignId(keepUids: readonly string[]): string {
-  const digest = crypto.createHash('sha256').update(uniqueSorted(keepUids).join('\n')).digest('hex');
+/** The deterministic campaign id of ONE kept account: derived from that uid
+ *  alone (never from the rest of the map), so a re-run of `--notify` finds the
+ *  campaign it already wrote for that person, and adding another person to the
+ *  map later creates only that person's campaign - nobody is pushed twice. */
+export function mergeNoticeCampaignId(keepUid: string): string {
+  const digest = crypto.createHash('sha256').update(keptUidOf(keepUid)).digest('hex');
   return `merge-notice-${digest.slice(0, 16)}`;
 }
 
-/** The `Campaigns/<id>` node: exactly what the Manager app writes
- *  (CampaignModel.toJson) so parseCampaign accepts it, the existing
+/** The `Campaigns/<id>` node for ONE kept account: exactly what the Manager
+ *  app writes (CampaignModel.toJson) so parseCampaign accepts it, the existing
  *  `onCampaignCreated` sends it at once (SendAt 0 = now) and the Manager's
  *  campaign list shows it. `CreatedAt` is the caller's clock (the tool has
  *  no server timestamp over REST). */
-export function mergeNoticeCampaign(keepUids: readonly string[], nowMs: number): Record<string, unknown> {
-  const uids = uniqueSorted(keepUids);
-  if (uids.length === 0) throw new Error('A merge-notice campaign needs at least one kept account (no kept accounts given).');
+export function mergeNoticeCampaign(keepUid: string, nowMs: number): Record<string, unknown> {
+  const uid = keptUidOf(keepUid);
   return {
     Title: MERGE_PUSH_TITLE,
     Body: MERGE_PUSH_BODY,
-    Audience: { Type: 'users', Uids: Object.fromEntries(uids.map((u) => [u, true])) },
+    Audience: { Type: 'users', Uids: { [uid]: true } },
     Data: { type: 'campaign' },
     SendAt: 0,
     Status: 'pending',

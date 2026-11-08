@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import { describe, expect, it } from 'vitest';
 import { parseCampaign } from './campaigns';
 import {
@@ -31,43 +32,52 @@ describe('mergeNoticeEmail (merge design D11)', () => {
 });
 
 describe('mergeNoticeCampaign (merge design D12)', () => {
-  it('passes parseCampaign: a users audience of the kept uids, D12 title/body, send now', () => {
-    const node = mergeNoticeCampaign(['k2', 'k1'], 1_762_400_000_000);
+  it('passes parseCampaign: a users audience of THE kept uid, D12 title/body, send now', () => {
+    const node = mergeNoticeCampaign('k1', 1_762_400_000_000);
     const parsed = parseCampaign(node);
     expect(parsed).not.toBeNull();
     expect(parsed?.title).toBe('Your accounts were combined');
     expect(parsed?.body).toBe('All your seasons are now on this profile.');
     expect(MERGE_PUSH_TITLE).toBe('Your accounts were combined');
     expect(MERGE_PUSH_BODY).toBe('All your seasons are now on this profile.');
-    expect(parsed?.audience).toEqual({ type: 'users', uids: ['k1', 'k2'] });
+    expect(parsed?.audience).toEqual({ type: 'users', uids: ['k1'] });
     expect(parsed?.sendAtMs).toBe(0);
     expect(parsed?.status).toBe('pending');
     expect(parsed?.data).toEqual({ type: 'campaign' });
   });
 
   it('is the Manager campaign shape: Uids as {uid: true}, CreatedAt stamped, no address anywhere', () => {
-    const node = mergeNoticeCampaign(['k1', 'k1', 'k2'], 123) as Record<string, any>;
-    expect(node.Audience).toEqual({ Type: 'users', Uids: { k1: true, k2: true } });
+    const node = mergeNoticeCampaign('k1', 123) as Record<string, any>;
+    expect(node.Audience).toEqual({ Type: 'users', Uids: { k1: true } });
     expect(node.SendAt).toBe(0);
     expect(node.Status).toBe('pending');
     expect(node.CreatedAt).toBe(123);
     expect(JSON.stringify(node)).not.toMatch(/@/);
   });
 
-  it('refuses an empty audience instead of writing a campaign nobody gets', () => {
-    expect(() => mergeNoticeCampaign([], 1)).toThrow(/no kept accounts/);
+  it('refuses a missing or blank kept uid instead of writing a campaign nobody gets', () => {
+    expect(() => mergeNoticeCampaign('', 1)).toThrow(/no kept account/);
+    expect(() => mergeNoticeCampaign('   ', 1)).toThrow(/no kept account/);
+    expect(() => mergeNoticeCampaign(undefined as unknown as string, 1)).toThrow(/no kept account/);
   });
 });
 
-describe('mergeNoticeCampaignId (a re-run finds the same node)', () => {
-  it('depends only on the SET of kept uids, never their order or repeats', () => {
-    const a = mergeNoticeCampaignId(['k2', 'k1', 'k3']);
-    expect(mergeNoticeCampaignId(['k1', 'k3', 'k2', 'k1'])).toBe(a);
-    expect(mergeNoticeCampaignId(['k1', 'k2'])).not.toBe(a);
+describe('mergeNoticeCampaignId (one campaign per kept account; a re-run finds it)', () => {
+  it('depends only on that one uid - adding another person to a map never changes it', () => {
+    const a = mergeNoticeCampaignId('k1');
+    expect(mergeNoticeCampaignId('k1')).toBe(a);
+    expect(mergeNoticeCampaignId('k2')).not.toBe(a);
+    // The id is derived from the uid alone: sha256('k1') first 16 hex.
+    expect(a).toBe(`merge-notice-${crypto.createHash('sha256').update('k1').digest('hex').slice(0, 16)}`);
   });
 
   it('is a safe database key', () => {
-    expect(mergeNoticeCampaignId(['k1'])).toMatch(/^merge-notice-[0-9a-f]{16}$/);
+    expect(mergeNoticeCampaignId('k1')).toMatch(/^merge-notice-[0-9a-f]{16}$/);
+  });
+
+  it('refuses a missing or blank uid', () => {
+    expect(() => mergeNoticeCampaignId('')).toThrow(/no kept account/);
+    expect(() => mergeNoticeCampaignId('  ')).toThrow(/no kept account/);
   });
 });
 
