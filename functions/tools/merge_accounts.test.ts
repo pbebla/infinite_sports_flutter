@@ -105,7 +105,7 @@ function fixture(): Record<string, any> {
     },
     Basketball: { '3': { 'Line Ups': { Hoopers: { 'Player A2': { UID: 'someoneElse' } } } } },
     'AFC San Jose': { Seasons: { 'Spring 2025': { Roster: { 'Player B2': { UID: 'oldB', Number: 9 } } } } },
-    Fantasy: { Futsal: { '15': { Config: { lockOverride: 'open' } } } },
+    Fantasy: { Futsal: { '15': { Config: { lockOverride: 'open' }, Managers: { keepA: { TeamName: 'Secret Squad' } } } } },
     PublicProfiles: { oldA: { 'First Name': 'Player' }, oldB: { 'First Name': 'Player' }, keepA: { 'First Name': 'Player' } },
     Registrations: {
       'Futsal-16': {
@@ -187,14 +187,90 @@ describe('readMergeSnapshot (the planner contract)', () => {
     expect(snap.nodes['AFC San Jose/Seasons/Spring 2025/Roster/Player B2/UID']).toBe('oldB');
     expect(snap.nodes['Futsal/10/Line Ups/Nineveh/Player C Variant']).toEqual({ Goals: 1 });
     expect(snap.nodes).not.toHaveProperty('Futsal/10/Line Ups/Nineveh/Player C Variant/UID');
-    // null = checked and absent; the fantasy season 15 is not touched.
+    // null = checked and absent; the fantasy season 15 is not touched by a relink
+    // but is checked too (a fantasy manager entry of an old account in ANY season).
     expect(snap.nodes['Fantasy/Futsal/11/Config']).toBeNull();
     expect(snap.nodes['Fantasy/Futsal/10/Config']).toBeNull();
-    expect(snap.nodes).not.toHaveProperty('Fantasy/Futsal/15/Config');
+    expect(snap.nodes['Fantasy/Futsal/15/Config']).toEqual({ lockOverride: true }); // keys only
     // the Basketball row held by an unrelated account is not ours.
     expect(Object.keys(snap.nodes).some((k) => k.startsWith('Basketball/'))).toBe(false);
     expect(snap.keptHints.keepB).toBe(maskEmail(EMAILS.keepB));
     expect(stats.seasons).toEqual({ Futsal: 3, Basketball: 1, 'Flag Football': 0, 'AFC San Jose': 1 });
+  });
+});
+
+describe('readMergeSnapshot: old-account data the merge does not move (final-review fix 4)', () => {
+  it('reads fantasy seasons, manager uids, registration forms and submitter uids - keys only', async () => {
+    const db = new MemDb(fixture());
+    const { snap, stats } = await readMergeSnapshot(guardRest(db, { readOnly: true }), MAP, hints);
+    expect(snap.nodes['Fantasy/Futsal']).toEqual({ '15': true });
+    expect(snap.nodes['Fantasy/Basketball']).toBeNull();
+    expect(snap.nodes['Fantasy/Flag Football']).toBeNull();
+    // The season with a Config gets its manager uids (keys, never a team name).
+    expect(snap.nodes['Fantasy/Futsal/15/Managers']).toEqual({ keepA: true });
+    const checks = Object.entries(snap.nodes).filter(([k]) => k.startsWith('Fantasy/') || k.startsWith('Registrations'));
+    expect(JSON.stringify(checks)).not.toContain('Secret Squad');
+    expect(snap.nodes['Registrations']).toEqual({ 'Futsal-16': true });
+    expect(snap.nodes['Registrations/Futsal-16/Submissions']).toEqual({
+      keepA: true, keepC: true, subOwn: true, subNone: true, subNoName: true,
+    });
+    expect(JSON.stringify(checks)).not.toMatch(RAW_EMAIL_RE);
+    expect(stats).toMatchObject({ fantasySeasons: 1, registrationForms: 1, oldAccounts: 2, oldPublicProfiles: 2 });
+    // Every one of those reads was key-only and nothing was written.
+    const shallowPaths = ['Fantasy/Futsal', 'Fantasy/Futsal/15/Managers', 'Registrations', 'Registrations/Futsal-16/Submissions'];
+    for (const path of shallowPaths) {
+      expect(db.calls.filter((c) => c.path === path).every((c) => c.shallow === true), path).toBe(true);
+      expect(db.calls.some((c) => c.path === path), path).toBe(true);
+    }
+    expect(db.writes()).toEqual([]);
+  });
+
+  it('the read allowlist takes these paths only as keys, and no deeper', () => {
+    const ro = guardRest(new MemDb(fixture()), { readOnly: true });
+    return Promise.all([
+      expect(ro.get('Registrations')).rejects.toThrow(/only its keys/),
+      expect(ro.get('Fantasy/Futsal')).rejects.toThrow(/only its keys/),
+      expect(ro.get('Fantasy/Futsal/15/Managers')).rejects.toThrow(/only its keys/),
+      expect(ro.get('Fantasy/Futsal/15/Managers/keepA')).rejects.toThrow(/not a path the merge tool reads/),
+      expect(ro.get('Registrations/Futsal-16/Submissions/keepA')).rejects.toThrow(/not a path the merge tool reads/),
+      expect(ro.get('Fantasy/Futsal/15/Managers', { shallow: true })).resolves.toEqual({ keepA: true }),
+    ]);
+  });
+
+  const refusedBy = async (mutate: (root: Record<string, any>) => void, why: RegExp) => {
+    const root = fixture();
+    mutate(root);
+    const d = deps(new MemDb(root));
+    const { plan } = await dryRun(MAP, d);
+    expect(plan.refusals.map((r) => r.who)).toEqual(['Player A']);
+    expect(plan.refusals[0].why).toMatch(why);
+    // The other people are still planned, and nothing private is printed.
+    expect(plan.writes.length).toBeGreaterThan(0);
+    const out = d.lines.join('\n');
+    expect(out).toContain('Player A: REFUSED');
+    expect(out).not.toMatch(RAW_EMAIL_RE);
+    expect(out).not.toMatch(/Secret Squad|Futsal-16|keepA|oldA/);
+  };
+
+  it('a dry run refuses a person whose old account has Awards or TournamentsPlayed', async () => {
+    await refusedBy((r) => { r.Users.oldA.Awards = { a1: { Tier: 'gold' } }; }, /Awards/);
+    await refusedBy((r) => { r.Users.oldA.TournamentsPlayed = { t1: 'Cup' }; }, /TournamentsPlayed/);
+  });
+
+  it('a dry run refuses a person whose old account is a fantasy manager or registered', async () => {
+    await refusedBy((r) => { r.Fantasy.Futsal['15'].Managers.oldA = { TeamName: 'Secret Squad' }; }, /fantasy manager/);
+    await refusedBy((r) => { r.Registrations['Futsal-16'].Submissions.oldA = { Answers: {} }; }, /registration submission/);
+  });
+
+  it('--apply plans nothing for that person either (same planner), and the others still go', async () => {
+    const root = fixture();
+    root.Users.oldA.Awards = { a1: 1 };
+    const db = withMirror(new MemDb(root));
+    const digest = await digestOf(MAP, root);
+    const r = await applyMerge(MAP, deps(db), { canary: true, expectPlan: digest });
+    expect(db.writes().some((w) => w.path.startsWith('Users/oldA/'))).toBe(false);
+    expect(db.root.Users.oldB.MergedInto).toBe('keepB');
+    expect(r.ok).toBe(false);
   });
 });
 
@@ -234,6 +310,36 @@ describe('dry run', () => {
 });
 
 // ── apply / undo ───────────────────────────────────────────────────────────
+
+describe('dry run: public profiles of the old accounts (final-review fix 6)', () => {
+  it('prints how many old accounts have a public profile entry now, so the owner knows what the canary can watch', async () => {
+    const d = deps(new MemDb(fixture()));
+    await dryRun(MAP, d);
+    const out = d.lines.join('\n');
+    expect(out).toContain('public profiles: 2 of 2 old account(s) have a public profile entry right now');
+    expect(out).toContain('the mirror check watches one of them leave');
+    expect(out).not.toMatch(/keepA|oldA|keepB|oldB/);
+  });
+
+  it('says plainly when none has one (the canary would be skipped)', async () => {
+    const root = fixture();
+    delete root.PublicProfiles.oldA;
+    delete root.PublicProfiles.oldB;
+    const d = deps(new MemDb(root));
+    await dryRun(MAP, d);
+    const out = d.lines.join('\n');
+    expect(out).toContain('public profiles: 0 of 2 old account(s) have a public profile entry right now');
+    expect(out).toContain('mirror check (canary) will have nothing to watch and is skipped');
+  });
+
+  it('counts only some of them when only some have one', async () => {
+    const root = fixture();
+    delete root.PublicProfiles.oldB;
+    const d = deps(new MemDb(root));
+    await dryRun(MAP, d);
+    expect(d.lines.join('\n')).toContain('public profiles: 1 of 2 old account(s)');
+  });
+});
 
 describe('apply + undo', () => {
   it('backup/undo round trip: apply writes the plan, undo restores every path verbatim', async () => {

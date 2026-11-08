@@ -7,7 +7,7 @@ import { isDeepStrictEqual } from 'util';
 import { describe, expect, it } from 'vitest';
 import { maskEmail } from '../src/lib/mask_email';
 import {
-  afcUidPath, assertMergePaths, buildMergePlan, fantasyConfigPath, leagueUidPath, looksMasked,
+  afcUidPath, assertMergePaths, buildMergePlan, fantasyConfigPath, LEAGUE_SPORTS, leagueUidPath, looksMasked,
   MergeCluster, MergeMap, MergeSnapshot, parseRosterUidPath, PlanWrite, playedPath, userPath,
 } from './merge_accounts_logic';
 
@@ -54,8 +54,46 @@ class World {
     return this;
   }
 
+  /** A fantasy manager entry of [uid] in a fantasy season (the season's
+   *  Config is recorded as existing). */
+  manager(sport: string, season: string, uid: string): this {
+    this.fantasy(sport, season);
+    const key = `Fantasy/${sport}/${season}/Managers`;
+    this.nodes[key] = { ...((this.nodes[key] as Record<string, true> | undefined) ?? {}), [uid]: true };
+    return this;
+  }
+
+  /** A registration form with a submission of each of [uids] (keys only). */
+  registration(id: string, uids: string[]): this {
+    this.nodes[`Registrations/${id}/Submissions`] = Object.fromEntries(uids.map((u) => [u, true]));
+    return this;
+  }
+
+  /** The snapshot a complete read would give: besides what the tests set, it
+   *  lists the fantasy seasons per sport and the registration forms, records
+   *  "no manager entries" for every fantasy season nobody was set on, and "no
+   *  submissions" for every form - the markers the planner needs (fail closed). */
   snap(): MergeSnapshot {
-    return { nodes: JSON.parse(JSON.stringify(this.nodes)), keptHints: { ...this.keptHints } };
+    const nodes: Record<string, unknown> = JSON.parse(JSON.stringify(this.nodes));
+    for (const sport of LEAGUE_SPORTS) {
+      const listing: Record<string, true> = {};
+      for (const [key, value] of Object.entries(nodes)) {
+        const parts = key.split('/');
+        if (parts.length !== 4 || parts[0] !== 'Fantasy' || parts[1] !== sport || parts[3] !== 'Config') continue;
+        if (value === null || value === undefined) continue;
+        listing[parts[2]] = true;
+        const managers = `Fantasy/${sport}/${parts[2]}/Managers`;
+        if (!(managers in nodes)) nodes[managers] = null;
+      }
+      if (!(`Fantasy/${sport}` in nodes)) nodes[`Fantasy/${sport}`] = Object.keys(listing).length > 0 ? listing : null;
+    }
+    const forms: Record<string, true> = {};
+    for (const key of Object.keys(nodes)) {
+      const parts = key.split('/');
+      if (parts.length === 3 && parts[0] === 'Registrations' && parts[2] === 'Submissions') forms[parts[1]] = true;
+    }
+    if (!('Registrations' in nodes)) nodes['Registrations'] = Object.keys(forms).length > 0 ? forms : null;
+    return { nodes, keptHints: { ...this.keptHints } };
   }
 }
 
@@ -1182,5 +1220,112 @@ describe('fix 6: a scalar Played / Information parent refuses the cluster (never
     const info = { path: 'Users/k/Information/FutsalPosition', before: null, after: 'Defender' };
     expect(() => assertMergePaths([info], m(), withKeep({ Information: 'x' }).snap())).toThrow(/Refusing merge path/);
     expect(() => assertMergePaths([played, relink, info], m(), withKeep({}).snap())).not.toThrow();
+  });
+});
+
+describe('final fix 4: refuse a cluster when an old account has data the merge would not move', () => {
+  const m = () => mapOf(cluster({ who: 'Ann A', keep: 'k', old: ['o'] }));
+  const base = (oldFields: Record<string, unknown> = {}) => {
+    const w = new World().user('k', { 'First Name': 'K' }).user('o', { 'First Name': 'O', ...oldFields }).hint('k');
+    w.row('Futsal', '9', 'Wolves', 'Ann A', 'o');
+    return w;
+  };
+  const refusedOnce = (snap: MergeSnapshot, why: RegExp) => {
+    const plan = buildMergePlan(m(), snap, NOW);
+    expect(plan.writes).toEqual([]);
+    expect(plan.refusals).toHaveLength(1);
+    expect(plan.refusals[0].why).toMatch(why);
+    return plan;
+  };
+
+  it('a clean old account is planned exactly as before', () => {
+    const plan = buildMergePlan(m(), base().snap(), NOW);
+    expect(plan.refusals).toEqual([]);
+    expect(plan.writes.length).toBeGreaterThan(0);
+  });
+
+  it('refuses an old account with non-empty Awards (reason has no values)', () => {
+    for (const awards of [{ a1: { Tier: 'gold-secret' } }, 'x', 5, true, ['a']]) {
+      const plan = refusedOnce(base({ Awards: awards }).snap(), /Awards/);
+      expect(plan.refusals[0].why).not.toContain('gold-secret');
+    }
+  });
+
+  it('refuses an old account with non-empty TournamentsPlayed', () => {
+    for (const t of [{ t1: 'Cup' }, 'x', 7, ['a']]) refusedOnce(base({ TournamentsPlayed: t }).snap(), /TournamentsPlayed/);
+  });
+
+  it('empty or absent Awards / TournamentsPlayed do not refuse, and the KEPT account may have them', () => {
+    for (const v of [undefined, null, '', '  ', {}, []]) {
+      const plan = buildMergePlan(m(), base({ Awards: v, TournamentsPlayed: v }).snap(), NOW);
+      expect(plan.refusals, JSON.stringify(v)).toEqual([]);
+    }
+    const w = new World().user('k', { Awards: { a: { Tier: 'gold' } }, TournamentsPlayed: { t: 'Cup' } }).user('o').hint('k');
+    w.row('Futsal', '9', 'Wolves', 'Ann A', 'o');
+    expect(buildMergePlan(m(), w.snap(), NOW).refusals).toEqual([]);
+  });
+
+  it('refuses a fantasy manager entry of an old account in ANY season with a Config (even one the merge does not touch)', () => {
+    const plan = refusedOnce(base().manager('Futsal', '15', 'o').snap(), /fantasy manager/);
+    expect(plan.refusals[0].why).toMatch(/Futsal Season 15/);
+  });
+
+  it('a manager entry of ANOTHER account, or a manager entry in a season with no Config, does not refuse', () => {
+    expect(buildMergePlan(m(), base().manager('Futsal', '15', 'someoneElse').snap(), NOW).refusals).toEqual([]);
+    const w = base();
+    w.nodes['Fantasy/Futsal'] = { '14': true };
+    w.nodes['Fantasy/Futsal/14/Config'] = null;
+    w.nodes['Fantasy/Futsal/14/Managers'] = { o: true };
+    expect(buildMergePlan(m(), w.snap(), NOW).refusals).toEqual([]);
+  });
+
+  it('refuses a registration submission of an old account (reason names no form and no value)', () => {
+    const plan = refusedOnce(base().registration('Futsal-16', ['o', 'x']).snap(), /registration/);
+    expect(plan.refusals[0].why).not.toContain('Futsal-16');
+    // A submission of another account or of the kept account is not ours to refuse.
+    expect(buildMergePlan(m(), base().registration('Futsal-16', ['x', 'k']).snap(), NOW).refusals).toEqual([]);
+  });
+
+  it('fails closed: a snapshot that never checked fantasy managers or registrations refuses the cluster', () => {
+    const noListing = base().snap();
+    delete noListing.nodes['Fantasy/Futsal'];
+    refusedOnce(noListing, /fantasy season listing/);
+
+    const noConfig = base().manager('Futsal', '15', 'someoneElse').snap();
+    delete noConfig.nodes['Fantasy/Futsal/15/Config'];
+    refusedOnce(noConfig, /fantasy Config check/);
+
+    const noManagers = base().manager('Futsal', '15', 'someoneElse').snap();
+    delete noManagers.nodes['Fantasy/Futsal/15/Managers'];
+    refusedOnce(noManagers, /fantasy manager check/);
+
+    const noRegistrations = base().snap();
+    delete noRegistrations.nodes['Registrations'];
+    refusedOnce(noRegistrations, /registration check/);
+
+    const noSubmissions = base().registration('Futsal-16', ['x']).snap();
+    delete noSubmissions.nodes['Registrations/Futsal-16/Submissions'];
+    refusedOnce(noSubmissions, /registration check/);
+  });
+
+  it('a refused cluster blocks only itself; a cluster with no old account needs none of these checks', () => {
+    const w = base({ Awards: { a: 1 } }).user('k2', { 'First Name': 'K2' }).hint('k2');
+    w.row('Futsal', '10', 'Bulls', 'Row Name', null);
+    const map = mapOf(
+      cluster({ who: 'Ann A', keep: 'k', old: ['o'] }),
+      cluster({ who: 'Row Person', keep: 'k2', old: [], nameRows: [{ sport: 'Futsal', season: '10', team: 'Bulls', name: 'Row Name' }] }),
+    );
+    const snap = w.snap();
+    const plan = buildMergePlan(map, snap, NOW);
+    expect(plan.refusals.map((r) => r.who)).toEqual(['Ann A']);
+    expect(plan.writes.some((x) => x.after === 'k2')).toBe(true);
+
+    const bare = new World().user('k2', { 'First Name': 'K2' }).hint('k2');
+    bare.row('Futsal', '10', 'Bulls', 'Row Name', null);
+    const s2 = bare.snap();
+    delete s2.nodes['Registrations'];
+    for (const sp of LEAGUE_SPORTS) delete s2.nodes[`Fantasy/${sp}`];
+    const solo = mapOf(cluster({ who: 'Row Person', keep: 'k2', old: [], nameRows: [{ sport: 'Futsal', season: '10', team: 'Bulls', name: 'Row Name' }] }));
+    expect(buildMergePlan(solo, s2, NOW).refusals).toEqual([]);
   });
 });

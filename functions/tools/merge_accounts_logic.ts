@@ -40,6 +40,23 @@
 //                                    absent = not checked (refused: fail closed).
 //   keptHints[keep]                  the kept email, ALREADY MASKED (maskEmail).
 //
+// Old-account data this tool does NOT move (a cluster with any is REFUSED, so
+// it is moved by hand first; every check below fails closed - a snapshot that
+// never made it is refused too, and none of it carries contents, only keys):
+//   `Users/<old>/Awards`, `Users/<old>/TournamentsPlayed`
+//                                    non-empty (they are in the Users node);
+//   `Fantasy/<Sport>`                for every league sport: the shallow season
+//                                    keys of that fantasy tree (null = none);
+//   `Fantasy/<Sport>/<S>/Config`     (see above) must be present for EVERY
+//                                    listed season, not only touched ones;
+//   `Fantasy/<Sport>/<S>/Managers`   for every listed season whose Config
+//                                    exists: the shallow manager uids ({uid:
+//                                    true}, null = none). An old uid in it
+//                                    refuses the cluster;
+//   `Registrations`                  the shallow form ids (null = none);
+//   `Registrations/<id>/Submissions` for every listed form: the shallow
+//                                    submitter uids. An old uid in it refuses.
+//
 // Write order inside a cluster is deliberate: Played, profile fields, roster
 // UID relinks, and the stamps LAST. A crash part-way leaves a state that a
 // rerun finishes without duplicating anything (the stamps are the "done"
@@ -202,6 +219,7 @@ function validNameRows(c: MergeCluster, refuse: (why: string) => void): MergeNam
 }
 
 const present = (v: unknown): boolean => v !== undefined && v !== null;
+const keysOf = (v: unknown): string[] => (isPlainMap(v) ? Object.keys(v) : []);
 
 /** Problems that make a whole map unfit to apply (checked independently by
  *  assertMergePaths, whatever the planner did): every uid a plain database
@@ -250,6 +268,62 @@ function mapProblems(map: MergeMap): string[] {
 }
 
 const rowPathOf = (uidPath: string): string => uidPath.slice(0, -'/UID'.length);
+
+/** True when [v] holds something: a non-blank string, a number or boolean, or
+ *  a non-empty map or list (RTDB never stores an empty one, but be exact). */
+function hasContent(v: unknown): boolean {
+  if (v === undefined || v === null) return false;
+  if (typeof v === 'string') return v.trim() !== '';
+  if (Array.isArray(v)) return v.length > 0;
+  if (isPlainMap(v)) return Object.keys(v).length > 0;
+  return true;
+}
+
+/** Old-account data this tool does NOT move (final-review fix 4): Awards,
+ *  TournamentsPlayed, a fantasy manager entry in any fantasy season, a
+ *  registration submission. Merging the account would leave it behind on an
+ *  account nobody signs in to any more, so the cluster is refused (plain
+ *  reasons - never a value, a form id or a uid) and the owner moves it by
+ *  hand first. Fail closed: a snapshot that never checked is refused too. */
+function unmovedDataReasons(oldNodes: ReadonlyArray<Record<string, unknown>>, snap: MergeSnapshot, olds: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const node of oldNodes) {
+    if (hasContent(node['Awards'])) out.push('an old account has Awards, which this tool does not move');
+    if (hasContent(node['TournamentsPlayed'])) out.push('an old account has TournamentsPlayed, which this tool does not move');
+  }
+  const heldBy = (listing: unknown): boolean => keysOf(listing).some((k) => olds.includes(k));
+  for (const sport of LEAGUE_SPORTS) {
+    const listPath = `Fantasy/${sport}`;
+    if (!hasOwn(snap.nodes, listPath)) {
+      out.push(`${sport}: the snapshot has no fantasy season listing`);
+      continue;
+    }
+    for (const season of keysOf(snap.nodes[listPath]).filter((k) => SEASON_RE.test(k)).sort()) {
+      const label = `${sport} Season ${season}`;
+      const cfg = fantasyConfigPath(sport, season);
+      if (!hasOwn(snap.nodes, cfg)) {
+        out.push(`${label}: the snapshot has no fantasy Config check for this season`);
+        continue;
+      }
+      if (snap.nodes[cfg] === null || snap.nodes[cfg] === undefined) continue; // no fantasy there
+      const managers = `${cfg.slice(0, -'/Config'.length)}/Managers`;
+      if (!hasOwn(snap.nodes, managers)) out.push(`${label}: the snapshot has no fantasy manager check for this season`);
+      else if (heldBy(snap.nodes[managers])) {
+        out.push(`${label}: an old account has a fantasy manager entry in this season, which this tool does not move`);
+      }
+    }
+  }
+  if (!hasOwn(snap.nodes, 'Registrations')) {
+    out.push('the snapshot has no registration check');
+  } else {
+    for (const id of keysOf(snap.nodes['Registrations'])) {
+      const subs = `Registrations/${id}/Submissions`;
+      if (!hasOwn(snap.nodes, subs)) out.push('the snapshot has no registration check for one of the forms');
+      else if (heldBy(snap.nodes[subs])) out.push('an old account has a registration submission, which this tool does not move');
+    }
+  }
+  return out;
+}
 
 type RowUid = { kind: 'absent' } | { kind: 'conflict' } | { kind: 'value'; value: unknown };
 
@@ -361,6 +435,9 @@ function planCluster(
     }
     oldNodes.push(node);
   }
+  // Old-account data the merge would leave behind (Awards, tournaments,
+  // fantasy manager entries, registration submissions): refuse the cluster.
+  if (olds.length > 0) for (const why of unmovedDataReasons(oldNodes, snap, olds)) refuse(why);
   const hintRaw = snap.keptHints?.[keep];
   const hint = hintRaw === undefined || hintRaw === null || hintRaw === '' ? null : hintRaw;
   if (hint !== null && !looksMasked(hint)) refuse('the kept email hint is not masked');

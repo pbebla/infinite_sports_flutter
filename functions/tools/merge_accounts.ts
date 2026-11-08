@@ -234,6 +234,12 @@ const READ_RULES: ReadonlyArray<{ re: RegExp; shallowOnly?: boolean }> = [
   { re: /^AFC San Jose\/Seasons\/[^/]+\/Roster$/ },
   { re: /^AFC San Jose\/Seasons\/[^/]+\/Roster\/[^/]+(\/UID)?$/ },
   { re: new RegExp(`^Fantasy/(${SPORTS})/\\d{1,4}/Config$`), shallowOnly: true },
+  // Old-account data the merge does not move (the planner refuses a cluster
+  // with any): the fantasy seasons, their manager uids and the registration
+  // submitter uids - KEYS ONLY, never a manager's or a submission's contents.
+  { re: new RegExp(`^Fantasy/(${SPORTS})$`), shallowOnly: true },
+  { re: new RegExp(`^Fantasy/(${SPORTS})/\\d{1,4}/Managers$`), shallowOnly: true },
+  { re: /^Registrations$/, shallowOnly: true },
   { re: /^PublicProfiles\/[A-Za-z0-9_-]+$/, shallowOnly: true },
   { re: /^Registrations\/[A-Za-z0-9_-]+\/Config$/ },
   { re: /^Registrations\/[A-Za-z0-9_-]+\/Submissions$/, shallowOnly: true },
@@ -524,6 +530,12 @@ export interface SnapshotStats {
   oldRows: number;
   configChecks: number;
   hints: number;
+  /** Fantasy seasons (all sports) and registration forms whose keys were read. */
+  fantasySeasons: number;
+  registrationForms: number;
+  /** Old accounts of the map, and how many of them have a PublicProfiles entry now. */
+  oldAccounts: number;
+  oldPublicProfiles: number;
 }
 
 /** The MergeSnapshot the planner's contract asks for (merge_accounts_logic.ts
@@ -573,12 +585,42 @@ export async function readMergeSnapshot(
     nodes[cfg] = (await db.get(cfg, { shallow: true })) ?? null;
   }
 
+  // Old-account data the merge would leave behind (the planner refuses a
+  // cluster with any of it). KEYS ONLY: every fantasy season (its Config, and
+  // the manager uids when it has one) and every registration form's
+  // submitter uids - no manager data, no submission contents.
+  let fantasySeasons = 0;
+  for (const sport of LEAGUE_SPORTS) {
+    const listing = await db.get(`Fantasy/${sport}`, { shallow: true });
+    nodes[`Fantasy/${sport}`] = isPlainMap(listing) ? listing : null;
+    for (const season of keysOf(listing).filter((k) => SEASON_RE.test(k)).sort(bySeason)) {
+      fantasySeasons++;
+      const cfg = fantasyConfigPath(sport, season);
+      if (!(cfg in nodes)) nodes[cfg] = (await db.get(cfg, { shallow: true })) ?? null;
+      if (nodes[cfg] === null) continue;
+      const managers = `Fantasy/${sport}/${season}/Managers`;
+      nodes[managers] = (await db.get(managers, { shallow: true })) ?? null;
+    }
+  }
+  const forms = await db.get('Registrations', { shallow: true });
+  nodes['Registrations'] = isPlainMap(forms) ? forms : null;
+  for (const id of keysOf(forms)) {
+    const submissions = `Registrations/${id}/Submissions`;
+    nodes[submissions] = (await db.get(submissions, { shallow: true })) ?? null;
+  }
+  // For the dry run: how many old accounts have a public profile to leave.
+  let oldPublicProfiles = 0;
+  for (const o of olds) {
+    if ((await db.get(`PublicProfiles/${o}`, { shallow: true })) !== null) oldPublicProfiles++;
+  }
+
   const keptHints = await hints([...new Set(map.clusters.map((c) => c.keep))]);
   return {
     snap: { nodes, keptHints },
     stats: {
       accounts: uids.length, accountsMissing: missing, seasons, rows: rows.length, oldRows,
       configChecks: touched.size, hints: Object.keys(keptHints).length,
+      fantasySeasons, registrationForms: keysOf(forms).length, oldAccounts: olds.size, oldPublicProfiles,
     },
   };
 }
@@ -618,6 +660,13 @@ function printPlan(map: MergeMap, plan: MergePlan, stats: SnapshotStats, log: (s
     `${stats.rows} roster rows in ${seasons} seasons, ${stats.oldRows} rows held by an old account, ` +
     `${stats.configChecks} fantasy Config checks`);
   log(`  kept-email hints found (masked, not shown): ${stats.hints} of ${new Set(map.clusters.map((c) => c.keep)).size}`);
+  log(`  data this tool does not move (Awards, tournaments, fantasy manager entries, registration submissions): ` +
+    `checked on the old accounts, ${stats.fantasySeasons} fantasy season(s) and ${stats.registrationForms} registration form(s) ` +
+    '(keys only); a person who has any is refused below');
+  log(`  public profiles: ${stats.oldPublicProfiles} of ${stats.oldAccounts} old account(s) have a public profile entry right now` +
+    (stats.oldPublicProfiles === 0
+      ? ' - after --apply the mirror check (canary) will have nothing to watch and is skipped'
+      : ' - after --apply the mirror check watches one of them leave'));
   log('  plan:');
   for (const line of plan.summary) log(`    ${line}`);
   log(`  refusals: ${plan.refusals.length === 0 ? 'none' : plan.refusals.length}`);
