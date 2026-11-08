@@ -1,8 +1,8 @@
 # Merging duplicate player accounts - owner runbook
 
-Last checked against the merge tool: 2026-11-07 (fan repo, branch `zaya-fantasy`).
+Last checked against the merge tool: 2026-11-08 (fan repo, branch `zaya-fantasy`).
 
-You can run every command below yourself, or tell Claude "run step N" and Claude runs it. Either way the order and your OKs apply. As of 2026-11-07 only the read-only checks (the dry run and the duplicate check) have been run against the live app. Nothing has been changed yet.
+You can run every command below yourself, or tell Claude "run step N" and Claude runs it. Either way the order and your OKs apply. As of 2026-11-08 only the read-only checks (the dry run and the duplicate check) have been run against the live app. Nothing has been changed yet.
 
 ## What this does
 
@@ -74,7 +74,7 @@ Do the steps in this order. Step 6 must come after step 5, so nobody is locked o
 2. **Deploy the two functions.** One changes player search so merged accounts drop out of it (`onUserWritten`). The other sends the "accounts combined" emails (`onMergeNoticeCreated`).
 
 ```bash
-firebase deploy --only functions:onUserWritten,functions:onMergeNoticeCreated --project infinite-sports-app
+npx firebase-tools deploy --only functions:onUserWritten,functions:onMergeNoticeCreated --project infinite-sports-app
 ```
 
    It should end with "Deploy complete!". If it asks a question you don't understand, stop and ask Claude.
@@ -97,11 +97,13 @@ It reads the live data, prints what it would do, and writes nothing. Read the pr
 
 - `read: 20 accounts (0 with no Users node)`. All the accounts in the list exist.
 - `kept-email hints found (masked, not shown): 10 of 10`. If a number is lower, that person's email would say "your other email" instead of showing a partly hidden address. Not harmful, but tell Claude.
+- `data this tool does not move (...): checked on the old accounts, 1 fantasy season(s) and 1 registration form(s) (keys only)`. The tool looks (keys only, never the contents) for things on an old account that it does **not** move: Awards, tournaments played, a fantasy manager entry, a registration sign-up. A person who has any of them is **refused** (you would see it under `refusals`), because the merge would leave that behind on an account nobody uses. The 10 people in this batch have none. If someone is refused for this reason, don't go on: tell Claude, the item has to be moved by hand first.
+- `public profiles: 10 of 10 old account(s) have a public profile entry right now`. This is how many of the old accounts are in player search today. The safety check in step 3 (the canary) watches one of them leave. If it says `0 of 10`, the canary has nothing to watch and is skipped (a boxed warning shows at apply). Tell Claude before you apply.
 - A plan section, with lines per person such as "relink Futsal Season 11, Nineveh, ..." (a roster row moves to the kept account), "add Futsal Season 11 (Nineveh) to seasons played", "copy the profile photo link from an old account", "stamp 1 old account(s) as merged". Check the names and seasons against what you expect.
 - `refusals: none`.
 - `clusters: 10 in the map - 10 planned, 0 refused, 0 with nothing to do`. In the tool's words a "cluster" is one person.
 - `writes: 69 (...)`. On 2026-11-07 this was 20 roster relinks, 16 seasons-played entries, 2 profile photo links, 30 merge stamps (10 old accounts times 3) and 1 first-name fix.
-- A **plan code** (the tool calls it the plan digest): `plan digest (MergedAt time excluded): ...`. The 2026-11-07 dry run gave `6b49644c86689a2a`. The code changes if the data or the list changes, so always use the one your latest dry run prints.
+- A **plan code** (the tool calls it the plan digest): `plan digest (MergedAt time excluded): ...`. The 2026-11-07 dry run gave `6b49644c86689a2a`, and the 2026-11-08 dry run gave the same code. The code changes if the data or the list changes, so always use the one your latest dry run prints.
 - The last line starts with "To apply exactly this plan:" and then gives the apply command, already filled in with the right plan code. In step 3 you copy only the `npm run ...` part after the colon.
 
 If the dry run shows a refusal, a different count than you expect, or an error: stop and send the printout to Claude. Don't go on.
@@ -125,10 +127,10 @@ What happens:
 1. It re-reads everything and checks the plan is exactly the one you read.
 2. It saves a **backup** of every spot it will change, in `functions/tools/rehearsal_out/merge_backup_<date and time>.json`. **Keep this file.** It is what undo needs. Don't delete or share it.
 3. **Safety check on the first person (the "canary").** It merges one person first, then waits **up to 90 seconds** (it moves on as soon as it sees them gone) for that person's old account to disappear from player search. This proves the deployed function from step 1 really works. It tells you who goes first, and when the check passes it prints `canary passed: the old account left PublicProfiles`. ("PublicProfiles" is the player search list.)
-4. Then it merges the other 9, printing a `wrote ...` line for every change.
+4. Then it merges the other 9, printing a `wrote ...` line for every change. For each old account the "merged" marker is written last, after the partly hidden email and the time, so a crash can never leave an account half-marked.
 5. It ends with `DONE - 69 writes for 10 cluster(s).` and a line starting `Undo:`. **Copy that Undo line somewhere safe.**
 
-You can run `--apply` again later; people already merged are skipped and nothing is written twice.
+You can run `--apply` again later; people already merged are skipped and nothing is written twice. A re-run needs a **fresh dry run first** and the **new plan code** that dry run prints: after a partly finished apply the plan is different, so the old code is refused. Each apply run saves its **own** backup file.
 
 If something goes wrong:
 
@@ -144,7 +146,7 @@ If something goes wrong:
 npm run merge:accounts -- --undo "tools/rehearsal_out/<your merge_backup_ file name>.json"
 ```
 
-Use a file that starts with `merge_backup_`, not the `fill_backup_` files in the same folder. The undo only puts back things nobody has touched since. If it prints `LEFT ALONE (changed since the merge)` for something, someone edited it after the merge; the tool refused to overwrite it. Ask Claude.
+**If the merge took more than one apply run** (for example the first run stopped on a canary failure or skipped a person, and you applied again), each run saved its own backup. To undo everything, run the undo for **every** run's backup file, **newest first**, then the older ones. Use only files that start with `merge_backup_`, not the `fill_backup_` files in the same folder. The undo only puts back things nobody has touched since. If it prints `LEFT ALONE (changed since the merge)` for something, someone edited it after the merge; the tool refused to overwrite it. Ask Claude.
 
 If you already did step 6, also switch the old logins back on (see step 6 undo). Either order works.
 
@@ -160,7 +162,7 @@ For each, in the fan app:
 
 1. Search the name in the app's search. Only **one** account should show. If an old one still shows, close the app fully, reopen it and search again.
 2. Open the profile. **Every season** should show.
-3. Optional: in the Manager app, pick the person somewhere (for example link a player). Only one account should be offered.
+3. Optional: in the Manager app, first **close it fully and reopen it** (it keeps its list of accounts until it is reopened), then pick the person somewhere (for example link a player). Only one account should be offered.
 
 If anything looks wrong, undo (step 3's undo) and tell Claude. Don't go on to step 5.
 
@@ -174,7 +176,7 @@ First the preview. It writes nothing:
 npm run merge:accounts -- --notify
 ```
 
-You should see 10 notices to write and a push to 8 kept accounts, ending with `PREVIEW - nothing was written. 10 email(s) and 1 push campaign would go out.` If it says `Refusing --notify ... not stamped yet`, step 3 isn't finished.
+You should see 10 notices to write and `push to 8 kept account(s), one campaign each: 8 to write, 0 already there`, ending with `PREVIEW - nothing was written. 10 email(s) and 8 push campaign(s) would go out.` If it says `Refusing --notify ... not stamped yet`, step 3 isn't finished.
 
 Before you send, make sure someone will check the support mailbox over the next few days. The emails come from the support mailer address, so replies to them land there.
 
@@ -187,11 +189,11 @@ npm run merge:accounts -- --notify --send
 What goes out:
 
 - **An email to each of the 10 old addresses.** Subject: "Your Infinite Sports accounts were combined". It says all their seasons now show on one profile and to sign in with the kept address from now on. The kept address is shown partly hidden: the first two letters, then dots, then the email provider (shaped like `xx` + dots + `@gmail.com`).
-- **One push to the 8 kept accounts**: "Your accounts were combined" / "All your seasons are now on this profile." It also shows in the Manager's campaign list.
+- **One push to each of the 8 kept accounts** (8 pushes, one campaign per kept account): "Your accounts were combined" / "All your seasons are now on this profile." They also show in the Manager's campaign list, 8 rows.
 
 Then check that the emails went. In the Firebase console, open the Realtime Database, then the `MergeNotices` entry. Each old account should show `Status: sent` within a minute or two. `no-email` means that account has no email address, `failed` means the mailer failed, and `sending` stuck for a long time means a send was interrupted. Tell Claude about any of those. Don't re-run on your own.
 
-Running `--notify --send` again writes nothing and sends nothing twice.
+Running `--notify --send` again writes nothing and sends nothing twice. If you later add one more person to the list and run `--notify --send` again, only that person's email and push go out (the preview tells you the counts first). Everyone already told is left alone.
 
 **Undo:** emails and push messages can't be recalled. Everything else in the system can still be undone. If you undo step 3 after sending, the people were told something that is no longer true, so ask Claude how to follow up.
 
@@ -207,7 +209,9 @@ Preview first. It changes nothing:
 npm run merge:accounts -- --disable-old-logins
 ```
 
-It lists the 10 old logins that would be switched off. If it says `Refusing`, step 3 isn't finished.
+It lists the 10 old logins that would be switched off, and a line `notices: 10 of 10 old account(s) have a settled notice`. If it says `Refusing`, step 3 isn't finished.
+
+**`--send` waits for the emails.** It refuses (and changes nothing) unless every old account's notice shows `sent` or `no-email` in the `MergeNotices` entry, so nobody is locked out before they were told which email to use. If it says some accounts "have not been told yet", go back to step 5 and wait until each shows `Status: sent`. Only if you decide to go ahead anyway, add `--skip-notice-check` to the `--send` command; it prints a loud warning when you do.
 
 Then do it:
 
@@ -235,7 +239,7 @@ Run this **before** you build the Season 16 rosters from sign-ups, and merge any
 npm run merge:accounts -- --find-dupes Futsal-16
 ```
 
-("Futsal-16" is the Season 16 registration.) Each candidate line is a sign-up whose name matches a roster player from earlier seasons:
+("Futsal-16" is the Season 16 registration.) It only matches **exact names**: first plus last name on the account against the roster name. A spelling variant ("Robben" for "Roben", an extra letter, a nickname) is not found, so it still needs a manual look at the rosters. Each candidate line is a sign-up whose name matches a roster player from earlier seasons:
 
 - **"already linked to another account"**: that roster row belongs to a different account than the sign-up. Likely a duplicate person. This is how Parlevino Tamraz showed up.
 - **"unlinked row"**: a roster name with no account behind it. Often it is just an old roster entry nobody linked. Check whether it is the same person, then link the row in the Manager.
