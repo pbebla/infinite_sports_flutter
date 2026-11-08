@@ -1137,7 +1137,7 @@ describe('old-login switch (D13)', () => {
   });
 
   it('--send disables every old account (and only those), writing nothing to the database', async () => {
-    const db = await appliedDb();
+    const db = await noticedDb();
     const sw = loginSwitch();
     const d = deps(db, { setLoginDisabled: sw.fn });
     const r = await switchOldLogins(MAP, d, { ...DISABLE, send: true });
@@ -1172,7 +1172,7 @@ describe('old-login switch (D13)', () => {
     const db = new MemDb({ Users: {
       [keep]: { 'First Name': 'Long' },
       [old1]: { MergedInto: keep }, [old2]: { MergedInto: keep },
-    } });
+    }, MergeNotices: { [old1]: { Status: 'sent' }, [old2]: { Status: 'no-email' } } });
     const sw = loginSwitch([old2]);
     const d = deps(db, { setLoginDisabled: sw.fn });
     const r = await switchOldLogins(map, d, { ...DISABLE, send: true });
@@ -1232,7 +1232,10 @@ describe('old-login switch (D13)', () => {
     const old1 = 'OLD1uidABCDEFGHIJKLMNOPQRST';
     const old2 = 'OLD2uidABCDEFGHIJKLMNOPQRST';
     const map: MergeMap = { clusters: [{ who: 'Long Uid', keep, old: [old1, old2] }] };
-    const db = new MemDb({ Users: { [old1]: { MergedInto: keep }, [old2]: { MergedInto: keep } } });
+    const db = new MemDb({
+      Users: { [old1]: { MergedInto: keep }, [old2]: { MergedInto: keep } },
+      MergeNotices: { [old1]: { Status: 'sent' }, [old2]: { Status: 'sent' } },
+    });
     const calls: string[] = [];
     const d = deps(db, {
       setLoginDisabled: async (uid) => {
@@ -1504,5 +1507,110 @@ describe('top-level error output prints uid prefixes only (every mode)', () => {
       expect(out).toContain('To switch them off again: npm run merge:accounts -- --disable-old-logins --send.');
       expect(out).not.toContain('not stamped');
     });
+  });
+});
+
+// ── final-review fix 7: do not shut the old email off before the person was told ──
+
+/** A stamped database whose notices have settled (what the trigger leaves). */
+async function noticedDb(statuses: Record<string, string | null> = { oldA: 'sent', oldB: 'sent' }): Promise<MemDb> {
+  const db = await appliedDb(MAP, 1_762_400_000_000 + Math.floor(Math.random() * 1_000_000));
+  for (const [uid, status] of Object.entries(statuses)) {
+    if (status !== null) db.set(`MergeNotices/${uid}`, { KeepHint: 'x', CreatedAt: 1, Status: status });
+  }
+  db.calls = [];
+  return db;
+}
+
+describe('--disable-old-logins --send waits for the notices (final-review fix 7)', () => {
+  const sendOpts = { disable: true, send: true };
+
+  it('refuses when an old account has no notice at all, naming labels (never a uid) and the way out', async () => {
+    const db = await noticedDb({ oldA: 'sent', oldB: null });
+    const sw = loginSwitch();
+    const err = (await switchOldLogins(MAP, deps(db, { setLoginDisabled: sw.fn }), sendOpts).catch((e: Error) => e)) as Error;
+    expect(err.message).toMatch(/Refusing --disable-old-logins --send/);
+    expect(err.message).toMatch(/not been told yet/);
+    expect(err.message).toContain('Player B: old account #1');
+    expect(err.message).not.toContain('Player A: old account #1');
+    expect(err.message).toContain('--notify --send');
+    expect(err.message).toContain('--skip-notice-check');
+    expect(err.message).toMatch(/Nothing was changed/);
+    expect(err.message).not.toMatch(/oldA|oldB|keepA|keepB/);
+    expect(sw.calls).toEqual([]);
+    expect(db.writes()).toEqual([]);
+  });
+
+  it('refuses while a notice is still sending, failed, or has any other status', async () => {
+    for (const status of ['sending', 'failed', 'weird']) {
+      const db = await noticedDb({ oldA: 'sent', oldB: status });
+      const sw = loginSwitch();
+      await expect(switchOldLogins(MAP, deps(db, { setLoginDisabled: sw.fn }), sendOpts), status)
+        .rejects.toThrow(/not been told yet/);
+      expect(sw.calls, status).toEqual([]);
+    }
+  });
+
+  it('goes ahead when every notice is sent or has no email', async () => {
+    const db = await noticedDb({ oldA: 'sent', oldB: 'no-email' });
+    const sw = loginSwitch();
+    const d = deps(db, { setLoginDisabled: sw.fn });
+    const r = await switchOldLogins(MAP, d, sendOpts);
+    expect(r).toMatchObject({ ok: true, switched: 2, failed: 0 });
+    expect(sw.calls).toEqual([['oldA', true], ['oldB', true]]);
+    expect(d.lines.join(' ')).not.toMatch(/SKIPPED/);
+  });
+
+  it('reads only each notice\'s Status leaf - never a notice body - and writes nothing', async () => {
+    const db = await noticedDb();
+    await switchOldLogins(MAP, deps(db, { setLoginDisabled: loginSwitch().fn }), sendOpts);
+    const reads = db.calls.filter((c) => c.path.startsWith('MergeNotices'));
+    expect(reads.map((c) => c.path).sort()).toEqual(['MergeNotices/oldA/Status', 'MergeNotices/oldB/Status']);
+    expect(db.writes()).toEqual([]);
+  });
+
+  it('--skip-notice-check overrides, and prints it loudly', async () => {
+    const db = await noticedDb({ oldA: null, oldB: 'sending' });
+    const sw = loginSwitch();
+    const d = deps(db, { setLoginDisabled: sw.fn });
+    const r = await switchOldLogins(MAP, d, { ...sendOpts, skipNoticeCheck: true });
+    expect(r).toMatchObject({ ok: true, switched: 2 });
+    expect(sw.calls).toEqual([['oldA', true], ['oldB', true]]);
+    const out = d.lines.join(' ');
+    expect(out).toContain('--skip-notice-check');
+    expect(out).toMatch(/NOTICE CHECK IS OFF/);
+    expect(out).toMatch(/2 old account\(s\) were NOT confirmed as told/);
+  });
+
+  it('the preview never refuses: it says how many notices have settled and how to proceed', async () => {
+    const db = await noticedDb({ oldA: 'sent', oldB: null });
+    const sw = loginSwitch();
+    const d = deps(db, { setLoginDisabled: sw.fn });
+    const r = await switchOldLogins(MAP, d, { disable: true, send: false });
+    expect(r.ok).toBe(true);
+    expect(sw.calls).toEqual([]);
+    const out = d.lines.join(' ');
+    expect(out).toContain('notices: 1 of 2 old account(s) have a settled notice');
+    expect(out).toContain('--send will refuse until every one has');
+    expect(out).toContain('Player B: old account #1');
+  });
+
+  it('--enable-old-logins never checks notices (it is the safe direction)', async () => {
+    const db = await appliedDb(MAP, 1_762_400_000_777); // no notices at all
+    db.calls = [];
+    const sw = loginSwitch();
+    const r = await switchOldLogins(MAP, deps(db, { setLoginDisabled: sw.fn }), { disable: false, send: true });
+    expect(r).toMatchObject({ ok: true, switched: 2 });
+    expect(db.calls.some((c) => c.path.startsWith('MergeNotices'))).toBe(false);
+  });
+
+  it('command line: --skip-notice-check belongs to --disable-old-logins and nothing else', () => {
+    expect(parseArgs(['--disable-old-logins', '--send', '--skip-notice-check'])).toMatchObject({
+      mode: 'disable-logins', send: true, skipNoticeCheck: true,
+    });
+    expect(parseArgs(['--disable-old-logins']).skipNoticeCheck).toBe(false);
+    expect(() => parseArgs(['--enable-old-logins', '--skip-notice-check'])).toThrow(/--skip-notice-check goes with --disable-old-logins/);
+    expect(() => parseArgs(['--notify', '--skip-notice-check'])).toThrow(/--skip-notice-check goes with --disable-old-logins/);
+    expect(() => parseArgs(['--skip-notice-check'])).toThrow(/--skip-notice-check goes with --disable-old-logins/);
   });
 });

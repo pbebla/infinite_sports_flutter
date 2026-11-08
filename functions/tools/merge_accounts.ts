@@ -89,6 +89,14 @@
 //                                                Under the emulator only the
 //                                                preview runs (no Auth
 //                                                emulator).
+//                                                --disable --send ALSO refuses
+//                                                unless every old account's
+//                                                MergeNotices/<old>/Status is
+//                                                sent or no-email (the player
+//                                                was told first; the Status
+//                                                leaf is the only thing read).
+//                                                --skip-notice-check overrides
+//                                                (printed loudly).
 //                                                OWNER RULE: never run
 //                                                against production until the
 //                                                owner says so.
@@ -173,7 +181,7 @@ const STAMPS = ['MergedInto', 'MergedAt', 'MergedHint'];
 
 const USAGE = 'Usage: npm run merge:accounts [-- --apply --expect-plan <digest> | ' +
   '-- --undo <backupFile> | -- --find-dupes <registrationId> | -- --notify [--send] | ' +
-  '-- --disable-old-logins [--send] | -- --enable-old-logins [--send]] [--map <file>] ' +
+  '-- --disable-old-logins [--send [--skip-notice-check]] | -- --enable-old-logins [--send]] [--map <file>] ' +
   '[--fake-emails] [--no-canary]';
 
 const isPlainMap = (v: unknown): v is Record<string, unknown> =>
@@ -245,6 +253,8 @@ const READ_RULES: ReadonlyArray<{ re: RegExp; shallowOnly?: boolean }> = [
   { re: /^Registrations\/[A-Za-z0-9_-]+\/Submissions$/, shallowOnly: true },
   // --notify: is the notice / the campaign already there (keys only).
   { re: /^MergeNotices\/[A-Za-z0-9_-]+$/, shallowOnly: true },
+  // --disable-old-logins --send: has the notice settled (the Status leaf only).
+  { re: /^MergeNotices\/[A-Za-z0-9_-]+\/Status$/ },
   { re: /^Campaigns\/merge-notice-[0-9a-f]{16}$/, shallowOnly: true },
 ];
 
@@ -1244,6 +1254,9 @@ export async function notifyMerge(
 export interface LoginSwitchOptions {
   /** true = --disable-old-logins, false = --enable-old-logins. */
   disable: boolean;
+  /** --skip-notice-check (disable only): switch even if a notice has not
+   *  settled. Printed loudly. */
+  skipNoticeCheck?: boolean;
   /** false (the default of the command line) = the PREVIEW: prints who would
    *  be switched and changes nothing. Only --send calls accounts:update. */
   send: boolean;
@@ -1311,6 +1324,35 @@ export async function switchOldLogins(
   }
   if (unstamped > 0) {
     log(`  note: ${unstamped} old account(s) not stamped (undone or never applied); re-enabling a login is safe either way.`);
+  }
+
+  // 1b. Disabling only: the old email must not be shut off before the person
+  //     was told which email to use (final-review fix 7). Each old account's
+  //     MergeNotices/<old>/Status (the leaf only) must be 'sent' or 'no-email'.
+  if (opts.disable) {
+    const notTold: string[] = [];
+    for (const o of olds) {
+      const status = await reader.get(`MergeNotices/${o.uid}/Status`);
+      if (status !== 'sent' && status !== 'no-email') notTold.push(labelOf(userPath(o.uid), map));
+    }
+    const settled = olds.length - notTold.length;
+    if (!opts.send) {
+      log(`  notices: ${settled} of ${olds.length} old account(s) have a settled notice (sent, or no email on file)` +
+        (notTold.length > 0 ? `; --send will refuse until every one has (not yet: ${notTold.join('; ')})` : ''));
+    } else if (opts.skipNoticeCheck) {
+      log('  ********************************************************************');
+      log('  * WARNING: --skip-notice-check - THE NOTICE CHECK IS OFF.          *');
+      log('  * Old logins are being disabled whether or not the players were    *');
+      log('  * told which email to use.                                         *');
+      log('  ********************************************************************');
+      log(`  ${notTold.length} old account(s) were NOT confirmed as told` +
+        (notTold.length > 0 ? ` (${notTold.join('; ')})` : ''));
+    } else if (notTold.length > 0) {
+      throw new Error(`Refusing ${flag} --send: ${notTold.length} old account(s) have not been told yet ` +
+        `(no notice, or it has not finished sending): ${notTold.join('; ')}. Run --notify --send first and wait until ` +
+        'every notice shows sent (MergeNotices/<old>/Status), then run this again. To disable the logins anyway add ' +
+        '--skip-notice-check. Nothing was changed.');
+    }
   }
 
   // 2. Print who (labels + the first 6 characters of the uid - never an email).
@@ -1470,6 +1512,8 @@ export interface CliArgs {
   noCanary: boolean;
   /** --notify / --disable-old-logins / --enable-old-logins with --send: act (otherwise they only preview). */
   send: boolean;
+  /** --skip-notice-check (with --disable-old-logins): switch even if a notice has not settled. */
+  skipNoticeCheck: boolean;
 }
 
 const isLoginSwitchMode = (m: CliArgs['mode']): boolean => m === 'disable-logins' || m === 'enable-logins';
@@ -1478,6 +1522,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   const valued = new Set(['--undo', '--find-dupes', '--map', '--expect-plan']);
   const flags = new Set([
     '--apply', '--notify', '--send', '--fake-emails', '--no-canary', '--disable-old-logins', '--enable-old-logins',
+    '--skip-notice-check',
   ]);
   const got = new Map<string, string>();
   for (let i = 0; i < argv.length; i++) {
@@ -1512,6 +1557,9 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   if (got.has('--send') && mode !== 'notify' && !switchMode) {
     throw new Error(`--send goes with --notify, --disable-old-logins or --enable-old-logins. ${USAGE}`);
   }
+  if (got.has('--skip-notice-check') && mode !== 'disable-logins') {
+    throw new Error(`--skip-notice-check goes with --disable-old-logins. ${USAGE}`);
+  }
   if (got.has('--fake-emails') && (mode === 'notify' || switchMode)) {
     throw new Error(`--fake-emails does not go with --notify, --disable-old-logins or --enable-old-logins (they look up no emails). ${USAGE}`);
   }
@@ -1524,6 +1572,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     fakeEmails: got.has('--fake-emails'),
     noCanary: got.has('--no-canary'),
     send: got.has('--send'),
+    skipNoticeCheck: got.has('--skip-notice-check'),
   };
 }
 
@@ -1611,7 +1660,9 @@ export async function runCli(argv: readonly string[], env: NodeJS.ProcessEnv, io
     } else if (args.mode === 'notify') {
       ok = (await notifyMerge(mapOf(), deps, { send: args.send })).ok;
     } else if (isLoginSwitchMode(args.mode)) {
-      ok = (await switchOldLogins(mapOf(), deps, { disable: args.mode === 'disable-logins', send: args.send })).ok;
+      ok = (await switchOldLogins(mapOf(), deps, {
+        disable: args.mode === 'disable-logins', send: args.send, skipNoticeCheck: args.skipNoticeCheck,
+      })).ok;
     } else if (args.mode === 'apply') {
       ok = (await applyMerge(mapOf(), deps, { canary: !args.noCanary, expectPlan: args.expectPlan })).ok;
     } else {
