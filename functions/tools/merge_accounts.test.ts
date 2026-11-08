@@ -71,49 +71,49 @@ class MemDb implements Rest {
 // ── fixture shaped like the audit ──────────────────────────────────────────
 
 const EMAILS: Record<string, string> = {
-  keepA: 'hiram.alvarez.real@gmail.com',
-  oldA: 'hiram.old.addr@yahoo.com',
-  keepB: 'carlo11rocks@gmail.com',
-  oldB: 'carlo.first@hotmail.com',
-  keepC: 'robert.s@outlook.com',
+  keepA: 'player.a.kept@example.test',
+  oldA: 'player.a.old@example.test',
+  keepB: 'testplayer12@example.test',
+  oldB: 'player.b.old@example.test',
+  keepC: 'player.c.kept@example.test',
 };
 
 function fixture(): Record<string, any> {
   return {
     Users: {
       keepA: {
-        'First Name': 'Hiram', 'Last Name': 'Alvarez', Email: EMAILS.keepA, Token: 'tok-keepA',
+        'First Name': 'Player', 'Last Name': 'A', Email: EMAILS.keepA, Token: 'tok-keepA',
         Played: { Futsal: { 'Season 15': 'Ashur' } }, Information: { Position: 'Defender' },
       },
       oldA: {
-        'First Name': 'Hiram', 'Last Name': 'A', Email: EMAILS.oldA, Token: 'tok-oldA', Phone: '555-0100',
+        'First Name': 'Player', 'Last Name': 'A', Email: EMAILS.oldA, Token: 'tok-oldA', Phone: '555-0100',
         Played: { Futsal: { 'Season 11': 'Nineveh' } }, ProfileUrl: 'https://storage.example/oldA.jpg',
         Information: { Position: 'Forward', Jersey: 7, Phone: '555-0100' },
       },
-      keepB: { 'First Name': 'Carlo', 'Last Name': 'Gewargis', Email: EMAILS.keepB },
-      oldB: { 'First Name': 'Carlo', 'Last Name': 'Gewargis', Email: EMAILS.oldB },
-      keepC: { 'First Name': 'Rabert', 'Last Name': 'Shamoeilzadeh', Email: EMAILS.keepC },
-      subOwn: { 'First Name': 'Ninos', 'Last Name': 'Own', Email: 'ninos@example.com' },
+      keepB: { 'First Name': 'Player', 'Last Name': 'B', Email: EMAILS.keepB },
+      oldB: { 'First Name': 'Player', 'Last Name': 'B', Email: EMAILS.oldB },
+      keepC: { 'First Name': 'Plyer', 'Last Name': 'C', Email: EMAILS.keepC },
+      subOwn: { 'First Name': 'Player F', 'Last Name': 'Own', Email: 'player.f@example.test' },
       subNone: { 'First Name': 'Nobody', 'Last Name': 'Here', Email: 'nobody@example.com' },
       subNoName: { Email: 'anon@example.com' },
     },
     Futsal: {
       Settings: { Ignored: true },
-      '10': { 'Line Ups': { Nineveh: { 'Robert Shamoelzadeh': { Goals: 1 }, 'Robben Tatari': { Goals: 2 } } } },
-      '11': { 'Line Ups': { Nineveh: { 'Hiram A': { UID: 'oldA', Goals: 3 } } } },
-      '15': { 'Line Ups': { Ashur: { 'Hiram Alvarez': { UID: 'keepA', Goals: 4 }, 'Ninos Own': { UID: 'subOwn' } } } },
+      '10': { 'Line Ups': { Nineveh: { 'Player C Variant': { Goals: 1 }, 'Player D': { Goals: 2 } } } },
+      '11': { 'Line Ups': { Nineveh: { 'Player A2': { UID: 'oldA', Goals: 3 } } } },
+      '15': { 'Line Ups': { Ashur: { 'Player A': { UID: 'keepA', Goals: 4 }, 'Player F Own': { UID: 'subOwn' } } } },
     },
-    Basketball: { '3': { 'Line Ups': { Hoopers: { 'Hiram A': { UID: 'someoneElse' } } } } },
-    'AFC San Jose': { Seasons: { 'Spring 2025': { Roster: { 'Carlo G': { UID: 'oldB', Number: 9 } } } } },
+    Basketball: { '3': { 'Line Ups': { Hoopers: { 'Player A2': { UID: 'someoneElse' } } } } },
+    'AFC San Jose': { Seasons: { 'Spring 2025': { Roster: { 'Player B2': { UID: 'oldB', Number: 9 } } } } },
     Fantasy: { Futsal: { '15': { Config: { lockOverride: 'open' } } } },
-    PublicProfiles: { oldA: { 'First Name': 'Hiram' }, oldB: { 'First Name': 'Carlo' }, keepA: { 'First Name': 'Hiram' } },
+    PublicProfiles: { oldA: { 'First Name': 'Player' }, oldB: { 'First Name': 'Player' }, keepA: { 'First Name': 'Player' } },
     Registrations: {
       'Futsal-16': {
         Config: { TargetType: 'league', Sport: 'Futsal', Season: '16' },
         Submissions: {
           keepA: { Answers: { email: EMAILS.keepA, phone: '555-0199' } },
           keepC: { Answers: { email: EMAILS.keepC } },
-          subOwn: { Answers: { email: 'ninos@example.com' } },
+          subOwn: { Answers: { email: 'player.f@example.test' } },
           subNone: { Answers: { email: 'nobody@example.com' } },
           subNoName: { Answers: { email: 'anon@example.com' } },
         },
@@ -124,12 +124,12 @@ function fixture(): Record<string, any> {
 
 const MAP: MergeMap = {
   clusters: [
-    { who: 'Hiram Alvarez', keep: 'keepA', old: ['oldA'] },
-    { who: 'Carlo Gewargis', keep: 'keepB', old: ['oldB'] },
+    { who: 'Player A', keep: 'keepA', old: ['oldA'] },
+    { who: 'Player B', keep: 'keepB', old: ['oldB'] },
     {
-      who: 'Robert Shamoeilzadeh', keep: 'keepC', old: [],
-      nameRows: [{ sport: 'Futsal', season: '10', team: 'Nineveh', name: 'Robert Shamoelzadeh' }],
-      firstNameFix: 'Robert',
+      who: 'Player C', keep: 'keepC', old: [],
+      nameRows: [{ sport: 'Futsal', season: '10', team: 'Nineveh', name: 'Player C Variant' }],
+      firstNameFix: 'Player',
     },
   ],
 };
@@ -183,10 +183,10 @@ describe('readMergeSnapshot (the planner contract)', () => {
     const { snap, stats } = await readMergeSnapshot(guardRest(db, { readOnly: true }), MAP, hints);
     expect(Object.keys(snap.nodes).filter((k) => k.startsWith('Users/')).sort())
       .toEqual(['Users/keepA', 'Users/keepB', 'Users/keepC', 'Users/oldA', 'Users/oldB']);
-    expect(snap.nodes['Futsal/11/Line Ups/Nineveh/Hiram A/UID']).toBe('oldA');
-    expect(snap.nodes['AFC San Jose/Seasons/Spring 2025/Roster/Carlo G/UID']).toBe('oldB');
-    expect(snap.nodes['Futsal/10/Line Ups/Nineveh/Robert Shamoelzadeh']).toEqual({ Goals: 1 });
-    expect(snap.nodes).not.toHaveProperty('Futsal/10/Line Ups/Nineveh/Robert Shamoelzadeh/UID');
+    expect(snap.nodes['Futsal/11/Line Ups/Nineveh/Player A2/UID']).toBe('oldA');
+    expect(snap.nodes['AFC San Jose/Seasons/Spring 2025/Roster/Player B2/UID']).toBe('oldB');
+    expect(snap.nodes['Futsal/10/Line Ups/Nineveh/Player C Variant']).toEqual({ Goals: 1 });
+    expect(snap.nodes).not.toHaveProperty('Futsal/10/Line Ups/Nineveh/Player C Variant/UID');
     // null = checked and absent; the fantasy season 15 is not touched.
     expect(snap.nodes['Fantasy/Futsal/11/Config']).toBeNull();
     expect(snap.nodes['Fantasy/Futsal/10/Config']).toBeNull();
@@ -207,8 +207,8 @@ describe('dry run', () => {
     expect(plan.refusals).toEqual([]);
     const out = d.lines.join('\n');
     expect(out).toContain('DRY RUN - nothing was written.');
-    expect(out).toContain('Hiram Alvarez: relink Futsal Season 11, Nineveh, "Hiram A"');
-    expect(out).toContain('Robert Shamoeilzadeh: fix the kept account\'s first name');
+    expect(out).toContain('Player A: relink Futsal Season 11, Nineveh, "Player A2"');
+    expect(out).toContain('Player C: fix the kept account\'s first name');
     expect(out).toContain(`--apply --expect-plan ${digest}`);
     expect(out).not.toMatch(RAW_EMAIL_RE);
     expect(out).not.toMatch(/keepA|oldA|keepB|oldB|keepC|tok-/);
@@ -242,15 +242,15 @@ describe('apply + undo', () => {
     const d = deps(db);
     const r = await applyMerge(MAP, d, { canary: true, expectPlan: await digestOf(MAP, db.root) });
     expect(r.ok).toBe(true);
-    expect(r.applied).toEqual(['Hiram Alvarez', 'Carlo Gewargis', 'Robert Shamoeilzadeh']);
+    expect(r.applied).toEqual(['Player A', 'Player B', 'Player C']);
     const u = db.root.Users;
-    expect(db.root.Futsal['11']['Line Ups'].Nineveh['Hiram A']).toEqual({ UID: 'keepA', Goals: 3 });
-    expect(db.root['AFC San Jose'].Seasons['Spring 2025'].Roster['Carlo G'].UID).toBe('keepB');
-    expect(db.root.Futsal['10']['Line Ups'].Nineveh['Robert Shamoelzadeh']).toEqual({ Goals: 1, UID: 'keepC' });
+    expect(db.root.Futsal['11']['Line Ups'].Nineveh['Player A2']).toEqual({ UID: 'keepA', Goals: 3 });
+    expect(db.root['AFC San Jose'].Seasons['Spring 2025'].Roster['Player B2'].UID).toBe('keepB');
+    expect(db.root.Futsal['10']['Line Ups'].Nineveh['Player C Variant']).toEqual({ Goals: 1, UID: 'keepC' });
     expect(u.keepA.Played.Futsal).toEqual({ 'Season 15': 'Ashur', 'Season 11': 'Nineveh' });
     expect(u.keepA.ProfileUrl).toBe('https://storage.example/oldA.jpg');
     expect(u.keepA.Information).toEqual({ Position: 'Defender', Jersey: 7 });
-    expect(u.keepC['First Name']).toBe('Robert');
+    expect(u.keepC['First Name']).toBe('Player');
     expect(u.oldA.MergedInto).toBe('keepA');
     expect(u.oldA.MergedHint).toBe(maskEmail(EMAILS.keepA));
     expect(u.oldA.MergedAt).toBe(1_762_400_000_000);
@@ -282,14 +282,14 @@ describe('apply + undo', () => {
     const before = fixture();
     const db = withMirror(new MemDb(fixture()));
     const d = deps(db, {
-      afterPlan: () => { db.set('Futsal/11/Line Ups/Nineveh/Hiram A/UID', 'managerLinkedSomeoneElse'); },
+      afterPlan: () => { db.set('Futsal/11/Line Ups/Nineveh/Player A2/UID', 'managerLinkedSomeoneElse'); },
     });
     const r = await applyMerge(MAP, d, { canary: true, expectPlan: await digestOf(MAP, db.root) });
     expect(r.ok).toBe(false);
-    expect(r.refusedAtApply).toEqual(['Hiram Alvarez']);
-    expect(r.applied).toEqual(['Carlo Gewargis', 'Robert Shamoeilzadeh']);
+    expect(r.refusedAtApply).toEqual(['Player A']);
+    expect(r.applied).toEqual(['Player B', 'Player C']);
     expect(d.lines.join('\n')).toContain(
-      'Hiram Alvarez: REFUSED at apply - changed since the plan: roster Futsal Season 11, Nineveh, "Hiram A"');
+      'Player A: REFUSED at apply - changed since the plan: roster Futsal Season 11, Nineveh, "Player A2"');
     expect(db.root.Users.keepA).toEqual(before.Users.keepA);
     expect(db.root.Users.oldA).toEqual(before.Users.oldA);
     expect(db.writes().some((w) => w.path.includes('keepA') || w.path.includes('oldA') || w.path.startsWith('Futsal/11'))).toBe(false);
@@ -298,7 +298,7 @@ describe('apply + undo', () => {
     const u = await undoMerge(r.backupFile as string, deps(db));
     expect(u.leftAlone).toEqual([]);
     expect(u.ok).toBe(true);
-    expect(db.root.Futsal['11']['Line Ups'].Nineveh['Hiram A'].UID).toBe('managerLinkedSomeoneElse');
+    expect(db.root.Futsal['11']['Line Ups'].Nineveh['Player A2'].UID).toBe('managerLinkedSomeoneElse');
     expect(db.root.Users.keepB).toEqual(before.Users.keepB);
     expect(db.root.Users.keepC).toEqual(before.Users.keepC);
   });
@@ -307,7 +307,7 @@ describe('apply + undo', () => {
     const db = withMirror(new MemDb(fixture()));
     const d = deps(db, { afterPlan: () => { db.set('Fantasy/Futsal/11/Config', { lockOverride: 'open' }); } });
     const r = await applyMerge(MAP, d, { canary: true, expectPlan: await digestOf(MAP, db.root) });
-    expect(r.refusedAtApply).toEqual(['Hiram Alvarez']);
+    expect(r.refusedAtApply).toEqual(['Player A']);
     expect(d.lines.join('\n')).toContain('Futsal Season 11 now has a fantasy Config');
   });
 
@@ -321,7 +321,7 @@ describe('apply + undo', () => {
     const r = await applyMerge(map, d, { canary: true, expectPlan: await digestOf(map, db.root) });
     expect(r.ok).toBe(false);
     expect(r.stoppedByCanary).toBe(true);
-    expect(r.applied).toEqual(['Hiram Alvarez']);
+    expect(r.applied).toEqual(['Player A']);
     expect(sleeps).toEqual(Array(9).fill(10_000)); // ~90 s in 10 s polls
     const out = d.lines.join('\n');
     expect(out).toContain('CANARY FAILED');
@@ -331,7 +331,7 @@ describe('apply + undo', () => {
     expect(db.root.Users.keepC).toEqual(before.Users.keepC);
     expect(db.root.Futsal['10']).toEqual(before.Futsal['10']);
 
-    // ...and the printed undo puts Hiram back.
+    // ...and the printed undo puts Player A back.
     await undoMerge(r.backupFile as string, deps(db));
     expect(db.root).toEqual(before);
   });
@@ -398,7 +398,7 @@ describe('undo refusals', () => {
     const d = deps(db);
     const u = await undoMerge(r.backupFile as string, d);
     expect(u.ok).toBe(false);
-    expect(u.leftAlone).toEqual(['Hiram Alvarez: kept account Information/Jersey']);
+    expect(u.leftAlone).toEqual(['Player A: kept account Information/Jersey']);
     expect(db.root.Users.keepA.Information.Jersey).toBe(10);
     expect(db.root.Users.oldA.MergedInto).toBeUndefined();
   });
@@ -411,20 +411,20 @@ describe('--find-dupes (D16)', () => {
     const root = fixture();
     // A second account named like the linked S15 row, and a submitter whose
     // name matches the S10 row that has no UID.
-    root.Users.subDup = { 'First Name': ' hiram ', 'Last Name': 'ALVAREZ', Email: 'second.hiram@example.com' };
-    root.Users.subNone = { 'First Name': 'Robert', 'Last Name': 'Shamoelzadeh', Email: 'robert.two@example.com' };
-    root.Registrations['Futsal-16'].Submissions.subDup = { Answers: { email: 'second.hiram@example.com' } };
+    root.Users.subDup = { 'First Name': ' player ', 'Last Name': 'A', Email: 'second.player@example.test' };
+    root.Users.subNone = { 'First Name': 'Player', 'Last Name': 'C Variant', Email: 'player.two@example.test' };
+    root.Registrations['Futsal-16'].Submissions.subDup = { Answers: { email: 'second.player@example.test' } };
     const db = new MemDb(root);
     const d = deps(db);
     const found = await findDupes('Futsal-16', d);
     // keepA owns its S15 row and subOwn owns its row: neither is a candidate.
     expect(found).toEqual([
-      { name: 'Hiram Alvarez', where: ['S15 Ashur'], kind: 'already linked to another account' },
-      { name: 'Robert Shamoelzadeh', where: ['S10 Nineveh'], kind: 'unlinked row' },
+      { name: 'Player A', where: ['S15 Ashur'], kind: 'already linked to another account' },
+      { name: 'Player C Variant', where: ['S10 Nineveh'], kind: 'unlinked row' },
     ]);
     const out = d.lines.join('\n');
-    expect(out).toContain('Hiram Alvarez — S15 Ashur — "already linked to another account"');
-    expect(out).toContain('Robert Shamoelzadeh — S10 Nineveh — "unlinked row"');
+    expect(out).toContain('Player A — S15 Ashur — "already linked to another account"');
+    expect(out).toContain('Player C Variant — S10 Nineveh — "unlinked row"');
     expect(out).toContain('6 submissions (1 without a first + last name on the account)');
     expect(out).not.toMatch(RAW_EMAIL_RE);
     expect(out).not.toContain('@');
@@ -436,11 +436,11 @@ describe('--find-dupes (D16)', () => {
 
   it('prints one line when two submitters with the same name match the same rows', async () => {
     const root = fixture();
-    root.Users.subNone = { 'First Name': 'Robert', 'Last Name': 'Shamoelzadeh' };
-    root.Users.subDup = { 'First Name': 'Robert', 'Last Name': 'Shamoelzadeh' };
+    root.Users.subNone = { 'First Name': 'Player', 'Last Name': 'C Variant' };
+    root.Users.subDup = { 'First Name': 'Player', 'Last Name': 'C Variant' };
     root.Registrations['Futsal-16'].Submissions.subDup = { Answers: {} };
     const found = await findDupes('Futsal-16', deps(new MemDb(root)));
-    expect(found).toEqual([{ name: 'Robert Shamoelzadeh', where: ['S10 Nineveh'], kind: 'unlinked row' }]);
+    expect(found).toEqual([{ name: 'Player C Variant', where: ['S10 Nineveh'], kind: 'unlinked row' }]);
   });
 
   it('refuses a registration that is not a league sport, and a bad id', async () => {
@@ -597,10 +597,10 @@ describe('fix round 1', () => {
   });
 
   it('labelOf never prints a raw path', () => {
-    expect(labelOf('Users/keepA/Played/Futsal/Season 11', MAP)).toBe('Hiram Alvarez: kept account Played/Futsal/Season 11');
-    expect(labelOf('Users/oldA/MergedInto', MAP)).toBe('Hiram Alvarez: old account #1 MergedInto');
-    expect(labelOf('PublicProfiles/oldB', MAP)).toBe('public profile of Carlo Gewargis: old account #1');
-    expect(labelOf('Somewhere/keepA/Else', MAP)).toBe('Hiram Alvarez: an unrecognized path');
+    expect(labelOf('Users/keepA/Played/Futsal/Season 11', MAP)).toBe('Player A: kept account Played/Futsal/Season 11');
+    expect(labelOf('Users/oldA/MergedInto', MAP)).toBe('Player A: old account #1 MergedInto');
+    expect(labelOf('PublicProfiles/oldB', MAP)).toBe('public profile of Player B: old account #1');
+    expect(labelOf('Somewhere/keepA/Else', MAP)).toBe('Player A: an unrecognized path');
     expect(labelOf('Users/strangerUid/Token', MAP)).toBe('an unrecognized path');
     expect(labelOf('PublicProfiles/strangerUid', MAP)).toBe('an unrecognized path');
     expect(labelOf('Registrations/x/Submissions', MAP)).toBe('an unrecognized path');
@@ -803,7 +803,7 @@ describe('--notify (D11 / D12)', () => {
 
     const half = await appliedDb();
     half.set('Users/oldB/MergedInto', null); // one of the two lost its stamp
-    await expect(notifyMerge(MAP, notifyDeps(half), SEND)).rejects.toThrow(/Carlo Gewargis: old account #1/);
+    await expect(notifyMerge(MAP, notifyDeps(half), SEND)).rejects.toThrow(/Player B: old account #1/);
     expect(half.writes()).toEqual([]);
     half.set('Users/oldB/MergedInto', '   ');
     await expect(notifyMerge(MAP, notifyDeps(half), SEND)).rejects.toThrow(/not stamped/);
@@ -813,7 +813,7 @@ describe('--notify (D11 / D12)', () => {
   it('refuses an account stamped into a DIFFERENT kept account than the map says', async () => {
     const db = await appliedDb();
     db.set('Users/oldA/MergedInto', 'someoneElse');
-    await expect(notifyMerge(MAP, notifyDeps(db), SEND)).rejects.toThrow(/Hiram Alvarez: old account #1.*different account/);
+    await expect(notifyMerge(MAP, notifyDeps(db), SEND)).rejects.toThrow(/Player A: old account #1.*different account/);
     expect(db.writes()).toEqual([]);
   });
 
@@ -845,12 +845,12 @@ describe('--notify (D11 / D12)', () => {
   });
 
   it('three old accounts of one person: three notices, a campaign of one', async () => {
-    const map: MergeMap = { clusters: [{ who: 'Robert Tatari', keep: 'keepA', old: ['oldA', 'oldB', 'oldC'] }] };
+    const map: MergeMap = { clusters: [{ who: 'Player E', keep: 'keepA', old: ['oldA', 'oldB', 'oldC'] }] };
     const db = new MemDb({
       Users: {
-        keepA: { 'First Name': 'Robert' },
-        oldA: { MergedInto: 'keepA', MergedAt: 1, MergedHint: 'ro••@gmail.com' },
-        oldB: { MergedInto: 'keepA', MergedAt: 1, MergedHint: 'ro••@gmail.com' },
+        keepA: { 'First Name': 'Player' },
+        oldA: { MergedInto: 'keepA', MergedAt: 1, MergedHint: 'pl••@example.test' },
+        oldB: { MergedInto: 'keepA', MergedAt: 1, MergedHint: 'pl••@example.test' },
         oldC: { MergedInto: 'keepA', MergedAt: 1 }, // the kept account has no email: no hint
       },
     });
@@ -899,8 +899,8 @@ describe('--notify fix round 1: previews by default, only --send writes', () => 
     expect(out).toContain('PREVIEW - nothing was written');
     expect(out).toContain('npm run merge:accounts -- --notify --send');
     expect(out).toContain('2 notice(s) to write');
-    expect(out).toContain('Hiram Alvarez: old account #1');
-    expect(out).toContain('Carlo Gewargis: old account #1');
+    expect(out).toContain('Player A: old account #1');
+    expect(out).toContain('Player B: old account #1');
     expect(out).toContain('push to 2 kept account(s), one campaign each: 2 to write');
     expect(out).not.toMatch(/wrote /);
     expect(out).not.toMatch(RAW_EMAIL_RE);
@@ -979,14 +979,14 @@ describe('old-login switch (D13)', () => {
     const half = await appliedDb();
     half.set('Users/oldB/MergedInto', null);
     await expect(switchOldLogins(MAP, deps(half, { setLoginDisabled: sw.fn }), { ...DISABLE, send: true }))
-      .rejects.toThrow(/Carlo Gewargis: old account #1 is not stamped yet/);
+      .rejects.toThrow(/Player B: old account #1 is not stamped yet/);
     expect(sw.calls).toEqual([]);
 
     // Stamped into a DIFFERENT account than the map's kept account: refused too.
     const wrong = await appliedDb(MAP, 1_762_400_000_001);
     wrong.set('Users/oldA/MergedInto', 'someoneElse');
     await expect(switchOldLogins(MAP, deps(wrong, { setLoginDisabled: sw.fn }), { ...ENABLE, send: true }))
-      .rejects.toThrow(/Refusing --enable-old-logins.*Hiram Alvarez: old account #1 is stamped into a different account/);
+      .rejects.toThrow(/Refusing --enable-old-logins.*Player A: old account #1 is stamped into a different account/);
     expect(sw.calls).toEqual([]);
   });
 
@@ -1002,8 +1002,8 @@ describe('old-login switch (D13)', () => {
     expect(out).toContain('DISABLE OLD LOGINS PREVIEW');
     expect(out).toContain('PREVIEW - nothing was changed');
     expect(out).toContain('2 old login(s) would be DISABLED');
-    expect(out).toContain('Hiram Alvarez: old account #1 (oldA)');
-    expect(out).toContain('Carlo Gewargis: old account #1 (oldB)');
+    expect(out).toContain('Player A: old account #1 (oldA)');
+    expect(out).toContain('Player B: old account #1 (oldB)');
     expect(out).toContain('npm run merge:accounts -- --disable-old-logins --send');
     expect(out).not.toMatch(RAW_EMAIL_RE);
     // The enable preview points at the enable command.
@@ -1101,7 +1101,7 @@ describe('old-login switch (D13)', () => {
     db.set('Users/oldA/MergedInto', 'someoneElse');
     sw.calls.length = 0;
     await expect(switchOldLogins(MAP, deps(db, { setLoginDisabled: sw.fn }), { ...ENABLE, send: true }))
-      .rejects.toThrow(/Refusing --enable-old-logins: Hiram Alvarez: old account #1 is stamped into a different account.*Nothing was changed/);
+      .rejects.toThrow(/Refusing --enable-old-logins: Player A: old account #1 is stamped into a different account.*Nothing was changed/);
     expect(sw.calls).toEqual([]);
   });
 
@@ -1337,7 +1337,7 @@ describe('top-level error output prints uid prefixes only (every mode)', () => {
     // a uid with underscore/hyphen is covered by the map's own list
     expect(redactUids('Users/abc_def-ghi-jkl-mno-pqr-stu/x', ['abc_def-ghi-jkl-mno-pqr-stu'])).toBe('Users/abc_de/x');
     // short ids, season numbers, team and roster names are left alone
-    const keepAsIs = 'GET Users/oldA/MergedInto Futsal/15/Line Ups/Ashur/Hiram Alvarez/UID -> HTTP 500';
+    const keepAsIs = 'GET Users/oldA/MergedInto Futsal/15/Line Ups/Ashur/Player A/UID -> HTTP 500';
     expect(redactUids(keepAsIs, ['oldA', 'keepA'])).toBe(keepAsIs);
     // a run longer than 40 characters is not a uid (a digest, say)
     const long = 'a'.repeat(64);

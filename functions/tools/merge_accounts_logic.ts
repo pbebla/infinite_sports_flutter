@@ -154,7 +154,7 @@ const lacks = (v: unknown): boolean => v === undefined || v === null || (typeof 
 
 /** Exactly the shape maskEmail produces: at most 2 visible characters, 1-8
  *  bullets, one `@`, then a domain with no `@` or whitespace. A raw email
- *  (no bullet) or `carlo11rocks•@gmail.com` (too much showing) fails. */
+ *  (no bullet) or `testplayer12•@example.test` (too much showing) fails. */
 const MASKED_HINT_RE = new RegExp(`^[^@\\s${MASK_BULLET}]{0,2}${MASK_BULLET}{1,8}@[^@\\s]+$`, 'u');
 export function looksMasked(hint: unknown): hint is string {
   return typeof hint === 'string' && MASKED_HINT_RE.test(hint);

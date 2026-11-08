@@ -3,7 +3,7 @@ import { maskEmail, redactEmails } from './mask_email';
 
 describe('maskEmail (merge design D6)', () => {
   it('keeps the first 2 characters and at most 8 bullets', () => {
-    expect(maskEmail('carlo11rocks@gmail.com')).toBe('ca••••••••@gmail.com');
+    expect(maskEmail('testplayer12@example.test')).toBe('te••••••••@example.test');
   });
 
   it('a 1-2 character local part keeps its first character plus one bullet', () => {
@@ -54,7 +54,7 @@ describe('maskEmail (merge design D6)', () => {
 
 describe('redactEmails (keeps addresses out of stored errors and logs)', () => {
   it('replaces every address-looking token and leaves the rest', () => {
-    expect(redactEmails('550 <carlo11rocks@gmail.com>: Recipient rejected, also x.y+z@mail.example.org!'))
+    expect(redactEmails('550 <testplayer12@example.test>: Recipient rejected, also x.y+z@mail.example.org!'))
       .toBe('550 <[email]>: Recipient rejected, also [email]!');
   });
 

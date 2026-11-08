@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript (tools + Cloud Functions, vitest), Flutter/Dart fan app and Manager app, Realtime Database REST with the firebase-tools admin login, Identity Toolkit REST, nodemailer (support mailer), FCM via Campaigns.
 
-**Spec:** this document's "Design" section. Owner decisions (2026-11-06): merge all 10 clusters; keep — Hiram: the S15 email; Carlo: the S16 email (carlo11rocks); Anthony: the S14–15 email; Mishel Ushana: the S14–15 email; Robert Tatari: the S15 email; Ashor: the S12 email; Joseph Baba: the S14 email (ghadine); Mishel Lazar: the S10 email; Roben Tatari: the S11–15 email; Robert Shamoeilzadeh: the S11 account. Fix "Rabert" → "Robert". Tell them which email to use by **in-app notice + push + email**. **Revision 2 (2026-11-06):** Fable's review (`docs/superpowers/plans/2026-11-06-fable-review-scale-and-merge.md`) folded in — M1, M2, S1–S3; owner: "lets do all the recommendation and fixes".
+**Spec:** this document's "Design" section. Owner decisions (2026-11-06): merge all 10 clusters; keep — Hiram: the S15 email; Carlo: the S16 email (his Season 16 email); Anthony: the S14–15 email; Mishel Ushana: the S14–15 email; Robert Tatari: the S15 email; Ashor: the S12 email; Joseph Baba: the S14 email; Mishel Lazar: the S10 email; Roben Tatari: the S11–15 email; Robert Shamoeilzadeh: the S11 account. Fix "Rabert" → "Robert". Tell them which email to use by **in-app notice + push + email**. **Revision 2 (2026-11-06):** Fable's review (`docs/superpowers/plans/2026-11-06-fable-review-scale-and-merge.md`) folded in — M1, M2, S1–S3; owner: "lets do all the recommendation and fixes".
 
 ---
 
@@ -113,7 +113,7 @@ Every account in the 10 clusters was checked against every node that stores a pl
 - Produces: `maskEmail(email: string): string` (D6); `buildMergePlan(map: MergeMap, snap: MergeSnapshot, nowMs: number): { writes: PlanWrite[]; refusals: Array<{ who: string; why: string }>; summary: string[] }` where `PlanWrite = { path: string; before: unknown; after: unknown }` (`after: null` = remove) and `MergeSnapshot` holds the values of every node the plan may touch keyed by path (`Users/<uid>` per uid, each relevant roster `UID` leaf, each touched season's `Fantasy/<sport>/<season>/Config` presence) plus `keptHints: Record<keepUid, string>` (already masked); `assertMergePaths(writes, map, snap)` — the allowlist (D1/D2/D3/D4/D5/D10 paths only).
 
 - [ ] **Step 1: Failing tests** (fake uids, fixtures shaped like the audit):
-  - `maskEmail('carlo11rocks@gmail.com')` → `'ca••••••••@gmail.com'` (8 bullets max); `maskEmail('ab@x.org')` → `'a•@x.org'`; `maskEmail('a@x.org')` → `'a•@x.org'`.
+  - `maskEmail('testplayer12@example.test')` → `'te••••••••@example.test'` (8 bullets max); `maskEmail('ab@x.org')` → `'a•@x.org'`; `maskEmail('a@x.org')` → `'a•@x.org'`.
   - Hiram-like: 4 Line Ups rows relinked, 4 Played entries added to keep, `ProfileUrl` copied, old account gets exactly `MergedInto`, `MergedAt`, `MergedHint` (its `Played` untouched).
   - Joseph-like: keep already has `ProfileUrl` → not overwritten.
   - Carlo-like: 3 AFC rows relinked, no Played entry for AFC.

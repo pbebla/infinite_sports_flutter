@@ -7,7 +7,7 @@ import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { handleMergeNotice, MergeNoticeDeps, onMergeNoticeCreated } from './merge_notice_watch';
 
-const OLD_EMAIL = 'old.address.zzz@yahoo.com';
+const OLD_EMAIL = 'old.address.zzz@example.test';
 const HINT = 'ca••••••••@gmail.com';
 
 type Tree = Record<string, any>;
@@ -130,7 +130,7 @@ describe('handleMergeNotice', () => {
 
   it('a lookup or mailer that THROWS is caught: failed, the error message only, addresses redacted', async () => {
     const h1 = harness({
-      getEmail: async () => { throw new Error('lookup for old.address.zzz@yahoo.com timed out'); },
+      getEmail: async () => { throw new Error('lookup for old.address.zzz@example.test timed out'); },
     });
     await expect(handleMergeNotice(h1.root, 'oldA', h1.deps)).resolves.toBe('failed');
     expect(h1.tree.MergeNotices.oldA.Status).toBe('failed');

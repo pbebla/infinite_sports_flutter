@@ -5,9 +5,9 @@
  *  The local part keeps its first 2 characters, then one `•` for every
  *  remaining character (at most 8); a local part of 1-2 characters keeps its
  *  first character and gets one `•`. The domain is unchanged:
- *    carlo11rocks@gmail.com -> ca••••••••@gmail.com
- *    ab@x.org               -> a•@x.org
- *    a@x.org                -> a•@x.org
+ *    testplayer12@example.test -> te••••••••@example.test
+ *    ab@x.org                  -> a•@x.org
+ *    a@x.org                   -> a•@x.org
  *
  *  Pure. Splits at the LAST `@`, counts characters (not UTF-16 units), and
  *  never echoes input that is not an email: with no `@` or no domain the
