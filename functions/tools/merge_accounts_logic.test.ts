@@ -221,12 +221,12 @@ describe('buildMergePlan: Player-A-like cluster (D1, D3, D4, D5)', () => {
     });
   });
 
-  it('stamps the old account with exactly MergedInto, MergedAt, MergedHint (D5)', () => {
+  it('stamps the old account with exactly MergedHint, MergedAt, then MergedInto LAST (D5; MergedInto is the "done" marker)', () => {
     const oldWrites = plan.writes.filter((x) => x.path.startsWith('Users/oldH/'));
     expect(oldWrites).toEqual([
-      { path: 'Users/oldH/MergedInto', before: null, after: 'keepH' },
-      { path: 'Users/oldH/MergedAt', before: null, after: NOW },
       { path: 'Users/oldH/MergedHint', before: null, after: HINT },
+      { path: 'Users/oldH/MergedAt', before: null, after: NOW },
+      { path: 'Users/oldH/MergedInto', before: null, after: 'keepH' },
     ]);
     // ...its Played (and everything else) is untouched, and no whole-node write exists.
     expect(plan.writes.some((x) => x.path.startsWith('Users/oldH/Played'))).toBe(false);
@@ -694,7 +694,7 @@ describe('buildMergePlan: running twice (Review Focus 3)', () => {
     const second = buildMergePlan(m, crashed, NOW + 5000);
     expect(second.refusals).toEqual([]);
     expect(paths(second.writes)).toEqual([
-      'Users/oldH/MergedInto', 'Users/oldH/MergedAt', 'Users/oldH/MergedHint',
+      'Users/oldH/MergedHint', 'Users/oldH/MergedAt', 'Users/oldH/MergedInto',
     ]);
     expect(byPath(second.writes).get('Users/oldH/MergedAt')?.after).toBe(NOW + 5000);
   });
@@ -894,10 +894,29 @@ describe('fix 1: exact stamp before-values; only absent/null counts as missing',
   it('a fresh old account gets the three stamps with before null', () => {
     const stamps = planFor({}).writes.filter((x) => x.path.startsWith('Users/o/'));
     expect(stamps).toEqual([
-      { path: 'Users/o/MergedInto', before: null, after: 'k' },
-      { path: 'Users/o/MergedAt', before: null, after: NOW },
       { path: 'Users/o/MergedHint', before: null, after: HINT },
+      { path: 'Users/o/MergedAt', before: null, after: NOW },
+      { path: 'Users/o/MergedInto', before: null, after: 'k' },
     ]);
+  });
+
+  it('MergedInto is the LAST write of every old account, and a crash before it leaves only a harmless partial state a re-run finishes', () => {
+    const w = new World().user('k').user('o1').user('o2').hint('k');
+    w.row('Futsal', '9', 'Wolves', 'Ann A', 'o1');
+    const m = mapOf(cluster({ who: 'Ann A', keep: 'k', old: ['o1', 'o2'] }));
+    const plan = buildMergePlan(m, w.snap(), NOW);
+    for (const o of ['o1', 'o2']) {
+      const mine = paths(plan.writes).filter((p) => p.startsWith(`Users/${o}/`));
+      expect(mine, o).toEqual([`Users/${o}/MergedHint`, `Users/${o}/MergedAt`, `Users/${o}/MergedInto`]);
+    }
+    // Stamps are the end of the cluster, after every relink and Played write.
+    const firstStamp = paths(plan.writes).findIndex((p) => p.includes('/Merged'));
+    expect(paths(plan.writes).slice(firstStamp).every((p) => p.includes('/Merged'))).toBe(true);
+    // Crash after the hint and the time but before MergedInto: no 'done' marker yet.
+    const partial = applyTo(w.snap(), plan.writes.filter((x) => !x.path.endsWith('/MergedInto')));
+    const rerun = buildMergePlan(m, partial, NOW + 9000);
+    expect(rerun.refusals).toEqual([]);
+    expect(paths(rerun.writes)).toEqual(['Users/o1/MergedInto', 'Users/o2/MergedInto']);
   });
 
   it('non-empty existing stamps count as already stamped and are left alone', () => {

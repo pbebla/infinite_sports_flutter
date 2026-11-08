@@ -342,6 +342,22 @@ describe('dry run: public profiles of the old accounts (final-review fix 6)', ()
 });
 
 describe('apply + undo', () => {
+  it('stamp order (final-review fix 5): MergedHint and MergedAt first, MergedInto LAST per old account; --undo takes MergedInto off first', async () => {
+    const db = withMirror(new MemDb(fixture()));
+    const r = await applyMerge(MAP, deps(db), { canary: true, expectPlan: await digestOf(MAP, db.root) });
+    expect(r.ok).toBe(true);
+    for (const o of ['oldA', 'oldB']) {
+      expect(db.writes().map((w) => w.path).filter((p) => p.startsWith(`Users/${o}/`)), o).toEqual([
+        `Users/${o}/MergedHint`, `Users/${o}/MergedAt`, `Users/${o}/MergedInto`,
+      ]);
+    }
+    // Undo is the reverse of the write order: the "done" marker goes first.
+    db.calls = [];
+    await undoMerge(r.backupFile as string, deps(db));
+    const undone = db.writes().map((w) => w.path).filter((p) => p.startsWith('Users/oldA/'));
+    expect(undone).toEqual(['Users/oldA/MergedInto', 'Users/oldA/MergedAt', 'Users/oldA/MergedHint']);
+  });
+
   it('backup/undo round trip: apply writes the plan, undo restores every path verbatim', async () => {
     const before = fixture();
     const db = withMirror(new MemDb(fixture()));

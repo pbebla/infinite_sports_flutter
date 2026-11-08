@@ -58,9 +58,12 @@
 //                                    submitter uids. An old uid in it refuses.
 //
 // Write order inside a cluster is deliberate: Played, profile fields, roster
-// UID relinks, and the stamps LAST. A crash part-way leaves a state that a
-// rerun finishes without duplicating anything (the stamps are the "done"
-// marker; the rows are only relinked after their Played entry exists).
+// UID relinks, and the stamps LAST - and per old account MergedHint, then
+// MergedAt, then MergedInto. A crash part-way leaves a state that a rerun
+// finishes without duplicating anything (MergedInto is the "done" marker - it
+// triggers the public-profile mirror and the app's notice, so it only appears
+// once the other two stamps are there; the rows are only relinked after their
+// Played entry exists). --undo is the reverse order.
 
 import { isDeepStrictEqual } from 'util';
 import { MASK_BULLET } from '../src/lib/mask_email';
@@ -589,15 +592,18 @@ function planCluster(
     const base = userPath(olds[i]);
     const before = stamps.length;
     // Only absent/null counts as missing (anything else was validated above).
-    if (!present(node['MergedInto'])) {
-      stamps.push({ path: `${base}/MergedInto`, before: node['MergedInto'] ?? null, after: keep });
+    // Order: MergedHint, MergedAt, then MergedInto LAST - MergedInto is the
+    // "done" marker (it triggers the public-profile mirror and is what the
+    // app's notice reads), so it only appears once the other two are there.
+    if (!present(node['MergedHint'])) {
+      if (hint !== null) stamps.push({ path: `${base}/MergedHint`, before: node['MergedHint'] ?? null, after: hint });
+      else missingHint = true;
     }
     if (!present(node['MergedAt'])) {
       stamps.push({ path: `${base}/MergedAt`, before: node['MergedAt'] ?? null, after: nowMs });
     }
-    if (!present(node['MergedHint'])) {
-      if (hint !== null) stamps.push({ path: `${base}/MergedHint`, before: node['MergedHint'] ?? null, after: hint });
-      else missingHint = true;
+    if (!present(node['MergedInto'])) {
+      stamps.push({ path: `${base}/MergedInto`, before: node['MergedInto'] ?? null, after: keep });
     }
     if (stamps.length > before) stamped++;
   }
