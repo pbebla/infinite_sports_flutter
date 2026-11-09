@@ -1266,14 +1266,29 @@ export interface UndoResult {
   /** Set only when the undo was refused up front: the labels of the copies whose
    *  move a later run finished. */
   heldByLaterRun?: string[];
+  /** Set only when the undo was refused up front by the fantasy guard (E1): the
+   *  "person: league Season N" labels of the roster relinks whose season now has
+   *  a fantasy Config but no TestFill marker (the test data was cleared). */
+  liveFantasy?: string[];
 }
 
 /** --undo: every path the apply ATTEMPTED (refused clusters are never
  *  touched) that still holds exactly what the apply wrote is put back to its
  *  backed-up value verbatim (DELETE when it was absent), stamps first (the
  *  reverse of the write order). A path already back at its old value is
- *  skipped; one changed since by someone else is left alone and listed. An
- *  old account whose MergedAt is another run's refuses the whole undo. */
+ *  skipped; one changed since by someone else is left alone and listed (and a
+ *  sign-up move whose kept record has since moved to the other status, Paid or
+ *  NotPaid, is left alone as a whole - both of its records are listed). An old
+ *  account whose MergedAt is another run's refuses the whole undo.
+ *
+ *  Two more refusals happen UP FRONT, before anything is written, and each
+ *  refuses the WHOLE undo (ok: false, never a half-undone person):
+ *   - a copy this backup wrote whose old record a LATER run already removed
+ *     (undo that later run's backup first);
+ *   - E1, the same fantasy guard as the apply: a roster relink whose season now
+ *     has a fantasy Config but no TestFill marker (the Season N test data was
+ *     cleared, so that season is live) - putting the old uid back would change a
+ *     live fantasy roster, so the owner tells Claude instead. */
 export async function undoMerge(file: string, deps: RunDeps): Promise<UndoResult> {
   deps.log(`Merge duplicate accounts - UNDO (${deps.target.label})`);
   const raw = readJsonFile(path.resolve(file), 'the backup');
@@ -1342,15 +1357,83 @@ export async function undoMerge(file: string, deps: RunDeps): Promise<UndoResult
     result.heldByLaterRun = heldByLater;
     return result;
   }
+  // E1, also up front: the apply put a league roster's UID leaf onto a fantasy
+  // season only while its TestFill marker existed. After the owner clears the test
+  // data (Config stays, TestFill goes) that season is LIVE, and writing the old uid
+  // back would make the roster trigger sync the whole team (a missing name joins the
+  // market). So every attempted league relink's season is checked - keys only - and
+  // one live season refuses the WHOLE undo, nothing written.
+  const liveCache = new Map<string, boolean>();
+  const liveSeasons = new Map<string, { sport: string; season: string }>();
+  const liveFantasy: string[] = [];
+  for (const e of todo) {
+    const ref = parseRosterUidPath(e.path);
+    if (!ref || ref.kind !== 'league') continue;
+    const key = `${ref.sport}|${ref.season}`;
+    if (!liveCache.has(key)) {
+      const hasConfig = ((await db.get(fantasyConfigPath(ref.sport, ref.season), { shallow: true })) ?? null) !== null;
+      const hasFill = hasConfig &&
+        ((await db.get(fantasyTestFillPath(ref.sport, ref.season), { shallow: true })) ?? null) !== null;
+      liveCache.set(key, hasConfig && !hasFill);
+    }
+    if (!liveCache.get(key)) continue;
+    liveSeasons.set(key, { sport: ref.sport, season: ref.season });
+    const who = (map.clusters.find((x) => x.keep === e.after) ??
+      map.clusters.find((x) => typeof e.before === 'string' && (x.old ?? []).includes(e.before)))?.who ?? 'an unrecognized account';
+    const label = `${who}: ${ref.sport} Season ${ref.season}`;
+    if (!liveFantasy.includes(label)) liveFantasy.push(label);
+  }
+  if (liveFantasy.length > 0) {
+    const seasonNames = [...new Set([...liveSeasons.values()].map((s) => Number(s.season)))]
+      .sort((a, b) => a - b).map((n) => `Season ${n}`);
+    const seasonText = seasonNames.length <= 1 ? seasonNames.join('')
+      : `${seasonNames.slice(0, -1).join(', ')} and ${seasonNames[seasonNames.length - 1]}`;
+    deps.log(`Refusing --undo: a season in this backup now has live fantasy (the ${seasonText} test data was cleared). ` +
+      'Undoing would change a live fantasy roster. Tell Claude.');
+    deps.log('Nothing was changed.');
+    deps.log('  the roster relink(s) in question (person: league, season):');
+    for (const l of liveFantasy) deps.log(`    ${l}`);
+    result.ok = false;
+    result.liveFantasy = liveFantasy;
+    return result;
+  }
+  // A sign-up move whose kept record has since MOVED to the other status (Paid <->
+  // NotPaid): putting the old record back would leave the person with two records in
+  // two statuses, and dropping the kept copy would lose the move. If the move still
+  // has something for this undo to write and the kept uid holds a record in the OTHER
+  // status of that league and season (and this backup did not write it), the whole
+  // move is left alone and reported.
+  const moves = new Map<string, { league: string; season: string; status: string; keep: string; paths: string[]; active: boolean }>();
+  for (const s of states) {
+    const su = parseSignUpPath(s.e.path);
+    const c = su ? map.clusters.find((x) => x.keep === su.uid || (x.old ?? []).includes(su.uid)) : undefined;
+    if (!su || !c) continue;
+    const key = `${c.keep}|${su.league}|${su.season}|${su.status}`;
+    const m = moves.get(key) ?? { league: su.league, season: su.season, status: su.status, keep: c.keep, paths: [], active: false };
+    m.paths.push(s.e.path);
+    if (s.state === 'written') m.active = true;
+    moves.set(key, m);
+  }
+  const movedAway = new Map<string, string>(); // a move's path -> the status the kept record is in now
+  for (const m of moves.values()) {
+    if (!m.active) continue;
+    const other = m.status === 'Paid' ? 'NotPaid' : 'Paid';
+    const otherLeaf = signUpPath(m.league, m.season, other, m.keep);
+    if (backup.entries.some((e) => e.path === otherLeaf)) continue; // this backup's own record
+    if (((await db.get(otherLeaf)) ?? null) !== null) for (const p of m.paths) movedAway.set(p, other);
+  }
   // Reverse of the write order: a removed old record is put back BEFORE its kept
   // copy is removed (the plan wrote the copies first, then the removes).
   for (const s of [...states].reverse()) {
     const label = labelOf(s.e.path, map);
-    if (s.state === 'before') {
-      result.alreadyBefore++;
-    } else if (s.state === 'changed') {
+    if (s.state === 'changed') {
       result.leftAlone.push(label);
       deps.log(`    LEFT ALONE ${label} (changed since the merge)`);
+    } else if (movedAway.has(s.e.path)) {
+      result.leftAlone.push(label);
+      deps.log(`    LEFT ALONE ${label} (the kept account's record moved to ${movedAway.get(s.e.path)} since the merge)`);
+    } else if (s.state === 'before') {
+      result.alreadyBefore++;
     } else if (heldCopies.has(s.e.path)) {
       result.leftAlone.push(label);
       deps.log(`    LEFT ALONE ${label} (its old record changed since the merge)`);

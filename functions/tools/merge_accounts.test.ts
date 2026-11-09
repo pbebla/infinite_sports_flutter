@@ -2329,3 +2329,151 @@ describe('Task 2 fix round 2: undoing a stopped run after a re-run finished the 
     expect(db.root['Sign Ups'].Futsal['13'].Paid).toEqual({ oldA: ' Zed Display ' }); // the copy was removed, the old record is there
   });
 });
+
+describe('Final review fix 1: --undo honours the fantasy test-season guard (E1)', () => {
+  const REFUSAL = 'Refusing --undo: a season in this backup now has live fantasy (the Season 15 test data was cleared). ' +
+    'Undoing would change a live fantasy roster. Tell Claude.';
+  const applied = async () => {
+    const db = withMirror(new MemDb(moveFixture()));
+    const r = await applyMerge(MAP, deps(db), { canary: true, expectPlan: await digestOf(MAP, db.root) });
+    expect(r.ok).toBe(true);
+    return { db, r };
+  };
+
+  it('TestFill still there: the undo goes ahead as today, restoring the old UID on the test season roster', async () => {
+    const { db, r } = await applied();
+    expect(db.root.Futsal['15']['Line Ups'].Ashur['Player A Old'].UID).toBe('keepA');
+    const u = await undoMerge(r.backupFile as string, deps(db));
+    expect(u.ok).toBe(true);
+    expect(u.leftAlone).toEqual([]);
+    expect(db.root.Futsal['15']['Line Ups'].Ashur['Player A Old'].UID).toBe('oldA');
+    expect(noPublic(db.root)).toEqual(noPublic(moveFixture()));
+  });
+
+  it('Config present and TestFill gone (the fill was cleared): the WHOLE undo is refused up front, zero writes, ok false, labels only', async () => {
+    const { db, r } = await applied();
+    db.set('Fantasy/Futsal/15/TestFill', null); // the owner cleared the Season 15 test data (Config stays)
+    expect(db.root.Fantasy.Futsal['15'].Config).toBeDefined();
+    const d = deps(db);
+    const state = clone(db.root);
+    const n = db.calls.length;
+    const u = await undoMerge(r.backupFile as string, d);
+    expect(u.ok).toBe(false);
+    expect(u.restored).toBe(0);
+    expect(u.alreadyBefore).toBe(0);
+    expect(u.leftAlone).toEqual([]);
+    expect(u.liveFantasy).toEqual(['Player A: Futsal Season 15']);
+    const out = d.lines.join('\n');
+    expect(out).toContain(REFUSAL);
+    expect(out).toContain('Player A: Futsal Season 15');
+    expect(out).not.toMatch(/UNDONE|restored /);
+    expect(out).not.toMatch(/keepA|oldA|keepB|oldB|keepC|KeptParle|OldParle/); // never a uid
+    // not one write - not Player A's, and not Player B's or C's either (all or nothing)
+    expect(db.calls.slice(n).filter((c) => c.method !== 'GET')).toEqual([]);
+    expect(db.root).toEqual(state);
+    expect(db.root.Futsal['15']['Line Ups'].Ashur['Player A Old'].UID).toBe('keepA'); // Parlevino's old uid is NOT written back
+    // only keys were read for the check (the read rules allow nothing more)
+    const reads = db.calls.slice(n).filter((c) => /^Fantasy\//.test(c.path));
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every((c) => c.method === 'GET' && c.shallow)).toBe(true);
+  });
+
+  it('no Config at all in the season (nothing live to protect): the undo proceeds', async () => {
+    const { db, r } = await applied();
+    db.set('Fantasy/Futsal/15/TestFill', null);
+    db.set('Fantasy/Futsal/15/Config', null); // no fantasy season there any more
+    const u = await undoMerge(r.backupFile as string, deps(db));
+    expect(u.ok).toBe(true);
+    expect(u.leftAlone).toEqual([]);
+    expect(db.root.Futsal['15']['Line Ups'].Ashur['Player A Old'].UID).toBe('oldA');
+  });
+
+  it('two cleared test seasons are named together, and each person-season is listed once', async () => {
+    const root = moveFixture();
+    root.Futsal['16'] = { 'Line Ups': { Ashur: { 'Player A Old 16': { UID: 'oldA' }, 'Player A Old 16b': { UID: 'oldA' } } } };
+    root.Fantasy.Futsal['16'] = { Config: { lockOverride: 'open' }, TestFill: { At: 1_762_000_000_000, Managers: 20 } };
+    const db = withMirror(new MemDb(root));
+    const r = await applyMerge(MAP, deps(db), { canary: true, expectPlan: await digestOf(MAP, db.root) });
+    expect(r.ok).toBe(true);
+    const applyWrites = db.writes().length;
+    db.set('Fantasy/Futsal/15/TestFill', null);
+    db.set('Fantasy/Futsal/16/TestFill', null);
+    const d = deps(db);
+    const u = await undoMerge(r.backupFile as string, d);
+    expect(u.ok).toBe(false);
+    expect(u.liveFantasy).toEqual(['Player A: Futsal Season 15', 'Player A: Futsal Season 16']);
+    expect(d.lines.join('\n')).toContain('(the Season 15 and Season 16 test data was cleared)');
+    expect(db.writes().length).toBe(applyWrites); // the undo wrote nothing
+  });
+
+  it('a live Config in a season this backup never relinked does not matter', async () => {
+    // The plain fixture has a Season 15 Config and no TestFill, but nobody is relinked there.
+    const db = withMirror(new MemDb(fixture()));
+    const r = await applyMerge(MAP, deps(db), { canary: true, expectPlan: await digestOf(MAP, db.root) });
+    expect(r.ok).toBe(true);
+    const u = await undoMerge(r.backupFile as string, deps(db));
+    expect(u.ok).toBe(true);
+    expect(noPublic(db.root)).toEqual(noPublic(fixture()));
+  });
+});
+
+describe('Final review fix 2 (minor 4): --undo and a kept sign-up copy moved to the other status', () => {
+  const applied = async () => {
+    const db = withMirror(new MemDb(moveFixture()));
+    const r = await applyMerge(MAP, deps(db), { canary: true, expectPlan: await digestOf(MAP, db.root) });
+    expect(r.ok).toBe(true);
+    return { db, r };
+  };
+
+  it('Paid -> NotPaid since the merge: neither the old record is put back nor the kept record touched; both listed, ok false', async () => {
+    const { db, r } = await applied();
+    db.set('Sign Ups/Futsal/12/Paid/keepA', null); // the kept account's record was flipped to unpaid
+    db.set('Sign Ups/Futsal/12/NotPaid/keepA', 'Zed Display');
+    const d = deps(db);
+    const n = db.calls.length;
+    const u = await undoMerge(r.backupFile as string, d);
+    expect(u.ok).toBe(false);
+    expect([...u.leftAlone].sort()).toEqual([
+      'Player A: kept account sign-up record, Futsal Season 12 (Paid)',
+      'Player A: old account #1 sign-up record, Futsal Season 12 (Paid)',
+    ]);
+    const out = d.lines.join('\n');
+    expect(out).toContain(
+      "LEFT ALONE Player A: kept account sign-up record, Futsal Season 12 (Paid) (the kept account's record moved to NotPaid since the merge)");
+    expect(out).toContain(
+      "LEFT ALONE Player A: old account #1 sign-up record, Futsal Season 12 (Paid) (the kept account's record moved to NotPaid since the merge)");
+    expect(out).not.toMatch(SU_LEAK_RE);
+    expect(out).not.toMatch(/keepA|oldA/);
+    // Season 12 was left exactly as it is now: no old record resurrected, the NotPaid record untouched
+    expect(db.root['Sign Ups'].Futsal['12'].Paid).toEqual({ stranger: 'Hidden Stranger' });
+    expect(db.root['Sign Ups'].Futsal['12'].NotPaid).toEqual({ keepA: 'Zed Display' });
+    expect(db.calls.slice(n).filter((c) => c.method !== 'GET' && c.path.startsWith('Sign Ups/Futsal/12/'))).toEqual([]);
+    // every other season was undone as usual
+    expect(db.root['Sign Ups'].Futsal['13'].Paid).toEqual({ oldA: ' Zed Display ' });
+    expect(db.root['Sign Ups'].Basketball['3'].NotPaid).toEqual({ oldB: 'Yan Display' });
+  });
+
+  it('NotPaid -> Paid works the same way (Basketball)', async () => {
+    const { db, r } = await applied();
+    db.set('Sign Ups/Basketball/3/NotPaid/keepB', null);
+    db.set('Sign Ups/Basketball/3/Paid/keepB', 'Yan Display');
+    const d = deps(db);
+    const u = await undoMerge(r.backupFile as string, d);
+    expect(u.ok).toBe(false);
+    expect([...u.leftAlone].sort()).toEqual([
+      'Player B: kept account sign-up record, Basketball Season 3 (NotPaid)',
+      'Player B: old account #1 sign-up record, Basketball Season 3 (NotPaid)',
+    ]);
+    expect(d.lines.join('\n')).toContain("(the kept account's record moved to Paid since the merge)");
+    expect(db.root['Sign Ups'].Basketball['3']).toEqual({ Paid: { keepB: 'Yan Display' } });
+    expect(db.root['Sign Ups'].Futsal['12'].Paid.oldA).toBe('Zed Display'); // Player A is undone
+  });
+
+  it('the kept copy still in its own status and nothing in the other: the undo is as before', async () => {
+    const { db, r } = await applied();
+    const u = await undoMerge(r.backupFile as string, deps(db));
+    expect(u.ok).toBe(true);
+    expect(u.leftAlone).toEqual([]);
+    expect(noPublic(db.root)).toEqual(noPublic(moveFixture()));
+  });
+});
