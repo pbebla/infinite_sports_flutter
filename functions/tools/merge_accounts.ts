@@ -324,10 +324,12 @@ export function guardRest(inner: Rest, opts: GuardOptions): Rest {
     },
     put: async (p, value) => {
       assertWriteAllowed('PUT', p, opts);
-      // A PUT of null would delete: the only way out for a removal is `del`, which
-      // has its own list.
-      if (value === null || value === undefined) {
-        throw new Error(`Refusing PUT ${p}: a PUT never carries null (a removal goes through DELETE)`);
+      // A PUT of null, {} or [] is a delete to the REST API: the only way out for a
+      // removal is `del`, which has its own list.
+      const empty = value === null || value === undefined ||
+        (Array.isArray(value) && value.length === 0) || (isPlainMap(value) && Object.keys(value).length === 0);
+      if (empty) {
+        throw new Error(`Refusing PUT ${p}: a PUT never carries null, {} or [] (a removal goes through DELETE)`);
       }
       await inner.put(p, value);
     },
@@ -971,6 +973,9 @@ export interface ApplyResult {
   backupFile: string | null;
   applied: string[];
   refusedAtApply: string[];
+  /** Clusters whose sign-up REMOVE was held back because a record changed in the
+   *  gap after the cluster's re-check (the rest of that cluster was not attempted). */
+  stoppedMidCluster: string[];
   /** Clusters the planner refused (nothing of them planned or written). */
   refusedByPlan: string[];
   stoppedByCanary: boolean;
@@ -1042,6 +1047,22 @@ async function changedSincePlan(
   return changed;
 }
 
+/** E2, right before ONE sign-up DELETE: the old leaf must still hold exactly the
+ *  value being moved (`w.before`) and the kept account's copy must still hold that
+ *  same value (the copy is what makes the remove safe). Returns labels of what no
+ *  longer matches (no values). */
+async function changedBeforeRemove(
+  db: Rest, map: MergeMap, keep: string, w: PlanWrite,
+): Promise<string[]> {
+  const su = parseSignUpPath(w.path);
+  if (!su) return [labelOf(w.path, map)]; // not a sign-up leaf: never remove it
+  const out: string[] = [];
+  if (!same((await db.get(w.path)) ?? null, w.before ?? null)) out.push(`${labelOf(w.path, map)} changed`);
+  const copy = signUpPath(su.league, su.season, su.status, keep);
+  if (!same((await db.get(copy)) ?? null, w.before ?? null)) out.push(`${labelOf(copy, map)} changed`);
+  return out;
+}
+
 /** Review Focus 4: poll PublicProfiles/<old> until every watched old
  *  account is gone or [timeoutMs] has passed. */
 async function canaryGone(
@@ -1076,7 +1097,7 @@ export async function applyMerge(map: MergeMap, deps: RunDeps, opts: ApplyOption
   const plan = buildMergePlan(map, snap, mergedAt);
   printPlan(map, plan, stats, log);
   const result: ApplyResult = {
-    ok: true, backupFile: null, applied: [], refusedAtApply: [], refusedByPlan: [],
+    ok: true, backupFile: null, applied: [], refusedAtApply: [], stoppedMidCluster: [], refusedByPlan: [],
     stoppedByCanary: false, writes: 0,
   };
   result.refusedByPlan = [...new Set(plan.refusals.map((r) => r.who))];
@@ -1170,7 +1191,18 @@ export async function applyMerge(map: MergeMap, deps: RunDeps, opts: ApplyOption
         continue;
       }
       assertMergePaths(g.writes, map, snap);
+      let heldBack: string | null = null;
       for (const w of g.writes) {
+        if (w.after === null) {
+          // Right before EACH sign-up remove: the old record still says what is being
+          // moved and the kept copy is still there, the same. Anything else and this
+          // cluster stops here - before the DELETE, the rest un-attempted.
+          const gone = await changedBeforeRemove(writer, map, g.keep, w);
+          if (gone.length > 0) {
+            heldBack = gone.join('; ');
+            break;
+          }
+        }
         const entry = backup.entries.find((e) => e.path === w.path) as BackupEntry;
         entry.attempted = true;
         saveBackup(backupFile, backup); // recorded BEFORE the write is sent
@@ -1178,6 +1210,13 @@ export async function applyMerge(map: MergeMap, deps: RunDeps, opts: ApplyOption
         else await writer.put(w.path, w.after);
         result.writes++;
         log(`    ${w.after === null ? 'removed' : 'wrote'} ${labelOf(w.path, map)}`);
+      }
+      if (heldBack !== null) {
+        log(`  ${g.who}: STOPPED before a sign-up remove - changed since the cluster was checked: ${heldBack}; ` +
+          'the rest of this cluster was not attempted (nothing else of it was written). Run the dry run again, ' +
+          'then apply again - or undo this run.');
+        result.stoppedMidCluster.push(g.who);
+        continue;
       }
       result.applied.push(g.who);
 
@@ -1204,9 +1243,14 @@ export async function applyMerge(map: MergeMap, deps: RunDeps, opts: ApplyOption
     log(`  Undo: ${undoCmd}`);
     throw err;
   }
-  result.ok = result.refusedAtApply.length === 0 && result.refusedByPlan.length === 0;
+  result.ok = result.refusedAtApply.length === 0 && result.refusedByPlan.length === 0 &&
+    result.stoppedMidCluster.length === 0;
   log(`DONE - ${result.writes} writes for ${result.applied.length} cluster(s)` +
     (result.refusedAtApply.length ? `; REFUSED at apply: ${result.refusedAtApply.join(', ')}` : '') + '.');
+  if (result.stoppedMidCluster.length > 0) {
+    log(`${result.stoppedMidCluster.length} cluster(s) STOPPED before a sign-up remove: ` +
+      `${result.stoppedMidCluster.join(', ')} - part of each was written; a re-run finishes it.`);
+  }
   if (result.refusedByPlan.length > 0) log(refusedLine());
   log(`Undo: ${undoCmd}`);
   return result;
@@ -1275,7 +1319,7 @@ export async function undoMerge(file: string, deps: RunDeps): Promise<UndoResult
       deps.log(`    LEFT ALONE ${label} (changed since the merge)`);
     } else if (heldCopies.has(s.e.path)) {
       result.leftAlone.push(label);
-      deps.log(`    LEFT ALONE ${label} (its old record was changed since the merge, so this copy stays)`);
+      deps.log(`    LEFT ALONE ${label} (its old record changed since the merge)`);
     } else {
       if (s.e.before === null || s.e.before === undefined) await db.del(s.e.path);
       else await db.put(s.e.path, s.e.before);

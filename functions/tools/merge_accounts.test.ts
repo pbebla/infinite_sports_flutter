@@ -2084,7 +2084,8 @@ describe('Task 2: undo is careful with a record that changed since the merge', (
       'Player A: old account #1 sign-up record, Futsal Season 12 (Paid)',
     ]);
     expect(db.root['Sign Ups'].Futsal['12'].Paid).toEqual({ oldA: 'Re-created Name', keepA: 'Zed Display', stranger: 'Hidden Stranger' });
-    expect(d.lines.join('\n')).toContain('so this copy stays');
+    expect(d.lines.join('\n')).toContain(
+      'LEFT ALONE Player A: kept account sign-up record, Futsal Season 12 (Paid) (its old record changed since the merge)');
     // the other seasons were undone as usual
     expect(db.root['Sign Ups'].Futsal['13'].Paid).toEqual({ oldA: ' Zed Display ' });
     expect(db.root['Sign Ups'].Basketball['3'].NotPaid).toEqual({ oldB: 'Yan Display' });
@@ -2097,5 +2098,135 @@ describe('Task 2: undo is careful with a record that changed since the merge', (
     const u = await undoMerge(r.backupFile as string, deps(db));
     expect(u.leftAlone).toEqual(['Player A: kept account sign-up record, Futsal Season 13 (Paid)']);
     expect(db.root['Sign Ups'].Futsal['13'].Paid).toEqual({ oldA: ' Zed Display ', keepA: 'Edited Name' });
+  });
+});
+
+describe('Task 2 fix round 1: hardening before the first production removal', () => {
+  /** Runs an apply over the move fixture with a hook that changes the database
+   *  AFTER the cluster's re-check passed (so only the pre-DELETE check can see it). */
+  const inTheGap = async (hook: (db: MemDb) => void, n: number) => {
+    const db = withMirror(new MemDb(moveFixture()));
+    hook(db);
+    const d = deps(db, { now: () => 1_762_400_000_000 + n }); // (a backup file per run)
+    const digest = await digestOf(MAP, moveFixture());
+    const r = await applyMerge(MAP, d, { canary: true, expectPlan: digest });
+    const backup = JSON.parse(fs.readFileSync(r.backupFile as string, 'utf8'));
+    return { db, r, out: d.lines.join('\n'), backup };
+  };
+  const afterPut = (db: MemDb, path: string, then: () => void): void => {
+    const prior = db.onPut;
+    db.onPut = (p, v) => { prior?.(p, v); if (p === path) then(); };
+  };
+  const stopped = (x: Awaited<ReturnType<typeof inTheGap>>, ranOn: RegExp): void => {
+    expect(x.r.ok).toBe(false); // -> exit code 1
+    expect(x.r.stoppedMidCluster).toEqual(['Player A']);
+    expect(x.r.applied).toEqual(['Player B', 'Player C']); // the other clusters carry on
+    expect(x.r.refusedAtApply).toEqual([]);
+    expect(x.out).toMatch(/Player A: STOPPED before a sign-up remove - /);
+    expect(x.out).toMatch(ranOn);
+    expect(x.out).toMatch(/Player A: STOPPED[^\n]*the rest of this cluster was not attempted/);
+    expect(x.out).toMatch(/1 cluster\(s\) STOPPED before a sign-up remove: Player A/);
+    expect(x.out).not.toMatch(SU_LEAK_RE);
+    expect(x.out).not.toMatch(/keepA|oldA|Changed In The Gap/);
+    expect(wr(x.db, 'Sign Ups/Basketball/')).toEqual([
+      'PUT Sign Ups/Basketball/3/NotPaid/keepB', 'DELETE Sign Ups/Basketball/3/NotPaid/oldB',
+    ]);
+  };
+
+  it('the old record changed in the gap: no DELETE, the rest of that cluster is not attempted, the others go', async () => {
+    const x = await inTheGap((db) => afterPut(db, 'Sign Ups/Futsal/12/Paid/keepA', () => {
+      db.set('Sign Ups/Futsal/12/Paid/oldA', 'Changed In The Gap');
+    }), 1);
+    stopped(x, /old account #1 sign-up record, Futsal Season 12 \(Paid\) changed/);
+    expect(wr(x.db, 'Sign Ups/Futsal/')).toEqual([ // both copies landed, no remove was sent
+      'PUT Sign Ups/Futsal/12/Paid/keepA', 'PUT Sign Ups/Futsal/13/Paid/keepA',
+    ]);
+    expect(x.db.root['Sign Ups'].Futsal['12'].Paid.oldA).toBe('Changed In The Gap');
+    expect(x.db.root['Sign Ups'].Futsal['13'].Paid.oldA).toBe(' Zed Display ');
+    expect(x.db.root.Users.oldA.MergedInto).toBeUndefined(); // no stamp: the cluster is not "done"
+    const entry = (p: string) => x.backup.entries.find((e: { path: string }) => e.path === p);
+    expect(entry('Sign Ups/Futsal/12/Paid/keepA').attempted).toBe(true);
+    expect(entry('Sign Ups/Futsal/12/Paid/oldA').attempted).toBe(false);
+    expect(entry('Sign Ups/Futsal/13/Paid/oldA').attempted).toBe(false);
+    expect(entry('Users/oldA/MergedInto').attempted).toBe(false);
+    // undo takes the kept copies off and leaves the old keys exactly as they are now
+    const before = noPublic(moveFixture());
+    before['Sign Ups'].Futsal['12'].Paid.oldA = 'Changed In The Gap';
+    const u = await undoMerge(x.r.backupFile as string, deps(x.db));
+    expect(u.ok).toBe(true);
+    expect(noPublic(x.db.root)).toEqual(before);
+  });
+
+  it('the kept copy missing in the gap: no DELETE either', async () => {
+    const x = await inTheGap((db) => afterPut(db, 'Sign Ups/Futsal/12/Paid/keepA', () => {
+      db.set('Sign Ups/Futsal/12/Paid/keepA', null);
+    }), 2);
+    stopped(x, /kept account sign-up record, Futsal Season 12 \(Paid\) changed/);
+    expect(wr(x.db, 'Sign Ups/Futsal/').some((w) => w.startsWith('DELETE'))).toBe(false);
+    expect(x.db.root['Sign Ups'].Futsal['12'].Paid.oldA).toBe('Zed Display'); // the old record is still there
+    expect(x.db.root['Sign Ups'].Futsal['13'].Paid.oldA).toBe(' Zed Display ');
+    expect(x.db.root.Users.oldA.MergedInto).toBeUndefined();
+    const u = await undoMerge(x.r.backupFile as string, deps(x.db));
+    expect(u.ok).toBe(true);
+    expect(noPublic(x.db.root)).toEqual(noPublic(moveFixture()));
+  });
+
+  it('a change after the FIRST remove stops at the second: the first stays done, the rest is not attempted', async () => {
+    const x = await inTheGap((db) => {
+      const real = db.del.bind(db);
+      db.del = async (p: string) => {
+        await real(p);
+        if (p === 'Sign Ups/Futsal/12/Paid/oldA') db.set('Sign Ups/Futsal/13/Paid/oldA', 'Changed In The Gap');
+      };
+    }, 3);
+    stopped(x, /old account #1 sign-up record, Futsal Season 13 \(Paid\) changed/);
+    expect(wr(x.db, 'Sign Ups/Futsal/')).toEqual([
+      'PUT Sign Ups/Futsal/12/Paid/keepA', 'PUT Sign Ups/Futsal/13/Paid/keepA', 'DELETE Sign Ups/Futsal/12/Paid/oldA',
+    ]);
+    expect(x.db.root['Sign Ups'].Futsal['12'].Paid.oldA).toBeUndefined();
+    expect(x.db.root['Sign Ups'].Futsal['13'].Paid).toEqual({ oldA: 'Changed In The Gap', keepA: ' Zed Display ' });
+    expect(x.db.root.Users.oldA.MergedInto).toBeUndefined();
+    expect(x.backup.entries.find((e: { path: string }) => e.path === 'Sign Ups/Futsal/13/Paid/oldA').attempted).toBe(false);
+    const before = noPublic(moveFixture());
+    before['Sign Ups'].Futsal['13'].Paid.oldA = 'Changed In The Gap';
+    const u = await undoMerge(x.r.backupFile as string, deps(x.db));
+    expect(u.ok).toBe(true);
+    expect(noPublic(x.db.root)).toEqual(before);
+  });
+
+  it('nothing changing in the gap: the extra reads cost no write and the apply is as before', async () => {
+    const x = await inTheGap(() => undefined, 4);
+    expect(x.r.ok).toBe(true);
+    expect(x.r.stoppedMidCluster).toEqual([]);
+    expect(wr(x.db, 'Sign Ups/Futsal/').filter((w) => w.startsWith('DELETE'))).toHaveLength(2);
+  });
+
+  it('the PUT guard refuses {} and [] as values (the REST API treats them as deletes)', async () => {
+    const db = new MemDb(moveFixture());
+    const w = guardRest(db, { readOnly: false, allowedWrites: new Set(['Sign Ups/Futsal/12/Paid/keepA']) });
+    await expect(w.put('Sign Ups/Futsal/12/Paid/keepA', {})).rejects.toThrow(/never carries null, \{\} or \[\]/);
+    await expect(w.put('Sign Ups/Futsal/12/Paid/keepA', [])).rejects.toThrow(/never carries null, \{\} or \[\]/);
+    await expect(w.put('Sign Ups/Futsal/12/Paid/keepA', null)).rejects.toThrow(/never carries null, \{\} or \[\]/);
+    expect(db.writes()).toEqual([]);
+    await w.put('Sign Ups/Futsal/12/Paid/keepA', 'Zed Display'); // a value still goes
+    await w.put('Sign Ups/Futsal/12/Paid/keepA', { Some: 1 }); // a non-empty node is not an empty one
+    expect(db.writes()).toHaveLength(2);
+  });
+
+  it('reordering a remove changes the plan code', async () => {
+    const { plan, digest } = await dryRun(MAP, deps(new MemDb(moveFixture()), { log: () => undefined }));
+    const i = plan.writes.findIndex((w) => w.path === 'Sign Ups/Futsal/12/Paid/oldA');
+    const j = plan.writes.findIndex((w) => w.path === 'Sign Ups/Futsal/13/Paid/oldA');
+    expect(i).toBeGreaterThan(0);
+    expect(j).toBe(i + 1);
+    const swapped = [...plan.writes];
+    [swapped[i], swapped[j]] = [swapped[j], swapped[i]];
+    expect(planDigest(plan.writes)).toBe(digest);
+    expect(planDigest(swapped)).not.toBe(digest);
+    // and moving a remove ahead of its copy changes it too
+    const early = [...plan.writes];
+    const copy = early.findIndex((w) => w.path === 'Sign Ups/Futsal/12/Paid/keepA');
+    [early[copy], early[i]] = [early[i], early[copy]];
+    expect(planDigest(early)).not.toBe(digest);
   });
 });
