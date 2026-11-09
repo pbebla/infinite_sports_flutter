@@ -39,3 +39,30 @@ Opus 5.5 ran both plans (`2026-11-06-fantasy-scale-fixes.md`, `2026-11-06-merge-
 - Plan text D12 still describes one group push (the code and runbook do one per kept account).
 - Two test assertions made toothless by the email scrub (`merge_accounts_logic.test.ts:652`, `merge_notice_watch.test.ts:130`).
 - If the last week is scored more than a day after its deadline, the Manager can still show it LOCKED (pre-existing; that season simply keeps its normal checks).
+
+---
+
+# Addendum — Parlevino + "bring everything" extension (built 2026-11-08, Fable 5.1 as controller)
+
+The owner's decisions: keep Parlevino's Season 16 Gmail account and fold in the iCloud one; move every merged person's old sign-up records (my recommendation, accepted); one batch of eleven; "build it" without switching to Opus — so Fable ran the build with the builders and reviewers on cheaper models.
+
+## Things the owner will notice
+
+1. **The merge now also moves old sign-up records (paid or unpaid) to the kept account**, for all eleven people. The old account ends up with nothing but the "merged" stamp. *(Cost: the plan code changed; it is `bd98b0592255a300` as of the last read-only dry run.)*
+2. **Parlevino's Season 15 move only works while the Season 15 test fantasy data is still there** — and so does undoing it. If the test data has been cleared, the tool refuses both directions and the runbook says to tell Claude. *(Cost: the order in the runbook matters: merge → phone check → clear the test data → Season 16.)*
+3. **Undo is all-or-nothing when a stopped run was finished by a later run**: it refuses and tells you to undo the newer backup first. *(Cost: one extra undo step in a rare sequence; nothing can be lost.)*
+4. **Old position info (age etc.) is copied only when the new account has none** and may be out of date; the person can fix it in their profile.
+
+## Engineering calls
+
+- The tool must prove it looked for sign-up records: the snapshot carries each league's season list; a missing list refuses the person ("sign-ups were not scanned") instead of silently moving nothing. *(Cost: none.)*
+- Whitespace-only sign-up values count as blank and refuse the person — one meaning of "blank" everywhere. *(Cost: a stray record needs a hand fix.)*
+- A relink in a fantasy season is allowed only while `TestFill` is present (the "finished and paused" shortcut was dropped: the roster sync would add any roster name missing from the market). The same guard applies to undo. *(Cost: an undo after the fill clear needs Claude — fails safe.)*
+- Every DELETE re-reads the old record and the kept copy right before it; `{}`/`[]` are refused as write values; the plan code binds every remove and its order. *(Cost: none.)*
+- Undo refuses up front when a later run finished a stopped run's move (data-loss sequence found by review), and leaves a kept copy alone if its record moved to the other status. *(Cost: rare extra steps.)*
+- Task 1's builder pulled the tool's read-only sign-up reads forward (one interface); the runbook task ran in parallel with a review (no shared files). *(Cost: none.)*
+- The three league sign-up keys are hard-coded (Futsal, Basketball, Flag Football) rather than read from the database — equivalent today. *(Cost: a fourth league sport would need one line.)*
+
+## Left for later
+- A hand-deleted old record during a stop also trips the "finished by a later run" refusal (fails safe; the runbook says to tell Claude).
+- The Manager "Find duplicates" screen with near-name matching (Season 17).
