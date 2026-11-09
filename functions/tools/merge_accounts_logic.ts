@@ -11,9 +11,13 @@
 //   D4  copy ProfileUrl and missing Information leaves - nothing private;
 //   D5  stamp each old account with MergedInto / MergedAt / MergedHint and
 //       change nothing else on it;
-//   D10 optionally fix the kept account's First Name (owner request).
-// Everything else on an old account (Sign Ups, votes, Token, its Played...)
-// is left exactly as it is (D14).
+//   D10 optionally fix the kept account's First Name (owner request);
+//   E2  move each old account's paid / not-paid sign-up records
+//       (`Sign Ups/<league>/<S>/<Paid|NotPaid>/<uid>` - a text value, the
+//       player's display name) to the kept account: a copy, then a remove of
+//       the old key. The one and only removal this tool ever plans.
+// Everything else on an old account (votes, Token, its Played...) is left
+// exactly as it is (D14), and `Comments/<displayName>` is never touched.
 //
 // Snapshot contract (what the CLI must hand over, all keyed by full path):
 //   `Users/<uid>`                    the user node of every keep and old uid
@@ -38,6 +42,22 @@
 //                                    touch: any non-null value = the Config
 //                                    exists, null = checked and absent, key
 //                                    absent = not checked (refused: fail closed).
+//   `Fantasy/<Sport>/<S>/TestFill`   (E1) for every league season a relink would
+//                                    touch whose Config exists: any non-null value
+//                                    = the fantasy TEST season (its fill is
+//                                    applied, the roster trigger stands down),
+//                                    null = checked and absent (a LIVE fantasy
+//                                    season: refused), key absent = not checked
+//                                    (refused: fail closed). No Config -> no
+//                                    TestFill key is needed;
+//   `Sign Ups/<League>/<S>/<Paid|NotPaid>/<uid>`
+//                                    (E2) for every league sport / season in which
+//                                    any account of a cluster has a sign-up key:
+//                                    BOTH statuses for EVERY old uid and the kept
+//                                    uid of the cluster - the text value, or null
+//                                    when absent. A key of such a season missing
+//                                    from the snapshot refuses the cluster (fail
+//                                    closed); a value that is not text refuses it;
 //   keptHints[keep]                  the kept email, ALREADY MASKED (maskEmail).
 //
 // Old-account data this tool does NOT move (a cluster with any is REFUSED, so
@@ -58,12 +78,15 @@
 //                                    submitter uids. An old uid in it refuses.
 //
 // Write order inside a cluster is deliberate: Played, profile fields, roster
-// UID relinks, and the stamps LAST - and per old account MergedHint, then
-// MergedAt, then MergedInto. A crash part-way leaves a state that a rerun
-// finishes without duplicating anything (MergedInto is the "done" marker - it
-// triggers the public-profile mirror and the app's notice, so it only appears
-// once the other two stamps are there; the rows are only relinked after their
-// Played entry exists). --undo is the reverse order.
+// UID relinks, sign-up copies, sign-up removes, and the stamps LAST - and per
+// old account MergedHint, then MergedAt, then MergedInto. A crash part-way
+// leaves a state that a rerun finishes without duplicating anything
+// (MergedInto is the "done" marker - it triggers the public-profile mirror and
+// the app's notice, so it only appears once the other two stamps are there;
+// the rows are only relinked after their Played entry exists; a sign-up record
+// is only removed after its copy exists, and a crash between the two leaves a
+// kept copy with the same value - a rerun plans only the remove). --undo is
+// the reverse order.
 
 import { isDeepStrictEqual } from 'util';
 import { MASK_BULLET } from '../src/lib/mask_email';
@@ -86,6 +109,9 @@ export interface MergeCluster {
   old: string[];
   nameRows?: MergeNameRow[];
   firstNameFix?: string;
+  /** E2: move the old accounts' sign-up records to the kept account. Absent
+   *  = true; `false` opts the cluster out; any other type refuses the map. */
+  moveSignUps?: boolean;
 }
 
 export interface MergeMap {
@@ -97,8 +123,9 @@ export interface MergeSnapshot {
   keptHints: Record<string, string>;
 }
 
-/** One leaf write. `after: null` would mean "remove" - the merge never
- *  removes anything, and assertMergePaths refuses it. */
+/** One leaf write. `after: null` means "remove" - the merge plans exactly one
+ *  kind of removal (an old account's sign-up record whose copy is on the kept
+ *  account, E2); assertMergePaths refuses every other `after: null`. */
 export interface PlanWrite {
   path: string;
   before: unknown;
@@ -128,6 +155,18 @@ export const playedPath = (keep: string, sport: string, season: string): string 
 export const fantasyConfigPath = (sport: string, season: string): string =>
   `Fantasy/${sport}/${season}/Config`;
 
+/** The fantasy TEST-season marker (written by the fill tool; presence = the
+ *  fill is applied and the roster trigger stands down - E1). */
+export const fantasyTestFillPath = (sport: string, season: string): string =>
+  `Fantasy/${sport}/${season}/TestFill`;
+
+export type SignUpStatus = 'Paid' | 'NotPaid';
+export const SIGN_UP_STATUSES: readonly SignUpStatus[] = ['Paid', 'NotPaid'];
+
+/** One sign-up leaf: its value is the player's display name (text). */
+export const signUpPath = (league: string, season: string, status: string, uid: string): string =>
+  `Sign Ups/${league}/${season}/${status}/${uid}`;
+
 export type RosterRef =
   | { kind: 'league'; sport: string; season: string; team: string; name: string }
   | { kind: 'afc'; season: string; name: string };
@@ -136,6 +175,22 @@ const LEAGUE_UID_RE = new RegExp(
   `^(${LEAGUE_SPORTS.join('|')})/(\\d+)/Line Ups/([^/]+)/([^/]+)/UID$`,
 );
 const AFC_UID_RE = /^AFC San Jose\/Seasons\/([^/]+)\/Roster\/([^/]+)\/UID$/;
+const SIGN_UP_RE = new RegExp(`^Sign Ups/(${LEAGUE_SPORTS.join('|')})/(\\d+)/(Paid|NotPaid)/([^/]+)$`);
+
+export interface SignUpRef {
+  league: string;
+  season: string;
+  status: SignUpStatus;
+  uid: string;
+}
+
+/** A sign-up leaf path -> its parts, or null for any other path (only the
+ *  league sports' numbered seasons; never the Due / Info / status nodes). */
+export function parseSignUpPath(path: unknown): SignUpRef | null {
+  if (typeof path !== 'string') return null;
+  const m = SIGN_UP_RE.exec(path);
+  return m ? { league: m[1], season: m[2], status: m[3] as SignUpStatus, uid: m[4] } : null;
+}
 
 /** A roster row's UID leaf path -> its parts, or null for any other path. */
 export function parseRosterUidPath(path: string): RosterRef | null {
@@ -227,8 +282,8 @@ const keysOf = (v: unknown): string[] => (isPlainMap(v) ? Object.keys(v) : []);
 /** Problems that make a whole map unfit to apply (checked independently by
  *  assertMergePaths, whatever the planner did): every uid a plain database
  *  key, none used twice (in one cluster or across clusters, as keep or old),
- *  valid name rows, at most one cluster with a firstNameFix, and that fix a
- *  plain name. */
+ *  valid name rows, at most one cluster with a firstNameFix, that fix a
+ *  plain name, and `moveSignUps` (when present) a boolean. */
 function mapProblems(map: MergeMap): string[] {
   const out: string[] = [];
   if (!map || !Array.isArray(map.clusters)) return ['the map has no clusters list'];
@@ -264,6 +319,9 @@ function mapProblems(map: MergeMap): string[] {
     if (c.firstNameFix !== undefined) {
       fixes++;
       if (!isValidFirstName(c.firstNameFix)) out.push(`${tag}: firstNameFix is not a plain name`);
+    }
+    if (c.moveSignUps !== undefined && typeof c.moveSignUps !== 'boolean') {
+      out.push(`${tag}: moveSignUps must be true or false`);
     }
   });
   if (fixes > 1) out.push('more than one cluster has a firstNameFix (D10 allows exactly one)');
@@ -345,6 +403,100 @@ function readRowUid(snap: MergeSnapshot, uidPath: string): RowUid {
   return { kind: 'value', value: fromRow !== undefined ? fromRow : fromLeaf };
 }
 
+// ------------------------------------------------------- sign-up records (E2)
+
+interface SignUpRecord {
+  uid: string;
+  status: SignUpStatus;
+  value: string;
+}
+
+interface SignUpGroup {
+  league: string;
+  season: string;
+  /** The records the cluster's OLD accounts hold in this season (either status). */
+  olds: SignUpRecord[];
+  /** The record(s) the KEPT account holds in this season (either status). */
+  kept: SignUpRecord[];
+  /** Why the snapshot cannot be used for this season (a leaf missing or not text). */
+  problem?: string;
+}
+
+const signUpLabel = (league: string, season: string): string => `${league} Season ${season}`;
+
+/** The leaves of one league season the planner and the allowlist rely on:
+ *  BOTH statuses for every old uid and the kept uid. A leaf that is missing from
+ *  the snapshot (never read) or is not text is a `problem` - fail closed. */
+function readSignUpGroup(
+  snap: MergeSnapshot,
+  keep: string,
+  olds: readonly string[],
+  league: string,
+  season: string,
+): SignUpGroup {
+  const group: SignUpGroup = { league, season, olds: [], kept: [] };
+  const label = signUpLabel(league, season);
+  for (const uid of [...olds, keep]) {
+    for (const status of SIGN_UP_STATUSES) {
+      const path = signUpPath(league, season, status, uid);
+      if (!hasOwn(snap.nodes, path)) {
+        group.problem ??= `${label}: the snapshot has no sign-up check for this season`;
+        continue;
+      }
+      const value = snap.nodes[path];
+      if (value === null || value === undefined) continue;
+      if (!nonEmptyString(value)) {
+        group.problem ??= `${label}: a sign-up record there is not text (blank or another type), so it cannot be moved`;
+        continue;
+      }
+      (uid === keep ? group.kept : group.olds).push({ uid, status, value });
+    }
+  }
+  return group;
+}
+
+type SignUpDecision =
+  | { kind: 'none' }
+  /** The kept account has no record: copy it, then remove every old copy. */
+  | { kind: 'move'; status: SignUpStatus; value: string }
+  /** The kept account already holds exactly that record: only the removes. */
+  | { kind: 'finish'; status: SignUpStatus; value: string }
+  | { kind: 'refuse'; why: string };
+
+/** E2's three-way rule for one league season (a group without a `problem`). */
+function decideSignUps(g: SignUpGroup): SignUpDecision {
+  if (g.olds.length === 0) return { kind: 'none' }; // nothing to move (kept may hold its own)
+  const label = signUpLabel(g.league, g.season);
+  const combos = new Set(g.olds.map((r) => `${r.status}\u0000${r.value}`));
+  if (combos.size > 1) {
+    return {
+      kind: 'refuse',
+      why: `${label}: the old accounts hold sign-up records there that disagree (another name or payment status), so none were moved`,
+    };
+  }
+  const { status, value } = g.olds[0];
+  if (g.kept.length === 0) return { kind: 'move', status, value };
+  if (g.kept.length === 1 && g.kept[0].status === status && g.kept[0].value === value) {
+    return { kind: 'finish', status, value };
+  }
+  return {
+    kind: 'refuse',
+    why: `${label}: the kept account already has a sign-up record there that differs from the old one (another name or payment status), so none were moved`,
+  };
+}
+
+/** The `Sign Ups/<league>/<S>` seasons in which any account of the cluster has a
+ *  key in the snapshot, in a stable order (league, then season number). */
+function signUpSeasonsOf(snap: MergeSnapshot, accounts: ReadonlySet<string>): Array<{ league: string; season: string }> {
+  const seen = new Map<string, { league: string; season: string }>();
+  for (const key of Object.keys(snap.nodes)) {
+    const ref = parseSignUpPath(key);
+    if (ref && accounts.has(ref.uid)) seen.set(`${ref.league}|${ref.season}`, { league: ref.league, season: ref.season });
+  }
+  return [...seen.values()].sort((a, b) =>
+    a.league === b.league ? Number(a.season) - Number(b.season) : a.league < b.league ? -1 : 1);
+}
+
 // ---------------------------------------------------------------- planner
 
 interface RelinkTarget {
@@ -403,6 +555,9 @@ function planCluster(
   }
   if (fix !== undefined && ctx.fixClusters > 1) {
     refuse('more than one cluster has a firstNameFix (only one owner name fix is allowed)');
+  }
+  if (c.moveSignUps !== undefined && typeof c.moveSignUps !== 'boolean') {
+    refuse('moveSignUps must be true or false');
   }
   if (reasons.length > 0) return done();
 
@@ -489,8 +644,14 @@ function planCluster(
   const ordered = [...targets.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const leagueTargets = ordered.filter((t) => t.ref.kind === 'league');
 
-  // ---- D2: never relink in a fantasy season
+  // ---- D2 / E1: never relink in a LIVE fantasy season. A season whose fantasy
+  // Config exists qualifies only when it is the fantasy TEST season (its
+  // TestFill marker exists): the roster trigger stands down there before it
+  // reads the market, while in any other fantasy season it would add every
+  // roster name missing from the market. A snapshot that never checked fails
+  // closed.
   const seasonsChecked = new Set<string>();
+  const testSeasons: string[] = [];
   for (const t of leagueTargets) {
     if (t.ref.kind !== 'league') continue;
     const label = `${t.ref.sport} Season ${t.ref.season}`;
@@ -500,7 +661,17 @@ function planCluster(
     if (!hasOwn(snap.nodes, cfg)) {
       refuse(`${label}: the snapshot has no fantasy Config check for this season`);
     } else if (snap.nodes[cfg] !== null && snap.nodes[cfg] !== undefined) {
-      refuse(`${label} is a fantasy season (its fantasy Config exists), so its roster rows must not be relinked`);
+      const fill = fantasyTestFillPath(t.ref.sport, t.ref.season);
+      if (!hasOwn(snap.nodes, fill)) {
+        refuse(`${label}: the snapshot has no fantasy TestFill check for this season`);
+      } else if (snap.nodes[fill] === null || snap.nodes[fill] === undefined) {
+        refuse(
+          `${label} is a live fantasy season (its fantasy Config exists and it is not the test season), ` +
+            'so its roster rows must not be relinked',
+        );
+      } else {
+        testSeasons.push(label);
+      }
     }
   }
 
@@ -552,6 +723,37 @@ function planCluster(
   const keepInfoRaw = keepNode['Information'];
   if (chosen.size > 0 && present(keepInfoRaw) && !isPlainMap(keepInfoRaw)) {
     refuse("the kept account's Information value is not a map, so missing fields cannot be copied without wiping it");
+  }
+
+  // ---- E2: sign-up records move - a copy on the kept account, then a remove of
+  // each old key. Per league season, the three-way rule (decideSignUps).
+  const signCopies: PlanWrite[] = [];
+  const signRemoves: PlanWrite[] = [];
+  const signLines: string[] = [];
+  if (c.moveSignUps !== false && olds.length > 0) {
+    for (const { league, season } of signUpSeasonsOf(snap, new Set([keep, ...olds]))) {
+      const group = readSignUpGroup(snap, keep, olds, league, season);
+      if (group.problem !== undefined) {
+        refuse(group.problem);
+        continue;
+      }
+      const decision = decideSignUps(group);
+      if (decision.kind === 'refuse') {
+        refuse(decision.why);
+        continue;
+      }
+      if (decision.kind === 'none') continue;
+      if (decision.kind === 'move') {
+        signCopies.push({ path: signUpPath(league, season, decision.status, keep), before: null, after: decision.value });
+      }
+      for (const r of group.olds) {
+        signRemoves.push({ path: signUpPath(league, season, r.status, r.uid), before: r.value, after: null });
+      }
+      signLines.push(
+        `${who}: ${decision.kind === 'move' ? 'move' : 'finish moving'} his Season ${season} sign-up record ` +
+          `(${league}, ${decision.status})`,
+      );
+    }
   }
   if (reasons.length > 0) return done();
 
@@ -612,17 +814,23 @@ function planCluster(
 
   // ---- assemble in the crash-safe order
   const roster: PlanWrite[] = ordered.map((t) => ({ path: t.path, before: t.before, after: keep }));
-  const rowLines = ordered.map((t) => `${who}: relink ${rowLabel(t.ref)}`);
+  const rowLines = ordered.map(
+    (t) =>
+      `${who}: relink ${rowLabel(t.ref)}` +
+      (t.ref.kind === 'league' && testSeasons.includes(`${t.ref.sport} Season ${t.ref.season}`)
+        ? ' (fantasy test season - the market sync stands down)'
+        : ''),
+  );
   // One line per Played write that is really planned (not for a kept account
   // that already has the team, and once per season).
   const playedLines = played.map(
     (p) => `${who}: add ${p.sport} Season ${p.season} (${p.team}) to seasons played`,
   );
-  const writes = [...played.map((p) => p.write), ...profile, ...roster, ...stamps];
+  const writes = [...played.map((p) => p.write), ...profile, ...roster, ...signCopies, ...signRemoves, ...stamps];
   const lines =
     writes.length === 0
       ? [`${who}: already merged - nothing to do`]
-      : [...rowLines, ...playedLines, ...summary];
+      : [...rowLines, ...playedLines, ...signLines, ...summary];
   return done(writes, lines);
 }
 
@@ -673,10 +881,13 @@ function snapshotValue(snap: MergeSnapshot, path: string): unknown {
 const STAMP_LEAVES = ['MergedInto', 'MergedAt', 'MergedHint'];
 
 /** The allowlist: every write of a merge must be one of the D1 / D2 / D3 /
- *  D4 / D5 / D10 leaves for a cluster of the map, with a `before` that still
- *  matches the snapshot, or the whole list is refused (throws). It never
- *  allows a whole `Users/<uid>` node, a removal, a Token or any private
- *  leaf, a uid outside the map, a roster key, or a fantasy-season relink. */
+ *  D4 / D5 / D10 / E1 / E2 leaves for a cluster of the map, with a `before`
+ *  that still matches the snapshot, or the whole list is refused (throws). It
+ *  never allows a whole `Users/<uid>` node, a Token or any private leaf, a uid
+ *  outside the map, a roster key, or a relink in a LIVE fantasy season (a
+ *  fantasy TEST season is allowed, E1). The only removal it allows is E2's: an
+ *  old account's sign-up record whose identical copy is on the kept account -
+ *  earlier in the same list, or already there. */
 export function assertMergePaths(
   writes: ReadonlyArray<PlanWrite>,
   map: MergeMap,
@@ -708,6 +919,12 @@ export function assertMergePaths(
     }
   }
 
+  // Where each path sits in the list (a sign-up remove must come after its copy).
+  const position = new Map<string, number>();
+  writes.forEach((x, i) => {
+    if (isPlainMap(x) && typeof x.path === 'string' && !position.has(x.path)) position.set(x.path, i);
+  });
+
   const seen = new Set<string>();
   for (const w of writes) {
     const path = isPlainMap(w) ? w.path : undefined;
@@ -717,7 +934,9 @@ export function assertMergePaths(
     if (typeof path !== 'string' || path.length === 0) return fail('the path is not a string');
     if (seen.has(path)) fail('it is written twice in one plan');
     seen.add(path);
-    if (w.after === null || w.after === undefined) fail('a merge never removes data (after is null)');
+    const signUp = parseSignUpPath(path);
+    // A removal is only ever an old account's sign-up record (checked below).
+    if (w.after === undefined || (w.after === null && !signUp)) fail('a merge never removes data (after is null)');
     const ref = parseRosterUidPath(path);
     let current: unknown;
     if (ref) {
@@ -729,7 +948,43 @@ export function assertMergePaths(
     }
     if (!isDeepStrictEqual(w.before ?? null, current)) fail('its before value no longer matches the snapshot');
 
-    // ---- roster UID leaves (D1, D2)
+    // ---- sign-up records (E2): a copy to the kept account, a remove of the old key
+    if (signUp) {
+      const owner = keepOf.get(signUp.uid) ?? oldOf.get(signUp.uid);
+      if (!owner) return fail('the uid is not in the merge map');
+      if (owner.moveSignUps === false) fail('this cluster does not move sign-up records');
+      const group = readSignUpGroup(snap, owner.keep, Array.isArray(owner.old) ? owner.old : [], signUp.league, signUp.season);
+      if (group.problem !== undefined) fail(group.problem);
+      const decision = decideSignUps(group);
+      if (decision.kind === 'refuse') fail(decision.why);
+      if (decision.kind === 'none') fail('there is no sign-up record of an old account to move here');
+      if (decision.status !== signUp.status) {
+        fail("the sign-up status does not match the old account's record");
+      }
+      if (w.after === null) {
+        // The remove: an OLD account's key, holding exactly the value being moved.
+        if (!oldOf.has(signUp.uid)) fail("only an old account's sign-up record may be removed");
+        if (w.before !== decision.value) fail('the removed sign-up record is not the one being moved');
+        if (decision.kind === 'move') {
+          const copyPath = signUpPath(signUp.league, signUp.season, signUp.status, owner.keep);
+          const at = position.get(copyPath);
+          const copy = at === undefined ? undefined : writes[at];
+          const mine = position.get(path) as number;
+          if (!copy || (copy.before ?? null) !== null || copy.after !== decision.value || (at as number) > mine) {
+            fail('its copy on the kept account is not in the plan before it');
+          }
+        }
+      } else {
+        // The copy: only to the kept account, only when it has no record, byte-identical.
+        if (!keepOf.has(signUp.uid)) fail('a sign-up record is only copied to the kept account');
+        if (decision.kind !== 'move') fail('the kept account already has this sign-up record');
+        if (w.before !== null && w.before !== undefined) fail('a sign-up copy never overwrites a record');
+        if (w.after !== decision.value) fail("the copied sign-up value is not exactly the old account's value");
+      }
+      continue;
+    }
+
+    // ---- roster UID leaves (D1, D2, E1)
     if (ref) {
       const cluster = typeof w.after === 'string' ? keepOf.get(w.after) : undefined;
       if (!cluster || oldOf.has(w.after as string)) fail('the new UID is not a kept account of the map');
@@ -746,7 +1001,12 @@ export function assertMergePaths(
         const cfg = fantasyConfigPath(ref.sport, ref.season);
         if (!hasOwn(snap.nodes, cfg)) fail(`${label}: no fantasy Config check in the snapshot`);
         if (snap.nodes[cfg] !== null && snap.nodes[cfg] !== undefined) {
-          fail(`${label} is a fantasy season (its fantasy Config exists)`);
+          // E1: only the fantasy TEST season (its TestFill marker exists).
+          const fill = fantasyTestFillPath(ref.sport, ref.season);
+          if (!hasOwn(snap.nodes, fill)) fail(`${label}: no fantasy TestFill check in the snapshot`);
+          if (snap.nodes[fill] === null || snap.nodes[fill] === undefined) {
+            fail(`${label} is a live fantasy season (its fantasy Config exists and it has no TestFill marker)`);
+          }
         }
       }
       continue;

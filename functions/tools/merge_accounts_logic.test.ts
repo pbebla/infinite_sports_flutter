@@ -6,9 +6,13 @@
 import { isDeepStrictEqual } from 'util';
 import { describe, expect, it } from 'vitest';
 import { maskEmail } from '../src/lib/mask_email';
+import { configToMap, futsalDefault } from '../src/lib/fantasy/fantasy_config';
+import { maybeSyncRoster } from '../src/lib/fantasy/roster_sync';
+import { FakeDb } from '../src/lib/fantasy/test_support';
 import {
-  afcUidPath, assertMergePaths, buildMergePlan, fantasyConfigPath, LEAGUE_SPORTS, leagueUidPath, looksMasked,
-  MergeCluster, MergeMap, MergeSnapshot, parseRosterUidPath, PlanWrite, playedPath, userPath,
+  afcUidPath, assertMergePaths, buildMergePlan, fantasyConfigPath, fantasyTestFillPath, LEAGUE_SPORTS, leagueUidPath,
+  looksMasked, MergeCluster, MergeMap, MergeSnapshot, parseRosterUidPath, parseSignUpPath, PlanWrite, playedPath,
+  SIGN_UP_STATUSES, signUpPath, userPath,
 } from './merge_accounts_logic';
 
 const NOW = 1_800_000_000_000;
@@ -49,6 +53,20 @@ class World {
     return this;
   }
 
+  /** The fantasy TEST-season marker of a season (the fill is applied); its
+   *  Config is recorded as existing. */
+  testFill(sport: string, season: string): this {
+    this.fantasy(sport, season);
+    this.nodes[fantasyTestFillPath(sport, season)] = { At: 1, Managers: 20 };
+    return this;
+  }
+
+  /** A sign-up record (the player's display name) of [uid] in a status. */
+  signUp(league: string, season: string, status: 'Paid' | 'NotPaid', uid: string, value: string): this {
+    this.nodes[signUpPath(league, season, status, uid)] = value;
+    return this;
+  }
+
   hint(keep: string, hint: string = HINT): this {
     this.keptHints[keep] = hint;
     return this;
@@ -86,6 +104,31 @@ class World {
         if (!(managers in nodes)) nodes[managers] = null;
       }
       if (!(`Fantasy/${sport}` in nodes)) nodes[`Fantasy/${sport}`] = Object.keys(listing).length > 0 ? listing : null;
+    }
+    // The TestFill marker is read for every season whose Config exists.
+    for (const [key, value] of Object.entries(nodes)) {
+      const parts = key.split('/');
+      if (parts.length !== 4 || parts[0] !== 'Fantasy' || parts[3] !== 'Config') continue;
+      if (value === null || value === undefined) continue;
+      const marker = fantasyTestFillPath(parts[1], parts[2]);
+      if (!(marker in nodes)) nodes[marker] = null;
+    }
+    // A complete sign-up read: every season that has a sign-up key lists both
+    // statuses for every account of the world (null = no record).
+    const accounts = Object.keys(nodes).filter((k) => /^Users\/[^/]+$/.test(k)).map((k) => k.slice('Users/'.length));
+    const seasonsRead = new Set<string>();
+    for (const key of Object.keys(nodes)) {
+      const su = parseSignUpPath(key);
+      if (su) seasonsRead.add(`${su.league}|${su.season}`);
+    }
+    for (const group of seasonsRead) {
+      const [league, season] = group.split('|');
+      for (const uid of accounts) {
+        for (const status of SIGN_UP_STATUSES) {
+          const p = signUpPath(league, season, status, uid);
+          if (!(p in nodes)) nodes[p] = null;
+        }
+      }
     }
     const forms: Record<string, true> = {};
     for (const key of Object.keys(nodes)) {
@@ -1346,5 +1389,503 @@ describe('final fix 4: refuse a cluster when an old account has data the merge w
     for (const sp of LEAGUE_SPORTS) delete s2.nodes[`Fantasy/${sp}`];
     const solo = mapOf(cluster({ who: 'Row Person', keep: 'k2', old: [], nameRows: [{ sport: 'Futsal', season: '10', team: 'Bulls', name: 'Row Name' }] }));
     expect(buildMergePlan(solo, s2, NOW).refusals).toEqual([]);
+  });
+});
+
+// ===================================================================
+// Merge extension (Parlevino) - Task 1: E1 relinks in the fantasy TEST season,
+// E2 old sign-up records move to the kept account.
+// ===================================================================
+
+/** A Parlevino-like person: one old account on four Futsal rosters (Season 15
+ *  is the fantasy test season), a Paid sign-up record for each of Seasons 12-15
+ *  under the old account, and a Season 16 record on the kept account. */
+function parleWorld(): World {
+  const w = new World()
+    .user('keepP', { 'First Name': 'Paul' })
+    .user('oldP', { 'First Name': 'Paul' })
+    .hint('keepP');
+  w.row('Futsal', '12', 'Nineveh', 'Paul P', 'oldP');
+  w.row('Futsal', '13', 'Hakkari', 'Paul P', 'oldP');
+  w.row('Futsal', '14', 'Nimrod', 'Paul P', 'oldP');
+  w.row('Futsal', '15', 'Ishtar', 'Paul P', 'oldP');
+  w.testFill('Futsal', '15');
+  for (const s of ['12', '13', '14', '15']) w.signUp('Futsal', s, 'Paid', 'oldP', 'Paul P');
+  w.signUp('Futsal', '16', 'Paid', 'keepP', 'Paul P');
+  return w;
+}
+const parleMap = (over: Partial<MergeCluster> = {}) =>
+  mapOf(cluster({ who: 'Paul P', keep: 'keepP', old: ['oldP'], ...over }));
+const signUpWrites = (writes: PlanWrite[]) => writes.filter((x) => x.path.startsWith('Sign Ups/'));
+const suOld = (s: string, status: 'Paid' | 'NotPaid' = 'Paid') => signUpPath('Futsal', s, status, 'oldP');
+const suKeep = (s: string, status: 'Paid' | 'NotPaid' = 'Paid') => signUpPath('Futsal', s, status, 'keepP');
+const ISHTAR_UID = leagueUidPath('Futsal', '15', 'Ishtar', 'Paul P');
+
+describe('E1: relinks in the fantasy test season only (Review Focus 1)', () => {
+  it('Config + TestFill -> the Season 15 relink and its Played entry are planned, and the allowlist accepts them', () => {
+    const snap = parleWorld().snap();
+    const plan = buildMergePlan(parleMap(), snap, NOW);
+    expect(plan.refusals).toEqual([]);
+    expect(byPath(plan.writes).get(ISHTAR_UID)).toEqual({ path: ISHTAR_UID, before: 'oldP', after: 'keepP' });
+    expect(byPath(plan.writes).get(playedPath('keepP', 'Futsal', '15'))?.after).toBe('Ishtar');
+    expect(() => assertMergePaths(plan.writes, parleMap(), snap)).not.toThrow();
+    expect(plan.summary.join('\n')).toMatch(/relink Futsal Season 15, Ishtar.*test season/);
+  });
+
+  it('Config WITHOUT TestFill -> refused whatever Finished or lockOverride say; the allowlist refuses it too', () => {
+    const variants: Array<Record<string, unknown>> = [
+      { Meta: true },
+      { lockOverride: 'auto' },
+      { lockOverride: 'locked', Finished: true },
+      { lockOverride: 'open', Finished: false },
+    ];
+    for (const cfg of variants) {
+      const w = parleWorld();
+      delete w.nodes[fantasyTestFillPath('Futsal', '15')];
+      w.nodes[fantasyConfigPath('Futsal', '15')] = cfg;
+      const snap = w.snap();
+      expect(snap.nodes[fantasyTestFillPath('Futsal', '15')]).toBeNull();
+      const plan = buildMergePlan(parleMap(), snap, NOW);
+      expect(plan.writes, JSON.stringify(cfg)).toEqual([]);
+      expect(plan.refusals).toHaveLength(1);
+      expect(plan.refusals[0].why).toContain('Futsal Season 15');
+      expect(plan.refusals[0].why).toMatch(/live fantasy season/);
+      // A hand-built relink for the same season is refused by the allowlist alone.
+      expect(() =>
+        assertMergePaths([{ path: ISHTAR_UID, before: 'oldP', after: 'keepP' }], parleMap(), snap),
+      ).toThrow(/Season 15.*fantasy/);
+    }
+  });
+
+  it('the TestFill check is per season: a test season elsewhere does not open Season 14', () => {
+    const w = parleWorld();
+    w.fantasy('Futsal', '14'); // a live fantasy season (Config, no TestFill)
+    const plan = buildMergePlan(parleMap(), w.snap(), NOW);
+    expect(plan.writes).toEqual([]);
+    const why = plan.refusals.map((r) => r.why).join('\n');
+    expect(why).toContain('Futsal Season 14');
+    expect(why).not.toContain('Futsal Season 15');
+  });
+
+  it('fails closed: Config exists but the snapshot never checked TestFill -> refused (planner and allowlist)', () => {
+    const snap = parleWorld().snap();
+    delete snap.nodes[fantasyTestFillPath('Futsal', '15')];
+    const plan = buildMergePlan(parleMap(), snap, NOW);
+    expect(plan.writes).toEqual([]);
+    expect(plan.refusals[0].why).toMatch(/Futsal Season 15.*TestFill check/);
+    expect(() =>
+      assertMergePaths([{ path: ISHTAR_UID, before: 'oldP', after: 'keepP' }], parleMap(), snap),
+    ).toThrow(/TestFill check/);
+  });
+
+  it('no Config at all needs no TestFill key (unchanged behaviour)', () => {
+    const snap = parleWorld().snap();
+    expect(fantasyTestFillPath('Futsal', '12') in snap.nodes).toBe(false);
+    expect(buildMergePlan(parleMap(), snap, NOW).refusals).toEqual([]);
+  });
+
+  it('the unmoved-data refusals still apply in a test season (an old fantasy manager entry refuses)', () => {
+    const w = parleWorld();
+    w.nodes['Fantasy/Futsal/15/Managers'] = { oldP: true, 'test-01': true };
+    const plan = buildMergePlan(parleMap(), w.snap(), NOW);
+    expect(plan.writes).toEqual([]);
+    expect(plan.refusals.map((r) => r.why).join('\n')).toMatch(/fantasy manager entry/);
+    // ...and a manager entry of the fill's own test uids does not.
+    const ok = parleWorld();
+    ok.nodes['Fantasy/Futsal/15/Managers'] = { 'test-01': true, 'test-02': true };
+    expect(buildMergePlan(parleMap(), ok.snap(), NOW).refusals).toEqual([]);
+  });
+
+  it('never writes the market: no Fantasy/... path anywhere in the plan', () => {
+    const plan = buildMergePlan(parleMap(), parleWorld().snap(), NOW);
+    expect(plan.writes.some((x) => x.path.startsWith('Fantasy/'))).toBe(false);
+  });
+});
+
+describe('E1 pin: the real roster sync stands down on a TestFill season (a relinked UID changes nothing)', () => {
+  const ishtar = (uid: string) => ({
+    'Paul P': { UID: uid, Goals: 2, number: 7 },
+    'Other One': { UID: 'someoneElse', Goals: 1 },
+  });
+  const market = () => ({
+    'Paul P': { position: 'DEF', priceTenths: 60, eligible: true, teamName: 'Ishtar' },
+    'Other One': { position: 'ATT', priceTenths: 90, eligible: true, teamName: 'Ishtar' },
+  });
+  const seed = (testFill: boolean) => ({
+    Fantasy: { Futsal: { 15: {
+      Config: { ...configToMap(futsalDefault()), lockOverride: 'auto' },
+      Players: market(),
+      ...(testFill ? { TestFill: { At: 1, Managers: 20 } } : {}),
+    } } },
+  });
+  const args = { sport: 'Futsal', season: '15', team: 'Ishtar', before: ishtar('oldP'), after: ishtar('keepP') };
+
+  it('a roster that differs only in one UID: zero writes and no market read on a TestFill season', async () => {
+    const db = new FakeDb(seed(true));
+    const res = await maybeSyncRoster(db, args);
+    // The gate passed (a UID changed) and the sync stood down at the marker.
+    expect(res).toEqual({ added: [], teamUpdated: [] });
+    expect(db.writes).toEqual([]);
+    expect(db.reads.filter((r) => r.includes('/Players') || r.includes('Users/'))).toEqual([]);
+    expect(db.reads.some((r) => r.endsWith('/TestFill'))).toBe(true); // it really looked at the marker
+  });
+
+  it('control: the same relink on a LIVE fantasy season does reach the market (so the pin means something)', async () => {
+    const db = new FakeDb(seed(false));
+    await maybeSyncRoster(db, args);
+    expect(db.reads.some((r) => r.includes('/Players'))).toBe(true);
+  });
+});
+
+describe('E2: sign-up records move to the kept account', () => {
+  it('old holds S12-S15 Paid, kept has none -> 4 copies then 4 removes, each remove after its copy', () => {
+    const snap = parleWorld().snap();
+    const plan = buildMergePlan(parleMap(), snap, NOW);
+    expect(plan.refusals).toEqual([]);
+    expect(signUpWrites(plan.writes)).toHaveLength(8);
+    const idx = (p: string) => paths(plan.writes).indexOf(p);
+    for (const s of ['12', '13', '14', '15']) {
+      expect(plan.writes[idx(suKeep(s))]).toEqual({ path: suKeep(s), before: null, after: 'Paul P' });
+      expect(plan.writes[idx(suOld(s))]).toEqual({ path: suOld(s), before: 'Paul P', after: null });
+      expect(idx(suKeep(s))).toBeGreaterThanOrEqual(0);
+      expect(idx(suKeep(s))).toBeLessThan(idx(suOld(s)));
+    }
+    // Write order: Played / relinks, then every copy, then every remove, stamps last.
+    const where = (f: (x: PlanWrite) => boolean) => plan.writes.map((x, i) => (f(x) ? i : -1)).filter((i) => i >= 0);
+    const relinks = where((x) => parseRosterUidPath(x.path) !== null);
+    const copies = where((x) => x.path.startsWith('Sign Ups/') && x.after !== null);
+    const removes = where((x) => x.after === null);
+    expect(Math.max(...relinks)).toBeLessThan(Math.min(...copies));
+    expect(Math.max(...copies)).toBeLessThan(Math.min(...removes));
+    expect(Math.max(...removes)).toBeLessThan(idx('Users/oldP/MergedHint'));
+    expect(idx('Users/oldP/MergedInto')).toBe(plan.writes.length - 1);
+    // The only removals in the whole plan are the four sign-up removes of the old uid.
+    expect(removes).toHaveLength(4);
+    expect(plan.writes.filter((x) => x.after === null).every((x) => parseSignUpPath(x.path)?.uid === 'oldP')).toBe(true);
+    expect(() => assertMergePaths(plan.writes, parleMap(), snap)).not.toThrow();
+    expect(plan.summary.join('\n')).toMatch(/Paul P: move his Season 12 sign-up record/);
+    expect(plan.summary.join('\n')).toMatch(/Paul P: move his Season 15 sign-up record/);
+  });
+
+  it('after the writes land, a second plan has zero writes and zero refusals', () => {
+    const snap = parleWorld().snap();
+    const first = buildMergePlan(parleMap(), snap, NOW);
+    const after = applyTo(snap, first.writes);
+    expect(after.nodes[suKeep('13')]).toBe('Paul P');
+    expect(after.nodes[suOld('13')]).toBeNull();
+    const second = buildMergePlan(parleMap(), after, NOW + 1000);
+    expect(second.refusals).toEqual([]);
+    expect(second.writes).toEqual([]);
+  });
+
+  it('a crash between a copy and its remove: the re-run plans only the removes (Review Focus 3)', () => {
+    const snap = parleWorld().snap();
+    const first = buildMergePlan(parleMap(), snap, NOW);
+    // Everything up to and including all four copies landed; no remove, no stamp.
+    const crashedWrites = first.writes.filter((x) => x.after !== null && !x.path.startsWith('Users/oldP/Merged'));
+    const crashed = applyTo(snap, crashedWrites);
+    const second = buildMergePlan(parleMap(), crashed, NOW + 5000);
+    expect(second.refusals).toEqual([]);
+    expect(signUpWrites(second.writes)).toHaveLength(4);
+    expect(signUpWrites(second.writes).every((x) => x.after === null)).toBe(true);
+    expect(paths(second.writes).filter((p) => p.startsWith('Users/'))).toEqual([
+      'Users/oldP/MergedHint', 'Users/oldP/MergedAt', 'Users/oldP/MergedInto',
+    ]);
+    expect(second.summary.join('\n')).toMatch(/finish moving his Season 13 sign-up record/);
+    expect(second.summary.join('\n')).not.toMatch(/Paul P: move his Season/);
+    expect(() => assertMergePaths(second.writes, parleMap(), crashed)).not.toThrow();
+
+    // A crash after only SOME copies: the rest are copied, then all are removed.
+    const partial = applyTo(snap, first.writes.filter((x) => x.path === suKeep('12') || x.path === suKeep('13')));
+    const third = buildMergePlan(parleMap(), partial, NOW + 6000);
+    expect(third.refusals).toEqual([]);
+    const thirdSu = signUpWrites(third.writes);
+    expect(thirdSu.filter((x) => x.after !== null).map((x) => x.path)).toEqual([suKeep('14'), suKeep('15')]);
+    expect(thirdSu.filter((x) => x.after === null)).toHaveLength(4);
+    expect(() => assertMergePaths(third.writes, parleMap(), partial)).not.toThrow();
+  });
+
+  it('kept already has S13 Paid with the same value -> only the S13 remove (Review Focus 3)', () => {
+    const snap = parleWorld().signUp('Futsal', '13', 'Paid', 'keepP', 'Paul P').snap();
+    const plan = buildMergePlan(parleMap(), snap, NOW);
+    expect(plan.refusals).toEqual([]);
+    const su = signUpWrites(plan.writes);
+    expect(su.filter((x) => x.after !== null).map((x) => x.path)).toEqual([suKeep('12'), suKeep('14'), suKeep('15')]);
+    expect(su.filter((x) => x.after === null).map((x) => x.path)).toEqual([suOld('12'), suOld('13'), suOld('14'), suOld('15')]);
+    expect(plan.summary.join('\n')).toMatch(/finish moving his Season 13 sign-up record/);
+    expect(() => assertMergePaths(plan.writes, parleMap(), snap)).not.toThrow();
+  });
+
+  it('kept has the record and old has none -> nothing to do (not even a refusal)', () => {
+    const w = new World().user('keepP').user('oldP').hint('keepP').signUp('Futsal', '16', 'Paid', 'keepP', 'Paul P');
+    w.row('Futsal', '9', 'Wolves', 'Paul P', 'oldP');
+    const plan = buildMergePlan(parleMap(), w.snap(), NOW);
+    expect(plan.refusals).toEqual([]);
+    expect(signUpWrites(plan.writes)).toEqual([]);
+  });
+
+  it('kept has S13 NotPaid (old has Paid) -> the person is refused, zero writes, no values in the reason (Review Focus 4)', () => {
+    const plan = buildMergePlan(parleMap(), parleWorld().signUp('Futsal', '13', 'NotPaid', 'keepP', 'Paul P').snap(), NOW);
+    expect(plan.writes).toEqual([]);
+    expect(plan.refusals).toHaveLength(1);
+    expect(plan.refusals[0].why).toContain('Futsal Season 13');
+    expect(plan.refusals[0].why).toMatch(/sign-up record/);
+    expect(plan.refusals[0].why).not.toContain('Paul');
+    expect(plan.summary.join('\n')).toMatch(/Paul P: REFUSED/);
+  });
+
+  it('kept has S13 Paid with ANOTHER value -> refused, zero writes (Review Focus 4)', () => {
+    const plan = buildMergePlan(parleMap(), parleWorld().signUp('Futsal', '13', 'Paid', 'keepP', 'Somebody Else').snap(), NOW);
+    expect(plan.writes).toEqual([]);
+    expect(plan.refusals).toHaveLength(1);
+    expect(plan.refusals[0].why).toContain('Futsal Season 13');
+    expect(plan.refusals[0].why).not.toContain('Somebody');
+  });
+
+  it('a refused person does not block the next person', () => {
+    const w = parleWorld().signUp('Futsal', '13', 'Paid', 'keepP', 'Somebody Else');
+    w.user('keepQ').user('oldQ').hint('keepQ');
+    w.row('Futsal', '9', 'Wolves', 'Quin Q', 'oldQ').signUp('Futsal', '9', 'NotPaid', 'oldQ', 'Quin Q');
+    const m = mapOf(
+      cluster({ who: 'Paul P', keep: 'keepP', old: ['oldP'] }),
+      cluster({ who: 'Quin Q', keep: 'keepQ', old: ['oldQ'] }),
+    );
+    const snap = w.snap();
+    const plan = buildMergePlan(m, snap, NOW);
+    expect(plan.refusals.map((r) => r.who)).toEqual(['Paul P']);
+    expect(signUpWrites(plan.writes).map((x) => x.path)).toEqual([
+      signUpPath('Futsal', '9', 'NotPaid', 'keepQ'), signUpPath('Futsal', '9', 'NotPaid', 'oldQ'),
+    ]);
+    expect(() => assertMergePaths(plan.writes, m, snap)).not.toThrow();
+  });
+
+  it('the value is copied byte-identical, odd whitespace included (Review Focus 5)', () => {
+    for (const value of ['Paul P ', ' Paul  P', 'Paul P\t', 'Pa ul P  ']) {
+      const snap = parleWorld().signUp('Futsal', '12', 'Paid', 'oldP', value).snap();
+      const plan = buildMergePlan(parleMap(), snap, NOW);
+      expect(plan.refusals, JSON.stringify(value)).toEqual([]);
+      const copy = byPath(plan.writes).get(suKeep('12'));
+      expect(copy?.after).toBe(value);
+      expect(byPath(plan.writes).get(suOld('12'))).toEqual({ path: suOld('12'), before: value, after: null });
+      expect(() => assertMergePaths(plan.writes, parleMap(), snap)).not.toThrow();
+      // a trimmed copy is NOT the old value: the allowlist refuses it
+      const trimmed = plan.writes.map((x) => (x.path === suKeep('12') ? { ...x, after: value.trim() } : x));
+      expect(() => assertMergePaths(trimmed, parleMap(), snap)).toThrow(/value|copy/i);
+    }
+  });
+});
+
+describe('E2: the opt-out, the map field and the edge cases', () => {
+  it('moveSignUps: false -> no sign-up writes and no sign-up refusal; the allowlist refuses a hand-built move', () => {
+    const snap = parleWorld().signUp('Futsal', '13', 'NotPaid', 'keepP', 'Paul P').snap(); // would refuse if moving
+    const m = parleMap({ moveSignUps: false });
+    const plan = buildMergePlan(m, snap, NOW);
+    expect(plan.refusals).toEqual([]);
+    expect(signUpWrites(plan.writes)).toEqual([]);
+    expect(plan.writes.some((x) => x.path.startsWith('Users/oldP/Merged'))).toBe(true);
+    expect(() => assertMergePaths(plan.writes, m, snap)).not.toThrow();
+    const cleanSnap = parleWorld().snap();
+    const move = buildMergePlan(parleMap(), cleanSnap, NOW).writes;
+    expect(() => assertMergePaths(move, m, cleanSnap)).toThrow(/sign-up|move/i);
+    // an explicit true is the default
+    expect(buildMergePlan(parleMap({ moveSignUps: true }), cleanSnap, NOW).writes).toEqual(move);
+  });
+
+  it('moveSignUps must be a boolean: the planner refuses the cluster and the allowlist the whole map', () => {
+    const snap = parleWorld().snap();
+    for (const bad of ['yes', 1, 0, null, {}, []]) {
+      const m = parleMap({ moveSignUps: bad as unknown as boolean });
+      const plan = buildMergePlan(m, snap, NOW);
+      expect(plan.writes, JSON.stringify(bad)).toEqual([]);
+      expect(plan.refusals[0].why).toMatch(/moveSignUps/);
+      expect(() => assertMergePaths([], m, snap)).toThrow(/Refusing merge map.*moveSignUps/);
+    }
+    expect(() => assertMergePaths([], parleMap({ moveSignUps: false }), snap)).not.toThrow();
+    expect(() => assertMergePaths([], parleMap({ moveSignUps: true }), snap)).not.toThrow();
+  });
+
+  it('two old accounts with the same record: copied once, both removed; different records refuse', () => {
+    const base = () => {
+      const w = new World().user('keepM').user('old1').user('old2').hint('keepM');
+      w.row('Futsal', '9', 'Wolves', 'Mo M', 'old1');
+      return w;
+    };
+    const m = mapOf(cluster({ who: 'Mo M', keep: 'keepM', old: ['old1', 'old2'] }));
+    const sameSnap = base().signUp('Futsal', '9', 'Paid', 'old1', 'Mo M').signUp('Futsal', '9', 'Paid', 'old2', 'Mo M').snap();
+    const plan = buildMergePlan(m, sameSnap, NOW);
+    expect(plan.refusals).toEqual([]);
+    expect(signUpWrites(plan.writes).map((x) => [x.path, x.after])).toEqual([
+      [signUpPath('Futsal', '9', 'Paid', 'keepM'), 'Mo M'],
+      [signUpPath('Futsal', '9', 'Paid', 'old1'), null],
+      [signUpPath('Futsal', '9', 'Paid', 'old2'), null],
+    ]);
+    expect(() => assertMergePaths(plan.writes, m, sameSnap)).not.toThrow();
+
+    for (const [status, value] of [['Paid', 'Mo Different'], ['NotPaid', 'Mo M']] as const) {
+      const w = base().signUp('Futsal', '9', 'Paid', 'old1', 'Mo M').signUp('Futsal', '9', status, 'old2', value);
+      const refused = buildMergePlan(m, w.snap(), NOW);
+      expect(refused.writes, `${status}/${value}`).toEqual([]);
+      expect(refused.refusals[0].why).toContain('Futsal Season 9');
+    }
+  });
+
+  it('an old account with records in BOTH statuses of one season is refused', () => {
+    const plan = buildMergePlan(parleMap(), parleWorld().signUp('Futsal', '12', 'NotPaid', 'oldP', 'Paul P').snap(), NOW);
+    expect(plan.writes).toEqual([]);
+    expect(plan.refusals[0].why).toContain('Futsal Season 12');
+  });
+
+  it('Basketball and Flag Football records move too; other trees and non-numeric seasons are never touched', () => {
+    const w = parleWorld();
+    w.signUp('Basketball', '3', 'NotPaid', 'oldP', 'Paul P').signUp('Flag Football', '2', 'Paid', 'oldP', 'Paul P');
+    w.nodes['Sign Ups/Some Cup/abc123/Paid/oldP'] = 'Paul P';
+    w.nodes['Sign Ups/Futsal/12/Due'] = 25;
+    const snap = w.snap();
+    const plan = buildMergePlan(parleMap(), snap, NOW);
+    expect(plan.refusals).toEqual([]);
+    const su = signUpWrites(plan.writes).map((x) => x.path);
+    expect(su).toContain(signUpPath('Basketball', '3', 'NotPaid', 'keepP'));
+    expect(su).toContain(signUpPath('Flag Football', '2', 'Paid', 'oldP'));
+    expect(su.some((p) => p.includes('Some Cup') || p.includes('Due'))).toBe(false);
+    expect(() => assertMergePaths(plan.writes, parleMap(), snap)).not.toThrow();
+  });
+
+  it('fails closed: a leaf of a scanned season missing from the snapshot, or a value that is not text, refuses the person', () => {
+    for (const p of [suOld('13', 'NotPaid'), suKeep('14'), suKeep('14', 'NotPaid'), suOld('15')]) {
+      const snap = parleWorld().snap();
+      delete snap.nodes[p];
+      const plan = buildMergePlan(parleMap(), snap, NOW);
+      expect(plan.writes, p).toEqual([]);
+      expect(plan.refusals[0].why, p).toMatch(/sign-up check/);
+    }
+    for (const bad of [5, true, { a: 1 }, ['x'], '']) {
+      const snap = parleWorld().snap();
+      snap.nodes[suOld('13')] = bad;
+      const plan = buildMergePlan(parleMap(), snap, NOW);
+      expect(plan.writes, JSON.stringify(bad)).toEqual([]);
+      expect(plan.refusals[0].why).toContain('Futsal Season 13');
+    }
+    const keptBad = parleWorld().snap();
+    keptBad.nodes[suKeep('13')] = 7;
+    expect(buildMergePlan(parleMap(), keptBad, NOW).refusals).toHaveLength(1);
+  });
+
+  it('a cluster refused for another reason plans no sign-up write either', () => {
+    const w = parleWorld();
+    w.user('oldP', { 'First Name': 'Paul', Awards: { a1: { Tier: 'gold' } } });
+    const plan = buildMergePlan(parleMap(), w.snap(), NOW);
+    expect(plan.writes).toEqual([]);
+    expect(plan.refusals.map((r) => r.why).join('\n')).toMatch(/Awards/);
+  });
+
+  it('a cluster with no old account never looks at sign-ups', () => {
+    const w = new World().user('k').hint('k');
+    w.row('Futsal', '10', 'Bulls', 'Row Name', null);
+    const m = mapOf(cluster({ who: 'Row', keep: 'k', old: [], nameRows: [{ sport: 'Futsal', season: '10', team: 'Bulls', name: 'Row Name' }] }));
+    expect(buildMergePlan(m, w.snap(), NOW).refusals).toEqual([]);
+  });
+});
+
+describe('assertMergePaths: the one allowed removal (a sign-up record, after its copy)', () => {
+  const map = () => parleMap();
+  const snap = () => parleWorld().snap();
+  const w = (path: string, before: unknown, after: unknown): PlanWrite => ({ path, before, after });
+  const reject = (writes: PlanWrite[], why?: RegExp, s: MergeSnapshot = snap(), m: MergeMap = map()) =>
+    expect(() => assertMergePaths(writes, m, s)).toThrow(why ?? /Refusing merge path/);
+
+  it('accepts a copy then its remove, and nothing else may be removed', () => {
+    expect(() => assertMergePaths([w(suKeep('12'), null, 'Paul P'), w(suOld('12'), 'Paul P', null)], map(), snap())).not.toThrow();
+    reject([w('Users/oldP/Played/Futsal/Season 9', 'Wolves', null)], /remov|null/i);
+    reject([w('Users/oldP/MergedInto', 'keepP', null)], /remov|null/i);
+    reject([w(ISHTAR_UID, 'oldP', null)], /remov|null/i);
+    reject([w('Comments/Paul P', 'x', null)], /remov|null|allowlist/i);
+    reject([w('Sign Ups/Futsal/12/Paid', { oldP: 'Paul P' }, null)], /remov|null|allowlist/i);
+    reject([w('Sign Ups/Futsal/12/Due', 25, null)], /remov|null|allowlist/i);
+    reject([w(suOld('12'), 'Paul P', undefined)], /remov|null/i);
+  });
+
+  it('rejects a remove of the KEPT account\'s key (even with a matching value)', () => {
+    const s = parleWorld().signUp('Futsal', '13', 'Paid', 'keepP', 'Paul P').snap();
+    reject([w(suKeep('13'), 'Paul P', null)], /old account/i, s);
+    reject([w(suKeep('16'), 'Paul P', null)], /old account/i);
+  });
+
+  it('rejects a remove with no copy in the plan (unless the kept copy already exists with that value)', () => {
+    reject([w(suOld('12'), 'Paul P', null)], /copy/i);
+    // the copy comes AFTER the remove
+    reject([w(suOld('12'), 'Paul P', null), w(suKeep('12'), null, 'Paul P')], /copy/i);
+    // the copy in the plan is for another season
+    reject([w(suKeep('13'), null, 'Paul P'), w(suOld('12'), 'Paul P', null)], /copy/i);
+    // the kept copy already exists with the same value: the remove stands alone
+    const s = parleWorld().signUp('Futsal', '13', 'Paid', 'keepP', 'Paul P').snap();
+    expect(() => assertMergePaths([w(suOld('13'), 'Paul P', null)], map(), s)).not.toThrow();
+    // ...but not when the kept value differs or sits in the other status
+    reject([w(suOld('13'), 'Paul P', null)], undefined, parleWorld().signUp('Futsal', '13', 'Paid', 'keepP', 'Somebody').snap());
+    reject([w(suOld('13'), 'Paul P', null)], undefined, parleWorld().signUp('Futsal', '13', 'NotPaid', 'keepP', 'Paul P').snap());
+  });
+
+  it('rejects a copy whose value differs from the old value, or whose status/season does not match an old record', () => {
+    reject([w(suKeep('12'), null, 'Paul Q'), w(suOld('12'), 'Paul P', null)], /value|copy/i);
+    reject([w(suKeep('12'), null, 'Paul P '), w(suOld('12'), 'Paul P', null)], /value|copy/i);
+    reject([w(suKeep('12', 'NotPaid'), null, 'Paul P'), w(suOld('12'), 'Paul P', null)], /value|copy|status/i);
+    reject([w(signUpPath('Futsal', '11', 'Paid', 'keepP'), null, 'Paul P')]);
+    reject([w(suKeep('12'), null, 5)]);
+    reject([w(suKeep('12'), null, '')]);
+  });
+
+  it('rejects a copy over an existing kept record, a copy to an old uid, and a copy when the kept record already matches', () => {
+    const s = parleWorld().signUp('Futsal', '13', 'Paid', 'keepP', 'Paul P').snap();
+    reject([w(suKeep('13'), 'Paul P', 'Paul P')], undefined, s);
+    reject([w(suKeep('13'), null, 'Paul P')], /before/i, s);
+    reject([w(suOld('12'), 'Paul P', 'Paul Q')]);
+  });
+
+  it('rejects any uid outside the map and a path outside the league sports / numbered seasons / two statuses', () => {
+    const s = parleWorld().signUp('Futsal', '12', 'Paid', 'stranger', 'Paul P').snap();
+    reject([w(signUpPath('Futsal', '12', 'Paid', 'stranger'), 'Paul P', null)], /not in the merge map/, s);
+    reject([w(signUpPath('Futsal', '12', 'Paid', 'stranger'), null, 'x')]);
+    for (const p of [
+      'Sign Ups/Some Cup/abc123/Paid/oldP', 'Sign Ups/Futsal/Season 12/Paid/oldP', 'Sign Ups/Futsal/12/Pending/oldP',
+      'Sign Ups/Futsal/12/Paid/oldP/extra', 'Sign Ups/y', 'Sign Ups/Futsal/12/Due/Info',
+    ]) {
+      reject([w(p, null, 'x')]);
+    }
+  });
+
+  it('a snapshot missing a leaf of the season is not enough to allow the write (fail closed)', () => {
+    const s = snap();
+    delete s.nodes[suOld('12', 'NotPaid')];
+    reject([w(suKeep('12'), null, 'Paul P'), w(suOld('12'), 'Paul P', null)], /sign-up check/i, s);
+    const s2 = snap();
+    delete s2.nodes[suKeep('12')]; // the kept leaf was never read
+    reject([w(suKeep('12'), null, 'Paul P')], /sign-up check/i, s2);
+  });
+
+  it('a stale write (before differs from the snapshot) is rejected', () => {
+    reject([w(suKeep('12'), null, 'Paul P'), w(suOld('12'), 'Someone', null)], /snapshot/);
+  });
+
+  it('rejects the "remove" of an old key that holds no record (nothing to move)', () => {
+    const m = mapOf(cluster({ who: 'Mo M', keep: 'keepM', old: ['old1', 'old2'] }));
+    const s = new World().user('keepM').user('old1').user('old2').hint('keepM')
+      .signUp('Futsal', '9', 'Paid', 'old1', 'Mo M').snap();
+    const copy = w(signUpPath('Futsal', '9', 'Paid', 'keepM'), null, 'Mo M');
+    const real = w(signUpPath('Futsal', '9', 'Paid', 'old1'), 'Mo M', null);
+    expect(() => assertMergePaths([copy, real], m, s)).not.toThrow();
+    reject([copy, w(signUpPath('Futsal', '9', 'Paid', 'old2'), null, null)], /Refusing merge path/, s, m);
+    reject([copy, w(signUpPath('Futsal', '9', 'NotPaid', 'old1'), null, null)], /Refusing merge path/, s, m);
+  });
+
+  it('a person the planner would refuse cannot be moved by hand-built writes (kept NotPaid / two old records)', () => {
+    const notPaid = parleWorld().signUp('Futsal', '13', 'NotPaid', 'keepP', 'Paul P').snap();
+    reject([w(suKeep('13'), null, 'Paul P'), w(suOld('13'), 'Paul P', null)], undefined, notPaid);
+    const both = parleWorld().signUp('Futsal', '12', 'NotPaid', 'oldP', 'Paul P').snap();
+    reject([w(suKeep('12'), null, 'Paul P'), w(suOld('12'), 'Paul P', null)], undefined, both);
+  });
+
+  it('every planned write of the bigger Parlevino plan passes the allowlist', () => {
+    const writes = buildMergePlan(map(), snap(), NOW).writes;
+    expect(writes).toHaveLength(4 + 4 + 8 + 3); // 4 relinks, 4 Played, 4 copies + 4 removes, 3 stamps
+    expect(() => assertMergePaths(writes, map(), snap())).not.toThrow();
   });
 });
