@@ -2,25 +2,25 @@
 
 Last checked against the merge tool: 2026-11-08 (fan repo, branch `zaya-fantasy`), after it learned to handle Parlevino Tamraz and to move old sign-up records.
 
-You can run every command below yourself, or tell Claude "run step N" and Claude runs it. Either way the order and your OKs apply. As of 2026-11-08 only the read-only checks (the dry run, the practice run for all 11 people, and the duplicate check) have been run against the live app. Nothing has been changed yet.
+You can run every command below yourself, or tell Claude "run step N" and Claude runs it. Either way the order and your OKs apply. As of 2026-11-08 only the read-only checks (the dry run, run for all 11 people, and the duplicate check) have been run against the live app. Nothing has been changed yet.
 
 ## What this does
 
 Some players signed up twice, so their seasons are split across two accounts. The merge tool:
 
 1. Moves every season onto one account (the **kept** account).
-2. Moves each player's old **paid sign-up records** (Seasons 9 to 15, the Manager's sign-up lists) to the kept account too. Each record is copied to the kept account first, and only then removed from the old one. Undo puts them back exactly.
+2. Moves each player's old **sign-up records** (paid or unpaid; today's are all Seasons 9 to 15 in the Manager's sign-up lists) to the kept account too. Each record is copied to the kept account first, and only then removed from the old one. Undo puts them back exactly.
 3. Marks the other account (the **old** account) as "merged", so it disappears from player search.
 4. Tells the player which email to use from now on (email, push, and an in-app message).
 5. Last, switches off the old email's login so nobody recreates the duplicate by accident.
 
-It never deletes an account. The only thing it ever removes is an old account's sign-up record, and only after the identical copy is on the kept account. If a sign-up record changed in the moments before the removal, the tool stops that person right there (see step 3) and removes nothing more for them. The notes and due/info entries kept next to the sign-up lists are not touched. Game votes, predictions, event RSVPs and profile photo files stay where they are, on the old account.
+It never deletes an account. The only thing it ever removes is an old account's sign-up record, and only after the identical copy is on the kept account. If a sign-up record changed in the moments before the removal, the tool stops that person right there (see step 3) and carries on with the others. The notes and due/info entries kept next to the sign-up lists are not touched. Game votes, predictions, event RSVPs and profile photo files stay where they are, on the old account.
 
 This batch is 11 people:
 
-- 9 have a second account. Robert Tatari has three old accounts, so there are 11 old accounts in total.
+- 9 have a second account (Parlevino Tamraz, below, is one of the 9). Robert Tatari has three old accounts, so there are 11 old accounts in total.
 - 2 have no second account, only a roster entry typed with a different spelling: Roben Tatari ("Robben Tatari", Season 10) and Robert Shamoeilzadeh ("Robert Shamoelzadeh", Season 10). Those rows get linked to their real account. Robert Shamoeilzadeh's first name is currently spelled "Rabert"; the tool fixes it to "Robert".
-- **Parlevino Tamraz** is the newest one. The kept account is his Season 16 account (the Gmail one). The old account is his iCloud account, which holds his roster entries for Seasons 12 to 15 (Nineveh, Hakkari, Nimrod, Ishtar) and his old paid sign-up records for those four seasons. His Season 15 row is in the Season 15 fantasy **test** season. The tool only moves a row in a fantasy season while that season's test data is still there, which is why the order rule below matters.
+- **Parlevino Tamraz** is one of the 9 with a second account, and the newest one. The kept account is his Season 16 account (the Gmail one). The old account is his iCloud account, which holds his roster entries for Seasons 12 to 15 (Nineveh, Hakkari, Nimrod, Ishtar) and his old sign-up records for those four seasons (all paid). His Season 15 row is in the Season 15 fantasy **test** season. The tool only moves a row in a fantasy season while that season's test data is still there, which is why the order rule below matters.
 
 ## The order rule: merge first
 
@@ -30,9 +30,11 @@ This batch is 11 people:
 > 2. Applying the Season 16 player prices.
 > 3. Building Season 16 rosters from sign-ups.
 >
-> **Why:** Parlevino's Season 15 move is only allowed while the Season 15 test data is still there. If the test data was cleared first, the tool **refuses him** (the whole person, not just that season) and writes nothing for him. Putting the test data back by hand is **not** an option: don't try it. Tell Claude instead. The prices and the roster build both read the roster links as they are at that moment, so they need the merge done first, or the split accounts get baked in.
+> **The check before you start any of the three:** run a fresh dry run (the plain `npm run merge:accounts` from step 2) and look for Parlevino Tamraz's line. It must say `Parlevino Tamraz: already merged - nothing to do`. If he is refused, or his line is missing, stop and tell Claude. Do not put the test data back.
+>
+> **Why:** Parlevino's Season 15 move is only allowed while the Season 15 test data is still there. If the test data was cleared first, the tool **refuses him** (the whole person, not just that season) and writes nothing for him.
 
-Only step 3 has to come first. The notices and the login switch (steps 5 and 6) can go on their own schedule. Step 7 is the Season 16 order in full.
+Only step 3 (the apply) has to come first. The notices and the login switch (steps 5 and 6) can go on their own schedule. Step 7 is the Season 16 order in full.
 
 ## Before you start (once)
 
@@ -69,11 +71,11 @@ npx firebase-tools login
 | 6 | Switch off the old logins | Yes |
 | 7 | Season 16 jobs: check for new duplicates before building rosters (after step 3) | No |
 
-Do the steps in this order. Step 6 must come after step 5, so nobody is locked out before they were told which email to use. Step 3 must come before clearing the Season 15 test data, applying the Season 16 prices, or building Season 16 rosters (see the order rule above).
+Do the steps in this order. Step 6 must come after step 5, so nobody is locked out before they were told which email to use. Step 3 must come before clearing the Season 15 test data, applying the Season 16 prices, or building Season 16 rosters, and a fresh dry run must show Parlevino as "already merged - nothing to do" before you start any of them (see the order rule above).
 
 ## Step 1: Get ready
 
-1. **Do your final review** of the work on the `zaya-fantasy` branch (both repos). Don't clear the Season 15 test data, apply the Season 16 prices or build Season 16 rosters until step 3 is done (the order rule above).
+1. **Do your final review** of the work on the `zaya-fantasy` branch (both repos). Don't clear the Season 15 test data, apply the Season 16 prices or build Season 16 rosters until step 3 is done and a fresh dry run shows Parlevino as "already merged - nothing to do" (the order rule above).
 2. **Deploy the two functions.** One changes player search so merged accounts drop out of it (`onUserWritten`). The other sends the "accounts combined" emails (`onMergeNoticeCreated`).
 
 ```bash
@@ -104,11 +106,11 @@ It reads the live data, prints what it would do, and writes nothing. Read the pr
 - `fantasy test-season check: 1 relinked season(s) have a fantasy Config - a relink there is allowed only when its TestFill marker exists`. This is Parlevino's Season 15 row. It is allowed only because the Season 15 test data is still there (the "TestFill marker"). If the test data had been cleared, he would show up under `refusals` instead.
 - `data this tool does not move (...): checked on the old accounts, 1 fantasy season(s) and 1 registration form(s) (keys only)`. The tool looks (keys only, never the contents) for things on an old account that it does **not** move: Awards, tournaments played, a fantasy manager entry, a registration sign-up. A person who has any of them is **refused** (you would see it under `refusals`), because the merge would leave that behind on an account nobody uses. The 11 people in this batch have none. If someone is refused for this reason, don't go on: tell Claude, the item has to be moved by hand first.
 - `public profiles: 11 of 11 old account(s) have a public profile entry right now`. This is how many of the old accounts are in player search today. The safety check in step 3 (the canary) watches one of them leave. If it says `0 of 11`, the canary has nothing to watch and is skipped (a boxed warning shows at apply). Tell Claude before you apply.
-- A plan section, with lines per person such as "relink Futsal Season 11, Nineveh, ..." (a roster row moves to the kept account), "add Futsal Season 11 (Nineveh) to seasons played", "move his Season 9 sign-up record (Futsal, Paid)" (a paid sign-up record moves to the kept account), "copy the profile photo link from an old account", "stamp 1 old account(s) as merged". Parlevino's Season 15 line ends "(fantasy test season - the market sync stands down)": that note is expected, and it is the one place the tool moves a row in a fantasy season. A line that says "finish moving" instead of "move" means a sign-up record was already copied and only the removal is left (this only happens after an interrupted run). Check the names and seasons against what you expect.
+- A plan section, with lines per person such as "relink Futsal Season 11, Nineveh, ..." (a roster row moves to the kept account), "add Futsal Season 11 (Nineveh) to seasons played", "move his Season 9 sign-up record (Futsal, Paid)" (a sign-up record moves to the kept account; the last word is Paid or NotPaid), "copy the profile photo link from an old account", "stamp 1 old account(s) as merged". Parlevino's Season 15 line ends "(fantasy test season - the market sync stands down)": that note is expected, and it is the one place the tool moves a row in a fantasy season. A line that says "finish moving" instead of "move" means a sign-up record was already copied and only the removal is left (this only happens after an interrupted run). Check the names and seasons against what you expect.
 - `refusals: none`.
 - `clusters: 11 in the map - 11 planned, 0 refused, 0 with nothing to do`. In the tool's words a "cluster" is one person.
 - `writes: 115 (...)`. On 2026-11-08 this was 20 seasons-played entries, 2 profile photo links, 24 roster relinks, 17 sign-up copies, 17 sign-up removes (the sign-up records moving), 33 merge stamps (11 old accounts, 3 stamps each), 1 first-name fix and 1 information field (Parlevino's Age, copied to his kept account).
-- A **plan code** (the tool calls it the plan digest): `plan digest (MergedAt time excluded): ...`. The latest practice run (2026-11-08, read-only) printed **`bd98b0592255a300`** for these 11 people (0 refused, 115 changes). The code changes if the data or the list changes, so always use the one your latest dry run prints. A code from an older run (for example from when the list had 10 people) is refused.
+- A **plan code** (the tool calls it the plan digest): `plan digest (MergedAt time excluded): ...`. The latest dry run (2026-11-08, read-only) printed **`bd98b0592255a300`** for these 11 people (0 refused, 115 changes). The code changes if the data or the list changes, so always use the one your latest dry run prints. A code from an older run (for example from when the list had 10 people) is refused.
 - The last line starts with "To apply exactly this plan:" and then gives the apply command, already filled in with the right plan code. In step 3 you copy only the `npm run ...` part after the colon.
 
 If the dry run shows a refusal, a different count than you expect, or an error: stop and send the printout to Claude. Don't go on.
@@ -117,9 +119,9 @@ If the dry run shows a refusal, a different count than you expect, or an error: 
 
 ## Step 3: Apply (the real merge)
 
-Only after you have read the dry run and said OK (and, as recommended, after the app updates are out). This step has to come before clearing the Season 15 test data, applying the Season 16 prices or building Season 16 rosters (the order rule above).
+Only after you have read the dry run and said OK (and, as recommended, after the app updates are out). This step has to come before clearing the Season 15 test data, applying the Season 16 prices or building Season 16 rosters, and a fresh dry run afterwards has to show Parlevino as "already merged - nothing to do" (the order rule above).
 
-From the last line of your latest dry run, copy only the `npm run ...` part (not the words "To apply exactly this plan:"). With the plan code of the 2026-11-08 practice run it is:
+From the last line of your latest dry run, copy only the `npm run ...` part (not the words "To apply exactly this plan:"). With the plan code of the 2026-11-08 dry run it is:
 
 ```bash
 npm run merge:accounts -- --apply --expect-plan bd98b0592255a300
@@ -142,7 +144,7 @@ If something goes wrong:
 - **`CANARY FAILED ... STOPPED before any other cluster`.** The player-search function wasn't doing its job (usually the step 1 deploy didn't happen). Only the first person was merged. Run the `Undo:` line it printed, redo the deploy in step 1, run the dry run again, and apply again with the new plan code.
 - **`STOPPED by an error after the backup was written`.** Run the `Undo:` line it printed, then send Claude the error text.
 - **`REFUSED at apply - changed since the plan`** for a person: someone edited that person's roster, profile or a sign-up record (for example in the Manager) between your dry run and now. That person was skipped and everyone else went through. Run the dry run again, read it, and apply again with the new plan code. It does only what is left. If the reason says **`the fantasy test-season marker is gone`**, the Season 15 test data was cleared while the tool was running. That is what the order rule is for: nothing was written for that person. Don't put the test data back yourself, tell Claude.
-- **`STOPPED before a sign-up remove - changed since the cluster was checked`** for a person: a sign-up record changed in the moments before the tool was going to remove it from the old account. The tool did not remove it, wrote nothing more for that person (no "merged" stamp, so they are still in player search) and carried on with the others. What it had already written for that person stays until the re-run finishes it or you undo. The run ends with a failure line (`N cluster(s) STOPPED before a sign-up remove`) and the `Undo:` line. Run the dry run again, read it, and apply again with the new plan code: the re-run finishes what is left (the "finish moving" lines). Or undo, below.
+- **`STOPPED before a sign-up remove - changed since the cluster was checked`** for a person: a sign-up record changed in the moments before the tool was going to remove it from the old account. The tool did not remove it, wrote nothing more for that person (no "merged" stamp, so they are still in player search) and carried on with the others. The run ends with a failure line (`N cluster(s) STOPPED before a sign-up remove`) and the `Undo:` line. **If a person is STOPPED: first undo THIS run** with the `Undo:` command it printed (see "Undo this step" below; it takes back the whole run, not just that person). **Then run a fresh dry run. If it lists that person under `refusals`, stop and tell Claude. If that person's sign-up lines say "move" or "finish moving", apply again with the new plan code.** Don't skip the undo: if you re-run first and undo the stopped run later, the undo refuses and changes nothing (it says the run was finished by a later run), so that no sign-up record is lost. If that happens, undo the newer run's backup first (the file with the later time in its name), then this one.
 - **`Refusing --apply: the plan digest is ... not the ... you expected`.** The data changed since your dry run (for example the Season 15 test data was cleared, which changes Parlevino's part of the plan). Nothing was written. Run the dry run again, read it, and use the new code. If the new dry run lists Parlevino under `refusals`, stop and tell Claude.
 - **A boxed `WARNING: THE MIRROR CHECK (CANARY) IS SKIPPED`.** Expected only when you re-run after a partly finished apply. On a first run, tell Claude.
 
@@ -152,7 +154,7 @@ If something goes wrong:
 npm run merge:accounts -- --undo "tools/rehearsal_out/<your merge_backup_ file name>.json"
 ```
 
-**If the merge took more than one apply run** (for example the first run stopped on a canary failure or skipped a person, and you applied again), each run saved its own backup. To undo everything, run the undo for **every** run's backup file, **newest first**, then the older ones. Use only files that start with `merge_backup_`, not the `fill_backup_` files in the same folder. The undo only puts back things nobody has touched since. If it prints `LEFT ALONE (changed since the merge)` for something, someone edited it after the merge; the tool refused to overwrite it. Ask Claude. A sign-up record whose old key was edited after the merge is left alone, and the copy on the kept account is left too (`LEFT ALONE ... (its old record changed since the merge)`), so the record is never lost.
+**If the merge took more than one apply run** (for example the first run stopped on a canary failure or skipped a person, and you applied again), each run saved its own backup. To undo everything, run the undo for **every** run's backup file, **newest first**, then the older ones. Use only files that start with `merge_backup_`, not the `fill_backup_` files in the same folder. The undo only puts back things nobody has touched since. If it prints `LEFT ALONE (changed since the merge)` for something, someone edited it after the merge; the tool refused to overwrite it. Ask Claude. A sign-up record whose old key was edited after the merge is left alone, and the copy on the kept account is left too (`LEFT ALONE ... (its old record changed since the merge)`), so the record is never lost. If an undo instead refuses and says that run was finished by a later run, nothing was changed: undo the newer run's backup first, then this one again.
 
 If you already did step 6, also switch the old logins back on (see step 6 undo). Either order works.
 
@@ -170,8 +172,6 @@ For each, in the fan app:
 1. Search the name in the app's search. Only **one** account should show. If an old one still shows, close the app fully, reopen it and search again.
 2. Open the profile. **Every season** should show.
 3. Optional: in the Manager app, first **close it fully and reopen it** (it keeps its list of accounts until it is reopened), then pick the person somewhere (for example link a player). Only one account should be offered.
-4. Optional: in the Manager app, open an old paid sign-up list (for example Hiram's Season 9). He should still be listed as paid.
-
 If anything looks wrong, undo (step 3's undo) and tell Claude. Don't go on to step 5.
 
 ## Step 5: Tell the players (emails and push)
@@ -243,9 +243,10 @@ npm run merge:accounts -- --enable-old-logins --send
 
 This is the Season 16 order in full:
 
-1. **Run the merge first** (step 3, the apply, and the phone check in step 4). It comes before every job below. In particular it comes **before** clearing the Season 15 test data (`npm run fill:s15 -- --clear ...`), because Parlevino's Season 15 move is only allowed while that test data is still there. If the test data was cleared first, the tool refuses him and writes nothing for him. Don't put the test data back yourself, tell Claude.
-2. **Check for new duplicates** (below), before you build the Season 16 rosters from sign-ups. Merge any new duplicate first, otherwise a duplicate gets baked into the new roster.
-3. **Then** the Season 16 jobs: applying the player prices and building the rosters from sign-ups (and clearing the Season 15 test data, whenever you are ready to).
+1. **Run the merge first** (step 3, the apply). It comes before every job below. In particular it comes **before** clearing the Season 15 test data (`npm run fill:s15 -- --clear ...`), because Parlevino's Season 15 move is only allowed while that test data is still there. If the test data was cleared first, the tool refuses him and writes nothing for him.
+2. **Check that it worked.** Before you clear the Season 15 test data, apply the Season 16 prices or build Season 16 rosters, run a fresh dry run (step 2's command) and check that Parlevino Tamraz is listed as "already merged - nothing to do". If he is refused or missing, stop and tell Claude. Do not put the test data back.
+3. **Check for new duplicates** (below), before you build the Season 16 rosters from sign-ups. Merge any new duplicate first, otherwise a duplicate gets baked into the new roster.
+4. **Then** the Season 16 jobs: applying the player prices and building the rosters from sign-ups (and clearing the Season 15 test data, whenever you are ready to).
 
 The duplicate check only looks:
 
@@ -255,7 +256,7 @@ npm run merge:accounts -- --find-dupes Futsal-16
 
 ("Futsal-16" is the Season 16 registration.) It only matches **exact names**: first plus last name on the account against the roster name. A spelling variant ("Robben" for "Roben", an extra letter, a nickname) is not found, so it still needs a manual look at the rosters. Each candidate line is a sign-up whose name matches a roster player from earlier seasons:
 
-- **"already linked to another account"**: that roster row belongs to a different account than the sign-up. Likely a duplicate person. This is how Parlevino Tamraz showed up.
+- **"already linked to another account"**: that roster row belongs to a different account than the sign-up. Likely a duplicate person.
 - **"unlinked row"**: a roster name with no account behind it. Often it is just an old roster entry nobody linked. Check whether it is the same person, then link the row in the Manager.
 
 The first run listed Carlo Gewargis and Parlevino Tamraz too. Both are in this batch and drop off the list once step 3 is done.
@@ -271,7 +272,7 @@ To merge a new duplicate, ask Claude to add that person to the list. Then repeat
 - **Same person on an older fan app:** no message. Their old account just disappears from search. That is why step 1 recommends waiting for the app release.
 - **After step 5:** the email at the old address and the push on the kept account.
 - **After step 6:** signing in with the old email fails with the normal wrong-password message ("Username or password is incorrect. Try again."). The email told them which address to use. There is no special message for this case yet. Ask Claude if you want one.
-- **Old paid sign-up records** (Seasons 9 to 15) now sit under the kept account, with the same name and the same Paid status. Nothing about payments changes. The notes and due/info entries beside the sign-up lists were not touched.
+- **Old sign-up records** (paid or unpaid; today's are all paid, Seasons 9 to 15) now sit under the kept account, with the same name and the same status. Nothing about payments changes. The notes and due/info entries beside the sign-up lists were not touched.
 
 ## If you see a message not covered here
 
