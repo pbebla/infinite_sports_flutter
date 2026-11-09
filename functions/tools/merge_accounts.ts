@@ -1263,6 +1263,9 @@ export interface UndoResult {
   restored: number;
   alreadyBefore: number;
   leftAlone: string[];
+  /** Set only when the undo was refused up front: the labels of the copies whose
+   *  move a later run finished. */
+  heldByLaterRun?: string[];
 }
 
 /** --undo: every path the apply ATTEMPTED (refused clusters are never
@@ -1312,19 +1315,32 @@ export async function undoMerge(file: string, deps: RunDeps): Promise<UndoResult
   }
   // ...and the other way round: a copy this backup wrote whose old key is ABSENT now
   // while this backup never attempted that remove (a stopped run) means a LATER run
-  // finished the move - deleting the copy here would leave neither record. Hold it;
-  // undo that later run's backup first, then this one.
-  const heldLater = new Set<string>();
-  for (const s of states) {
+  // finished the move - deleting the copy here would leave neither record. So the
+  // whole backup is scanned BEFORE anything is written, and one such copy refuses
+  // the whole undo (all or nothing: never a half-undone person).
+  const finishedByLaterRun = async (s: { e: BackupEntry; state: string }): Promise<boolean> => {
     const su = s.state === 'written' && s.e.after !== null && (s.e.before ?? null) === null
       ? parseSignUpPath(s.e.path) : null;
     const c = su ? map.clusters.find((x) => x.keep === su.uid) : undefined;
-    if (!su || !c) continue;
+    if (!su || !c) return false;
     for (const old of c.old ?? []) {
       const oldPath = signUpPath(su.league, su.season, su.status, old);
       const removal = backup.entries.find((e) => e.path === oldPath && e.after === null);
-      if (removal && !removal.attempted && ((await db.get(oldPath)) ?? null) === null) heldLater.add(s.e.path);
+      if (removal && !removal.attempted && ((await db.get(oldPath)) ?? null) === null) return true;
     }
+    return false;
+  };
+  const heldByLater: string[] = [];
+  for (const s of states) if (await finishedByLaterRun(s)) heldByLater.push(labelOf(s.e.path, map));
+  if (heldByLater.length > 0) {
+    deps.log("Refusing --undo: This run was finished by a later run. Undo that later run's backup first, " +
+      'then undo this one. (The later run is the one whose merge_backup_<time>.json has the newer time.) ' +
+      'Nothing was changed.');
+    deps.log('  the sign-up record(s) this run copied, whose old record a later run already removed:');
+    for (const l of heldByLater) deps.log(`    ${l}`);
+    result.ok = false;
+    result.heldByLaterRun = heldByLater;
+    return result;
   }
   // Reverse of the write order: a removed old record is put back BEFORE its kept
   // copy is removed (the plan wrote the copies first, then the removes).
@@ -1338,7 +1354,10 @@ export async function undoMerge(file: string, deps: RunDeps): Promise<UndoResult
     } else if (heldCopies.has(s.e.path)) {
       result.leftAlone.push(label);
       deps.log(`    LEFT ALONE ${label} (its old record changed since the merge)`);
-    } else if (heldLater.has(s.e.path)) {
+    } else if (await finishedByLaterRun(s)) {
+      // LAST RESORT. The pre-scan above refuses the whole undo for this condition, so
+      // this is unreachable unless a record disappears while the undo is running -
+      // then this one copy is held (never deleted) and the run reports ok: false.
       result.leftAlone.push(label);
       deps.log(`    LEFT ALONE ${label} (its old record was already removed by a later run - undo that run's backup first)`);
     } else {

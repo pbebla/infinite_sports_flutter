@@ -2258,27 +2258,52 @@ describe('Task 2 fix round 2: undoing a stopped run after a re-run finished the 
   const HELD = ['Player A: kept account sign-up record, Futsal Season 12 (Paid)',
     'Player A: kept account sign-up record, Futsal Season 13 (Paid)'];
 
-  it('undoing the stopped run FIRST holds its kept copies (the old records are already gone): nothing lost, ok false', async () => {
+  it('undoing the stopped run FIRST refuses the WHOLE undo up front: zero writes, nothing touched, ok false', async () => {
     const { db, b1, b2 } = await stopThenRerun(1);
     const d = deps(db);
+    const state = clone(db.root);
     const n = db.calls.length;
     const u1 = await undoMerge(b1, d);
     expect(u1.ok).toBe(false);
-    expect([...u1.leftAlone].sort()).toEqual(HELD);
+    expect(u1.restored).toBe(0);
+    expect(u1.leftAlone).toEqual([]);
+    expect([...(u1.heldByLaterRun ?? [])].sort()).toEqual(HELD);
     const out = d.lines.join('\n');
-    expect(out).toContain(`LEFT ALONE ${HELD[0]} (its old record was already removed by a later run - undo that run's backup first)`);
-    expect(out).toContain(`LEFT ALONE ${HELD[1]} (its old record was already removed by a later run - undo that run's backup first)`);
-    expect(out).toMatch(/UNDONE - \d+ restored, \d+ already as before, 2 LEFT ALONE/);
-    // no sign-up record was deleted: the copies are still the only copy of the player's record
-    expect(db.calls.slice(n).filter((w) => w.path.startsWith('Sign Ups/Futsal/') && w.method !== 'GET')).toEqual([]); // not one Futsal sign-up write (Player B's own record was undone as usual)
+    expect(out).toContain("Refusing --undo: This run was finished by a later run. Undo that later run's backup first, then undo this one.");
+    expect(out).toMatch(/merge_backup_<time>\.json/); // the file pattern, never a uid
+    expect(out).toContain(HELD[0]);
+    expect(out).toContain(HELD[1]);
+    expect(out).not.toMatch(/UNDONE|restored /);
+    expect(out).not.toMatch(/keepA|oldA|KeptParle|OldParle/);
+    // not one write - not Player A's, and not Player B's or C's either (all or nothing)
+    expect(db.calls.slice(n).filter((c) => c.method !== 'GET')).toEqual([]);
+    expect(db.root).toEqual(state);
     expect(db.root['Sign Ups'].Futsal['12'].Paid.keepA).toBe('Zed Display');
     expect(db.root['Sign Ups'].Futsal['13'].Paid.keepA).toBe(' Zed Display ');
-    // the way out: undo the later run, then this one again - everything is back
+    // the way out: undo the later run, then this one - everything is back
     const u2 = await undoMerge(b2, deps(db));
     expect(u2.ok).toBe(true);
     const u3 = await undoMerge(b1, deps(db));
     expect(u3.ok).toBe(true);
+    expect(u3.leftAlone).toEqual([]);
     expect(noPublic(db.root)).toEqual(noPublic(moveFixture()));
+  });
+
+  it('last resort: a record that disappears DURING the undo is still held per copy (nothing deleted for it)', async () => {
+    // A stopped run on its own (old keys present, so the pre-scan passes); while the
+    // undo runs, the old S13 key vanishes - the copy for it is held, not deleted.
+    const db = withMirror(new MemDb(moveFixture()));
+    const mirror = db.onPut;
+    db.onPut = (p, v) => { mirror?.(p, v); if (p === 'Sign Ups/Futsal/12/Paid/keepA') db.set('Sign Ups/Futsal/12/Paid/oldA', 'Changed In The Gap'); };
+    const r = await applyMerge(MAP, deps(db), { canary: true, expectPlan: await digestOf(MAP, moveFixture()) });
+    expect(r.stoppedMidCluster).toEqual(['Player A']);
+    db.onPut = (p) => { if (p === 'Users/keepC/First Name') db.set('Sign Ups/Futsal/13/Paid/oldA', null); }; // mid-undo (Player C is undone first)
+    const d = deps(db);
+    const u = await undoMerge(r.backupFile as string, d);
+    expect(u.ok).toBe(false);
+    expect(u.leftAlone).toEqual(['Player A: kept account sign-up record, Futsal Season 13 (Paid)']);
+    expect(d.lines.join('\n')).toContain('(its old record was already removed by a later run - undo that run\'s backup first)');
+    expect(db.root['Sign Ups'].Futsal['13'].Paid).toEqual({ keepA: ' Zed Display ' }); // the copy is the only record left: kept
   });
 
   it('undoing the later run first and then the stopped one restores everything exactly', async () => {
