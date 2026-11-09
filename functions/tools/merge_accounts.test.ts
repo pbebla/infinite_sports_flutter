@@ -225,6 +225,47 @@ describe('readMergeSnapshot: old-account data the merge does not move (final-rev
     expect(db.writes()).toEqual([]);
   });
 
+  it('reads the sign-up listing per league, the uid keys per season/status, and the value of a mapped uid only (E2 scan)', async () => {
+    const root = fixture();
+    root['Sign Ups'] = {
+      Futsal: {
+        '12': {
+          Paid: { oldA: 'Player A ', stranger: 'Secret Name' },
+          NotPaid: { keepB: 'Player B' },
+          Due: 25,
+          Comments: { 'Secret Name': 'secret comment' },
+        },
+      },
+    };
+    const db = new MemDb(root);
+    const { snap } = await readMergeSnapshot(guardRest(db, { readOnly: true }), MAP, hints);
+    expect(snap.nodes['Sign Ups/Futsal']).toEqual({ '12': true });
+    expect(snap.nodes['Sign Ups/Basketball']).toBeNull();
+    expect(snap.nodes['Sign Ups/Flag Football']).toBeNull();
+    expect(snap.nodes['Sign Ups/Futsal/12/Paid/oldA']).toBe('Player A '); // byte for byte
+    expect(snap.nodes['Sign Ups/Futsal/12/NotPaid/keepB']).toBe('Player B');
+    expect(snap.nodes['Sign Ups/Futsal/12/Paid/keepA']).toBeNull(); // mapped, no record
+    expect(snap.nodes['Sign Ups/Futsal/12/NotPaid/oldA']).toBeNull();
+    expect(Object.keys(snap.nodes).some((k) => k.includes('stranger'))).toBe(false);
+    expect(JSON.stringify(snap.nodes)).not.toContain('Secret');
+    // key-only scans; nothing but those paths is read under Sign Ups; nothing written
+    const reads = db.calls.filter((c) => c.path.startsWith('Sign Ups'));
+    expect(reads.filter((c) => c.shallow).map((c) => c.path).sort()).toEqual([
+      'Sign Ups/Basketball', 'Sign Ups/Flag Football', 'Sign Ups/Futsal',
+      'Sign Ups/Futsal/12/NotPaid', 'Sign Ups/Futsal/12/Paid',
+    ]);
+    expect(reads.some((c) => /Comments|Due/.test(c.path))).toBe(false);
+    expect(db.writes()).toEqual([]);
+    const ro = guardRest(new MemDb(root), { readOnly: true });
+    await Promise.all([
+      expect(ro.get('Sign Ups/Futsal')).rejects.toThrow(/only its keys/),
+      expect(ro.get('Sign Ups/Futsal/12/Paid')).rejects.toThrow(/only its keys/),
+      expect(ro.get('Sign Ups/Futsal/12/Comments')).rejects.toThrow(/not a path the merge tool reads/),
+      expect(ro.get('Sign Ups/Futsal/12/Comments', { shallow: true })).rejects.toThrow(/not a path the merge tool reads/),
+      expect(ro.get('Sign Ups/Futsal/12/Due')).rejects.toThrow(/not a path the merge tool reads/),
+    ]);
+  });
+
   it('the read allowlist takes these paths only as keys, and no deeper', () => {
     const ro = guardRest(new MemDb(fixture()), { readOnly: true });
     return Promise.all([

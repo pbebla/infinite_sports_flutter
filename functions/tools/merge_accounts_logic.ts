@@ -50,14 +50,26 @@
 //                                    season: refused), key absent = not checked
 //                                    (refused: fail closed). No Config -> no
 //                                    TestFill key is needed;
+//   `Sign Ups/<League>`              (E2) for EVERY league sport (Futsal, Basketball,
+//                                    Flag Football), whenever a cluster has an old
+//                                    account and has not opted out: the shallow
+//                                    season keys of that league's sign-ups ({season:
+//                                    true}; null = the league has no sign-ups). A
+//                                    missing key = "sign-ups were not scanned" and
+//                                    refuses the cluster (a skipped scan must never
+//                                    look like "nothing to move"). The seasons
+//                                    checked are exactly the listed numeric keys;
 //   `Sign Ups/<League>/<S>/<Paid|NotPaid>/<uid>`
-//                                    (E2) for every league sport / season in which
-//                                    any account of a cluster has a sign-up key:
-//                                    BOTH statuses for EVERY old uid and the kept
-//                                    uid of the cluster - the text value, or null
-//                                    when absent. A key of such a season missing
-//                                    from the snapshot refuses the cluster (fail
-//                                    closed); a value that is not text refuses it;
+//                                    (E2) for every LISTED season: BOTH statuses for
+//                                    EVERY old uid and the kept uid of the cluster -
+//                                    the text value, or null when absent. A leaf of a
+//                                    listed season missing from the snapshot refuses
+//                                    the cluster (fail closed); an old account's
+//                                    value that is blank (or only whitespace) or not
+//                                    text refuses it, and so does the kept account's
+//                                    in a season where an old account has a record
+//                                    (a season where only the kept account has one is
+//                                    "nothing to do");
 //   keptHints[keep]                  the kept email, ALREADY MASKED (maskEmail).
 //
 // Old-account data this tool does NOT move (a cluster with any is REFUSED, so
@@ -418,15 +430,42 @@ interface SignUpGroup {
   olds: SignUpRecord[];
   /** The record(s) the KEPT account holds in this season (either status). */
   kept: SignUpRecord[];
-  /** Why the snapshot cannot be used for this season (a leaf missing or not text). */
+  /** Why the snapshot cannot be used for this season (a leaf missing, or an
+   *  old account's value that is blank / not text). */
   problem?: string;
+  /** The kept account's value is blank / not text: it only matters in a season
+   *  where an old account has a record to move (decideSignUps). */
+  keptProblem?: string;
 }
 
 const signUpLabel = (league: string, season: string): string => `${league} Season ${season}`;
 
-/** The leaves of one league season the planner and the allowlist rely on:
- *  BOTH statuses for every old uid and the kept uid. A leaf that is missing from
- *  the snapshot (never read) or is not text is a `problem` - fail closed. */
+/** A sign-up value that can be moved: text with something in it. (A value with
+ *  trailing spaces is fine and is copied byte for byte; blank or whitespace-only
+ *  is "blank" - refused, the same as everywhere else in this tool.) */
+const isSignUpText = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
+
+/** The seasons that hold sign-ups for one league sport, from its listing
+ *  (`Sign Ups/<League>` = {season: true}, null = none). A listing that was never
+ *  read (key absent) or is not a map is a problem - "sign-ups were not scanned". */
+function signUpListing(snap: MergeSnapshot, league: string): { seasons: string[] } | { problem: string } {
+  const key = `Sign Ups/${league}`;
+  if (!hasOwn(snap.nodes, key)) {
+    return { problem: `${league}: sign-ups were not scanned (the snapshot has no sign-up listing for this league)` };
+  }
+  const listing = snap.nodes[key];
+  if (listing === null || listing === undefined) return { seasons: [] };
+  if (!isPlainMap(listing)) return { problem: `${league}: the sign-up listing is not a list of seasons` };
+  return {
+    seasons: Object.keys(listing).filter((k) => SEASON_RE.test(k)).sort((a, b) => Number(a) - Number(b)),
+  };
+}
+
+/** The leaves of one LISTED league season the planner and the allowlist rely
+ *  on: BOTH statuses for every old uid and the kept uid. A leaf that is missing
+ *  from the snapshot (never read) is a `problem` - fail closed; so is an old
+ *  account's value that is blank or not text. The kept account's own bad value is
+ *  a `keptProblem` (only matters when an old account has a record there). */
 function readSignUpGroup(
   snap: MergeSnapshot,
   keep: string,
@@ -436,6 +475,7 @@ function readSignUpGroup(
 ): SignUpGroup {
   const group: SignUpGroup = { league, season, olds: [], kept: [] };
   const label = signUpLabel(league, season);
+  const notText = `${label}: a sign-up record there is blank or not text, so it cannot be moved`;
   for (const uid of [...olds, keep]) {
     for (const status of SIGN_UP_STATUSES) {
       const path = signUpPath(league, season, status, uid);
@@ -445,8 +485,9 @@ function readSignUpGroup(
       }
       const value = snap.nodes[path];
       if (value === null || value === undefined) continue;
-      if (!nonEmptyString(value)) {
-        group.problem ??= `${label}: a sign-up record there is not text (blank or another type), so it cannot be moved`;
+      if (!isSignUpText(value)) {
+        if (uid === keep) group.keptProblem ??= notText;
+        else group.problem ??= notText;
         continue;
       }
       (uid === keep ? group.kept : group.olds).push({ uid, status, value });
@@ -466,6 +507,7 @@ type SignUpDecision =
 /** E2's three-way rule for one league season (a group without a `problem`). */
 function decideSignUps(g: SignUpGroup): SignUpDecision {
   if (g.olds.length === 0) return { kind: 'none' }; // nothing to move (kept may hold its own)
+  if (g.keptProblem !== undefined) return { kind: 'refuse', why: g.keptProblem };
   const label = signUpLabel(g.league, g.season);
   const combos = new Set(g.olds.map((r) => `${r.status}\u0000${r.value}`));
   if (combos.size > 1) {
@@ -483,18 +525,6 @@ function decideSignUps(g: SignUpGroup): SignUpDecision {
     kind: 'refuse',
     why: `${label}: the kept account already has a sign-up record there that differs from the old one (another name or payment status), so none were moved`,
   };
-}
-
-/** The `Sign Ups/<league>/<S>` seasons in which any account of the cluster has a
- *  key in the snapshot, in a stable order (league, then season number). */
-function signUpSeasonsOf(snap: MergeSnapshot, accounts: ReadonlySet<string>): Array<{ league: string; season: string }> {
-  const seen = new Map<string, { league: string; season: string }>();
-  for (const key of Object.keys(snap.nodes)) {
-    const ref = parseSignUpPath(key);
-    if (ref && accounts.has(ref.uid)) seen.set(`${ref.league}|${ref.season}`, { league: ref.league, season: ref.season });
-  }
-  return [...seen.values()].sort((a, b) =>
-    a.league === b.league ? Number(a.season) - Number(b.season) : a.league < b.league ? -1 : 1);
 }
 
 // ---------------------------------------------------------------- planner
@@ -731,28 +761,37 @@ function planCluster(
   const signRemoves: PlanWrite[] = [];
   const signLines: string[] = [];
   if (c.moveSignUps !== false && olds.length > 0) {
-    for (const { league, season } of signUpSeasonsOf(snap, new Set([keep, ...olds]))) {
-      const group = readSignUpGroup(snap, keep, olds, league, season);
-      if (group.problem !== undefined) {
-        refuse(group.problem);
+    for (const league of LEAGUE_SPORTS) {
+      // The seasons come from the league's LISTING, never from whatever leaves
+      // the snapshot happens to hold; no listing = the scan was skipped = refuse.
+      const listing = signUpListing(snap, league);
+      if ('problem' in listing) {
+        refuse(listing.problem);
         continue;
       }
-      const decision = decideSignUps(group);
-      if (decision.kind === 'refuse') {
-        refuse(decision.why);
-        continue;
+      for (const season of listing.seasons) {
+        const group = readSignUpGroup(snap, keep, olds, league, season);
+        if (group.problem !== undefined) {
+          refuse(group.problem);
+          continue;
+        }
+        const decision = decideSignUps(group);
+        if (decision.kind === 'refuse') {
+          refuse(decision.why);
+          continue;
+        }
+        if (decision.kind === 'none') continue;
+        if (decision.kind === 'move') {
+          signCopies.push({ path: signUpPath(league, season, decision.status, keep), before: null, after: decision.value });
+        }
+        for (const r of group.olds) {
+          signRemoves.push({ path: signUpPath(league, season, r.status, r.uid), before: r.value, after: null });
+        }
+        signLines.push(
+          `${who}: ${decision.kind === 'move' ? 'move' : 'finish moving'} his Season ${season} sign-up record ` +
+            `(${league}, ${decision.status})`,
+        );
       }
-      if (decision.kind === 'none') continue;
-      if (decision.kind === 'move') {
-        signCopies.push({ path: signUpPath(league, season, decision.status, keep), before: null, after: decision.value });
-      }
-      for (const r of group.olds) {
-        signRemoves.push({ path: signUpPath(league, season, r.status, r.uid), before: r.value, after: null });
-      }
-      signLines.push(
-        `${who}: ${decision.kind === 'move' ? 'move' : 'finish moving'} his Season ${season} sign-up record ` +
-          `(${league}, ${decision.status})`,
-      );
     }
   }
   if (reasons.length > 0) return done();
@@ -953,6 +992,12 @@ export function assertMergePaths(
       const owner = keepOf.get(signUp.uid) ?? oldOf.get(signUp.uid);
       if (!owner) return fail('the uid is not in the merge map');
       if (owner.moveSignUps === false) fail('this cluster does not move sign-up records');
+      // The season must be one the snapshot's listing names (a skipped scan allows nothing).
+      const listing = signUpListing(snap, signUp.league);
+      if ('problem' in listing) fail(listing.problem);
+      if (!(listing as { seasons: string[] }).seasons.includes(signUp.season)) {
+        fail(`${signUpLabel(signUp.league, signUp.season)} is not in the snapshot's sign-up listing`);
+      }
       const group = readSignUpGroup(snap, owner.keep, Array.isArray(owner.old) ? owner.old : [], signUp.league, signUp.season);
       if (group.problem !== undefined) fail(group.problem);
       const decision = decideSignUps(group);

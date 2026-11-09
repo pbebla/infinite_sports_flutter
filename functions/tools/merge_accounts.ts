@@ -155,7 +155,7 @@ import { accessToken } from './admin_rest';
 import {
   afcUidPath, assertMergePaths, buildMergePlan, fantasyConfigPath, isCopyableInformation,
   LEAGUE_SPORTS, leagueUidPath, looksMasked, MergeMap, MergePlan, MergeSnapshot, parseRosterUidPath, PlanWrite,
-  userPath,
+  SIGN_UP_STATUSES, signUpPath, userPath,
 } from './merge_accounts_logic';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -248,6 +248,12 @@ const READ_RULES: ReadonlyArray<{ re: RegExp; shallowOnly?: boolean }> = [
   { re: new RegExp(`^Fantasy/(${SPORTS})$`), shallowOnly: true },
   { re: new RegExp(`^Fantasy/(${SPORTS})/\\d{1,4}/Managers$`), shallowOnly: true },
   { re: /^Registrations$/, shallowOnly: true },
+  // E2 sign-up scan: each league's season keys, each season's per-status uid
+  // keys (keys only), then the leaf (the display name) of a mapped uid. Never
+  // `Comments`, `Due` or any other node of a season.
+  { re: new RegExp(`^Sign Ups/(${SPORTS})$`), shallowOnly: true },
+  { re: new RegExp(`^Sign Ups/(${SPORTS})/\\d{1,4}/(Paid|NotPaid)$`), shallowOnly: true },
+  { re: new RegExp(`^Sign Ups/(${SPORTS})/\\d{1,4}/(Paid|NotPaid)/[A-Za-z0-9_-]+$`) },
   { re: /^PublicProfiles\/[A-Za-z0-9_-]+$/, shallowOnly: true },
   { re: /^Registrations\/[A-Za-z0-9_-]+\/Config$/ },
   { re: /^Registrations\/[A-Za-z0-9_-]+\/Submissions$/, shallowOnly: true },
@@ -617,6 +623,25 @@ export async function readMergeSnapshot(
   for (const id of keysOf(forms)) {
     const submissions = `Registrations/${id}/Submissions`;
     nodes[submissions] = (await db.get(submissions, { shallow: true })) ?? null;
+  }
+  // E2 sign-up scan (the planner refuses an old account's cluster when it was
+  // skipped): per league the listed seasons, per season and status the uid
+  // keys, and the value (the display name) of every mapped uid that has one;
+  // every other mapped uid is recorded as null. Never Comments / Due / Info.
+  let signUpSeasons = 0;
+  for (const league of LEAGUE_SPORTS) {
+    const listing = await db.get(`Sign Ups/${league}`, { shallow: true });
+    nodes[`Sign Ups/${league}`] = isPlainMap(listing) ? listing : null;
+    for (const season of keysOf(listing).filter((k) => SEASON_RE.test(k)).sort(bySeason)) {
+      signUpSeasons++;
+      for (const status of SIGN_UP_STATUSES) {
+        const held = new Set(keysOf(await db.get(`Sign Ups/${league}/${season}/${status}`, { shallow: true })));
+        for (const uid of uids) {
+          const leaf = signUpPath(league, season, status, uid);
+          nodes[leaf] = held.has(uid) ? (await db.get(leaf)) ?? null : null;
+        }
+      }
+    }
   }
   // For the dry run: how many old accounts have a public profile to leave.
   let oldPublicProfiles = 0;
