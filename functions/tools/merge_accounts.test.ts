@@ -6,12 +6,13 @@ import { parseCampaign } from '../src/lib/campaigns';
 import { maskEmail } from '../src/lib/mask_email';
 import { mergeNoticeCampaignId } from '../src/lib/merge_notice';
 import {
-  applyMerge, BACKUP_KIND, checkTargetFlags, DB_URL, dryRun, findDupes, guardRest, HintLookup,
-  httpRest, identityToolkitHints, identityToolkitSetDisabled, installLoginSwitchFetchGuard, installReadOnlyFetchGuard,
-  labelOf, loadMap, LOOKUP_URL, LoginSwitch, notifyMerge, parseArgs, printableError, readMergeSnapshot, redactUids,
-  resolveTarget, Rest, RunDeps, runCli, switchOldLogins, Target, UPDATE_URL, undoMerge,
+  applyMerge, assertWriteAllowed, BACKUP_KIND, checkTargetFlags, clusterOfWrite, DB_URL, dryRun, findDupes, guardRest,
+  HintLookup, httpRest, identityToolkitHints, identityToolkitSetDisabled, installLoginSwitchFetchGuard,
+  installReadOnlyFetchGuard, labelOf, loadMap, LOOKUP_URL, LoginSwitch, notifyMerge, parseArgs, planDigest,
+  printableError, readMergeSnapshot, redactUids, removablePaths, resolveTarget, Rest, RunDeps, runCli,
+  switchOldLogins, Target, UPDATE_URL, undoMerge, validateBackup,
 } from './merge_accounts';
-import { looksMasked, MergeMap } from './merge_accounts_logic';
+import { looksMasked, MergeMap, PlanWrite } from './merge_accounts_logic';
 
 // ── in-memory RTDB-like REST stub (no network) ─────────────────────────────
 
@@ -1653,5 +1654,448 @@ describe('--disable-old-logins --send waits for the notices (final-review fix 7)
     expect(() => parseArgs(['--enable-old-logins', '--skip-notice-check'])).toThrow(/--skip-notice-check goes with --disable-old-logins/);
     expect(() => parseArgs(['--notify', '--skip-notice-check'])).toThrow(/--skip-notice-check goes with --disable-old-logins/);
     expect(() => parseArgs(['--skip-notice-check'])).toThrow(/--skip-notice-check goes with --disable-old-logins/);
+  });
+});
+
+// ── Task 2: sign-up moves (E2) and test-season relinks (E1) in the CLI ─────
+
+/** The audit's shape: the old account also sits on a roster of the fantasy TEST
+ *  season (Config + TestFill), and holds sign-up records in several seasons. The
+ *  display names are made up and distinctive so a leak into any output shows. */
+function moveFixture(): Record<string, any> {
+  const root = fixture();
+  root.Futsal['15']['Line Ups'].Ashur['Player A Old'] = { UID: 'oldA', Goals: 1 };
+  root.Fantasy.Futsal['15'].TestFill = { At: 1_762_000_000_000, Managers: 20 };
+  root['Sign Ups'] = {
+    Futsal: {
+      '12': {
+        Paid: { oldA: 'Zed Display', stranger: 'Hidden Stranger' }, Due: 25,
+        Comments: { 'Zed Display': 'a private comment' },
+      },
+      '13': { Paid: { oldA: ' Zed Display ' }, Info: { Note: 'x' } },
+      '16': { Paid: { keepA: 'Zed Display' } },
+    },
+    Basketball: { '3': { NotPaid: { oldB: 'Yan Display' } } },
+  };
+  return root;
+}
+
+const SU_LEAK_RE = /Zed Display|Yan Display|Hidden Stranger|private comment/;
+const wr = (db: MemDb, prefix: string): string[] =>
+  db.writes().filter((w) => w.path.startsWith(prefix)).map((w) => `${w.method} ${w.path}`);
+
+describe('Task 2: reads and guards for the test-season gate and the sign-up removes', () => {
+  it('reads TestFill (keys only) for a relinked season whose Config exists; null when absent; nothing when there is no Config', async () => {
+    const db = new MemDb(moveFixture());
+    const { snap } = await readMergeSnapshot(guardRest(db, { readOnly: true }), MAP, hints);
+    expect(snap.nodes['Fantasy/Futsal/15/Config']).toEqual({ lockOverride: true });
+    expect(snap.nodes['Fantasy/Futsal/15/TestFill']).toEqual({ At: true, Managers: true }); // keys, not values
+    expect('Fantasy/Futsal/11/TestFill' in snap.nodes).toBe(false); // no Config there: no marker read
+    const reads = db.calls.filter((c) => c.path.endsWith('/TestFill'));
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every((c) => c.shallow)).toBe(true);
+    expect(db.writes()).toEqual([]);
+
+    const live = moveFixture();
+    delete live.Fantasy.Futsal['15'].TestFill; // a LIVE fantasy season: checked, absent
+    const again = await readMergeSnapshot(guardRest(new MemDb(live), { readOnly: true }), MAP, hints);
+    expect(again.snap.nodes['Fantasy/Futsal/15/TestFill']).toBeNull();
+    const { plan } = await dryRun(MAP, deps(new MemDb(live)));
+    expect(plan.refusals.map((r) => r.who)).toEqual(['Player A']);
+    expect(plan.refusals[0].why).toMatch(/live fantasy season/);
+  });
+
+  it('the read allowlist takes TestFill only as keys', async () => {
+    const ro = guardRest(new MemDb(moveFixture()), { readOnly: true });
+    await Promise.all([
+      expect(ro.get('Fantasy/Futsal/15/TestFill')).rejects.toThrow(/only its keys/),
+      expect(ro.get('Fantasy/Futsal/15/TestFill', { shallow: true })).resolves.toEqual({ At: true, Managers: true }),
+      expect(ro.get('Fantasy/Futsal/15/TestFill/At')).rejects.toThrow(/not a path the merge tool reads/),
+    ]);
+  });
+
+  it('a DELETE is only for a path on the remove list; a PUT never carries null', async () => {
+    const db = new MemDb(moveFixture());
+    const w = guardRest(db, {
+      readOnly: false,
+      allowedWrites: new Set(['Sign Ups/Futsal/12/Paid/keepA', 'Users/oldA/MergedInto']),
+      allowedDeletes: new Set(['Sign Ups/Futsal/12/Paid/oldA']),
+    });
+    await expect(w.del('Users/oldA/MergedInto')).rejects.toThrow(/not on this run's merge allowlist/); // a PUT path is not a remove path
+    await expect(w.del('Sign Ups/Futsal/13/Paid/oldA')).rejects.toThrow(/not on this run's merge allowlist/);
+    await expect(w.del('Users/oldA')).rejects.toThrow(/not on this run's merge allowlist/);
+    await expect(w.put('Sign Ups/Futsal/12/Paid/oldA', 'x')).rejects.toThrow(/not on this run's merge allowlist/); // a remove path is not a PUT path
+    await expect(w.put('Sign Ups/Futsal/12/Paid/keepA', null)).rejects.toThrow(/never carries null/);
+    await expect(w.put('Sign Ups/Futsal/12/Paid/keepA', undefined)).rejects.toThrow(/never carries null/);
+    expect(db.writes()).toEqual([]);
+    await w.put('Sign Ups/Futsal/12/Paid/keepA', 'Zed Display');
+    await w.del('Sign Ups/Futsal/12/Paid/oldA');
+    expect(db.writes()).toEqual([
+      { method: 'PUT', path: 'Sign Ups/Futsal/12/Paid/keepA' },
+      { method: 'DELETE', path: 'Sign Ups/Futsal/12/Paid/oldA' },
+    ]);
+    // no allowedDeletes at all (notify, the plain guard): no DELETE ever
+    const none = guardRest(db, { readOnly: false, allowedWrites: new Set(['MergeNotices/oldA']) });
+    await expect(none.del('MergeNotices/oldA')).rejects.toThrow(/not on this run's merge allowlist/);
+    expect(() => assertWriteAllowed('DELETE', 'Users/oldA', { readOnly: true })).toThrow(/read-only client/);
+  });
+
+  it('removablePaths is exactly the old-uid sign-up leaves of the plan that carry after: null', () => {
+    const rm = (path: string, before: unknown = 'Zed Display'): PlanWrite => ({ path, before, after: null });
+    const writes: PlanWrite[] = [
+      { path: 'Sign Ups/Futsal/12/Paid/keepA', before: null, after: 'Zed Display' },
+      rm('Sign Ups/Futsal/12/Paid/oldA'),
+      rm('Sign Ups/Futsal/12/Paid/keepA'), // a kept account's record: never
+      rm('Users/oldA/Played/Futsal/Season 11', 'Nineveh'),
+      rm('Sign Ups/Futsal/12/Comments/Zed Display', 'x'),
+      rm('Sign Ups/Futsal/12/Paid/stranger'),
+      rm('Sign Ups/Tournaments/9/Paid/oldA'),
+    ];
+    expect([...removablePaths(writes, MAP)]).toEqual(['Sign Ups/Futsal/12/Paid/oldA']);
+  });
+
+  it('clusterOfWrite maps a sign-up path to its cluster through the uid (kept or old)', () => {
+    const w = (path: string, after: unknown = 'x'): PlanWrite => ({ path, before: null, after });
+    expect(clusterOfWrite(w('Sign Ups/Futsal/12/Paid/oldA', null), MAP)).toBe(0);
+    expect(clusterOfWrite(w('Sign Ups/Futsal/12/Paid/keepA'), MAP)).toBe(0);
+    expect(clusterOfWrite(w('Sign Ups/Basketball/3/NotPaid/oldB', null), MAP)).toBe(1);
+    expect(clusterOfWrite(w('Sign Ups/Futsal/12/Paid/stranger'), MAP)).toBe(-1);
+    expect(clusterOfWrite(w('Sign Ups/Futsal/12/Comments/oldA'), MAP)).toBe(-1);
+  });
+
+  it('labelOf names a sign-up leaf by person, side, league, season and status - never the uid or the value', () => {
+    expect(labelOf('Sign Ups/Futsal/12/Paid/oldA', MAP)).toBe('Player A: old account #1 sign-up record, Futsal Season 12 (Paid)');
+    expect(labelOf('Sign Ups/Basketball/3/NotPaid/keepB', MAP)).toBe('Player B: kept account sign-up record, Basketball Season 3 (NotPaid)');
+    expect(labelOf('Sign Ups/Futsal/12/Paid/stranger', MAP)).toBe('an unrecognized path');
+  });
+});
+
+describe('Task 2: dry run, apply and undo of the sign-up moves', () => {
+  it('the dry run prints the moves and the counts by kind, writes nothing, and leaks no name, uid or comment', async () => {
+    const db = new MemDb(moveFixture());
+    const d = deps(db);
+    const { plan, digest } = await dryRun(MAP, d);
+    expect(plan.refusals).toEqual([]);
+    expect(db.writes()).toEqual([]);
+    const out = d.lines.join('\n');
+    expect(out).toContain('Player A: move his Season 12 sign-up record (Futsal, Paid)');
+    expect(out).toContain('Player A: move his Season 13 sign-up record (Futsal, Paid)');
+    expect(out).toContain('Player B: move his Season 3 sign-up record (Basketball, NotPaid)');
+    expect(out).toContain('Player A: relink Futsal Season 15, Ashur, "Player A Old" (fantasy test season - the market sync stands down)');
+    expect(out).toMatch(/3 sign-up copies, 3 sign-up removes/);
+    expect(out).toMatch(/sign-ups: 4 league season\(s\) listed/);
+    expect(out).toContain(`--apply --expect-plan ${digest}`);
+    expect(out).not.toMatch(SU_LEAK_RE);
+    expect(out).not.toMatch(/keepA|oldA|keepB|oldB|stranger/);
+    // the sign-up plan: copies before removes, per cluster
+    const su = plan.writes.filter((w) => w.path.startsWith('Sign Ups/')).map((w) => `${w.after === null ? 'DEL' : 'PUT'} ${w.path}`);
+    expect(su).toEqual([
+      'PUT Sign Ups/Futsal/12/Paid/keepA', 'PUT Sign Ups/Futsal/13/Paid/keepA',
+      'DEL Sign Ups/Futsal/12/Paid/oldA', 'DEL Sign Ups/Futsal/13/Paid/oldA',
+      'PUT Sign Ups/Basketball/3/NotPaid/keepB', 'DEL Sign Ups/Basketball/3/NotPaid/oldB',
+    ]);
+    // never a read of Comments / Due / Info
+    expect(db.calls.some((c) => /Comments|Due|Info/.test(c.path))).toBe(false);
+  });
+
+  it('apply writes the copy THEN the remove, in the cluster order, and backs up both', async () => {
+    const root = moveFixture();
+    const db = withMirror(new MemDb(root));
+    const r = await applyMerge(MAP, deps(db), { canary: true, expectPlan: await digestOf(MAP, db.root) });
+    expect(r.ok).toBe(true);
+    expect(wr(db, 'Sign Ups/')).toEqual([
+      'PUT Sign Ups/Futsal/12/Paid/keepA', 'PUT Sign Ups/Futsal/13/Paid/keepA',
+      'DELETE Sign Ups/Futsal/12/Paid/oldA', 'DELETE Sign Ups/Futsal/13/Paid/oldA',
+      'PUT Sign Ups/Basketball/3/NotPaid/keepB', 'DELETE Sign Ups/Basketball/3/NotPaid/oldB',
+    ]);
+    const su = db.root['Sign Ups'];
+    expect(su.Futsal['12']).toEqual({
+      Paid: { keepA: 'Zed Display', stranger: 'Hidden Stranger' }, Due: 25, Comments: { 'Zed Display': 'a private comment' },
+    });
+    expect(su.Futsal['13']).toEqual({ Paid: { keepA: ' Zed Display ' }, Info: { Note: 'x' } }); // byte for byte
+    expect(su.Futsal['16']).toEqual(root['Sign Ups'].Futsal['16']); // the kept account's own record: untouched
+    expect(su.Basketball['3']).toEqual({ NotPaid: { keepB: 'Yan Display' } });
+    expect(db.root.Futsal['15']['Line Ups'].Ashur['Player A Old'].UID).toBe('keepA'); // test-season relink
+    // every write touched exactly the planned leaf: nothing under Comments / Due / Info, no whole node
+    expect(db.calls.some((c) => /^Sign Ups\/.*\/(Comments|Due|Info)/.test(c.path))).toBe(false);
+
+    const backup = JSON.parse(fs.readFileSync(r.backupFile as string, 'utf8'));
+    const entry = (p: string) => backup.entries.find((e: { path: string }) => e.path === p);
+    expect(entry('Sign Ups/Futsal/12/Paid/keepA')).toMatchObject({ before: null, after: 'Zed Display', attempted: true });
+    expect(entry('Sign Ups/Futsal/12/Paid/oldA')).toMatchObject({ before: 'Zed Display', after: null, attempted: true });
+    expect(entry('Sign Ups/Futsal/13/Paid/oldA')).toMatchObject({ before: ' Zed Display ', after: null, attempted: true });
+    validateBackup(backup, 'production');
+    expect(JSON.stringify(backup)).not.toMatch(RAW_EMAIL_RE);
+  });
+
+  it('a second apply writes nothing (the moved records are gone from the old accounts)', async () => {
+    const db = withMirror(new MemDb(moveFixture()));
+    await applyMerge(MAP, deps(db), { canary: true, expectPlan: await digestOf(MAP, db.root) });
+    const n = db.writes().length;
+    const r2 = await applyMerge(MAP, deps(db, { now: () => 1_762_400_100_000 }), {
+      canary: true, expectPlan: await digestOf(MAP, db.root),
+    });
+    expect(r2.writes).toBe(0);
+    expect(db.writes().length).toBe(n);
+  });
+
+  it('undo restores everything exactly: the old key is put back BEFORE the kept copy is removed', async () => {
+    const before = moveFixture();
+    const db = withMirror(new MemDb(moveFixture()));
+    const r = await applyMerge(MAP, deps(db), { canary: true, expectPlan: await digestOf(MAP, db.root) });
+    const backup = JSON.parse(fs.readFileSync(r.backupFile as string, 'utf8'));
+    const n = db.writes().length;
+    const und = await undoMerge(r.backupFile as string, deps(db));
+    expect(und).toEqual({ ok: true, restored: backup.entries.length, alreadyBefore: 0, leftAlone: [] });
+    expect(noPublic(db.root)).toEqual(noPublic(before));
+    const undo = db.writes().slice(n).map((w) => `${w.method} ${w.path}`);
+    const at = (s: string): number => undo.indexOf(s);
+    for (const season of ['12', '13']) {
+      const restore = at(`PUT Sign Ups/Futsal/${season}/Paid/oldA`);
+      const drop = at(`DELETE Sign Ups/Futsal/${season}/Paid/keepA`);
+      expect(restore, `${season} restore`).toBeGreaterThanOrEqual(0);
+      expect(drop, `${season} drop`).toBeGreaterThan(restore);
+    }
+    expect(at('PUT Sign Ups/Basketball/3/NotPaid/oldB')).toBeGreaterThanOrEqual(0);
+    expect(at('PUT Sign Ups/Basketball/3/NotPaid/oldB')).toBeLessThan(at('DELETE Sign Ups/Basketball/3/NotPaid/keepB'));
+    expect(db.root['Sign Ups'].Futsal['13'].Paid.oldA).toBe(' Zed Display '); // byte for byte
+  });
+
+  // A crash between a copy and its remove (Review Focus 3).
+  const crashAtFirstRemove = async (): Promise<{ db: MemDb; file: string; before: Record<string, any>; real: MemDb['del'] }> => {
+    const before = moveFixture();
+    const db = withMirror(new MemDb(moveFixture()));
+    const digest = await digestOf(MAP, db.root);
+    const real = db.del.bind(db);
+    db.del = async (p: string) => {
+      if (p === 'Sign Ups/Futsal/12/Paid/oldA') throw new Error('DELETE failed: network error');
+      await real(p);
+    };
+    const d = deps(db);
+    await expect(applyMerge(MAP, d, { canary: true, expectPlan: digest })).rejects.toThrow(/network error/);
+    const file = /--undo "([^"]+)"/.exec(d.lines.join('\n'))?.[1] as string;
+    expect(file).toBeTruthy();
+    // the copies landed, the removes did not
+    expect(db.root['Sign Ups'].Futsal['12'].Paid).toMatchObject({ keepA: 'Zed Display', oldA: 'Zed Display' });
+    expect(db.root['Sign Ups'].Futsal['13'].Paid).toMatchObject({ keepA: ' Zed Display ', oldA: ' Zed Display ' });
+    db.del = real;
+    return { db, file, before, real };
+  };
+
+  it('a re-run after a crash between a copy and its remove plans only the removes and finishes the move', async () => {
+    const { db } = await crashAtFirstRemove();
+    const dry = deps(db, { now: () => 1_762_400_100_000 });
+    const { plan, digest } = await dryRun(MAP, dry);
+    expect(plan.refusals).toEqual([]);
+    const futsal = plan.writes.filter((w) => w.path.startsWith('Sign Ups/Futsal/'));
+    expect(futsal.map((w) => `${w.after === null ? 'DEL' : 'PUT'} ${w.path}`)).toEqual([
+      'DEL Sign Ups/Futsal/12/Paid/oldA', 'DEL Sign Ups/Futsal/13/Paid/oldA', // no copy is planned again
+    ]);
+    expect(dry.lines.join('\n')).toContain('Player A: finish moving his Season 12 sign-up record (Futsal, Paid)');
+    const r2 = await applyMerge(MAP, deps(db, { now: () => 1_762_400_100_000 }), { canary: true, expectPlan: digest });
+    expect(r2.ok).toBe(true);
+    expect(wr(db, 'Sign Ups/Futsal/').slice(-2)).toEqual([ // (the failed DELETE was never recorded)
+      'DELETE Sign Ups/Futsal/12/Paid/oldA', 'DELETE Sign Ups/Futsal/13/Paid/oldA',
+    ]);
+    expect(db.root['Sign Ups'].Futsal['12'].Paid).toEqual({ keepA: 'Zed Display', stranger: 'Hidden Stranger' });
+    expect(db.root['Sign Ups'].Futsal['13'].Paid).toEqual({ keepA: ' Zed Display ' });
+  });
+
+  it('undo after that partial apply removes the kept copies and leaves the old records', async () => {
+    const { db, file, before } = await crashAtFirstRemove();
+    const und = await undoMerge(file, deps(db));
+    expect(und.ok).toBe(true);
+    expect(und.alreadyBefore).toBe(1); // the remove that was sent but never landed
+    expect(noPublic(db.root)).toEqual(noPublic(before));
+    expect(db.root['Sign Ups'].Futsal['12'].Paid.oldA).toBe('Zed Display');
+    expect(db.root['Sign Ups'].Futsal['12'].Paid.keepA).toBeUndefined();
+  });
+
+  it('a person the planner refused (the kept account holds another record) moves nothing; the rest still go', async () => {
+    const root = moveFixture();
+    root['Sign Ups'].Futsal['12'].NotPaid = { keepA: 'Zed Display' }; // the kept account: another status
+    const db = withMirror(new MemDb(root));
+    const d = deps(db);
+    const r = await applyMerge(MAP, d, { canary: true, expectPlan: await digestOf(MAP, root) });
+    expect(r.refusedByPlan).toEqual(['Player A']);
+    expect(r.applied).toEqual(['Player B', 'Player C']);
+    expect(r.ok).toBe(false);
+    expect(db.writes().some((w) => /keepA|oldA|^Futsal\/(11|15)\//.test(w.path))).toBe(false);
+    expect(db.root['Sign Ups'].Futsal['12'].Paid.oldA).toBe('Zed Display');
+    const out = d.lines.join('\n');
+    expect(out).toMatch(/Player A: Futsal Season 12: the kept account already has a sign-up record there that differs/);
+    expect(out).not.toMatch(SU_LEAK_RE);
+  });
+
+  it('the snapshot read always lists every league, so a CLI that skipped the scan cannot look like nothing to move', async () => {
+    const root = fixture(); // no `Sign Ups` tree at all
+    const db = new MemDb(root);
+    const { snap } = await readMergeSnapshot(guardRest(db, { readOnly: true }), MAP, hints);
+    for (const league of ['Futsal', 'Basketball', 'Flag Football']) {
+      expect(`Sign Ups/${league}` in snap.nodes, league).toBe(true);
+    }
+    expect(db.calls.filter((c) => c.path.startsWith('Sign Ups/') && c.shallow).map((c) => c.path).sort())
+      .toEqual(['Sign Ups/Basketball', 'Sign Ups/Flag Football', 'Sign Ups/Futsal']);
+    const { plan } = await dryRun(MAP, deps(new MemDb(root)));
+    expect(plan.refusals).toEqual([]);
+    expect(plan.writes.some((w) => w.path.startsWith('Sign Ups/'))).toBe(false);
+  });
+});
+
+describe('Task 2: what is re-checked right before a cluster is written', () => {
+  let runs = 0;
+  const refusedAtApply = async (
+    mutate: (db: MemDb) => void, root: Record<string, any> = moveFixture(),
+  ): Promise<{ db: MemDb; r: Awaited<ReturnType<typeof applyMerge>>; out: string; before: Record<string, any> }> => {
+    const before = clone(root);
+    const db = withMirror(new MemDb(root));
+    const d = deps(db, { afterPlan: () => mutate(db), now: () => 1_762_400_000_000 + 1000 * ++runs }); // (a backup file per run)
+    const r = await applyMerge(MAP, d, { canary: true, expectPlan: await digestOf(MAP, clone(root)) });
+    return { db, r, out: d.lines.join('\n'), before };
+  };
+
+  it('the TestFill marker cleared between the dry run and the apply refuses that cluster only, writes none of it, and says so (Review Focus 2)', async () => {
+    const { db, r, out, before } = await refusedAtApply((m) => m.set('Fantasy/Futsal/15/TestFill', null));
+    expect(r.ok).toBe(false);
+    expect(r.refusedAtApply).toEqual(['Player A']);
+    expect(r.applied).toEqual(['Player B', 'Player C']);
+    expect(out).toContain('Player A: REFUSED at apply - changed since the plan: Futsal Season 15: the fantasy test-season marker is gone');
+    // nothing of Player A was written: no roster, no Played, no sign-up, no stamp
+    expect(db.writes().some((w) => /keepA|oldA|^Futsal\/(11|15)\//.test(w.path))).toBe(false);
+    expect(db.root['Sign Ups'].Futsal).toEqual(before['Sign Ups'].Futsal);
+    expect(db.root.Users.keepA).toEqual(before.Users.keepA);
+    expect(db.root.Users.oldA).toEqual(before.Users.oldA);
+    expect(db.root.Futsal['15']['Line Ups'].Ashur['Player A Old'].UID).toBe('oldA');
+    // Player B went through, and the undo leaves the refused cluster alone
+    expect(db.root.Basketball['3']).toEqual(before.Basketball['3']);
+    expect(db.root['Sign Ups'].Basketball['3']).toEqual({ NotPaid: { keepB: 'Yan Display' } });
+    const u = await undoMerge(r.backupFile as string, deps(db));
+    expect(u).toMatchObject({ ok: true, leftAlone: [] });
+    const expected = noPublic(before);
+    delete expected.Fantasy.Futsal['15'].TestFill; // (the test itself cleared it)
+    expect(noPublic(db.root)).toEqual(expected);
+  });
+
+  it('a TestFill that is still there lets the relink through (and a Config that appeared where there was none still refuses)', async () => {
+    const ok = await refusedAtApply(() => undefined);
+    expect(ok.r.ok).toBe(true);
+    const fresh = await refusedAtApply((m) => m.set('Fantasy/Futsal/11/Config', { lockOverride: 'open' }));
+    expect(fresh.r.refusedAtApply).toEqual(['Player A']);
+    expect(fresh.out).toContain('Futsal Season 11 now has a fantasy Config');
+  });
+
+  const variants: Array<[string, (m: MemDb) => void, RegExp, ((root: Record<string, any>) => void)?]> = [
+    ['the old record changed value', (m) => m.set('Sign Ups/Futsal/12/Paid/oldA', 'Someone Else'),
+      /Player A: old account #1 sign-up record, Futsal Season 12 \(Paid\)/],
+    ['the old record was removed by someone else', (m) => m.set('Sign Ups/Futsal/13/Paid/oldA', null),
+      /old account #1 sign-up record, Futsal Season 13 \(Paid\)/],
+    ['the kept account got a record in the same status (the copy is no longer a copy)', (m) => m.set('Sign Ups/Futsal/12/Paid/keepA', 'Zed Display'),
+      /kept account sign-up record, Futsal Season 12 \(Paid\)/],
+    ['the kept account got a record in the other status', (m) => m.set('Sign Ups/Futsal/12/NotPaid/keepA', 'Zed Display'),
+      /kept account sign-up record, Futsal Season 12 \(NotPaid\)/],
+    ['the old account got a second record in the other status', (m) => m.set('Sign Ups/Futsal/13/NotPaid/oldA', 'Zed Display'),
+      /old account #1 sign-up record, Futsal Season 13 \(NotPaid\)/],
+    ['the kept copy of a half-done move was removed', (m) => m.set('Sign Ups/Futsal/12/Paid/keepA', null),
+      /kept account sign-up record, Futsal Season 12 \(Paid\)/,
+      (root) => { root['Sign Ups'].Futsal['12'].Paid.keepA = 'Zed Display'; }],
+    ['the kept copy of a half-done move changed value', (m) => m.set('Sign Ups/Futsal/12/Paid/keepA', 'Another Name'),
+      /kept account sign-up record, Futsal Season 12 \(Paid\)/,
+      (root) => { root['Sign Ups'].Futsal['12'].Paid.keepA = 'Zed Display'; }],
+  ];
+  it.each(variants)('%s since the plan: that cluster is refused, nothing of it written, the other goes', async (_n, mutate, label, seed) => {
+    const root = moveFixture();
+    seed?.(root);
+    const { db, r, out } = await refusedAtApply(mutate, root);
+    expect(r.refusedAtApply).toEqual(['Player A']);
+    expect(r.applied).toEqual(['Player B', 'Player C']);
+    expect(out).toMatch(label);
+    expect(out).not.toMatch(SU_LEAK_RE);
+    expect(out).not.toMatch(/keepA|oldA/);
+    expect(db.writes().some((w) => /keepA|oldA|^Futsal\/(11|15)\//.test(w.path))).toBe(false);
+  });
+});
+
+describe('Task 2: the plan digest and the backup cover the removes', () => {
+  it('dropping a remove, or changing what it removes, changes the digest', async () => {
+    const { plan, digest } = await dryRun(MAP, deps(new MemDb(moveFixture()), { log: () => undefined }));
+    expect(planDigest(plan.writes)).toBe(digest);
+    const removes = plan.writes.filter((w) => w.after === null);
+    expect(removes.length).toBe(3);
+    expect(planDigest(plan.writes.filter((w) => w.after !== null))).not.toBe(digest);
+    expect(planDigest(plan.writes.filter((w) => w !== removes[0]))).not.toBe(digest);
+    expect(planDigest(plan.writes.map((w) => (w === removes[1] ? { ...w, before: 'Zed Display!' } : w)))).not.toBe(digest);
+    // an apply over the same data accepts exactly this code; another code refuses before any write
+    const db = withMirror(new MemDb(moveFixture()));
+    await expect(applyMerge(MAP, deps(db), { canary: true, expectPlan: planDigest(plan.writes.filter((w) => w.after !== null)) }))
+      .rejects.toThrow(/plan digest is [0-9a-f]{16}, not the/);
+    expect(db.writes()).toEqual([]);
+  });
+
+  describe('validateBackup on sign-up entries', () => {
+    const base = async (): Promise<any> => {
+      const db = withMirror(new MemDb(moveFixture()));
+      const r = await applyMerge(MAP, deps(db), { canary: true, expectPlan: await digestOf(MAP, db.root) });
+      return JSON.parse(fs.readFileSync(r.backupFile as string, 'utf8'));
+    };
+    const withEntry = (b: any, e: Record<string, unknown>): any => ({ ...b, entries: [...b.entries, { who: 'Player A', attempted: true, ...e }] });
+    it('accepts what apply wrote and refuses every other sign-up shape', async () => {
+      const b = await base();
+      expect(() => validateBackup(b, 'production')).not.toThrow();
+      // a remove of a KEPT account's record, a copy onto an OLD account, a remove that is not a removal
+      expect(() => validateBackup(withEntry(b, { path: 'Sign Ups/Futsal/16/Paid/keepA', before: 'Zed Display', after: null }), 'production'))
+        .toThrow(/only an old account's sign-up record may be removed/);
+      expect(() => validateBackup(withEntry(b, { path: 'Sign Ups/Futsal/9/Paid/oldA', before: null, after: 'Zed Display' }), 'production'))
+        .toThrow(/a sign-up copy goes to the kept account/);
+      // a copy with no matching remove in the same backup
+      expect(() => validateBackup(withEntry(b, { path: 'Sign Ups/Futsal/9/Paid/keepA', before: null, after: 'Zed Display' }), 'production'))
+        .toThrow(/no old record of this backup is being moved to it/);
+      // a copy over an existing record, a blank or non-text value
+      expect(() => validateBackup(withEntry(b, { path: 'Sign Ups/Futsal/12/NotPaid/keepA', before: 'x', after: 'Zed Display' }), 'production'))
+        .toThrow(/a sign-up copy only fills an empty record/);
+      expect(() => validateBackup(withEntry(b, { path: 'Sign Ups/Futsal/9/Paid/oldA', before: '   ', after: null }), 'production'))
+        .toThrow(/the removed sign-up record is blank or not text/);
+      expect(() => validateBackup(withEntry(b, { path: 'Sign Ups/Futsal/9/Paid/oldA', before: 7, after: null }), 'production'))
+        .toThrow(/the removed sign-up record is blank or not text/);
+      // an account that is in no cluster, and paths that are not league sign-up leaves
+      expect(() => validateBackup(withEntry(b, { path: 'Sign Ups/Futsal/9/Paid/stranger', before: 'x', after: null }), 'production'))
+        .toThrow(/not in this backup's clusters/);
+      for (const p of ['Sign Ups/Futsal/12/Comments/Zed Display', 'Sign Ups/Futsal/12/Due', 'Sign Ups/Tournaments/9/Paid/oldA',
+        'Sign Ups/Futsal/12/Paid']) {
+        expect(() => validateBackup(withEntry(b, { path: p, before: 'x', after: null }), 'production'), p).toThrow(/no value written/);
+        expect(() => validateBackup(withEntry(b, { path: p, before: null, after: 'x' }), 'production'), p).toThrow(/not a merge path/);
+      }
+      // a null `after` anywhere else is still "no value written"
+      expect(() => validateBackup(withEntry(b, { path: 'Users/oldA/Played/Futsal/Season 11', before: 'Nineveh', after: null }), 'production'))
+        .toThrow(/no value written/);
+    });
+  });
+});
+
+describe('Task 2: undo is careful with a record that changed since the merge', () => {
+  it('an old key someone re-created with another value is left alone, and so is the kept copy (the record is never lost)', async () => {
+    const db = withMirror(new MemDb(moveFixture()));
+    const r = await applyMerge(MAP, deps(db), { canary: true, expectPlan: await digestOf(MAP, db.root) });
+    db.set('Sign Ups/Futsal/12/Paid/oldA', 'Re-created Name'); // the old key is back, with another value
+    const d = deps(db);
+    const u = await undoMerge(r.backupFile as string, d);
+    expect(u.ok).toBe(false);
+    expect([...u.leftAlone].sort()).toEqual([
+      'Player A: kept account sign-up record, Futsal Season 12 (Paid)',
+      'Player A: old account #1 sign-up record, Futsal Season 12 (Paid)',
+    ]);
+    expect(db.root['Sign Ups'].Futsal['12'].Paid).toEqual({ oldA: 'Re-created Name', keepA: 'Zed Display', stranger: 'Hidden Stranger' });
+    expect(d.lines.join('\n')).toContain('so this copy stays');
+    // the other seasons were undone as usual
+    expect(db.root['Sign Ups'].Futsal['13'].Paid).toEqual({ oldA: ' Zed Display ' });
+    expect(db.root['Sign Ups'].Basketball['3'].NotPaid).toEqual({ oldB: 'Yan Display' });
+  });
+
+  it('a kept copy the player edited since the merge is left alone too (and the old record is still put back)', async () => {
+    const db = withMirror(new MemDb(moveFixture()));
+    const r = await applyMerge(MAP, deps(db), { canary: true, expectPlan: await digestOf(MAP, db.root) });
+    db.set('Sign Ups/Futsal/13/Paid/keepA', 'Edited Name');
+    const u = await undoMerge(r.backupFile as string, deps(db));
+    expect(u.leftAlone).toEqual(['Player A: kept account sign-up record, Futsal Season 13 (Paid)']);
+    expect(db.root['Sign Ups'].Futsal['13'].Paid).toEqual({ oldA: ' Zed Display ', keepA: 'Edited Name' });
   });
 });

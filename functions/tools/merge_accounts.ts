@@ -21,7 +21,10 @@
 //                                                every target and refuses the
 //                                                cluster if anything moved
 //                                                since the plan (Review Focus
-//                                                1), writes it, and after the
+//                                                1; also the TestFill marker of
+//                                                a fantasy season it relinks in,
+//                                                and every sign-up record it
+//                                                moves), writes it, and after the
 //                                                first stamped old account
 //                                                runs the canary (Focus 4)
 //   npm run merge:accounts -- --undo <backupFile>
@@ -112,6 +115,12 @@
 //     PUT/DELETE throws before the network) behind a fetch guard that only
 //     lets GETs to the database and the two POSTs that read (the OAuth token
 //     exchange and Identity Toolkit accounts:lookup) out of the process.
+//   - The tool's ONE removal (E2): --apply may DELETE only an old account's sign-up
+//     record (Sign Ups/<league>/<S>/<Paid|NotPaid>/<old uid of the map>), and only
+//     after its identical copy is on the kept account (the plan puts the copy
+//     first; a re-run after a crash between the two plans only the remove). A PUT
+//     never carries null, a DELETE needs its own list (removablePaths), and --undo
+//     puts the old record back BEFORE it removes the kept copy.
 //   - Every GET passes READ_RULES (no whole Users, no Submissions bodies -
 //     only their keys - so no answers, emails or phones are ever fetched by
 //     --find-dupes). Every PUT/DELETE must be a path of this run's plan that
@@ -153,9 +162,9 @@ import { maskEmail } from '../src/lib/mask_email';
 import { mergeNoticeCampaign, mergeNoticeCampaignId } from '../src/lib/merge_notice';
 import { accessToken } from './admin_rest';
 import {
-  afcUidPath, assertMergePaths, buildMergePlan, fantasyConfigPath, isCopyableInformation,
-  LEAGUE_SPORTS, leagueUidPath, looksMasked, MergeMap, MergePlan, MergeSnapshot, parseRosterUidPath, PlanWrite,
-  SIGN_UP_STATUSES, signUpPath, userPath,
+  afcUidPath, assertMergePaths, buildMergePlan, fantasyConfigPath, fantasyTestFillPath, isCopyableInformation,
+  LEAGUE_SPORTS, leagueUidPath, looksMasked, MergeMap, MergePlan, MergeSnapshot, parseRosterUidPath,
+  parseSignUpPath, PlanWrite, SIGN_UP_STATUSES, signUpPath, userPath,
 } from './merge_accounts_logic';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -242,6 +251,8 @@ const READ_RULES: ReadonlyArray<{ re: RegExp; shallowOnly?: boolean }> = [
   { re: /^AFC San Jose\/Seasons\/[^/]+\/Roster$/ },
   { re: /^AFC San Jose\/Seasons\/[^/]+\/Roster\/[^/]+(\/UID)?$/ },
   { re: new RegExp(`^Fantasy/(${SPORTS})/\\d{1,4}/Config$`), shallowOnly: true },
+  // E1: the fantasy TEST-season marker of a season a relink touches - presence only.
+  { re: new RegExp(`^Fantasy/(${SPORTS})/\\d{1,4}/TestFill$`), shallowOnly: true },
   // Old-account data the merge does not move (the planner refuses a cluster
   // with any): the fantasy seasons, their manager uids and the registration
   // submitter uids - KEYS ONLY, never a manager's or a submission's contents.
@@ -273,15 +284,34 @@ export function assertReadAllowed(p: string, shallow: boolean): void {
 export interface GuardOptions {
   /** The dry run and --find-dupes: every PUT/DELETE throws. */
   readOnly: boolean;
-  /** Otherwise: the only paths a PUT/DELETE may touch. */
+  /** Otherwise: the only paths a PUT may touch (always with a value, never null). */
   allowedWrites?: ReadonlySet<string>;
+  /** Otherwise: the only paths a DELETE may touch. A merge removes exactly one
+   *  kind of thing (E2: an old account's sign-up record, once its copy is on
+   *  the kept account); --undo deletes what the merge created. No list = no
+   *  DELETE at all. */
+  allowedDeletes?: ReadonlySet<string>;
 }
 
 export function assertWriteAllowed(method: string, p: string, opts: GuardOptions): void {
   if (opts.readOnly) throw new Error(`Refusing ${method} ${p}: read-only client (dry run / find-dupes)`);
-  if (!opts.allowedWrites || !opts.allowedWrites.has(p)) {
+  const list = method === 'DELETE' ? opts.allowedDeletes : opts.allowedWrites;
+  if (!list || !list.has(p)) {
     throw new Error(`Refusing ${method} ${p}: not on this run's merge allowlist`);
   }
+}
+
+/** The paths of [writes] a run may DELETE: exactly an old account's sign-up
+ *  leaf (Sign Ups / league / season / Paid or NotPaid / an old uid of the map)
+ *  whose planned `after` is null - nothing else, whatever else a plan carries. */
+export function removablePaths(writes: ReadonlyArray<PlanWrite>, map: MergeMap): Set<string> {
+  const olds = new Set(oldsOf(map));
+  const out = new Set<string>();
+  for (const w of writes) {
+    const ref = w.after === null ? parseSignUpPath(w.path) : null;
+    if (ref !== null && olds.has(ref.uid)) out.add(w.path);
+  }
+  return out;
 }
 
 /** Wraps any client so every call passes the guards BEFORE it reaches the
@@ -294,6 +324,11 @@ export function guardRest(inner: Rest, opts: GuardOptions): Rest {
     },
     put: async (p, value) => {
       assertWriteAllowed('PUT', p, opts);
+      // A PUT of null would delete: the only way out for a removal is `del`, which
+      // has its own list.
+      if (value === null || value === undefined) {
+        throw new Error(`Refusing PUT ${p}: a PUT never carries null (a removal goes through DELETE)`);
+      }
       await inner.put(p, value);
     },
     del: async (p) => {
@@ -478,6 +513,12 @@ export function labelOf(p: string, map: MergeMap): string {
       ? `roster ${ref.sport} Season ${ref.season}, ${ref.team}, "${ref.name}"`
       : `roster AFC San Jose "${ref.season}", "${ref.name}"`;
   }
+  const su = parseSignUpPath(p);
+  const suCluster = su ? clusterOfUid(su.uid, map) : undefined;
+  if (su && suCluster) {
+    const role = suCluster.keep === su.uid ? 'kept account' : `old account #${(suCluster.old ?? []).indexOf(su.uid) + 1}`;
+    return `${suCluster.who}: ${role} sign-up record, ${su.league} Season ${su.season} (${su.status})`;
+  }
   const m = /^Users\/([^/]+)(?:\/(.+))?$/.exec(String(p));
   const c = m ? clusterOfUid(m[1], map) : undefined;
   if (m && c) {
@@ -545,6 +586,10 @@ export interface SnapshotStats {
   rows: number;
   oldRows: number;
   configChecks: number;
+  /** Touched seasons with a fantasy Config whose TestFill marker was read (E1). */
+  testFillChecks: number;
+  /** League seasons the sign-up scan listed (E2), all leagues. */
+  signUpSeasons: number;
   hints: number;
   /** Fantasy seasons (all sports) and registration forms whose keys were read. */
   fantasySeasons: number;
@@ -595,10 +640,19 @@ export async function readMergeSnapshot(
       touched.add(`${nr.sport}|${nr.season}`);
     }
   }
+  // E1: a relink in a season with a fantasy Config is allowed only in the TEST
+  // season (its TestFill marker exists), so that marker is read - keys only - for
+  // every touched season whose Config exists (null = checked, absent).
+  let testFillChecks = 0;
   for (const key of [...touched].sort()) {
     const [sport, season] = key.split('|');
     const cfg = fantasyConfigPath(sport, season);
     nodes[cfg] = (await db.get(cfg, { shallow: true })) ?? null;
+    if (nodes[cfg] !== null) {
+      const fill = fantasyTestFillPath(sport, season);
+      nodes[fill] = (await db.get(fill, { shallow: true })) ?? null;
+      testFillChecks++;
+    }
   }
 
   // Old-account data the merge would leave behind (the planner refuses a
@@ -654,7 +708,7 @@ export async function readMergeSnapshot(
     snap: { nodes, keptHints },
     stats: {
       accounts: uids.length, accountsMissing: missing, seasons, rows: rows.length, oldRows,
-      configChecks: touched.size, hints: Object.keys(keptHints).length,
+      configChecks: touched.size, testFillChecks, signUpSeasons, hints: Object.keys(keptHints).length,
       fantasySeasons, registrationForms: keysOf(forms).length, oldAccounts: olds.size, oldPublicProfiles,
     },
   };
@@ -674,13 +728,18 @@ export function planDigest(writes: ReadonlyArray<PlanWrite>): string {
 /** Which cluster (index in the map) a planned write belongs to. */
 export function clusterOfWrite(w: PlanWrite, map: MergeMap): number {
   if (parseRosterUidPath(w.path)) return map.clusters.findIndex((c) => c.keep === w.after);
+  // A sign-up leaf (the kept copy or the old record) belongs to the cluster of its uid.
+  const su = parseSignUpPath(w.path);
+  if (su) return map.clusters.findIndex((c) => c.keep === su.uid || (c.old ?? []).includes(su.uid));
   const m = /^Users\/([^/]+)\//.exec(w.path);
   if (!m) return -1;
   return map.clusters.findIndex((c) => c.keep === m[1] || (c.old ?? []).includes(m[1]));
 }
 
-function kindOf(p: string): string {
+function kindOf(w: PlanWrite): string {
+  const p = w.path;
   if (parseRosterUidPath(p)) return 'roster relinks';
+  if (parseSignUpPath(p)) return w.after === null ? 'sign-up removes' : 'sign-up copies';
   if (/\/Played\//.test(p)) return 'seasons-played entries';
   if (/\/ProfileUrl$/.test(p)) return 'profile photo links';
   if (/\/Information\//.test(p)) return 'information fields';
@@ -695,6 +754,9 @@ function printPlan(map: MergeMap, plan: MergePlan, stats: SnapshotStats, log: (s
     `${stats.rows} roster rows in ${seasons} seasons, ${stats.oldRows} rows held by an old account, ` +
     `${stats.configChecks} fantasy Config checks`);
   log(`  kept-email hints found (masked, not shown): ${stats.hints} of ${new Set(map.clusters.map((c) => c.keep)).size}`);
+  log(`  sign-ups: ${stats.signUpSeasons} league season(s) listed (${LEAGUE_SPORTS.join(', ')}); only the record of a ` +
+    'mapped account is read, and an old record moves to the kept account (a copy, then a remove); Comments and Due are never read');
+  log(`  fantasy test-season check: ${stats.testFillChecks} relinked season(s) have a fantasy Config - a relink there is allowed only when its TestFill marker exists`);
   log(`  data this tool does not move (Awards, tournaments, fantasy manager entries, registration submissions): ` +
     `checked on the old accounts, ${stats.fantasySeasons} fantasy season(s) and ${stats.registrationForms} registration form(s) ` +
     '(keys only); a person who has any is refused below');
@@ -712,7 +774,7 @@ function printPlan(map: MergeMap, plan: MergePlan, stats: SnapshotStats, log: (s
   log(`  clusters: ${map.clusters.length} in the map - ${planned.size} planned, ` +
     `${refused.size} refused, ${already} with nothing to do`);
   const kinds = new Map<string, number>();
-  for (const w of plan.writes) kinds.set(kindOf(w.path), (kinds.get(kindOf(w.path)) ?? 0) + 1);
+  for (const w of plan.writes) kinds.set(kindOf(w), (kinds.get(kindOf(w)) ?? 0) + 1);
   log(`  writes: ${plan.writes.length}` +
     (kinds.size ? ` (${[...kinds].map(([k, n]) => `${n} ${k}`).join(', ')})` : ''));
   log(`  plan digest (MergedAt time excluded): ${planDigest(plan.writes)}`);
@@ -778,6 +840,16 @@ export function validateBackup(raw: unknown, target: Target['kind']): MergeBacku
     keepOf.set(entry.keep, entry);
     for (const o of entry.old) oldOf.set(o, entry);
   }
+  // E2: the old records this backup removes (kept uid | league | season | status |
+  // value) - a sign-up COPY in the backup must be the copy of one of them.
+  const moved = new Set<string>();
+  for (const e of raw['entries'] as unknown[]) {
+    const su = isPlainMap(e) ? parseSignUpPath(e['path']) : null;
+    const c = su ? oldOf.get(su.uid) : undefined;
+    if (su && c && isPlainMap(e) && e['after'] === null && typeof e['before'] === 'string') {
+      moved.add(`${c.keep}|${su.league}|${su.season}|${su.status}|${e['before']}`);
+    }
+  }
   const seen = new Set<string>();
   for (const e of raw['entries'] as unknown[]) {
     const bad = (why: string): never => {
@@ -791,6 +863,25 @@ export function validateBackup(raw: unknown, target: Target['kind']): MergeBacku
     const after = e['after'];
     if (seen.has(p)) bad('listed twice');
     seen.add(p);
+    // E2 sign-up leaves: an old account's record REMOVED (after null, before = its
+    // text), or the kept account's copy written into an empty record.
+    const su = parseSignUpPath(p);
+    if (su) {
+      const oc = oldOf.get(su.uid);
+      if (!oc && !keepOf.has(su.uid)) bad("the account is not in this backup's clusters");
+      if (oc) {
+        if (after !== null) bad('a sign-up copy goes to the kept account');
+        if (!(typeof before === 'string' && before.trim() !== '')) bad('the removed sign-up record is blank or not text');
+      } else {
+        if (after === null || after === undefined) bad("only an old account's sign-up record may be removed");
+        if (before !== null) bad('a sign-up copy only fills an empty record');
+        if (typeof after !== 'string' || after.trim() === '') bad('the copied sign-up record is blank or not text');
+        if (!moved.has(`${su.uid}|${su.league}|${su.season}|${su.status}|${after}`)) {
+          bad('no old record of this backup is being moved to it');
+        }
+      }
+      continue;
+    }
     if (after === null || after === undefined) bad('no value written');
     const ref = parseRosterUidPath(p);
     if (ref) {
@@ -893,30 +984,61 @@ export const EXPECT_PLAN_REQUIRED =
 
 const rowPathOf = (uidPath: string): string => uidPath.slice(0, -'/UID'.length);
 
-/** Review Focus 1: what in this cluster no longer matches the plan, read
- *  live right before writing (labels only, no values). Also re-checks D2
- *  (no fantasy Config appeared) and that the kept account is not merged. */
+/** Review Focus 1 and 2: what in this cluster no longer matches the plan, read
+ *  live right before writing (labels only, no values).
+ *   - every write's target still holds its planned `before` (for a sign-up
+ *     remove: the old record still says what is being moved; for a copy: the
+ *     kept account still has none);
+ *   - E1: a relinked season that had a fantasy Config at plan time was allowed
+ *     only because its TestFill marker existed - the marker must still be there
+ *     (a fill cleared in between refuses the cluster); a Config that appeared
+ *     where there was none refuses it as before (D2);
+ *   - E2: every sign-up leaf of each moved season (both statuses, every old
+ *     account and the kept one) still equals what the plan read - so a copy is
+ *     never made onto a record that appeared, and a half-done move's kept copy
+ *     is still the same one;
+ *   - the kept account is not merged itself. */
 async function changedSincePlan(
-  db: Rest, map: MergeMap, keep: string, writes: ReadonlyArray<PlanWrite>,
+  db: Rest, map: MergeMap, keep: string, writes: ReadonlyArray<PlanWrite>, snap: MergeSnapshot,
 ): Promise<string[]> {
   const changed: string[] = [];
-  const configs = new Map<string, string>();
+  const add = (label: string): void => { if (!changed.includes(label)) changed.push(label); };
+  const seasons = new Map<string, { sport: string; season: string }>();
+  const moved = new Map<string, { league: string; season: string }>();
   for (const w of writes) {
     const ref = parseRosterUidPath(w.path);
+    const su = parseSignUpPath(w.path);
     if (ref) {
       const row = await db.get(rowPathOf(w.path));
-      if (!isPlainMap(row) || !same(row['UID'] ?? null, w.before ?? null)) changed.push(labelOf(w.path, map));
-      if (ref.kind === 'league') {
-        configs.set(fantasyConfigPath(ref.sport, ref.season), `${ref.sport} Season ${ref.season}`);
-      }
+      if (!isPlainMap(row) || !same(row['UID'] ?? null, w.before ?? null)) add(labelOf(w.path, map));
+      if (ref.kind === 'league') seasons.set(`${ref.sport}|${ref.season}`, { sport: ref.sport, season: ref.season });
     } else if (!same(await db.get(w.path), w.before ?? null)) {
-      changed.push(labelOf(w.path, map));
+      add(labelOf(w.path, map));
+    }
+    if (su) moved.set(`${su.league}|${su.season}`, { league: su.league, season: su.season });
+  }
+  for (const [, s] of [...seasons].sort()) {
+    const label = `${s.sport} Season ${s.season}`;
+    const live = await db.get(fantasyConfigPath(s.sport, s.season), { shallow: true });
+    if (live === null) continue; // no fantasy season now: nothing to protect
+    const planned = snap.nodes[fantasyConfigPath(s.sport, s.season)] ?? null;
+    if (planned === null) {
+      add(`${label} now has a fantasy Config`);
+    } else if ((await db.get(fantasyTestFillPath(s.sport, s.season), { shallow: true })) === null) {
+      add(`${label}: the fantasy test-season marker is gone`);
     }
   }
-  for (const [cfg, label] of [...configs].sort()) {
-    if ((await db.get(cfg, { shallow: true })) !== null) changed.push(`${label} now has a fantasy Config`);
+  const cluster = map.clusters.find((c) => c.keep === keep);
+  for (const [, m] of [...moved].sort()) {
+    for (const uid of [...(cluster?.old ?? []), keep]) {
+      for (const status of SIGN_UP_STATUSES) {
+        const leaf = signUpPath(m.league, m.season, status, uid);
+        const planned = Object.prototype.hasOwnProperty.call(snap.nodes, leaf) ? snap.nodes[leaf] ?? null : null;
+        if (!same((await db.get(leaf)) ?? null, planned)) add(labelOf(leaf, map));
+      }
+    }
   }
-  if (hasUidValue(await db.get(`${userPath(keep)}/MergedInto`))) changed.push('the kept account is now merged itself');
+  if (hasUidValue(await db.get(`${userPath(keep)}/MergedInto`))) add('the kept account is now merged itself');
   return changed;
 }
 
@@ -1032,12 +1154,16 @@ export async function applyMerge(map: MergeMap, deps: RunDeps, opts: ApplyOption
   const undoCmd = `npm run merge:accounts -- --undo "${backupFile}"`;
   log(`  backup of ${backup.entries.length} planned paths: ${backupFile}`);
 
+  // PUTs: every planned leaf that carries a value. DELETEs: only an old account's
+  // sign-up record (E2) - the tool's one removal.
   const writer = guardRest(deps.rest, {
-    readOnly: false, allowedWrites: new Set(plan.writes.map((w) => w.path)),
+    readOnly: false,
+    allowedWrites: new Set(plan.writes.filter((w) => w.after !== null).map((w) => w.path)),
+    allowedDeletes: removablePaths(plan.writes, map),
   });
   try {
     for (const g of groups) {
-      const changed = await changedSincePlan(writer, map, g.keep, g.writes);
+      const changed = await changedSincePlan(writer, map, g.keep, g.writes, snap);
       if (changed.length > 0) {
         log(`  ${g.who}: REFUSED at apply - changed since the plan: ${changed.join('; ')}`);
         result.refusedAtApply.push(g.who);
@@ -1048,9 +1174,10 @@ export async function applyMerge(map: MergeMap, deps: RunDeps, opts: ApplyOption
         const entry = backup.entries.find((e) => e.path === w.path) as BackupEntry;
         entry.attempted = true;
         saveBackup(backupFile, backup); // recorded BEFORE the write is sent
-        await writer.put(w.path, w.after);
+        if (w.after === null) await writer.del(w.path);
+        else await writer.put(w.path, w.after);
         result.writes++;
-        log(`    wrote ${labelOf(w.path, map)}`);
+        log(`    ${w.after === null ? 'removed' : 'wrote'} ${labelOf(w.path, map)}`);
       }
       result.applied.push(g.who);
 
@@ -1110,7 +1237,13 @@ export async function undoMerge(file: string, deps: RunDeps): Promise<UndoResult
     deps.log('Nothing to undo - this backup recorded no writes.');
     return result;
   }
-  const db = guardRest(deps.rest, { readOnly: false, allowedWrites: new Set(todo.map((e) => e.path)) });
+  // PUTs put a backed-up value back; DELETEs remove what the merge created (a
+  // `before` of null: a kept copy, a Played entry, a stamp, a roster UID...).
+  const db = guardRest(deps.rest, {
+    readOnly: false,
+    allowedWrites: new Set(todo.filter((e) => e.before !== null && e.before !== undefined).map((e) => e.path)),
+    allowedDeletes: new Set(todo.filter((e) => e.before === null || e.before === undefined).map((e) => e.path)),
+  });
   const states: Array<{ e: BackupEntry; state: 'written' | 'before' | 'changed' }> = [];
   for (const e of todo) {
     const live = (await db.get(e.path)) ?? null;
@@ -1122,6 +1255,17 @@ export async function undoMerge(file: string, deps: RunDeps): Promise<UndoResult
       'carries a different MergedAt than this backup wrote - that account was merged by another ' +
       'run, so this backup is not the one to undo it with. Nothing was changed.');
   }
+  // E2: a kept sign-up copy is removed only when its old record can be put back.
+  // If someone changed the old key since the merge (it stays as it is), the copy
+  // stays too - the moved record is never lost.
+  const heldCopies = new Set<string>();
+  for (const s of states) {
+    const su = s.e.after === null ? parseSignUpPath(s.e.path) : null;
+    const c = su ? map.clusters.find((x) => (x.old ?? []).includes(su.uid)) : undefined;
+    if (su && c && s.state === 'changed') heldCopies.add(signUpPath(su.league, su.season, su.status, c.keep));
+  }
+  // Reverse of the write order: a removed old record is put back BEFORE its kept
+  // copy is removed (the plan wrote the copies first, then the removes).
   for (const s of [...states].reverse()) {
     const label = labelOf(s.e.path, map);
     if (s.state === 'before') {
@@ -1129,6 +1273,9 @@ export async function undoMerge(file: string, deps: RunDeps): Promise<UndoResult
     } else if (s.state === 'changed') {
       result.leftAlone.push(label);
       deps.log(`    LEFT ALONE ${label} (changed since the merge)`);
+    } else if (heldCopies.has(s.e.path)) {
+      result.leftAlone.push(label);
+      deps.log(`    LEFT ALONE ${label} (its old record was changed since the merge, so this copy stays)`);
     } else {
       if (s.e.before === null || s.e.before === undefined) await db.del(s.e.path);
       else await db.put(s.e.path, s.e.before);
