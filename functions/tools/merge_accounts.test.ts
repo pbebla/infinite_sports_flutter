@@ -2125,7 +2125,10 @@ describe('Task 2 fix round 1: hardening before the first production removal', ()
     expect(x.out).toMatch(/Player A: STOPPED before a sign-up remove - /);
     expect(x.out).toMatch(ranOn);
     expect(x.out).toMatch(/Player A: STOPPED[^\n]*the rest of this cluster was not attempted/);
-    expect(x.out).toMatch(/1 cluster\(s\) STOPPED before a sign-up remove: Player A/);
+    expect(x.out).toMatch(/Player A: STOPPED[^\n]*\(its earlier changes are in the backup; undo this run before re-running\)/);
+    expect(x.out).toMatch(/Player A: STOPPED[^\n]*a changed old record makes a re-run refuse that season/);
+    expect(x.out).toMatch(/1 cluster\(s\) STOPPED before a sign-up remove: Player A - part of each was written; undo this run before re-running/);
+    expect(x.out).not.toMatch(/nothing else of it was written|a re-run finishes it/);
     expect(x.out).not.toMatch(SU_LEAK_RE);
     expect(x.out).not.toMatch(/keepA|oldA|Changed In The Gap/);
     expect(wr(x.db, 'Sign Ups/Basketball/')).toEqual([
@@ -2228,5 +2231,76 @@ describe('Task 2 fix round 1: hardening before the first production removal', ()
     const copy = early.findIndex((w) => w.path === 'Sign Ups/Futsal/12/Paid/keepA');
     [early[copy], early[i]] = [early[i], early[copy]];
     expect(planDigest(early)).not.toBe(digest);
+  });
+});
+
+describe('Task 2 fix round 2: undoing a stopped run after a re-run finished the move', () => {
+  /** A run that stops before a sign-up remove (the kept S12 copy goes missing in
+   *  the gap), then a re-run that completes the move. Returns both backups. */
+  const stopThenRerun = async (n: number) => {
+    const db = withMirror(new MemDb(moveFixture()));
+    const mirror = db.onPut;
+    db.onPut = (p, v) => { mirror?.(p, v); if (p === 'Sign Ups/Futsal/12/Paid/keepA') db.set(p, null); };
+    const d1 = deps(db, { now: () => 1_762_410_000_000 + n });
+    const r1 = await applyMerge(MAP, d1, { canary: true, expectPlan: await digestOf(MAP, moveFixture()) });
+    expect(r1.stoppedMidCluster).toEqual(['Player A']);
+    db.onPut = mirror; // the gap is over
+    const d2 = deps(db, { now: () => 1_762_420_000_000 + n });
+    const r2 = await applyMerge(MAP, d2, { canary: true, expectPlan: await digestOf(MAP, clone(db.root)) });
+    expect(r2.ok).toBe(true);
+    expect(r2.applied).toEqual(['Player A']);
+    // the move is finished: both kept copies there, both old records gone
+    const paid = (s: string) => db.root['Sign Ups'].Futsal[s].Paid;
+    expect(paid('12')).toEqual({ keepA: 'Zed Display', stranger: 'Hidden Stranger' });
+    expect(paid('13')).toEqual({ keepA: ' Zed Display ' });
+    return { db, b1: r1.backupFile as string, b2: r2.backupFile as string, d1, d2 };
+  };
+  const HELD = ['Player A: kept account sign-up record, Futsal Season 12 (Paid)',
+    'Player A: kept account sign-up record, Futsal Season 13 (Paid)'];
+
+  it('undoing the stopped run FIRST holds its kept copies (the old records are already gone): nothing lost, ok false', async () => {
+    const { db, b1, b2 } = await stopThenRerun(1);
+    const d = deps(db);
+    const n = db.calls.length;
+    const u1 = await undoMerge(b1, d);
+    expect(u1.ok).toBe(false);
+    expect([...u1.leftAlone].sort()).toEqual(HELD);
+    const out = d.lines.join('\n');
+    expect(out).toContain(`LEFT ALONE ${HELD[0]} (its old record was already removed by a later run - undo that run's backup first)`);
+    expect(out).toContain(`LEFT ALONE ${HELD[1]} (its old record was already removed by a later run - undo that run's backup first)`);
+    expect(out).toMatch(/UNDONE - \d+ restored, \d+ already as before, 2 LEFT ALONE/);
+    // no sign-up record was deleted: the copies are still the only copy of the player's record
+    expect(db.calls.slice(n).filter((w) => w.path.startsWith('Sign Ups/Futsal/') && w.method !== 'GET')).toEqual([]); // not one Futsal sign-up write (Player B's own record was undone as usual)
+    expect(db.root['Sign Ups'].Futsal['12'].Paid.keepA).toBe('Zed Display');
+    expect(db.root['Sign Ups'].Futsal['13'].Paid.keepA).toBe(' Zed Display ');
+    // the way out: undo the later run, then this one again - everything is back
+    const u2 = await undoMerge(b2, deps(db));
+    expect(u2.ok).toBe(true);
+    const u3 = await undoMerge(b1, deps(db));
+    expect(u3.ok).toBe(true);
+    expect(noPublic(db.root)).toEqual(noPublic(moveFixture()));
+  });
+
+  it('undoing the later run first and then the stopped one restores everything exactly', async () => {
+    const { db, b1, b2 } = await stopThenRerun(2);
+    const u2 = await undoMerge(b2, deps(db));
+    expect(u2.ok).toBe(true);
+    expect(db.root['Sign Ups'].Futsal['12'].Paid.oldA).toBe('Zed Display'); // back
+    expect(db.root['Sign Ups'].Futsal['13'].Paid.oldA).toBe(' Zed Display ');
+    const u1 = await undoMerge(b1, deps(db));
+    expect(u1.ok).toBe(true);
+    expect(u1.leftAlone).toEqual([]);
+    expect(noPublic(db.root)).toEqual(noPublic(moveFixture()));
+  });
+
+  it('a copy whose old key is present is still undone as before (the stopped run alone)', async () => {
+    const db = withMirror(new MemDb(moveFixture()));
+    const prior = db.onPut;
+    db.onPut = (p, v) => { prior?.(p, v); if (p === 'Sign Ups/Futsal/12/Paid/keepA') db.set('Sign Ups/Futsal/12/Paid/oldA', 'Changed In The Gap'); };
+    const r = await applyMerge(MAP, deps(db), { canary: true, expectPlan: await digestOf(MAP, moveFixture()) });
+    expect(r.stoppedMidCluster).toEqual(['Player A']);
+    const u = await undoMerge(r.backupFile as string, deps(db));
+    expect(u.ok).toBe(true);
+    expect(db.root['Sign Ups'].Futsal['13'].Paid).toEqual({ oldA: ' Zed Display ' }); // the copy was removed, the old record is there
   });
 });

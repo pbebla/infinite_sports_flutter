@@ -1213,8 +1213,9 @@ export async function applyMerge(map: MergeMap, deps: RunDeps, opts: ApplyOption
       }
       if (heldBack !== null) {
         log(`  ${g.who}: STOPPED before a sign-up remove - changed since the cluster was checked: ${heldBack}; ` +
-          'the rest of this cluster was not attempted (nothing else of it was written). Run the dry run again, ' +
-          'then apply again - or undo this run.');
+          'the rest of this cluster was not attempted (its earlier changes are in the backup; undo this run before ' +
+          're-running). A kept copy that went missing is planned again by a re-run; a changed old record makes a ' +
+          're-run refuse that season.');
         result.stoppedMidCluster.push(g.who);
         continue;
       }
@@ -1249,7 +1250,8 @@ export async function applyMerge(map: MergeMap, deps: RunDeps, opts: ApplyOption
     (result.refusedAtApply.length ? `; REFUSED at apply: ${result.refusedAtApply.join(', ')}` : '') + '.');
   if (result.stoppedMidCluster.length > 0) {
     log(`${result.stoppedMidCluster.length} cluster(s) STOPPED before a sign-up remove: ` +
-      `${result.stoppedMidCluster.join(', ')} - part of each was written; a re-run finishes it.`);
+      `${result.stoppedMidCluster.join(', ')} - part of each was written; undo this run before re-running ` +
+      '(a missing kept copy is planned again by a re-run; a changed old record makes the re-run refuse that season).');
   }
   if (result.refusedByPlan.length > 0) log(refusedLine());
   log(`Undo: ${undoCmd}`);
@@ -1308,6 +1310,22 @@ export async function undoMerge(file: string, deps: RunDeps): Promise<UndoResult
     const c = su ? map.clusters.find((x) => (x.old ?? []).includes(su.uid)) : undefined;
     if (su && c && s.state === 'changed') heldCopies.add(signUpPath(su.league, su.season, su.status, c.keep));
   }
+  // ...and the other way round: a copy this backup wrote whose old key is ABSENT now
+  // while this backup never attempted that remove (a stopped run) means a LATER run
+  // finished the move - deleting the copy here would leave neither record. Hold it;
+  // undo that later run's backup first, then this one.
+  const heldLater = new Set<string>();
+  for (const s of states) {
+    const su = s.state === 'written' && s.e.after !== null && (s.e.before ?? null) === null
+      ? parseSignUpPath(s.e.path) : null;
+    const c = su ? map.clusters.find((x) => x.keep === su.uid) : undefined;
+    if (!su || !c) continue;
+    for (const old of c.old ?? []) {
+      const oldPath = signUpPath(su.league, su.season, su.status, old);
+      const removal = backup.entries.find((e) => e.path === oldPath && e.after === null);
+      if (removal && !removal.attempted && ((await db.get(oldPath)) ?? null) === null) heldLater.add(s.e.path);
+    }
+  }
   // Reverse of the write order: a removed old record is put back BEFORE its kept
   // copy is removed (the plan wrote the copies first, then the removes).
   for (const s of [...states].reverse()) {
@@ -1320,6 +1338,9 @@ export async function undoMerge(file: string, deps: RunDeps): Promise<UndoResult
     } else if (heldCopies.has(s.e.path)) {
       result.leftAlone.push(label);
       deps.log(`    LEFT ALONE ${label} (its old record changed since the merge)`);
+    } else if (heldLater.has(s.e.path)) {
+      result.leftAlone.push(label);
+      deps.log(`    LEFT ALONE ${label} (its old record was already removed by a later run - undo that run's backup first)`);
     } else {
       if (s.e.before === null || s.e.before === undefined) await db.del(s.e.path);
       else await db.put(s.e.path, s.e.before);
@@ -1329,7 +1350,7 @@ export async function undoMerge(file: string, deps: RunDeps): Promise<UndoResult
   }
   result.ok = result.leftAlone.length === 0;
   deps.log(`UNDONE - ${result.restored} restored, ${result.alreadyBefore} already as before` +
-    (result.leftAlone.length ? `, ${result.leftAlone.length} LEFT ALONE (changed since the merge)` : '') + '.');
+    (result.leftAlone.length ? `, ${result.leftAlone.length} LEFT ALONE (see above)` : '') + '.');
   return result;
 }
 
