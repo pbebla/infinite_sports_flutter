@@ -63,7 +63,7 @@ function seed(): Record<string, unknown> {
       'Alice A': { UID: A, Goals: 3, PhotoUrl: 'https://img.example/a.jpg' }, 'Bob B': { UID: B, Goals: 1 },
     } } } },
     Registrations: { 'Futsal-16': { Submissions: {
-      [A]: { Paid: true, PaidVia: 'card', PaidAmount: 80, DisplayName: 'Alice Able', Phone: '555-0100', Answers: { Shirt: 'M' } },
+      [A]: { Paid: true, PaidVia: 'card', PaidAmount: 80, DisplayName: 'Alice Able', SubmittedAt: 1234, AdjustReason: 'friend of owner', Phone: '555-0100', Answers: { Shirt: 'M' } },
       [B]: { Paid: false, Phone: '555-0101' },
     } } },
     'Sign Ups': { Futsal: { '16': { Paid: { [A]: 'Alice Able' } } } },
@@ -123,7 +123,7 @@ async function main(): Promise<void> {
     Status: 'active', AmountCents: 1000, StripePaymentIntent: 'pi_1', Deleted: true,
   });
   assert.deepStrictEqual(await get(`Registrations/Futsal-16/Submissions/${A}`), {
-    Paid: true, PaidVia: 'card', PaidAmount: 80, DisplayName: 'Alice Able', Deleted: true,
+    Paid: true, PaidVia: 'card', PaidAmount: 80, DisplayName: 'Alice Able', SubmittedAt: 1234, Deleted: true,
   });
   assert.strictEqual(await get(`Sign Ups/Futsal/16/Paid/${A}`), 'Alice Able');
   assert.deepStrictEqual(await get(`DeletedAccounts/${A}`), { At: NOW, Provider: 'password' });

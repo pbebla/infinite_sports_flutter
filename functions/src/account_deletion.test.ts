@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({
   deletedAuth: [] as string[],
   authDeleteError: null as unknown,
   providers: {} as Record<string, string>,
+  getUserError: null as unknown,
   storageDeleted: [] as string[],
   lines: [] as string[],
 }));
@@ -53,9 +54,13 @@ vi.mock('firebase-admin/auth', () => ({
   getAuth: () => ({
     deleteUser: async (uid: string) => {
       if (h.authDeleteError !== null) throw h.authDeleteError;
+      if (h.deletedAuth.includes(uid)) {
+        throw Object.assign(new Error('gone'), { code: 'auth/user-not-found' });
+      }
       h.deletedAuth.push(uid);
     },
     getUser: async (uid: string) => {
+      if (h.getUserError !== null) throw h.getUserError;
       const id = h.providers[uid];
       if (id === undefined) throw Object.assign(new Error('gone'), { code: 'auth/user-not-found' });
       return { providerData: [{ providerId: id }] };
@@ -130,6 +135,7 @@ beforeEach(() => {
   h.deletedAuth = [];
   h.authDeleteError = null;
   h.providers = { [ALICE]: 'google.com' };
+  h.getUserError = null;
   h.storageDeleted = [];
   h.lines = [];
   vi.useFakeTimers();
@@ -140,6 +146,7 @@ describe('deleteAccount', () => {
   it('refuses a caller who is not signed in', async () => {
     const e = await failure(call(deleteAccount, {}));
     expect(e.code).toBe('unauthenticated');
+    expect(e.details).toEqual({ code: 'unauthenticated' });
     expect(h.deletedAuth).toEqual([]);
   });
 
@@ -208,6 +215,17 @@ describe('deleteAccount', () => {
     expect(h.lines.filter((l) => l.includes(ALICE))).toEqual([]);
   });
 
+  it('two concurrent calls for the same uid both succeed; the second deleteUser not-found is success', async () => {
+    const [a, b] = await Promise.all([
+      call(deleteAccount, {}, fresh()), call(deleteAccount, {}, fresh()),
+    ]) as Array<Record<string, number>>;
+    expect(a['pendingStorage']).toBe(0);
+    expect(b['pendingStorage']).toBe(0);
+    expect(h.deletedAuth).toEqual([ALICE]); // deleted once; the other saw not-found
+    expect(h.tree.Users[ALICE]).toBeUndefined();
+    expect(h.tree.DeletedAccounts[ALICE]).toEqual({ At: NOW, Provider: 'google.com' });
+  });
+
   it('treats auth/user-not-found as success and fails loudly on other Auth errors', async () => {
     h.authDeleteError = Object.assign(new Error('gone'), { code: 'auth/user-not-found' });
     await expect(call(deleteAccount, {}, fresh())).resolves.toBeDefined();
@@ -229,9 +247,12 @@ describe('adminDeleteAccount', () => {
   const admin = () => ({ uid: ADMIN, token: {} });
 
   it('refuses a caller who is not signed in or not an admin', async () => {
-    expect((await failure(call(adminDeleteAccount, { uid: ALICE }))).code).toBe('unauthenticated');
+    const anon = await failure(call(adminDeleteAccount, { uid: ALICE }));
+    expect(anon.code).toBe('unauthenticated');
+    expect(anon.details).toEqual({ code: 'unauthenticated' });
     const e = await failure(call(adminDeleteAccount, { uid: ALICE }, { uid: BOB, token: {} }));
     expect(e.code).toBe('permission-denied');
+    expect(e.details).toEqual({ code: 'permission-denied' });
     expect(h.tree.Users[ALICE]).toBeDefined();
     expect(h.deletedAuth).toEqual([]);
   });
@@ -242,6 +263,7 @@ describe('adminDeleteAccount', () => {
     for (const data of bad) {
       const e = await failure(call(adminDeleteAccount, data, admin()));
       expect(e.code).toBe('invalid-argument');
+      expect(e.details).toEqual({ code: 'invalid-argument' });
     }
     expect(h.tree.Users[ALICE]).toBeDefined();
   });
@@ -256,6 +278,14 @@ describe('adminDeleteAccount', () => {
     });
     expect(h.deletedAuth).toEqual([ALICE]);
     expect(h.lines.filter((l) => l.includes(ALICE))).toEqual([]);
+  });
+
+  it('a transient getUser failure propagates instead of stamping unknown', async () => {
+    h.getUserError = Object.assign(new Error('unavailable'), { code: 'auth/internal-error' });
+    await expect(call(adminDeleteAccount, { uid: ALICE }, admin())).rejects.toThrow('unavailable');
+    expect(h.tree.Users[ALICE]).toBeDefined();
+    expect(h.tree.DeletedAccounts).toBeUndefined();
+    expect(h.deletedAuth).toEqual([]);
   });
 
   it('an unknown uid is not an error: only the stamp is planned', async () => {

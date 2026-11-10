@@ -109,7 +109,7 @@ function requireRecentLogin(request: CallableRequest): void {
 
 export const deleteAccount = onCall(async (request): Promise<DeletionResult> => {
   const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError('unauthenticated', 'Sign in first.');
+  if (!uid) throw new HttpsError('unauthenticated', 'Sign in first.', { code: 'unauthenticated' });
   requireRecentLogin(request);
   const provider = request.auth?.token?.firebase?.sign_in_provider;
   return deleteAccountFor(uid, {
@@ -124,25 +124,42 @@ async function providerOf(uid: string): Promise<string> {
   try {
     const user = await getAuth().getUser(uid);
     return user.providerData[0]?.providerId ?? 'unknown';
-  } catch {
-    return 'unknown';
+  } catch (err) {
+    // Only a gone user is 'unknown'; a transient failure must not stamp it.
+    if (authErrorCode(err) === 'auth/user-not-found') return 'unknown';
+    throw err;
   }
 }
 
 export const adminDeleteAccount = onCall(async (request): Promise<DeletionResult> => {
-  const adminUid = await requireAdmin(request);
+  if (!request.auth?.uid) {
+    throw new HttpsError('unauthenticated', 'Sign in first.', { code: 'unauthenticated' });
+  }
+  let adminUid: string;
+  try {
+    adminUid = await requireAdmin(request); // shared; leaves no details of its own
+  } catch (err) {
+    if (err instanceof HttpsError && err.code === 'permission-denied') {
+      throw new HttpsError('permission-denied', 'Admins only.', { code: 'permission-denied' });
+    }
+    throw err;
+  }
   const data = (request.data ?? {}) as Record<string, unknown>;
   const uid = data['uid'];
   if (typeof uid !== 'string' || !ADMIN_UID_RE.test(uid)) {
-    throw new HttpsError('invalid-argument', 'uid is not a valid account id.');
+    throw new HttpsError('invalid-argument', 'uid is not a valid account id.', {
+      code: 'invalid-argument',
+    });
   }
   const rawReason = data['reason'];
   if (rawReason !== undefined && typeof rawReason !== 'string') {
-    throw new HttpsError('invalid-argument', 'reason must be text.');
+    throw new HttpsError('invalid-argument', 'reason must be text.', { code: 'invalid-argument' });
   }
   const reason = (rawReason ?? '').trim();
   if (reason.length > MAX_REASON) {
-    throw new HttpsError('invalid-argument', `reason is longer than ${MAX_REASON} characters.`);
+    throw new HttpsError('invalid-argument', `reason is longer than ${MAX_REASON} characters.`, {
+      code: 'invalid-argument',
+    });
   }
   return deleteAccountFor(uid, {
     nowMs: Date.now(),

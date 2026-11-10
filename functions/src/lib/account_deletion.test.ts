@@ -334,7 +334,7 @@ describe('account deletion — every D1 row', () => {
       Paid: true, PaidVia: 'card', PaidAmount: 80, PaidAt: 222, StripePaymentIntent: 'pi_test_2',
       AmountCents: 8000, Method: 'card', Waived: false,
       DisplayName: 'Alice Able', Status: 'approved', TeamId: 'team_1', TeamName: 'Team A',
-      Deleted: true,
+      SubmittedAt: 333, Deleted: true,
     });
     expect(at(db, 'Registrations/Futsal-16/Submissions/uid_bob'))
       .toEqual({ Paid: false, DisplayName: 'Bob', Phone: '555-0199' });
@@ -574,14 +574,14 @@ describe('account deletion — the applier', () => {
 });
 
 describe('account deletion — stamp By/Reason and the payment allow-list', () => {
-  it('a retry keeps the first At and an existing By/Reason, and adds them when missing', async () => {
+  it('a retry keeps the first At, Provider and an existing By/Reason, and adds them when missing', async () => {
     const seed = world();
     seed.DeletedAccounts = { [ALICE]: { At: 5, Provider: 'password', By: 'uid_admin', Reason: 'emailed request' } };
     const db = new FakeDb(seed);
     const snap = await readAccountDeletionSnapshot(db, ALICE);
     const plan = planAccountDeletion(snap, ALICE, { nowMs: NOW, provider: 'google.com', by: 'uid_other', reason: 'later' }) as DeletionPlan;
     const stamp = plan.steps[plan.steps.length - 1].after;
-    expect(stamp).toEqual({ At: 5, Provider: 'google.com', By: 'uid_admin', Reason: 'emailed request' });
+    expect(stamp).toEqual({ At: 5, Provider: 'password', By: 'uid_admin', Reason: 'emailed request' });
 
     const fresh = planAccountDeletion(await readAccountDeletionSnapshot(new FakeDb(world()), ALICE), ALICE,
       { nowMs: NOW, provider: 'password', by: 'uid_admin', reason: 'why' }) as DeletionPlan;
@@ -594,11 +594,12 @@ describe('account deletion — stamp By/Reason and the payment allow-list', () =
     seed.Registrations['Futsal-16'].Submissions[ALICE] = {
       Paid: true, PaidVia: 'card', PaidAmount: 80, RefundedAt: 9, RefundAmountCents: 100,
       PaidNote: 'call 555-0100', RefundMemo: 'text me', Phone: '555-0100',
+      SubmittedAt: 1234, AdjustReason: 'friend of owner',
     };
     const db = new FakeDb(seed);
     await deleteAll(db);
     expect(at(db, `Registrations/Futsal-16/Submissions/${ALICE}`)).toEqual({
-      Paid: true, PaidVia: 'card', PaidAmount: 80, RefundedAt: 9, RefundAmountCents: 100, Deleted: true,
+      Paid: true, PaidVia: 'card', PaidAmount: 80, RefundedAt: 9, RefundAmountCents: 100, SubmittedAt: 1234, Deleted: true,
     });
   });
 });

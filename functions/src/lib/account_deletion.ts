@@ -53,7 +53,7 @@
 //             lists the Storage objects whose delete failed (opaque paths:
 //             uid / ticket number only); the next run plans them again and
 //             its stamp drops the key once they are gone. A retry keeps the
-//             first At and any By/Reason (an admin's note survives).
+//             first At/Provider and any By/Reason (an admin's note survives).
 //   NOTE      Baselines/<uid> and Live/Squads/<uid> regrow after the next
 //             lock while the account still exists; a later rerun deletes
 //             them again.
@@ -124,7 +124,7 @@ const SUBMISSION_KEEP: ReadonlySet<string> = new Set([
   'Paid', 'PaidVia', 'PaidAmount', 'DisplayName', 'Status', 'TeamId', 'TeamName',
   'PaidAt', 'AmountCents', 'AmountDollars', 'StripePaymentIntent',
   'StripeCheckoutSession', 'RefundedAt', 'RefundAmountCents', 'Method', 'Waived',
-  'AdjustedFee', 'EligibleFee', 'DiscountPct', 'DiscountSource', 'Deleted',
+  'AdjustedFee', 'EligibleFee', 'DiscountPct', 'DiscountSource', 'SubmittedAt', 'Deleted',
 ]);
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -502,7 +502,7 @@ export function planAccountDeletion(
   const isStr = (v: unknown) => typeof v === 'string' && v.length > 0;
   const closing: Record<string, unknown> = {
     At: first(prevMap['At'], stamp.nowMs, (v) => typeof v === 'number'),
-    Provider: stamp.provider,
+    Provider: first(prevMap['Provider'], stamp.provider, isStr),
   };
   const by = first(prevMap['By'], stamp.by, isStr);
   const reason = first(prevMap['Reason'], stamp.reason, isStr);
