@@ -274,3 +274,8 @@ What this build means for running the league, in plain words:
 - If you remove an automatic season award by hand in the Manager, it stays removed: the automatic check will not put it back (re-scoring a week decides it again).
 - A brand-new squad save that goes over budget is not re-checked straight away. It is checked again when a price or the budget changes, when a new week opens or a week is reopened, or at the lock — and the lock check always has the final say.
 - A new game day added to a season already marked Finished now works by itself: the season goes back to its full checks, opens and locks that day like any week, scores it, and then goes quiet again. You no longer need to un-mark Finished first.
+
+## From the account-deletion build (2026-11-10)
+
+- Insider referral rows (`Referrals/<id>` where the deleted person is the Insider) still hold the invitees' names (`ReferredName`). They must join the account deletion when Insiders launches (today only the row where the deleted person was the one invited loses its name).
+- A mini-league's free-text `Name` survives the ownership hand-off when its owner deletes their account (the league passes to the next member with the name the old owner typed). Decide whether a hand-off should offer a rename or reset it.
