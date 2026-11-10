@@ -65,14 +65,14 @@ Quoted exactly as the apps show them.
 | Player's app | "Please choose the same Google account you signed in with." | They picked a different Google account at the re-sign-in step. Ask them to try again. |
 | Player's app | "Something went wrong. Please try again or email contact@infinitesports.org." | Try again. If it repeats, tell Claude. |
 
-The sign-in check ("recent sign-in") is handled by the player's app, which asks them to sign in again. It never happens in the Manager.
+There is no separate message for the sign-in check: the player's app simply asks them to sign in again before deleting. It never happens in the Manager.
 
 ## 4. What is never deleted, and why
 
 - **Payment and registration records.** Kept for accounting, typically seven years. They keep the person's **display name** along with the amounts, dates and payment status. The other personal answers (phone, email, form answers, free-text notes) are removed. On request we can replace the display name with a generic entry, as the Privacy Policy promises (tell Claude).
 - **League history**: rosters, results, standings and stats. This is the league's history. On request we can replace the name with a generic entry (tell Claude).
 - **Votes and predictions.** They are recorded against the account. After deletion they remain as anonymous entries, with no name.
-- **Referral rows where the deleted person is the Insider (the one who invited others).** These still hold the names of the people they invited, and they are NOT cleaned up today. This is a known gap. The Insiders program is not live yet. When it launches, those rows must be added to the deletion. Campaign audience lists hold only anonymous ids.
+- **Referral rows where the deleted person is the Insider (the one who invited others).** These still hold the names of the people they invited, and they are NOT cleaned up today. This is a known gap. The Insiders program is not live yet. When it launches, those rows must be added to the deletion. Rows where the deleted person was the one invited lose their name (only an id stays). Campaign audience lists hold only anonymous ids.
 - **A small "deleted on" record** with no personal details: when the account was deleted, by whom (the person or an admin), and any leftover photo files to finish. It lets a retry finish safely.
 
 ## 5. For the iOS team (Paul / Bronsin)
