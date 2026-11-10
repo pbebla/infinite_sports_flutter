@@ -42,8 +42,7 @@ It cannot be undone. There is no grace period and no restore button.
 2. Open the Manager app, then Users.
 3. Find the person. Tap the three dots at the end of their row, then **Delete account...**
 4. Type their **first name** to confirm. (If the account has no first name, the box asks for the full name.)
-5. Optionally write a short reason, for example "emailed request". It is saved in a small "deleted on" record with no personal details. Do not put emails or phone numbers in it.
-6. Tap delete. When it finishes the sheet says: "Removed N records, anonymised N, hand-offs N, files N, pending N". In plain words:
+5. Tap delete. When it finishes the sheet says: "Removed N records, anonymised N, hand-offs N, files N, pending N". In plain words:
    - **Removed**: items deleted outright.
    - **Anonymised**: items that stay but no longer name the person.
    - **Hand-offs**: mini-leagues passed to another member because the person owned them.
@@ -55,7 +54,7 @@ It cannot be undone. There is no grace period and no restore button.
 
 The Manager route is immediate. The 30 days in the policy is the outer limit.
 
-If the person had two accounts that were combined earlier, delete the account they **kept**: that also removes the old ones. An old account can also be deleted on its own from the Manager (it no longer refuses one).
+If the person had two accounts that were combined earlier, delete the account they **kept**: that also removes the old ones. The Manager's Users list hides old combined accounts and accounts already deleted, so if an old account ever needs removing on its own, tell Claude: the server deletion can be run directly on it.
 
 The Manager will not delete an admin's account (your own, or anyone on the admin list). Remove them from the admin list first (tell Claude).
 
@@ -79,7 +78,7 @@ Quoted exactly as the apps show them.
 
 There is no separate message for the sign-in check: the player's app simply asks them to sign in again before deleting. It never happens in the Manager.
 
-If an old account's sign-in cannot be removed while the kept account is deleted, there is no message: the server notes it and removes it on the next try (running the Manager delete on the kept account again finishes it).
+If an old account's sign-in cannot be removed while the kept account is deleted, there is no message: the server notes it and removes it on the next try (the kept account no longer shows in the Manager's list by then, so tell Claude, who re-runs the server deletion to finish it).
 
 ## 4. What is never deleted, and why
 
