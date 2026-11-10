@@ -65,7 +65,7 @@ For every row: processed ephemerally **No**; data **not** shared with third part
 
 **Required permissions text (Info.plist, already set):** location when-in-use (Around You map), camera and photo library (profile photo / support screenshots). The two "Always" location keys were removed on 2026-11-09 — the app never asks for background location.
 
-**Account deletion (Apple 5.1.1(v)):** the in-app Delete Account must remove the account and its data and revoke Sign in with Apple tokens. See `docs/superpowers/plans/2026-11-09-account-deletion.md` — until it ships, honour emailed requests by hand (tell Claude; the merge/deletion tooling runs against the live database only on the owner's go).
+**Account deletion (Apple 5.1.1(v)):** in-app Settings → Delete Account now works for email, Google and Apple sign-ins. It removes the account and its data as the policy promises and revokes the Sign in with Apple token on iPhone (iOS verification pending: Paul/Bronsin run the checklist in the runbook). So the Play "Account deletion URL" (`https://infinite-sports-app.web.app/delete-account`) and the Apple answer are live and working. Emailed requests: Manager → Users → row menu → Delete account…. Full steps, messages and the iOS checklist: `docs/runbooks/deleting-an-account.md`.
 
 **Third-party AI disclosure (Apple 5.1.2(i)):** the policy §6 names Anthropic and exactly what is sent (public stats only). Nothing else to declare on the form.
 
