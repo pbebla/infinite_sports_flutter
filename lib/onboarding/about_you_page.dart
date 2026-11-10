@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/account/session_sign_out.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/onboarding/profile_completion.dart';
 import 'package:infinite_sports_flutter/onboarding/signup_validation.dart';
@@ -106,9 +107,54 @@ class _AboutYouPageState extends State<AboutYouPage> {
     await FirebaseDatabase.instance.ref('Users/$uid').update(data);
   }
 
+  /// Under-13 exit (Terms of Use §1). The page is mandatory and blocks back,
+  /// so someone too young needs a way out: explain, then sign out. A
+  /// brand-new account (signup flow, [stepIndex] set) is removed first so no
+  /// orphan login keeps their email; an existing account only signs out.
+  Future<void> _showUnderageExit() async {
+    final leave = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Sorry, not yet'),
+        content: const Text(
+            'Infinite Sports accounts are for people $kMinimumAccountAge and '
+            'older. A parent or guardian can register you for a league from '
+            'their own account.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Fix date of birth'),
+          ),
+          FilledButton(
+            key: const ValueKey('about_you_underage_sign_out'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+    if (leave != true || !mounted) return;
+    final user = FirebaseAuth.instance.currentUser;
+    final isNewAccount = widget.stepIndex != null;
+    // Leave every onboarding route before the auth flip swaps the gate.
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    if (user != null && isNewAccount) {
+      try {
+        await FirebaseDatabase.instance.ref('Users/${user.uid}').remove();
+      } catch (_) {}
+      try {
+        await user.delete(); // just signed in, so no re-auth needed
+      } catch (_) {}
+    }
+    await signOutAndClearSession();
+  }
+
   Future<void> _continue() async {
     if (_saving) return;
-    if (!_validate()) return;
+    if (!_validate()) {
+      if (_dobError == kUnderageDobMessage) await _showUnderageExit();
+      return;
+    }
     setState(() => _saving = true);
     final data = <String, Object?>{
       'DOB': formatDob(_dob!),

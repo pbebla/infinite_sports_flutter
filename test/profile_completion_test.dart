@@ -65,6 +65,27 @@ void main() {
       expect(validateDob(DateTime(2000, 1, 1)), isNull);
     });
 
+    test('rejects anyone under 13 with the underage message', () {
+      final now = DateTime(2026, 11, 9);
+      // Turns 13 tomorrow — still 12 today.
+      expect(validateDob(DateTime(2013, 11, 10), now: now),
+          kUnderageDobMessage);
+      expect(validateDob(DateTime(2020, 1, 1), now: now),
+          kUnderageDobMessage);
+    });
+
+    test('accepts a 13th birthday that is today or earlier', () {
+      final now = DateTime(2026, 11, 9);
+      expect(validateDob(DateTime(2013, 11, 9), now: now), isNull);
+      expect(validateDob(DateTime(2013, 11, 8), now: now), isNull);
+    });
+
+    test('isUnderMinimumAge is birthday-exact across month boundaries', () {
+      final now = DateTime(2026, 3, 1);
+      expect(isUnderMinimumAge(DateTime(2013, 2, 28), now: now), isFalse);
+      expect(isUnderMinimumAge(DateTime(2013, 3, 2), now: now), isTrue);
+    });
+
     test('accepts exactly the 120-year boundary', () {
       final now = DateTime.now();
       final boundary = DateTime(now.year - 120, now.month, now.day);
