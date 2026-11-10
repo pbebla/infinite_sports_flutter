@@ -274,7 +274,7 @@ describe('account deletion — every D1 row', () => {
     // The row's name comes from Managers/<uid> (realName ?? teamName): kept
     // and anonymised, never deleted, so the row reads "Deleted manager".
     expect(at(db, `Fantasy/Futsal/15/Managers/${ALICE}`)).toEqual({
-      TeamName: DELETED_MANAGER, NameFlagged: false, NamedAt: 5, Deleted: true,
+      TeamName: DELETED_MANAGER, NamedAt: 5, Deleted: true,
     });
     expect(at(db, `PublicProfiles/${ALICE}`)).toBeNull();
     // A row that did carry names: every name -> Deleted manager, photo gone,
@@ -478,8 +478,9 @@ describe('account deletion — Review Focus 3: the function dies halfway', () =>
   it('a Managers node already marked Deleted is not planned again', () => {
     expect(anonymiseManager({ TeamName: DELETED_MANAGER, Deleted: true, NamedAt: 5 })).toBeNull();
     expect(anonymiseManager(null)).toBeNull();
-    expect(anonymiseManager({ TeamName: 'X', Name: 'Y', ProfileUrl: 'z', NameFlagged: true }))
-      .toEqual({ TeamName: DELETED_MANAGER, NameFlagged: true, Deleted: true });
+    // A flagged manager reads "Deleted manager" too: the flag would hide it.
+    expect(anonymiseManager({ TeamName: 'X', Name: 'Y', ProfileUrl: 'z', NameFlagged: true, NamedAt: 2 }))
+      .toEqual({ TeamName: DELETED_MANAGER, NamedAt: 2, Deleted: true });
   });
 
   it('a row already reading Deleted manager is not planned again', () => {
@@ -492,29 +493,46 @@ describe('account deletion — Review Focus 3: the function dies halfway', () =>
 });
 
 describe('account deletion — the applier', () => {
-  it('a failed Storage delete is recorded without the uid, holds back the stamp, and the retry re-runs Storage then stamps', async () => {
+  it('a failed Storage delete is recorded without the uid and carried in the stamp as PendingStorage', async () => {
     const db = new FakeDb(world());
     const storage = new FakeObjectStore();
-    storage.failing.add(`Users/${ALICE}/profileimage.jpg`);
+    storage.failing.add('support/7/img_2.jpg');
     const plan = await planOk(db);
     const summary = await applyAccountDeletion(db, storage, plan);
     expect(summary.errors).toHaveLength(1);
+    expect(summary.errors[0]).toContain('support/7/img_2.jpg');
     expect(summary.errors[0]).not.toContain(ALICE);
     expect(summary.storageDeleted).toBe(plan.storagePaths.length - 1);
     const writes = plan.steps.filter((s) => s.action === 'write').length;
     expect(summary.deleted).toBe(plan.steps.length - writes);
     expect(summary.anonymised).toBe(writes - 1);
+    // Every database step landed: the ticket is gone, the stamp is written
+    // and remembers the object it could not delete.
+    expect(at(db, 'Support/Tickets/7')).toBeNull();
     expect(at(db, `Users/${ALICE}`)).toBeNull();
-    expect(at(db, `DeletedAccounts/${ALICE}`)).toBeNull();
+    expect(at(db, `DeletedAccounts/${ALICE}`)).toEqual({
+      At: NOW, Provider: 'password', PendingStorage: ['support/7/img_2.jpg'],
+    });
 
+    // The retry plans that object again (next to the always-planned
+    // profile photo) and its stamp clears the field.
     const retry = await planOk(db);
     expect(retry.steps.map((s) => s.path)).toEqual([`DeletedAccounts/${ALICE}`]);
-    expect(retry.storagePaths).toEqual([`Users/${ALICE}/profileimage.jpg`]);
+    expect(retry.storagePaths).toEqual([`Users/${ALICE}/profileimage.jpg`, 'support/7/img_2.jpg']);
     const again = new FakeObjectStore();
     const ok = await applyAccountDeletion(db, again, retry);
-    expect(ok).toEqual({ deleted: 0, anonymised: 0, storageDeleted: 1, errors: [] });
-    expect(again.deleted).toEqual([`Users/${ALICE}/profileimage.jpg`]);
+    expect(ok).toEqual({ deleted: 0, anonymised: 0, storageDeleted: 2, errors: [] });
+    expect(again.deleted).toContain('support/7/img_2.jpg');
     expect(at(db, `DeletedAccounts/${ALICE}`)).toEqual({ At: NOW, Provider: 'password' });
+    expect((await planOk(db)).storagePaths).toEqual([`Users/${ALICE}/profileimage.jpg`]);
+  });
+
+  it('a PendingStorage entry that is not a known object path is never planned', async () => {
+    const seed = world();
+    seed.DeletedAccounts = { [ALICE]: { At: 1, Provider: 'password', PendingStorage: ['support/8/../x', 'Users/uid_bob/other.jpg', 7] } };
+    const plan = await planOk(new FakeDb(seed));
+    expect(plan.storagePaths.filter((p) => !p.startsWith('support/7/') && !p.startsWith('support/9/')))
+      .toEqual([`Users/${ALICE}/profileimage.jpg`]);
   });
 
   it('a failed database step stops the run: no Storage, no stamp', async () => {

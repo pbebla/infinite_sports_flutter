@@ -48,7 +48,11 @@
 //   KEPT      Sign Ups/**/<uid>, TransferCosts/<gw>/<uid>,
 //             LiveBase/<gw>/Managers/<uid>, ReferredUsers/<uid> (the
 //             referral guard a later refund void needs).
-//   WRITTEN   DeletedAccounts/<uid> = {At, Provider} — always, last.
+//   WRITTEN   DeletedAccounts/<uid> = {At, Provider, PendingStorage?} —
+//             last, whenever every database step landed. PendingStorage
+//             lists the Storage objects whose delete failed (opaque paths:
+//             uid / ticket number only); the next run plans them again and
+//             its stamp drops the key once they are gone.
 //
 // Order is what makes a rerun safe (Review Focus 3): everything found
 // THROUGH another node is removed before that node (tournament rows before
@@ -97,7 +101,11 @@ const ROSTER_UID_KEYS: readonly string[] = ['UID', 'uid'];
 /** Photo leaves a roster row may carry (tournamentplayer.dart reads both). */
 const ROSTER_PHOTO_KEYS: readonly string[] = ['PhotoUrl', 'photoUrl'];
 /** Managers/<uid> keys removed by the anonymiser (TeamName is rewritten). */
-const MANAGER_DROP: readonly string[] = ['Name', 'ManagerName', 'DisplayName', ...PHOTO_KEYS];
+const MANAGER_DROP: readonly string[] = [
+  'Name', 'ManagerName', 'DisplayName', 'NameFlagged', ...PHOTO_KEYS,
+];
+/** The only object paths a PendingStorage list may name. */
+const PENDING_OBJECT_RE = /^(Users\/[A-Za-z0-9_-]{1,128}\/profileimage\.jpg|support\/\d{1,12}\/img_\d\.jpg)$/;
 
 /** Fantasy Access/<uid> keys that are the payment record (access.ts). */
 const ACCESS_KEEP: ReadonlySet<string> = new Set([
@@ -190,6 +198,8 @@ export interface AccountDeletionSnapshot {
   tickets: Array<{ num: string; owner: unknown }>;
   /** Nodes deleted whole when present, in delete order (Users/<uid> last). */
   wholeNodes: FoundNode[];
+  /** DeletedAccounts/<uid> as an earlier run left it (null = none). */
+  previousStamp: unknown;
 }
 
 const silent: FantasyLogger = { info: () => undefined, warn: () => undefined };
@@ -293,6 +303,7 @@ export async function readAccountDeletionSnapshot(
   const snap: AccountDeletionSnapshot = {
     uid, user, uidLeafRows: [], ledgerRows: [], scrubRows: [], miniLeagues: [],
     referral: null, tickets: [], wholeNodes: [],
+    previousStamp: await db.read(`DeletedAccounts/${uid}`),
   };
   if (mergedInto(user) !== null) return snap; // refused: nothing else matters
 
@@ -479,16 +490,24 @@ export function planAccountDeletion(
   for (const num of owned) {
     for (let i = 0; i < MAX_SCREENSHOTS; i++) storagePaths.push(`support/${num}/img_${i}.jpg`);
   }
+  const prev = snapshot.previousStamp;
+  const pending = isPlainMap(prev) ? childEntries(prev['PendingStorage']).map(([, p]) => p) : [];
+  for (const p of pending) {
+    if (typeof p === 'string' && PENDING_OBJECT_RE.test(p) && !storagePaths.includes(p)) {
+      storagePaths.push(p);
+    }
+  }
   return { uid, steps, storagePaths };
 }
 
 // ── Applier ─────────────────────────────────────────────────────────────────
 
 /** Runs [plan]: the database steps in order (stopping at the first
- *  failure), then every Storage object (a failure is recorded, never
- *  thrown), and the closing DeletedAccounts write only when nothing failed —
- *  so a retry re-runs Storage and then stamps. Errors never carry the uid;
- *  the summary is counts only. */
+ *  failure, with no Storage and no stamp), then every Storage object (a
+ *  failure is recorded, never thrown), then the closing DeletedAccounts
+ *  write — with `PendingStorage: [failed paths]` when any Storage delete
+ *  failed, without the key (cleared) when none did. Errors never carry the
+ *  uid; the summary is counts only. */
 export async function applyAccountDeletion(
   db: FantasyDb, storage: ObjectStore, plan: DeletionPlan,
 ): Promise<DeletionSummary> {
@@ -511,14 +530,20 @@ export async function applyAccountDeletion(
     if (step.action === 'delete') summary.deleted++;
     else summary.anonymised++;
   }
+  const failed: string[] = [];
   for (const path of plan.storagePaths) {
     try {
       await storage.deleteObject(path);
       summary.storageDeleted++;
     } catch (err) {
+      failed.push(path);
       summary.errors.push(masked(`storage ${path}`, err));
     }
   }
-  if (summary.errors.length === 0 && stamp !== undefined) await run(stamp);
+  if (stamp !== undefined) {
+    const after = isPlainMap(stamp.after) ? { ...stamp.after } : {};
+    if (failed.length > 0) after['PendingStorage'] = failed;
+    await run({ ...stamp, after });
+  }
   return summary;
 }
