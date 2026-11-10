@@ -121,6 +121,11 @@
 //     first; a re-run after a crash between the two plans only the remove). A PUT
 //     never carries null, a DELETE needs its own list (removablePaths), and --undo
 //     puts the old record back BEFORE it removes the kept copy.
+//   - C1 (account-deletion fix wave): the plan also writes the kept account's
+//     back-link Users/<keep>/MergedFrom/<old> = true per old account (before
+//     its MergedInto); --undo deletes it like any leaf whose before was null.
+//     It changes the plan digest of a pending batch - run the dry run again.
+//     Labels name it "combined-from link (old account #n)", never the uid.
 //   - Every GET passes READ_RULES (no whole Users, no Submissions bodies -
 //     only their keys - so no answers, emails or phones are ever fetched by
 //     --find-dupes). Every PUT/DELETE must be a path of this run's plan that
@@ -242,6 +247,8 @@ const SPORTS = LEAGUE_SPORTS.join('|');
 const READ_RULES: ReadonlyArray<{ re: RegExp; shallowOnly?: boolean }> = [
   { re: /^Users\/[A-Za-z0-9_-]+$/ },
   { re: /^Users\/[A-Za-z0-9_-]+\/(First Name|Last Name|MergedInto|MergedAt|MergedHint|ProfileUrl)$/ },
+  // C1: the kept account's back-link to one old account (re-checked / undone).
+  { re: /^Users\/[A-Za-z0-9_-]+\/MergedFrom\/[A-Za-z0-9_-]+$/ },
   { re: /^Users\/[A-Za-z0-9_-]+\/Information\/[^/]+$/ },
   { re: /^Users\/[A-Za-z0-9_-]+\/Played\/[^/]+\/Season \d+$/ },
   { re: new RegExp(`^(${SPORTS})$`), shallowOnly: true },
@@ -523,6 +530,12 @@ export function labelOf(p: string, map: MergeMap): string {
   }
   const m = /^Users\/([^/]+)(?:\/(.+))?$/.exec(String(p));
   const c = m ? clusterOfUid(m[1], map) : undefined;
+  const from = m && c && c.keep === m[1] ? /^MergedFrom\/([^/]+)$/.exec(m[2] ?? '') : null;
+  if (from && c) {
+    // C1: name the old account by its place in the map, never by its uid.
+    const n = (c.old ?? []).indexOf(from[1]);
+    return `${c.who}: kept account combined-from link (${n >= 0 ? `old account #${n + 1}` : 'an unrecognized account'})`;
+  }
   if (m && c) {
     const role = c.keep === m[1] ? 'kept account' : `old account #${(c.old ?? []).indexOf(m[1]) + 1}`;
     return `${c.who}: ${role}${m[2] ? ` ${m[2]}` : ''}`;
@@ -747,6 +760,7 @@ function kindOf(w: PlanWrite): string {
   if (/\/Information\//.test(p)) return 'information fields';
   if (/\/First Name$/.test(p)) return 'first-name fix';
   if (STAMPS.some((s) => p.endsWith(`/${s}`))) return 'merge stamps';
+  if (/^Users\/[^/]+\/MergedFrom\/[^/]+$/.test(p)) return 'combined-from links';
   return 'other';
 }
 
@@ -906,6 +920,16 @@ export function validateBackup(raw: unknown, target: Target['kind']): MergeBacku
       continue;
     }
     if (!keepOf.has(uid)) bad('the account is not in this backup\'s clusters');
+    const fromOld = /^MergedFrom\/([A-Za-z0-9_-]+)$/.exec(rest);
+    if (fromOld) {
+      // C1: the kept account's back-link - an old uid of the same cluster,
+      // true, written over nothing (so --undo deletes it).
+      if (!(keepOf.get(uid) as { old: string[] }).old.includes(fromOld[1])) {
+        bad('a combined-from link names an account that is not an old account of this cluster');
+      }
+      if (after !== true || before !== null) bad('a combined-from link is true, written over nothing');
+      continue;
+    }
     const played = new RegExp(`^Played/(${SPORTS})/Season \\d+$`).test(rest);
     const info = /^Information\/([^/]+)$/.exec(rest);
     const ok = (played && before === null && typeof after === 'string') ||

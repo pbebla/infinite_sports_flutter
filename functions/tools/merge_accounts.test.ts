@@ -400,6 +400,23 @@ describe('apply + undo', () => {
     expect(undone).toEqual(['Users/oldA/MergedInto', 'Users/oldA/MergedAt', 'Users/oldA/MergedHint']);
   });
 
+  it('C1: apply writes Users/<keep>/MergedFrom/<old> = true before MergedInto; --undo removes exactly those leaves', async () => {
+    const db = withMirror(new MemDb(fixture()));
+    const d = deps(db);
+    const r = await applyMerge(MAP, d, { canary: true, expectPlan: await digestOf(MAP, db.root) });
+    expect(r.ok).toBe(true);
+    expect(db.root.Users.keepA.MergedFrom).toEqual({ oldA: true });
+    expect(db.root.Users.keepB.MergedFrom).toEqual({ oldB: true });
+    const written = db.writes().map((w) => w.path);
+    expect(written.indexOf('Users/keepA/MergedFrom/oldA')).toBeLessThan(written.indexOf('Users/oldA/MergedInto'));
+    // The printed label never carries the old uid.
+    expect(d.lines.join('\n')).not.toMatch(/MergedFrom\/old/);
+    expect(d.lines.join('\n')).toMatch(/combined-from link/);
+    await undoMerge(r.backupFile as string, deps(db));
+    expect(db.root.Users.keepA.MergedFrom).toBeUndefined();
+    expect(db.root.Users.keepB.MergedFrom).toBeUndefined();
+  });
+
   it('backup/undo round trip: apply writes the plan, undo restores every path verbatim', async () => {
     const before = fixture();
     const db = withMirror(new MemDb(fixture()));

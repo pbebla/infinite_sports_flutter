@@ -236,9 +236,9 @@ describe('buildMergePlan: Player-A-like cluster (D1, D3, D4, D5)', () => {
   const plan = buildMergePlan(hiramMap(), hiramWorld().snap(), NOW);
   const w = byPath(plan.writes);
 
-  it('plans no refusals and exactly 12 leaf writes', () => {
+  it('plans no refusals and exactly 13 leaf writes (12 + the C1 back-link)', () => {
     expect(plan.refusals).toEqual([]);
-    expect(plan.writes).toHaveLength(12);
+    expect(plan.writes).toHaveLength(13);
   });
 
   it('relinks the 4 Line Ups UID leaves to the kept uid and renames no roster key', () => {
@@ -317,7 +317,7 @@ describe('buildMergePlan: ProfileUrl (D4)', () => {
     const plan = buildMergePlan(mapOf(cluster({ who: 'Player J', keep: 'keepJ', old: ['oldJ'] })), w.snap(), NOW);
     expect(plan.refusals).toEqual([]);
     expect(paths(plan.writes)).not.toContain('Users/keepJ/ProfileUrl');
-    expect(plan.writes).toHaveLength(1 + 1 + 3);
+    expect(plan.writes).toHaveLength(1 + 1 + 3 + 1); // + the C1 back-link
   });
 
   it('an empty ProfileUrl on the kept account counts as lacking', () => {
@@ -365,7 +365,7 @@ describe('buildMergePlan: AFC rows (D1, D3)', () => {
       expect(byPath(plan.writes).get(p)).toEqual({ path: p, before: 'oldC', after: 'keepC' });
     }
     expect(paths(plan.writes).some((p) => p.includes('/Played'))).toBe(false);
-    expect(plan.writes).toHaveLength(3 + 3); // 3 relinks + 3 stamps
+    expect(plan.writes).toHaveLength(3 + 3 + 1); // 3 relinks + 3 stamps + the C1 back-link
     expect(() => assertMergePaths(plan.writes, m, w.snap())).not.toThrow();
   });
 });
@@ -416,7 +416,7 @@ describe('buildMergePlan: Player-E-like (Review Focus 5)', () => {
       expect(w.get(`Users/${o}/MergedAt`)?.after).toBe(NOW);
       expect(w.get(`Users/${o}/MergedHint`)?.after).toBe(HINT);
     }
-    expect(plan.writes).toHaveLength(4 + 4 + 9);
+    expect(plan.writes).toHaveLength(4 + 4 + 9 + 3); // + one C1 back-link per old account
     expect(() => assertMergePaths(plan.writes, map(), world().snap())).not.toThrow();
   });
 });
@@ -574,7 +574,7 @@ describe('buildMergePlan: refusals block only that cluster', () => {
     const w = new World().user('k').user('o').hint('k').afc('Spring 2025', 'Player B2', 'o');
     const plan = buildMergePlan(mapOf(cluster({ keep: 'k', old: ['o'] })), w.snap(), NOW);
     expect(plan.refusals).toEqual([]);
-    expect(plan.writes).toHaveLength(1 + 3);
+    expect(plan.writes).toHaveLength(1 + 3 + 1); // + the C1 back-link
   });
 
   it('Review Focus 2: a name row holding a third, unrelated uid is refused and never overwritten', () => {
@@ -1265,7 +1265,7 @@ describe('fix 6: a scalar Played / Information parent refuses the cluster (never
     const w = new World().user('k', { Played: 'x' }).user('o').hint('k').afc('Spring 2025', 'Player B2', 'o');
     const plan = buildMergePlan(mapOf(cluster({ keep: 'k', old: ['o'] })), w.snap(), NOW);
     expect(plan.refusals).toEqual([]);
-    expect(plan.writes).toHaveLength(1 + 3);
+    expect(plan.writes).toHaveLength(1 + 3 + 1); // + the C1 back-link
   });
 
   it('Information that exists but is not a map is refused when there is something to copy', () => {
@@ -1892,7 +1892,7 @@ describe('assertMergePaths: the one allowed removal (a sign-up record, after its
 
   it('every planned write of the bigger Parlevino plan passes the allowlist', () => {
     const writes = buildMergePlan(map(), snap(), NOW).writes;
-    expect(writes).toHaveLength(4 + 4 + 8 + 3); // 4 relinks, 4 Played, 4 copies + 4 removes, 3 stamps
+    expect(writes).toHaveLength(4 + 4 + 8 + 3 + 1); // 4 relinks, 4 Played, 4 copies + 4 removes, 3 stamps, 1 back-link
     expect(() => assertMergePaths(writes, map(), snap())).not.toThrow();
   });
 });
@@ -1980,7 +1980,7 @@ describe('fix round 1: the sign-up listing is mandatory and authoritative', () =
     for (const l of LEAGUE_SPORTS) expect(snap.nodes[`Sign Ups/${l}`]).toBeNull();
     const plan = buildMergePlan(hiramMap(), snap, NOW);
     expect(plan.refusals).toEqual([]);
-    expect(plan.writes).toHaveLength(12);
+    expect(plan.writes).toHaveLength(13);
     expect(signUpWrites(plan.writes)).toEqual([]);
     // identical to the plan of the same cluster with the sign-up step switched off
     const off = buildMergePlan(
@@ -2075,5 +2075,64 @@ describe('fix round 1: kept-only seasons, blank values, the Comments subtree', (
         parleMap(), snap,
       ),
     ).toThrow(/remov|null/i);
+  });
+});
+
+describe('C1: the kept account gets a MergedFrom back-link per old account', () => {
+  const twoOld = () => {
+    const w = new World().user('k').user('o1').user('o2').hint('k');
+    w.row('Futsal', '9', 'Wolves', 'Ann A', 'o1');
+    return w;
+  };
+  const m = () => mapOf(cluster({ who: 'Ann A', keep: 'k', old: ['o1', 'o2'] }));
+
+  it('plans Users/<keep>/MergedFrom/<old> = true for every old uid, after the hint and time, before MergedInto', () => {
+    const plan = buildMergePlan(m(), twoOld().snap(), NOW);
+    expect(plan.refusals).toEqual([]);
+    for (const o of ['o1', 'o2']) {
+      expect(byPath(plan.writes).get(`Users/k/MergedFrom/${o}`)).toEqual({
+        path: `Users/k/MergedFrom/${o}`, before: null, after: true,
+      });
+      const p = paths(plan.writes);
+      expect(p.indexOf(`Users/k/MergedFrom/${o}`)).toBeGreaterThan(p.indexOf(`Users/${o}/MergedAt`));
+      expect(p.indexOf(`Users/k/MergedFrom/${o}`)).toBeLessThan(p.indexOf(`Users/${o}/MergedInto`));
+    }
+    expect(() => assertMergePaths(plan.writes, m(), twoOld().snap())).not.toThrow();
+  });
+
+  it('an already-merged cluster without the link plans only the link (backfill); with it, nothing', () => {
+    const w = twoOld();
+    for (const o of ['o1', 'o2']) w.user(o, { MergedInto: 'k', MergedAt: 5, MergedHint: HINT });
+    w.row('Futsal', '9', 'Wolves', 'Ann A', 'k');
+    const plan = buildMergePlan(m(), w.snap(), NOW);
+    expect(plan.refusals).toEqual([]);
+    expect(paths(plan.writes)).toEqual(['Users/k/MergedFrom/o1', 'Users/k/MergedFrom/o2']);
+    const after = applyTo(w.snap(), plan.writes);
+    expect(buildMergePlan(m(), after, NOW).writes).toEqual([]);
+  });
+
+  it('a MergedFrom that is not a map, or a leaf that is not true, refuses the cluster', () => {
+    for (const bad of [{ MergedFrom: 'x' }, { MergedFrom: { o1: 'yes' } }]) {
+      const w = twoOld().user('k', bad);
+      const plan = buildMergePlan(m(), w.snap(), NOW);
+      expect(plan.writes, JSON.stringify(bad)).toEqual([]);
+      expect(plan.refusals[0].why).toMatch(/MergedFrom/);
+    }
+  });
+
+  it('the allowlist accepts exactly that shape: an old uid of this cluster, true, over nothing', () => {
+    const s = twoOld().snap();
+    const ok = { path: 'Users/k/MergedFrom/o1', before: null, after: true };
+    expect(() => assertMergePaths([ok], m(), s)).not.toThrow();
+    for (const bad of [
+      { path: 'Users/k/MergedFrom/stranger', before: null, after: true },
+      { path: 'Users/k/MergedFrom/k', before: null, after: true },
+      { path: 'Users/k/MergedFrom/o1', before: null, after: 'o1' },
+      { path: 'Users/k/MergedFrom/o1', before: false, after: true },
+      { path: 'Users/k/MergedFrom', before: null, after: { o1: true } },
+      { path: 'Users/o1/MergedFrom/o2', before: null, after: true },
+    ]) {
+      expect(() => assertMergePaths([bad], m(), s), JSON.stringify(bad)).toThrow(/Refusing merge path/);
+    }
   });
 });

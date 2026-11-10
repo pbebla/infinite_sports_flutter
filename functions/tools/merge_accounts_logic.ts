@@ -11,6 +11,11 @@
 //   D4  copy ProfileUrl and missing Information leaves - nothing private;
 //   D5  stamp each old account with MergedInto / MergedAt / MergedHint and
 //       change nothing else on it;
+//   C1  (account-deletion fix wave) write `Users/<keep>/MergedFrom/<old> =
+//       true` per old account - the back-link account deletion follows to
+//       delete the old accounts with the kept one. Planned before that old
+//       account's MergedInto; an already-merged cluster without it gets just
+//       the link (backfill); --undo removes it (its before is null);
 //   D10 optionally fix the kept account's First Name (owner request);
 //   E2  move each old account's paid / not-paid sign-up records
 //       (`Sign Ups/<league>/<S>/<Paid|NotPaid>/<uid>` - a text value, the
@@ -160,6 +165,9 @@ export const leagueUidPath = (sport: string, season: string, team: string, name:
 
 export const afcUidPath = (season: string, name: string): string =>
   `AFC San Jose/Seasons/${season}/Roster/${name}/UID`;
+
+/** C1: the kept account's back-link to one old account (value `true`). */
+export const mergedFromPath = (keep: string, old: string): string => `Users/${keep}/MergedFrom/${old}`;
 
 /** The seasons-played index leaf (the shape the Manager's linkLeaguePlayer writes). */
 export const playedPath = (keep: string, sport: string, season: string): string =>
@@ -627,6 +635,16 @@ function planCluster(
   // Old-account data the merge would leave behind (Awards, tournaments,
   // fantasy manager entries, registration submissions): refuse the cluster.
   if (olds.length > 0) for (const why of unmovedDataReasons(oldNodes, snap, olds)) refuse(why);
+  // C1 back-link: Users/<keep>/MergedFrom/<old> = true (account deletion
+  // follows it to delete the old accounts with the kept one). Only a map of
+  // `true` leaves is understood; anything else is refused so `before` stays
+  // exact and an undo is exact.
+  const fromRaw = isPlainMap(keepNode) ? keepNode['MergedFrom'] : undefined;
+  if (present(fromRaw) && !isPlainMap(fromRaw)) {
+    refuse("the kept account's MergedFrom value is not a map");
+  } else if (isPlainMap(fromRaw) && olds.some((o) => present(fromRaw[o]) && fromRaw[o] !== true)) {
+    refuse('the kept account has an unexpected MergedFrom value (not true)');
+  }
   const hintRaw = snap.keptHints?.[keep];
   const hint = hintRaw === undefined || hintRaw === null || hintRaw === '' ? null : hintRaw;
   if (hint !== null && !looksMasked(hint)) refuse('the kept email hint is not masked');
@@ -827,29 +845,43 @@ function planCluster(
 
   // ---- D5: stamp each old account (only leaves it does not have yet)
   const stamps: PlanWrite[] = [];
+  const keepFrom = isPlainMap(keepNode['MergedFrom']) ? keepNode['MergedFrom'] : {};
   let stamped = 0;
+  let linked = 0;
   let missingHint = false;
   for (let i = 0; i < olds.length; i++) {
     const node = oldNodes[i];
     const base = userPath(olds[i]);
-    const before = stamps.length;
+    let own = 0;
     // Only absent/null counts as missing (anything else was validated above).
-    // Order: MergedHint, MergedAt, then MergedInto LAST - MergedInto is the
-    // "done" marker (it triggers the public-profile mirror and is what the
-    // app's notice reads), so it only appears once the other two are there.
+    // Order: MergedHint, MergedAt, the kept account's MergedFrom back-link
+    // (C1), then MergedInto LAST - MergedInto is the "done" marker (it
+    // triggers the public-profile mirror and is what the app's notice reads),
+    // so it only appears once the other three are there: whenever an old
+    // account is marked merged, the kept account names it (account deletion
+    // follows that link).
     if (!present(node['MergedHint'])) {
-      if (hint !== null) stamps.push({ path: `${base}/MergedHint`, before: node['MergedHint'] ?? null, after: hint });
-      else missingHint = true;
+      if (hint !== null) {
+        stamps.push({ path: `${base}/MergedHint`, before: node['MergedHint'] ?? null, after: hint });
+        own++;
+      } else missingHint = true;
     }
     if (!present(node['MergedAt'])) {
       stamps.push({ path: `${base}/MergedAt`, before: node['MergedAt'] ?? null, after: nowMs });
+      own++;
+    }
+    if (!present(keepFrom[olds[i]])) {
+      stamps.push({ path: mergedFromPath(keep, olds[i]), before: null, after: true });
+      linked++;
     }
     if (!present(node['MergedInto'])) {
       stamps.push({ path: `${base}/MergedInto`, before: node['MergedInto'] ?? null, after: keep });
+      own++;
     }
-    if (stamps.length > before) stamped++;
+    if (own > 0) stamped++;
   }
   if (stamped > 0) summary.push(`${who}: stamp ${stamped} old account(s) as merged`);
+  if (linked > 0) summary.push(`${who}: link ${linked} old account(s) on the kept account (combined from)`);
   if (missingHint) summary.push(`${who}: no kept-email hint available - the notice will say "your other email"`);
 
   // ---- assemble in the crash-safe order
@@ -1117,6 +1149,14 @@ export function assertMergePaths(
       }
       const infoRaw = keepFields['Information'];
       if (present(infoRaw) && !isPlainMap(infoRaw)) fail("the kept account's Information is not a map");
+    } else if (rest.startsWith('MergedFrom/')) {
+      // C1: one `true` leaf per old account of this cluster, over nothing.
+      const o = rest.slice('MergedFrom/'.length);
+      if (!(c.old ?? []).includes(o)) fail('MergedFrom only names an old account of this cluster');
+      if (w.after !== true) fail('a MergedFrom link is the value true');
+      if (w.before !== null && w.before !== undefined) fail('a MergedFrom link only fills an empty leaf');
+      const fromRaw = keepFields['MergedFrom'];
+      if (present(fromRaw) && !isPlainMap(fromRaw)) fail("the kept account's MergedFrom is not a map");
     } else if (rest === 'First Name') {
       if (c.firstNameFix === undefined || w.after !== c.firstNameFix) {
         fail('First Name is only written for the cluster with a firstNameFix, and only to that value');
