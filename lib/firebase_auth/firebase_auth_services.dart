@@ -1,4 +1,8 @@
+import 'dart:io' show Platform;
+
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
@@ -13,6 +17,20 @@ import '../onboarding/google_profile.dart';
 /// (safe to embed); this is NOT a client secret.
 const _googleServerClientId =
     '248087010229-u4lsjnu68lid7bj82v82d3pcr9t6r1oe.apps.googleusercontent.com';
+
+/// The person backed out of the re-authentication step (closed the Google or
+/// Apple sheet, or cancelled the password dialog). Not an error: the Delete
+/// account page just goes back to idle.
+class ReauthCancelled implements Exception {
+  const ReauthCancelled();
+}
+
+/// Re-authentication could not be completed (no supported provider, a
+/// different Google account was picked, network, too many attempts...).
+/// Carries no message for the screen: the page shows its own plain wording.
+class ReauthFailed implements Exception {
+  const ReauthFailed();
+}
 
 class FirebaseAuthService {
 
@@ -133,6 +151,118 @@ class FirebaseAuthService {
       // ignore: avoid_print
       print(e.toString());
       return null;
+    }
+  }
+
+  /// Fresh sign-in for "Delete account" (account deletion, design D3): the
+  /// `deleteAccount` callable only runs for a sign-in from the last five
+  /// minutes. Picks the provider from the signed-in user's `providerData`,
+  /// Apple first, then Google, then email/password.
+  ///
+  /// - Apple: a new Apple ID credential re-authenticates, then (iOS only) its
+  ///   authorization code revokes the app's Apple token, which Apple requires
+  ///   when an account is deleted. A revoke failure is logged and never blocks
+  ///   the deletion.
+  /// - Google: the account picker; closing it cancels.
+  /// - Password: [askPassword] is called with `null` the first time and with
+  ///   `'Wrong password'` after a rejected password; it returns the typed
+  ///   password, or `null` when the person cancels.
+  ///
+  /// Completes normally once re-authenticated. Throws [ReauthCancelled] when
+  /// the person backs out and [ReauthFailed] for anything else.
+  Future<void> reauthenticateForDeletion({
+    required Future<String?> Function(String? errorText) askPassword,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw const ReauthFailed();
+    final providers = user.providerData.map((p) => p.providerId).toSet();
+    try {
+      if (providers.contains('apple.com')) {
+        await _reauthWithApple(user);
+      } else if (providers.contains('google.com')) {
+        await _reauthWithGoogle(user);
+      } else if (providers.contains('password') && user.email != null) {
+        await _reauthWithPassword(user, askPassword);
+      } else {
+        throw const ReauthFailed();
+      }
+    } on ReauthCancelled {
+      rethrow;
+    } on ReauthFailed {
+      rethrow;
+    } catch (e) {
+      debugPrint('Re-authentication for deletion failed: '
+          '${e is FirebaseAuthException ? e.code : e.runtimeType}');
+      throw const ReauthFailed();
+    }
+  }
+
+  Future<void> _reauthWithApple(User user) async {
+    final AuthorizationCredentialAppleID apple;
+    try {
+      apple = await SignInWithApple.getAppleIDCredential(scopes: const []);
+    } on SignInWithAppleAuthorizationException catch (e) {
+      if (e.code == AuthorizationErrorCode.canceled) {
+        throw const ReauthCancelled();
+      }
+      rethrow;
+    }
+    await user.reauthenticateWithCredential(OAuthProvider('apple.com')
+        .credential(
+            idToken: apple.identityToken,
+            accessToken: apple.authorizationCode));
+    if (Platform.isIOS) {
+      try {
+        await FirebaseAuth.instance
+            .revokeTokenWithAuthorizationCode(apple.authorizationCode);
+      } catch (e) {
+        debugPrint('Apple token revoke failed (deletion continues): '
+            '${e is FirebaseAuthException ? e.code : e.runtimeType}');
+      }
+    }
+  }
+
+  Future<void> _reauthWithGoogle(User user) async {
+    final GoogleSignInAccount? account;
+    try {
+      account =
+          await GoogleSignIn(serverClientId: _googleServerClientId).signIn();
+    } on PlatformException catch (e) {
+      // iOS reports a closed sheet as an error rather than a null account.
+      if (e.code == GoogleSignIn.kSignInCanceledError) {
+        throw const ReauthCancelled();
+      }
+      rethrow;
+    }
+    if (account == null) throw const ReauthCancelled();
+    final googleAuth = await account.authentication;
+    await user.reauthenticateWithCredential(GoogleAuthProvider.credential(
+      idToken: googleAuth.idToken,
+      accessToken: googleAuth.accessToken,
+    ));
+  }
+
+  Future<void> _reauthWithPassword(
+    User user,
+    Future<String?> Function(String? errorText) askPassword,
+  ) async {
+    String? errorText;
+    while (true) {
+      final password = await askPassword(errorText);
+      if (password == null) throw const ReauthCancelled();
+      try {
+        await user.reauthenticateWithCredential(EmailAuthProvider.credential(
+            email: user.email!, password: password));
+        return;
+      } on FirebaseAuthException catch (e) {
+        // With email-enumeration protection on, a wrong password comes back
+        // as invalid-credential rather than wrong-password.
+        if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
+          errorText = 'Wrong password';
+          continue;
+        }
+        rethrow;
+      }
     }
   }
 }

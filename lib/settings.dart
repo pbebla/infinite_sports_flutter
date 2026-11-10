@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:flutter_sticky_header/flutter_sticky_header.dart';
+import 'package:infinite_sports_flutter/account/delete_account_flow.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/misc/follow_store.dart';
 import 'package:infinite_sports_flutter/misc/categories.dart';
@@ -33,8 +34,6 @@ class Settings extends StatefulWidget {
 }
 
 class _SettingsState extends State<Settings> {
-  TextEditingController? _emailController;
-  String? _emailErrorText;
   final FollowStore _followStore = FollowStore();
   final NotificationPrefs _notifPrefs = NotificationPrefs();
   List<FollowedChannel> _follows = [];
@@ -45,8 +44,6 @@ class _SettingsState extends State<Settings> {
   @override
   void initState() {
     super.initState();
-    _emailController = TextEditingController();
-    _emailErrorText = "";
     _loadNotificationSettings();
   }
 
@@ -69,12 +66,6 @@ class _SettingsState extends State<Settings> {
       _masterEnabled = master;
       _categoriesOn = categories;
     });
-  }
-
-  @override
-  void dispose() {
-    _emailController!.dispose();
-    super.dispose();
   }
 
   @override
@@ -410,64 +401,10 @@ class _SettingsState extends State<Settings> {
           delegate: SliverChildListDelegate(
             [
               const Divider(color: Colors.grey),
-              ListTile(title: Text("Delete Account", style: TextStyle(color: Theme.of(context).colorScheme.error,)), minTileHeight: 40, onTap: () async {
-                showDialog(
-                  context: context, 
-                  builder: (context) {
-                    return StatefulBuilder(
-                      builder: (context, localSetState) {
-                        return AlertDialog(
-                          title: Text("ALERT!"),
-                          content: SizedBox(
-                            height: 150,
-                            child: Column(
-                            children: [
-                              Text("Are you sure you want to delete your account? Type your email below before confirming."),
-                              Padding(
-                                padding: EdgeInsets.fromLTRB(0, 10, 0, 0),
-                                child: TextField(
-                                  controller: _emailController,
-                                  decoration: InputDecoration(
-                                    border: const OutlineInputBorder(),
-                                    errorText: (_emailErrorText),
-                                    labelText: 'Email',
-                                    hintText: 'Enter your email'),
-                                ),
-                              )
-                            ],
-                          ),
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () {
-                                Navigator.pop(context);
-                              }, 
-                              child: const Text("No, Go Back"),
-                            ),
-                            FilledButton(
-                              onPressed: () async {
-                                if (_emailController!.text != FirebaseAuth.instance.currentUser!.email) {
-                                  _emailErrorText = "Email does not match.";
-                                  localSetState(() {});
-                                } else {
-                                  var user = FirebaseAuth.instance.currentUser!;
-                                  await removeImage(user);
-                                  await user.delete();
-                                  signedIn = false;
-                                  Navigator.pop(context);
-                                  Navigator.pop(context);
-                                  Navigator.pop(context);
-                                  setState(() {},);
-                                }
-                              }, 
-                              child: const Text("Yes, Delete", style: TextStyle(color: Colors.white),),
-                            )
-                          ],
-                        );
-                      }
-                    );
-                  }
-                );
+              ListTile(title: Text("Delete Account", style: TextStyle(color: Theme.of(context).colorScheme.error,)), minTileHeight: 40, onTap: () {
+                // Account deletion (design D3): the page explains what goes,
+                // re-signs the person in and asks the server to delete.
+                Navigator.push(context, MaterialPageRoute(builder: (context) => buildDeleteAccountPage()));
               },),
               const Divider(color: Colors.grey),
             ]
