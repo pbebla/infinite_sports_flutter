@@ -318,13 +318,13 @@ describe('adminDeleteAccount', () => {
     expect(h.tree.Users[ALICE]).toBeDefined();
   });
 
-  it('runs for an admin, stamps By and Reason, and deletes the Auth user', async () => {
+  it('runs for an admin, stamps By (never the reason), and deletes the Auth user', async () => {
     const result = await call(adminDeleteAccount, { uid: ALICE, reason: '  emailed request  ' }, admin());
     expect(result).toMatchObject({ pendingStorage: 0 });
     expect(JSON.stringify(result)).not.toContain(ALICE);
     expect(h.tree.Users[ALICE]).toBeUndefined();
     expect(h.tree.DeletedAccounts[ALICE]).toEqual({
-      At: NOW, Provider: 'google.com', By: ADMIN, Reason: 'emailed request',
+      At: NOW, Provider: 'google.com', By: ADMIN,
     });
     expect(h.deletedAuth).toEqual([ALICE]);
     expect(h.lines.filter((l) => l.includes(ALICE))).toEqual([]);

@@ -599,20 +599,20 @@ describe('account deletion — the applier', () => {
   });
 });
 
-describe('account deletion — stamp By/Reason and the payment allow-list', () => {
-  it('a retry keeps the first At, Provider and an existing By/Reason, and adds them when missing', async () => {
+describe('account deletion — stamp By (no free text) and the payment allow-list', () => {
+  it('a retry keeps the first At, Provider and an existing By, drops any old Reason, and adds By when missing', async () => {
     const seed = world();
     seed.DeletedAccounts = { [ALICE]: { At: 5, Provider: 'password', By: 'uid_admin', Reason: 'emailed request' } };
     const db = new FakeDb(seed);
     const snap = await readAccountDeletionSnapshot(db, ALICE);
-    const plan = planAccountDeletion(snap, ALICE, { nowMs: NOW, provider: 'google.com', by: 'uid_other', reason: 'later' }) as DeletionPlan;
+    const plan = planAccountDeletion(snap, ALICE, { nowMs: NOW, provider: 'google.com', by: 'uid_other' }) as DeletionPlan;
     const stamp = plan.steps[plan.steps.length - 1].after;
-    expect(stamp).toEqual({ At: 5, Provider: 'password', By: 'uid_admin', Reason: 'emailed request' });
+    expect(stamp).toEqual({ At: 5, Provider: 'password', By: 'uid_admin' });
 
     const fresh = planAccountDeletion(await readAccountDeletionSnapshot(new FakeDb(world()), ALICE), ALICE,
-      { nowMs: NOW, provider: 'password', by: 'uid_admin', reason: 'why' }) as DeletionPlan;
+      { nowMs: NOW, provider: 'password', by: 'uid_admin' }) as DeletionPlan;
     expect(fresh.steps[fresh.steps.length - 1].after)
-      .toEqual({ At: NOW, Provider: 'password', By: 'uid_admin', Reason: 'why' });
+      .toEqual({ At: NOW, Provider: 'password', By: 'uid_admin' });
   });
 
   it('a registration scrub keeps only the allow-list: an unknown Paid*/Refund* key is dropped', async () => {

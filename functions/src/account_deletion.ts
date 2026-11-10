@@ -16,8 +16,8 @@
 //
 // adminDeleteAccount (callable, admin-gated by requireAdmin)
 //   data: { uid: string, reason?: string (<= 200 chars) }
-//   Same run for that uid; DeletedAccounts/<uid> gets By = the admin and
-//   Reason. An unknown uid is not an error (only the stamp is planned).
+//   Same run for that uid; DeletedAccounts/<uid> gets By = the admin
+//   (reason is accepted for compatibility but never stored or logged). An unknown uid is not an error (only the stamp is planned).
 //   Refuses (failed-precondition, details.code 'admin-protected') the
 //   caller's own uid and any uid with /Admins/<uid> === true (M7). An old
 //   account of a merge is deleted on its own (C1; no already-merged refusal).
@@ -195,7 +195,7 @@ export const adminDeleteAccount = onCall(async (request): Promise<DeletionResult
   if (rawReason !== undefined && typeof rawReason !== 'string') {
     throw new HttpsError('invalid-argument', 'reason must be text.', { code: 'invalid-argument' });
   }
-  const reason = (rawReason ?? '').trim();
+  const reason = rawReason === undefined ? '' : (rawReason as string).trim();
   if (reason.length > MAX_REASON) {
     throw new HttpsError('invalid-argument', `reason is longer than ${MAX_REASON} characters.`, {
       code: 'invalid-argument',
@@ -212,6 +212,5 @@ export const adminDeleteAccount = onCall(async (request): Promise<DeletionResult
     nowMs: Date.now(),
     provider: await providerOf(uid),
     by: adminUid,
-    ...(reason.length > 0 ? { reason } : {}),
   }, { allowMerged: true });
 });

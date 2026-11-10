@@ -54,12 +54,13 @@
 //   KEPT      Sign Ups/<league>/<S>/Paid/<uid>, TransferCosts/<gw>/<uid>,
 //             LiveBase/<gw>/Managers/<uid>, ReferredUsers/<uid> (the
 //             referral guard a later refund void needs).
-//   WRITTEN   DeletedAccounts/<uid> = {At, Provider, By?, Reason?,
+//   WRITTEN   DeletedAccounts/<uid> = {At, Provider, By?,
 //             PendingStorage?} — last, whenever every database step landed. PendingStorage
 //             lists the Storage objects whose delete failed (opaque paths:
 //             uid / ticket number only); the next run plans them again and
 //             its stamp drops the key once they are gone. A retry keeps the
-//             first At/Provider and any By/Reason (an admin's note survives).
+//             first At/Provider and any By (an old Reason key is dropped).
+//             No free text in the stamp: `DeletedAccounts` is readable by any client while the stage-1 rules keep the root read open.
 //   MERGED    (C1) Users/<uid>/MergedFrom/<old> = true (written by the merge
 //             tool): each old account that points back (Users/<old>/
 //             MergedInto, or its own DeletedAccounts/<old>/MergedInto once
@@ -200,8 +201,6 @@ export interface DeletionStamp {
   provider: string;
   /** The admin who deleted the account (adminDeleteAccount only). */
   by?: string;
-  /** The admin's note (adminDeleteAccount only), already trimmed. */
-  reason?: string;
 }
 
 export interface DeletionSummary {
@@ -677,9 +676,7 @@ export function planAccountDeletion(
     Provider: first(prevMap['Provider'], stamp.provider, isStr),
   };
   const by = first(prevMap['By'], stamp.by, isStr);
-  const reason = first(prevMap['Reason'], stamp.reason, isStr);
   if (by !== undefined) closing['By'] = by;
-  if (reason !== undefined) closing['Reason'] = reason;
   if (pendingAuth.length > 0) closing['PendingAuth'] = pendingAuth;
   steps.push({ path: `DeletedAccounts/${uid}`, action: 'write', after: closing });
 
