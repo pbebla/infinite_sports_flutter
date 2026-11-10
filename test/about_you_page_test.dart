@@ -18,6 +18,52 @@ Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
   await tester.tap(finder);
 }
 
+
+/// Picks a date of birth through the picker's typed-input mode.
+Future<void> _enterDob(WidgetTester tester, String mmddyyyy) async {
+  await tester.tap(find.byKey(const ValueKey('about_you_dob_field')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byIcon(Icons.edit_outlined));
+  await tester.pumpAndSettle();
+  await tester.enterText(
+      find.descendant(
+          of: find.byType(Dialog), matching: find.byType(TextField)),
+      mmddyyyy);
+  await tester.tap(find.text('OK'));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _underageSignOut(
+  WidgetTester tester, {
+  int? stepIndex,
+  int? stepCount,
+  required List<String> calls,
+}) async {
+  await tester.pumpWidget(MaterialApp(
+    home: AboutYouPage(
+      onDone: () {},
+      stepIndex: stepIndex,
+      stepCount: stepCount,
+      writeOverride: (_) async => calls.add('write'),
+      deleteFreshAccountOverride: () async => calls.add('delete'),
+      signOutOverride: () async => calls.add('signOut'),
+    ),
+  ));
+  // Ten years old today: under the minimum age.
+  final now = DateTime.now();
+  final dob = DateTime(now.year - 10, 1, 1);
+  await _enterDob(
+      tester,
+      '${dob.month.toString().padLeft(2, '0')}/'
+      '${dob.day.toString().padLeft(2, '0')}/${dob.year}');
+  await _tapVisible(
+      tester, find.byKey(const ValueKey('about_you_continue_button')));
+  await tester.pumpAndSettle();
+  expect(find.text('Sorry, not yet'), findsOneWidget);
+  await tester.tap(find.byKey(const ValueKey('about_you_underage_sign_out')));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets('renders date of birth, city, ZIP, gender, and referral fields',
       (tester) async {
@@ -248,5 +294,46 @@ void main() {
 
     // Still on AboutYouPage — canPop:false blocked the pop.
     expect(find.text('About you'), findsOneWidget);
+  });
+
+  testWidgets(
+      'under 13, brand-new account: Sign out deletes it through the server '
+      'once, then signs out', (tester) async {
+    final calls = <String>[];
+    await _underageSignOut(tester, stepIndex: 2, stepCount: 3, calls: calls);
+    expect(calls, ['delete', 'signOut']);
+  });
+
+  testWidgets(
+      'under 13, existing account (completion gate): Sign out only signs '
+      'out, never deletes', (tester) async {
+    final calls = <String>[];
+    await _underageSignOut(tester, calls: calls);
+    expect(calls, ['signOut']);
+  });
+
+  testWidgets('under 13: a failed deletion still signs out', (tester) async {
+    final calls = <String>[];
+    await tester.pumpWidget(MaterialApp(
+      home: AboutYouPage(
+        onDone: () {},
+        stepIndex: 2,
+        stepCount: 3,
+        writeOverride: (_) async {},
+        deleteFreshAccountOverride: () async {
+          calls.add('delete');
+          throw Exception('offline');
+        },
+        signOutOverride: () async => calls.add('signOut'),
+      ),
+    ));
+    final now = DateTime.now();
+    await _enterDob(tester, '01/01/${now.year - 10}');
+    await _tapVisible(
+        tester, find.byKey(const ValueKey('about_you_continue_button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('about_you_underage_sign_out')));
+    await tester.pumpAndSettle();
+    expect(calls, ['delete', 'signOut']);
   });
 }

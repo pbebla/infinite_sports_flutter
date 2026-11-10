@@ -30,23 +30,35 @@ const _supportEmail = 'contact@infinitesports.org';
 const _genericError =
     'Something went wrong. Please try again or email $_supportEmail.';
 
+const _appleOnAndroidError =
+    'Delete this account from your iPhone, or email $_supportEmail.';
+
+// Word for word the lists on public/delete-account/index.html (and the
+// Manager's delete sheet): change all three together.
 const _deletedLines = [
   'Your sign-in (email, Google or Apple) and password.',
   'Your name, email address, phone number, date of birth, gender, city, ZIP '
       'code and profile photo.',
   'Your player profile details and public profile.',
-  'Your fantasy teams, picks and mini-league memberships.',
+  'Your fantasy squad, transfers, chips and mini-league memberships.',
   'Your notification tokens and preferences.',
-  'Your support requests.',
+  'Your support requests and sign-up comments.',
 ];
 
 const _keptLines = [
   'Payment records, for as long as our accounting rules require (typically '
-      'seven years).',
+      'seven years). Unpaid sign-ups are removed.',
   'League records (rosters, results, standings and statistics), which are the '
-      "league's history. On request we remove your photo and personal details "
-      'from them and can replace your name with a generic entry.',
+      "league's history. Your photo and sign-in link are removed "
+      'automatically; on request we can replace your name with a generic '
+      'entry.',
+  'Fantasy points and rankings, shown as "Deleted manager" so other '
+      "players' ranks don't change.",
+  'Poll votes and match predictions, which stay as anonymous entries.',
 ];
+
+const _mergedAccountsLine = 'If your accounts were combined earlier, '
+    'deleting this account also removes the old ones.';
 
 class DeleteAccountPage extends StatefulWidget {
   /// Signs the person in again. Completes when done; throws
@@ -61,11 +73,19 @@ class DeleteAccountPage extends StatefulWidget {
   /// gone server-side and the app must sign out regardless).
   final Future<void> Function() onDeleted;
 
+  /// True when the account no longer exists on the server. Asked after an
+  /// unknown `callDelete` failure (or a re-auth that says the user is gone):
+  /// the server may have deleted the account and only the answer was lost,
+  /// in which case [onDeleted] runs instead of an error. A throw counts as
+  /// false.
+  final Future<bool> Function() accountGone;
+
   const DeleteAccountPage({
     super.key,
     required this.reauth,
     required this.callDelete,
     required this.onDeleted,
+    required this.accountGone,
   });
 
   @override
@@ -97,16 +117,23 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
       _busy = true;
       _error = null;
     });
+    // True while the server call is in flight: an unknown failure there may
+    // be a lost answer to a delete that went through.
+    var inCall = false;
     try {
       await widget.reauth(context);
       try {
+        inCall = true;
         await widget.callDelete();
       } on DeleteAccountError catch (e) {
         // The sign-in was a little too old by the server's clock: once more.
         if (e.code != DeleteAccountError.recentLogin || !mounted) rethrow;
+        inCall = false;
         await widget.reauth(context);
+        inCall = true;
         await widget.callDelete();
       }
+      inCall = false;
       // Stays busy: onDeleted takes the person out of the signed-in app. No
       // `mounted` check: the server already deleted the Auth user, so the
       // sign-out must happen even if this page was removed meanwhile.
@@ -114,15 +141,48 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
     } on ReauthCancelled {
       if (mounted) setState(() => _busy = false);
     } on ReauthFailed catch (e) {
-      _fail(e.reason == ReauthFailureReason.googleAccountMismatch
-          ? 'Please choose the same Google account you signed in with.'
-          : _genericError);
+      switch (e.reason) {
+        case ReauthFailureReason.googleAccountMismatch:
+          _fail('Please choose the same Google account you signed in with.');
+        case ReauthFailureReason.appleOnlyOnAndroid:
+          _fail(_appleOnAndroidError);
+        case ReauthFailureReason.userGone:
+          await _deletedOrFail(_genericError);
+        case ReauthFailureReason.other:
+          _fail(_genericError);
+      }
     } on DeleteAccountError catch (e) {
-      _fail(_messageFor(e));
+      if (e.code == DeleteAccountError.other) {
+        await _deletedOrFail(_genericError);
+      } else {
+        _fail(_messageFor(e));
+      }
     } catch (e) {
       debugPrint('Delete account failed: ${e.runtimeType}');
-      _fail(_genericError);
+      if (inCall) {
+        await _deletedOrFail(_genericError);
+      } else {
+        _fail(_genericError);
+      }
     }
+  }
+
+  /// After an unknown failure: if the account is in fact gone (the delete
+  /// went through and only the answer was lost), finish as a success;
+  /// otherwise show [message]. Stays busy while checking.
+  Future<void> _deletedOrFail(String message) async {
+    var gone = false;
+    try {
+      gone = await widget.accountGone();
+    } catch (e) {
+      debugPrint('Account check after a failed delete failed: '
+          '${e.runtimeType}');
+    }
+    if (gone) {
+      await widget.onDeleted();
+      return;
+    }
+    _fail(message);
   }
 
   void _fail(String message) {
@@ -177,6 +237,8 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
                 Text('What is kept', style: text.titleMedium),
                 const SizedBox(height: 8),
                 for (final line in _keptLines) _Bullet(line),
+                const SizedBox(height: 12),
+                Text(_mergedAccountsLine, style: text.bodyMedium),
                 const SizedBox(height: 24),
                 Text(
                   'You will be asked to sign in again before the account is '

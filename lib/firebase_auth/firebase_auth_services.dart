@@ -1,5 +1,6 @@
 import 'dart:io' show Platform;
 
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/services.dart' show PlatformException;
@@ -38,6 +39,17 @@ enum ReauthFailureReason {
   /// The person picked a different Google account than the signed-in one
   /// (Firebase `user-mismatch`).
   googleAccountMismatch,
+
+  /// The only sign-in on the account is Apple and this is Android, where
+  /// Sign in with Apple cannot run: the person deletes from an iPhone or
+  /// emails support.
+  appleOnlyOnAndroid,
+
+  /// Firebase said the account no longer exists or is disabled
+  /// (`user-not-found` / `user-disabled`): a previous delete may already
+  /// have gone through, so the page checks before showing an error.
+  userGone,
+
   other,
 }
 
@@ -55,6 +67,22 @@ String? reauthProviderFor(
   if (ids.contains('google.com')) return 'google.com';
   if (ids.contains('password') && hasEmail) return 'password';
   return null;
+}
+
+/// Why [reauthProviderFor] found no usable provider: Apple is on the account
+/// but this is Android (so it cannot run here), or anything else.
+ReauthFailureReason reauthUnavailableReason(
+  Iterable<String> providerIds, {
+  required bool isIOS,
+  required bool hasEmail,
+}) {
+  final ids = providerIds.toSet();
+  if (!isIOS &&
+      ids.contains('apple.com') &&
+      reauthProviderFor(ids, isIOS: isIOS, hasEmail: hasEmail) == null) {
+    return ReauthFailureReason.appleOnlyOnAndroid;
+  }
+  return ReauthFailureReason.other;
 }
 
 /// The Apple credential for re-signing in before deletion: the identity token
@@ -207,8 +235,9 @@ class FirebaseAuthService {
   }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw const ReauthFailed();
+    final providerIds = user.providerData.map((p) => p.providerId).toList();
     final provider = reauthProviderFor(
-      user.providerData.map((p) => p.providerId),
+      providerIds,
       isIOS: Platform.isIOS,
       hasEmail: user.email != null,
     );
@@ -220,12 +249,25 @@ class FirebaseAuthService {
       } else if (provider == 'password') {
         await _reauthWithPassword(user, askPassword);
       } else {
-        throw const ReauthFailed();
+        throw ReauthFailed(
+          reason: reauthUnavailableReason(
+            providerIds,
+            isIOS: Platform.isIOS,
+            hasEmail: user.email != null,
+          ),
+        );
       }
     } on ReauthCancelled {
       rethrow;
     } on ReauthFailed {
       rethrow;
+    } on FirebaseAuthException catch (e) {
+      debugPrint('Re-authentication for deletion failed: ${e.code}');
+      // The account may already be gone (a delete whose answer was lost).
+      if (e.code == 'user-not-found' || e.code == 'user-disabled') {
+        throw const ReauthFailed(reason: ReauthFailureReason.userGone);
+      }
+      throw const ReauthFailed();
     } catch (e) {
       debugPrint('Re-authentication for deletion failed: '
           '${e is FirebaseAuthException ? e.code : e.runtimeType}');
@@ -233,16 +275,63 @@ class FirebaseAuthService {
     }
   }
 
-  Future<void> _reauthWithApple(User user) async {
-    final AuthorizationCredentialAppleID apple;
+  /// Deletes an account created moments ago (the under-13 exit on the About
+  /// You signup step): Apple's token is revoked first (iOS, Apple accounts),
+  /// then the `deleteAccount` callable removes the data and the Auth user.
+  /// The sign-in is only minutes old, so no password or Google re-auth is
+  /// needed. Never throws: every failure is logged, and the caller signs the
+  /// person out regardless.
+  Future<void> deleteFreshAccount() async {
     try {
-      apple = await SignInWithApple.getAppleIDCredential(scopes: const []);
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      if (Platform.isIOS &&
+          user.providerData.any((p) => p.providerId == 'apple.com')) {
+        try {
+          final apple = await _appleIdCredential();
+          await _revokeAppleToken(apple.authorizationCode);
+        } catch (e) {
+          debugPrint('Apple revoke before fresh-account deletion skipped: '
+              '${e.runtimeType}');
+        }
+      }
+      await FirebaseFunctions.instance
+          .httpsCallable('deleteAccount')
+          .call<Object?>();
+    } catch (e) {
+      debugPrint('Fresh-account deletion failed: '
+          '${e is FirebaseFunctionsException ? e.code : e.runtimeType}');
+    }
+  }
+
+  /// A new Apple ID credential (the Apple sheet). Throws [ReauthCancelled]
+  /// when the person closes it.
+  Future<AuthorizationCredentialAppleID> _appleIdCredential() async {
+    try {
+      return await SignInWithApple.getAppleIDCredential(scopes: const []);
     } on SignInWithAppleAuthorizationException catch (e) {
       if (e.code == AuthorizationErrorCode.canceled) {
         throw const ReauthCancelled();
       }
       rethrow;
     }
+  }
+
+  /// Revokes the app's Apple token (Apple requires it when an account is
+  /// deleted). iOS only; a failure is logged and never blocks the deletion.
+  Future<void> _revokeAppleToken(String authorizationCode) async {
+    if (!Platform.isIOS) return;
+    try {
+      await FirebaseAuth.instance
+          .revokeTokenWithAuthorizationCode(authorizationCode);
+    } catch (e) {
+      debugPrint('Apple token revoke failed (deletion continues): '
+          '${e is FirebaseAuthException ? e.code : e.runtimeType}');
+    }
+  }
+
+  Future<void> _reauthWithApple(User user) async {
+    final apple = await _appleIdCredential();
     await user.reauthenticateWithCredential(
         appleReauthCredential(apple.identityToken));
     // The revoke runs here, BEFORE the server call, because it needs the live
@@ -250,15 +339,7 @@ class FirebaseAuthService {
     // no longer run). On a recent-login-required retry the whole re-auth,
     // revoke included, runs a second time; a second revoke of an already
     // revoked token just fails and is logged.
-    if (Platform.isIOS) {
-      try {
-        await FirebaseAuth.instance
-            .revokeTokenWithAuthorizationCode(apple.authorizationCode);
-      } catch (e) {
-        debugPrint('Apple token revoke failed (deletion continues): '
-            '${e is FirebaseAuthException ? e.code : e.runtimeType}');
-      }
-    }
+    await _revokeAppleToken(apple.authorizationCode);
   }
 
   Future<void> _reauthWithGoogle(User user) async {

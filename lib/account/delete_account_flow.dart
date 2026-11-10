@@ -3,6 +3,7 @@
 // happens once the account is gone. The page itself stays Firebase-free.
 
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/account/delete_account_page.dart';
 import 'package:infinite_sports_flutter/account/password_reauth_dialog.dart';
@@ -20,7 +21,27 @@ Widget buildDeleteAccountPage(BuildContext context) {
     reauth: reauthForDeletion,
     callDelete: callDeleteAccount,
     onDeleted: () => onAccountDeleted(navigator, messenger),
+    accountGone: isSignedInAccountGone,
   );
+}
+
+/// True when the signed-in account no longer exists server-side: a reload
+/// fails with `user-not-found` / `user-disabled`, or the session is already
+/// gone. Used after an unknown delete failure, where the server may have
+/// deleted the account and only its answer was lost (the app would
+/// otherwise sit signed in to a dead account). Any other failure (offline,
+/// ...) is "not known to be gone": the page shows its error.
+Future<bool> isSignedInAccountGone() async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return true;
+  try {
+    await user.reload();
+  } on FirebaseAuthException catch (e) {
+    return e.code == 'user-not-found' || e.code == 'user-disabled';
+  } catch (_) {
+    return false;
+  }
+  return FirebaseAuth.instance.currentUser == null;
 }
 
 /// Re-signs the current user in with their own provider (Apple, Google or

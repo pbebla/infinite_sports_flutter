@@ -27,6 +27,7 @@ Future<void> _pump(
   required Future<void> Function() reauth,
   required Future<void> Function() callDelete,
   Future<void> Function()? onDeleted,
+  Future<bool> Function()? accountGone,
   ThemeData? theme,
 }) async {
   await tester.pumpWidget(MaterialApp(
@@ -35,6 +36,7 @@ Future<void> _pump(
       reauth: (_) => reauth(),
       callDelete: callDelete,
       onDeleted: onDeleted ?? () async {},
+      accountGone: accountGone ?? () async => false,
     ),
   ));
 }
@@ -63,6 +65,182 @@ void main() {
     expect(find.text('What is kept'), findsOneWidget);
     expect(find.text('Type DELETE to confirm'), findsOneWidget);
     expect(find.text('Delete my account'), findsOneWidget);
+  });
+
+  testWidgets('lists exactly the lines on the public delete-account page',
+      (tester) async {
+    await _pump(tester, reauth: () async {}, callDelete: () async {});
+    const lines = [
+      'Your sign-in (email, Google or Apple) and password.',
+      'Your name, email address, phone number, date of birth, gender, city, '
+          'ZIP code and profile photo.',
+      'Your player profile details and public profile.',
+      'Your fantasy squad, transfers, chips and mini-league memberships.',
+      'Your notification tokens and preferences.',
+      'Your support requests and sign-up comments.',
+      'Payment records, for as long as our accounting rules require '
+          '(typically seven years). Unpaid sign-ups are removed.',
+      'League records (rosters, results, standings and statistics), which are '
+          "the league's history. Your photo and sign-in link are removed "
+          'automatically; on request we can replace your name with a generic '
+          'entry.',
+      'Fantasy points and rankings, shown as "Deleted manager" so other '
+          "players' ranks don't change.",
+      'Poll votes and match predictions, which stay as anonymous entries.',
+      'If your accounts were combined earlier, deleting this account also '
+          'removes the old ones.',
+    ];
+    for (final line in lines) {
+      expect(find.text(line), findsOneWidget, reason: line);
+    }
+    // Nothing else is bulleted: 6 deleted + 4 kept.
+    expect(find.text('•  '), findsNWidgets(10));
+  });
+
+  group('lost response (the server may have deleted the account)', () {
+    testWidgets('unknown failure + account gone: onDeleted once, no error',
+        (tester) async {
+      var deleted = 0;
+      var checks = 0;
+      await _pump(
+        tester,
+        reauth: () async {},
+        callDelete: () async => throw Exception('connection reset'),
+        onDeleted: () async => deleted++,
+        accountGone: () async {
+          checks++;
+          return true;
+        },
+      );
+      await _typeAndTap(tester);
+      await _flush(tester);
+      expect(checks, 1);
+      expect(deleted, 1);
+      expect(find.textContaining('Something went wrong'), findsNothing);
+    });
+
+    testWidgets('server "other" error + account gone: onDeleted once',
+        (tester) async {
+      var deleted = 0;
+      await _pump(
+        tester,
+        reauth: () async {},
+        callDelete: () async =>
+            throw const DeleteAccountError(DeleteAccountError.other),
+        onDeleted: () async => deleted++,
+        accountGone: () async => true,
+      );
+      await _typeAndTap(tester);
+      await _flush(tester);
+      expect(deleted, 1);
+      expect(find.textContaining('Something went wrong'), findsNothing);
+    });
+
+    testWidgets('unknown failure + account still there: generic, idle',
+        (tester) async {
+      var deleted = 0;
+      var checks = 0;
+      await _pump(
+        tester,
+        reauth: () async {},
+        callDelete: () async => throw Exception('connection reset'),
+        onDeleted: () async => deleted++,
+        accountGone: () async {
+          checks++;
+          return false;
+        },
+      );
+      await _typeAndTap(tester);
+      await tester.pumpAndSettle();
+      expect(checks, 1);
+      expect(deleted, 0);
+      expect(find.textContaining('Something went wrong'), findsOneWidget);
+      expect(_enabled(tester), isTrue);
+    });
+
+    testWidgets('a throwing check counts as "still there"', (tester) async {
+      var deleted = 0;
+      await _pump(
+        tester,
+        reauth: () async {},
+        callDelete: () async => throw Exception('connection reset'),
+        onDeleted: () async => deleted++,
+        accountGone: () async => throw Exception('offline'),
+      );
+      await _typeAndTap(tester);
+      await tester.pumpAndSettle();
+      expect(deleted, 0);
+      expect(find.textContaining('Something went wrong'), findsOneWidget);
+      expect(_enabled(tester), isTrue);
+    });
+
+    testWidgets('re-auth says the user is gone + account gone: onDeleted',
+        (tester) async {
+      var deleted = 0;
+      var deleteCalls = 0;
+      await _pump(
+        tester,
+        reauth: () async =>
+            throw const ReauthFailed(reason: ReauthFailureReason.userGone),
+        callDelete: () async => deleteCalls++,
+        onDeleted: () async => deleted++,
+        accountGone: () async => true,
+      );
+      await _typeAndTap(tester);
+      await _flush(tester);
+      expect(deleteCalls, 0);
+      expect(deleted, 1);
+    });
+
+    testWidgets('known server codes and other re-auth failures never check',
+        (tester) async {
+      var checks = 0;
+      await _pump(
+        tester,
+        reauth: () async {},
+        callDelete: () async =>
+            throw const DeleteAccountError(DeleteAccountError.incomplete),
+        accountGone: () async {
+          checks++;
+          return true;
+        },
+      );
+      await _typeAndTap(tester);
+      await tester.pumpAndSettle();
+      expect(checks, 0);
+
+      await _pump(
+        tester,
+        reauth: () async => throw Exception('raw boom'),
+        callDelete: () async {},
+        accountGone: () async {
+          checks++;
+          return true;
+        },
+      );
+      await _typeAndTap(tester);
+      await tester.pumpAndSettle();
+      expect(checks, 0);
+      expect(find.textContaining('Something went wrong'), findsOneWidget);
+    });
+  });
+
+  testWidgets('Apple-only account on Android: says to use the iPhone',
+      (tester) async {
+    await _pump(
+      tester,
+      reauth: () async => throw const ReauthFailed(
+          reason: ReauthFailureReason.appleOnlyOnAndroid),
+      callDelete: () async {},
+    );
+    await _typeAndTap(tester);
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Delete this account from your iPhone, or email '
+          'contact@infinitesports.org.'),
+      findsOneWidget,
+    );
+    expect(_enabled(tester), isTrue);
   });
 
   testWidgets('button is enabled only when the trimmed text is exactly DELETE',
@@ -268,6 +446,7 @@ void main() {
                 reauth: (_) async {},
                 callDelete: callDelete,
                 onDeleted: onDeleted,
+                accountGone: () async => false,
               ),
             )),
             child: const Text('home'),
@@ -353,6 +532,24 @@ void main() {
           'google.com');
       expect(reauthProviderFor(['apple.com'], isIOS: false, hasEmail: true),
           isNull);
+    });
+
+    test('why no provider: Apple-only on Android vs anything else', () {
+      expect(
+          reauthUnavailableReason(['apple.com'], isIOS: false, hasEmail: true),
+          ReauthFailureReason.appleOnlyOnAndroid);
+      expect(
+          reauthUnavailableReason(['apple.com', 'password'],
+              isIOS: false, hasEmail: false),
+          ReauthFailureReason.appleOnlyOnAndroid);
+      expect(reauthUnavailableReason([], isIOS: false, hasEmail: true),
+          ReauthFailureReason.other);
+      expect(
+          reauthUnavailableReason(['password'], isIOS: false, hasEmail: false),
+          ReauthFailureReason.other);
+      expect(
+          reauthUnavailableReason(['apple.com'], isIOS: true, hasEmail: true),
+          ReauthFailureReason.other);
     });
 
     test('password needs an email on the account', () {
