@@ -8,12 +8,13 @@
 //                                          per-uid nodes read by path);
 //   planAccountDeletion(snapshot, uid, s)  pure: the ordered steps + Storage
 //                                          objects, or a refusal (D5);
-//   applyAccountDeletion(db, store, plan)  Storage first, then the steps in
-//                                          order, DeletedAccounts/<uid> last.
+//   applyAccountDeletion(db, store, plan)  the database steps in order, then
+//                                          Storage, DeletedAccounts/<uid>
+//                                          last and only when nothing failed.
 //
 // What happens to each place (D1 + the controller's rulings):
 //   DELETED   Users/<uid>, PublicProfiles/<uid>, Storage
-//             Users/<uid>/profileimage.jpg; per fantasy season Managers,
+//             Users/<uid>/profileimage.jpg; per fantasy season
 //             Squads, TransferState, Baselines, SquadAlerts, AccessClaims,
 //             Watchlists, Badges, BadgePushClaims, Live/Squads (all /<uid>)
 //             and PreviewPushed/<gw>/<uid>; MiniLeagues/<id>/Members/<uid>;
@@ -25,9 +26,10 @@
 //             the ReferredName leaf of the person's own referral row.
 //   UID LEAF  `UID`/`uid` removed, the row kept (a league record): league
 //             Line Ups, AFC San Jose rosters, tournament rosters (found
-//             through Users/<uid>/TournamentsPlayed), and the fantasy
-//             market row Players/<name> (its copied `photoUrl` goes too —
-//             it points at the deleted profile photo).
+//             through Users/<uid>/TournamentsPlayed) — with the row's
+//             `PhotoUrl`/`photoUrl` — and the fantasy market row
+//             Players/<name> (its copied `photoUrl` too). The photo urls
+//             point at the deleted profile photo.
 //   ANONYMISED (ledgers: everyone else's rank stays true) History/<gw>/<uid>,
 //             PublishedPicks/<gw>/<uid>, Leaderboards/Gameweek/<gw>/<uid>,
 //             Leaderboards/Overall/<uid>, Leaderboards/RankHistory/<uid>,
@@ -35,6 +37,11 @@
 //             -> 'Deleted manager', PhotoUrl/ProfileUrl removed, every
 //             number/boolean kept. Today's engine rows carry no names, so
 //             this is usually "nothing to do".
+//   MANAGER   <root>/Managers/<uid> is kept (the engine still scores the
+//             week rows it owns) but anonymised: TeamName 'Deleted
+//             manager', Deleted: true, Name/ManagerName/DisplayName/
+//             PhotoUrl/ProfileUrl removed, every other key untouched — the
+//             fan app's leaderboard names the row from it.
 //   SCRUBBED  (payment records, kept for accounting) Fantasy Access/<uid>
 //             and Registrations/<id>/Submissions/<uid>: only the
 //             allow-listed keys stay, plus `Deleted: true`.
@@ -72,7 +79,7 @@ const MAX_SCREENSHOTS = 5;
 
 /** Per-uid fantasy nodes deleted whole: `<root>/<name>/<uid>`. */
 const FANTASY_UID_NODES: readonly string[] = [
-  'Managers', 'Squads', 'TransferState', 'Baselines', 'SquadAlerts',
+  'Squads', 'TransferState', 'Baselines', 'SquadAlerts',
   'AccessClaims', 'Watchlists', 'Badges', 'BadgePushClaims', 'Live/Squads',
 ];
 /** Per-gameweek ledgers holding a `<gw>/<uid>` row (anonymised). */
@@ -87,6 +94,10 @@ const FANTASY_UID_LEDGERS: readonly string[] = [
 const NAME_KEYS: readonly string[] = ['Name', 'TeamName', 'ManagerName', 'DisplayName'];
 const PHOTO_KEYS: readonly string[] = ['PhotoUrl', 'ProfileUrl'];
 const ROSTER_UID_KEYS: readonly string[] = ['UID', 'uid'];
+/** Photo leaves a roster row may carry (tournamentplayer.dart reads both). */
+const ROSTER_PHOTO_KEYS: readonly string[] = ['PhotoUrl', 'photoUrl'];
+/** Managers/<uid> keys removed by the anonymiser (TeamName is rewritten). */
+const MANAGER_DROP: readonly string[] = ['Name', 'ManagerName', 'DisplayName', ...PHOTO_KEYS];
 
 /** Fantasy Access/<uid> keys that are the payment record (access.ts). */
 const ACCESS_KEEP: ReadonlySet<string> = new Set([
@@ -104,7 +115,7 @@ const SUBMISSION_KEEP_PREFIXES: readonly string[] = ['Paid', 'Amount', 'Stripe',
 // ── Types ───────────────────────────────────────────────────────────────────
 
 /** The Storage seam (Task 2 wraps `bucket().file(p).delete({ignoreNotFound})`).
- *  A missing object must resolve, not throw. */
+ *  A missing object counts as success: it must resolve, not throw. */
 export interface ObjectStore {
   deleteObject(path: string): Promise<void>;
 }
@@ -159,7 +170,7 @@ interface UidLeafRow {
 }
 
 interface ScrubRow extends FoundNode {
-  kind: 'fantasy-access' | 'registration';
+  kind: 'fantasy-access' | 'registration' | 'fantasy-manager';
 }
 
 /** Everything the planner needs, read by readAccountDeletionSnapshot. Paths
@@ -207,6 +218,8 @@ async function readFantasySeason(
   }
   snap.wholeNodes.push(...await readAll(db, wholePaths));
 
+  const manager = `${root}/Managers/${uid}`;
+  snap.scrubRows.push({ path: manager, value: await db.read(manager), kind: 'fantasy-manager' });
   const access = `${root}/Access/${uid}`;
   snap.scrubRows.push({ path: access, value: await db.read(access), kind: 'fantasy-access' });
 
@@ -229,7 +242,7 @@ function rosterRowsOf(rosterPath: string, roster: unknown, uid: string): UidLeaf
   const out: UidLeafRow[] = [];
   for (const [name, row] of childEntries(roster)) {
     if (isPlainMap(row) && ROSTER_UID_KEYS.some((k) => row[k] === uid)) {
-      out.push({ path: `${rosterPath}/${name}`, row, alsoRemove: [] });
+      out.push({ path: `${rosterPath}/${name}`, row, alsoRemove: [...ROSTER_PHOTO_KEYS] });
     }
   }
   return out;
@@ -370,9 +383,21 @@ function keepsSubmissionKey(key: string): boolean {
   return SUBMISSION_KEEP.has(key) || SUBMISSION_KEEP_PREFIXES.some((p) => key.startsWith(p));
 }
 
-/** The payment record that stays, plus `Deleted: true`; null when the row
- *  is absent or already scrubbed. */
+/** Managers/<uid> anonymised (see the header); null when absent or
+ *  already marked Deleted. */
+export function anonymiseManager(node: unknown): Record<string, unknown> | null {
+  if (!isPlainMap(node) || node['Deleted'] === true) return null;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(node)) if (!MANAGER_DROP.includes(k)) out[k] = v;
+  out['TeamName'] = DELETED_MANAGER;
+  out['Deleted'] = true;
+  return out;
+}
+
+/** The payment record that stays, plus `Deleted: true` (or the anonymised
+ *  manager); null when the row is absent or already done. */
 function scrubbed(row: ScrubRow): Record<string, unknown> | null {
+  if (row.kind === 'fantasy-manager') return anonymiseManager(row.value);
   if (!isPlainMap(row.value)) return null;
   const keep = row.kind === 'fantasy-access'
     ? (k: string) => ACCESS_KEEP.has(k) : keepsSubmissionKey;
@@ -459,18 +484,33 @@ export function planAccountDeletion(
 
 // ── Applier ─────────────────────────────────────────────────────────────────
 
-/** Runs [plan]: every Storage object first (a failure stops the run before
- *  the database is touched, so the retry can still find what it points
- *  at), then the steps in order, stopping at the first failure. The final
- *  DeletedAccounts write therefore only lands when everything before it
- *  did. Errors never carry the uid; the summary is counts only. */
+/** Runs [plan]: the database steps in order (stopping at the first
+ *  failure), then every Storage object (a failure is recorded, never
+ *  thrown), and the closing DeletedAccounts write only when nothing failed —
+ *  so a retry re-runs Storage and then stamps. Errors never carry the uid;
+ *  the summary is counts only. */
 export async function applyAccountDeletion(
   db: FantasyDb, storage: ObjectStore, plan: DeletionPlan,
 ): Promise<DeletionSummary> {
   const summary: DeletionSummary = { deleted: 0, anonymised: 0, storageDeleted: 0, errors: [] };
   const masked = (what: string, err: unknown) =>
     `${what}: ${err instanceof Error ? err.message : String(err)}`.split(plan.uid).join('<uid>');
+  const run = async (step: DeletionStep): Promise<boolean> => {
+    try {
+      await db.write(step.path, step.action === 'delete' ? null : step.after);
+      return true;
+    } catch (err) {
+      summary.errors.push(masked(`${step.action} ${step.path}`, err));
+      return false;
+    }
+  };
 
+  const stamp = plan.steps[plan.steps.length - 1];
+  for (const step of plan.steps.slice(0, -1)) {
+    if (!await run(step)) return summary;
+    if (step.action === 'delete') summary.deleted++;
+    else summary.anonymised++;
+  }
   for (const path of plan.storagePaths) {
     try {
       await storage.deleteObject(path);
@@ -479,18 +519,6 @@ export async function applyAccountDeletion(
       summary.errors.push(masked(`storage ${path}`, err));
     }
   }
-  if (summary.errors.length > 0) return summary;
-
-  const last = plan.steps.length - 1;
-  for (const [i, step] of plan.steps.entries()) {
-    try {
-      await db.write(step.path, step.action === 'delete' ? null : step.after);
-    } catch (err) {
-      summary.errors.push(masked(`${step.action} ${step.path}`, err));
-      return summary;
-    }
-    if (step.action === 'delete') summary.deleted++;
-    else if (i !== last) summary.anonymised++;
-  }
+  if (summary.errors.length === 0 && stamp !== undefined) await run(stamp);
   return summary;
 }

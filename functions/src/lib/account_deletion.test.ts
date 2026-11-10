@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  AccountDeletionPlanning, anonymiseLedgerRow, applyAccountDeletion,
+  AccountDeletionPlanning, anonymiseLedgerRow, anonymiseManager, applyAccountDeletion,
   DELETED_MANAGER, DeletionPlan, ObjectStore, planAccountDeletion,
   readAccountDeletionSnapshot,
 } from './account_deletion';
@@ -59,7 +59,10 @@ function world(): Record<string, any> {
       Futsal: {
         '15': {
           Config: { budgetTenths: 1000 },
-          Managers: { [ALICE]: { TeamName: 'Alice FC' }, uid_bob: { TeamName: 'Bob FC' } },
+          Managers: {
+            [ALICE]: { TeamName: 'Alice FC', NameFlagged: false, NamedAt: 5, PhotoUrl: 'https://img.example/alice.jpg', DisplayName: 'Alice Able' },
+            uid_bob: { TeamName: 'Bob FC' },
+          },
           Squads: { [ALICE]: squad('Alice A'), uid_bob: squad('Bob B') },
           TransferState: { [ALICE]: { SavedGw: 2 }, uid_bob: { SavedGw: 2 } },
           Baselines: { [ALICE]: { ForGw: 2, RealizedTenths: 0 } },
@@ -126,14 +129,17 @@ function world(): Record<string, any> {
     Futsal: {
       '15': {
         'Line Ups': {
-          'Team A': { 'Alice A': { UID: ALICE, Goals: 3, number: '7' }, 'Bob B': { UID: 'uid_bob', Goals: 1 } },
+          'Team A': {
+            'Alice A': { UID: ALICE, Goals: 3, number: '7', PhotoUrl: 'https://img.example/alice.jpg' },
+            'Bob B': { UID: 'uid_bob', Goals: 1, PhotoUrl: 'https://img.example/bob.jpg' },
+          },
         },
       },
       'Futsal Season': 15,
     },
     'AFC San Jose': { Seasons: { '2': { Roster: { 'Alice A': { UID: ALICE, Goals: 1 }, 'Dan D': { UID: 'uid_dan' } } } } },
     Tournaments: {
-      t_spring: { Rosters: { team1: { 'Alice A': { uid: ALICE, Goals: 2 }, 'Cara C': { uid: 'uid_cara' } } } },
+      t_spring: { Rosters: { team1: { 'Alice A': { uid: ALICE, Goals: 2, photoUrl: 'https://img.example/alice.jpg' }, 'Cara C': { uid: 'uid_cara' } } } },
     },
     Registrations: {
       'Futsal-16': {
@@ -216,12 +222,12 @@ describe('account deletion — every D1 row', () => {
     const db = new FakeDb(world());
     await deleteAll(db);
     for (const node of [
-      'Managers', 'Squads', 'TransferState', 'Baselines', 'SquadAlerts', 'AccessClaims',
+      'Squads', 'TransferState', 'Baselines', 'SquadAlerts', 'AccessClaims',
       'Watchlists', 'Badges', 'BadgePushClaims', 'Live/Squads', 'PreviewPushed/2',
     ]) {
       expect(at(db, `Fantasy/Futsal/15/${node}/${ALICE}`), node).toBeNull();
     }
-    expect(at(db, `Fantasy/Futsal/16/Managers/${ALICE}`)).toBeNull();
+    expect(at(db, `Fantasy/Futsal/16/Managers/${ALICE}`)).toEqual({ TeamName: DELETED_MANAGER, Deleted: true });
     expect(at(db, `Fantasy/Futsal/16/Squads/${ALICE}`)).toBeNull();
     // Nobody else's rows move.
     expect(at(db, 'Fantasy/Futsal/15/Managers/uid_bob')).toEqual({ TeamName: 'Bob FC' });
@@ -265,6 +271,12 @@ describe('account deletion — every D1 row', () => {
       ['uid_bob', 1, 90], ['uid_cara', 2, 70], [ALICE, 3, 40], ['uid_dan', 4, 10],
     ]);
     expect(overall[ALICE]).toEqual({ points: 40, rank: 3, movement: -1 });
+    // The row's name comes from Managers/<uid> (realName ?? teamName): kept
+    // and anonymised, never deleted, so the row reads "Deleted manager".
+    expect(at(db, `Fantasy/Futsal/15/Managers/${ALICE}`)).toEqual({
+      TeamName: DELETED_MANAGER, NameFlagged: false, NamedAt: 5, Deleted: true,
+    });
+    expect(at(db, `PublicProfiles/${ALICE}`)).toBeNull();
     // A row that did carry names: every name -> Deleted manager, photo gone,
     // every number kept.
     expect(at(db, `Fantasy/Futsal/16/Leaderboards/Overall/${ALICE}`)).toEqual({
@@ -297,11 +309,12 @@ describe('account deletion — every D1 row', () => {
     expect(at(db, 'Fantasy/Futsal/15/Players/Bob B/uid')).toBe('uid_bob');
   });
 
-  it('removes only the UID leaf from league, AFC and tournament roster rows', async () => {
+  it('removes only the UID leaf (and its photo url) from league, AFC and tournament roster rows', async () => {
     const db = new FakeDb(world());
     await deleteAll(db);
     expect(at(db, 'Futsal/15/Line Ups/Team A/Alice A')).toEqual({ Goals: 3, number: '7' });
-    expect(at(db, 'Futsal/15/Line Ups/Team A/Bob B')).toEqual({ UID: 'uid_bob', Goals: 1 });
+    expect(at(db, 'Futsal/15/Line Ups/Team A/Bob B'))
+      .toEqual({ UID: 'uid_bob', Goals: 1, PhotoUrl: 'https://img.example/bob.jpg' });
     expect(at(db, 'AFC San Jose/Seasons/2/Roster/Alice A')).toEqual({ Goals: 1 });
     expect(at(db, 'AFC San Jose/Seasons/2/Roster/Dan D')).toEqual({ UID: 'uid_dan' });
     expect(at(db, 'Tournaments/t_spring/Rosters/team1/Alice A')).toEqual({ Goals: 2 });
@@ -462,6 +475,13 @@ describe('account deletion — Review Focus 3: the function dies halfway', () =>
     expect(again.steps.map((s) => s.path)).toEqual([`DeletedAccounts/${ALICE}`]);
   });
 
+  it('a Managers node already marked Deleted is not planned again', () => {
+    expect(anonymiseManager({ TeamName: DELETED_MANAGER, Deleted: true, NamedAt: 5 })).toBeNull();
+    expect(anonymiseManager(null)).toBeNull();
+    expect(anonymiseManager({ TeamName: 'X', Name: 'Y', ProfileUrl: 'z', NameFlagged: true }))
+      .toEqual({ TeamName: DELETED_MANAGER, NameFlagged: true, Deleted: true });
+  });
+
   it('a row already reading Deleted manager is not planned again', () => {
     expect(anonymiseLedgerRow({ points: 3, rank: 2, Name: DELETED_MANAGER })).toBeNull();
     expect(anonymiseLedgerRow({ points: 3, rank: 2 })).toBeNull();
@@ -472,41 +492,44 @@ describe('account deletion — Review Focus 3: the function dies halfway', () =>
 });
 
 describe('account deletion — the applier', () => {
-  it('a failed Storage delete stops before any database step, reported without the uid', async () => {
+  it('a failed Storage delete is recorded without the uid, holds back the stamp, and the retry re-runs Storage then stamps', async () => {
     const db = new FakeDb(world());
-    const before = db.snapshot();
     const storage = new FakeObjectStore();
-    storage.failing.add('support/7/img_0.jpg');
+    storage.failing.add(`Users/${ALICE}/profileimage.jpg`);
     const plan = await planOk(db);
     const summary = await applyAccountDeletion(db, storage, plan);
-    expect(summary.errors.length).toBeGreaterThan(0);
-    for (const e of summary.errors) expect(e).not.toContain(ALICE);
+    expect(summary.errors).toHaveLength(1);
+    expect(summary.errors[0]).not.toContain(ALICE);
     expect(summary.storageDeleted).toBe(plan.storagePaths.length - 1);
-    expect(summary.deleted).toBe(0);
-    expect(summary.anonymised).toBe(0);
-    // Nothing in the database moved, so the ticket (and its screenshots)
-    // can still be found by the retry.
-    expect(db.writes).toEqual([]);
-    expect(db.snapshot()).toBe(before);
+    const writes = plan.steps.filter((s) => s.action === 'write').length;
+    expect(summary.deleted).toBe(plan.steps.length - writes);
+    expect(summary.anonymised).toBe(writes - 1);
+    expect(at(db, `Users/${ALICE}`)).toBeNull();
+    expect(at(db, `DeletedAccounts/${ALICE}`)).toBeNull();
 
     const retry = await planOk(db);
-    expect(retry).toEqual(plan);
-    const ok = await applyAccountDeletion(db, new FakeObjectStore(), retry);
-    expect(ok.errors).toEqual([]);
+    expect(retry.steps.map((s) => s.path)).toEqual([`DeletedAccounts/${ALICE}`]);
+    expect(retry.storagePaths).toEqual([`Users/${ALICE}/profileimage.jpg`]);
+    const again = new FakeObjectStore();
+    const ok = await applyAccountDeletion(db, again, retry);
+    expect(ok).toEqual({ deleted: 0, anonymised: 0, storageDeleted: 1, errors: [] });
+    expect(again.deleted).toEqual([`Users/${ALICE}/profileimage.jpg`]);
     expect(at(db, `DeletedAccounts/${ALICE}`)).toEqual({ At: NOW, Provider: 'password' });
   });
 
-  it('a failed database step stops the run and holds back the DeletedAccounts stamp', async () => {
+  it('a failed database step stops the run: no Storage, no stamp', async () => {
     const plan = await planOk(new FakeDb(world()));
     const db = new DyingDb(world(), 3);
-    const summary = await applyAccountDeletion(db, new FakeObjectStore(), plan);
+    const storage = new FakeObjectStore();
+    const summary = await applyAccountDeletion(db, storage, plan);
     expect(summary.errors).toHaveLength(1);
     expect(summary.errors[0]).not.toContain(ALICE);
     expect(summary.deleted + summary.anonymised).toBe(3);
+    expect(storage.deleted).toEqual([]);
     expect(at(db, `DeletedAccounts/${ALICE}`)).toBeNull();
   });
 
-  it('deletes Storage objects before any database step', async () => {
+  it('runs the database steps, then Storage, then the stamp', async () => {
     const db = new FakeDb(world());
     const order: string[] = [];
     const storage: ObjectStore = { deleteObject: async (p) => { order.push(`storage:${p}`); } };
@@ -514,8 +537,12 @@ describe('account deletion — the applier', () => {
     db.write = async (p, v) => { order.push(`db:${p}`); await origWrite(p, v); };
     const plan = await planOk(db);
     await applyAccountDeletion(db, storage, plan);
-    const lastStorage = order.map((o) => o.startsWith('storage:')).lastIndexOf(true);
-    const firstDb = order.findIndex((o) => o.startsWith('db:'));
-    expect(lastStorage).toBeLessThan(firstDb);
+    const kinds = order.map((o) => o.split(':')[0]);
+    const firstStorage = kinds.indexOf('storage');
+    const lastStorage = kinds.lastIndexOf('storage');
+    expect(kinds.slice(0, firstStorage).every((k) => k === 'db')).toBe(true);
+    expect(firstStorage).toBe(plan.steps.length - 1);
+    expect(lastStorage - firstStorage + 1).toBe(plan.storagePaths.length);
+    expect(order[order.length - 1]).toBe(`db:DeletedAccounts/${ALICE}`);
   });
 });
