@@ -115,7 +115,7 @@ It reads the live data, prints what it would do, and writes nothing. Read the pr
 - `refusals: none`.
 - `clusters: 11 in the map - 11 planned, 0 refused, 0 with nothing to do`. In the tool's words a "cluster" is one person.
 - `writes: 115 (...)`. On 2026-11-08 this was 20 seasons-played entries, 2 profile photo links, 24 roster relinks, 17 sign-up copies, 17 sign-up removes (the sign-up records moving), 33 merge stamps (11 old accounts, 3 stamps each), 1 first-name fix and 1 information field (Parlevino's Age, copied to his kept account).
-- A **plan code** (the tool calls it the plan digest): `plan digest (MergedAt time excluded): ...`. The latest dry run (2026-11-08, read-only) printed **`bd98b0592255a300`** for these 11 people (0 refused, 115 changes). The code changes if the data or the list changes, so always use the one your latest dry run prints. A code from an older run (for example from when the list had 10 people) is refused. Since 2026-11-10 the merge also writes a "combined from" link on each kept account (one per old account, so that deleting the kept account later also deletes the old ones), so the code printed by the next dry run will differ from `bd98b0592255a300` and the change count goes up by one per old account: use the new code.
+- A **plan code** (the tool calls it the plan digest): `plan digest (MergedAt time excluded): ...`. The latest dry run (2026-11-10, read-only) printed **`48135c9b50e5e401`** for these 11 people (0 refused, 126 changes, including one "combined from" link per old account so that deleting the kept account later also deletes the old ones). The code changes if the data or the list changes, so always use the one your latest dry run prints. A code from an older run (for example `bd98b0592255a300` from before the combined-from link, or from when the list had 10 people) is refused.
 - The last line starts with "To apply exactly this plan:" and then gives the apply command, already filled in with the right plan code. In step 3 you copy only the `npm run ...` part after the colon.
 
 If the dry run shows a refusal, a different count than you expect, or an error: stop and send the printout to Claude. Don't go on.
@@ -129,7 +129,7 @@ Only after you have read the dry run and said OK. It is better if the app update
 From the last line of your latest dry run, copy only the `npm run ...` part (not the words "To apply exactly this plan:"). With the plan code of the 2026-11-08 dry run it is:
 
 ```bash
-npm run merge:accounts -- --apply --expect-plan bd98b0592255a300
+npm run merge:accounts -- --apply --expect-plan 48135c9b50e5e401
 ```
 
 If your dry run printed a different code, use that one. A wrong or stale code is simply refused and nothing changes.
