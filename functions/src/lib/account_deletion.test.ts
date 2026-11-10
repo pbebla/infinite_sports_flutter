@@ -385,9 +385,13 @@ describe('account deletion — every D1 row', () => {
     expect(db.writes[db.writes.length - 1]).toBe(`DeletedAccounts/${ALICE}`);
     expect(summary.errors).toEqual([]);
     const writes = plan.steps.filter((s) => s.action === 'write').length;
+    const handoffs = plan.steps.filter((s) => s.handoff === true).length;
+    expect(handoffs).toBe(1); // ml_owned -> a new Owner
     expect(summary).toEqual({
       deleted: plan.steps.length - writes,
-      anonymised: writes - 1,
+      anonymised: writes - 1 - handoffs,
+      handoffs,
+      stamped: true,
       storageDeleted: plan.storagePaths.length,
       errors: [],
     });
@@ -505,7 +509,8 @@ describe('account deletion — the applier', () => {
     expect(summary.storageDeleted).toBe(plan.storagePaths.length - 1);
     const writes = plan.steps.filter((s) => s.action === 'write').length;
     expect(summary.deleted).toBe(plan.steps.length - writes);
-    expect(summary.anonymised).toBe(writes - 1);
+    expect(summary.anonymised + summary.handoffs).toBe(writes - 1);
+    expect(summary.stamped).toBe(true);
     // Every database step landed: the ticket is gone, the stamp is written
     // and remembers the object it could not delete.
     expect(at(db, 'Support/Tickets/7')).toBeNull();
@@ -521,7 +526,9 @@ describe('account deletion — the applier', () => {
     expect(retry.storagePaths).toEqual([`Users/${ALICE}/profileimage.jpg`, 'support/7/img_2.jpg']);
     const again = new FakeObjectStore();
     const ok = await applyAccountDeletion(db, again, retry);
-    expect(ok).toEqual({ deleted: 0, anonymised: 0, storageDeleted: 2, errors: [] });
+    expect(ok).toEqual({
+      deleted: 0, anonymised: 0, handoffs: 0, stamped: true, storageDeleted: 2, errors: [],
+    });
     expect(again.deleted).toContain('support/7/img_2.jpg');
     expect(at(db, `DeletedAccounts/${ALICE}`)).toEqual({ At: NOW, Provider: 'password' });
     expect((await planOk(db)).storagePaths).toEqual([`Users/${ALICE}/profileimage.jpg`]);
@@ -542,7 +549,8 @@ describe('account deletion — the applier', () => {
     const summary = await applyAccountDeletion(db, storage, plan);
     expect(summary.errors).toHaveLength(1);
     expect(summary.errors[0]).not.toContain(ALICE);
-    expect(summary.deleted + summary.anonymised).toBe(3);
+    expect(summary.deleted + summary.anonymised + summary.handoffs).toBe(3);
+    expect(summary.stamped).toBe(false);
     expect(storage.deleted).toEqual([]);
     expect(at(db, `DeletedAccounts/${ALICE}`)).toBeNull();
   });
@@ -562,5 +570,35 @@ describe('account deletion — the applier', () => {
     expect(firstStorage).toBe(plan.steps.length - 1);
     expect(lastStorage - firstStorage + 1).toBe(plan.storagePaths.length);
     expect(order[order.length - 1]).toBe(`db:DeletedAccounts/${ALICE}`);
+  });
+});
+
+describe('account deletion — stamp By/Reason and the payment allow-list', () => {
+  it('a retry keeps the first At and an existing By/Reason, and adds them when missing', async () => {
+    const seed = world();
+    seed.DeletedAccounts = { [ALICE]: { At: 5, Provider: 'password', By: 'uid_admin', Reason: 'emailed request' } };
+    const db = new FakeDb(seed);
+    const snap = await readAccountDeletionSnapshot(db, ALICE);
+    const plan = planAccountDeletion(snap, ALICE, { nowMs: NOW, provider: 'google.com', by: 'uid_other', reason: 'later' }) as DeletionPlan;
+    const stamp = plan.steps[plan.steps.length - 1].after;
+    expect(stamp).toEqual({ At: 5, Provider: 'google.com', By: 'uid_admin', Reason: 'emailed request' });
+
+    const fresh = planAccountDeletion(await readAccountDeletionSnapshot(new FakeDb(world()), ALICE), ALICE,
+      { nowMs: NOW, provider: 'password', by: 'uid_admin', reason: 'why' }) as DeletionPlan;
+    expect(fresh.steps[fresh.steps.length - 1].after)
+      .toEqual({ At: NOW, Provider: 'password', By: 'uid_admin', Reason: 'why' });
+  });
+
+  it('a registration scrub keeps only the allow-list: an unknown Paid*/Refund* key is dropped', async () => {
+    const seed = world();
+    seed.Registrations['Futsal-16'].Submissions[ALICE] = {
+      Paid: true, PaidVia: 'card', PaidAmount: 80, RefundedAt: 9, RefundAmountCents: 100,
+      PaidNote: 'call 555-0100', RefundMemo: 'text me', Phone: '555-0100',
+    };
+    const db = new FakeDb(seed);
+    await deleteAll(db);
+    expect(at(db, `Registrations/Futsal-16/Submissions/${ALICE}`)).toEqual({
+      Paid: true, PaidVia: 'card', PaidAmount: 80, RefundedAt: 9, RefundAmountCents: 100, Deleted: true,
+    });
   });
 });

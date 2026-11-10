@@ -442,3 +442,7 @@ export {
   createFantasyCheckoutSession, onFantasyAccessClaimCreated, onFantasyAccessStatusWritten,
   onRegistrationPaidGrantFantasy, sendFantasyAccessTest,
 } from './fantasy_access';
+
+// Account deletion (plan 2026-11-09-account-deletion): a fan deletes their
+// own account (fresh sign-in required); an admin deletes on request.
+export { adminDeleteAccount, deleteAccount } from './account_deletion';

@@ -101,10 +101,11 @@
 // the reverse order.
 
 import { isDeepStrictEqual } from 'util';
+import { LEAGUE_SPORTS } from '../src/lib/account_deletion';
 import { MASK_BULLET } from '../src/lib/mask_email';
 
 /** The league sports whose rosters live under `<Sport>/<Season>/Line Ups`. */
-export const LEAGUE_SPORTS: readonly string[] = ['Futsal', 'Basketball', 'Flag Football'];
+export { LEAGUE_SPORTS };
 
 export interface MergeNameRow {
   sport: string;

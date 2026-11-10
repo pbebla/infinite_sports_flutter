@@ -48,11 +48,15 @@
 //   KEPT      Sign Ups/**/<uid>, TransferCosts/<gw>/<uid>,
 //             LiveBase/<gw>/Managers/<uid>, ReferredUsers/<uid> (the
 //             referral guard a later refund void needs).
-//   WRITTEN   DeletedAccounts/<uid> = {At, Provider, PendingStorage?} —
-//             last, whenever every database step landed. PendingStorage
+//   WRITTEN   DeletedAccounts/<uid> = {At, Provider, By?, Reason?,
+//             PendingStorage?} — last, whenever every database step landed. PendingStorage
 //             lists the Storage objects whose delete failed (opaque paths:
 //             uid / ticket number only); the next run plans them again and
-//             its stamp drops the key once they are gone.
+//             its stamp drops the key once they are gone. A retry keeps the
+//             first At and any By/Reason (an admin's note survives).
+//   NOTE      Baselines/<uid> and Live/Squads/<uid> regrow after the next
+//             lock while the account still exists; a later rerun deletes
+//             them again.
 //
 // Order is what makes a rerun safe (Review Focus 3): everything found
 // THROUGH another node is removed before that node (tournament rows before
@@ -70,8 +74,8 @@ import {
 export const DELETED_MANAGER = 'Deleted manager';
 
 /** The league sports whose rosters live under `<Sport>/<Season>/Line Ups`
- *  (tools/merge_accounts_logic.ts LEAGUE_SPORTS — src cannot import tools). */
-const LEAGUE_SPORTS: readonly string[] = ['Futsal', 'Basketball', 'Flag Football'];
+ *  (tools/merge_accounts_logic.ts imports this one copy). */
+export const LEAGUE_SPORTS: readonly string[] = ['Futsal', 'Basketball', 'Flag Football'];
 const AFC_SEASONS = 'AFC San Jose/Seasons';
 const SEASON_RE = /^\d{1,4}$/;
 const UID_RE = /^[A-Za-z0-9_-]{1,128}$/;
@@ -112,13 +116,16 @@ const ACCESS_KEEP: ReadonlySet<string> = new Set([
   'Status', 'Via', 'AmountCents', 'PaidAt', 'By', 'StripePaymentIntent',
   'RefundedAt', 'RevokedBy', 'Deleted',
 ]);
-/** Registration submission keys kept: the payment record, the fee it was
- *  computed from, the display name and the team it paid into. */
+/** Registration submission keys kept: the payment record (Paid* are what
+ *  stripeWebhook / the Manager write: PaidVia, PaidAmount), the fee it was
+ *  computed from, the display name and the team it paid into. An explicit
+ *  allow-list — everything else (answers, phone, free text) goes. */
 const SUBMISSION_KEEP: ReadonlySet<string> = new Set([
-  'Paid', 'DisplayName', 'Status', 'Method', 'Waived', 'TeamId', 'TeamName',
+  'Paid', 'PaidVia', 'PaidAmount', 'DisplayName', 'Status', 'TeamId', 'TeamName',
+  'PaidAt', 'AmountCents', 'AmountDollars', 'StripePaymentIntent',
+  'StripeCheckoutSession', 'RefundedAt', 'RefundAmountCents', 'Method', 'Waived',
   'AdjustedFee', 'EligibleFee', 'DiscountPct', 'DiscountSource', 'Deleted',
 ]);
-const SUBMISSION_KEEP_PREFIXES: readonly string[] = ['Paid', 'Amount', 'Stripe', 'Refund'];
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -132,6 +139,8 @@ export interface DeletionStep {
   path: string;
   action: 'delete' | 'write';
   after?: unknown;
+  /** A hand-over write (mini-league Owner), counted as `handoffs`. */
+  handoff?: boolean;
 }
 
 export interface DeletionPlan {
@@ -155,11 +164,19 @@ export interface DeletionStamp {
   nowMs: number;
   /** The sign-in provider id ('password', 'google.com', 'apple.com', ...). */
   provider: string;
+  /** The admin who deleted the account (adminDeleteAccount only). */
+  by?: string;
+  /** The admin's note (adminDeleteAccount only), already trimmed. */
+  reason?: string;
 }
 
 export interface DeletionSummary {
   deleted: number;
   anonymised: number;
+  /** Ownership hand-overs (mini-league Owner), not anonymisations. */
+  handoffs: number;
+  /** True when the closing DeletedAccounts stamp landed (every DB step done). */
+  stamped: boolean;
   storageDeleted: number;
   errors: string[];
 }
@@ -390,10 +407,6 @@ export function anonymiseLedgerRow(row: unknown): Record<string, unknown> | null
   return changed ? out : null;
 }
 
-function keepsSubmissionKey(key: string): boolean {
-  return SUBMISSION_KEEP.has(key) || SUBMISSION_KEEP_PREFIXES.some((p) => key.startsWith(p));
-}
-
 /** Managers/<uid> anonymised (see the header); null when absent or
  *  already marked Deleted. */
 export function anonymiseManager(node: unknown): Record<string, unknown> | null {
@@ -411,7 +424,7 @@ function scrubbed(row: ScrubRow): Record<string, unknown> | null {
   if (row.kind === 'fantasy-manager') return anonymiseManager(row.value);
   if (!isPlainMap(row.value)) return null;
   const keep = row.kind === 'fantasy-access'
-    ? (k: string) => ACCESS_KEEP.has(k) : keepsSubmissionKey;
+    ? (k: string) => ACCESS_KEEP.has(k) : (k: string) => SUBMISSION_KEEP.has(k);
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(row.value)) if (keep(k)) out[k] = v;
   out['Deleted'] = true;
@@ -438,7 +451,7 @@ function miniLeagueSteps(league: FoundNode, uid: string): DeletionStep[] {
   if (owns && heir === null) return [{ path: league.path, action: 'delete' }];
   const steps: DeletionStep[] = [];
   if (members[uid] != null) steps.push({ path: `${league.path}/Members/${uid}`, action: 'delete' });
-  if (owns && heir !== null) steps.push({ path: `${league.path}/Owner`, action: 'write', after: heir });
+  if (owns && heir !== null) steps.push({ path: `${league.path}/Owner`, action: 'write', after: heir, handoff: true });
   return steps;
 }
 
@@ -482,16 +495,25 @@ export function planAccountDeletion(
   for (const num of owned) del(`Support/Tickets/${num}`);
   for (const node of snapshot.wholeNodes) if (node.value != null) del(node.path);
 
-  steps.push({
-    path: `DeletedAccounts/${uid}`, action: 'write',
-    after: { At: stamp.nowMs, Provider: stamp.provider },
-  });
+  const prev = snapshot.previousStamp;
+  const prevMap = isPlainMap(prev) ? prev : {};
+  const first = <T>(old: unknown, now: T | undefined, ok: (v: unknown) => boolean) =>
+    (ok(old) ? old : now) as T | undefined;
+  const isStr = (v: unknown) => typeof v === 'string' && v.length > 0;
+  const closing: Record<string, unknown> = {
+    At: first(prevMap['At'], stamp.nowMs, (v) => typeof v === 'number'),
+    Provider: stamp.provider,
+  };
+  const by = first(prevMap['By'], stamp.by, isStr);
+  const reason = first(prevMap['Reason'], stamp.reason, isStr);
+  if (by !== undefined) closing['By'] = by;
+  if (reason !== undefined) closing['Reason'] = reason;
+  steps.push({ path: `DeletedAccounts/${uid}`, action: 'write', after: closing });
   const storagePaths = [`Users/${uid}/profileimage.jpg`];
   for (const num of owned) {
     for (let i = 0; i < MAX_SCREENSHOTS; i++) storagePaths.push(`support/${num}/img_${i}.jpg`);
   }
-  const prev = snapshot.previousStamp;
-  const pending = isPlainMap(prev) ? childEntries(prev['PendingStorage']).map(([, p]) => p) : [];
+  const pending = childEntries(prevMap['PendingStorage']).map(([, p]) => p);
   for (const p of pending) {
     if (typeof p === 'string' && PENDING_OBJECT_RE.test(p) && !storagePaths.includes(p)) {
       storagePaths.push(p);
@@ -511,7 +533,9 @@ export function planAccountDeletion(
 export async function applyAccountDeletion(
   db: FantasyDb, storage: ObjectStore, plan: DeletionPlan,
 ): Promise<DeletionSummary> {
-  const summary: DeletionSummary = { deleted: 0, anonymised: 0, storageDeleted: 0, errors: [] };
+  const summary: DeletionSummary = {
+    deleted: 0, anonymised: 0, handoffs: 0, stamped: false, storageDeleted: 0, errors: [],
+  };
   const masked = (what: string, err: unknown) =>
     `${what}: ${err instanceof Error ? err.message : String(err)}`.split(plan.uid).join('<uid>');
   const run = async (step: DeletionStep): Promise<boolean> => {
@@ -528,6 +552,7 @@ export async function applyAccountDeletion(
   for (const step of plan.steps.slice(0, -1)) {
     if (!await run(step)) return summary;
     if (step.action === 'delete') summary.deleted++;
+    else if (step.handoff === true) summary.handoffs++;
     else summary.anonymised++;
   }
   const failed: string[] = [];
@@ -543,7 +568,7 @@ export async function applyAccountDeletion(
   if (stamp !== undefined) {
     const after = isPlainMap(stamp.after) ? { ...stamp.after } : {};
     if (failed.length > 0) after['PendingStorage'] = failed;
-    await run({ ...stamp, after });
+    summary.stamped = await run({ ...stamp, after });
   }
   return summary;
 }
