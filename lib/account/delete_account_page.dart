@@ -110,6 +110,10 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
       await widget.onDeleted(context);
     } on ReauthCancelled {
       if (mounted) setState(() => _busy = false);
+    } on ReauthFailed catch (e) {
+      _fail(e.reason == ReauthFailureReason.googleAccountMismatch
+          ? 'Please choose the same Google account you signed in with.'
+          : _genericError);
     } on DeleteAccountError catch (e) {
       _fail(_messageFor(e));
     } catch (e) {

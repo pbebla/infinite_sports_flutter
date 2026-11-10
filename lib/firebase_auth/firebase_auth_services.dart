@@ -29,8 +29,24 @@ class ReauthCancelled implements Exception {
 /// different Google account was picked, network, too many attempts...).
 /// Carries no message for the screen: the page shows its own plain wording.
 class ReauthFailed implements Exception {
-  const ReauthFailed();
+  final ReauthFailureReason reason;
+
+  const ReauthFailed({this.reason = ReauthFailureReason.other});
 }
+
+enum ReauthFailureReason {
+  /// The person picked a different Google account than the signed-in one
+  /// (Firebase `user-mismatch`).
+  googleAccountMismatch,
+  other,
+}
+
+/// The Apple credential for re-signing in before deletion: the identity token
+/// ONLY. The authorization code is single-use and is kept for
+/// `revokeTokenWithAuthorizationCode`, which runs right after the re-auth
+/// (passing it here as the access token could spend it first).
+OAuthCredential appleReauthCredential(String? identityToken) =>
+    OAuthProvider('apple.com').credential(idToken: identityToken);
 
 class FirebaseAuthService {
 
@@ -207,10 +223,8 @@ class FirebaseAuthService {
       }
       rethrow;
     }
-    await user.reauthenticateWithCredential(OAuthProvider('apple.com')
-        .credential(
-            idToken: apple.identityToken,
-            accessToken: apple.authorizationCode));
+    await user
+        .reauthenticateWithCredential(appleReauthCredential(apple.identityToken));
     if (Platform.isIOS) {
       try {
         await FirebaseAuth.instance
@@ -236,10 +250,23 @@ class FirebaseAuthService {
     }
     if (account == null) throw const ReauthCancelled();
     final googleAuth = await account.authentication;
-    await user.reauthenticateWithCredential(GoogleAuthProvider.credential(
-      idToken: googleAuth.idToken,
-      accessToken: googleAuth.accessToken,
-    ));
+    try {
+      await user.reauthenticateWithCredential(GoogleAuthProvider.credential(
+        idToken: googleAuth.idToken,
+        accessToken: googleAuth.accessToken,
+      ));
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'user-mismatch') {
+        // Sign the picker out so the next try offers the account list again
+        // instead of silently reusing the wrong account.
+        try {
+          await GoogleSignIn(serverClientId: _googleServerClientId).signOut();
+        } catch (_) {}
+        throw const ReauthFailed(
+            reason: ReauthFailureReason.googleAccountMismatch);
+      }
+      rethrow;
+    }
   }
 
   Future<void> _reauthWithPassword(

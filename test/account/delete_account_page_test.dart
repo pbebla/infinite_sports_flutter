@@ -214,6 +214,46 @@ void main() {
     expect(find.textContaining('uid-abc123'), findsNothing);
   });
 
+  testWidgets('a wrong Google account shows the same-account message, idle',
+      (tester) async {
+    var deleteCalls = 0;
+    await _pump(
+      tester,
+      reauth: () async => throw const ReauthFailed(
+          reason: ReauthFailureReason.googleAccountMismatch),
+      callDelete: () async => deleteCalls++,
+    );
+    await _typeAndTap(tester);
+    await tester.pumpAndSettle();
+    expect(deleteCalls, 0);
+    expect(
+      find.text('Please choose the same Google account you signed in with.'),
+      findsOneWidget,
+    );
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(_enabled(tester), isTrue);
+  });
+
+  testWidgets('any other ReauthFailed shows the generic message',
+      (tester) async {
+    await _pump(
+      tester,
+      reauth: () async => throw const ReauthFailed(),
+      callDelete: () async {},
+    );
+    await _typeAndTap(tester);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Something went wrong'), findsOneWidget);
+    expect(_enabled(tester), isTrue);
+  });
+
+  test('Apple re-auth credential carries the identity token only', () {
+    final credential = appleReauthCredential('id-token-1');
+    expect(credential.providerId, 'apple.com');
+    expect(credential.idToken, 'id-token-1');
+    expect(credential.accessToken, isNull);
+  });
+
   testWidgets('busy: spinner shows and a second tap does nothing',
       (tester) async {
     final gate = Completer<void>();
