@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AccountDeletionPlanning, anonymiseLedgerRow, anonymiseManager, applyAccountDeletion,
   DELETED_MANAGER, DeletionPlan, ObjectStore, planAccountDeletion,
-  readAccountDeletionSnapshot,
+  readAccountDeletionSnapshot, settlePendingAuth,
 } from './account_deletion';
 import { FakeDb } from './fantasy/test_support';
 
@@ -155,8 +155,33 @@ function world(): Record<string, any> {
           uid_bob: { Paid: false, DisplayName: 'Bob', Phone: '555-0199' },
         },
       },
+      // M11: an UNPAID submission - nothing was paid, so no name is kept.
+      'Futsal-17': {
+        Submissions: {
+          [ALICE]: {
+            Paid: false, AmountCents: 8000, EligibleFee: 80, DisplayName: 'Alice Able',
+            Status: 'pending', Phone: '555-0100', Answers: { Shirt: 'M' },
+          },
+        },
+      },
     },
-    'Sign Ups': { Futsal: { '16': { Paid: { [ALICE]: 'Alice Able', uid_bob: 'Bob' } } } },
+    'Sign Ups': {
+      Futsal: {
+        '16': {
+          Paid: { [ALICE]: 'Alice Able', uid_bob: 'Bob' },
+          // I3: `<displayName>: "<uid>:<text>"`; another uid that merely
+          // STARTS with alice's uid must stay.
+          Comments: {
+            'Alice Able': `${ALICE}:bring a ball`,
+            Bob: 'uid_bob:see you there',
+            'Alice Two': `${ALICE}2:not hers`,
+          },
+        },
+        '17': { NotPaid: { [ALICE]: 'Alice Able', uid_bob: 'Bob' } },
+      },
+      'Spring Cup': { t_spring: { NotPaid: { [ALICE]: 'Alice Able' }, Comments: { 'Alice Able': `${ALICE}:hi` } } },
+      Rules: 'Be kind.',
+    },
     Support: {
       Counter: 9,
       Tickets: {
@@ -423,6 +448,7 @@ describe('account deletion — bounded snapshot reads', () => {
       'read:Fantasy/Futsal/15/PublishedPicks', 'read:Fantasy/Futsal/15/Leaderboards',
       'read:Fantasy/Futsal/15/Squads', 'read:EventsV2', 'read:Events', 'read:Registrations',
       'read:Referrals', 'read:Insiders', 'read:Users', 'read:Tournaments',
+      'read:Sign Ups', 'read:Sign Ups/Futsal', 'read:Sign Ups/Futsal/16', 'read:Sign Ups/Futsal/17/NotPaid',
     ];
     for (const f of forbidden) expect(db.reads, f).not.toContain(f);
     expect(db.reads).toContain('keys:Fantasy');
@@ -601,5 +627,184 @@ describe('account deletion — stamp By/Reason and the payment allow-list', () =
     expect(at(db, `Registrations/Futsal-16/Submissions/${ALICE}`)).toEqual({
       Paid: true, PaidVia: 'card', PaidAmount: 80, RefundedAt: 9, RefundAmountCents: 100, SubmittedAt: 1234, Deleted: true,
     });
+  });
+});
+
+describe('I3 + M11: sign-up comments, unpaid sign-ups and unpaid registrations', () => {
+  it("deletes the person's sign-up comments in every listed season and leaves everyone else's", async () => {
+    const db = new FakeDb(world());
+    await deleteAll(db);
+    expect(at(db, 'Sign Ups/Futsal/16/Comments')).toEqual({
+      Bob: 'uid_bob:see you there', 'Alice Two': `${ALICE}2:not hers`,
+    });
+    expect(at(db, 'Sign Ups/Spring Cup/t_spring/Comments/Alice Able')).toBeNull();
+    expect(at(db, 'Sign Ups/Rules')).toBe('Be kind.');
+  });
+
+  it('deletes an unpaid sign-up (NotPaid) and keeps a paid one', async () => {
+    const db = new FakeDb(world());
+    await deleteAll(db);
+    expect(at(db, `Sign Ups/Futsal/17/NotPaid/${ALICE}`)).toBeNull();
+    expect(at(db, 'Sign Ups/Futsal/17/NotPaid/uid_bob')).toBe('Bob');
+    expect(at(db, `Sign Ups/Spring Cup/t_spring/NotPaid/${ALICE}`)).toBeNull();
+    expect(at(db, `Sign Ups/Futsal/16/Paid/${ALICE}`)).toBe('Alice Able');
+  });
+
+  it("an unpaid registration keeps its payment keys but not the person's name; a paid one is unchanged", async () => {
+    const db = new FakeDb(world());
+    await deleteAll(db);
+    expect(at(db, `Registrations/Futsal-17/Submissions/${ALICE}`)).toEqual({
+      Paid: false, AmountCents: 8000, EligibleFee: 80, DisplayName: 'Deleted player',
+      Status: 'pending', Deleted: true,
+    });
+    expect(at(db, `Registrations/Futsal-16/Submissions/${ALICE}/DisplayName`)).toBe('Alice Able');
+  });
+});
+
+// ── C1: an old merged account is deleted with the account it was combined into
+const OLD = 'uid_alice_old';
+
+/** alice (kept) combined from OLD; a forged link to bob must never reach bob. */
+function mergedWorld(): Record<string, any> {
+  const w = world();
+  w.Users[ALICE].MergedFrom = { [OLD]: true, uid_bob: true };
+  w.Users[OLD] = {
+    'First Name': 'Alice', Email: 'a***@example.com', Token: 'tok_old',
+    MergedInto: ALICE, MergedAt: 7, MergedHint: 'a•••@example.com',
+  };
+  w.PublicProfiles[OLD] = { 'First Name': 'Alice' };
+  w.MergeNotices[OLD] = { KeepHint: 'a•••@example.com', Status: 'sent' };
+  w.Support.Tickets['10'] = { Num: 10, Uid: OLD, Name: 'Alice', Message: 'old account' };
+  w.Support.UserTickets[OLD] = { '10': true };
+  w.EventsV2.ev2.Attendees[OLD] = true;
+  // A roster leftover still pointing at the old account.
+  w.Futsal['15']['Line Ups']['Team A']['Alice Old'] = { UID: OLD, Goals: 0 };
+  w['Sign Ups'].Futsal['16'].Comments['Alice Old'] = `${OLD}:from the old account`;
+  return w;
+}
+
+describe('C1: deleting the kept account also deletes the old accounts it was combined from', () => {
+  it("plans the old account's own deletion, stamps it as merged and lists both Auth users", async () => {
+    const db = new FakeDb(mergedWorld());
+    const plan = await planOk(db);
+    expect(plan.authUidsToDelete).toEqual([ALICE, OLD]);
+    const storage = new FakeObjectStore();
+    const summary = await applyAccountDeletion(db, storage, plan);
+    expect(summary.errors).toEqual([]);
+    expect(summary.stamped).toBe(true);
+    for (const p of [`Users/${OLD}`, `PublicProfiles/${OLD}`, `MergeNotices/${OLD}`,
+      'Support/Tickets/10', `Support/UserTickets/${OLD}`, `EventsV2/ev2/Attendees/${OLD}`,
+      'Sign Ups/Futsal/16/Comments/Alice Old', 'Futsal/15/Line Ups/Team A/Alice Old/UID']) {
+      expect(at(db, p), p).toBeNull();
+    }
+    expect(storage.deleted).toContain(`Users/${OLD}/profileimage.jpg`);
+    expect(storage.deleted).toContain('support/10/img_0.jpg');
+    expect(at(db, `DeletedAccounts/${OLD}`)).toEqual({ At: NOW, Provider: 'merged', MergedInto: ALICE });
+    // The kept account's stamp remembers the old Auth user until it is gone.
+    expect(at(db, `DeletedAccounts/${ALICE}`)).toEqual({ At: NOW, Provider: 'password', PendingAuth: [OLD] });
+    // The forged link never reaches bob.
+    expect(at(db, 'Users/uid_bob')).toEqual({ 'First Name': 'Bob', Email: 'b***@example.com' });
+    expect(at(db, 'PublicProfiles/uid_bob')).toEqual({ 'First Name': 'Bob' });
+    expect(at(db, 'DeletedAccounts/uid_bob')).toBeNull();
+    expect(plan.authUidsToDelete).not.toContain('uid_bob');
+  });
+
+  it('a link to an account that is not merged into this one costs two reads and nothing else', async () => {
+    const db = new FakeDb(mergedWorld());
+    await readAccountDeletionSnapshot(db, ALICE);
+    const bobReads = db.reads.filter((r) => r.includes('uid_bob'));
+    expect(bobReads).toEqual(['read:Users/uid_bob', 'read:DeletedAccounts/uid_bob']);
+  });
+
+  it('the old account is not refused as already-merged when reached this way', async () => {
+    const plan = await planFor(new FakeDb(mergedWorld()));
+    expect(plan.refused).toBeUndefined();
+  });
+
+  it('the old account steps (and its stamp) come before the kept Users node is deleted', async () => {
+    const plan = await planOk(new FakeDb(mergedWorld()));
+    const idx = (p: string) => plan.steps.findIndex((s) => s.path === p);
+    expect(idx(`DeletedAccounts/${OLD}`)).toBeLessThan(idx(`Users/${OLD}`));
+    expect(idx(`Users/${OLD}`)).toBeLessThan(idx(`Users/${ALICE}`));
+    expect(plan.steps[plan.steps.length - 1].path).toBe(`DeletedAccounts/${ALICE}`);
+  });
+
+  it('dies at every cut point: the rerun plans exactly the remainder, still lists the old Auth user, and converges', async () => {
+    const full = await planOk(new FakeDb(mergedWorld()));
+    const clean = new FakeDb(mergedWorld());
+    await applyAccountDeletion(clean, new FakeObjectStore(), await planOk(clean));
+    for (let done = 0; done < full.steps.length; done++) {
+      const dying = new DyingDb(mergedWorld(), done);
+      await applyAccountDeletion(dying, new FakeObjectStore(), full);
+      const resumed = new FakeDb(dying.data);
+      const rest = await planOk(resumed);
+      expect(rest.steps, `cut ${done}`).toEqual(full.steps.slice(done));
+      expect(rest.authUidsToDelete, `cut ${done}`).toEqual([ALICE, OLD]);
+      await applyAccountDeletion(resumed, new FakeObjectStore(), rest);
+      expect(resumed.data, `cut ${done}`).toEqual(clean.data);
+    }
+  });
+
+  it('a finished run still lists the old Auth user until PendingAuth is settled', async () => {
+    const db = new FakeDb(mergedWorld());
+    await applyAccountDeletion(db, new FakeObjectStore(), await planOk(db));
+    const again = await planOk(db);
+    expect(again.authUidsToDelete).toEqual([ALICE, OLD]);
+    await settlePendingAuth(db, ALICE, []);
+    expect(at(db, `DeletedAccounts/${ALICE}`)).toEqual({ At: NOW, Provider: 'password' });
+    expect((await planOk(db)).authUidsToDelete).toEqual([ALICE]);
+    await settlePendingAuth(db, ALICE, [OLD]);
+    expect(at(db, `DeletedAccounts/${ALICE}/PendingAuth`)).toEqual([OLD]);
+    expect((await planOk(db)).authUidsToDelete).toEqual([ALICE, OLD]);
+  });
+
+  it('a PendingAuth entry that is not a uid is never listed', async () => {
+    const seed = world();
+    seed.DeletedAccounts = { [ALICE]: { At: 1, Provider: 'password', PendingAuth: ['../x', 7, ALICE, 'uid_ok_1'] } };
+    expect((await planOk(new FakeDb(seed))).authUidsToDelete).toEqual([ALICE, 'uid_ok_1']);
+  });
+
+  it('allowMerged (the admin path) deletes an old merged account on its own', async () => {
+    const db = new FakeDb(mergedWorld());
+    const snap = await readAccountDeletionSnapshot(db, OLD, undefined, { allowMerged: true });
+    const plan = planAccountDeletion(snap, OLD, STAMP, { allowMerged: true });
+    if (plan.refused) throw new Error('refused');
+    expect(plan.authUidsToDelete).toEqual([OLD]);
+    await applyAccountDeletion(db, new FakeObjectStore(), plan);
+    expect(at(db, `Users/${OLD}`)).toBeNull();
+    expect(at(db, `Users/${ALICE}`)).not.toBeNull();
+    // Without the option the user path still refuses it.
+    expect(await planFor(new FakeDb(mergedWorld()), OLD)).toMatchObject({ refused: 'already-merged' });
+  });
+});
+
+describe('C1: old-account edge cases', () => {
+  it("an old account's Storage failure is masked and carried in the kept account's PendingStorage", async () => {
+    const db = new FakeDb(mergedWorld());
+    const storage = new FakeObjectStore();
+    storage.failing.add(`Users/${OLD}/profileimage.jpg`);
+    const summary = await applyAccountDeletion(db, storage, await planOk(db));
+    expect(summary.stamped).toBe(true);
+    expect(summary.errors).toHaveLength(1);
+    expect(summary.errors[0]).not.toContain(OLD);
+    expect(summary.errors[0]).not.toContain(ALICE);
+    expect(at(db, `DeletedAccounts/${ALICE}/PendingStorage`)).toEqual([`Users/${OLD}/profileimage.jpg`]);
+    expect((await planOk(db)).storagePaths).toContain(`Users/${OLD}/profileimage.jpg`);
+  });
+
+  it('a league the old account owns never passes to the kept account that is leaving too', async () => {
+    const seed = mergedWorld();
+    seed.Fantasy.Futsal['15'].MiniLeagues.ml_old = {
+      Name: 'Old', Code: 'OLD123', Owner: OLD, CreatedAt: 9, Members: { [ALICE]: true, [OLD]: true, uid_cara: true },
+    };
+    seed.Fantasy.Futsal['15'].MiniLeagues.ml_pair = {
+      Name: 'Pair', Code: 'PAI123', Owner: OLD, CreatedAt: 9, Members: { [ALICE]: true, [OLD]: true },
+    };
+    const db = new FakeDb(seed);
+    await applyAccountDeletion(db, new FakeObjectStore(), await planOk(db));
+    const ml = 'Fantasy/Futsal/15/MiniLeagues';
+    expect(at(db, `${ml}/ml_old/Owner`)).toBe('uid_cara');
+    expect(at(db, `${ml}/ml_old/Members`)).toEqual({ uid_cara: true });
+    expect(at(db, `${ml}/ml_pair`)).toBeNull();
   });
 });

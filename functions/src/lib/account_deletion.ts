@@ -23,7 +23,11 @@
 //             EventsV2/<id>/Attendees|Reminders/<uid>,
 //             Events/<id>/Attendees/<uid>; MergeNotices/<uid>,
 //             Insiders/<uid>, InsiderCodes/<code> when it points at the uid;
-//             the ReferredName leaf of the person's own referral row.
+//             the ReferredName leaf of the person's own referral row;
+//             Sign Ups/<league>/<S>/NotPaid/<uid> (M11: an unpaid sign-up,
+//             the value is just the name) and every
+//             Sign Ups/<league>/<S>/Comments/<displayName> whose value is
+//             "<uid>:<text>" (I3) - leagues and seasons found keys-only.
 //   UID LEAF  `UID`/`uid` removed, the row kept (a league record): league
 //             Line Ups, AFC San Jose rosters, tournament rosters (found
 //             through Users/<uid>/TournamentsPlayed) — with the row's
@@ -44,8 +48,10 @@
 //             fan app's leaderboard names the row from it.
 //   SCRUBBED  (payment records, kept for accounting) Fantasy Access/<uid>
 //             and Registrations/<id>/Submissions/<uid>: only the
-//             allow-listed keys stay, plus `Deleted: true`.
-//   KEPT      Sign Ups/**/<uid>, TransferCosts/<gw>/<uid>,
+//             allow-listed keys stay, plus `Deleted: true`. A submission
+//             with `Paid !== true` also gets DisplayName 'Deleted player'
+//             (M11: nothing was paid, so the name is not kept).
+//   KEPT      Sign Ups/<league>/<S>/Paid/<uid>, TransferCosts/<gw>/<uid>,
 //             LiveBase/<gw>/Managers/<uid>, ReferredUsers/<uid> (the
 //             referral guard a later refund void needs).
 //   WRITTEN   DeletedAccounts/<uid> = {At, Provider, By?, Reason?,
@@ -54,7 +60,20 @@
 //             uid / ticket number only); the next run plans them again and
 //             its stamp drops the key once they are gone. A retry keeps the
 //             first At/Provider and any By/Reason (an admin's note survives).
-//   NOTE      Baselines/<uid> and Live/Squads/<uid> regrow after the next
+//   MERGED    (C1) Users/<uid>/MergedFrom/<old> = true (written by the merge
+//             tool): each old account that points back (Users/<old>/
+//             MergedInto, or its own DeletedAccounts/<old>/MergedInto once
+//             its Users node is gone) gets its own full per-uid plan - the
+//             same discovery and steps as above - plus DeletedAccounts/<old>
+//             = {At, Provider: 'merged', MergedInto: <uid>} right before
+//             Users/<old>; all of it before Users/<uid>. The first step writes
+//             DeletedAccounts/<uid>/PendingAuth = [old uids] (the closing
+//             stamp keeps it) so a rerun still knows which Auth users are
+//             left; the callable deletes `authUidsToDelete` and settles the
+//             list (settlePendingAuth). Not subject to the already-merged
+//             refusal when reached this way; `allowMerged` (admin) plans an
+//             old account on its own.
+//   NOTE     Baselines/<uid> and Live/Squads/<uid> regrow after the next
 //             lock while the account still exists; a later rerun deletes
 //             them again.
 //
@@ -72,6 +91,8 @@ import {
 } from './fantasy/orchestration_db';
 
 export const DELETED_MANAGER = 'Deleted manager';
+/** M11: the DisplayName an UNPAID registration submission keeps. */
+export const DELETED_PLAYER = 'Deleted player';
 
 /** The league sports whose rosters live under `<Sport>/<Season>/Line Ups`
  *  (tools/merge_accounts_logic.ts imports this one copy). */
@@ -141,6 +162,9 @@ export interface DeletionStep {
   after?: unknown;
   /** A hand-over write (mini-league Owner), counted as `handoffs`. */
   handoff?: boolean;
+  /** A DeletedAccounts bookkeeping write (an old account's stamp, the
+   *  PendingAuth marker) - not counted in the summary. */
+  stamp?: boolean;
 }
 
 export interface DeletionPlan {
@@ -149,6 +173,16 @@ export interface DeletionPlan {
   /** In apply order; the last one is always the DeletedAccounts write. */
   steps: DeletionStep[];
   storagePaths: string[];
+  /** C1: every Firebase Auth user the callable deletes once the database
+   *  steps landed - [uid, ...old accounts combined into it]. */
+  authUidsToDelete: string[];
+}
+
+/** C1: what the admin path may do that the user path may not. */
+export interface DeletionOptions {
+  /** Plan an old account of a completed merge on its own (adminDeleteAccount)
+   *  instead of refusing it with 'already-merged'. */
+  allowMerged?: boolean;
 }
 
 /** D5: an old account of a completed merge is never deleted itself. */
@@ -213,10 +247,15 @@ export interface AccountDeletionSnapshot {
   referral: FoundNode | null;
   /** Ticket numbers from Support/UserTickets/<uid>, with each ticket's Uid. */
   tickets: Array<{ num: string; owner: unknown }>;
+  /** I3: `Sign Ups/<league>/<S>/Comments` nodes ({displayName: "<uid>:<text>"}). */
+  signUpComments: FoundNode[];
   /** Nodes deleted whole when present, in delete order (Users/<uid> last). */
   wholeNodes: FoundNode[];
   /** DeletedAccounts/<uid> as an earlier run left it (null = none). */
   previousStamp: unknown;
+  /** C1: the old accounts combined into this one (Users/<uid>/MergedFrom),
+   *  each verified to point back here, with their own per-uid snapshot. */
+  merged: AccountDeletionSnapshot[];
 }
 
 const silent: FantasyLogger = { info: () => undefined, warn: () => undefined };
@@ -313,17 +352,53 @@ async function readRosters(
  *  Players, a league season's Line Ups, the AFC rosters and the person's
  *  own tournaments' rosters. */
 export async function readAccountDeletionSnapshot(
-  db: FantasyDb, uid: string, log: FantasyLogger = silent,
+  db: FantasyDb, uid: string, log: FantasyLogger = silent, opts: DeletionOptions = {},
 ): Promise<AccountDeletionSnapshot> {
   assertUid(uid);
   const user = await db.read(`Users/${uid}`);
-  const snap: AccountDeletionSnapshot = {
-    uid, user, uidLeafRows: [], ledgerRows: [], scrubRows: [], miniLeagues: [],
-    referral: null, tickets: [], wholeNodes: [],
-    previousStamp: await db.read(`DeletedAccounts/${uid}`),
-  };
-  if (mergedInto(user) !== null) return snap; // refused: nothing else matters
+  const snap = emptySnapshot(uid, user, await db.read(`DeletedAccounts/${uid}`));
+  if (opts.allowMerged !== true && mergedInto(user) !== null) return snap; // refused
+  await readUidPlaces(db, uid, user, snap, log);
 
+  // C1: the old accounts combined into this one. The MergedFrom index sits
+  // in the person's own (user-writable) node, so an old account is followed
+  // only when IT points back here: Users/<old>/MergedInto, or - once its
+  // Users node is gone on a rerun - its own DeletedAccounts/<old>/MergedInto
+  // (written only by this server). A link that does not check out costs
+  // exactly those two reads. One level only: an old account's own
+  // MergedFrom is never followed.
+  for (const old of mergedFromOf(user, uid)) {
+    const oldUser = await db.read(`Users/${old}`);
+    const oldStamp = await db.read(`DeletedAccounts/${old}`);
+    const back = oldUser != null
+      ? mergedInto(oldUser)
+      : (isPlainMap(oldStamp) ? oldStamp['MergedInto'] : null);
+    if (back !== uid) continue;
+    const sub = emptySnapshot(old, oldUser, oldStamp);
+    await readUidPlaces(db, old, oldUser, sub, log);
+    snap.merged.push(sub);
+  }
+  return snap;
+}
+
+function emptySnapshot(uid: string, user: unknown, previousStamp: unknown): AccountDeletionSnapshot {
+  return {
+    uid, user, uidLeafRows: [], ledgerRows: [], scrubRows: [], miniLeagues: [],
+    referral: null, tickets: [], signUpComments: [], wholeNodes: [], previousStamp, merged: [],
+  };
+}
+
+/** The uids listed in Users/<uid>/MergedFrom (`<old>: true`), never [uid]. */
+function mergedFromOf(user: unknown, uid: string): string[] {
+  const from = isPlainMap(user) ? user['MergedFrom'] : null;
+  return childEntries(from).filter(([o, v]) => v === true && o !== uid && UID_RE.test(o)).map(([o]) => o);
+}
+
+/** Every per-uid place of [uid] (the body of the snapshot, for the account
+ *  itself and for each old account combined into it). */
+async function readUidPlaces(
+  db: FantasyDb, uid: string, user: unknown, snap: AccountDeletionSnapshot, log: FantasyLogger,
+): Promise<void> {
   snap.uidLeafRows.push(...await readRosters(db, uid, user, log));
   for (const ref of await listFantasySeasons(db, log)) {
     await readFantasySeason(db, uid, fantasyRoot(ref.sport, ref.season), snap, log);
@@ -358,6 +433,21 @@ export async function readAccountDeletionSnapshot(
     num, owner: await db.read(`Support/Tickets/${num}/Uid`),
   })));
 
+  // I3 + M11: sign-ups. Leagues and their seasons keys-only (tournament
+  // sign-ups are `<TournamentName>/<id>`); per season the person's unpaid
+  // record (the value is just the name - nothing was paid) and the Comments
+  // node, scanned for "<uid>:" values. Paid records stay (accounting).
+  for (const league of await childKeysOf(db, 'Sign Ups', log)) {
+    if (!SAFE_KEY_RE.test(league)) continue;
+    for (const season of await childKeysOf(db, `Sign Ups/${league}`, log)) {
+      if (!SAFE_KEY_RE.test(season)) continue;
+      const base = `Sign Ups/${league}/${season}`;
+      const notPaid = `${base}/NotPaid/${uid}`;
+      snap.wholeNodes.push({ path: notPaid, value: await db.read(notPaid) });
+      snap.signUpComments.push({ path: `${base}/Comments`, value: await db.read(`${base}/Comments`) });
+    }
+  }
+
   snap.wholeNodes.push({ path: `MergeNotices/${uid}`, value: await db.read(`MergeNotices/${uid}`) });
   const insider = await db.read(`Insiders/${uid}`);
   const code = isPlainMap(insider) && typeof insider['Code'] === 'string'
@@ -373,7 +463,6 @@ export async function readAccountDeletionSnapshot(
     { path: `PublicProfiles/${uid}`, value: await db.read(`PublicProfiles/${uid}`) },
     { path: `Users/${uid}`, value: user },
   );
-  return snap;
 }
 
 // ── Planner (pure) ──────────────────────────────────────────────────────────
@@ -427,6 +516,10 @@ function scrubbed(row: ScrubRow): Record<string, unknown> | null {
     ? (k: string) => ACCESS_KEEP.has(k) : (k: string) => SUBMISSION_KEEP.has(k);
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(row.value)) if (keep(k)) out[k] = v;
+  // M11: an unpaid submission keeps its fee keys (the same allow-list) but
+  // not the person's name - nothing was paid, so there is no record to keep
+  // it for.
+  if (row.kind === 'registration' && row.value['Paid'] !== true) out['DisplayName'] = DELETED_PLAYER;
   out['Deleted'] = true;
   return isDeepStrictEqual(out, row.value) ? null : out;
 }
@@ -434,69 +527,148 @@ function scrubbed(row: ScrubRow): Record<string, unknown> | null {
 /** The member that inherits a league: the lowest numeric join value when
  *  members carry one, else the first uid in key order (members are stored
  *  as `true`, so there is no join time to compare). */
-function nextOwner(members: Record<string, unknown>, leaving: string): string | null {
+function nextOwner(members: Record<string, unknown>, leaving: ReadonlySet<string>): string | null {
   const rest = Object.entries(members)
-    .filter(([m, v]) => m !== leaving && v != null && v !== false);
+    .filter(([m, v]) => !leaving.has(m) && v != null && v !== false);
   if (rest.length === 0) return null;
   const at = (v: unknown) => (typeof v === 'number' ? v : Number.POSITIVE_INFINITY);
   rest.sort(([a, va], [b, vb]) => (at(va) - at(vb)) || (a < b ? -1 : a > b ? 1 : 0));
   return rest[0][0];
 }
 
-function miniLeagueSteps(league: FoundNode, uid: string): DeletionStep[] {
-  if (!isPlainMap(league.value)) return [];
+/** [leaving] = every account this plan deletes (the person and the old
+ *  accounts combined into them): none of them can inherit a league.
+ *  [gone] = leagues an earlier part of the plan deletes whole (skipped). */
+function miniLeagueSteps(
+  league: FoundNode, uid: string, leaving: ReadonlySet<string>, gone: Set<string>,
+): DeletionStep[] {
+  if (!isPlainMap(league.value) || gone.has(league.path)) return [];
   const members = isPlainMap(league.value['Members']) ? league.value['Members'] : {};
   const owns = league.value['Owner'] === uid;
-  const heir = nextOwner(members, uid);
-  if (owns && heir === null) return [{ path: league.path, action: 'delete' }];
+  const heir = nextOwner(members, leaving);
+  if (owns && heir === null) {
+    gone.add(league.path);
+    return [{ path: league.path, action: 'delete' }];
+  }
   const steps: DeletionStep[] = [];
   if (members[uid] != null) steps.push({ path: `${league.path}/Members/${uid}`, action: 'delete' });
   if (owns && heir !== null) steps.push({ path: `${league.path}/Owner`, action: 'write', after: heir, handoff: true });
   return steps;
 }
 
-/** The ordered plan for [uid] from [snapshot] (see the header for what each
- *  place gets). Pure and idempotent: a snapshot of a half-deleted account
- *  plans only what is left, a finished one only the DeletedAccounts write. */
-export function planAccountDeletion(
-  snapshot: AccountDeletionSnapshot, uid: string, stamp: DeletionStamp,
-): AccountDeletionPlanning {
-  assertUid(uid);
-  if (snapshot.uid !== uid) throw new Error('account deletion: snapshot is for another account');
-  if (mergedInto(snapshot.user) !== null) {
-    const hint = isPlainMap(snapshot.user) ? snapshot.user['MergedHint'] : null;
-    return { refused: 'already-merged', keepHint: typeof hint === 'string' ? hint : '' };
-  }
+/** One account's own steps (no DeletedAccounts write) and Storage objects,
+ *  shared by the person and every old account combined into them. */
+function planUidPart(
+  snap: AccountDeletionSnapshot, uid: string, leaving: ReadonlySet<string>, gone: Set<string>,
+): { steps: DeletionStep[]; storagePaths: string[] } {
   const steps: DeletionStep[] = [];
   const del = (path: string) => { steps.push({ path, action: 'delete' }); };
 
-  for (const r of snapshot.uidLeafRows) {
+  for (const r of snap.uidLeafRows) {
     if (!isPlainMap(r.row)) continue;
     const row = r.row;
     if (!ROSTER_UID_KEYS.some((k) => row[k] === uid)) continue;
     for (const leaf of r.alsoRemove) if (row[leaf] != null) del(`${r.path}/${leaf}`);
     for (const k of ROSTER_UID_KEYS) if (row[k] === uid) del(`${r.path}/${k}`);
   }
-  for (const r of snapshot.ledgerRows) {
+  for (const r of snap.ledgerRows) {
     const after = anonymiseLedgerRow(r.value);
     if (after !== null) steps.push({ path: r.path, action: 'write', after });
   }
-  for (const r of snapshot.scrubRows) {
+  for (const r of snap.scrubRows) {
     const after = scrubbed(r);
     if (after !== null) steps.push({ path: r.path, action: 'write', after });
   }
-  for (const league of snapshot.miniLeagues) steps.push(...miniLeagueSteps(league, uid));
-  const ref = snapshot.referral;
+  for (const league of snap.miniLeagues) steps.push(...miniLeagueSteps(league, uid, leaving, gone));
+  const ref = snap.referral;
   if (ref !== null && isPlainMap(ref.value) && ref.value['ReferredUid'] === uid &&
       ref.value['ReferredName'] != null) {
     del(`${ref.path}/ReferredName`);
   }
-  const owned = snapshot.tickets.filter((t) => t.owner === uid).map((t) => t.num);
+  // I3: a sign-up comment is `<displayName>: "<uid>:<text>"` - the person's
+  // when the value starts with their uid and a colon.
+  for (const node of snap.signUpComments) {
+    for (const [name, v] of childEntries(node.value)) {
+      if (typeof v === 'string' && v.startsWith(`${uid}:`) && SAFE_KEY_RE.test(name)) {
+        del(`${node.path}/${name}`);
+      }
+    }
+  }
+  const owned = snap.tickets.filter((t) => t.owner === uid).map((t) => t.num);
   for (const num of owned) del(`Support/Tickets/${num}`);
-  for (const node of snapshot.wholeNodes) if (node.value != null) del(node.path);
+  for (const node of snap.wholeNodes) if (node.value != null) del(node.path);
 
+  const storagePaths = [`Users/${uid}/profileimage.jpg`];
+  for (const num of owned) {
+    for (let i = 0; i < MAX_SCREENSHOTS; i++) storagePaths.push(`support/${num}/img_${i}.jpg`);
+  }
+  return { steps, storagePaths };
+}
+
+/** The valid uids of a stamp's PendingAuth list, never [uid] itself. */
+function pendingAuthOf(stamp: Record<string, unknown>, uid: string): string[] {
+  return childEntries(stamp['PendingAuth']).map(([, u]) => u)
+    .filter((u): u is string => typeof u === 'string' && UID_RE.test(u) && u !== uid);
+}
+
+/** The ordered plan for [uid] from [snapshot] (see the header for what each
+ *  place gets). Pure and idempotent: a snapshot of a half-deleted account
+ *  plans only what is left, a finished one only the DeletedAccounts write.
+ *
+ *  C1: the old accounts combined into [uid] (snapshot.merged) come first,
+ *  each with its full per-uid plan and its own DeletedAccounts/<old> stamp
+ *  {At, Provider: 'merged', MergedInto: uid} just before its Users node -
+ *  all of it before Users/<uid> (which holds the MergedFrom link) goes. A
+ *  first step records the old uids in DeletedAccounts/<uid>/PendingAuth, so
+ *  a rerun after Users/<uid> is gone still knows which Auth users to delete;
+ *  the callable settles that list (settlePendingAuth) once they are. */
+export function planAccountDeletion(
+  snapshot: AccountDeletionSnapshot, uid: string, stamp: DeletionStamp,
+  opts: DeletionOptions = {},
+): AccountDeletionPlanning {
+  assertUid(uid);
+  if (snapshot.uid !== uid) throw new Error('account deletion: snapshot is for another account');
+  if (opts.allowMerged !== true && mergedInto(snapshot.user) !== null) {
+    const hint = isPlainMap(snapshot.user) ? snapshot.user['MergedHint'] : null;
+    return { refused: 'already-merged', keepHint: typeof hint === 'string' ? hint : '' };
+  }
   const prev = snapshot.previousStamp;
   const prevMap = isPlainMap(prev) ? prev : {};
+  const olds = snapshot.merged.map((m) => m.uid);
+  const prevPending = pendingAuthOf(prevMap, uid);
+  const pendingAuth = [...prevPending, ...olds.filter((o) => !prevPending.includes(o))];
+  const leaving = new Set<string>([uid, ...olds]);
+  const gone = new Set<string>();
+  const steps: DeletionStep[] = [];
+  const storagePaths: string[] = [];
+  const addStorage = (paths: string[]) => {
+    for (const p of paths) if (!storagePaths.includes(p)) storagePaths.push(p);
+  };
+
+  if (olds.some((o) => !prevPending.includes(o))) {
+    steps.push({ path: `DeletedAccounts/${uid}/PendingAuth`, action: 'write', after: pendingAuth, stamp: true });
+  }
+  for (const old of snapshot.merged) {
+    const part = planUidPart(old, old.uid, leaving, gone);
+    const oldPrev = isPlainMap(old.previousStamp) ? old.previousStamp : {};
+    const oldClosing = {
+      At: typeof oldPrev['At'] === 'number' ? oldPrev['At'] : stamp.nowMs,
+      Provider: 'merged',
+      MergedInto: uid,
+    };
+    if (!isDeepStrictEqual(oldClosing, old.previousStamp)) {
+      const users = part.steps.findIndex((s) => s.path === `Users/${old.uid}` && s.action === 'delete');
+      const oldStamp: DeletionStep = {
+        path: `DeletedAccounts/${old.uid}`, action: 'write', after: oldClosing, stamp: true,
+      };
+      if (users >= 0) part.steps.splice(users, 0, oldStamp); else part.steps.push(oldStamp);
+    }
+    steps.push(...part.steps);
+    addStorage(part.storagePaths);
+  }
+  const own = planUidPart(snapshot, uid, leaving, gone);
+  steps.push(...own.steps);
+
   const first = <T>(old: unknown, now: T | undefined, ok: (v: unknown) => boolean) =>
     (ok(old) ? old : now) as T | undefined;
   const isStr = (v: unknown) => typeof v === 'string' && v.length > 0;
@@ -508,18 +680,26 @@ export function planAccountDeletion(
   const reason = first(prevMap['Reason'], stamp.reason, isStr);
   if (by !== undefined) closing['By'] = by;
   if (reason !== undefined) closing['Reason'] = reason;
+  if (pendingAuth.length > 0) closing['PendingAuth'] = pendingAuth;
   steps.push({ path: `DeletedAccounts/${uid}`, action: 'write', after: closing });
-  const storagePaths = [`Users/${uid}/profileimage.jpg`];
-  for (const num of owned) {
-    for (let i = 0; i < MAX_SCREENSHOTS; i++) storagePaths.push(`support/${num}/img_${i}.jpg`);
-  }
+
+  // The person's own objects first, then the old accounts', then whatever
+  // an earlier run could not delete.
+  const ownStorage = own.storagePaths;
+  storagePaths.splice(0, 0, ...ownStorage.filter((p) => !storagePaths.includes(p)));
   const pending = childEntries(prevMap['PendingStorage']).map(([, p]) => p);
   for (const p of pending) {
-    if (typeof p === 'string' && PENDING_OBJECT_RE.test(p) && !storagePaths.includes(p)) {
-      storagePaths.push(p);
-    }
+    if (typeof p === 'string' && PENDING_OBJECT_RE.test(p)) addStorage([p]);
   }
-  return { uid, steps, storagePaths };
+  return { uid, steps, storagePaths, authUidsToDelete: [uid, ...pendingAuth] };
+}
+
+/** C1: after the callable tried every old account's Auth user, record the
+ *  ones that are still there (or clear the list). Opaque uids only. */
+export async function settlePendingAuth(db: FantasyDb, uid: string, failed: string[]): Promise<void> {
+  assertUid(uid);
+  const keep = failed.filter((u) => UID_RE.test(u) && u !== uid);
+  await db.write(`DeletedAccounts/${uid}/PendingAuth`, keep.length > 0 ? keep : null);
 }
 
 // ── Applier ─────────────────────────────────────────────────────────────────
@@ -536,8 +716,13 @@ export async function applyAccountDeletion(
   const summary: DeletionSummary = {
     deleted: 0, anonymised: 0, handoffs: 0, stamped: false, storageDeleted: 0, errors: [],
   };
-  const masked = (what: string, err: unknown) =>
-    `${what}: ${err instanceof Error ? err.message : String(err)}`.split(plan.uid).join('<uid>');
+  // Every uid of the plan (the person and any old account), longest first so
+  // a uid that prefixes another never leaves a tail behind.
+  const uids = [...new Set([plan.uid, ...(plan.authUidsToDelete ?? [])])]
+    .sort((a, b) => b.length - a.length);
+  const masked = (what: string, err: unknown) => uids.reduce(
+    (text, u) => text.split(u).join('<uid>'),
+    `${what}: ${err instanceof Error ? err.message : String(err)}`);
   const run = async (step: DeletionStep): Promise<boolean> => {
     try {
       await db.write(step.path, step.action === 'delete' ? null : step.after);
@@ -551,6 +736,7 @@ export async function applyAccountDeletion(
   const stamp = plan.steps[plan.steps.length - 1];
   for (const step of plan.steps.slice(0, -1)) {
     if (!await run(step)) return summary;
+    if (step.stamp === true) continue; // bookkeeping, not a change to the person's data
     if (step.action === 'delete') summary.deleted++;
     else if (step.handoff === true) summary.handoffs++;
     else summary.anonymised++;

@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   failStorage: false,
   deletedAuth: [] as string[],
   authDeleteError: null as unknown,
+  authFailFor: [] as string[],
   providers: {} as Record<string, string>,
   getUserError: null as unknown,
   storageDeleted: [] as string[],
@@ -54,6 +55,7 @@ vi.mock('firebase-admin/auth', () => ({
   getAuth: () => ({
     deleteUser: async (uid: string) => {
       if (h.authDeleteError !== null) throw h.authDeleteError;
+      if (h.authFailFor.includes(uid)) throw Object.assign(new Error(`auth down for ${uid}`), { code: 'auth/internal-error' });
       if (h.deletedAuth.includes(uid)) {
         throw Object.assign(new Error('gone'), { code: 'auth/user-not-found' });
       }
@@ -134,6 +136,7 @@ beforeEach(() => {
   h.failStorage = false;
   h.deletedAuth = [];
   h.authDeleteError = null;
+  h.authFailFor = [];
   h.providers = { [ALICE]: 'google.com' };
   h.getUserError = null;
   h.storageDeleted = [];
@@ -174,7 +177,7 @@ describe('deleteAccount', () => {
   it('applies the plan, then deletes the Auth user, and returns counts only', async () => {
     const result = await call(deleteAccount, { uid: BOB }, fresh()) as Record<string, unknown>;
     expect(Object.keys(result).sort())
-      .toEqual(['anonymised', 'deleted', 'handoffs', 'pendingStorage', 'storageDeleted']);
+      .toEqual(['anonymised', 'deleted', 'handoffs', 'oldAccounts', 'pendingAuth', 'pendingStorage', 'storageDeleted']);
     expect(Object.values(result).every((v) => typeof v === 'number')).toBe(true);
     expect(result['deleted']).toBeGreaterThan(0);
     expect(result['anonymised']).toBeGreaterThan(0); // Managers/<uid>
@@ -243,6 +246,53 @@ describe('deleteAccount', () => {
   });
 });
 
+const OLD = 'uid_old_alice_123';
+
+/** alice (kept) was combined from OLD. */
+function mergedSeed(): void {
+  h.tree.Users[ALICE].MergedFrom = { [OLD]: true };
+  h.tree.Users[OLD] = { 'First Name': 'Alice', MergedInto: ALICE, MergedHint: 'a***@example.com' };
+  h.tree.PublicProfiles[OLD] = { 'First Name': 'Alice' };
+  h.tree.MergeNotices = { [OLD]: { Status: 'sent' } };
+}
+
+describe('deleteAccount - C1: the old accounts combined into this one', () => {
+  it('deletes the old account data and its Auth user (old first), then the kept one', async () => {
+    mergedSeed();
+    const result = await call(deleteAccount, {}, fresh()) as Record<string, number>;
+    expect(result['oldAccounts']).toBe(1);
+    expect(result['pendingAuth']).toBe(0);
+    expect(h.tree.Users[OLD]).toBeUndefined();
+    expect(h.tree.PublicProfiles[OLD]).toBeUndefined();
+    expect(h.tree.MergeNotices[OLD]).toBeUndefined();
+    expect(h.tree.DeletedAccounts[OLD]).toEqual({ At: NOW, Provider: 'merged', MergedInto: ALICE });
+    expect(h.tree.DeletedAccounts[ALICE]).toEqual({ At: NOW, Provider: 'google.com' });
+    expect(h.storageDeleted).toContain(`Users/${OLD}/profileimage.jpg`);
+    expect(h.deletedAuth).toEqual([OLD, ALICE]);
+    expect(JSON.stringify(result)).not.toContain(OLD);
+    expect(h.lines.filter((l) => l.includes(ALICE) || l.includes(OLD))).toEqual([]);
+  });
+
+  it('an old Auth user that cannot be deleted is recorded in PendingAuth, never thrown', async () => {
+    mergedSeed();
+    h.authFailFor = [OLD];
+    const result = await call(deleteAccount, {}, fresh()) as Record<string, number>;
+    expect(result['pendingAuth']).toBe(1);
+    expect(h.deletedAuth).toEqual([ALICE]);
+    expect(h.tree.DeletedAccounts[ALICE].PendingAuth).toEqual([OLD]);
+    expect(h.lines.some((l) => l.startsWith('warn'))).toBe(true);
+    expect(h.lines.filter((l) => l.includes(ALICE) || l.includes(OLD))).toEqual([]);
+  });
+
+  it('user-not-found for an old account counts as deleted', async () => {
+    mergedSeed();
+    h.deletedAuth = [OLD]; // already gone
+    const result = await call(deleteAccount, {}, fresh()) as Record<string, number>;
+    expect(result['pendingAuth']).toBe(0);
+    expect(h.tree.DeletedAccounts[ALICE].PendingAuth).toBeUndefined();
+  });
+});
+
 describe('adminDeleteAccount', () => {
   const admin = () => ({ uid: ADMIN, token: {} });
 
@@ -295,9 +345,39 @@ describe('adminDeleteAccount', () => {
     expect(h.deletedAuth).toEqual(['uid_nobody_1234']);
   });
 
-  it('refuses a merged old account like the self-service call', async () => {
-    h.tree.Users[ALICE] = { MergedInto: 'uid_kept_12345', MergedHint: 'k***@example.com' };
-    const e = await failure(call(adminDeleteAccount, { uid: ALICE }, admin()));
-    expect(e.details).toEqual({ code: 'already-merged', keepHint: 'k***@example.com' });
+  it('C1: deletes an old merged account on its own (the user path still refuses it)', async () => {
+    h.tree.Users[OLD] = { 'First Name': 'Alice', MergedInto: ALICE, MergedHint: 'k***@example.com' };
+    h.providers[OLD] = 'password';
+    const result = await call(adminDeleteAccount, { uid: OLD }, admin()) as Record<string, number>;
+    expect(result['oldAccounts']).toBe(0);
+    expect(h.tree.Users[OLD]).toBeUndefined();
+    expect(h.tree.Users[ALICE]).toBeDefined();
+    expect(h.deletedAuth).toEqual([OLD]);
+    expect(h.tree.DeletedAccounts[OLD]).toMatchObject({ Provider: 'password', By: ADMIN });
+  });
+
+  it('M7: refuses to delete the calling admin or any account on the admin list', async () => {
+    h.tree.Admins[BOB] = true;
+    for (const uid of [ADMIN, BOB]) {
+      const e = await failure(call(adminDeleteAccount, { uid }, admin()));
+      expect(e.code).toBe('failed-precondition');
+      expect(e.details).toEqual({ code: 'admin-protected' });
+      expect(JSON.stringify([e.message, e.details])).not.toContain(uid);
+    }
+    expect(h.tree.Users[BOB]).toBeDefined();
+    expect(h.tree.DeletedAccounts).toBeUndefined();
+    expect(h.deletedAuth).toEqual([]);
+  });
+
+  it('C1: an old Auth user left over from a deleteAccount run is finished by an admin rerun', async () => {
+    mergedSeed();
+    h.authFailFor = [OLD];
+    await call(deleteAccount, {}, fresh());
+    expect(h.tree.DeletedAccounts[ALICE].PendingAuth).toEqual([OLD]);
+    h.authFailFor = [];
+    const result = await call(adminDeleteAccount, { uid: ALICE }, admin()) as Record<string, number>;
+    expect(result['pendingAuth']).toBe(0);
+    expect(h.deletedAuth).toEqual([ALICE, OLD]);
+    expect(h.tree.DeletedAccounts[ALICE].PendingAuth).toBeUndefined();
   });
 });

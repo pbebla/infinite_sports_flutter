@@ -6,7 +6,11 @@
 // real keys-only `?shallow=true` read is exercised too) with a fake
 // ObjectStore, over a compact seed, then asserts the tree: deleted nodes
 // absent, ledgers/Managers anonymised, the registration scrub, the stamp,
-// bystanders untouched, and that a rerun plans only the stamp.
+// bystanders untouched, and that a rerun plans only the stamp. Fix wave:
+// an old account combined into alice (C1) is deleted with her and stamped
+// 'merged'; her sign-up comment and unpaid sign-up go (I3, M11) while a
+// foreign comment and the paid record stay; an unpaid registration loses
+// its name.
 //
 // The Functions emulator has no Auth emulator here, so the callables
 // themselves are covered by src/account_deletion.test.ts instead.
@@ -23,12 +27,13 @@ import * as admin from 'firebase-admin';
 import { rtdbFantasyDb } from '../src/fantasy_adapter';
 import {
   applyAccountDeletion, DeletionPlan, ObjectStore, planAccountDeletion,
-  readAccountDeletionSnapshot,
+  readAccountDeletionSnapshot, settlePendingAuth,
 } from '../src/lib/account_deletion';
 
 const A = 'uid_alice';
 const B = 'uid_bob';
 const C = 'uid_cara';
+const O = 'uid_alice_old';
 const NOW = Date.UTC(2026, 10, 9, 18);
 const STAMP = { nowMs: NOW, provider: 'password' };
 const F = 'Fantasy/Futsal/15';
@@ -37,10 +42,14 @@ function seed(): Record<string, unknown> {
   const squad = { captainId: 'x', picks: { 0: { playerId: 'x', position: 'ATT' } } };
   return {
     Users: {
-      [A]: { 'First Name': 'Alice', Email: 'a***@example.com', Token: 'tok', TournamentsPlayed: { t_spring: true } },
+      [A]: {
+        'First Name': 'Alice', Email: 'a***@example.com', Token: 'tok', TournamentsPlayed: { t_spring: true },
+        MergedFrom: { [O]: true },
+      },
       [B]: { 'First Name': 'Bob' },
+      [O]: { 'First Name': 'Alice', Token: 'tok_old', MergedInto: A, MergedAt: 7, MergedHint: 'a***@example.com' },
     },
-    PublicProfiles: { [A]: { 'First Name': 'Alice' }, [B]: { 'First Name': 'Bob' } },
+    PublicProfiles: { [A]: { 'First Name': 'Alice' }, [B]: { 'First Name': 'Bob' }, [O]: { 'First Name': 'Alice' } },
     Fantasy: { Futsal: { '15': {
       Config: { budgetTenths: 1000 },
       Managers: { [A]: { TeamName: 'Alice FC', DisplayName: 'Alice Able', NamedAt: 5 }, [B]: { TeamName: 'Bob FC' } },
@@ -62,13 +71,19 @@ function seed(): Record<string, unknown> {
     Futsal: { '15': { 'Line Ups': { 'Team A': {
       'Alice A': { UID: A, Goals: 3, PhotoUrl: 'https://img.example/a.jpg' }, 'Bob B': { UID: B, Goals: 1 },
     } } } },
-    Registrations: { 'Futsal-16': { Submissions: {
-      [A]: { Paid: true, PaidVia: 'card', PaidAmount: 80, DisplayName: 'Alice Able', SubmittedAt: 1234, AdjustReason: 'friend of owner', Phone: '555-0100', Answers: { Shirt: 'M' } },
-      [B]: { Paid: false, Phone: '555-0101' },
-    } } },
-    'Sign Ups': { Futsal: { '16': { Paid: { [A]: 'Alice Able' } } } },
+    Registrations: {
+      'Futsal-16': { Submissions: {
+        [A]: { Paid: true, PaidVia: 'card', PaidAmount: 80, DisplayName: 'Alice Able', SubmittedAt: 1234, AdjustReason: 'friend of owner', Phone: '555-0100', Answers: { Shirt: 'M' } },
+        [B]: { Paid: false, Phone: '555-0101' },
+      } },
+      'Futsal-17': { Submissions: { [A]: { Paid: false, AmountCents: 8000, DisplayName: 'Alice Able', Phone: '555-0100' } } },
+    },
+    'Sign Ups': { Futsal: {
+      '16': { Paid: { [A]: 'Alice Able' }, Comments: { 'Alice Able': `${A}:bring a ball`, Bob: `${B}:see you` } },
+      '17': { NotPaid: { [A]: 'Alice Able', [B]: 'Bob' }, Comments: { 'Alice Old': `${O}:old comment` } },
+    } },
     Support: { UserTickets: { [A]: { 7: true } }, Tickets: { 7: { Uid: A, Message: 'hi' }, 8: { Uid: B, Message: 'yo' } } },
-    MergeNotices: { [A]: { Seen: false } },
+    MergeNotices: { [A]: { Seen: false }, [O]: { Status: 'sent' } },
     Tournaments: { t_spring: { Rosters: { 'Team T': { 'Alice A': { uid: A, photoUrl: 'https://img.example/a.jpg' } } } } },
   };
 }
@@ -94,11 +109,13 @@ async function main(): Promise<void> {
     await get(`Users/${B}`), await get(`${F}/Squads/${B}`), await get(`${F}/Leaderboards/Overall/${B}`),
     await get('Support/Tickets/8'), await get(`Registrations/Futsal-16/Submissions/${B}`),
     await get(`${F}/MiniLeagues/ml_other`), await get(`${F}/Players/Bob B`),
+    await get('Sign Ups/Futsal/16/Comments/Bob'), await get(`Sign Ups/Futsal/17/NotPaid/${B}`),
   ]);
 
   const snapshot = await readAccountDeletionSnapshot(db, A);
   const plan = planAccountDeletion(snapshot, A, STAMP) as DeletionPlan;
   assert.strictEqual(plan.refused, undefined);
+  assert.deepStrictEqual(plan.authUidsToDelete, [A, O]);
   const store = new FakeObjectStore();
   const summary = await applyAccountDeletion(db, store, plan);
   assert.deepStrictEqual(summary.errors, []);
@@ -111,6 +128,8 @@ async function main(): Promise<void> {
     `${F}/Players/Alice A/uid`, `${F}/Players/Alice A/photoUrl`,
     'Futsal/15/Line Ups/Team A/Alice A/UID', 'Futsal/15/Line Ups/Team A/Alice A/PhotoUrl',
     'Tournaments/t_spring/Rosters/Team T/Alice A/uid',
+    `Users/${O}`, `PublicProfiles/${O}`, `MergeNotices/${O}`, 'Sign Ups/Futsal/17/Comments',
+    'Sign Ups/Futsal/16/Comments/Alice Able', `Sign Ups/Futsal/17/NotPaid/${A}`,
   ]) assert.strictEqual(await get(gone), null, `${gone} should be gone`);
 
   assert.deepStrictEqual(await get(`${F}/Managers/${A}`), { TeamName: 'Deleted manager', Deleted: true, NamedAt: 5 });
@@ -125,8 +144,13 @@ async function main(): Promise<void> {
   assert.deepStrictEqual(await get(`Registrations/Futsal-16/Submissions/${A}`), {
     Paid: true, PaidVia: 'card', PaidAmount: 80, DisplayName: 'Alice Able', SubmittedAt: 1234, Deleted: true,
   });
+  assert.deepStrictEqual(await get(`Registrations/Futsal-17/Submissions/${A}`), {
+    Paid: false, AmountCents: 8000, DisplayName: 'Deleted player', Deleted: true,
+  });
   assert.strictEqual(await get(`Sign Ups/Futsal/16/Paid/${A}`), 'Alice Able');
-  assert.deepStrictEqual(await get(`DeletedAccounts/${A}`), { At: NOW, Provider: 'password' });
+  assert.deepStrictEqual(await get(`DeletedAccounts/${O}`), { At: NOW, Provider: 'merged', MergedInto: A });
+  assert.deepStrictEqual(await get(`DeletedAccounts/${A}`), { At: NOW, Provider: 'password', PendingAuth: [O] });
+  assert.ok(store.deleted.includes(`Users/${O}/profileimage.jpg`));
   assert.strictEqual(await get(`Futsal/15/Line Ups/Team A/Alice A/Goals`), 3);
   assert.ok(store.deleted.includes(`Users/${A}/profileimage.jpg`));
   assert.ok(store.deleted.includes('support/7/img_0.jpg'));
@@ -134,15 +158,20 @@ async function main(): Promise<void> {
     await get(`Users/${B}`), await get(`${F}/Squads/${B}`), await get(`${F}/Leaderboards/Overall/${B}`),
     await get('Support/Tickets/8'), await get(`Registrations/Futsal-16/Submissions/${B}`),
     await get(`${F}/MiniLeagues/ml_other`), await get(`${F}/Players/Bob B`),
+    await get('Sign Ups/Futsal/16/Comments/Bob'), await get(`Sign Ups/Futsal/17/NotPaid/${B}`),
   ]), bystanders, 'bystanders must be untouched');
 
   // A rerun plans only the stamp.
   const again = planAccountDeletion(await readAccountDeletionSnapshot(db, A), A, STAMP) as DeletionPlan;
   assert.deepStrictEqual(again.steps.map((s) => s.path), [`DeletedAccounts/${A}`]);
+  // ...and still lists the old Auth user until the callable settles it.
+  assert.deepStrictEqual(again.authUidsToDelete, [A, O]);
+  await settlePendingAuth(db, A, []);
+  assert.deepStrictEqual(await get(`DeletedAccounts/${A}`), { At: NOW, Provider: 'password' });
 
   console.log(`rehearse:deletion OK - deleted=${summary.deleted} anonymised=${summary.anonymised} ` +
-    `handoffs=${summary.handoffs} storageDeleted=${summary.storageDeleted} errors=0; ` +
-    'tree, scrub, stamp, bystanders and rerun asserted');
+    `handoffs=${summary.handoffs} storageDeleted=${summary.storageDeleted} oldAccounts=${snapshot.merged.length} errors=0; ` +
+    'tree, scrub, stamp, merged old account, sign-ups, bystanders and rerun asserted');
 }
 
 main().then(() => process.exit(0), (err) => { console.error('rehearse:deletion FAILED', err); process.exit(1); });

@@ -18,6 +18,15 @@
 //   data: { uid: string, reason?: string (<= 200 chars) }
 //   Same run for that uid; DeletedAccounts/<uid> gets By = the admin and
 //   Reason. An unknown uid is not an error (only the stamp is planned).
+//   Refuses (failed-precondition, details.code 'admin-protected') the
+//   caller's own uid and any uid with /Admins/<uid> === true (M7). An old
+//   account of a merge is deleted on its own (C1; no already-merged refusal).
+//
+// C1: deleting a kept account also deletes the old accounts combined into it
+// (Users/<uid>/MergedFrom): their data in the same plan, then each old Auth
+// user (user-not-found = done; any other failure goes to the stamp's
+// PendingAuth and is retried by a rerun, never thrown), then the person's
+// own Auth user. The result adds `oldAccounts` and `pendingAuth` (counts).
 //
 // Order: database steps -> Storage -> DeletedAccounts stamp -> Auth user. A
 // Storage leftover (PendingStorage) never blocks the Auth deletion.
@@ -30,8 +39,8 @@ import { CallableRequest, HttpsError, onCall } from 'firebase-functions/v2/https
 import { fantasyLogger, rtdbFantasyDb } from './fantasy_adapter';
 import { requireAdmin } from './fantasy_messages';
 import {
-  applyAccountDeletion, DeletionStamp, ObjectStore, planAccountDeletion,
-  readAccountDeletionSnapshot,
+  applyAccountDeletion, DeletionOptions, DeletionStamp, ObjectStore, planAccountDeletion,
+  readAccountDeletionSnapshot, settlePendingAuth,
 } from './lib/account_deletion';
 
 /** How fresh the sign-in must be: the bar Firebase sets for client deletes. */
@@ -46,6 +55,10 @@ export interface DeletionResult {
   handoffs: number;
   storageDeleted: number;
   pendingStorage: number;
+  /** C1: old accounts (combined into this one) deleted with it. */
+  oldAccounts: number;
+  /** C1: old accounts whose Auth user is still there (retried on a rerun). */
+  pendingAuth: number;
 }
 
 /** getStorage().bucket().file(p).delete — a missing object is success. */
@@ -63,10 +76,12 @@ function authErrorCode(err: unknown): string {
 }
 
 /** The plan, the apply, then the Auth user. Never logs or returns the uid. */
-async function deleteAccountFor(uid: string, stamp: DeletionStamp): Promise<DeletionResult> {
+async function deleteAccountFor(
+  uid: string, stamp: DeletionStamp, opts: DeletionOptions = {},
+): Promise<DeletionResult> {
   const db = rtdbFantasyDb(admin.database().ref());
-  const snapshot = await readAccountDeletionSnapshot(db, uid, fantasyLogger);
-  const plan = planAccountDeletion(snapshot, uid, stamp);
+  const snapshot = await readAccountDeletionSnapshot(db, uid, fantasyLogger, opts);
+  const plan = planAccountDeletion(snapshot, uid, stamp, opts);
   if (plan.refused !== undefined) {
     throw new HttpsError('failed-precondition', 'already-merged', {
       code: 'already-merged', keepHint: plan.keepHint,
@@ -78,6 +93,29 @@ async function deleteAccountFor(uid: string, stamp: DeletionStamp): Promise<Dele
       errors: summary.errors.length, deleted: summary.deleted,
     });
     throw new HttpsError('internal', 'deletion-incomplete', { code: 'deletion-incomplete' });
+  }
+  // C1: the old accounts' Auth users first - a failure is recorded in the
+  // stamp's PendingAuth (a rerun tries again), never thrown, so the person's
+  // own deletion is not held up by an account they no longer use.
+  const olds = plan.authUidsToDelete.filter((u) => u !== uid);
+  const stillThere: string[] = [];
+  for (const old of olds) {
+    try {
+      await getAuth().deleteUser(old);
+    } catch (err) {
+      if (authErrorCode(err) !== 'auth/user-not-found') {
+        logger.warn('account deletion: an old Auth user not deleted', { code: authErrorCode(err) });
+        stillThere.push(old);
+      }
+    }
+  }
+  if (olds.length > 0) {
+    try {
+      await settlePendingAuth(db, uid, stillThere);
+    } catch {
+      // The stamp still lists every old account: a rerun retries them all.
+      logger.warn('account deletion: PendingAuth not settled', { pending: olds.length });
+    }
   }
   try {
     await getAuth().deleteUser(uid);
@@ -94,6 +132,8 @@ async function deleteAccountFor(uid: string, stamp: DeletionStamp): Promise<Dele
     storageDeleted: summary.storageDeleted,
     // Stamped => every remaining error is a Storage delete.
     pendingStorage: summary.errors.length,
+    oldAccounts: snapshot.merged.length,
+    pendingAuth: stillThere.length,
   };
 }
 
@@ -161,10 +201,17 @@ export const adminDeleteAccount = onCall(async (request): Promise<DeletionResult
       code: 'invalid-argument',
     });
   }
+  // M7: an admin never deletes themself or another admin here (remove them
+  // from /Admins first). Same answer for both; no uid in it.
+  if (uid === adminUid || (await admin.database().ref(`Admins/${uid}`).get()).val() === true) {
+    throw new HttpsError('failed-precondition', 'admin-protected', { code: 'admin-protected' });
+  }
+  // C1: an old account of a merge is deleted on its own here (the user path
+  // still refuses it and names the kept account).
   return deleteAccountFor(uid, {
     nowMs: Date.now(),
     provider: await providerOf(uid),
     by: adminUid,
     ...(reason.length > 0 ? { reason } : {}),
-  });
+  }, { allowMerged: true });
 });

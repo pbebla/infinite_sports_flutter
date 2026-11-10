@@ -215,11 +215,14 @@
     },
     "Users": {
       ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
-      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
       "$uid": {
         ".read": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())",
-        ".write": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())"
+        ".write": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists()) && !root.child('DeletedAccounts').child($uid).exists()"
       }
+    },
+    "DeletedAccounts": {
+      ".read": false,
+      ".write": false
     },
     "Registrations": {
       ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",

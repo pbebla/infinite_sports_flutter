@@ -521,3 +521,23 @@ describe('rules contract: the walker itself', () => {
     expect(links.some((l) => grants('own', l, bindings))).toBe(false);
   });
 });
+
+describe('rules contract: account deletion (I4, stage-1 rules)', () => {
+  const rules = loadRules('database.rules.stage1.json');
+
+  it("nobody's client writes a deleted account's Users node back - admins included (no ancestor grant)", () => {
+    for (const p of ['Users/someUid', 'Users/someUid/First Name', 'Users/someUid/Information/Age']) {
+      const { links } = writeChain(rules, p);
+      expect(links.map((l) => l.at), p).toEqual(['Users/$uid']);
+      expect(String(links[0].write)).toContain("!root.child('DeletedAccounts').child($uid).exists()");
+    }
+  });
+
+  it('DeletedAccounts is functions-only: no client read or write', () => {
+    expect(rules['rules']['DeletedAccounts']).toEqual({ '.read': false, '.write': false });
+    const { links, bindings } = writeChain(rules, 'DeletedAccounts/someUid');
+    for (const kind of ['admin', 'own', 'ownerCreate'] as const) {
+      expect(links.some((l) => grants(kind, l, bindings)), kind).toBe(false);
+    }
+  });
+});
