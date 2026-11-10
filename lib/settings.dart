@@ -404,7 +404,7 @@ class _SettingsState extends State<Settings> {
               ListTile(title: Text("Delete Account", style: TextStyle(color: Theme.of(context).colorScheme.error,)), minTileHeight: 40, onTap: () {
                 // Account deletion (design D3): the page explains what goes,
                 // re-signs the person in and asks the server to delete.
-                Navigator.push(context, MaterialPageRoute(builder: (context) => buildDeleteAccountPage()));
+                Navigator.push(context, MaterialPageRoute(builder: (_) => buildDeleteAccountPage(context)));
               },),
               const Divider(color: Colors.grey),
             ]

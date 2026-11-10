@@ -34,7 +34,7 @@ Future<void> _pump(
     home: DeleteAccountPage(
       reauth: (_) => reauth(),
       callDelete: callDelete,
-      onDeleted: (_) => (onDeleted ?? () async {})(),
+      onDeleted: onDeleted ?? () async {},
     ),
   ));
 }
@@ -252,6 +252,113 @@ void main() {
     expect(credential.providerId, 'apple.com');
     expect(credential.idToken, 'id-token-1');
     expect(credential.accessToken, isNull);
+  });
+
+  group('page pushed over a home route', () {
+    Future<NavigatorState> pushPage(
+      WidgetTester tester, {
+      required Future<void> Function() callDelete,
+      required Future<void> Function() onDeleted,
+    }) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => DeleteAccountPage(
+                reauth: (_) async {},
+                callDelete: callDelete,
+                onDeleted: onDeleted,
+              ),
+            )),
+            child: const Text('home'),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('home'));
+      await tester.pumpAndSettle();
+      return tester.state<NavigatorState>(find.byType(Navigator));
+    }
+
+    testWidgets('back is blocked while the delete is in flight',
+        (tester) async {
+      final gate = Completer<void>();
+      final navigator = await pushPage(
+        tester,
+        callDelete: () => gate.future,
+        onDeleted: () async {},
+      );
+      await _typeAndTap(tester);
+      await navigator.maybePop();
+      // Past the page-out transition (the spinner never settles).
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(find.byType(DeleteAccountPage), findsOneWidget);
+      gate.complete();
+      await _flush(tester);
+    });
+
+    testWidgets('back works again when idle', (tester) async {
+      final navigator = await pushPage(
+        tester,
+        callDelete: () async {},
+        onDeleted: () async {},
+      );
+      await navigator.maybePop();
+      await tester.pumpAndSettle();
+      expect(find.byType(DeleteAccountPage), findsNothing);
+    });
+
+    testWidgets('page removed mid-call: onDeleted still runs exactly once',
+        (tester) async {
+      final gate = Completer<void>();
+      var deleted = 0;
+      final navigator = await pushPage(
+        tester,
+        callDelete: () => gate.future,
+        onDeleted: () async => deleted++,
+      );
+      await _typeAndTap(tester);
+      navigator.pop(); // forced removal (bypasses PopScope)
+      await tester.pumpAndSettle();
+      expect(find.byType(DeleteAccountPage), findsNothing);
+      gate.complete();
+      await _flush(tester);
+      expect(deleted, 1);
+    });
+  });
+
+  group('reauthProviderFor', () {
+    test('iOS: Apple first, then Google, then password', () {
+      expect(
+          reauthProviderFor(['password', 'apple.com', 'google.com'],
+              isIOS: true, hasEmail: true),
+          'apple.com');
+      expect(
+          reauthProviderFor(['password', 'google.com'],
+              isIOS: true, hasEmail: true),
+          'google.com');
+      expect(reauthProviderFor(['password'], isIOS: true, hasEmail: true),
+          'password');
+    });
+
+    test('Android skips Apple and falls through to the linked provider', () {
+      expect(
+          reauthProviderFor(['apple.com', 'password'],
+              isIOS: false, hasEmail: true),
+          'password');
+      expect(
+          reauthProviderFor(['apple.com', 'google.com'],
+              isIOS: false, hasEmail: true),
+          'google.com');
+      expect(reauthProviderFor(['apple.com'], isIOS: false, hasEmail: true),
+          isNull);
+    });
+
+    test('password needs an email on the account', () {
+      expect(reauthProviderFor(['password'], isIOS: false, hasEmail: false),
+          isNull);
+    });
   });
 
   testWidgets('busy: spinner shows and a second tap does nothing',

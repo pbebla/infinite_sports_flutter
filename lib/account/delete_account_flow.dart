@@ -9,12 +9,19 @@ import 'package:infinite_sports_flutter/account/password_reauth_dialog.dart';
 import 'package:infinite_sports_flutter/account/session_sign_out.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 
-/// The page with its production closures; Settings pushes this.
-Widget buildDeleteAccountPage() => const DeleteAccountPage(
-      reauth: reauthForDeletion,
-      callDelete: callDeleteAccount,
-      onDeleted: onAccountDeleted,
-    );
+/// The page with its production closures; Settings pushes this with its own
+/// [context]. The root navigator and the root ScaffoldMessenger are captured
+/// NOW, so [onAccountDeleted] works even if the page is gone by the time the
+/// server answers.
+Widget buildDeleteAccountPage(BuildContext context) {
+  final navigator = Navigator.of(context, rootNavigator: true);
+  final messenger = ScaffoldMessenger.maybeOf(navigator.context);
+  return DeleteAccountPage(
+    reauth: reauthForDeletion,
+    callDelete: callDeleteAccount,
+    onDeleted: () => onAccountDeleted(navigator, messenger),
+  );
+}
 
 /// Re-signs the current user in with their own provider (Apple, Google or
 /// password; see `FirebaseAuthService.reauthenticateForDeletion`).
@@ -68,12 +75,13 @@ DeleteAccountError deleteAccountErrorFrom(FirebaseFunctionsException e) {
 ///
 /// The snackbar goes through the MaterialApp's root ScaffoldMessenger (the
 /// one above the root navigator, the same one main.dart's sign-in handlers
-/// use), captured before anything is popped. It sits above AuthGate, so it
+/// use), captured by [buildDeleteAccountPage]. It sits above AuthGate, so it
 /// survives the swap and shows on the welcome wall's Scaffold.
-Future<void> onAccountDeleted(BuildContext context) async {
-  final navigator = Navigator.of(context, rootNavigator: true);
-  final messenger = ScaffoldMessenger.maybeOf(navigator.context);
-  navigator.popUntil((r) => r.isFirst);
+Future<void> onAccountDeleted(
+  NavigatorState navigator,
+  ScaffoldMessengerState? messenger,
+) async {
+  if (navigator.mounted) navigator.popUntil((r) => r.isFirst);
   try {
     await signOutAndClearSession();
   } catch (e) {

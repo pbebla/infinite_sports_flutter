@@ -56,8 +56,10 @@ class DeleteAccountPage extends StatefulWidget {
   /// Calls the server. Throws [DeleteAccountError] on a server failure.
   final Future<void> Function() callDelete;
 
-  /// Runs once, after the server deleted the account.
-  final Future<void> Function(BuildContext context) onDeleted;
+  /// Runs once, after the server deleted the account, even if the page is
+  /// no longer on screen by then (so it takes no page context: the account is
+  /// gone server-side and the app must sign out regardless).
+  final Future<void> Function() onDeleted;
 
   const DeleteAccountPage({
     super.key,
@@ -105,9 +107,10 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
         await widget.reauth(context);
         await widget.callDelete();
       }
-      // Stays busy: onDeleted takes the person out of the signed-in app.
-      if (!mounted) return;
-      await widget.onDeleted(context);
+      // Stays busy: onDeleted takes the person out of the signed-in app. No
+      // `mounted` check: the server already deleted the Auth user, so the
+      // sign-out must happen even if this page was removed meanwhile.
+      await widget.onDeleted();
     } on ReauthCancelled {
       if (mounted) setState(() => _busy = false);
     } on ReauthFailed catch (e) {
@@ -147,93 +150,99 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Delete account')),
-      body: SafeArea(
-        // A plain scroll view (not a lazy ListView): the page is short, and
-        // every row, the field and the button included, always exists.
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'This permanently deletes your Infinite Sports account. It '
-                'cannot be undone.',
-                style: text.bodyLarge,
-              ),
-              const SizedBox(height: 20),
-              Text('What is deleted', style: text.titleMedium),
-              const SizedBox(height: 8),
-              for (final line in _deletedLines) _Bullet(line),
-              const SizedBox(height: 16),
-              Text('What is kept', style: text.titleMedium),
-              const SizedBox(height: 8),
-              for (final line in _keptLines) _Bullet(line),
-              const SizedBox(height: 24),
-              Text(
-                'You will be asked to sign in again before the account is '
-                'deleted.',
-                style:
-                    text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                key: const ValueKey('delete_account_confirm_field'),
-                controller: _confirm,
-                enabled: !_busy,
-                autocorrect: false,
-                enableSuggestions: false,
-                textCapitalization: TextCapitalization.characters,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  labelText: 'Type DELETE to confirm',
+    // No back while the delete is in flight: leaving mid-call would let the
+    // server delete the account behind a page nobody is watching.
+    return PopScope(
+      canPop: !_busy,
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Delete account')),
+        body: SafeArea(
+          // A plain scroll view (not a lazy ListView): the page is short, and
+          // every row, the field and the button included, always exists.
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'This permanently deletes your Infinite Sports account. It '
+                  'cannot be undone.',
+                  style: text.bodyLarge,
                 ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                height: 48,
-                child: FilledButton(
-                  key: const ValueKey('delete_account_button'),
-                  style: ButtonStyle(
-                    backgroundColor: WidgetStateProperty.resolveWith((states) =>
-                        states.contains(WidgetState.disabled)
-                            ? scheme.onSurface.withValues(alpha: 0.12)
-                            : scheme.error),
-                    foregroundColor: WidgetStateProperty.resolveWith((states) =>
-                        states.contains(WidgetState.disabled)
-                            ? scheme.onSurface.withValues(alpha: 0.38)
-                            : scheme.onError),
-                  ),
-                  onPressed: (_busy || !_confirmed) ? null : _delete,
-                  child: _busy
-                      ? SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.5,
-                            color: scheme.onSurface,
-                          ),
-                        )
-                      : const Text('Delete my account'),
-                ),
-              ),
-              if (_error != null) ...[
+                const SizedBox(height: 20),
+                Text('What is deleted', style: text.titleMedium),
+                const SizedBox(height: 8),
+                for (final line in _deletedLines) _Bullet(line),
                 const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: scheme.errorContainer,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    _error!,
-                    style: text.bodyMedium
-                        ?.copyWith(color: scheme.onErrorContainer),
+                Text('What is kept', style: text.titleMedium),
+                const SizedBox(height: 8),
+                for (final line in _keptLines) _Bullet(line),
+                const SizedBox(height: 24),
+                Text(
+                  'You will be asked to sign in again before the account is '
+                  'deleted.',
+                  style:
+                      text.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  key: const ValueKey('delete_account_confirm_field'),
+                  controller: _confirm,
+                  enabled: !_busy,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    labelText: 'Type DELETE to confirm',
                   ),
                 ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 48,
+                  child: FilledButton(
+                    key: const ValueKey('delete_account_button'),
+                    style: ButtonStyle(
+                      backgroundColor: WidgetStateProperty.resolveWith(
+                          (states) => states.contains(WidgetState.disabled)
+                              ? scheme.onSurface.withValues(alpha: 0.12)
+                              : scheme.error),
+                      foregroundColor: WidgetStateProperty.resolveWith(
+                          (states) => states.contains(WidgetState.disabled)
+                              ? scheme.onSurface.withValues(alpha: 0.38)
+                              : scheme.onError),
+                    ),
+                    onPressed: (_busy || !_confirmed) ? null : _delete,
+                    child: _busy
+                        ? SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              // M3 disabled foreground, same as the label.
+                              color: scheme.onSurface.withValues(alpha: 0.38),
+                            ),
+                          )
+                        : const Text('Delete my account'),
+                  ),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: scheme.errorContainer,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      _error!,
+                      style: text.bodyMedium
+                          ?.copyWith(color: scheme.onErrorContainer),
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),

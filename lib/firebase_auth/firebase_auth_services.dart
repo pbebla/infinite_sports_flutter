@@ -41,6 +41,22 @@ enum ReauthFailureReason {
   other,
 }
 
+/// Which provider re-signs the person in before deletion: Apple first (iOS
+/// only: Sign in with Apple cannot run on Android, so a linked Apple +
+/// password account falls through to its other provider there), then Google,
+/// then password (only with an email on the account). null = none usable.
+String? reauthProviderFor(
+  Iterable<String> providerIds, {
+  required bool isIOS,
+  required bool hasEmail,
+}) {
+  final ids = providerIds.toSet();
+  if (isIOS && ids.contains('apple.com')) return 'apple.com';
+  if (ids.contains('google.com')) return 'google.com';
+  if (ids.contains('password') && hasEmail) return 'password';
+  return null;
+}
+
 /// The Apple credential for re-signing in before deletion: the identity token
 /// ONLY. The authorization code is single-use and is kept for
 /// `revokeTokenWithAuthorizationCode`, which runs right after the re-auth
@@ -191,13 +207,17 @@ class FirebaseAuthService {
   }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) throw const ReauthFailed();
-    final providers = user.providerData.map((p) => p.providerId).toSet();
+    final provider = reauthProviderFor(
+      user.providerData.map((p) => p.providerId),
+      isIOS: Platform.isIOS,
+      hasEmail: user.email != null,
+    );
     try {
-      if (providers.contains('apple.com')) {
+      if (provider == 'apple.com') {
         await _reauthWithApple(user);
-      } else if (providers.contains('google.com')) {
+      } else if (provider == 'google.com') {
         await _reauthWithGoogle(user);
-      } else if (providers.contains('password') && user.email != null) {
+      } else if (provider == 'password') {
         await _reauthWithPassword(user, askPassword);
       } else {
         throw const ReauthFailed();
@@ -223,8 +243,13 @@ class FirebaseAuthService {
       }
       rethrow;
     }
-    await user
-        .reauthenticateWithCredential(appleReauthCredential(apple.identityToken));
+    await user.reauthenticateWithCredential(
+        appleReauthCredential(apple.identityToken));
+    // The revoke runs here, BEFORE the server call, because it needs the live
+    // re-authenticated session (once the server deletes the Auth user it can
+    // no longer run). On a recent-login-required retry the whole re-auth,
+    // revoke included, runs a second time; a second revoke of an already
+    // revoked token just fails and is logged.
     if (Platform.isIOS) {
       try {
         await FirebaseAuth.instance
