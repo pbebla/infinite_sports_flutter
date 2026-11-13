@@ -275,16 +275,27 @@ class FirebaseAuthService {
     }
   }
 
-  /// Deletes an account created moments ago (the under-13 exit on the About
-  /// You signup step): Apple's token is revoked first (iOS, Apple accounts),
-  /// then the `deleteAccount` callable removes the data and the Auth user.
-  /// The sign-in is only minutes old, so no password or Google re-auth is
-  /// needed. Never throws: every failure is logged, and the caller signs the
-  /// person out regardless.
-  Future<void> deleteFreshAccount() async {
+  /// Deletes a recently created account (the under-13 exit on About You,
+  /// account under 7 days old): Apple's token is revoked first (iOS, Apple
+  /// accounts), then the `deleteAccount` callable removes the data and the Auth user.
+  /// No password or Google re-auth: the server skips the recent-sign-in
+  /// requirement for an incomplete profile created in the last 7 days.
+  /// Never throws: every failure is logged and the result is false; the
+  /// caller signs the person out regardless and tells them when the account
+  /// is still there.
+  ///
+  /// Returns whether the account is gone. A failure whose answer may have
+  /// been lost after the server already deleted it is re-checked with a
+  /// reload (`user-not-found` / `user-disabled` = gone).
+  Future<bool> deleteFreshAccount() async {
+    final User? user;
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
+      user = FirebaseAuth.instance.currentUser;
+    } catch (_) {
+      return false;
+    }
+    if (user == null) return false;
+    try {
       if (Platform.isIOS &&
           user.providerData.any((p) => p.providerId == 'apple.com')) {
         try {
@@ -298,10 +309,23 @@ class FirebaseAuthService {
       await FirebaseFunctions.instance
           .httpsCallable('deleteAccount')
           .call<Object?>();
+      return true;
     } catch (e) {
-      debugPrint('Fresh-account deletion failed: '
-          '${e is FirebaseFunctionsException ? e.code : e.runtimeType}');
+      final details = e is FirebaseFunctionsException ? e.details : null;
+      final detailCode = details is Map ? details['code'] : null;
+      final what = e is FirebaseFunctionsException
+          ? '${e.code}/$detailCode'
+          : '${e.runtimeType}';
+      debugPrint('Fresh-account deletion failed: $what');
     }
+    try {
+      await user.reload();
+    } on FirebaseAuthException catch (e) {
+      return e.code == 'user-not-found' || e.code == 'user-disabled';
+    } catch (_) {
+      // Unknown: treat as still there (the person is told to email us).
+    }
+    return false;
   }
 
   /// A new Apple ID credential (the Apple sheet). Throws [ReauthCancelled]
