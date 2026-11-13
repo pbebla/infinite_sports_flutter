@@ -192,9 +192,19 @@ class NewsPlayerCardView extends StatelessWidget {
           ),
           if (onOpenPlayer != null) ...[
             const SizedBox(height: 10),
-            FilledButton.tonal(
+            // The hub accent fill (gold on dark, brand red on light): the
+            // grey tonal face read as disabled (release report #9).
+            FilledButton(
               key: ValueKey('news_view_player_${card.name}'),
               onPressed: () => onOpenPlayer!(card.name),
+              style: FilledButton.styleFrom(
+                backgroundColor: fantasyAccent(context),
+                foregroundColor:
+                    Theme.of(context).brightness == Brightness.dark
+                        ? Colors.black
+                        : Theme.of(context).colorScheme.onPrimary,
+                textStyle: const TextStyle(fontWeight: FontWeight.w700),
+              ),
               child: const Text('View player'),
             ),
           ],
