@@ -24,6 +24,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart'
     show fantasyAccent;
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_page.dart';
+import 'package:infinite_sports_flutter/fantasy/profile/profile_hero.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -1008,6 +1009,45 @@ void main() {
     expect(style().statusBarBrightness, Brightness.light);
     expectStatusBarOnly(style());
   });
+
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    testWidgets(
+        '${mode.name} at 360 px: once content reaches the back/star row a '
+        'solid bar backs both buttons (release report #3)', (tester) async {
+      await pumpPage(tester, size: const Size(360, 600), themeMode: mode);
+      await emitAll(tester);
+      final bar = key('profile_pinned_bar');
+      double opacity() => tester
+          .widget<AnimatedOpacity>(
+              find.descendant(of: bar, matching: find.byType(AnimatedOpacity)))
+          .opacity;
+      expect(opacity(), 0, reason: 'over the hero the buttons float');
+
+      // Scroll until the hero's bottom edge (and the stat strip under it)
+      // sits inside the button row, but has not reached the status bar.
+      final heroBottom = tester.getBottomLeft(find.byType(FantasyProfileHero)).dy;
+      final starBottom = tester.getBottomLeft(key('profile_star')).dy;
+      await tester.drag(
+          key('profile_scroll'), Offset(0, -(heroBottom - starBottom + 20)));
+      await tester.pumpAndSettle();
+      expect(opacity(), 1);
+
+      // The bar spans the full width and reaches below both buttons, in the
+      // theme's surface colour (no hard-coded fill).
+      final barRect = tester.getRect(bar);
+      expect(barRect.left, 0);
+      expect(barRect.width, 360);
+      expect(barRect.bottom,
+          greaterThanOrEqualTo(tester.getRect(key('profile_star')).bottom));
+      expect(barRect.bottom,
+          greaterThanOrEqualTo(tester.getRect(key('profile_back')).bottom));
+      final scheme = Theme.of(tester.element(bar)).colorScheme;
+      final fill = tester.widget<DecoratedBox>(find.descendant(
+          of: bar, matching: find.byKey(const ValueKey('profile_bar_fill'))));
+      expect((fill.decoration as BoxDecoration).color, scheme.surface);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('no underlined text anywhere on the profile (house rule)',
       (tester) async {

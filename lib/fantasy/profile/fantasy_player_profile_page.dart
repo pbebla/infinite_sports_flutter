@@ -214,13 +214,19 @@ SystemUiOverlayStyle profileStatusBarStyle({required bool lightIcons}) =>
 double _heroHeightFor(BuildContext context) =>
     (MediaQuery.sizeOf(context).height * 0.42).clamp(260.0, 380.0);
 
+/// Height of the row the floating back/star buttons sit in, below the status
+/// bar: 6 px gap + 48 px IconButton + 6 px gap.
+const double _kButtonRowHeight = 60;
+
 class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(length: 4, vsync: this);
   int _tabIndex = 0;
 
-  /// The page scroll; [_pastHero] flips once the hero has scrolled out from
-  /// under the status bar (status-bar icons + backing follow).
+  /// The page scroll; [_pastHero] flips once the hero's bottom edge scrolls
+  /// up into the back/star row — the solid pinned bar then backs the
+  /// status bar and both buttons, so content never shows under them
+  /// (release report #3), and the status-bar icons follow the theme.
   final ScrollController _scroll = ScrollController();
   bool _pastHero = false;
 
@@ -349,7 +355,9 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
     _scroll.addListener(() {
       if (!mounted || !_scroll.hasClients) return;
       final past = _scroll.offset >
-          _heroHeightFor(context) - MediaQuery.paddingOf(context).top - 4;
+          _heroHeightFor(context) -
+              MediaQuery.paddingOf(context).top -
+              _kButtonRowHeight;
       if (past != _pastHero) setState(() => _pastHero = past);
     });
     _seedFromSession();
@@ -594,21 +602,36 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
                 child: body,
               ),
             ),
-            // Status-bar backing once the hero has scrolled away, so content
-            // never runs under the clock/battery icons.
+            // Solid pinned bar once the hero has scrolled up to the button
+            // row: backs the status bar AND the back/star buttons, so the
+            // stat strip / tabs never run under the clock or the buttons
+            // (release report #3 — the star used to cover "Owned").
             Positioned(
+              key: const ValueKey('profile_pinned_bar'),
               top: 0,
               left: 0,
               right: 0,
-              height: top,
+              height: top + _kButtonRowHeight,
               child: IgnorePointer(
                 child: AnimatedOpacity(
                   opacity: _pastHero ? 1 : 0,
                   duration: reduceMotion
                       ? Duration.zero
                       : const Duration(milliseconds: 150),
-                  child:
-                      ColoredBox(color: Theme.of(context).colorScheme.surface),
+                  child: DecoratedBox(
+                    key: const ValueKey('profile_bar_fill'),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      border: Border(
+                        bottom: BorderSide(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .outlineVariant
+                              .withValues(alpha: 0.5),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
