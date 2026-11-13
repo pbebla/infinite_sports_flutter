@@ -10,7 +10,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:infinite_sports_flutter/insiders/insider_dashboard_page.dart';
+import 'package:infinite_sports_flutter/misc/share_card_service.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
+
+import 'helpers/share_capture.dart';
 
 Insider _activeInsider({
   int tier = 2,
@@ -60,7 +63,7 @@ Future<void> _pumpDashboard(
   List<InsiderReferral> referrals = const [],
   Future<void> Function(bool)? setLeaderboardOptIn,
   Future<void> Function(bool)? setProfileBadgeOptIn,
-  void Function(String)? shareInvite,
+  ShareSheet? shareInvite,
 }) async {
   await tester.pumpWidget(MaterialApp(
     home: InsiderDashboardPage(
@@ -101,19 +104,23 @@ void main() {
     expect(find.textContaining('copied'), findsOneWidget);
   });
 
-  testWidgets('tapping Share calls shareInvite with the exact invite message',
-      (tester) async {
-    String? captured;
+  testWidgets(
+      'tapping Share calls shareInvite with the exact invite message, '
+      'anchored to the Share button (iPad popover origin)', (tester) async {
+    final recorder = ShareSheetRecorder();
     await _pumpDashboard(
       tester,
       insider: _activeInsider(code: 'ZA4K9P2'),
-      shareInvite: (msg) => captured = msg,
+      shareInvite: recorder.call,
     );
 
-    await tester.tap(find.byKey(const ValueKey('insider_dashboard_share_button')));
+    const shareButton = ValueKey('insider_dashboard_share_button');
+    await tester.tap(find.byKey(shareButton));
     await tester.pump();
 
-    expect(captured, inviteMessage('ZA4K9P2'));
+    expect(recorder.calls.single.text, inviteMessage('ZA4K9P2'));
+    expectShareAnchoredTo(
+        tester, recorder.calls.single, find.byKey(shareButton));
   });
 
   testWidgets('empty referrals shows the "share your code" empty state',

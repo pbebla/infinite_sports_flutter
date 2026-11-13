@@ -1,11 +1,38 @@
 {
+  "database": {
+    "rules": "database.rules.stage1.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "hosting": {
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "cleanUrls": true,
+    "trailingSlash": false
+  },
   "functions": {
     "source": "functions",
-    "predeploy": ["npm --prefix functions run build"]
+    "predeploy": [
+      "npm --prefix functions run build"
+    ]
   },
   "emulators": {
-    "functions": { "port": 5001 },
-    "database": { "port": 9000 },
-    "ui": { "enabled": false }
+    "functions": {
+      "port": 5001
+    },
+    "database": {
+      "port": 9000
+    },
+    "ui": {
+      "enabled": false
+    }
   }
 }

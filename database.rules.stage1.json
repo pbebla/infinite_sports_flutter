@@ -1,0 +1,581 @@
+{
+  "rules": {
+    "Current League": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+    },
+    "Futsal Season": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+    },
+    "Basketball Season": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+    },
+    "Flag Football Season": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+    },
+    "Logo Urls": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+    },
+    "Down": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+    },
+    "NotifPopUp": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+    },
+    "Notifications": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+    },
+    "AppConfig": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+    },
+    "Map": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+    },
+    "Categories": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+    },
+    "Trophies": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+    },
+    "Futsal": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$season": {
+        "Date": {
+          "$date": {
+            "$game": {
+              "team1vote": {
+                "$uid": {
+                  ".write": "auth != null && auth.uid == $uid",
+                  ".validate": "newData.val() == 1"
+                }
+              },
+              "team2vote": {
+                "$uid": {
+                  ".write": "auth != null && auth.uid == $uid",
+                  ".validate": "newData.val() == 1"
+                }
+              }
+            }
+          }
+        },
+        "Predictions": {
+          "$match": {
+            "$uid": {
+              ".write": "auth != null && auth.uid == $uid"
+            }
+          }
+        }
+      }
+    },
+    "Basketball": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$season": {
+        "Date": {
+          "$date": {
+            "$game": {
+              "team1vote": {
+                "$uid": {
+                  ".write": "auth != null && auth.uid == $uid",
+                  ".validate": "newData.val() == 1"
+                }
+              },
+              "team2vote": {
+                "$uid": {
+                  ".write": "auth != null && auth.uid == $uid",
+                  ".validate": "newData.val() == 1"
+                }
+              }
+            }
+          }
+        },
+        "Predictions": {
+          "$match": {
+            "$uid": {
+              ".write": "auth != null && auth.uid == $uid"
+            }
+          }
+        }
+      }
+    },
+    "Flag Football": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$season": {
+        "Date": {
+          "$date": {
+            "$game": {
+              "team1vote": {
+                "$uid": {
+                  ".write": "auth != null && auth.uid == $uid",
+                  ".validate": "newData.val() == 1"
+                }
+              },
+              "team2vote": {
+                "$uid": {
+                  ".write": "auth != null && auth.uid == $uid",
+                  ".validate": "newData.val() == 1"
+                }
+              }
+            }
+          }
+        },
+        "Predictions": {
+          "$match": {
+            "$uid": {
+              ".write": "auth != null && auth.uid == $uid"
+            }
+          }
+        }
+      }
+    },
+    "AFC San Jose": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "Seasons": {
+        "$season": {
+          "Date": {
+            "$date": {
+              "$game": {
+                "team1vote": {
+                  "$uid": {
+                    ".write": "auth != null && auth.uid == $uid",
+                    ".validate": "newData.val() == 1"
+                  }
+                },
+                "team2vote": {
+                  "$uid": {
+                    ".write": "auth != null && auth.uid == $uid",
+                    ".validate": "newData.val() == 1"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Tournaments": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$tid": {
+        "Predictions": {
+          "$match": {
+            "$uid": {
+              ".write": "auth != null && auth.uid == $uid"
+            }
+          }
+        }
+      }
+    },
+    "Events": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$event": {
+        "Attendees": {
+          "$uid": {
+            ".write": "auth != null && auth.uid == $uid"
+          }
+        }
+      }
+    },
+    "EventsV2": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$event": {
+        "Attendees": {
+          "$uid": {
+            ".write": "auth != null && auth.uid == $uid"
+          }
+        },
+        "Reminders": {
+          "$uid": {
+            ".write": "auth != null && auth.uid == $uid"
+          }
+        }
+      }
+    },
+    "PublicProfiles": {
+      ".read": true
+    },
+    "RegistrationsPublic": {
+      ".read": true
+    },
+    "Users": {
+      ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$uid": {
+        ".read": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())",
+        ".write": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists()) && !root.child('DeletedAccounts').child($uid).exists()"
+      }
+    },
+    "DeletedAccounts": {
+      ".read": false,
+      ".write": false
+    },
+    "Registrations": {
+      ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$regId": {
+        "Config": {
+          ".read": true
+        },
+        "Form": {
+          ".read": true
+        },
+        "Promo": {
+          ".read": true
+        },
+        "Submissions": {
+          "$uid": {
+            ".read": "auth != null && auth.uid == $uid",
+            ".write": "auth != null && auth.uid == $uid && root.child('Registrations').child($regId).child('Config').child('Status').val() == 'open'",
+            ".validate": "root.child('Admins').child(auth.uid).exists() || !newData.child('Paid').exists() || newData.child('Paid').val() == false || data.child('Paid').val() == true || root.child('Registrations').child($regId).child('Teams').child(newData.child('TeamId').val()).child('CodeWaivesPayment').val() == true"
+          }
+        },
+        "Teams": {
+          "$tid": {
+            ".read": "auth != null && data.child('CaptainUid').val() == auth.uid",
+            ".write": "auth != null && !data.exists() && newData.child('CaptainUid').val() == auth.uid",
+            "Members": {
+              "$uid": {
+                ".read": "auth != null && auth.uid == $uid"
+              }
+            }
+          }
+        }
+      }
+    },
+    "Sign Ups": {
+      ".read": true,
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$league": {
+        "$season": {
+          "NotPaid": {
+            "$uid": {
+              ".write": "auth != null && auth.uid == $uid",
+              ".validate": "newData.isString()"
+            }
+          },
+          "Paid": {
+            "$uid": {
+              ".write": "auth != null && auth.uid == $uid",
+              ".validate": "newData.isString()"
+            }
+          },
+          "Comments": {
+            "$name": {
+              ".write": "auth != null && !data.exists()",
+              ".validate": "newData.isString() && newData.val().beginsWith(auth.uid + ':')"
+            }
+          }
+        }
+      }
+    },
+    "FormTemplates": {
+      ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+    },
+    "Support": {
+      "Counter": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        ".validate": "newData.isNumber() && ((!data.exists() && newData.val() == 1) || newData.val() == data.val() + 1)"
+      },
+      "Tickets": {
+        ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+        ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+        "$n": {
+          ".read": "auth != null && data.child('Uid').val() == auth.uid",
+          ".write": "auth != null && !data.exists() && newData.child('Uid').val() == auth.uid",
+          "Thread": {
+            "$mid": {
+              ".write": "auth != null && !data.exists() && root.child('Support').child('Tickets').child($n).child('Uid').val() == auth.uid && newData.child('From').val() == 'user'"
+            }
+          }
+        }
+      },
+      "UserTickets": {
+        "$uid": {
+          ".read": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())",
+          ".write": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())"
+        }
+      },
+      "MailLog": {
+        ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+        ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+      }
+    },
+    "Insiders": {
+      ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": "auth != null && auth.uid == $uid && (!data.exists() || data.child('Status').val() == 'declined') && newData.child('Status').val() == 'pending'",
+        "PublicLeaderboardOptIn": {
+          ".write": "auth != null && auth.uid == $uid",
+          ".validate": "newData.isBoolean()"
+        },
+        "ProfileBadgeOptIn": {
+          ".write": "auth != null && auth.uid == $uid",
+          ".validate": "newData.isBoolean()"
+        }
+      }
+    },
+    "Referrals": {
+      ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+    },
+    "InsiderCodes": {
+      ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+        ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128 && $code.matches(/^[A-Z0-9]{4,15}$/)"
+      }
+    },
+    "InsiderAudit": {
+      ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$id": {
+        ".write": "auth != null && root.child('Admins').child(auth.uid).exists() && !data.exists() && newData.exists()",
+        ".validate": "newData.child('AdminUid').val() === auth.uid && newData.child('Target').isString() && newData.child('Field').isString() && newData.child('Reason').isString() && newData.child('At').isNumber()"
+      }
+    },
+    "ReferredUsers": {
+      ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid"
+      }
+    },
+    "Campaigns": {
+      ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$id": {
+        ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+      }
+    },
+    "NotificationsMeta": {
+      ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+    },
+    "CategorySuggestions": {
+      ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$id": {
+        ".write": "auth != null && !data.exists()"
+      }
+    },
+    "Admins": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid"
+      }
+    },
+    "Fantasy": {
+      "BadgeCatalog": {
+        ".read": true,
+        ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+      },
+      "Templates": {
+        "Access": {
+          ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+          ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+        }
+      },
+      "$sport": {
+        "$season": {
+          "Config": {
+            ".read": true,
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+          },
+          "Players": {
+            ".read": true,
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+          },
+          "Squads": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$uid": {
+              ".read": "auth != null && auth.uid == $uid",
+              ".write": "auth != null && auth.uid == $uid && (newData.exists() || (!root.child('Fantasy/' + $sport + '/' + $season + '/GwState').exists() || root.child('Fantasy/' + $sport + '/' + $season + '/GwState/status').val() !== 'open' || now < root.child('Fantasy/' + $sport + '/' + $season + '/GwState/lockAtUtc').val() || (root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverride').val() === 'open' && (!root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverrideUntil').isNumber() || now < root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverrideUntil').val())))) && (root.child('Fantasy/' + $sport + '/' + $season + '/Config/Access/Mode').val() !== 'pass' || root.child('Fantasy/' + $sport + '/' + $season + '/Access/' + $uid + '/Status').val() === 'active')",
+              ".validate": "newData.hasChildren(['picks', 'captainId', 'viceId']) && newData.child('captainId').isString() && newData.child('captainId').val().length <= 60 && newData.child('viceId').isString() && newData.child('viceId').val().length <= 60 && (!root.child('Fantasy/' + $sport + '/' + $season + '/GwState').exists() || (root.child('Fantasy/' + $sport + '/' + $season + '/GwState/status').val() === 'open' && now < root.child('Fantasy/' + $sport + '/' + $season + '/GwState/lockAtUtc').val()) || (root.child('Fantasy/' + $sport + '/' + $season + '/GwState/status').val() !== 'open' && now >= root.child('Fantasy/' + $sport + '/' + $season + '/GwState/lockAtUtc').val() + 86400000) || (root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverride').val() === 'open' && (!root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverrideUntil').isNumber() || now < root.child('Fantasy/' + $sport + '/' + $season + '/Config/lockOverrideUntil').val())))",
+              "realizedTenths": {
+                ".validate": false
+              },
+              "picks": {
+                ".validate": "newData.hasChildren()",
+                "$i": {
+                  ".validate": "$i.matches(/^[0-6]$/) && newData.hasChildren(['playerId', 'position', 'priceTenths', 'bench']) && newData.child('playerId').isString() && newData.child('playerId').val().length > 0 && newData.child('playerId').val().length <= 60 && newData.child('position').isString() && newData.child('position').val().matches(/^(GK|DEF|ATT)$/) && newData.child('priceTenths').isNumber() && newData.child('bench').isBoolean()"
+                }
+              },
+              "chip": {
+                ".validate": "newData.isString() && newData.val().matches(/^(tripleCaptain|benchBoost|wildcard|freeHit)$/)"
+              }
+            }
+          },
+          "TransferState": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$uid": {
+              ".read": "auth != null && auth.uid == $uid"
+            }
+          },
+          "Baselines": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$uid": {
+              ".read": "auth != null && auth.uid == $uid"
+            }
+          },
+          "SquadAlerts": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$uid": {
+              ".read": "auth != null && auth.uid == $uid"
+            }
+          },
+          "PendingPositionChanges": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()"
+          },
+          "Managers": {
+            ".read": true,
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$uid": {
+              ".write": "auth != null && auth.uid == $uid && (root.child('Fantasy/' + $sport + '/' + $season + '/Config/Access/Mode').val() !== 'pass' || root.child('Fantasy/' + $sport + '/' + $season + '/Access/' + $uid + '/Status').val() === 'active')",
+              ".validate": "newData.child('TeamName').isString() && newData.child('TeamName').val().length >= 3 && newData.child('TeamName').val().length <= 30 && (root.child('Admins').child(auth.uid).exists() || !newData.child('NameFlagged').exists() || newData.child('NameFlagged').val() == false && (!data.child('NameFlagged').exists() || data.child('NameFlagged').val() != true || newData.child('TeamName').val() != data.child('TeamName').val()))"
+            }
+          },
+          "Access": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$uid": {
+              ".read": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())"
+            }
+          },
+          "AccessClaims": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$uid": {
+              ".read": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())",
+              "$key": {
+                ".write": "auth != null && auth.uid == $uid && !data.exists() && newData.exists()",
+                ".validate": "newData.hasChildren(['Method', 'AmountDollars', 'At']) && newData.child('Method').isString() && newData.child('Method').val().matches(/^(venmo|zelle)$/) && newData.child('AmountDollars').isNumber() && newData.child('AmountDollars').val() >= 0 && newData.child('At').isNumber() && (!newData.hasChild('Note') || (newData.child('Note').isString() && newData.child('Note').val().length <= 120)) && (root.child('Admins').child(auth.uid).exists() || (!newData.hasChild('Resolved') && !newData.hasChild('ResolvedAt') && !newData.hasChild('ResolvedBy') && !newData.hasChild('Reason') && !newData.hasChild('Notified')))"
+              }
+            }
+          },
+          "PublishedPicks": {
+            ".read": true
+          },
+          "LockedPositions": {
+            ".read": true
+          },
+          "LockedWeeks": {
+            ".read": "auth != null"
+          },
+          "History": {
+            ".read": true
+          },
+          "Leaderboards": {
+            ".read": true
+          },
+          "PlayerTotals": {
+            ".read": true
+          },
+          "PlayerWeeks": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()"
+          },
+          "PlayerWeekStats": {
+            ".read": true
+          },
+          "Live": {
+            ".read": "auth != null"
+          },
+          "LiveBase": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()"
+          },
+          "PriceChanges": {
+            ".read": true,
+            "$gw": {
+              "Manual": {
+                ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+                ".validate": "newData.val() === true"
+              }
+            }
+          },
+          "Voided": {
+            ".read": true,
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$gw": {
+              ".validate": "newData.val() === true"
+            }
+          },
+          "PriceHistory": {
+            ".read": true
+          },
+          "TransferCosts": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()"
+          },
+          "Watchlists": {
+            "$uid": {
+              ".read": "auth != null && auth.uid === $uid",
+              ".write": "auth != null && auth.uid === $uid",
+              ".validate": "newData.hasChildren()",
+              "$name": {
+                ".validate": "newData.val() === true && $name.length <= 60"
+              }
+            }
+          },
+          "MiniLeagues": {
+            ".read": true,
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "$id": {
+              ".write": "auth != null && !data.exists() && newData.child('Owner').val() == auth.uid",
+              ".validate": "newData.child('Name').isString() && newData.child('Name').val().length >= 3 && newData.child('Name').val().length <= 30 && newData.child('Code').isString() && newData.child('Code').val().length == 6 && newData.child('Code').val().matches(/^[A-Z0-9]+$/) && newData.child('Owner').isString() && newData.hasChild('Members')",
+              "Members": {
+                "$uid": {
+                  ".write": "auth != null && auth.uid == $uid",
+                  ".validate": "newData.val() == true"
+                }
+              }
+            }
+          },
+          "News": {
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            "Published": {
+              ".read": true
+            },
+            "Drafts": {
+              ".read": "auth != null && root.child('Admins').child(auth.uid).exists()"
+            }
+          },
+          "ScheduledPushes": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+          },
+          "DreamTeam": {
+            ".read": true,
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+          },
+          "Badges": {
+            ".read": true,
+            ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+          },
+          "BadgePushClaims": {
+            ".read": false,
+            ".write": false
+          },
+          "Analytics": {
+            ".read": "auth != null && root.child('Admins').child(auth.uid).exists()"
+          }
+        }
+      }
+    },
+    ".read": true
+  }
+}

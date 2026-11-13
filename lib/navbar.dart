@@ -6,21 +6,21 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:infinite_sports_flutter/account/session_sign_out.dart';
 import 'package:infinite_sports_flutter/insiders/insiders_info_page.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
-import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
 import 'package:infinite_sports_flutter/playerpage.dart';
-import 'package:infinite_sports_flutter/profile/profile_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/settings.dart';
 import 'package:infinite_sports_flutter/signup.dart';
+import 'package:infinite_sports_flutter/support/support_form_page.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:provider/provider.dart';
 
@@ -324,6 +324,16 @@ class _NavBarState extends State<NavBar> {
             } 
           ),
           ListTile(
+            leading: const Icon(Icons.support_agent, color: Colors.white),
+            title: const Text("Help & Feedback", style: TextStyle(fontWeight: FontWeight.bold),),
+            textColor: Colors.white,
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(builder:(context) {
+                return const SupportFormPage(fromScreen: 'Drawer');
+              },));
+            },
+          ),
+          ListTile(
             leading: const ImageIcon(AssetImage("assets/settings.png"), color: Colors.white,),
             title: const Text("Settings", style: TextStyle(fontWeight: FontWeight.bold),),
             textColor: Colors.white,
@@ -375,12 +385,10 @@ class _NavBarState extends State<NavBar> {
                             // the instant `auth.signOut()` flips
                             // authStateChanges().
                             Navigator.pop(dialogCtx);
-                            print(FirebaseAuth.instance.currentUser);
-                            await auth.signOut();
-                            print("Signed out");
-                            ProfilePage.clearCareerCache();
-                            LeagueService.clearRostersSnapshotCache();
-                            signedIn = false;
+                            // The one shared sign-out (also used by the
+                            // "accounts were combined" notice): Firebase +
+                            // Google, every session cache, signedIn = false.
+                            await signOutAndClearSession();
                             if (mounted) setState(() {});
                           },
                           child: const Text("Yes")

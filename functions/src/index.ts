@@ -14,6 +14,9 @@ import { computeLeaderboardV2, FinalMatch, PredQuestion, QAnswer }
 import { readUserName } from './lib/user_names';
 import { makeLeagueTriggers } from './league_watch';
 import { makeInsiderVerifyTrigger } from './insiders_verify';
+import { makeFantasyFinalizeTrigger } from './fantasy_finalize';
+import { makeFantasyLiveTrigger } from './fantasy_live';
+import { makeFantasyRosterTrigger } from './fantasy_roster';
 
 admin.initializeApp();
 
@@ -309,6 +312,16 @@ export { onCampaignCreated, processScheduledCampaigns } from './campaign_watch';
 
 export { onSubmissionPaidChange } from './insiders_watch';
 
+// ---- DB security lockdown Phase A: public mirrors (Task A2) ----
+
+export {
+  onRegistrationConfigWritten, onSubmissionWritten, onUserWritten,
+} from './public_mirrors_watch';
+
+// ---- DB security lockdown Phase A: registration lookup callables (A3) ----
+
+export { checkFirstTimer, resolveJoinCode } from './registration_lookups';
+
 // ---- Infinite Insiders P3: daily tier maintenance + stat-verified watcher
 // (Task X2) ----
 
@@ -323,6 +336,20 @@ export const insiderVerifyFutsal = makeInsiderVerifyTrigger('Futsal');
 export const insiderVerifyBasketball = makeInsiderVerifyTrigger('Basketball');
 export const insiderVerifyFlagFootball = makeInsiderVerifyTrigger('Flag Football');
 
+// ---- Support tickets (zaya-support): emails, admin notifications, joke
+// generator ----
+
+export {
+  onTicketCreated, onTicketThreadMessage, onTicketStatusChanged,
+} from './support_watch';
+export { generateTicketJoke } from './support_joke';
+
+// ---- Duplicate-account merge (plan 2026-11-06): the one email to each old
+// address, sent once per MergeNotices/<oldUid> node (written by the merge
+// tool's --notify) ----
+
+export { onMergeNoticeCreated } from './merge_notice_watch';
+
 // ---- League Experience P3: league watcher + prediction scoring ----
 
 /** Grouped export -> deploys as leagueFutsal-onTeam1Score, ... (P4 landed:
@@ -330,3 +357,92 @@ export const insiderVerifyFlagFootball = makeInsiderVerifyTrigger('Flag Football
 export const leagueFutsal = makeLeagueTriggers('Futsal');
 export const leagueBasketball = makeLeagueTriggers('Basketball');
 export const leagueFlagFootball = makeLeagueTriggers('Flag Football');
+
+// ---- Infinite Fantasy P4 (B–D): gameweek lifecycle + lock snapshots,
+// match-day finalization, Monday repricing ----
+
+export { fantasyLifecycleSweep, fantasyMondayReprice } from './fantasy_lifecycle';
+
+/** Grouped export -> deploys as fantasyFutsal-onGameWritten (finalize) and
+ *  fantasyFutsal-onGameLive (the live gameweek, live design 2026-11-03),
+ *  ... (makeLeagueTriggers convention: sport baked into the path). Both
+ *  handlers no-op for seasons without a Fantasy/<sport>/<season>/Config;
+ *  onGameLive returns with zero reads unless a scoring key of a game in
+ *  play changed. onLineupsWritten (fantasyFutsal-onLineupsWritten, ...: a
+ *  player added to a team mid-season joins the market, Task 7 of the season
+ *  setup plan) returns with zero reads unless a roster's player keys or UIDs
+ *  changed. */
+export const fantasyFutsal = {
+  ...makeFantasyFinalizeTrigger('Futsal'),
+  ...makeFantasyLiveTrigger('Futsal'),
+  ...makeFantasyRosterTrigger('Futsal'),
+};
+export const fantasyBasketball = {
+  ...makeFantasyFinalizeTrigger('Basketball'),
+  ...makeFantasyLiveTrigger('Basketball'),
+  ...makeFantasyRosterTrigger('Basketball'),
+};
+export const fantasyFlagFootball = {
+  ...makeFantasyFinalizeTrigger('Flag Football'),
+  ...makeFantasyLiveTrigger('Flag Football'),
+  ...makeFantasyRosterTrigger('Flag Football'),
+};
+
+// ---- Infinite Fantasy P4 (E): transfer accounting on squad saves ----
+
+export { onFantasySquadWritten } from './fantasy_transfers';
+
+// ---- Infinite Fantasy P4 (F): admin send-now reminder push ----
+
+export { sendFantasyReminderNow } from './fantasy_push';
+
+// ---- Infinite Fantasy (spec §15): owner void-a-week re-settle ----
+
+export { onFantasyVoidWritten } from './fantasy_void';
+
+// ---- Infinite Fantasy (season setup + schedule plan 2026-11-05): an open
+// week's GwState follows the owner's deadline / skip edits at once (the
+// sweep alone rewinds a called-off week) ----
+
+export { onFantasyConfigWritten } from './fantasy_schedule';
+
+// ---- Infinite Fantasy (season setup + schedule plan 2026-11-05, Task 6): the
+// Manager previews and starts a season — carry-over prices and positions, the
+// season pass pre-filled ----
+
+export { previewFantasySeason, startFantasySeason } from './fantasy_season';
+
+// ---- Infinite Fantasy (spec §3): holder protection on position changes ----
+
+export { onFantasyPositionWritten } from './fantasy_positions';
+
+// ---- Infinite Fantasy (spec 2026-10-28 §4.5): news push on publish ----
+
+export { onFantasyNewsPublished } from './fantasy_news';
+
+// ---- Infinite Fantasy (spec 2026-10-30 §4): achievement badge push on
+// award creation (auto + manual, once-only) ----
+
+export { onFantasyBadgeAwarded } from './fantasy_badges';
+
+// ---- Infinite Fantasy (spec 2026-10-28 §3, §4.5): Manager AI copy +
+// Message managers ----
+
+export { sendFantasyMessage, writeFantasyCopy } from './fantasy_messages';
+
+// ---- Infinite Fantasy round 3 (spec 2026-10-29 §3.4): admin-only email +
+// sign-in methods for a manager's Manager-app fantasy profile ----
+
+export { getUserContact } from './user_contact';
+
+// Infinite Fantasy paid access (spec 2026-11-01): the Checkout link + the
+// admin template test, the claim / status / registration-grant triggers.
+// stripeWebhook (above) carries the card activation + refund revoke.
+export {
+  createFantasyCheckoutSession, onFantasyAccessClaimCreated, onFantasyAccessStatusWritten,
+  onRegistrationPaidGrantFantasy, sendFantasyAccessTest,
+} from './fantasy_access';
+
+// Account deletion (plan 2026-11-09-account-deletion): a fan deletes their
+// own account (fresh sign-in required); an admin deletes on request.
+export { adminDeleteAccount, deleteAccount } from './account_deletion';

@@ -1,5 +1,7 @@
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:infinite_sports_flutter/misc/stream_resilience.dart';
 import 'package:infinite_sports_flutter/registration/promo_engine.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 
@@ -11,19 +13,18 @@ import 'package:infinite_sports_flutter/registration/registration_models.dart';
 /// markPaid.
 class RegistrationService {
   /// {regId: config} for every registration whose Status is "open".
+  ///
+  /// DB lockdown B2: reads the RegistrationsPublic mirror (each child is
+  /// the registration's Config node verbatim, maintained by the
+  /// public-mirror trigger) instead of the Registrations root — that root
+  /// also holds Submissions, which go owner-only when the rules flip, and
+  /// RTDB denies a whole-node read unless the WHOLE subtree is readable.
   static Future<Map<String, RegistrationConfig>> getOpenRegistrations() async {
     try {
       final snap =
-          (await FirebaseDatabase.instance.ref('Registrations').once())
+          (await FirebaseDatabase.instance.ref('RegistrationsPublic').once())
               .snapshot;
-      if (snap.value is! Map) return {};
-      final out = <String, RegistrationConfig>{};
-      (snap.value as Map).forEach((regId, value) {
-        if (value is! Map) return;
-        final config = RegistrationConfig.fromFirebase(value['Config']);
-        if (config != null && config.isOpen) out[regId.toString()] = config;
-      });
-      return out;
+      return openRegistrationsFromNode(snap.value);
     } catch (_) {
       return {};
     }
@@ -33,19 +34,18 @@ class RegistrationService {
   /// immediately from RTDB's local cache (if any) then on every change, so
   /// registrations opening/closing appear on the entry page without a
   /// refresh. Same stream style as TournamentService.watchMatches.
+  /// Lockdown B2: rides the RegistrationsPublic mirror (see
+  /// [getOpenRegistrations]).
   static Stream<Map<String, RegistrationConfig>> watchOpenRegistrations() {
-    return FirebaseDatabase.instance.ref('Registrations').onValue.map((event) {
-      final value = event.snapshot.value;
-      if (value is! Map) return <String, RegistrationConfig>{};
-      final out = <String, RegistrationConfig>{};
-      value.forEach((regId, node) {
-        if (node is! Map) return;
-        try {
-          final config = RegistrationConfig.fromFirebase(node['Config']);
-          if (config != null && config.isOpen) out[regId.toString()] = config;
-        } catch (_) {}
-      });
-      return out;
+    return FirebaseDatabase.instance
+        .ref('RegistrationsPublic')
+        .onValue
+        .map((event) {
+      try {
+        return openRegistrationsFromNode(event.snapshot.value);
+      } catch (_) {
+        return <String, RegistrationConfig>{};
+      }
     });
   }
 
@@ -152,55 +152,54 @@ class RegistrationService {
     }
   }
 
-  /// Every prior submission's Answers map, across EVERY registration — the
-  /// data source for the first-timer email/phone match (promo_engine.dart's
-  /// [firstTimer], spec §4). Deliberately scoped to submissions only (not a
-  /// separate scan of every Users/{uid} account) per this task's explicit
-  /// direction; a paper-era or never-registered account simply can't be
-  /// matched this way (accepted — spec §4/§11 already treats a paper-era
-  /// pass-as-first-timer as by-design, not a bug).
+  /// The signed-in registrant's first-timer verdict (spec §4), via the
+  /// checkFirstTimer callable (DB lockdown B4). The old client-side scan
+  /// downloaded EVERY submission of EVERY registration to match email/
+  /// phone locally — a privacy bug in its own right, and impossible under
+  /// default-deny (Submissions are owner-only). The callable runs the
+  /// identical match server-side (functions/src/registration_lookups.ts,
+  /// same normalization as promo_engine.dart's [firstTimer]) and returns
+  /// the same FirstTimerResult shape.
   ///
-  /// Cost/scaling choice: one read of /Registrations (already the entry
-  /// page's primary read) to get every regId, then one
-  /// /Registrations/{regId}/Submissions read PER registration. At this
-  /// league's real scale (a few dozen open+historical registrations, each
-  /// with at most a few hundred submissions) that's a handful of small
-  /// reads done ONCE per form session — a composite server-side index
-  /// keyed by email/phone would be premature engineering here. Callers
-  /// (RegistrationFormPage) fetch this once per session and hand the same
-  /// list to every InsiderPromoCodeField validation, so re-typing the code
-  /// never re-reads Firebase.
-  static Future<List<Map<String, dynamic>>>
-      getAllSubmissionAnswersForMatch() async {
-    final out = <Map<String, dynamic>>[];
+  /// Defensive: any error degrades to "first-timer" — exactly what the old
+  /// scan's silent-failure path produced (an empty prior-submissions list).
+  /// Same callable pattern as createRegistrationPaymentIntent
+  /// (payment_screen.dart).
+  static Future<FirstTimerResult> checkFirstTimer({
+    required String email,
+    required String phone,
+  }) async {
     try {
-      final regsSnap =
-          (await FirebaseDatabase.instance.ref('Registrations').once())
-              .snapshot;
-      final regs = regsSnap.value;
-      if (regs is! Map) return out;
-      for (final regId in regs.keys) {
-        try {
-          final subsSnap = (await FirebaseDatabase.instance
-                  .ref('Registrations/$regId/Submissions')
-                  .once())
-              .snapshot;
-          final subs = subsSnap.value;
-          if (subs is! Map) continue;
-          subs.forEach((_, node) {
-            if (node is! Map) return;
-            final answers = node['Answers'];
-            if (answers is Map) {
-              out.add(answers.map((k, v) => MapEntry(k.toString(), v)));
-            }
-          });
-        } catch (_) {
-          // Skip one bad registration's Submissions node rather than
-          // failing the whole scan.
-        }
-      }
-    } catch (_) {}
-    return out;
+      final callable =
+          FirebaseFunctions.instance.httpsCallable('checkFirstTimer');
+      final result = await callable
+          .call<Map<String, dynamic>>({'email': email, 'phone': phone});
+      return firstTimerResultFromCallable(result.data);
+    } catch (_) {
+      return const FirstTimerResult(isFirstTimer: true);
+    }
+  }
+
+  /// Resolves an entered team join code server-side (DB lockdown B4) via
+  /// the resolveJoinCode callable. The old flow downloaded ALL of a
+  /// registration's teams — join codes included, payment-waiving ones among
+  /// them — and matched locally; the callable never returns other teams'
+  /// codes. The result maps onto the same [JoinCodeMatch] statuses the page
+  /// has always branched on ('ok' | 'notApproved' | 'notFound'); errors
+  /// degrade to 'notFound'.
+  static Future<JoinCodeMatch> resolveJoinCode({
+    required String regId,
+    required String code,
+  }) async {
+    try {
+      final callable =
+          FirebaseFunctions.instance.httpsCallable('resolveJoinCode');
+      final result = await callable
+          .call<Map<String, dynamic>>({'regId': regId, 'code': code});
+      return joinCodeMatchFromCallable(result.data);
+    } catch (_) {
+      return const JoinCodeMatch('notFound');
+    }
   }
 
   /// Individual-path submit:
@@ -294,19 +293,9 @@ class RegistrationService {
 
   // -------- Teams (L1b) --------
 
-  /// {teamId: team} for a registration ({} on error). The joiner code page
-  /// matches entered codes against this map (matchJoinCode).
-  static Future<Map<String, RegTeam>> getTeams(String regId) async {
-    try {
-      final snap = (await FirebaseDatabase.instance
-              .ref('Registrations/$regId/Teams')
-              .once())
-          .snapshot;
-      return regTeamsFromNode(snap.value);
-    } catch (_) {
-      return {};
-    }
-  }
+  // getTeams (the whole-Teams read the join-code page matched against) was
+  // removed in lockdown B4: Teams/{tid} is captain-only under default-deny
+  // and the join-code match runs server-side now ([resolveJoinCode]).
 
   /// One team, or null (missing / malformed / error).
   static Future<RegTeam?> getTeam(String regId, String teamId) async {
@@ -325,44 +314,46 @@ class RegistrationService {
   /// Live stream of one team — the captain sees approval, the join code and
   /// waive changes the moment an admin writes them. Emits null while the
   /// node is missing/malformed; an empty [teamId] gets a single null.
+  /// Lockdown B8: a DENIED read (joiners can't read `Teams/<tid>` under
+  /// default-deny) also emits null instead of an error, so the status page
+  /// degrades to the submission-stamped team name rather than an error
+  /// state.
   static Stream<RegTeam?> watchTeam(String regId, String teamId) {
     if (teamId.isEmpty) return Stream.value(null);
-    return FirebaseDatabase.instance
-        .ref('Registrations/$regId/Teams/$teamId')
-        .onValue
-        .map((event) {
-      try {
-        return RegTeam.fromNode(teamId, event.snapshot.value);
-      } catch (_) {
-        return null;
-      }
-    });
+    return streamErrorsAs(
+        FirebaseDatabase.instance
+            .ref('Registrations/$regId/Teams/$teamId')
+            .onValue
+            .map<RegTeam?>((event) {
+          try {
+            return RegTeam.fromNode(teamId, event.snapshot.value);
+          } catch (_) {
+            return null;
+          }
+        }),
+        null);
   }
 
-  /// Live roster of a team's joiners for the captain's status page — every
-  /// Submission with Path 'joiner' and this [teamId], sorted by display name
-  /// (case-insensitive). Defensive: junk children are skipped and a
-  /// missing/malformed Submissions node yields an empty list.
+  /// Live roster of a team's joiners for the captain's status page, sorted
+  /// by display name (case-insensitive). Defensive: junk children are
+  /// skipped and a missing/malformed node yields an empty list.
+  ///
+  /// DB lockdown B3: streams the trigger-maintained
+  /// Registrations/{regId}/Teams/{teamId}/Members mirror ({uid:
+  /// {DisplayName, Paid}}) instead of scanning the whole Submissions bucket
+  /// (owner-only under default-deny). The mirror also carries the CAPTAIN's
+  /// own submission — pass [captainUid] so it is filtered out, preserving
+  /// the pre-mirror roster shape (the old scan kept Path=='joiner' only).
   static Stream<List<RegSubmission>> watchTeamMembers(
-      String regId, String teamId) {
+      String regId, String teamId,
+      {String captainUid = ''}) {
     return FirebaseDatabase.instance
-        .ref('Registrations/$regId/Submissions')
+        .ref('Registrations/$regId/Teams/$teamId/Members')
         .onValue
         .map((event) {
       try {
-        final value = event.snapshot.value;
-        if (value is! Map) return <RegSubmission>[];
-        final out = <RegSubmission>[];
-        value.forEach((_, node) {
-          final sub = RegSubmission.fromFirebase(node);
-          if (sub != null && sub.path == 'joiner' && sub.teamId == teamId) {
-            out.add(sub);
-          }
-        });
-        out.sort((a, b) => a.displayName
-            .toLowerCase()
-            .compareTo(b.displayName.toLowerCase()));
-        return out;
+        return teamMembersFromNode(event.snapshot.value,
+            teamId: teamId, captainUid: captainUid);
       } catch (_) {
         return <RegSubmission>[];
       }
@@ -454,6 +445,9 @@ class RegistrationService {
         path: 'joiner',
         answers: answers,
         teamId: team.id,
+        // B8: stamped so the status page can render the team card without
+        // reading Teams/<tid> (captain+admin-only under default-deny).
+        teamName: team.name,
         paid: waived,
         paidVia: waived ? 'team code' : '',
         displayName: displayName,
@@ -473,4 +467,98 @@ class RegistrationService {
       return false;
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Pure parsing for the lockdown mirrors (unit-tested without Firebase —
+// test/registration_callables_test.dart; activity_entry.dart-style).
+// ---------------------------------------------------------------------------
+
+/// Parses the RegistrationsPublic root ({regId: Config-verbatim}) into
+/// {regId: config}, keeping only OPEN registrations. {} for null/junk;
+/// malformed children are skipped. Defensive about RTDB's List coercion
+/// (regIds like "Futsal-17" are never dense ints, but a List must not
+/// crash — non-null entries parse under their index).
+Map<String, RegistrationConfig> openRegistrationsFromNode(Object? raw) {
+  final out = <String, RegistrationConfig>{};
+  void add(String regId, Object? node) {
+    final config = RegistrationConfig.fromFirebase(node);
+    if (config != null && config.isOpen) out[regId] = config;
+  }
+
+  if (raw is Map) {
+    raw.forEach((regId, node) => add(regId.toString(), node));
+  } else if (raw is List) {
+    for (var i = 0; i < raw.length; i++) {
+      add('$i', raw[i]);
+    }
+  }
+  return out;
+}
+
+/// Parses a Registrations/{regId}/Teams/{teamId}/Members mirror node
+/// ({uid: {DisplayName, Paid}}) into the joiner-roster shape the status
+/// page has always consumed: RegSubmissions with path 'joiner', this
+/// [teamId], the mirrored DisplayName/Paid, sorted by display name
+/// (case-insensitive). The entry whose uid equals [captainUid] is skipped
+/// (captains appear in Members too, but the roster lists joiners only).
+/// [] for null/junk; malformed children are skipped; an RTDB List
+/// coercion parses non-null entries under their index without crashing.
+List<RegSubmission> teamMembersFromNode(Object? raw,
+    {required String teamId, String captainUid = ''}) {
+  final out = <RegSubmission>[];
+  void add(String uid, Object? node) {
+    if (node is! Map) return;
+    if (captainUid.isNotEmpty && uid == captainUid) return;
+    out.add(RegSubmission(
+      path: 'joiner',
+      answers: const {},
+      teamId: teamId,
+      paid: node['Paid'] == true,
+      displayName: node['DisplayName']?.toString() ?? '',
+    ));
+  }
+
+  if (raw is Map) {
+    raw.forEach((uid, node) => add(uid.toString(), node));
+  } else if (raw is List) {
+    for (var i = 0; i < raw.length; i++) {
+      add('$i', raw[i]);
+    }
+  }
+  out.sort((a, b) =>
+      a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()));
+  return out;
+}
+
+/// Maps a resolveJoinCode callable result onto the [JoinCodeMatch] shape
+/// the join-code page has always branched on. The callable returns
+/// {found: true, status: 'ok', teamId, teamName, codeWaivesPayment} for an
+/// approved match, or {found: false, status: 'notApproved'|'notFound'}.
+/// An 'ok' result becomes an approved [RegTeam] carrying exactly the
+/// fields the joiner flow uses downstream (id for the submission's TeamId,
+/// name for the headers, codeWaivesPayment for the born-Paid path);
+/// CaptainUid is not returned (never needed on the joiner path).
+/// Malformed/incomplete payloads degrade to 'notFound'.
+JoinCodeMatch joinCodeMatchFromCallable(Object? data) {
+  if (data is! Map) return const JoinCodeMatch('notFound');
+  final status = data['status']?.toString() ?? '';
+  if (data['found'] == true && status == 'ok') {
+    final teamId = data['teamId']?.toString() ?? '';
+    final teamName = data['teamName']?.toString() ?? '';
+    if (teamId.isEmpty || teamName.isEmpty) {
+      return const JoinCodeMatch('notFound');
+    }
+    return JoinCodeMatch(
+        'ok',
+        RegTeam(
+          id: teamId,
+          name: teamName,
+          captainUid: '',
+          status: 'approved',
+          codeWaivesPayment: data['codeWaivesPayment'] == true,
+        ));
+  }
+  if (status == 'notApproved') return const JoinCodeMatch('notApproved');
+  return const JoinCodeMatch('notFound');
 }

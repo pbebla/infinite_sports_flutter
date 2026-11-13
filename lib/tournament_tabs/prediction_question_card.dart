@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/points_text.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scoring.dart';
 import 'package:infinite_sports_flutter/model/prediction_question.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -140,9 +141,8 @@ class _PredictionQuestionCardState extends State<PredictionQuestionCard> {
   @override
   Widget build(BuildContext context) {
     final q = widget.question;
-    // Change 7: pluralize points
-    final pts = q.points;
-    final ptsLabel = '$pts ${pts == 1 ? 'pt' : 'pts'}';
+    // Change 7: pluralize points (the shared points_text.dart rule)
+    final ptsLabel = pointsText(q.points);
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),

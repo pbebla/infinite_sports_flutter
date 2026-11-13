@@ -1,18 +1,28 @@
 {
   "name": "functions",
   "private": true,
-  "engines": { "node": "22" },
+  "engines": {
+    "node": "22"
+  },
   "main": "lib/index.js",
   "scripts": {
     "build": "tsc",
-    "test": "vitest run"
+    "test": "vitest run",
+    "rehearse:s15": "tsc -p tools/tsconfig.json && node tools/rehearsal_out/build/tools/rehearse_s15.js",
+    "fill:s15": "tsc -p tools/tsconfig.json && node tools/rehearsal_out/build/tools/fill_test_season.js",
+    "loadtest": "tsc -p tools/tsconfig.json && node tools/rehearsal_out/build/tools/load_test.js",
+    "rehearse:deletion": "tsc -p tools/tsconfig.json && npx firebase-tools emulators:exec --only database --project demo-deletion \"node tools/rehearsal_out/build/tools/rehearse_account_deletion.js\"",
+    "merge:accounts": "tsc -p tools/tsconfig.json && node tools/rehearsal_out/build/tools/merge_accounts.js",
+    "probe:rules": "tsc -p tools/tsconfig.json && npx firebase-tools emulators:exec --only database --project demo-rules-probe \"node tools/rehearsal_out/build/tools/probe_rules.js\""
   },
   "dependencies": {
     "firebase-admin": "^13.0.0",
     "firebase-functions": "^6.1.0",
+    "nodemailer": "^7.0.13",
     "stripe": "^18.0.0"
   },
   "devDependencies": {
+    "@types/nodemailer": "^7.0.12",
     "typescript": "^5.5.0",
     "vitest": "^3.0.0"
   }

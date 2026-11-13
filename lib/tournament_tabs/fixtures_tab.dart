@@ -8,6 +8,7 @@ import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_match_detail.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:infinite_sports_flutter/tournamentteamdetail.dart';
+import 'package:infinite_sports_flutter/widgets/forfeit_chip.dart';
 import 'package:infinite_sports_flutter/widgets/live_clock.dart';
 import 'package:infinite_sports_flutter/widgets/score_text.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
@@ -167,10 +168,19 @@ class FixturesTab extends StatelessWidget {
         ],
       );
     } else if (isFinal) {
-      centerWidget = Text(
+      final score = Text(
         '${match.team1Score} - ${match.team2Score}',
         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
       );
+      // League forfeits (spec §8a) read "5 - 0 · Forfeit": the pill sits
+      // under the score. Tournament matches never carry forfeitedBy.
+      centerWidget = match.isForfeit
+          ? Column(
+              key: ValueKey('forfeit_score_${match.id}'),
+              mainAxisSize: MainAxisSize.min,
+              children: [score, const SizedBox(height: 3), const ForfeitChip()],
+            )
+          : score;
     } else {
       centerWidget = Text(
         match.time ?? 'TBD',

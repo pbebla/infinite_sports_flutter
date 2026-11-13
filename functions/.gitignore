@@ -1,3 +1,5 @@
 node_modules/
 /lib/
 *.log
+# Read-only S15 rehearsal outputs (snapshot, captured writes, tsc build)
+/tools/rehearsal_out/

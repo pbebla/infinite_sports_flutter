@@ -114,6 +114,36 @@ void main() {
       expect(m.team1Id, 'Winner of SF1');
       expect(m.team2Id, 'Winner of SF2');
     });
+
+    test('forfeitedBy (spec §8a): 1|2 (int, whole double or numeric String) '
+        'marks the match; absent/junk = a normal game', () {
+      final normal =
+          leagueMatchFromGameMap(dateKey: '06152026', index: 0, raw: baseGame());
+      expect(normal.forfeitedBy, isNull);
+      expect(normal.isForfeit, isFalse);
+
+      for (final (raw, want) in [
+        (2, 2),
+        ('1', 1),
+        (2.0, 2),
+        (' 2 ', 2),
+        (0, null),
+        (3, null),
+        ('x', null),
+        (1.5, null),
+        (true, null),
+      ]) {
+        final game = baseGame()
+          ..['forfeitedBy'] = raw
+          ..['team1score'] = 5
+          ..['team2score'] = 0
+          ..['status'] = 2;
+        final m =
+            leagueMatchFromGameMap(dateKey: '06152026', index: 0, raw: game);
+        expect(m.forfeitedBy, want, reason: '$raw');
+        expect(m.isForfeit, want != null, reason: '$raw');
+      }
+    });
   });
 
   group('leagueMatchesFromDateNode', () {

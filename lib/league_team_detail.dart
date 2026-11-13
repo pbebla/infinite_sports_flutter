@@ -7,6 +7,7 @@ import 'package:infinite_sports_flutter/misc/league_stat_categories.dart';
 import 'package:infinite_sports_flutter/misc/league_form.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/notification_topics.dart';
+import 'package:infinite_sports_flutter/misc/points_text.dart';
 import 'package:infinite_sports_flutter/misc/top_stats.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -16,6 +17,7 @@ import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:infinite_sports_flutter/widgets/follow_bell.dart';
+import 'package:infinite_sports_flutter/widgets/forfeit_chip.dart';
 import 'package:infinite_sports_flutter/widgets/form_chips.dart';
 import 'package:infinite_sports_flutter/widgets/jersey_painter.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
@@ -267,7 +269,8 @@ class _LeagueTeamDetailPageState extends State<LeagueTeamDetailPage>
                       const SkeletonBox(width: 170, height: 12)
                     else
                       Text(
-                        'W${team.wins} D${team.draws} L${team.losses} · ${team.points} pts · Season ${widget.season}',
+                        'W${team.wins} D${team.draws} L${team.losses} · '
+                        '${pointsText(team.points)} · Season ${widget.season}',
                         style: TextStyle(color: muted, fontSize: 12),
                       ),
                     if (form.isNotEmpty) ...[
@@ -954,6 +957,7 @@ class LeagueTeamMatchRow extends StatelessWidget {
     final subtitleBits = [
       _shortDate(m.date),
       if (m.label != 'League') m.label, // Friendly / Semifinal / ...
+      if (m.isForfeit) ForfeitChip.label, // spec §8a "5–0 · Forfeit"
     ];
 
     return ListTile(

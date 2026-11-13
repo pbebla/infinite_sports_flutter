@@ -1,0 +1,160 @@
+// Fantasy push taps (spec 2026-10-28 §4.2): every fantasy push carries
+// `{type:'fantasy', sport, season, gw}` and news pushes add `postId`. The
+// pure route helper decides where the tap lands — News + the post when a
+// postId is present, My Team otherwise — and refuses unusable payloads so a
+// tap can never crash the app.
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
+
+void main() {
+  group('fantasyRouteFromPayload', () {
+    test('a news push opens the News tab focused on the post', () {
+      final route = fantasyRouteFromPayload({
+        'type': 'fantasy',
+        'sport': 'Futsal',
+        'season': '16',
+        'gw': '3',
+        'postId': '-Nabc123',
+      })!;
+      expect(route.sport, 'Futsal');
+      expect(route.season, '16');
+      expect(route.initialTab, FantasyHubTab.news);
+      expect(route.focusPostId, '-Nabc123');
+    });
+
+    test('deadline reminder / recap / alert / owner message (no postId) '
+        'opens My Team', () {
+      for (final data in [
+        {'type': 'fantasy', 'sport': 'Futsal', 'season': '16', 'gw': '3'},
+        {
+          'type': 'fantasy',
+          'sport': 'Futsal',
+          'season': '16',
+          'gw': '0',
+          'postId': '  ',
+        },
+      ]) {
+        final route = fantasyRouteFromPayload(data)!;
+        expect(route.initialTab, FantasyHubTab.myTeam);
+        expect(route.focusPostId, isNull);
+      }
+    });
+
+    test('a badge push (spec 2026-10-30 §4) opens Leaderboards — the own row '
+        'carries the badge count and opens the badge shelf', () {
+      final route = fantasyRouteFromPayload({
+        'type': 'fantasy',
+        'sport': 'Futsal',
+        'season': '15',
+        'badge': 'captainGenius_gw3',
+      })!;
+      expect(route.sport, 'Futsal');
+      expect(route.season, '15');
+      expect(route.initialTab, FantasyHubTab.leaderboards);
+      expect(route.focusPostId, isNull);
+      // A blank badge id is an ordinary push (My Team).
+      expect(
+          fantasyRouteFromPayload({
+            'type': 'fantasy',
+            'sport': 'Futsal',
+            'season': '15',
+            'badge': ' ',
+          })!
+              .initialTab,
+          FantasyHubTab.myTeam);
+    });
+
+    test('missing sport or season → null (the tap does nothing)', () {
+      expect(
+          fantasyRouteFromPayload(
+              {'type': 'fantasy', 'season': '16', 'postId': 'p'}),
+          isNull);
+      expect(
+          fantasyRouteFromPayload(
+              {'type': 'fantasy', 'sport': 'Futsal', 'season': ''}),
+          isNull);
+    });
+
+    test('non-fantasy payloads are not fantasy routes', () {
+      // A league-watcher payload also carries sport/season — it must keep
+      // flowing to the match page, never the hub.
+      expect(
+          fantasyRouteFromPayload({
+            'sport': 'Futsal',
+            'season': '16',
+            'dateKey': '11022026',
+            'gameIndex': '0',
+          }),
+          isNull);
+      expect(fantasyRouteFromPayload({'type': 'goal'}), isNull);
+      expect(fantasyRouteFromPayload(const {}), isNull);
+    });
+
+    test('a push payload never names a player', () {
+      final route = fantasyRouteFromPayload({
+        'type': 'fantasy',
+        'sport': 'Futsal',
+        'season': '16',
+        'postId': '-Nabc123',
+      })!;
+      expect(route.initialPlayerName, isNull);
+    });
+
+    test('tab enum order matches the hub TabBar order', () {
+      expect(FantasyHubTab.values.map((t) => t.index), [0, 1, 2, 3, 4]);
+      expect(FantasyHubTab.myTeam.index, 0);
+      expect(FantasyHubTab.players.index, 1);
+      expect(FantasyHubTab.leaderboards.index, 2);
+      expect(FantasyHubTab.news.index, 3);
+      expect(FantasyHubTab.rules.index, 4);
+    });
+  });
+
+  group('fantasyRouteForPlayer ("Open in Fantasy")', () {
+    test('opens the hub on the Players tab with that player profile', () {
+      final route = fantasyRouteForPlayer(
+          sport: 'Futsal', season: '15', playerName: 'Ava Striker');
+      expect(route.sport, 'Futsal');
+      expect(route.season, '15');
+      expect(route.initialTab, FantasyHubTab.players);
+      expect(route.initialPlayerName, 'Ava Striker');
+      expect(route.focusPostId, isNull);
+    });
+  });
+
+
+  group('fantasyAccess pushes (paid access, spec 2026-11-01 §7)', () {
+    test('payment noted / you\'re in / access removed land on My Team', () {
+      final route = fantasyRouteFromPayload({
+        'type': 'fantasyAccess',
+        'sport': 'Futsal',
+        'season': '16',
+      })!;
+      expect(route.sport, 'Futsal');
+      expect(route.season, '16');
+      expect(route.initialTab, FantasyHubTab.myTeam);
+      expect(route.focusPostId, isNull);
+      expect(route.initialPlayerName, isNull);
+    });
+
+    test('a stray postId or badge on an access push is ignored', () {
+      final route = fantasyRouteFromPayload({
+        'type': 'fantasyAccess',
+        'sport': 'Futsal',
+        'season': '16',
+        'postId': 'p1',
+        'badge': 'b1',
+      })!;
+      expect(route.initialTab, FantasyHubTab.myTeam);
+      expect(route.focusPostId, isNull);
+    });
+
+    test('missing sport / season → null; the type set is pinned', () {
+      expect(
+          fantasyRouteFromPayload({'type': 'fantasyAccess', 'season': '16'}),
+          isNull);
+      expect(kFantasyPushTypes, {'fantasy', 'fantasyAccess'});
+    });
+  });
+}

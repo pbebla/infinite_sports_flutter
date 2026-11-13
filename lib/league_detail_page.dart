@@ -2,7 +2,10 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/league_match_detail.dart';
+import 'package:infinite_sports_flutter/league_tabs/league_fantasy_tab.dart';
 import 'package:infinite_sports_flutter/league_tabs/league_fixtures_tab.dart';
 import 'package:infinite_sports_flutter/league_tabs/league_player_stats_tab.dart';
 import 'package:infinite_sports_flutter/league_tabs/league_playoffs_tab.dart';
@@ -43,25 +46,42 @@ class LeagueDetailPage extends StatefulWidget {
   State<LeagueDetailPage> createState() => _LeagueDetailPageState();
 }
 
+/// The season page's tab row (P3a Task 5): the five base tabs plus the
+/// optional live-gated ones in a FIXED order — Predict (prediction config
+/// open), then Fantasy (`Fantasy/<sport>/<season>/Config` exists). Pure so
+/// the gating is unit-testable.
+@visibleForTesting
+List<Tab> leagueSeasonTabs(
+        {required bool predictOpen, required bool fantasyOpen}) =>
+    [
+      ..._leagueBaseTabs,
+      if (predictOpen) const Tab(text: 'Predict'),
+      if (fantasyOpen) const Tab(text: 'Fantasy'),
+    ];
+
+const List<Tab> _leagueBaseTabs = [
+  Tab(text: 'Fixtures'),
+  Tab(text: 'Table'),
+  Tab(text: 'Playoffs'),
+  Tab(text: 'Player Stats'),
+  Tab(text: 'Teams'),
+];
+
 // TickerProviderStateMixin (not Single…): the P3.2 tab swap keeps the old
-// and new TabController alive for one frame during the 5↔6 transition.
+// and new TabController alive for one frame during the tab-count transition.
 class _LeagueDetailPageState extends State<LeagueDetailPage>
     with TickerProviderStateMixin {
-  static const List<Tab> _baseTabs = [
-    Tab(text: 'Fixtures'),
-    Tab(text: 'Table'),
-    Tab(text: 'Playoffs'),
-    Tab(text: 'Player Stats'),
-    Tab(text: 'Teams'),
-  ];
-
-  List<Tab> _tabs = _baseTabs;
+  List<Tab> _tabs = _leagueBaseTabs;
   late TabController _tabController =
       TabController(length: _tabs.length, vsync: this);
 
   PredictionConfig? _predictionConfig;
   bool get _predictionsOpen => _predictionConfig?.open ?? false;
-  int get _predictTabIndex => _baseTabs.length; // 6th tab when open
+  int get _predictTabIndex => _leagueBaseTabs.length; // 6th tab when open
+
+  /// Fantasy tab gate (P3a Task 5): true while the season's Fantasy Config
+  /// node exists — stream-gated, so the tab pops in live when it's seeded.
+  bool _fantasyOpen = false;
 
   LeaguePredictionScope get _predictionScope =>
       LeaguePredictionScope(sport: widget.sport, season: widget.season);
@@ -77,12 +97,24 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
   /// carries over, clamped so removing the Predict tab while it's selected
   /// never crashes.
   void _applyPredictionConfig(PredictionConfig config) {
-    final tabs = <Tab>[
-      ..._baseTabs,
-      if (config.open) const Tab(text: 'Predict'),
-    ];
+    _predictionConfig = config;
+    _rebuildTabs();
+  }
+
+  /// Fantasy mirror of the Predict toggle — same live tab swap.
+  void _applyFantasyOpen(bool open) {
+    if (_fantasyOpen == open) return;
+    _fantasyOpen = open;
+    _rebuildTabs();
+  }
+
+  /// Rebuilds the tab row from both optional-tab gates, swapping the
+  /// controller only when the count actually changes.
+  void _rebuildTabs() {
+    final tabs = leagueSeasonTabs(
+        predictOpen: _predictionsOpen, fantasyOpen: _fantasyOpen);
     if (tabs.length == _tabs.length) {
-      setState(() => _predictionConfig = config);
+      setState(() => _tabs = tabs);
       return;
     }
     final controller = swapTabController(
@@ -91,7 +123,6 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
       vsync: this,
     );
     setState(() {
-      _predictionConfig = config;
       _tabs = tabs;
       _tabController = controller;
     });
@@ -111,6 +142,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
   StreamSubscription<Map<String, List<TournamentPlayer>>>? _rostersSub;
   StreamSubscription<LeaguePlayoffs?>? _playoffsSub;
   StreamSubscription<PredictionConfig>? _configSub;
+  StreamSubscription<FantasyConfigState?>? _fantasySub;
 
   @override
   void initState() {
@@ -135,6 +167,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
     _rostersSub?.cancel();
     _playoffsSub?.cancel();
     _configSub?.cancel();
+    _fantasySub?.cancel();
     setState(() {
       _matches = null;
       _standings = null;
@@ -170,6 +203,12 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
     _configSub = LeagueService.watchPredictionConfig(widget.sport, widget.season)
         .listen((config) {
       if (mounted) _applyPredictionConfig(config);
+    });
+    // Fantasy tab gate: the tab exists exactly while the season's Fantasy
+    // Config node does (absent node → parser yields null).
+    _fantasySub =
+        FantasyService.watchConfig(widget.sport, widget.season).listen((s) {
+      if (mounted) _applyFantasyOpen(s != null);
     });
   }
 
@@ -214,6 +253,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
     _rostersSub?.cancel();
     _playoffsSub?.cancel();
     _configSub?.cancel();
+    _fantasySub?.cancel();
     _tabController.dispose();
     super.dispose();
   }
@@ -414,6 +454,11 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                       config: _predictionConfig!,
                       currentUid: FirebaseAuth.instance.currentUser?.uid,
                       rosters: _rosters ?? const {},
+                    ),
+                  if (_fantasyOpen)
+                    LeagueFantasyTab(
+                      sport: widget.sport,
+                      season: widget.season,
                     ),
                 ],
               ),

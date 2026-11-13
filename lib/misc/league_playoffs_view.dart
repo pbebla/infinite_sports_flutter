@@ -132,5 +132,6 @@ TournamentMatch _withBracketSlot(TournamentMatch m, LeaguePlayoffSlot slot) {
     team2Seed: slot.team2Seed,
     team1Source: m.team1Source,
     team2Source: m.team2Source,
+    forfeitedBy: m.forfeitedBy, // a forfeited playoff game stays labelled
   );
 }

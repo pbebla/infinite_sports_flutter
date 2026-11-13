@@ -332,6 +332,26 @@ void main() {
       expect(sub.toFirebaseMap().containsKey('PaidAmount'), isFalse);
     });
 
+    test('round-trips TeamName when set, omits it when empty (B8)', () {
+      const joiner = RegSubmission(
+        path: 'joiner',
+        answers: {},
+        teamId: 't1',
+        teamName: 'The Boys',
+      );
+      final map = joiner.toFirebaseMap();
+      expect(map['TeamName'], 'The Boys');
+      final parsed = RegSubmission.fromFirebase(map);
+      expect(parsed!.teamName, 'The Boys');
+
+      // Empty name (individual/pre-B8 shapes) writes no key and parses ''.
+      const individual = RegSubmission(path: 'individual', answers: {});
+      expect(individual.toFirebaseMap().containsKey('TeamName'), isFalse);
+      expect(
+          RegSubmission.fromFirebase(individual.toFirebaseMap())!.teamName,
+          '');
+    });
+
     test('round-trips PaidAmount when set', () {
       const sub = RegSubmission(
         path: 'captain',

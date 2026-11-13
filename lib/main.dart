@@ -5,6 +5,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_config/flutter_config.dart';
+import 'package:infinite_sports_flutter/account/merged_account_notice.dart';
 import 'package:infinite_sports_flutter/calendar_tab.dart';
 import 'package:infinite_sports_flutter/insiders/insider_dashboard_page.dart';
 import 'package:infinite_sports_flutter/misc/auth_gate.dart';
@@ -13,6 +14,7 @@ import 'package:infinite_sports_flutter/misc/home_nav.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/notification_router.dart';
 import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
+import 'package:infinite_sports_flutter/misc/rtdb_emulator.dart';
 import 'package:infinite_sports_flutter/misc/server_time.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
@@ -21,6 +23,7 @@ import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:infinite_sports_flutter/onboarding/about_you_page.dart';
 import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
 import 'package:infinite_sports_flutter/onboarding/google_profile.dart';
+import 'package:infinite_sports_flutter/onboarding/onboarding_gate.dart';
 import 'package:infinite_sports_flutter/onboarding/profile_completion.dart';
 import 'package:infinite_sports_flutter/onboarding/welcome_page.dart';
 import 'package:infinite_sports_flutter/navbar.dart';
@@ -41,12 +44,16 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  // Demo builds only (--dart-define=RTDB_EMULATOR=1): use the local database
+  // emulator. The normal build skips this entirely. Before any database use.
+  connectRtdbEmulatorIfRequested(FirebaseDatabase.instance);
   // Start listening to Firebase server-time offset so live match clocks
   // stay accurate even when the device clock differs from server time.
   initServerTimeOffset();
   // Cache RTDB on disk so tournament pages render instantly from the last
   // known data, then stream fresh updates. Must run before any DB access.
-  FirebaseDatabase.instance.setPersistenceEnabled(true);
+  // (Not in demo builds: the emulator and the disk cache crash together.)
+  enableRtdbPersistenceUnlessEmulator(FirebaseDatabase.instance);
   await PushNotifications.init();
   await PushNotifications.initLocalNotifications();
   FirebaseMessaging.instance.getToken().then( (token) {
@@ -76,8 +83,8 @@ Future<void> main() async {
     }
     if (message.notification != null) {
       PushNotifications.showSimpleNotification(
-          title: message.notification!.title!,
-          body: message.notification!.body!,
+          title: message.notification!.title ?? '',
+          body: message.notification!.body ?? '',
           payload: payloadData);
     }
   });
@@ -133,7 +140,16 @@ class AuthGate extends StatelessWidget {
         signedIn = user != null;
         return chooseRootWidget(
           user: user,
-          signedInHome: () => const MyHomePage(),
+          // A merged (duplicate) account is told once which email to use,
+          // then signed out (account-merge notice, D9). The uid is passed in
+          // (not re-read inside), and keys the watcher so a direct account
+          // switch starts a fresh watch instead of reusing the previous
+          // user's.
+          signedInHome: () => MergedAccountWatcher(
+            key: ValueKey(user!.uid),
+            uid: user.uid,
+            child: const MyHomePage(),
+          ),
           signedOutHome: () => WelcomePage(
             onGoogle: () => _handleGoogleSignIn(context),
             onApple: () => _handleAppleSignIn(context),
@@ -444,7 +460,10 @@ class _MyHomePageState extends State<MyHomePage> {
     await prefs.subscribeAllUsers();
     final user = FirebaseAuth.instance.currentUser;
     if (!signedIn || user == null) return;
-    await _showAboutYouIfIncomplete(user.uid);
+    // A merged (old) account gets NEITHER prompt: the merged-account watcher
+    // shows its notice and signs the person out (final-review fix 1).
+    final gate = await _showAboutYouIfIncomplete(user.uid);
+    if (!gate.showsFavorites) return;
     if (await prefs.hasAnswered(user.uid)) return;
     final answered = await prefs.serverFavorites(user.uid);
     if (answered != null) return; // already has favorites recorded
@@ -469,18 +488,24 @@ class _MyHomePageState extends State<MyHomePage> {
   /// signups always collected a phone in Step 1, but Google/Apple never
   /// collect one at credential sign-in time — not that it matters here
   /// anymore, since Google/Apple new-users never reach this method.
-  Future<void> _showAboutYouIfIncomplete(String uid) async {
+  ///
+  /// Returns the gate's decision so the caller can also skip the favorites
+  /// prompt: a MERGED account (see [onboardingGateDecisionFor]) is shown
+  /// neither page — the merged-account watcher handles it.
+  Future<OnboardingGateDecision> _showAboutYouIfIncomplete(String uid) async {
     dynamic usersNode;
     try {
       final snap =
           (await FirebaseDatabase.instance.ref('Users/$uid').once()).snapshot;
       usersNode = snap.value;
     } catch (_) {
-      return; // network hiccup: don't block app entry over this check
+      // network hiccup: don't block app entry over this check
+      return OnboardingGateDecision.profileComplete;
     }
-    if (profileCompleted(usersNode)) return;
+    final decision = onboardingGateDecisionFor(usersNode);
+    if (!decision.showsAboutYou) return decision;
     final ctx = mainContext;
-    if (ctx == null || !ctx.mounted) return;
+    if (ctx == null || !ctx.mounted) return decision;
     final askPhone = needsPhoneNumber(usersNode);
     // No step labels here (not part of the 3-step signup flow); onDone pops
     // this route back to MyHomePage, then favorites logic runs as today.
@@ -493,6 +518,7 @@ class _MyHomePageState extends State<MyHomePage> {
         ),
       ),
     );
+    return decision;
   }
 
   void setTitle(String value) {

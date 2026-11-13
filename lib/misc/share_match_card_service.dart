@@ -1,14 +1,8 @@
-import 'dart:io';
-import 'dart:typed_data';
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
+import 'package:infinite_sports_flutter/misc/share_card_service.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/widgets/share_match_card.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 
 /// Caption text shared alongside the image. Pure.
 String buildShareText({
@@ -26,8 +20,10 @@ String buildShareText({
   return '$team1Name vs $team2Name$mid — follow live on Infinite Sports.';
 }
 
-/// Renders [ShareMatchCard] offscreen to a PNG and opens the system share sheet.
-/// Never throws; shows a SnackBar on failure.
+/// Renders [ShareMatchCard] offscreen to a PNG and opens the system share sheet
+/// (the shared pipeline in share_card_service.dart, anchored to [context] for
+/// the iPad popover — pass the tapped button's context). [share] replaces the
+/// system sheet (tests). Never throws; shows a SnackBar on failure.
 Future<void> shareMatchCard(
   BuildContext context, {
   required TournamentMatch match,
@@ -35,9 +31,14 @@ Future<void> shareMatchCard(
   required TournamentTeam? team2,
   required String tournamentName,
   required String sport,
+  SharePng? share,
 }) async {
-  final messenger = ScaffoldMessenger.maybeOf(context);
+  ScaffoldMessengerState? messenger;
   try {
+    // Both context lookups sit INSIDE the try (a stale context asserts) and
+    // run NOW, before any await — the "never throws" contract has no hole.
+    messenger = ScaffoldMessenger.maybeOf(context);
+    final origin = shareOriginFor(context);
     await Future.wait([
       precacheImage(const AssetImage('assets/goal.png'), context),
       precacheImage(const AssetImage('assets/assist.png'), context),
@@ -64,10 +65,6 @@ Future<void> shareMatchCard(
       ),
     );
 
-    final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/match_card_${match.id}.png');
-    await file.writeAsBytes(bytes);
-
     final text = buildShareText(
       match: match,
       team1Name: team1?.name ?? match.team1Id ?? 'TBD',
@@ -75,43 +72,17 @@ Future<void> shareMatchCard(
       tournamentName: tournamentName,
     );
 
-    await SharePlus.instance.share(
-      ShareParams(files: [XFile(file.path)], text: text),
-    );
+    final sink = share ??
+        (png, caption, anchor) => sharePngWithSystemSheet(
+              png,
+              caption: caption,
+              fileName: 'match_card_${match.id}.png',
+              origin: anchor,
+            );
+    await sink(bytes, text, origin);
   } catch (_) {
     messenger?.showSnackBar(
       const SnackBar(content: Text("Couldn't create the share card.")),
     );
-  }
-}
-
-/// Renders [card] offscreen via a transparent overlay and returns the PNG bytes.
-///
-/// Exported so that other share services (e.g. [shareProfileCard]) can reuse
-/// the same pipeline without duplicating the RepaintBoundary / Overlay logic.
-Future<Uint8List> captureCardToPng(BuildContext context, Widget card) async {
-  final key = GlobalKey();
-  final overlay = Overlay.of(context, rootOverlay: true);
-  final entry = OverlayEntry(
-    builder: (_) => Positioned(
-      left: -10000,
-      top: 0,
-      child: Material(
-        type: MaterialType.transparency,
-        child: RepaintBoundary(key: key, child: card),
-      ),
-    ),
-  );
-  overlay.insert(entry);
-  try {
-    await WidgetsBinding.instance.endOfFrame;
-    await Future<void>.delayed(const Duration(milliseconds: 32));
-    final boundary =
-        key.currentContext!.findRenderObject() as RenderRepaintBoundary;
-    final image = await boundary.toImage(pixelRatio: 3.0);
-    final data = await image.toByteData(format: ui.ImageByteFormat.png);
-    return data!.buffer.asUint8List();
-  } finally {
-    entry.remove();
   }
 }

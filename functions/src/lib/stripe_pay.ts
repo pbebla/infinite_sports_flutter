@@ -98,25 +98,67 @@ export function legacyTarget(config: RegistrationConfigLike): { league: string; 
 
 /** The identifying fields the webhook needs to flip Paid on the right
  *  submission — carried as Stripe PaymentIntent metadata (Stripe stores
- *  metadata values as strings; keys/values here are already strings). */
-export interface WebhookMeta {
+ *  metadata values as strings; keys/values here are already strings).
+ *  Registration metadata carries NO `kind` — every PaymentIntent created
+ *  before paid access, and every one after (webhookMetadata is unchanged) —
+ *  and the parser treats an absent kind as a registration. */
+export interface RegistrationMeta {
+  kind?: 'registration';
   regId: string;
   uid: string;
   league: string;
   season: string;
 }
 
-/** Builds the metadata object passed to `stripe.paymentIntents.create`. */
-export function webhookMetadata(meta: WebhookMeta): Record<string, string> {
+/** A fantasy season-pass Checkout payment (paid access spec 2026-11-01 §7):
+ *  `kind` routes payment_intent.succeeded / charge.refunded to the
+ *  Fantasy/<sport>/<season>/Access/<uid> record instead of a submission. */
+export interface FantasyAccessMeta {
+  kind: 'fantasyAccess';
+  sport: string;
+  season: string;
+  uid: string;
+}
+
+export type WebhookMeta = RegistrationMeta | FantasyAccessMeta;
+
+/** Builds the metadata object passed to `stripe.paymentIntents.create`
+ *  (registration — no kind, byte-identical to before paid access). */
+export function webhookMetadata(meta: RegistrationMeta): Record<string, string> {
   return { regId: meta.regId, uid: meta.uid, league: meta.league, season: meta.season };
+}
+
+/** Builds the `payment_intent_data.metadata` of a fantasy Checkout Session. */
+export function fantasyAccessMetadata(
+  meta: { sport: string; season: string; uid: string },
+): Record<string, string> {
+  return { kind: 'fantasyAccess', sport: meta.sport, season: meta.season, uid: meta.uid };
+}
+
+function nonEmptyString(v: unknown): v is string {
+  return typeof v === 'string' && v.length > 0;
 }
 
 /** Defensive parse of a Stripe event's `metadata` back into [WebhookMeta].
  *  Returns null when any required field is missing or not a string, so the
- *  webhook can log-and-200 instead of crashing on a malformed/foreign event. */
+ *  webhook can log-and-200 instead of crashing on a malformed/foreign event.
+ *  No kind (or 'registration') -> the registration shape, exactly as before;
+ *  'fantasyAccess' -> the fantasy shape (never falls back to the
+ *  registration parse); any other kind -> null. */
 export function parseWebhookMetadata(raw: unknown): WebhookMeta | null {
   if (raw === null || raw === undefined || typeof raw !== 'object') return null;
   const m = raw as Record<string, unknown>;
+  const kind = m['kind'];
+  if (kind === 'fantasyAccess') {
+    const sport = m['sport'];
+    const season = m['season'];
+    const uid = m['uid'];
+    if (!nonEmptyString(sport) || !nonEmptyString(season) || !nonEmptyString(uid)) {
+      return null;
+    }
+    return { kind: 'fantasyAccess', sport, season, uid };
+  }
+  if (kind !== undefined && kind !== 'registration') return null;
   const regId = m['regId'];
   const uid = m['uid'];
   const league = m['league'];

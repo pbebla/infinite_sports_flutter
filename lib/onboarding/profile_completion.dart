@@ -27,14 +27,37 @@ String? validateZip(String s) {
   return 'Enter a 5-digit ZIP code';
 }
 
-/// Null when [d] is present, not in the future, and no more than 120 years
-/// ago; otherwise a user-facing error string.
-String? validateDob(DateTime? d) {
+/// The youngest age that may hold an account (Terms of Use §1, Privacy
+/// Policy §9 — a parent or guardian registers younger players from their
+/// own account).
+const int kMinimumAccountAge = 13;
+
+/// The DOB error for someone younger than [kMinimumAccountAge]. The About
+/// You page keys on this exact string to offer the sign-out exit.
+const String kUnderageDobMessage =
+    'You must be at least $kMinimumAccountAge to have an Infinite Sports account';
+
+/// True when someone born on [dob] has not yet turned [kMinimumAccountAge]
+/// as of [now] (birthday-exact: 13 today is old enough, 13 tomorrow is not).
+bool isUnderMinimumAge(DateTime dob, {DateTime? now}) {
+  final n = now ?? DateTime.now();
+  var age = n.year - dob.year;
+  if (n.month < dob.month || (n.month == dob.month && n.day < dob.day)) {
+    age--;
+  }
+  return age < kMinimumAccountAge;
+}
+
+/// Null when [d] is present, not in the future, no more than 120 years
+/// ago, and at least [kMinimumAccountAge] years ago; otherwise a
+/// user-facing error string.
+String? validateDob(DateTime? d, {DateTime? now}) {
   if (d == null) return 'Date of birth is required';
-  final now = DateTime.now();
-  if (d.isAfter(now)) return "Date of birth can't be in the future";
-  final oldestAllowed = DateTime(now.year - 120, now.month, now.day);
+  final n = now ?? DateTime.now();
+  if (d.isAfter(n)) return "Date of birth can't be in the future";
+  final oldestAllowed = DateTime(n.year - 120, n.month, n.day);
   if (d.isBefore(oldestAllowed)) return 'Enter a valid date of birth';
+  if (isUnderMinimumAge(d, now: n)) return kUnderageDobMessage;
   return null;
 }
 

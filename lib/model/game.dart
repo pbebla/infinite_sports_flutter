@@ -35,6 +35,9 @@ abstract class Game
   late int Time;
   String storedTime = "";
   String stage = "";
+  /// League forfeit marker (spec §8a, misc/forfeit.dart): 1 | 2 = which
+  /// team forfeited (score 5–0 to the other); null = a normal game.
+  int? forfeitedBy;
   void setUpVote();
   void getLineUpImages();
 }

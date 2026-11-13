@@ -3,10 +3,13 @@ import 'dart:convert';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/eventpage.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 import 'package:infinite_sports_flutter/league_match_detail.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
+import 'package:infinite_sports_flutter/support/my_tickets_page.dart';
 import 'package:infinite_sports_flutter/tournament_match_detail.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
@@ -23,6 +26,17 @@ Future<void> openMatchFromNotification(Map<String, dynamic> data) async {
   // event reminder, deep-links to the event; a plain campaign just opened
   // the app (no navigation target).
   final type = data['type']?.toString() ?? '';
+  // Support-ticket pushes (admin replied / ticket closed) land on My
+  // Tickets — the live list streams the fresh status, so no preloading.
+  if (type == 'support') {
+    final ctx = mainContext;
+    if (ctx != null) {
+      Navigator.of(ctx, rootNavigator: true).push(
+        MaterialPageRoute(builder: (_) => const MyTicketsPage()),
+      );
+    }
+    return;
+  }
   if (type == 'event' || type == 'campaign') {
     final eventId = data['eventId']?.toString() ?? '';
     final ctx = mainContext;
@@ -31,6 +45,23 @@ Future<void> openMatchFromNotification(Map<String, dynamic> data) async {
         MaterialPageRoute(builder: (_) => EventPage(v2Id: eventId)),
       );
     }
+    return;
+  }
+
+  // Fantasy pushes (deadline reminder, weekly recap, position alerts, owner
+  // messages, news posts, badges) carry {type:'fantasy', sport, season, gw?,
+  // postId?, badge?}. They also carry sport/season, so this MUST run before
+  // the league-watcher branch below (which would otherwise swallow them and
+  // do nothing). News → the hub's News tab scrolled to the post; a badge →
+  // Leaderboards (Overall: the own row with its badge count); else My Team.
+  // Paid-access pushes ({type:'fantasyAccess'}: payment noted / you're in /
+  // access removed) land on My Team too.
+  if (kFantasyPushTypes.contains(type)) {
+    final route = fantasyRouteFromPayload(data);
+    final fantasyCtx = mainContext;
+    if (route == null || fantasyCtx == null) return;
+    Navigator.of(fantasyCtx, rootNavigator: true)
+        .push(fantasyHubPageRoute(route));
     return;
   }
 

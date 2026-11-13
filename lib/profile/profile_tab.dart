@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/insiders/insider_tier_colors.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/profile_stat_priority.dart';
+import 'package:infinite_sports_flutter/misc/public_profiles.dart'
+    show isSignedInUid;
 import 'package:infinite_sports_flutter/model/award.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
@@ -190,9 +192,17 @@ class ProfileTab extends StatelessWidget {
   /// placeholder) for every other case: no application ever submitted,
   /// pending, suspended, declined, or opted out — a bare uid with no
   /// Insider history should look exactly like a non-Insider profile.
+  ///
+  /// DB lockdown B6: `/Insiders/<uid>` is owner-only under default-deny, so
+  /// the live read only runs on the viewer's OWN profile — a visited
+  /// profile simply shows no badge (program dormant; a public mirror comes
+  /// back with the Insiders rebuild). The [insiderStream] seam bypasses the
+  /// self-check so tests keep driving both render paths.
   Widget _insiderBox(BuildContext context) {
     if (uid.trim().isEmpty) return const SizedBox.shrink();
-    final stream = insiderStream ?? InsiderService.watchMyInsider(uid);
+    final stream = insiderStream ??
+        (isSignedInUid(uid) ? InsiderService.watchMyInsider(uid) : null);
+    if (stream == null) return const SizedBox.shrink();
     return StreamBuilder<Insider?>(
       stream: stream,
       builder: (context, snapshot) {

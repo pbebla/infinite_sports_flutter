@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  centsToDollars, isAlreadyPaid, legacyTarget, owedCents, parseWebhookMetadata,
+  centsToDollars, fantasyAccessMetadata, isAlreadyPaid, legacyTarget, owedCents, parseWebhookMetadata,
   RegistrationConfigLike, SubmissionLike, TeamLike, webhookMetadata,
 } from './stripe_pay';
 
@@ -122,5 +122,45 @@ describe('webhookMetadata / parseWebhookMetadata', () => {
 
   it('parseWebhookMetadata rejects non-string values defensively', () => {
     expect(parseWebhookMetadata({ regId: 'x', uid: 1, league: 'Futsal', season: '17' })).toBeNull();
+  });
+});
+
+// Paid access (spec 2026-11-01 §7, plan A2): the metadata becomes a union.
+// Registration metadata carries NO `kind` and parses exactly as before (the
+// cases above are untouched); `kind:'fantasyAccess'` parses to the fantasy
+// shape; anything else is null.
+describe('fantasyAccessMetadata / parseWebhookMetadata (kind union)', () => {
+  it('fantasyAccessMetadata builds string metadata with the kind', () => {
+    expect(fantasyAccessMetadata({ sport: 'Futsal', season: '16', uid: 'uid-1' })).toEqual({
+      kind: 'fantasyAccess', sport: 'Futsal', season: '16', uid: 'uid-1',
+    });
+  });
+
+  it('round-trips the fantasy kind', () => {
+    const parsed = parseWebhookMetadata(
+      fantasyAccessMetadata({ sport: 'Futsal', season: '16', uid: 'uid-1' }));
+    expect(parsed).toEqual({ kind: 'fantasyAccess', sport: 'Futsal', season: '16', uid: 'uid-1' });
+  });
+
+  it('registration metadata (no kind) still parses to the kind-less registration shape', () => {
+    const parsed = parseWebhookMetadata({ regId: 'Futsal-17', uid: 'uid-1', league: 'Futsal', season: '17' });
+    expect(parsed).toEqual({ regId: 'Futsal-17', uid: 'uid-1', league: 'Futsal', season: '17' });
+    expect(parsed && 'kind' in parsed).toBe(false);
+    // An explicit registration kind is tolerated and parses the same way.
+    expect(parseWebhookMetadata({ kind: 'registration', regId: 'r', uid: 'u', league: 'L', season: '1' }))
+      .toEqual({ regId: 'r', uid: 'u', league: 'L', season: '1' });
+  });
+
+  it('a fantasy kind with a missing / blank / non-string field is null', () => {
+    expect(parseWebhookMetadata({ kind: 'fantasyAccess', sport: 'Futsal', season: '16' })).toBeNull();
+    expect(parseWebhookMetadata({ kind: 'fantasyAccess', sport: '', season: '16', uid: 'u' })).toBeNull();
+    expect(parseWebhookMetadata({ kind: 'fantasyAccess', sport: 'Futsal', season: 16, uid: 'u' })).toBeNull();
+    // Fantasy metadata never falls back to the registration parse, even
+    // when it happens to carry registration-looking keys.
+    expect(parseWebhookMetadata({ kind: 'fantasyAccess', regId: 'r', uid: 'u', league: 'L', season: '1' })).toBeNull();
+  });
+
+  it('an unknown kind is null', () => {
+    expect(parseWebhookMetadata({ kind: 'mystery', regId: 'r', uid: 'u', league: 'L', season: '1' })).toBeNull();
   });
 });

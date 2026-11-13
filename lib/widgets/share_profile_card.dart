@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/trophy_icons.dart';
 import 'package:infinite_sports_flutter/model/award.dart';
+import 'package:infinite_sports_flutter/widgets/share_card_footer.dart';
 
 // ─── Shared constants ─────────────────────────────────────────────────────────
 
 const double _kWidth = 360;
 const double _kHeight = 450;
 const Color _kPrimary = Color(0xFFD00000);
-const Color _kFooter = Color(0xFF111111);
 
 // ─── Shared scaffold ──────────────────────────────────────────────────────────
 
@@ -92,37 +92,7 @@ class _ProfileCardScaffold extends StatelessWidget {
           // ── Body ─────────────────────────────────────────────────────────
           Expanded(child: body),
           // ── Footer ───────────────────────────────────────────────────────
-          Container(
-            color: _kFooter,
-            padding:
-                const EdgeInsets.symmetric(vertical: 7, horizontal: 12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Image.asset('assets/infinite_mark.png', height: 34),
-                const SizedBox(width: 6),
-                const Flexible(
-                  child: Text.rich(
-                    TextSpan(
-                      children: [
-                        TextSpan(text: 'Follow '),
-                        TextSpan(
-                          text: 'Infinite Sports',
-                          style: TextStyle(color: Color(0xFFFF5A5A)),
-                        ),
-                        TextSpan(text: ' for live scores'),
-                      ],
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          const ShareCardFooter(),
         ],
       ),
     );

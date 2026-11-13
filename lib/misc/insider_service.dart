@@ -1,4 +1,5 @@
 import 'package:firebase_database/firebase_database.dart';
+import 'package:infinite_sports_flutter/misc/stream_resilience.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
 
 /// Live reads + the application write for the Infinite Insiders program
@@ -116,16 +117,22 @@ class InsiderService {
   /// `/Referrals` row with `InsiderUid == uid`, newest-counted first (spec
   /// §7). A missing/malformed node (or one still using the pre-index
   /// shape) degrades to an empty list rather than throwing.
+  /// Lockdown B8: a DENIED read also degrades to an empty list — RTDB
+  /// queries need read permission at `/Referrals` itself (admin-only under
+  /// default-deny), so the dashboard shows zero referrals instead of an
+  /// error state until the Insiders rebuild moves this server-side.
   static Stream<List<InsiderReferral>> watchMyReferrals(String uid) =>
-      FirebaseDatabase.instance
-          .ref('Referrals')
-          .orderByChild('InsiderUid')
-          .equalTo(uid)
-          .onValue
-          .map((event) => sortReferralsNewestFirst<InsiderReferral>(
-                referralsFromNode(event.snapshot.value),
-                (r) => r.countedAt,
-              ));
+      streamErrorsAs(
+          FirebaseDatabase.instance
+              .ref('Referrals')
+              .orderByChild('InsiderUid')
+              .equalTo(uid)
+              .onValue
+              .map((event) => sortReferralsNewestFirst<InsiderReferral>(
+                    referralsFromNode(event.snapshot.value),
+                    (r) => r.countedAt,
+                  )),
+          const <InsiderReferral>[]);
 
   /// Toggles the "Show me on the public leaderboard" opt-out (spec §7 —
   /// individually opt-out-able from the leaderboard row).
@@ -144,27 +151,10 @@ class InsiderService {
   }) =>
       _ref(uid).update({'ProfileBadgeOptIn': value});
 
-  // -- Public leaderboard (Infinite Insiders P4, Task F6) ----------------
-  // Mirrors the Manager's own InsiderService.watchAllInsiders /
-  // watchAllReferrals (lib/services/firebase/insider_service.dart) — same
-  // node, same live-stream semantics — so both apps agree on what "the
-  // program" looks like right now.
-
-  /// Live {uid: Insider} for every Insider node, any status — the public
-  /// leaderboard page (Task F6) filters this down to active +
-  /// PublicLeaderboardOptIn via [leaderboardRows]/[programStats].
-  static Stream<Map<String, Insider>> watchAllInsiders() =>
-      FirebaseDatabase.instance
-          .ref('Insiders')
-          .onValue
-          .map((event) => insidersFromNode(event.snapshot.value));
-
-  /// Live referral history for every Insider (spec §9 — `/Referrals` is a
-  /// single flat node); callers filter/sort as needed ([leaderboardRows]
-  /// filters by insider/period/sport, [programStats] aggregates program-wide).
-  static Stream<List<InsiderReferral>> watchAllReferrals() =>
-      FirebaseDatabase.instance
-          .ref('Referrals')
-          .onValue
-          .map((event) => referralsFromNode(event.snapshot.value));
+  // watchAllInsiders / watchAllReferrals (the whole-`/Insiders` and
+  // `/Referrals` root streams the public leaderboard rode, emails
+  // included) were removed in DB lockdown B6: both roots are denied under
+  // default-deny and the program is dormant. The pure leaderboard logic
+  // (leaderboardRows/programStats in model/insider.dart) stays for the
+  // Insiders rebuild, which will feed it from a public mirror instead.
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/login.dart';
 import 'package:infinite_sports_flutter/misc/league_timeline_filter.dart';
+import 'package:infinite_sports_flutter/misc/points_text.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/icon_legend.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
@@ -742,7 +743,7 @@ class _WhoWillWinTeaserState extends State<_WhoWillWinTeaser> {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
-                      '+${q.points} pt',
+                      '+${pointsText(q.points)}',
                       style: const TextStyle(
                           fontSize: 11,
                           color: _greenWin,

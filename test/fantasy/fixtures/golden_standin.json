@@ -1,0 +1,222 @@
+{
+  "_notes": [
+    "GOLDEN STAND-IN GOALKEEPER GAMEWEEK — cross-engine contract for the",
+    "spec §7 stand-in keeper rule (owner-approved 2026-10-29). Every expected",
+    "number below was computed BY HAND from FantasyConfig.futsalDefault()",
+    "(spec §7) BEFORE either pipeline ran. Replayed by",
+    "test/fantasy/golden_standin_test.dart (Dart, the reference) and",
+    "functions/src/lib/fantasy/golden_standin_replay.test.ts (TS port).",
+    "Never copy actual values in here — if an engine disagrees, it is wrong.",
+    "",
+    "RULE: a DEF/ATT who plays in goal for a game scores, for THAT game only,",
+    "his saves / penalty saves / clean sheet / goals conceded at the GK rates",
+    "(CS +8, every 2 saves +1, pen save +5, every 2 conceded -1). Goals,",
+    "assists, appearance, cards, own goals, pen misses and DPL stay at his",
+    "LISTED position. Position, price, squad slot and formation never change.",
+    "In goal = >=1 Save/PenSaved in that game (automatic), OR his name keyed",
+    "true in his side's team{1,2}keepers marker (only a literal true counts).",
+    "Listed GKs are unaffected (the mapper's inGoal flag is position-blind;",
+    "scoring ignores it for a GK). BPS is position-agnostic — unchanged.",
+    "",
+    "Rates: GK goal 10 assist 5; DEF goal 6 assist 4 CS 5 conceded -1/2;",
+    "ATT goal 4 assist 3 CS 2 conceded 0. BPS: goal 12, assist 9, save 2,",
+    "CS 5, pen save 8, yellow -4.",
+    "",
+    "GAME 0 — Owls 1-0 Bears (no marker: the AUTOMATIC path). Owls' listed",
+    "GK Gil is absent; DEF Dana makes 3 saves.",
+    "Gil  GK  absent:                 0                          BPS 0",
+    "Dana DEF IN GOAL saves3 conc0:   1 + CS(GK) 8 + floor(3/2)*1 = 10",
+    "     (outfield DEF would be 1 + CS 5 = 6)                   BPS 3*2 + 5 = 11",
+    "Omar ATT goal1 conc0:            1 + 4 + CS(ATT) 2          = 7   BPS 12+5 = 17",
+    "Ola  DEF assist1 conc0:          1 + 4 + CS(DEF) 5          = 10  BPS 9+5 = 14",
+    "Bo   GK  saves2 conc1:           1 + floor(2/2)*1           = 2   BPS 2*2 = 4",
+    "Bea  DEF yellow1 conc1:          1 - 1                      = 0   BPS -4",
+    "Ben  ATT (attendance only) c1:   1                          = 1   BPS 0",
+    "Bonus: Omar 17 -> 3, Ola 14 -> 2, Dana 11 -> 1.",
+    "inGoal: Dana true (saves), Bo true (saves — a GK, scoring ignores it),",
+    "everyone else false.",
+    "",
+    "GAME 1 — Cats 2-4 Dogs. team1keepers = {Cy: true, Cid: true, Cal: false}.",
+    "Cid  GK  marked, 0 events, conc4: 1 + floor(4/2)*-1         = -1  BPS 0",
+    "Cy   ATT MARKED IN GOAL, 0 saves, conc4: 1 + (GK) floor(4/2)*-1 = -1",
+    "     (outfield ATT is never docked: would be 1)             BPS 0",
+    "Cal  ATT marker FALSE, goal1 assist1 conc4: 1 + 4 + 3       = 8",
+    "     (if the false entry wrongly counted: 6)                BPS 12+9 = 21",
+    "Cass DEF goal1 conc4:            1 + 6 - floor(4/2)*1       = 5   BPS 12",
+    "Dex  DEF IN GOAL (2 Save + 1 PenSaved -> saves 3, penSaved 1), goal1",
+    "     assist1 conc2: 1 + goal(DEF) 6 + assist(DEF) 4 + floor(3/2)*1",
+    "     + pen save 5 - floor(2/2)*1 = 16",
+    "     (outfield DEF: 1+6+4-1 = 10; listed GK: 1+10+5+1+5-1 = 21)",
+    "                                 BPS 12 + 9 + 3*2 + 8 = 35",
+    "Dax  ATT goal2 conc2:            1 + 8                      = 9   BPS 24",
+    "Dot  DEF goal1 yellow1 conc2:    1 + 6 - 1 - floor(2/2)*1   = 5   BPS 12-4 = 8",
+    "Bonus: Dex 35 -> 3, Dax 24 -> 2, Cal 21 -> 1.",
+    "inGoal: Cid true (marker), Cy true (marker), Dex true (saves), everyone",
+    "else false (Cal's false entry never counts).",
+    "",
+    "WEEK POINTS (base + bonus), played flag:",
+    "Gil 0 F (absent), Dana 10+1 = 11 T, Omar 7+3 = 10 T, Ola 10+2 = 12 T,",
+    "Bo 2 T, Bea 0 T, Ben 1 T, Cid -1 T, Cy -1 T, Cal 8+1 = 9 T, Cass 5 T,",
+    "Dex 16+3 = 19 T, Dax 9+2 = 11 T, Dot 5 T.",
+    "",
+    "SQUAD standin (no chip): the stand-ins keep their DEF/ATT slots. Starters",
+    "Bo GK, Dana DEF, Dex DEF, Cy ATT (captain), Omar ATT; bench Cass DEF,",
+    "Cal ATT; vice Dex. Every starter played -> no auto-subs; captain Cy",
+    "played -> armband Cy x2 (his stand-in -1 doubles to -2).",
+    "  Bo 2*10=20 + Dana 11*10=110 + Dex 19*10=190 + Cy -1*2*10=-20 +",
+    "  Omar 10*10=100 + Cass 5*1*50~/10=25 + Cal 9*1*50~/10=45 = 470 tenths.",
+    "",
+    "DREAM TEAM (TS finalize replay only): played + eligible, LISTED",
+    "position, points desc then name asc. GK: Bo 2 (Cid -1; Gil absent).",
+    "DEF: Dex 19, Ola 12 (Dana 11 stays a DEF). ATT: Dax 11, Omar 10.",
+    "",
+    "PLAYER WEEK STATS (TS finalize replay): line keys/counts are the same",
+    "ones a listed keeper gets — only the points move. Dana: plays 1/1,",
+    "cleanSheet 1/8, saves 3/1, bonus 1/1 = 11. Cy: plays 1/1, conceded",
+    "4/-2 = -1. Dex: plays 1/1, goals 1/6, assists 1/4, saves 3/1, penSaved",
+    "1/5, conceded 2/-1, bonus 3/3 = 19."
+  ],
+  "config": "futsalDefault",
+  "players": [
+    { "id": "Gil",  "team": "Owls",  "position": "GK",  "priceTenths": 50 },
+    { "id": "Dana", "team": "Owls",  "position": "DEF", "priceTenths": 50 },
+    { "id": "Omar", "team": "Owls",  "position": "ATT", "priceTenths": 80 },
+    { "id": "Ola",  "team": "Owls",  "position": "DEF", "priceTenths": 55 },
+    { "id": "Bo",   "team": "Bears", "position": "GK",  "priceTenths": 50 },
+    { "id": "Bea",  "team": "Bears", "position": "DEF", "priceTenths": 45 },
+    { "id": "Ben",  "team": "Bears", "position": "ATT", "priceTenths": 40 },
+    { "id": "Cid",  "team": "Cats",  "position": "GK",  "priceTenths": 45 },
+    { "id": "Cy",   "team": "Cats",  "position": "ATT", "priceTenths": 70 },
+    { "id": "Cal",  "team": "Cats",  "position": "ATT", "priceTenths": 55 },
+    { "id": "Cass", "team": "Cats",  "position": "DEF", "priceTenths": 45 },
+    { "id": "Dex",  "team": "Dogs",  "position": "DEF", "priceTenths": 60 },
+    { "id": "Dax",  "team": "Dogs",  "position": "ATT", "priceTenths": 75 },
+    { "id": "Dot",  "team": "Dogs",  "position": "DEF", "priceTenths": 50 }
+  ],
+  "games": [
+    {
+      "node": {
+        "team1": "Owls",
+        "team2": "Bears",
+        "team1score": 1,
+        "team2score": 0,
+        "status": 2,
+        "team1attendance": { "Gil": false },
+        "team1activity": {
+          "4'": [ { "Save": "Dana", "_t": 5555 } ],
+          "11'": [ { "Goal": "Omar" }, { "Assist": "Ola" } ],
+          "19'": [ { "Save": "Dana" } ],
+          "33'": [ { "Save": "Dana" } ]
+        },
+        "team2activity": {
+          "8'": [ { "Save": "Bo" } ],
+          "26'": [ { "Save": "Bo" }, { "Yellow": "Bea" } ]
+        }
+      },
+      "attendance": {
+        "Owls": { "Gil": false, "Dana": true, "Omar": true, "Ola": true },
+        "Bears": { "Bo": true, "Bea": true, "Ben": true }
+      }
+    },
+    {
+      "node": {
+        "team1": "Cats",
+        "team2": "Dogs",
+        "team1score": 2,
+        "team2score": 4,
+        "status": 2,
+        "team1keepers": { "Cy": true, "Cid": true, "Cal": false },
+        "team1activity": {
+          "7'": [ { "Goal": "Cal" } ],
+          "29'": [ { "Goal": "Cass" }, { "Assist": "Cal" } ]
+        },
+        "team2activity": {
+          "3'": [ { "Goal": "Dax" }, { "Assist": "Dex" } ],
+          "12'": [ { "Save": "Dex" } ],
+          "15'": [ { "PenSaved": "Dex" } ],
+          "21'": [ { "Goal": "Dax" } ],
+          "24'": [ { "Save": "Dex" }, { "Yellow": "Dot" } ],
+          "31'": [ { "Goal": "Dex" } ],
+          "38'": [ { "Goal": "Dot" } ]
+        }
+      },
+      "attendance": {
+        "Cats": { "Cid": true, "Cy": true, "Cal": true, "Cass": true },
+        "Dogs": { "Dex": true, "Dax": true, "Dot": true }
+      }
+    }
+  ],
+  "squads": [
+    {
+      "name": "standin",
+      "squad": {
+        "picks": [
+          { "playerId": "Bo",   "position": "GK",  "priceTenths": 50, "bench": false },
+          { "playerId": "Dana", "position": "DEF", "priceTenths": 50, "bench": false },
+          { "playerId": "Dex",  "position": "DEF", "priceTenths": 60, "bench": false },
+          { "playerId": "Cy",   "position": "ATT", "priceTenths": 70, "bench": false },
+          { "playerId": "Omar", "position": "ATT", "priceTenths": 80, "bench": false },
+          { "playerId": "Cass", "position": "DEF", "priceTenths": 45, "bench": true },
+          { "playerId": "Cal",  "position": "ATT", "priceTenths": 55, "bench": true }
+        ],
+        "captainId": "Cy",
+        "viceId": "Dex"
+      }
+    }
+  ],
+  "expected": {
+    "inGoalByGame": [
+      { "Gil": false, "Dana": true, "Omar": false, "Ola": false,
+        "Bo": true, "Bea": false, "Ben": false },
+      { "Cid": true, "Cy": true, "Cal": false, "Cass": false,
+        "Dex": true, "Dax": false, "Dot": false }
+    ],
+    "basePointsByGame": [
+      { "Gil": 0, "Dana": 10, "Omar": 7, "Ola": 10, "Bo": 2, "Bea": 0, "Ben": 1 },
+      { "Cid": -1, "Cy": -1, "Cal": 8, "Cass": 5, "Dex": 16, "Dax": 9, "Dot": 5 }
+    ],
+    "bpsByGame": [
+      { "Gil": 0, "Dana": 11, "Omar": 17, "Ola": 14, "Bo": 4, "Bea": -4, "Ben": 0 },
+      { "Cid": 0, "Cy": 0, "Cal": 21, "Cass": 12, "Dex": 35, "Dax": 24, "Dot": 8 }
+    ],
+    "bonusByGame": [
+      { "Omar": 3, "Ola": 2, "Dana": 1 },
+      { "Dex": 3, "Dax": 2, "Cal": 1 }
+    ],
+    "playerWeeks": {
+      "Gil":  { "points": 0,  "played": false },
+      "Dana": { "points": 11, "played": true },
+      "Omar": { "points": 10, "played": true },
+      "Ola":  { "points": 12, "played": true },
+      "Bo":   { "points": 2,  "played": true },
+      "Bea":  { "points": 0,  "played": true },
+      "Ben":  { "points": 1,  "played": true },
+      "Cid":  { "points": -1, "played": true },
+      "Cy":   { "points": -1, "played": true },
+      "Cal":  { "points": 9,  "played": true },
+      "Cass": { "points": 5,  "played": true },
+      "Dex":  { "points": 19, "played": true },
+      "Dax":  { "points": 11, "played": true },
+      "Dot":  { "points": 5,  "played": true }
+    },
+    "squads": {
+      "standin": {
+        "totalTenths": 470,
+        "armband": "Cy",
+        "armbandMultiplier": 2,
+        "autoSubbedIn": [],
+        "countedTenths": {
+          "Bo": 20, "Dana": 110, "Dex": 190, "Cy": -20, "Omar": 100,
+          "Cass": 25, "Cal": 45
+        }
+      }
+    },
+    "dreamTeam": [
+      { "name": "Bo",   "position": "GK",  "points": 2 },
+      { "name": "Dex",  "position": "DEF", "points": 19 },
+      { "name": "Ola",  "position": "DEF", "points": 12 },
+      { "name": "Dax",  "position": "ATT", "points": 11 },
+      { "name": "Omar", "position": "ATT", "points": 10 }
+    ]
+  }
+}

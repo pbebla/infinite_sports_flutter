@@ -2,7 +2,10 @@ import 'dart:async';
 
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/bounded_read.dart';
 import 'package:infinite_sports_flutter/misc/profile_stat_priority.dart';
+import 'package:infinite_sports_flutter/misc/public_profiles.dart';
+import 'package:infinite_sports_flutter/misc/share_card_service.dart' show SharePng;
 import 'package:infinite_sports_flutter/misc/share_profile_service.dart';
 import 'package:infinite_sports_flutter/misc/single_match_tallies.dart'
     show catchPercentage;
@@ -15,6 +18,8 @@ import 'package:infinite_sports_flutter/model/futsalplayer.dart';
 import 'package:infinite_sports_flutter/model/player.dart';
 import 'package:infinite_sports_flutter/model/soccerplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
+import 'package:infinite_sports_flutter/profile/fantasy_profile_source.dart';
+import 'package:infinite_sports_flutter/profile/fantasy_profile_tab.dart';
 import 'package:infinite_sports_flutter/profile/profile_hero.dart';
 import 'package:infinite_sports_flutter/profile/profile_tab.dart';
 import 'package:infinite_sports_flutter/profile/stats_tab.dart';
@@ -77,8 +82,23 @@ class ProfilePage extends StatefulWidget {
   /// [loadOverride] alone resolves the full page (both phases at once).
   final Future<void> Function()? careerLoadOverride;
 
+  /// Test seams for the Fantasy tab (round 3): the fantasy feeds and the
+  /// tab's navigation. null = the real FantasyService / LeagueService feeds.
+  /// A limited profile never has a Fantasy tab, so it takes none.
+  final FantasyProfileSeams? fantasySeams;
+
+  /// Test seam: replaces the system share sheet behind the app-bar Share
+  /// icon (it receives the PNG, the caption and the icon's iPad popover
+  /// anchor). null = the real share sheet.
+  final SharePng? share;
+
   const ProfilePage(
-      {super.key, required this.uid, this.loadOverride, this.careerLoadOverride})
+      {super.key,
+      required this.uid,
+      this.loadOverride,
+      this.careerLoadOverride,
+      this.fantasySeams,
+      this.share})
       : _isLimited = false,
         _limitedName = '';
 
@@ -88,7 +108,9 @@ class ProfilePage extends StatefulWidget {
         _isLimited = true,
         _limitedName = name,
         loadOverride = null,
-        careerLoadOverride = null;
+        careerLoadOverride = null,
+        fantasySeams = null,
+        share = null;
 
   /// Clears the session career cache (mirrors
   /// TournamentService.clearProfileUrlCache). Call after a sign-out or when
@@ -101,9 +123,28 @@ class ProfilePage extends StatefulWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Index of the Fantasy tab when it is shown (Profile, Career, Fantasy).
+const int _kFantasyTabIndex = 2;
+
+// TickerProviderStateMixin (not Single…): a late Fantasy-tab decision swaps
+// in a second TabController while the first is still alive for the fade.
 class _ProfilePageState extends State<ProfilePage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late TabController _tabController;
+
+  /// The Fantasy tab's data (null on limited profiles / without a uid).
+  FantasyProfileSource? _fantasy;
+
+  /// Whether the TabBar currently has the third (Fantasy) tab.
+  bool _showFantasyTab = false;
+
+  /// True while the Fantasy tab is the selected one (the Share action — which
+  /// only knows the Profile / Career cards — hides).
+  bool _fantasyTabSelected = false;
+
+  /// Controllers replaced by a late tab-count change: kept alive until the
+  /// page disposes so the outgoing TabBar can finish its cross-fade.
+  final List<TabController> _retiredTabControllers = [];
 
   // ── Raw loaded data ──────────────────────────────────────────────────────
   String _firstName = '';
@@ -116,6 +157,10 @@ class _ProfilePageState extends State<ProfilePage>
   /// Phase 2 (career) done — career-dependent sections swap their skeletons
   /// for real content once this flips.
   bool _careerLoaded = false;
+  /// Set when any bounded career read timed out (offline). A degraded
+  /// career is shown for this visit but NEVER cached — the next open
+  /// refetches instead of restoring an empty career for the session.
+  bool _careerDegraded = false;
 
   // ── Share state ──────────────────────────────────────────────────────────
   /// Tracks which competition is currently selected in the Career tab, so the
@@ -138,12 +183,72 @@ class _ProfilePageState extends State<ProfilePage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    // The Fantasy tab (round 3) exists only on full (uid) profiles. start()
+    // runs BEFORE the listener is attached so a synchronous (session-cached)
+    // decision never calls setState inside initState — it is simply read
+    // here, and the TabController is built with the right length at once.
+    if (!widget._isLimited && widget.uid.trim().isNotEmpty) {
+      final fantasy =
+          FantasyProfileSource(uid: widget.uid, seams: widget.fantasySeams)
+            ..start();
+      fantasy.addListener(_onFantasyChanged);
+      _fantasy = fantasy;
+      _showFantasyTab = fantasy.hasTab;
+    }
+    _tabController = _newTabController(0);
+  }
+
+  TabController _newTabController(int initialIndex) {
+    final length = _showFantasyTab ? 3 : 2;
+    return TabController(
+      length: length,
+      vsync: this,
+      initialIndex: initialIndex.clamp(0, length - 1),
+    )..addListener(_onTabTick);
+  }
+
+  /// The Share action hides on the Fantasy tab; rebuild only when that flips
+  /// (this fires on every animation tick of a tab change).
+  void _onTabTick() {
+    final selected =
+        _showFantasyTab && _tabController.index == _kFantasyTabIndex;
+    if (selected != _fantasyTabSelected && mounted) {
+      setState(() => _fantasyTabSelected = selected);
+    }
+  }
+
+  void _onFantasyChanged() {
+    final fantasy = _fantasy;
+    if (!mounted || fantasy == null || !fantasy.decided) return;
+    _applyFantasyTab(fantasy.hasTab);
+  }
+
+  /// Gives the TabBar / TabBarView the new tab count. Before the page has
+  /// revealed this is invisible (the skeleton is up); after it, the TabBar
+  /// cross-fades between its two- and three-tab faces (see build) and the
+  /// selected tab is kept. No-op when the count is unchanged.
+  void _applyFantasyTab(bool show) {
+    if (show == _showFantasyTab || !mounted) return;
+    final old = _tabController;
+    old.removeListener(_onTabTick);
+    _retiredTabControllers.add(old);
+    _showFantasyTab = show;
+    _tabController = _newTabController(old.index);
+    setState(() {
+      _fantasyTabSelected =
+          show && _tabController.index == _kFantasyTabIndex;
+    });
   }
 
   @override
   void dispose() {
+    _fantasy
+      ?..removeListener(_onFantasyChanged)
+      ..dispose();
     _tabController.dispose();
+    for (final c in _retiredTabControllers) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -151,7 +256,10 @@ class _ProfilePageState extends State<ProfilePage>
 
   Future<(String, Color, Player)> _extractHelper(
       String sport, String season, String team) async {
-    await getAllTeamLogo();
+    // Logos are cosmetic: a read with no answer (offline) never holds the
+    // career reveal — the stint just has no logo.
+    await getAllTeamLogo()
+        .bounded('ProfilePage: team logos', orElse: () {});
     // Color extraction is deferred — we only decode the CURRENT stint's logo
     // once, after _current is determined. Use a placeholder here so we don't
     // download + decode every logo for every season.
@@ -249,10 +357,15 @@ class _ProfilePageState extends State<ProfilePage>
 
   Future<void> _extractAFCStats() async {
     try {
-      final seasons = await getSoccerSeasons('AFC San Jose');
+      // Bounded one-shot reads (bounded_read.dart): offline, no answer =
+      // no AFC stints, never a held career reveal.
+      final seasons = await getSoccerSeasons('AFC San Jose')
+          .bounded('ProfilePage: AFC seasons');
       // Each season's roster read is independent — fetch them concurrently.
       await Future.wait(seasons.map((season) async {
-        final roster = await getSoccerRoster('AFC San Jose', season);
+        final roster = await getSoccerRoster('AFC San Jose', season).bounded(
+            'ProfilePage: AFC roster $season',
+            orElse: () => <String, SoccerPlayer>{});
         roster.forEach((name, info) {
           if (info.uid == widget.uid) {
             _tableEntries['AFC San Jose'] ??= {};
@@ -261,6 +374,8 @@ class _ProfilePageState extends State<ProfilePage>
           }
         });
       }));
+    } on TimeoutException {
+      _careerDegraded = true;
     } catch (_) {}
   }
 
@@ -553,13 +668,21 @@ class _ProfilePageState extends State<ProfilePage>
                 teamColor: _teamColor,
               ),
               // Tab bar — PR #10: Stats + Career merged into one Career tab
-              // (the enhanced StatsTab).
-              TabBar(
-                controller: _tabController,
-                tabs: const [
-                  Tab(text: 'Profile'),
-                  Tab(text: 'Career'),
-                ],
+              // (the enhanced StatsTab). Round 3 adds Fantasy as a third tab
+              // for a fantasy player / manager. Its presence is decided
+              // before this is first built; a late decision cross-fades the
+              // two faces (keyed by tab count) instead of jumping.
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 250),
+                child: TabBar(
+                  key: ValueKey('profile_tabbar_${_tabController.length}'),
+                  controller: _tabController,
+                  tabs: [
+                    const Tab(text: 'Profile'),
+                    const Tab(text: 'Career'),
+                    if (_showFantasyTab) const Tab(text: 'Fantasy'),
+                  ],
+                ),
               ),
               // Tab content
               Expanded(
@@ -604,6 +727,13 @@ class _ProfilePageState extends State<ProfilePage>
                               ],
                             ),
                     ),
+                    if (_showFantasyTab)
+                      FantasyProfileTab(
+                        source: _fantasy!,
+                        // The profile owner's real name ('' until known) —
+                        // the squad viewer's title fallback.
+                        personName: '$_firstName $_lastName'.trim(),
+                      ),
                   ],
                 ),
               ),
@@ -618,19 +748,26 @@ class _ProfilePageState extends State<ProfilePage>
     return AppBar(
       centerTitle: true,
       title: const Text('Profile'),
-      actions: widget._isLimited
+      // No Share on the Fantasy tab: the share cards only cover the Profile
+      // (trophy cabinet) and Career (stats) tabs.
+      actions: (widget._isLimited || _fantasyTabSelected)
           ? null
           : [
-              IconButton(
-                icon: const Icon(Icons.ios_share),
-                tooltip: 'Share',
-                onPressed: () => _onShareTap(context),
+              // Builder: the iPad share popover anchors to THIS icon.
+              Builder(
+                builder: (buttonContext) => IconButton(
+                  icon: const Icon(Icons.ios_share),
+                  tooltip: 'Share',
+                  onPressed: () => _onShareTap(buttonContext),
+                ),
               ),
             ],
     );
   }
 
   /// Builds and shares the appropriate profile card for the active tab.
+  /// [context] is the tapped Share icon's own context (the iPad popover
+  /// anchor — never the page's).
   Future<void> _onShareTap(BuildContext context) async {
     final fullName =
         '$_firstName $_lastName'.trim().isNotEmpty
@@ -656,6 +793,7 @@ class _ProfilePageState extends State<ProfilePage>
         shareText:
             "$fullName's trophy cabinet — $n ${n == 1 ? 'trophy' : 'trophies'}"
             ' on Infinite Sports',
+        share: widget.share,
       );
     } else {
       // ── Career tab → Stats card for currently selected competition ──────
@@ -695,6 +833,7 @@ class _ProfilePageState extends State<ProfilePage>
         ),
         shareText:
             "$fullName · ${comp.label} — Infinite Sports",
+        share: widget.share,
       );
     }
   }
@@ -704,8 +843,23 @@ class _ProfilePageState extends State<ProfilePage>
   // it and fills the career-dependent sections in via setState when done.
   Future<int>? _loadFuture;
   Future<int> _loadOnce() {
-    _loadFuture ??= _doLoad();
+    _loadFuture ??= _fantasy == null ? _doLoad() : _doLoadThenFantasy();
     return _loadFuture!;
+  }
+
+  /// Identity first, then the Fantasy tab's decision — bounded: the TabBar's
+  /// tab count is decided BEFORE the TabBar is built, so the reveal never
+  /// shows two tabs and then three. A decision that misses the grace window
+  /// still lands later (a faded tab swap); an already-cached one costs
+  /// nothing.
+  Future<int> _doLoadThenFantasy() async {
+    final value = await _doLoad();
+    final fantasy = _fantasy;
+    if (fantasy != null && !fantasy.decided) {
+      await fantasy.decision.timeout(kFantasyTabDecisionGrace, onTimeout: () {});
+    }
+    if (fantasy != null && fantasy.decided) _applyFantasyTab(fantasy.hasTab);
+    return value;
   }
 
   Future<int> _doLoad() async {
@@ -804,14 +958,31 @@ class _ProfilePageState extends State<ProfilePage>
   // ─── Phase 1: identity ────────────────────────────────────────────────────
 
   Future<void> _loadIdentity() async {
-    // ── 1. Load Users/{uid} ──────────────────────────────────────────────
+    // ── 1. Load the profile node ─────────────────────────────────────────
+    // DB lockdown B1: Users/{uid} stays for the viewer's OWN profile (its
+    // owner may always read it); any other uid reads the PublicProfiles
+    // mirror, which carries the exact same keys this page uses (First/Last
+    // Name, ProfileUrl, Information, Played, Awards).
     final ref = FirebaseDatabase.instance.ref();
-    Map rawUser = {};
+    final Map rawUser;
     try {
-      final userSnap =
-          (await ref.child('Users/${widget.uid}').once()).snapshot;
+      // Bounded (bounded_read.dart): this read gates the page's first paint
+      // and a cold offline once() never answers. No answer — or a failed
+      // read — keeps whatever identity is already on screen (a cache-hit
+      // refresh must never blank the cached name); a first visit then shows
+      // the empty page instead of a skeleton forever.
+      final userSnap = (await ref
+              .child(profileNodePathFor(widget.uid))
+              .once()
+              .bounded('ProfilePage: profile node'))
+          .snapshot;
       rawUser = userSnap.value as Map? ?? {};
-    } catch (_) {}
+    } on TimeoutException {
+      _careerDegraded = true;
+      return;
+    } catch (_) {
+      return;
+    }
 
     _firstName = (rawUser['First Name'] ?? '').toString();
     _lastName = (rawUser['Last Name'] ?? '').toString();
@@ -868,7 +1039,13 @@ class _ProfilePageState extends State<ProfilePage>
       ok = false;
       _careerCache.remove(widget.uid);
     }
-    if (ok) {
+    if (ok && _careerDegraded) {
+      // Shown, but not remembered: a timed-out read means this career is
+      // incomplete (offline first visit); caching it would restore an empty
+      // career for the rest of the session.
+      _careerCache.remove(widget.uid);
+    }
+    if (ok && !_careerDegraded) {
       _careerCache[widget.uid] = _snapshotCareer();
       if (color == null && colorFuture != null) {
         // Too late for this visit's reveal, but cache hits render the tint
@@ -920,6 +1097,8 @@ class _ProfilePageState extends State<ProfilePage>
       // team per (sport, season), so one team node is enough — the shared
       // getAll* caches download the whole season's Line Ups (every team,
       // every player) just to extract this one row.
+      // (A team read with no answer — offline — throws, skipping the
+      // whole-season fallback too: it would hang the same way.)
       final targeted = await _extractFromTeamNode(sport, seasonNum, team);
       if (targeted != null) {
         _tableEntries[sport] ??= {};
@@ -928,29 +1107,35 @@ class _ProfilePageState extends State<ProfilePage>
       }
       // Fallback (team renamed / legacy data / player transferred): the old
       // whole-season fetch through the shared lineup caches, which also
-      // searches the season's other teams.
+      // searches the season's other teams. Bounded like every career read.
+      final what = 'ProfilePage: $sport $seasonNum Line Ups';
       if (sport == 'Futsal') {
-        await getAllFutsalLineUps(seasonNum);
+        await getAllFutsalLineUps(seasonNum).bounded(what);
       } else if (sport == 'Basketball') {
-        await getAllBasketballLineUps(seasonNum);
+        await getAllBasketballLineUps(seasonNum).bounded(what);
       } else {
-        await getAllFlagFootballLineUps(seasonNum);
+        await getAllFlagFootballLineUps(seasonNum).bounded(what);
       }
       _tableEntries[sport] ??= {};
       _tableEntries[sport]![seasonNum] =
           await _extractPlayerStats(sport, seasonNum, team);
+    } on TimeoutException {
+      _careerDegraded = true;
     } catch (_) {}
   }
 
   /// Reads `/<Sport>/<season>/Line Ups/<team>` (one team's node) and pulls
   /// this player's row out of it. Returns null when the node is missing or
-  /// the player isn't on it — callers fall back to the whole-season path.
+  /// the player isn't on it — callers fall back to the whole-season path. A
+  /// read with no answer (offline, bounded) THROWS [TimeoutException] so the
+  /// caller skips that fallback too.
   Future<(String, Color, Player)?> _extractFromTeamNode(
       String sport, String season, String team) async {
     try {
       final snap = (await FirebaseDatabase.instance
               .ref('/$sport/$season/Line Ups/$team')
-              .once())
+              .once()
+              .bounded('ProfilePage: $sport $season $team'))
           .snapshot;
       final node = snap.value;
       if (node is! Map) return null;
@@ -958,7 +1143,8 @@ class _ProfilePageState extends State<ProfilePage>
         final info = e.value;
         if (info is! Map) continue;
         if ((info['UID'] ?? '') != widget.uid) continue;
-        await getAllTeamLogo();
+        await getAllTeamLogo()
+            .bounded('ProfilePage: team logos', orElse: () {});
         final logoUrl = (teamLogos[sport]?[season]?[team])?.toString() ?? '';
         final player =
             _parseLeaguePlayer(sport, e.key.toString(), info, logoUrl);
@@ -971,6 +1157,8 @@ class _ProfilePageState extends State<ProfilePage>
         return (team, const Color(0xFFD00000), player);
       }
       return null;
+    } on TimeoutException {
+      rethrow;
     } catch (_) {
       return null;
     }
@@ -1047,9 +1235,13 @@ class _ProfilePageState extends State<ProfilePage>
       // A missing/empty node means no appearances — roster entries without a
       // linked UID never matched the old all-tournaments scan either — so
       // nothing at all is fetched in that (common) case.
+      // Lockdown B1: own profile reads Users, visited profiles read the
+      // PublicProfiles mirror (TournamentsPlayed is mirrored verbatim).
+      // Bounded like every career read: no answer = no appearances.
       final idxSnap = (await FirebaseDatabase.instance
-              .ref('Users/${widget.uid}/TournamentsPlayed')
-              .once())
+              .ref('${profileNodePathFor(widget.uid)}/TournamentsPlayed')
+              .once()
+              .bounded('ProfilePage: TournamentsPlayed'))
           .snapshot;
       final index = idxSnap.value;
       if (index is! Map) return;
@@ -1060,13 +1252,17 @@ class _ProfilePageState extends State<ProfilePage>
           // One whole-node read per tournament (iOS overlapping-get() fix —
           // see TournamentService.getTournamentBundle). Parallel ACROSS
           // tournaments stays fine: different ids never overlap.
-          final bundle =
-              await TournamentService.getTournamentBundle(id.toString());
+          final bundle = await TournamentService.getTournamentBundle(
+                  id.toString())
+              .bounded('ProfilePage: tournament $id');
           final tournament = bundle.tournament;
           if (tournament == null) return;
           final teams = bundle.teams;
+          // Photos never gate: no answer keeps the rosters as they are.
           final rosters =
-              await TournamentService.enrichRosterPhotos(bundle.rosters);
+              await TournamentService.enrichRosterPhotos(bundle.rosters)
+                  .bounded('ProfilePage: tournament $id photos',
+                      orElse: () => bundle.rosters);
           for (final entry in rosters.entries) {
             for (final player in entry.value) {
               if (player.uid == widget.uid) {
@@ -1089,6 +1285,8 @@ class _ProfilePageState extends State<ProfilePage>
           }
         } catch (_) {}
       }));
+    } on TimeoutException {
+      _careerDegraded = true;
     } catch (_) {}
   }
 
@@ -1105,9 +1303,10 @@ class _ProfilePageState extends State<ProfilePage>
       // Fetch current season ONCE per sport.
       if (!cachedCurrentSeason.containsKey(sport)) {
         try {
-          cachedCurrentSeason[sport] = sport == 'AFC San Jose'
-              ? await getAFCCurrentSeason()
-              : await getCurrentSeason(sport);
+          cachedCurrentSeason[sport] = await (sport == 'AFC San Jose'
+                  ? getAFCCurrentSeason()
+                  : getCurrentSeason(sport))
+              .bounded('ProfilePage: $sport current season');
         } catch (_) {
           cachedCurrentSeason[sport] = '';
         }
@@ -1124,9 +1323,10 @@ class _ProfilePageState extends State<ProfilePage>
         // Only run the finished-check for the one matching season, not all.
         if (currentSeasonForSport == seasonNum) {
           try {
-            isActive = sport == 'AFC San Jose'
-                ? !(await isAFCSeasonFinished(seasonNum))
-                : !(await isSeasonFinished(sport, seasonNum));
+            isActive = !(await (sport == 'AFC San Jose'
+                    ? isAFCSeasonFinished(seasonNum)
+                    : isSeasonFinished(sport, seasonNum))
+                .bounded('ProfilePage: $sport $seasonNum Finished'));
           } catch (_) {}
         }
 

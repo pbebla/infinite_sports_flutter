@@ -2,6 +2,28 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/trophy_icons.dart';
 import 'package:infinite_sports_flutter/model/award.dart';
 
+// ─── Infinite Fantasy podium copies ──────────────────────────────────────────
+
+/// ScopeType of the cabinet copies of Infinite Fantasy's season-end Champion
+/// / Runner-up / Third place badges (functions badges.ts cabinetAwardFor;
+/// spec 2026-10-30 §3): ScopeId `<sport>/<season>`, Context 'Infinite
+/// Fantasy'.
+const String kFantasyAwardScopeType = 'fantasy';
+
+/// The cabinet's line for an Infinite Fantasy award — "Infinite Fantasy ·
+/// Futsal Season 15"; null for every other award.
+String? fantasyAwardLine(Award award) {
+  if (award.scopeType != kFantasyAwardScopeType) return null;
+  final context = award.context.trim().isNotEmpty
+      ? award.context.trim()
+      : 'Infinite Fantasy';
+  final where = [
+    if (award.sport.trim().isNotEmpty) award.sport.trim(),
+    if (award.season.trim().isNotEmpty) 'Season ${award.season.trim()}',
+  ].join(' ');
+  return where.isEmpty ? context : '$context · $where';
+}
+
 // ─── Grouping helper ──────────────────────────────────────────────────────────
 
 /// Groups [awards] by trophyId (or name when trophyId is empty) and returns
@@ -188,16 +210,22 @@ class _TrophyChip extends StatelessWidget {
                 // ── Occurrence list ──────────────────────────────────────────
                 ...group.map((award) {
                   final lines = <String>[];
-                  if (award.context.isNotEmpty) lines.add(award.context);
-                  if (award.sport.isNotEmpty) lines.add(award.sport);
-                  if (award.season.isNotEmpty) {
-                    final last = lines.isNotEmpty ? lines.last : '';
-                    // Append season to the sport line if it's the same string
-                    if (last == award.sport) {
-                      lines[lines.length - 1] =
-                          '${award.sport} · Season ${award.season}';
-                    } else {
-                      lines.add('Season ${award.season}');
+                  final fantasyLine = fantasyAwardLine(award);
+                  if (fantasyLine != null) {
+                    // "Infinite Fantasy · Futsal Season 15"
+                    lines.add(fantasyLine);
+                  } else {
+                    if (award.context.isNotEmpty) lines.add(award.context);
+                    if (award.sport.isNotEmpty) lines.add(award.sport);
+                    if (award.season.isNotEmpty) {
+                      final last = lines.isNotEmpty ? lines.last : '';
+                      // Append season to the sport line if it's the same string
+                      if (last == award.sport) {
+                        lines[lines.length - 1] =
+                            '${award.sport} · Season ${award.season}';
+                      } else {
+                        lines.add('Season ${award.season}');
+                      }
                     }
                   }
                   if (award.date.isNotEmpty) {
@@ -315,8 +343,11 @@ class _TrophyChip extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
-            // For a single award keep context line; for grouped show count pill
-            if (count == 1 && _rep.context.isNotEmpty) ...[
+            // For a single award keep context line; for grouped show count
+            // pill. A fantasy award always keeps it ("Infinite Fantasy") so a
+            // fantasy "Champion" never reads like a league title.
+            if (_rep.context.isNotEmpty &&
+                (count == 1 || _rep.scopeType == kFantasyAwardScopeType)) ...[
               const SizedBox(height: 2),
               Text(
                 _rep.context,

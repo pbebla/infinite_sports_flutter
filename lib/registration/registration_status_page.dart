@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:infinite_sports_flutter/misc/share_card_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/registration/payment_screen.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:share_plus/share_plus.dart' show ShareParams;
 
 /// The player's registration state: Paid badge, team state (captain sees
 /// "pending approval" / a rejection notice / the join code prominently with
@@ -20,8 +21,26 @@ class RegistrationStatusPage extends StatefulWidget {
   final String regId;
   final RegistrationConfig config;
 
-  const RegistrationStatusPage(
-      {super.key, required this.regId, required this.config});
+  /// Test seams (mirrors insider_dashboard_page.dart): each defaults to the
+  /// real RegistrationService call / the system share sheet, none of which
+  /// are available in widget tests. [shareSheet] receives the finished
+  /// [ShareParams] — the join-code text plus the iPad popover anchor.
+  final Stream<RegSubmission?>? submissionStream;
+  final Future<List<RegQuestion>>? formFuture;
+  final Stream<RegTeam?>? teamStream;
+  final Stream<List<RegSubmission>>? rosterStream;
+  final ShareSheet? shareSheet;
+
+  const RegistrationStatusPage({
+    super.key,
+    required this.regId,
+    required this.config,
+    this.submissionStream,
+    this.formFuture,
+    this.teamStream,
+    this.rosterStream,
+    this.shareSheet,
+  });
 
   @override
   State<RegistrationStatusPage> createState() => _RegistrationStatusPageState();
@@ -43,23 +62,28 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
   @override
   void initState() {
     super.initState();
-    _submission = RegistrationService.watchMySubmission(widget.regId);
-    _form = RegistrationService.getForm(widget.regId);
+    _submission = widget.submissionStream ??
+        RegistrationService.watchMySubmission(widget.regId);
+    _form = widget.formFuture ?? RegistrationService.getForm(widget.regId);
   }
 
   Stream<RegTeam?> _teamStreamFor(String teamId) {
     if (_teamStream == null || _teamStreamTeamId != teamId) {
       _teamStreamTeamId = teamId;
-      _teamStream = RegistrationService.watchTeam(widget.regId, teamId);
+      _teamStream = widget.teamStream ??
+          RegistrationService.watchTeam(widget.regId, teamId);
     }
     return _teamStream!;
   }
 
-  Stream<List<RegSubmission>> _rosterStreamFor(String teamId) {
-    if (_rosterStream == null || _rosterStreamTeamId != teamId) {
-      _rosterStreamTeamId = teamId;
-      _rosterStream =
-          RegistrationService.watchTeamMembers(widget.regId, teamId);
+  Stream<List<RegSubmission>> _rosterStreamFor(RegTeam team) {
+    if (_rosterStream == null || _rosterStreamTeamId != team.id) {
+      _rosterStreamTeamId = team.id;
+      // Lockdown B3: the Members mirror also carries the captain's own
+      // entry — captainUid filters it out so the roster stays joiners-only.
+      _rosterStream = widget.rosterStream ??
+          RegistrationService.watchTeamMembers(widget.regId, team.id,
+              captainUid: team.captainUid);
     }
     return _rosterStream!;
   }
@@ -88,25 +112,40 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
         .showSnackBar(const SnackBar(content: Text('Join code copied.')));
   }
 
-  void _shareCode(RegTeam team) {
-    SharePlus.instance.share(ShareParams(
+  /// [buttonContext] is the tapped Share button's own context: it anchors
+  /// the iPad share popover (share_plus rejects a share without an origin).
+  void _shareCode(BuildContext buttonContext, RegTeam team) {
+    final sheet = widget.shareSheet ?? openShareSheet;
+    sheet(ShareParams(
         text:
-            'Join my team "${team.name}" for ${widget.config.label}! Open the Infinite Sports app, go to Registration, pick "Join a team with a code" and enter: ${team.joinCode}'));
+            'Join my team "${team.name}" for ${widget.config.label}! Open the Infinite Sports app, go to Registration, pick "Join a team with a code" and enter: ${team.joinCode}',
+        sharePositionOrigin: shareOriginFor(buttonContext)));
   }
 
   Widget? _teamCard(RegSubmission sub, RegTeam? team) {
     if (sub.teamId.isEmpty) return null;
-    if (team == null) {
-      return const Card(
+    if (sub.path != 'captain') {
+      // Joiner (lockdown B8): under default-deny the Teams/<tid> node is
+      // captain+admin-only, so the live team read is denied for joiners —
+      // the card renders from the TeamName stamped on their own submission
+      // (preferred even when the team read worked), and only falls back to
+      // the retry card when neither source has a name (pre-B8 submissions;
+      // none exist in the live DB).
+      final name = sub.teamName.isNotEmpty ? sub.teamName : (team?.name ?? '');
+      if (name.isEmpty) return _teamLoadFailedCard();
+      return Card(
         elevation: 2,
         child: ListTile(
-          leading: Icon(Icons.group),
-          title: Text('Team'),
-          subtitle:
-              Text("Couldn't load your team right now — go back and retry."),
+          leading: const Icon(Icons.group),
+          title:
+              Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+          subtitle: Text(sub.paidVia == 'team code'
+              ? "You're on the team — payment covered by your captain."
+              : "You're on the team."),
         ),
       );
     }
+    if (team == null) return _teamLoadFailedCard();
     if (sub.path == 'captain') {
       if (team.isPending) {
         return Card(
@@ -162,14 +201,17 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
               padding: const EdgeInsets.fromLTRB(15, 0, 15, 12),
               child: SizedBox(
                 width: double.infinity,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.primary,
-                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                // Builder: the share popover anchors to THIS button.
+                child: Builder(
+                  builder: (buttonContext) => ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                    ),
+                    icon: const Icon(Icons.share),
+                    label: const Text('Share code'),
+                    onPressed: () => _shareCode(buttonContext, team),
                   ),
-                  icon: const Icon(Icons.share),
-                  label: const Text('Share code'),
-                  onPressed: () => _shareCode(team),
                 ),
               ),
             ),
@@ -179,23 +221,29 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
         ),
       );
     }
-    // Joiner.
-    return Card(
+    // Unreachable: every non-captain path returned above; this satisfies
+    // the compiler's return requirement only.
+    return null;
+  }
+
+  /// Fallback card when no team identity is available at all (captain's
+  /// team node unreadable, or a pre-B8 joiner submission with no stamped
+  /// TeamName).
+  Widget _teamLoadFailedCard() {
+    return const Card(
       elevation: 2,
       child: ListTile(
-        leading: const Icon(Icons.group),
-        title: Text(team.name,
-            style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(sub.paidVia == 'team code'
-            ? "You're on the team — payment covered by your captain."
-            : "You're on the team."),
+        leading: Icon(Icons.group),
+        title: Text('Team'),
+        subtitle:
+            Text("Couldn't load your team right now — go back and retry."),
       ),
     );
   }
 
   Widget _teamRoster(RegTeam team) {
     return StreamBuilder<List<RegSubmission>>(
-      stream: _rosterStreamFor(team.id),
+      stream: _rosterStreamFor(team),
       builder: (context, snapshot) {
         final members = snapshot.data ?? const <RegSubmission>[];
         return Padding(

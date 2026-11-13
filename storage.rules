@@ -1,0 +1,61 @@
+rules_version = '2';
+
+// Least-privilege Storage rules (lockdown C5, 2026-10-28). Replaces the
+// world-open `allow read, write` rules that were live since 2018.
+//
+// Displaying images never depends on these rules: every image the apps show
+// is a tokenized download URL stored in RTDB, and token URLs bypass rules.
+// These rules govern SDK uploads, deletes, and the uploader's own
+// getDownloadURL right after an upload.
+//
+// Admins: Storage rules cannot read RTDB /Admins, so the admin UIDs are
+// listed here (owner's fan account + the Manager app login). Keep this list
+// in sync with /Admins. Upgrade path: custom claims stamped by a function on
+// /Admins writes, then check request.auth.token.admin instead.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.uid in [
+        'EsDzzsdVM9TASCyBmVbOviYZL4z1',
+        '2ERVXV890VWSXXJTkFGNu63SZMr1'
+      ];
+    }
+
+    function underMb(n) {
+      return request.resource.size < n * 1024 * 1024;
+    }
+
+    // Profile photos: each user manages only their own folder. No content
+    // type check — store builds upload without metadata and the SDK guesses
+    // from the extension. 25 MB because camera photos upload uncompressed.
+    match /Users/{uid}/{rest=**} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && underMb(25);
+      allow delete: if signedIn() && (request.auth.uid == uid || isAdmin());
+    }
+
+    // Support screenshots: written once per index and tagged with the
+    // uploader's uid (customMetadata), because the path carries no owner.
+    match /support/{ticket}/{file} {
+      allow create: if signedIn()
+        && request.resource.metadata.uid == request.auth.uid
+        && request.resource.contentType.matches('image/.*')
+        && underMb(5);
+      allow get: if isAdmin()
+        || (signedIn() && resource.metadata.uid == request.auth.uid);
+      allow list, update, delete: if isAdmin();
+    }
+
+    // Everything else is admin-only: event flyers, fantasy news photos,
+    // legacy league logos, Public/ documents, businesses, root objects.
+    // (Overlapping matches only ever ADD admin access to the paths above.)
+    match /{allPaths=**} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

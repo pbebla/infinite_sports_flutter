@@ -4,7 +4,7 @@ import { onValueCreated } from 'firebase-functions/v2/database';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import type { Reference } from 'firebase-admin/database';
 import {
-  audienceTopic, Campaign, chunk, isDue, parseCampaign,
+  audienceTopic, Campaign, campaignClaim, chunk, isDue, parseCampaign,
 } from './lib/campaigns';
 
 const BRAND_COLOR = '#D00000';
@@ -89,9 +89,10 @@ async function processCampaign(
   root: Reference, id: string, c: Campaign,
 ): Promise<void> {
   const statusRef = root.child(`Campaigns/${id}/Status`);
-  const claim = await statusRef.transaction((current) =>
-    (current === 'pending' ? 'sending' : undefined));
-  if (!claim.committed) return; // someone else claimed it
+  const claim = await statusRef.transaction(campaignClaim);
+  // Not committed, or committed null (no Status at all): someone else
+  // claimed it, or there is nothing to send.
+  if (!claim.committed || claim.snapshot.val() !== 'sending') return;
 
   try {
     let reached: number | null = null;

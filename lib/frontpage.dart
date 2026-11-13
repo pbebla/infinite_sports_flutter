@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_home_banner.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
 import 'package:infinite_sports_flutter/leaderboard.dart';
 import 'package:infinite_sports_flutter/league_detail_page.dart';
@@ -317,6 +318,11 @@ class _FrontPageState extends State<FrontPage> {
                 tabs.add(Column(children: [
                   if (openRegistrations.isNotEmpty)
                     _registrationBanner(context),
+                  // In-season Infinite Fantasy entry (P6): stream-gates
+                  // ITSELF on Fantasy/<sport>/<season>/Config — renders
+                  // nothing while the node is absent.
+                  FantasyHomeBanner(
+                      sport: currentSport, season: currentSeason),
                   // P3.1 owner feedback: header opens the season hub
                   // (LeagueDetailPage), mirroring the tournament header card
                   // below. Root navigator, matching league_day_view's pushes.

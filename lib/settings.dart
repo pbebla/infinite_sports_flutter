@@ -2,12 +2,14 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:flutter_sticky_header/flutter_sticky_header.dart';
+import 'package:infinite_sports_flutter/account/delete_account_flow.dart';
 import 'package:infinite_sports_flutter/misc/web_view_stack.dart';
 import 'package:infinite_sports_flutter/misc/follow_store.dart';
 import 'package:infinite_sports_flutter/misc/categories.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/support/support_form_page.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -32,8 +34,6 @@ class Settings extends StatefulWidget {
 }
 
 class _SettingsState extends State<Settings> {
-  TextEditingController? _emailController;
-  String? _emailErrorText;
   final FollowStore _followStore = FollowStore();
   final NotificationPrefs _notifPrefs = NotificationPrefs();
   List<FollowedChannel> _follows = [];
@@ -44,8 +44,6 @@ class _SettingsState extends State<Settings> {
   @override
   void initState() {
     super.initState();
-    _emailController = TextEditingController();
-    _emailErrorText = "";
     _loadNotificationSettings();
   }
 
@@ -68,12 +66,6 @@ class _SettingsState extends State<Settings> {
       _masterEnabled = master;
       _categoriesOn = categories;
     });
-  }
-
-  @override
-  void dispose() {
-    _emailController!.dispose();
-    super.dispose();
   }
 
   @override
@@ -337,13 +329,13 @@ class _SettingsState extends State<Settings> {
                   },)); 
                 },),
                 const Divider(color: Colors.grey),
-                ListTile(title: const Text("Terms and Conditions"), minTileHeight: 40, onTap: () {
+                ListTile(title: const Text("Terms of Use"), minTileHeight: 40, onTap: () {
                   Navigator.push(context, MaterialPageRoute(builder:(context) {
-                    WebViewController controller = WebViewController()..loadRequest(Uri.parse("https://docs.google.com/document/d/1EifPlImldFfq4yLMZA5m7brbnwH8mfP8Kxf9UpHaF74/edit?usp=sharing"));
+                    WebViewController controller = WebViewController()..loadRequest(Uri.parse("https://infinite-sports-app.web.app/terms"));
                     return Scaffold(
                       appBar: AppBar(
                         centerTitle: true,
-                        title: const Text("Terms and Conditions"),
+                        title: const Text("Terms of Use"),
                         backgroundColor: TournamentColors.headerBackground(context),
                         foregroundColor: TournamentColors.headerForeground(context),
                       ),
@@ -352,35 +344,19 @@ class _SettingsState extends State<Settings> {
                   },));  
                 },),
                 const Divider(color: Colors.grey),
-                ListTile(title: const Text("Privacy Poilicy"), minTileHeight: 40, onTap: () {
+                ListTile(title: const Text("Privacy Policy"), minTileHeight: 40, onTap: () {
                   Navigator.push(context, MaterialPageRoute(builder:(context) {
-                    WebViewController controller = WebViewController()..loadRequest(Uri.parse("https://docs.google.com/document/d/1cT9lJEUyvMsFUAfkpNtzHBBqeM3Em3nvK3lONvK-shk/edit?usp=sharing"));
+                    WebViewController controller = WebViewController()..loadRequest(Uri.parse("https://infinite-sports-app.web.app/privacy"));
                     return Scaffold(
                       appBar: AppBar(
                         centerTitle: true,
-                        title: const Text("Privacy Poilicy"),
+                        title: const Text("Privacy Policy"),
                         backgroundColor: TournamentColors.headerBackground(context),
                         foregroundColor: TournamentColors.headerForeground(context),
                       ),
                       body: WebViewStack(controller: controller,)
                     );
                   },));             
-                },),
-                const Divider(color: Colors.grey),
-                ListTile(title: const Text("End-User License Agreement"), minTileHeight: 40, onTap: () {
-                  Navigator.push(context, MaterialPageRoute(builder:(context) {
-                    return Scaffold(
-                      appBar: AppBar(
-                        centerTitle: true,
-                        title: const Text("End-User License Agreement"),
-                        backgroundColor: TournamentColors.headerBackground(context),
-                        foregroundColor: TournamentColors.headerForeground(context),
-                      ),
-                      // Bottom inset keeps the EULA's last lines scrollable
-                      // clear of the bottom of the screen (PR #12 review).
-                      body: SingleChildScrollView(padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(context).bottom), child: const Text("End-User License Agreement (EULA) of Infinite Sports App \n \n This End-User License Agreement (\"EULA\") is a legal agreement between you, Infinite Sports Association and NinevehWare \n \n This EULA agreement governs your acquisition and use of our Infinite Sports App software (\"Software\") directly from Infinite Sports Association and NinevehWare or indirectly through a Infinite Sports Association and NinevehWare authorized reseller or distributor (a \"Reseller\"). \n \n Please read this EULA agreement carefully before completing the installation process and using the Infinite Sports App software. It provides a license to use the Infinite Sports App software and contains warranty information and liability disclaimers. \n \n If you register for a free trial of the Infinite Sports App software, this EULA agreement will also govern that trial. By clicking \"accept\" or installing and/or using the Infinite Sports App software, you are confirming your acceptance of the Software and agreeing to become bound by the terms of this EULA agreement. \n \n If you are entering into this EULA agreement on behalf of a company or other legal entity, you represent that you have the authority to bind such entity and its affiliates to these terms and conditions. If you do not have such authority or if you do not agree with the terms and conditions of this EULA agreement, do not install or use the Software, and you must not accept this EULA agreement. \n \n This EULA agreement shall apply only to the Software supplied by Infinite Sports Association and NinevehWare herewith regardless of whether other software is referred to or described herein. The terms also apply to any Infinite Sports Association and NinevehWare updates, supplements, Internet-based services, and support services for the Software, unless other terms accompany those items on delivery. If so, those terms apply. \n \n License Grant \n \n Infinite Sports Association and NinevehWare hereby grants you a personal, non-transferable, non-exclusive licence to use the Infinite Sports App software on your devices in accordance with the terms of this EULA agreement. \n \n You are permitted to load the Infinite Sports App software (for example a PC, laptop, mobile or tablet) under your control. You are responsible for ensuring your device meets the minimum requirements of the Infinite Sports App software. \n \n You are not permitted to: \n \n \n - Edit, alter, modify, adapt, translate or otherwise change the whole or any part of the Software nor permit the whole or any part of the Software to be combined with or become incorporated in any other software, nor decompile, disassemble or reverse engineer the Software or attempt to do any such things \n - Reproduce, copy, distribute, resell or otherwise use the Software for any commercial purpose \n - Allow any third party to use the Software on behalf of or for the benefit of any third party \n - Use the Software in any way which breaches any applicable local, national or international law \n - use the Software for any purpose that Infinite Sports Association and NinevehWare considers is a breach of this EULA agreement \n \n \n Intellectual Property and Ownership \n \n Infinite Sports Association and NinevehWare shall at all times retain ownership of the Software as originally downloaded by you and all subsequent downloads of the Software by you. The Software (and the copyright, and other intellectual property rights of whatever nature in the Software, including any modifications made thereto) are and shall remain the property of Infinite Sports Association and NinevehWare. \n \n Infinite Sports Association and NinevehWare reserves the right to grant licences to use the Software to third parties. \n \n Termination \n \n This EULA agreement is effective from the date you first use the Software and shall continue until terminated. You may terminate it at any time upon written notice to Infinite Sports Association and NinevehWare. \n \n This EULA was created by eulatemplate.com for Infinite Sports App \n \n It will also terminate immediately if you fail to comply with any term of this EULA agreement. Upon such termination, the licenses granted by this EULA agreement will immediately terminate and you agree to stop all access and use of the Software. The provisions that by their nature continue and survive will survive any termination of this EULA agreement. \n \n Governing Law \n \n This EULA agreement, and any dispute arising out of or in connection with this EULA agreement, shall be governed by and construed in accordance with the laws of United States of America."),)
-                    );
-                  },)); 
                 },),
                 const Divider(color: Colors.grey),
               ]
@@ -392,6 +368,17 @@ class _SettingsState extends State<Settings> {
           sliver: SliverList(
             delegate: SliverChildListDelegate(
               [
+                const Divider(color: Colors.grey),
+                ListTile(
+                  title: const Text("Help & Feedback"),
+                  subtitle: const Text("Questions, ideas, bugs — send us a ticket"),
+                  minTileHeight: 40,
+                  onTap: () {
+                    Navigator.push(context, MaterialPageRoute(builder: (context) {
+                      return const SupportFormPage(fromScreen: 'Settings');
+                    }));
+                  },
+                ),
                 const Divider(color: Colors.grey),
                 const ListTile(title: Text("Infinite Sports Association"), subtitle: Text("Email: InfiniteSportsAssociation@gmail.com\nIG/FB: Infinite Sports Association") , minTileHeight: 40),
                 const Divider(color: Colors.grey),
@@ -414,64 +401,10 @@ class _SettingsState extends State<Settings> {
           delegate: SliverChildListDelegate(
             [
               const Divider(color: Colors.grey),
-              ListTile(title: Text("Delete Account", style: TextStyle(color: Theme.of(context).colorScheme.error,)), minTileHeight: 40, onTap: () async {
-                showDialog(
-                  context: context, 
-                  builder: (context) {
-                    return StatefulBuilder(
-                      builder: (context, localSetState) {
-                        return AlertDialog(
-                          title: Text("ALERT!"),
-                          content: SizedBox(
-                            height: 150,
-                            child: Column(
-                            children: [
-                              Text("Are you sure you want to delete your account? Type your email below before confirming."),
-                              Padding(
-                                padding: EdgeInsets.fromLTRB(0, 10, 0, 0),
-                                child: TextField(
-                                  controller: _emailController,
-                                  decoration: InputDecoration(
-                                    border: const OutlineInputBorder(),
-                                    errorText: (_emailErrorText),
-                                    labelText: 'Email',
-                                    hintText: 'Enter your email'),
-                                ),
-                              )
-                            ],
-                          ),
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () {
-                                Navigator.pop(context);
-                              }, 
-                              child: const Text("No, Go Back"),
-                            ),
-                            FilledButton(
-                              onPressed: () async {
-                                if (_emailController!.text != FirebaseAuth.instance.currentUser!.email) {
-                                  _emailErrorText = "Email does not match.";
-                                  localSetState(() {});
-                                } else {
-                                  var user = FirebaseAuth.instance.currentUser!;
-                                  await removeImage(user);
-                                  await user.delete();
-                                  signedIn = false;
-                                  Navigator.pop(context);
-                                  Navigator.pop(context);
-                                  Navigator.pop(context);
-                                  setState(() {},);
-                                }
-                              }, 
-                              child: const Text("Yes, Delete", style: TextStyle(color: Colors.white),),
-                            )
-                          ],
-                        );
-                      }
-                    );
-                  }
-                );
+              ListTile(title: Text("Delete Account", style: TextStyle(color: Theme.of(context).colorScheme.error,)), minTileHeight: 40, onTap: () {
+                // Account deletion (design D3): the page explains what goes,
+                // re-signs the person in and asks the server to delete.
+                Navigator.push(context, MaterialPageRoute(builder: (_) => buildDeleteAccountPage(context)));
               },),
               const Divider(color: Colors.grey),
             ]

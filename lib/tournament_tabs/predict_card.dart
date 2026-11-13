@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/points_text.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scoring.dart';
 import 'package:infinite_sports_flutter/model/prediction.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
@@ -238,7 +239,7 @@ class _PredictCardState extends State<PredictCard> {
       exactScorePoints: widget.config.exactScorePoints,
     );
     final label = r.exactCorrect
-        ? 'Exact! +${r.points} pts'
+        ? 'Exact! +${pointsText(r.points)}'
         : r.resultCorrect
             ? 'Right winner +${r.points}'
             : '0 pts';

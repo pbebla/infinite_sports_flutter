@@ -13,9 +13,12 @@ import 'package:infinite_sports_flutter/registration/registration_status_page.da
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 /// Everything [_RegistrationFormPageState._loadAll] fetches once per form
-/// session. [priorSubmissions]/[promo] stay empty/disabled-default on the
-/// joiner path (spec §7 — the promo code field is individual/captain only)
-/// so that path never pays for the extra reads. [insider] is a one-shot read
+/// session. [firstTimerResult] is the checkFirstTimer callable's verdict
+/// (lockdown B4 — computed ONCE here and handed down, so re-typing a promo
+/// code never re-runs the server match); it and [promo] stay
+/// first-timer/disabled-default on the joiner path (spec §7 — the promo
+/// code field is individual/captain only) so that path never pays for the
+/// extra calls. [insider] is a one-shot read
 /// of the SIGNED-IN registrant's own `/Insiders/{uid}` node (Task F5) — null
 /// on every path except individual (spec §2: the tier discount only ever
 /// applies to the Insider's own individual fee, enforced by
@@ -24,7 +27,7 @@ import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 typedef _LoadedForm = ({
   List<RegQuestion> questions,
   Map<String, dynamic> prefill,
-  List<Map<String, dynamic>> priorSubmissions,
+  FirstTimerResult firstTimerResult,
   RegPromo promo,
   Insider? insider,
 });
@@ -96,9 +99,14 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
     final form = await RegistrationService.getForm(widget.regId);
     final prefill = await RegistrationService.getPrefill(widget.config.sport);
     final visible = form.where((q) => q.visibleFor(widget.path)).toList();
-    final priorSubmissions = _showPromoField
-        ? await RegistrationService.getAllSubmissionAnswersForMatch()
-        : const <Map<String, dynamic>>[];
+    // Lockdown B4: the first-timer match runs server-side (checkFirstTimer
+    // callable) against the same two signals the old client scan used —
+    // the account's email and the profile phone already loaded as prefill.
+    final firstTimerResult = _showPromoField
+        ? await RegistrationService.checkFirstTimer(
+            email: FirebaseAuth.instance.currentUser?.email ?? '',
+            phone: (prefill['phone'] ?? '').toString())
+        : const FirstTimerResult(isFirstTimer: true);
     final promo = _showPromoField
         ? await RegistrationService.getPromo(widget.regId)
         : const RegPromo();
@@ -109,7 +117,7 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
     return (
       questions: visible,
       prefill: prefill,
-      priorSubmissions: priorSubmissions,
+      firstTimerResult: firstTimerResult,
       promo: promo,
       insider: insider,
     );
@@ -252,6 +260,7 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
       path: widget.path,
       answers: answers,
       teamId: widget.team?.id ?? '',
+      teamName: widget.team?.name ?? '',
       paid: bornPaid,
       paidVia: bornPaid ? 'team code' : '',
       submittedAt: DateTime.now().millisecondsSinceEpoch,
@@ -337,7 +346,7 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
               (
                 questions: const <RegQuestion>[],
                 prefill: const <String, dynamic>{},
-                priorSubmissions: const <Map<String, dynamic>>[],
+                firstTimerResult: const FirstTimerResult(isFirstTimer: true),
                 promo: const RegPromo(),
                 insider: null,
               );
@@ -366,10 +375,7 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
                       ? InsiderPromoCodeField(
                           eligibleFee: _eligibleFee,
                           promo: loaded.promo,
-                          priorSubmissions: loaded.priorSubmissions,
-                          myEmail:
-                              FirebaseAuth.instance.currentUser?.email ?? '',
-                          myPhone: (loaded.prefill['phone'] ?? '').toString(),
+                          firstTimerResult: loaded.firstTimerResult,
                         )
                       : null,
                 ),

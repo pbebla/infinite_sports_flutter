@@ -7,20 +7,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_stripe/flutter_stripe.dart' hide Card;
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
+import 'package:infinite_sports_flutter/registration/payment_links.dart';
 import 'package:infinite_sports_flutter/registration/promo_engine.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-/// The Zelle account's registered number (shown + copyable).
-const String kZelleNumber = '408-693-9436';
-
-/// The recipient name Zelle displays for 408-693-9436 (owner-confirmed).
-const String kZelleDisplayName = 'Zaya Shahbaz Arami';
-
-/// Venmo handle for the business profile.
-const String kVenmoHandle = 'infinite-sports';
+// The Venmo handle, the Zelle number + display name and the Venmo deep link
+// live in payment_links.dart (shared with the fantasy season-pass card).
 
 /// Stripe's brand purple, used for the "Pay with card" button so it reads as
 /// a distinct payment method next to Venmo blue and the Zelle card.
@@ -105,16 +100,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
     }
   }
 
-  /// venmo.com profile links open the Venmo app when it is installed
-  /// (Android App Links / iOS Universal Links); otherwise the browser loads
-  /// the profile page. txn=pay + amount + note pre-fill the payment. Takes
-  /// the live EFFECTIVE amount (after any manual admin adjustment) so the
-  /// pre-filled Venmo request never asks for more than is actually owed.
+  /// The shared Venmo deep link (payment_links.dart) with the live
+  /// EFFECTIVE amount (after any manual admin adjustment) so the pre-filled
+  /// Venmo request never asks for more than is actually owed.
   Uri _venmoUri(num amount) {
     final name = FirebaseAuth.instance.currentUser?.displayName ?? '';
-    final note = Uri.encodeComponent('${widget.regId} - $name');
-    return Uri.parse(
-        'https://venmo.com/$kVenmoHandle?txn=pay&amount=$amount&note=$note');
+    return venmoPayUri(amount: amount, note: '${widget.regId} - $name');
   }
 
   /// The amount THIS registrant currently owes, combining the base
@@ -356,7 +347,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
             height: 50,
             child: ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF008CFF),
+                backgroundColor: kVenmoBlue,
                 foregroundColor: Colors.white,
               ),
               icon: const Icon(Icons.open_in_new),
