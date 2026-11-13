@@ -2,6 +2,7 @@ import 'package:data_table_2/data_table_2.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/tab_swap.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/leaderboard.dart';
 import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
@@ -686,8 +687,10 @@ class _ScorePageState extends State<ScorePage> {
             );
             tabNames.add(Tab(text: game!.team2));
           }
-          return DefaultTabController(
-            length: tabs.length, 
+          // Keyed by tab count (release report #1): a count change can never
+          // leave TabBar/TabBarView on a disposed controller.
+          return LiveLengthTabController(
+            length: tabs.length,
             child: Scaffold(
               appBar: AppBar(
                 automaticallyImplyLeading: false,

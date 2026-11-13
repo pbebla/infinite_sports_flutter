@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/tab_swap.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_home_banner.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
@@ -422,7 +423,9 @@ class _FrontPageState extends State<FrontPage> {
               }
               if (tabs.isNotEmpty) {
                 WidgetsBinding.instance.addPostFrameCallback((_) => executeAfterBuild());
-                return DefaultTabController(
+                // Keyed by tab count (release report #1): a count change can
+                // never leave TabBar/TabBarView on a disposed controller.
+                return LiveLengthTabController(
                     length: tabs.length,
                     child: Scaffold(
                       appBar: AppBar(

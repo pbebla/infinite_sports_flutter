@@ -15,6 +15,7 @@ import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
 import 'package:infinite_sports_flutter/misc/schedule_display.dart';
 import 'package:infinite_sports_flutter/misc/single_match_tallies.dart';
+import 'package:infinite_sports_flutter/misc/tab_swap.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
@@ -417,14 +418,15 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
         configExists: _fantasyConfig != null, stage: match.stage);
     final tabCount = fantasyOpen ? 4 : 3;
 
-    return DefaultTabController(
+    // The tab count changes live (Fantasy config appearing/disappearing):
+    // LiveLengthTabController keys the controller AND its whole subtree by
+    // the count, so TabBar/TabBarView never outlive their controller
+    // (release report #1 — keying only the NestedScrollView leaked their
+    // animation listeners and threw on every later tab switch).
+    return LiveLengthTabController(
       length: tabCount,
       child: Scaffold(
         body: NestedScrollView(
-          // Remount the tabbed subtree when the tab count changes live
-          // (league_detail_page.dart's P3.2 rule) so TabBar/TabBarView
-          // re-attach to the re-created controller cleanly.
-          key: ValueKey(tabCount),
           headerSliverBuilder: (context, innerBoxIsScrolled) {
             return [
               SliverAppBar(
