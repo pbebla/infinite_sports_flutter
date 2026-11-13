@@ -63,6 +63,19 @@ import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart'
 import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 
+/// The season-over call to action, shared by this banner ("Season over —
+/// see the final standings") and the Search hub's Fantasy card.
+const String kFantasySeasonOverCta = 'see the final standings';
+
+/// The Search hub's Fantasy card line (release report #16): "is live" only
+/// while the league season is running, decided by the SAME
+/// [FantasySeasonFinishedFeed] flag this banner uses.
+String fantasyEntryCardSubtitle(String sport, String season,
+        {required bool finished}) =>
+    finished
+        ? '$sport Season $season is over — $kFantasySeasonOverCta'
+        : 'Pick your seven — $sport Season $season is live';
+
 class FantasyHomeBanner extends StatefulWidget {
   const FantasyHomeBanner({
     super.key,
@@ -373,7 +386,7 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
   /// the squad can't be saved.
   String _restingTitle() {
     if (_seasonFinished.finished) {
-      return 'Season over — see the final standings';
+      return 'Season over — $kFantasySeasonOverCta';
     }
     const setYourSquad = 'Fantasy is live — set your squad';
     switch (_config?.lockOverride ?? FantasyLockOverride.auto) {
