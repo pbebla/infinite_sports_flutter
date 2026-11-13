@@ -190,6 +190,15 @@ describe('deleteAccount', () => {
       expect(h.deletedAuth).toEqual([]);
     });
 
+    it('a new incomplete KEPT account of a combine (MergedFrom) still needs a fresh sign-in', async () => {
+      h.created[ALICE] = daysAgo(3);
+      h.tree.Users[ALICE].MergedFrom = { uid_old_12345: true };
+      const e = await failure(call(deleteAccount, {}, stale()));
+      expect(e.details).toEqual({ code: 'recent-login-required' });
+      expect(h.deletedAuth).toEqual([]);
+      expect(h.tree.Users[ALICE]).toBeDefined();
+    });
+
     it('an incomplete account older than 7 days still needs a fresh sign-in', async () => {
       h.created[ALICE] = daysAgo(8);
       const e = await failure(call(deleteAccount, {}, stale()));

@@ -141,7 +141,8 @@ async function deleteAccountFor(
   };
 }
 
-/** True only when BOTH hold: Users/<uid>/ProfileCompleted is not true AND
+/** True only when ALL hold: Users/<uid>/ProfileCompleted is not true, there
+ *  is no Users/<uid>/MergedFrom (not the kept account of a combine), AND
  *  the Auth user was created within the last 7 days. Such an account (the
  *  under-13 exit right after sign-up) may delete itself without a fresh
  *  sign-in. Any doubt - a gone Auth user, an unreadable creation time, a
@@ -150,6 +151,10 @@ async function isNewIncompleteAccount(uid: string): Promise<boolean> {
   try {
     const completed = (await admin.database().ref(`Users/${uid}/ProfileCompleted`).get()).val();
     if (completed === true) return false;
+    // A KEPT account of a combine never qualifies: its deletion cascades to
+    // the old accounts combined into it (C1).
+    const mergedFrom = (await admin.database().ref(`Users/${uid}/MergedFrom`).get()).val();
+    if (mergedFrom !== null && mergedFrom !== undefined) return false;
     const user = await getAuth().getUser(uid);
     const created = Date.parse(String(user.metadata?.creationTime ?? ''));
     if (!Number.isFinite(created)) return false;
