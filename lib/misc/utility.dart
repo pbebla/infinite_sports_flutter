@@ -1064,26 +1064,46 @@ Future<void> createDatabaseLocation(User user, FileImage? fileImage, String phon
 /// Seam over `Users/<uid>/Token` (this phone's FCM token for per-person
 /// pushes) so the token rules below are unit-testable without Firebase.
 abstract class UserTokenNode {
-  Future<Object?> read(String uid);
   Future<void> write(String uid, String token);
-  Future<void> remove(String uid);
+
+  /// Removes the node in ONE server-checked step when [shouldRemove] says
+  /// so for the value the SERVER holds (never a stale cached value).
+  /// Returns whether the removal committed.
+  Future<bool> removeIf(
+      String uid, bool Function(Object? current) shouldRemove);
 }
 
 class FirebaseUserTokenNode implements UserTokenNode {
   DatabaseReference _ref(String uid) =>
       FirebaseDatabase.instance.ref('Users/$uid/Token');
 
-  // `once()`, never `get()` (house rule).
-  @override
-  Future<Object?> read(String uid) async =>
-      (await _ref(uid).once()).snapshot.value;
-
   @override
   Future<void> write(String uid, String token) => _ref(uid).set(token);
 
+  // A transaction, not `once()` + `remove()`: with disk persistence on, a
+  // `once()` on an unwatched path can answer from a stale cache (this
+  // phone's old token while the server holds another phone's). The server
+  // rejects a transaction run against a stale value and re-runs the
+  // handler with the real one.
   @override
-  Future<void> remove(String uid) => _ref(uid).remove();
+  Future<bool> removeIf(
+      String uid, bool Function(Object? current) shouldRemove) async {
+    final result = await _ref(uid).runTransaction(
+      (current) => shouldRemove(current)
+          ? Transaction.success(null)
+          : Transaction.abort(),
+      applyLocally: false,
+    );
+    return result.committed;
+  }
 }
+
+/// The transaction handler for [removeUserTokenIfThisDevice]: remove when
+/// the node holds [mine]. A null value also "removes" (null -> null, a
+/// no-op) so an empty local cache never aborts before the server answers;
+/// if the server actually holds another token it re-runs this and aborts.
+bool shouldRemoveTokenNode(Object? current, String mine) =>
+    current == null || current == mine;
 
 /// This phone's FCM token, or null when unavailable.
 Future<String?> currentDeviceFcmToken() =>
@@ -1117,10 +1137,8 @@ Future<bool> removeUserTokenIfThisDevice(
     final mine = await (deviceToken ?? currentDeviceFcmToken)();
     if (mine == null || mine.isEmpty) return false;
     final store = node ?? FirebaseUserTokenNode();
-    final stored = await store.read(uid);
-    if (stored != mine) return false;
-    await store.remove(uid);
-    return true;
+    return store.removeIf(
+        uid, (current) => shouldRemoveTokenNode(current, mine));
   }
 
   try {
@@ -1133,15 +1151,20 @@ Future<bool> removeUserTokenIfThisDevice(
 
 /// Writes this phone's token for [uid] unless the Settings "All
 /// notifications" switch is off (then the phone must receive nothing, so
-/// nothing is written). Never throws.
+/// nothing is written). Never throws, and stops WAITING after [timeout]
+/// (a Realtime Database `set` only completes once the server confirms; the
+/// queued write still goes through when the phone reconnects).
 Future<void> uploadTokenForUid(
   String uid,
   String token, {
   UserTokenNode? node,
+  Duration timeout = kTokenDetachTimeout,
 }) async {
   try {
     if (!await FollowStore().masterEnabled()) return;
-    await (node ?? FirebaseUserTokenNode()).write(uid, token);
+    await (node ?? FirebaseUserTokenNode())
+        .write(uid, token)
+        .timeout(timeout);
   } catch (e) {
     debugPrint('Device token upload failed: ${e.runtimeType}');
   }
@@ -1151,14 +1174,19 @@ Future<void> uploadToken(User user, String token) =>
     uploadTokenForUid(user.uid, token);
 
 /// Uploads this phone's current token for the signed-in person (the
-/// notifications switch turned back ON). No-op when signed out.
+/// notifications switch turned back ON). No-op when signed out. Bounded
+/// by [kTokenDetachTimeout] overall, never throws.
 Future<void> uploadCurrentDeviceToken() async {
   try {
     final uid = currentSignedInUid();
     if (uid == null) return;
-    final token = await currentDeviceFcmToken();
-    if (token == null) return;
-    await uploadTokenForUid(uid, token);
+    Future<void> run() async {
+      final token = await currentDeviceFcmToken();
+      if (token == null) return;
+      await uploadTokenForUid(uid, token);
+    }
+
+    await run().timeout(kTokenDetachTimeout);
   } catch (e) {
     debugPrint('Device token upload skipped: ${e.runtimeType}');
   }

@@ -461,7 +461,8 @@ class _MyHomePageState extends State<MyHomePage> {
     }
     final prefs = NotificationPrefs();
     // The everyone topic stays off while "All notifications" is off.
-    if (await FollowStore().masterEnabled()) await prefs.subscribeAllUsers();
+    await FollowStore()
+        .joinEveryoneTopicIfEnabled(subscribe: prefs.subscribeAllUsers);
     final user = FirebaseAuth.instance.currentUser;
     if (!signedIn || user == null) return;
     // A merged (old) account gets NEITHER prompt: the merged-account watcher

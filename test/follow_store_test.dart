@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/misc/follow_store.dart';
 import 'package:infinite_sports_flutter/misc/notification_topics.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart'
+    show UserTokenNode, uploadTokenForUid;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class FakeMessaging implements TopicMessaging {
@@ -11,6 +15,18 @@ class FakeMessaging implements TopicMessaging {
   @override
   Future<void> unsubscribeFromTopic(String topic) async =>
       unsubscribed.add(topic);
+}
+
+class _RecordingTokenNode implements UserTokenNode {
+  final List<String> calls = [];
+  @override
+  Future<void> write(String uid, String token) async => calls.add('write');
+  @override
+  Future<bool> removeIf(
+      String uid, bool Function(Object? current) shouldRemove) async {
+    calls.add('removeIf');
+    return false;
+  }
 }
 
 void main() {
@@ -99,6 +115,41 @@ void main() {
     await s.setMasterEnabled(false);
     await s.setMasterEnabled(true);
     expect(await s.masterEnabled(), isTrue);
+  });
+
+  test('a never-completing token write (offline) cannot freeze the switch',
+      () async {
+    final s = FollowStore(
+      messaging: messaging,
+      detachToken: () => Completer<void>().future,
+      attachToken: () => Completer<void>().future,
+    );
+    final sw = Stopwatch()..start();
+    await s.setMasterEnabled(true);
+    await s.setMasterEnabled(false);
+    expect(sw.elapsed, lessThan(const Duration(seconds: 6)));
+    expect(await s.masterEnabled(), isFalse);
+  });
+
+  test(
+      'app launch with the switch OFF: no everyone-topic join and no token '
+      'write', () async {
+    await store.setMasterEnabled(false);
+    messaging.subscribed.clear();
+    // The two launch-time steps main.dart runs.
+    await store.joinEveryoneTopicIfEnabled();
+    final node = _RecordingTokenNode();
+    await uploadTokenForUid('uid_alice', 'tok_phone', node: node);
+    expect(messaging.subscribed, isEmpty);
+    expect(node.calls, isEmpty);
+  });
+
+  test('app launch with the switch ON: joins the everyone topic', () async {
+    var custom = 0;
+    await store.joinEveryoneTopicIfEnabled();
+    await store.joinEveryoneTopicIfEnabled(subscribe: () async => custom++);
+    expect(messaging.subscribed, [allUsersTopic]);
+    expect(custom, 1);
   });
 
   test('signed out / no Firebase: default token steps do not crash',
