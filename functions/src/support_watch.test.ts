@@ -1,0 +1,193 @@
+// Support-ticket triggers: mail to "the person" goes to the address Firebase
+// Auth holds for the ticket's uid (never the client-written Email field), and
+// the server caps acknowledgements (6/h) and user-reply notices (20/h) per
+// uid. Handlers are driven over an in-memory tree with Auth and the mailer
+// injected, so no SMTP, Auth or secrets.
+
+import { describe, expect, it, vi } from 'vitest';
+
+const logged = vi.hoisted(() => [] as string[]);
+vi.mock('firebase-functions/logger', () => {
+  const line = (kind: string) => (m: string, c?: unknown) => {
+    logged.push(`${kind} ${m} ${JSON.stringify(c ?? {})}`);
+  };
+  return { info: line('info'), warn: line('warn'), error: line('error'), debug: line('debug') };
+});
+
+import {
+  handleThreadMessage, handleTicketClosed, handleTicketCreated, SUPPORT_INBOX, SupportDeps,
+} from './support_watch';
+
+type Tree = Record<string, any>;
+const UID = 'uid_alice_12345';
+const AUTH_EMAIL = 'alice.account@example.com';
+const STRANGER = 'stranger.victim@example.net';
+const NOW = 50_000_000;
+
+function fakeRef(tree: Tree, path: string): any {
+  const parts = path.split('/').filter((p) => p.length > 0);
+  const read = (): unknown => {
+    let node: any = tree;
+    for (const p of parts) {
+      if (node === null || node === undefined || typeof node !== 'object') return null;
+      node = node[p];
+    }
+    return node === undefined ? null : JSON.parse(JSON.stringify(node));
+  };
+  const write = (value: unknown): void => {
+    let node: any = tree;
+    for (const p of parts.slice(0, -1)) {
+      if (node[p] === null || node[p] === undefined || typeof node[p] !== 'object') node[p] = {};
+      node = node[p];
+    }
+    const last = parts[parts.length - 1];
+    if (value === null || value === undefined) delete node[last]; else node[last] = value;
+  };
+  return {
+    child: (sub: string) => fakeRef(tree, `${path}/${sub}`),
+    get: async () => ({ val: () => read() }),
+    set: async (v: unknown) => write(v),
+    update: async (v: Record<string, unknown>) => {
+      for (const [k, val] of Object.entries(v)) fakeRef(tree, `${path}/${k}`).set(val);
+    },
+    transaction: async (fn: (cur: unknown) => unknown) => {
+      const cur = read();
+      const next = fn(cur);
+      if (next === undefined) return { committed: false, snapshot: { val: () => cur } };
+      write(next);
+      return { committed: true, snapshot: { val: () => next } };
+    },
+  };
+}
+
+function harness(over: Partial<SupportDeps> = {}, tree: Tree = {}) {
+  const mails: Array<{ to: string; subject: string; html: string; replyTo?: string }> = [];
+  const pushes: string[] = [];
+  const deps: SupportDeps = {
+    getAuthEmail: async (uid) => (uid === UID ? AUTH_EMAIL : null),
+    sendMail: async (_root, m) => { mails.push(m); },
+    sendPush: async (_root, uid, title) => { pushes.push(`${uid}:${title}`); },
+    now: () => NOW,
+    ...over,
+  };
+  return { root: fakeRef(tree, ''), tree, mails, pushes, deps };
+}
+
+const ticket = (over: Record<string, unknown> = {}) => ({
+  Uid: UID, Name: 'Alice', Email: STRANGER, Category: 'bug', Message: 'It broke',
+  Platform: 'iOS', AppVersion: '3.0.0', Screen: 'Home', Status: 'open', ...over,
+});
+
+describe('handleTicketCreated', () => {
+  it("acknowledges to the account's Auth address, never the stored Email field", async () => {
+    const h = harness();
+    await handleTicketCreated(h.root, '7', ticket(), h.deps);
+    const ack = h.mails.find((m) => m.to !== SUPPORT_INBOX)!;
+    expect(ack.to).toBe(AUTH_EMAIL);
+    const inbox = h.mails.find((m) => m.to === SUPPORT_INBOX)!;
+    expect(inbox.replyTo).toBe(AUTH_EMAIL);
+    expect(JSON.stringify(h.mails.map((m) => [m.to, m.replyTo]))).not.toContain(STRANGER);
+  });
+
+  it('no Auth email (or user-not-found) -> no acknowledgement, no throw; the inbox still hears', async () => {
+    logged.length = 0;
+    const h = harness({ getAuthEmail: async () => null });
+    await expect(handleTicketCreated(h.root, '7', ticket(), h.deps)).resolves.toBeUndefined();
+    expect(h.mails.map((m) => m.to)).toEqual([SUPPORT_INBOX]);
+    expect(h.mails[0].replyTo).toBeUndefined();
+    expect(logged.join('\n')).not.toContain(UID);
+    expect(logged.join('\n')).not.toContain(STRANGER);
+  });
+
+  it('an Auth lookup that throws is treated as no address (never throws into the trigger)', async () => {
+    const h = harness({ getAuthEmail: async () => { throw new Error('auth down'); } });
+    await expect(handleTicketCreated(h.root, '7', ticket(), h.deps)).resolves.toBeUndefined();
+    expect(h.mails.map((m) => m.to)).toEqual([SUPPORT_INBOX]);
+  });
+
+  it('caps acknowledgements at 6 per rolling hour per uid; over the cap sends nothing and warns once, masked', async () => {
+    const h = harness();
+    for (let i = 1; i <= 6; i++) await handleTicketCreated(h.root, String(i), ticket(), h.deps);
+    expect(h.mails.filter((m) => m.to === AUTH_EMAIL)).toHaveLength(6);
+    logged.length = 0;
+    h.mails.length = 0;
+    await handleTicketCreated(h.root, '7', ticket(), h.deps);
+    expect(h.mails).toEqual([]);
+    const warns = logged.filter((l) => l.startsWith('warn'));
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).not.toContain(UID);
+    expect(warns[0]).toContain(UID.slice(0, 6));
+    // The counter node is bounded (6 stamps) and lives at the functions-only path.
+    expect(h.tree.Support.MailCaps[UID].Ack).toHaveLength(6);
+  });
+
+  it('the cap is a ROLLING hour: an hour later the next ticket is acknowledged again', async () => {
+    let now = NOW;
+    const h = harness({ now: () => now });
+    for (let i = 1; i <= 7; i++) await handleTicketCreated(h.root, String(i), ticket(), h.deps);
+    expect(h.mails.filter((m) => m.to === AUTH_EMAIL)).toHaveLength(6);
+    now += 60 * 60 * 1000 + 1;
+    await handleTicketCreated(h.root, '8', ticket(), h.deps);
+    expect(h.mails.filter((m) => m.to === AUTH_EMAIL)).toHaveLength(7);
+  });
+
+  it('a ticket with no Uid sends no acknowledgement', async () => {
+    const h = harness();
+    await handleTicketCreated(h.root, '7', ticket({ Uid: '' }), h.deps);
+    expect(h.mails.map((m) => m.to)).toEqual([SUPPORT_INBOX]);
+  });
+});
+
+describe('handleThreadMessage', () => {
+  const seeded = (): Tree => ({ Support: { Tickets: { '7': ticket() } } });
+
+  it('a user reply reopens the ticket and notifies the inbox with Reply-To the Auth address', async () => {
+    const h = harness({}, seeded());
+    await handleThreadMessage(h.root, '7', { From: 'user', Text: 'still broken' }, h.deps);
+    expect(h.tree.Support.Tickets['7'].Status).toBe('open');
+    expect(h.mails).toHaveLength(1);
+    expect(h.mails[0].to).toBe(SUPPORT_INBOX);
+    expect(h.mails[0].replyTo).toBe(AUTH_EMAIL);
+  });
+
+  it('caps user-reply notices at 20 per rolling hour per uid; the reply is still processed', async () => {
+    const h = harness({}, seeded());
+    for (let i = 0; i < 20; i++) {
+      await handleThreadMessage(h.root, '7', { From: 'user', Text: `r${i}` }, h.deps);
+    }
+    expect(h.mails).toHaveLength(20);
+    h.tree.Support.Tickets['7'].Status = 'answered';
+    logged.length = 0;
+    await handleThreadMessage(h.root, '7', { From: 'user', Text: 'r21' }, h.deps);
+    expect(h.mails).toHaveLength(20);
+    expect(h.tree.Support.Tickets['7'].Status).toBe('open'); // data still written
+    expect(logged.filter((l) => l.startsWith('warn'))).toHaveLength(1);
+    expect(logged.join('\n')).not.toContain(UID);
+  });
+
+  it('an admin reply pushes to the owner and sends no mail', async () => {
+    const h = harness({}, seeded());
+    await handleThreadMessage(h.root, '7', { From: 'admin', Text: 'fixed' }, h.deps);
+    expect(h.tree.Support.Tickets['7'].Status).toBe('answered');
+    expect(h.mails).toEqual([]);
+    expect(h.pushes).toHaveLength(1);
+  });
+});
+
+describe('handleTicketClosed', () => {
+  it('sends the closing email to the Auth address, not the stored Email field', async () => {
+    const h = harness({}, {
+      Support: { Tickets: { '7': ticket({ ClosedOutcome: 'fixed', ClosedNote: 'ha' }) } },
+    });
+    await handleTicketClosed(h.root, '7', h.deps);
+    expect(h.mails.map((m) => m.to)).toEqual([AUTH_EMAIL]);
+    expect(h.pushes).toHaveLength(1);
+  });
+
+  it('no Auth email -> no closing email, push still sent', async () => {
+    const h = harness({ getAuthEmail: async () => null }, { Support: { Tickets: { '7': ticket() } } });
+    await handleTicketClosed(h.root, '7', h.deps);
+    expect(h.mails).toEqual([]);
+    expect(h.pushes).toHaveLength(1);
+  });
+});

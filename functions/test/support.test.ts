@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  ackEmailHtml, ackSubject, becameClosed, buildJokePrompt, cannedJoke,
+  ackEmailHtml, ackSubject, MAIL_CAP_WINDOW_MS, MAIL_CAPS, mailCapStep, becameClosed, buildJokePrompt, cannedJoke,
   CATEGORY_KEYS, categoryLabel, closedOutcomePhrase, closingEmailHtml,
   closingSubject, escapeHtml, escapeMultiline, FetchLike, generateJoke,
   isValidEmail, JOKE_BANK, JOKE_MODEL, mailLogEntry, newTicketEmailHtml,
@@ -331,16 +331,20 @@ describe('cannedJoke', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildJokePrompt', () => {
-  it('includes the category label and the ticket message', () => {
-    const prompt = buildJokePrompt('bug', 'The scoreboard shows 999-0');
+  it('is built from the category label alone', () => {
+    const prompt = buildJokePrompt('bug');
     expect(prompt).toContain('Something is broken');
-    expect(prompt).toContain('The scoreboard shows 999-0');
+    expect(prompt).not.toContain('Ticket message');
   });
 
-  it('truncates very long messages', () => {
-    const prompt = buildJokePrompt('comment', 'x'.repeat(5000));
-    expect(prompt).toContain('…');
-    expect(prompt.length).toBeLessThan(2000);
+  it('a missing or unknown category falls back to the generic one', () => {
+    expect(buildJokePrompt('')).toContain('Something else');
+    expect(buildJokePrompt('banana')).toContain('Something else');
+  });
+
+  it("never carries the person's words, even if a caller passes them", () => {
+    const prompt = (buildJokePrompt as (...a: unknown[]) => string)('bug', 'PRIVATE_SCOREBOARD_999');
+    expect(prompt).not.toContain('PRIVATE_SCOREBOARD_999');
   });
 });
 
@@ -378,7 +382,7 @@ describe('generateJoke', () => {
   it('returns the AI joke on a successful API call', async () => {
     const fetchImpl = okFetch('Scoreboard said 999-0? Even Rocky took fewer hits.');
     const res = await generateJoke({
-      category: 'bug', message: 'Scoreboard shows 999-0', apiKey: 'sk-test', fetchImpl,
+      category: 'bug', apiKey: 'sk-test', fetchImpl,
     });
     expect(res).toEqual({
       joke: 'Scoreboard said 999-0? Even Rocky took fewer hits.', source: 'ai',
@@ -388,7 +392,7 @@ describe('generateJoke', () => {
   it('calls the Messages API with the documented headers and body', async () => {
     const fetchImpl = okFetch('ha');
     await generateJoke({
-      category: 'bug', message: 'broken', apiKey: 'sk-test', fetchImpl,
+      category: 'bug', apiKey: 'sk-test', fetchImpl,
     });
     const calls = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls;
     expect(calls).toHaveLength(1);
@@ -402,14 +406,25 @@ describe('generateJoke', () => {
     expect(typeof body.system).toBe('string');
     expect(body.messages).toHaveLength(1);
     expect(body.messages[0].role).toBe('user');
-    expect(body.messages[0].content).toContain('broken');
     expect(body.messages[0].content).toContain('Something is broken');
+  });
+
+  it("sends no part of the person's message, even if an older caller passes one", async () => {
+    const fetchImpl = okFetch('ha');
+    const secret = 'My kid Jordan at 12 Elm Street cannot log in';
+    await generateJoke({
+      category: 'account', message: secret, apiKey: 'sk-test', fetchImpl,
+    } as Parameters<typeof generateJoke>[0]);
+    const [, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(init.body).not.toContain('Jordan');
+    expect(init.body).not.toContain('Elm Street');
+    expect(init.body).not.toContain(secret);
   });
 
   it('falls back to the bank when no key is configured (and never fetches)', async () => {
     const fetchImpl = okFetch('should not be used');
     const res = await generateJoke({
-      category: 'help', message: 'halp', apiKey: '', fetchImpl, rand: () => 0,
+      category: 'help', apiKey: '', fetchImpl, rand: () => 0,
     });
     expect(res).toEqual({ joke: JOKE_BANK.help[0], source: 'bank' });
     expect((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
@@ -420,7 +435,7 @@ describe('generateJoke', () => {
       ok: false, status: 529, json: async () => ({ error: 'overloaded' }),
     });
     const res = await generateJoke({
-      category: 'account', message: 'locked out', apiKey: 'sk', fetchImpl, rand: () => 0,
+      category: 'account', apiKey: 'sk', fetchImpl, rand: () => 0,
     });
     expect(res).toEqual({ joke: JOKE_BANK.account[0], source: 'bank' });
   });
@@ -428,7 +443,7 @@ describe('generateJoke', () => {
   it('falls back to the bank when fetch throws', async () => {
     const fetchImpl: FetchLike = async () => { throw new Error('ECONNRESET'); };
     const res = await generateJoke({
-      category: 'suggestion', message: 'idea', apiKey: 'sk', fetchImpl, rand: () => 0,
+      category: 'suggestion', apiKey: 'sk', fetchImpl, rand: () => 0,
     });
     expect(res).toEqual({ joke: JOKE_BANK.suggestion[0], source: 'bank' });
   });
@@ -438,7 +453,7 @@ describe('generateJoke', () => {
       ok: true, status: 200, json: async () => ({ unexpected: true }),
     });
     const res = await generateJoke({
-      category: 'comment', message: 'nice app', apiKey: 'sk', fetchImpl, rand: () => 0,
+      category: 'comment', apiKey: 'sk', fetchImpl, rand: () => 0,
     });
     expect(res).toEqual({ joke: JOKE_BANK.comment[0], source: 'bank' });
   });
@@ -448,9 +463,43 @@ describe('generateJoke', () => {
       init.signal?.addEventListener('abort', () => reject(new Error('aborted')));
     });
     const res = await generateJoke({
-      category: 'other', message: 'hmm', apiKey: 'sk', fetchImpl,
+      category: 'other', apiKey: 'sk', fetchImpl,
       timeoutMs: 5, rand: () => 0,
     });
     expect(res).toEqual({ joke: JOKE_BANK.other[0], source: 'bank' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Server-side mail caps (Support/MailCaps/<uid>/<kind>)
+// ---------------------------------------------------------------------------
+
+describe('mailCapStep', () => {
+  const NOW = 10_000_000;
+  const HOUR = 60 * 60 * 1000;
+
+  it('allows the first send and records it', () => {
+    expect(mailCapStep(null, NOW, 6)).toEqual([NOW]);
+  });
+
+  it('refuses once the limit is reached inside the rolling hour', () => {
+    const five = [NOW - 5, NOW - 4, NOW - 3, NOW - 2, NOW - 1];
+    expect(mailCapStep(five, NOW, 6)).toEqual([...five, NOW]);
+    expect(mailCapStep([...five, NOW - 0.5], NOW, 6)).toBeNull();
+  });
+
+  it('prunes stamps older than an hour, so the node stays bounded', () => {
+    const old = Array.from({ length: 20 }, (_, i) => NOW - HOUR - 1 - i);
+    expect(mailCapStep(old, NOW, 6)).toEqual([NOW]);
+  });
+
+  it('reads a map-shaped node and ignores junk', () => {
+    expect(mailCapStep({ a: NOW - 1, b: 'x', c: null }, NOW, 2)).toEqual([NOW - 1, NOW]);
+    expect(mailCapStep('garbage', NOW, 2)).toEqual([NOW]);
+  });
+
+  it('the documented limits', () => {
+    expect(MAIL_CAPS).toEqual({ Ack: 6, Reply: 20 });
+    expect(MAIL_CAP_WINDOW_MS).toBe(HOUR);
   });
 });

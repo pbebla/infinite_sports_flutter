@@ -146,6 +146,38 @@ export function mailLogEntry(input: {
 }
 
 // ---------------------------------------------------------------------------
+// Server-side mail caps (per uid, rolling hour). The app's own rate limit is
+// a courtesy; these are the real ones. Stored by the functions at
+// Support/MailCaps/<uid>/<kind> as the send timestamps of the last hour
+// (pruned on every write, so the node holds at most `limit` numbers). No
+// client rule grants that node: it is functions-only.
+// ---------------------------------------------------------------------------
+
+export const MAIL_CAP_WINDOW_MS = 60 * 60 * 1000;
+
+/** Ack: ticket acknowledgements to the person. Reply: "user replied"
+ *  notices to the support inbox. */
+export const MAIL_CAPS = { Ack: 6, Reply: 20 } as const;
+export type MailCapKind = keyof typeof MAIL_CAPS;
+
+/** One transaction step: the pruned stamps plus [nowMs] when another send
+ *  fits under [limit] in the window, else null (over the cap - abort, send
+ *  nothing). Tolerates a list- or map-shaped node and ignores junk. Pure. */
+export function mailCapStep(
+  current: unknown, nowMs: number, limit: number, windowMs: number = MAIL_CAP_WINDOW_MS,
+): number[] | null {
+  const raw = Array.isArray(current)
+    ? current
+    : current !== null && typeof current === 'object' ? Object.values(current as object) : [];
+  const recent = raw
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+    .filter((t) => nowMs - t < windowMs)
+    .sort((a, b) => a - b);
+  if (recent.length >= limit) return null;
+  return [...recent, nowMs];
+}
+
+// ---------------------------------------------------------------------------
 // Subjects (all pass through sanitizeSubject — header-injection safe)
 // ---------------------------------------------------------------------------
 
@@ -336,20 +368,19 @@ export const JOKE_SYSTEM_PROMPT =
   'ORIGINAL line in its comedic voice (channel a signature character, ' +
   'catchphrase-style, or running gag — do not copy long quotes verbatim): ' +
   `${JOKE_FRANCHISES.join('; ')}. ` +
-  "Match the ticket's category and content. One or two sentences max. " +
+  "Match the ticket's category. One or two sentences max. " +
   'Snarky/sarcastic welcome; playful, never cruel or mocking of the user. ' +
   'No emoji spam (one at most). Reply with the one-liner only — no preamble, ' +
   'no quotes around it, no naming the show unless the line itself does.';
 
-const JOKE_MESSAGE_MAX_CHARS = 1_500;
-
-/** The user turn sent to the model: category + (truncated) ticket message. */
-export function buildJokePrompt(category: string, message: string): string {
-  const trimmed = message.length > JOKE_MESSAGE_MAX_CHARS
-    ? `${message.slice(0, JOKE_MESSAGE_MAX_CHARS)}…`
-    : message;
-  return `Ticket category: ${categoryLabel(category)}\n` +
-    `Ticket message:\n"""\n${trimmed}\n"""\n` +
+/** The user turn sent to the model: the ticket CATEGORY only. The person's
+ *  own words never leave our servers for the AI service (the Privacy Policy
+ *  says only public fantasy statistics go there); a missing/unknown category
+ *  is the generic 'Something else' (normalizeCategory). Extra arguments from
+ *  an older caller are ignored. */
+export function buildJokePrompt(category: string): string {
+  return `Ticket category: ${categoryLabel(String(category ?? ''))}
+` +
     'Write the closing one-liner now.';
 }
 
@@ -383,7 +414,6 @@ export interface JokeResult { joke: string; source: 'ai' | 'bank'; }
  *  canned bank on missing key / API error / timeout. Never throws. */
 export async function generateJoke(opts: {
   category: string;
-  message: string;
   apiKey: string;
   fetchImpl?: FetchLike;
   timeoutMs?: number;
@@ -409,7 +439,7 @@ export async function generateJoke(opts: {
         model: JOKE_MODEL,
         max_tokens: 150,
         system: JOKE_SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: buildJokePrompt(opts.category, opts.message) }],
+        messages: [{ role: 'user', content: buildJokePrompt(opts.category) }],
       }),
       signal: controller.signal,
     });
