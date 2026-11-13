@@ -1342,19 +1342,23 @@ Future<Event> getEvent(index) async {
 /// Date Joined is deliberately NOT mirrored, so [MyUser.dateJoined] is
 /// always '' here; no consumer reads it (the search index and the event
 /// attendee list use name + photo only).
-Future<Map<String, MyUser>> getAllUsers() async {
-  Map<String, MyUser> users = {};
-  try
-  {
-    final profiles = await PublicProfiles.getAllOnce();
-    profiles.forEach((uid, profile) {
-      users[uid] = MyUser(profile.firstName, profile.lastName, "", uid,
-          profile.profileUrl.isEmpty ? null : profile.profileUrl);
-    });
-    return users;
+///
+/// null when the mirror couldn't be loaded (failed / timed-out read) — an
+/// error is not "no users", so callers can show it and retry. [load] is a
+/// test seam replacing [PublicProfiles.getAllOnceOrNull].
+Future<Map<String, MyUser>?> getAllUsers(
+    {Future<Map<String, PublicProfile>?> Function()? load}) async {
+  final Map<String, PublicProfile>? profiles;
+  try {
+    profiles = await (load ?? PublicProfiles.getAllOnceOrNull)();
+  } catch (_) {
+    return null;
   }
-  catch (e)
-  {
-    return users;
-  }
+  if (profiles == null) return null;
+  final users = <String, MyUser>{};
+  profiles.forEach((uid, profile) {
+    users[uid] = MyUser(profile.firstName, profile.lastName, "", uid,
+        profile.profileUrl.isEmpty ? null : profile.profileUrl);
+  });
+  return users;
 }

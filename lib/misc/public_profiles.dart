@@ -17,6 +17,7 @@
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:infinite_sports_flutter/misc/bounded_read.dart';
 
 /// One user's public identity + career data, as mirrored.
@@ -121,19 +122,35 @@ class PublicProfiles {
   static DatabaseReference _root() =>
       FirebaseDatabase.instance.ref('PublicProfiles');
 
-  /// One-shot {uid: profile} of the whole mirror ({} on error) — the
-  /// search index / event-attendee bulk read, and the fantasy leaderboard's
-  /// names (inside its reveal gate). Bounded ([kRevealReadTimeout]): a cold
-  /// offline `once()` never answers, so no answer by then is {} too (the
-  /// leaderboard then retries on its next mount).
-  static Future<Map<String, PublicProfile>> getAllOnce() async {
+  /// Test seam replacing the whole-mirror `once()` read: returns the raw
+  /// node value (or throws / never answers, like a failed or offline read).
+  @visibleForTesting
+  static Future<Object?> Function()? rootReadOverride;
+
+  static Future<Object?> _readRoot() async {
+    final override = rootReadOverride;
+    if (override != null) return override();
+    return (await _root().once()).snapshot.value;
+  }
+
+  /// One-shot {uid: profile} of the whole mirror — the search index /
+  /// event-attendee bulk read. Bounded ([kRevealReadTimeout]): a cold
+  /// offline `once()` never answers. A failed read or no answer by then is
+  /// null — NOT {} — so callers can tell "couldn't load" from "nobody".
+  static Future<Map<String, PublicProfile>?> getAllOnceOrNull() async {
     try {
-      final event = await _root().once().bounded('PublicProfiles.getAllOnce');
-      return publicProfilesFromNode(event.snapshot.value);
+      final raw = await _readRoot().bounded('PublicProfiles.getAllOnce');
+      return publicProfilesFromNode(raw);
     } catch (_) {
-      return {};
+      return null;
     }
   }
+
+  /// [getAllOnceOrNull] with a failure folded into {} — the fantasy
+  /// leaderboard's names (inside its reveal gate), which already treats an
+  /// empty result as "retry on the next mount".
+  static Future<Map<String, PublicProfile>> getAllOnce() async =>
+      (await getAllOnceOrNull()) ?? {};
 
   /// One user's mirrored ProfileUrl ('' when absent/error) — roster photo
   /// enrichment.

@@ -11,6 +11,7 @@ import 'package:infinite_sports_flutter/misc/event_repo.dart';
 import 'package:infinite_sports_flutter/misc/search_index.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/myuser.dart';
 import 'package:infinite_sports_flutter/playerpage.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 import 'package:infinite_sports_flutter/tournamentdetail.dart';
@@ -25,7 +26,12 @@ class SearchHubPage extends StatefulWidget {
     this.insidersLeaderboardPageBuilder,
     this.fantasyGateOverride,
     this.fantasyHubPageBuilder,
+    this.loadUsers,
   });
+
+  /// Test seam replacing [getAllUsers] (null = the player list couldn't be
+  /// loaded).
+  final Future<Map<String, MyUser>?> Function()? loadUsers;
 
   /// Test seam replacing the real `Navigator.push(... InsidersLeaderboardPage
   /// ...)` the "Infinite Insiders" card makes (Task F6) — the real page
@@ -50,6 +56,11 @@ class _SearchHubPageState extends State<SearchHubPage> {
   final TextEditingController _controller = TextEditingController();
   Future<SearchIndex>? _indexFuture;
   String _query = '';
+
+  /// True while the index was built WITHOUT players because their load
+  /// failed / timed out — the next search retries just that part.
+  bool _playersMissing = false;
+  bool _retryingPlayers = false;
 
   /// (sport, season) while the current league has a Fantasy Config node —
   /// the card appears/disappears live with it (same stream gate as the
@@ -120,10 +131,41 @@ class _SearchHubPageState extends State<SearchHubPage> {
       // the calendar and Around You (never a stripped-down mirror row).
       index.addEvents(await getAllEvents());
     } catch (_) {}
-    try {
-      index.addUsers(await getAllUsers());
-    } catch (_) {}
+    final users = await _loadUsers();
+    if (users == null) {
+      _playersMissing = true;
+    } else {
+      index.addUsers(users);
+    }
     return index;
+  }
+
+  Future<Map<String, MyUser>?> _loadUsers() async {
+    try {
+      return await (widget.loadUsers ?? getAllUsers)();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// A slow/failed first player load must not mean "no players" for the
+  /// rest of the visit: on the next search, load them again and add them to
+  /// the already-built index.
+  Future<void> _retryPlayersIfMissing() async {
+    final indexFuture = _indexFuture;
+    if (!_playersMissing || _retryingPlayers || indexFuture == null) return;
+    _retryingPlayers = true;
+    try {
+      final index = await indexFuture;
+      final users = await _loadUsers();
+      if (users != null && _playersMissing) {
+        index.addUsers(users);
+        _playersMissing = false;
+        if (mounted) setState(() {});
+      }
+    } finally {
+      _retryingPlayers = false;
+    }
   }
 
   void _open(SearchResult result) {
@@ -319,7 +361,10 @@ class _SearchHubPageState extends State<SearchHubPage> {
                 color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
             border: InputBorder.none,
           ),
-          onChanged: (value) => setState(() { _query = value; }),
+          onChanged: (value) {
+            setState(() { _query = value; });
+            if (value.trim().isNotEmpty) _retryPlayersIfMissing();
+          },
         ),
         actions: [
           if (_query.isNotEmpty)
