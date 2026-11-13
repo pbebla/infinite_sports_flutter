@@ -18,6 +18,28 @@ class SupportRateLimitException implements Exception {
   String toString() => message;
 }
 
+/// What [SupportService.createTicket] hands back: the reference number and
+/// how many screenshots could NOT be attached (uploads are best-effort, but
+/// a dropped screenshot is never silent — the success screen says so).
+typedef SupportTicketResult = ({int num, int failedScreenshots});
+
+/// Uploads [count] screenshots one by one through [upload] (index -> the
+/// download URL), best-effort: a failed upload is skipped and counted, the
+/// rest still go through.
+Future<({List<String> urls, int failed})> uploadScreenshotsBestEffort(
+    int count, Future<String> Function(int index) upload) async {
+  final urls = <String>[];
+  var failed = 0;
+  for (var i = 0; i < count; i++) {
+    try {
+      urls.add(await upload(i));
+    } catch (_) {
+      failed++;
+    }
+  }
+  return (urls: urls, failed: failed);
+}
+
 /// Ticket creation + live reads + replies for the player-facing support
 /// system (zaya-support). Static-method service in the house style of
 /// lib/misc/insider_service.dart — and like it, iOS-parity clean: `.once()`
@@ -30,17 +52,18 @@ class SupportRateLimitException implements Exception {
 class SupportService {
   static DatabaseReference get _root => FirebaseDatabase.instance.ref();
 
-  /// Creates a ticket end-to-end and returns its reference number:
+  /// Creates a ticket end-to-end and returns its reference number plus the
+  /// count of screenshots that failed to upload:
   /// 1. soft rate-limit check (6/hour per account — throws
   ///    [SupportRateLimitException], never blocks on read errors),
   /// 2. transaction-increments `Support/Counter` → n,
   /// 3. uploads [screenshots] to Storage `support/<n>/img_<i>.jpg`
-  ///    (individually best-effort — a failed upload is skipped, the ticket
-  ///    still goes through with the ones that made it),
+  ///    (individually best-effort — a failed upload is skipped and counted,
+  ///    the ticket still goes through with the ones that made it),
   /// 4. writes `Support/Tickets/<n>` + `Support/UserTickets/<uid>/<n>` in a
   ///    single multi-path update, so the ticket and its index entry can
   ///    never exist without each other.
-  static Future<int> createTicket({
+  static Future<SupportTicketResult> createTicket({
     required String uid,
     required String name,
     required String email,
@@ -70,23 +93,21 @@ class SupportService {
       throw Exception('Could not reserve a ticket number.');
     }
 
-    final urls = <String>[];
-    for (var i = 0; i < screenshots.length; i++) {
-      try {
-        final ref = FirebaseStorage.instance.ref('support/$n/img_$i.jpg');
-        // The uid tag is what storage.rules checks: the path carries no
-        // owner, so create requires it to match the uploader and get is
-        // limited to that uploader (plus admins).
-        await ref.putFile(
-            screenshots[i],
-            SettableMetadata(
-                contentType: 'image/jpeg', customMetadata: {'uid': uid}));
-        urls.add(await ref.getDownloadURL());
-      } catch (_) {
-        // Best-effort (spec: "skip failed uploads gracefully") — a broken
-        // upload never sinks the ticket itself.
-      }
-    }
+    // Best-effort (spec: "skip failed uploads gracefully") — a broken
+    // upload never sinks the ticket itself, but it is counted and reported.
+    final uploads =
+        await uploadScreenshotsBestEffort(screenshots.length, (i) async {
+      final ref = FirebaseStorage.instance.ref('support/$n/img_$i.jpg');
+      // The uid tag is what storage.rules checks: the path carries no
+      // owner, so create requires it to match the uploader and get is
+      // limited to that uploader (plus admins).
+      await ref.putFile(
+          screenshots[i],
+          SettableMetadata(
+              contentType: 'image/jpeg', customMetadata: {'uid': uid}));
+      return ref.getDownloadURL();
+    });
+    final urls = uploads.urls;
 
     await _root.update({
       'Support/Tickets/$n': {
@@ -107,7 +128,7 @@ class SupportService {
       },
       'Support/UserTickets/$uid/$n': true,
     });
-    return n;
+    return (num: n, failedScreenshots: uploads.failed);
   }
 
   /// Live ticket numbers for [uid], newest first — the My Tickets list spine.

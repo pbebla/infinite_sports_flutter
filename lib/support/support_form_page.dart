@@ -44,8 +44,9 @@ class SupportFormPage extends StatefulWidget {
   final String fromScreen;
 
   /// Test seam: replaces [SupportService.createTicket]. Receives the exact
-  /// assembled ticket payload and returns the new reference number.
-  final Future<int> Function({
+  /// assembled ticket payload and returns the new reference number + the
+  /// count of screenshots that couldn't be attached.
+  final Future<SupportTicketResult> Function({
     required String category,
     required String message,
     required List<XFile> screenshots,
@@ -89,6 +90,7 @@ class _SupportFormPageState extends State<SupportFormPage> {
   List<XFile> _screenshots = [];
   bool _submitting = false;
   int? _submittedNum; // set → the success body replaces the form
+  int _failedScreenshots = 0;
 
   String _name = '';
   String _email = '';
@@ -219,7 +221,12 @@ class _SupportFormPageState extends State<SupportFormPage> {
         device: _device,
         screen: widget.fromScreen,
       );
-      if (mounted) setState(() => _submittedNum = n);
+      if (mounted) {
+        setState(() {
+          _submittedNum = n.num;
+          _failedScreenshots = n.failedScreenshots;
+        });
+      }
     } on SupportRateLimitException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -235,7 +242,7 @@ class _SupportFormPageState extends State<SupportFormPage> {
     }
   }
 
-  Future<int> _realSubmit({
+  Future<SupportTicketResult> _realSubmit({
     required String category,
     required String message,
     required List<XFile> screenshots,
@@ -524,11 +531,22 @@ class _SupportFormPageState extends State<SupportFormPage> {
         ),
         const SizedBox(height: 10),
         Text(
-          "We've emailed you a copy. Replies land in the app under "
-          "My Tickets, and you'll hear from us there.",
+          "If your account has an email address, we'll send a copy there. "
+          "Replies land in the app under My Tickets, and you'll hear from "
+          "us there.",
           textAlign: TextAlign.center,
           style: TextStyle(color: scheme.onSurfaceVariant),
         ),
+        if (_failedScreenshots > 0) ...[
+          const SizedBox(height: 10),
+          Text(
+            _failedScreenshots == 1
+                ? "1 screenshot couldn't be attached."
+                : "$_failedScreenshots screenshots couldn't be attached.",
+            textAlign: TextAlign.center,
+            style: TextStyle(color: scheme.error),
+          ),
+        ],
         const SizedBox(height: 24),
         FilledButton(
           key: const ValueKey('support_view_tickets_button'),
