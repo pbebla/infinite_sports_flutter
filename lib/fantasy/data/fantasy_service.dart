@@ -456,7 +456,7 @@ class FantasyService {
           in _ref('${_root(sport, season)}/Baselines/$uid').onValue) {
         final state = saleBaselineStateFromNode(event.snapshot.value);
         if (state.degraded) {
-          debugPrint('FantasyService: unreadable Baselines/$uid node');
+          debugPrint('FantasyService: unreadable sale baseline node');
         }
         _saleBaselineCache[key] = state;
         yield state;
