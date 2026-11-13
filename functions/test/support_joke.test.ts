@@ -67,6 +67,14 @@ describe('generateTicketJoke', () => {
     await expect(call(null)).resolves.toMatchObject({ source: 'ai' });
   });
 
+  it('logs the category truncated to 40 characters', async () => {
+    const long = 'c'.repeat(39) + 'XYZ-TAIL-SHOULD-NOT-BE-LOGGED';
+    await call({ category: long });
+    const all = h.lines.join(' | ');
+    expect(all).toContain('c'.repeat(39) + 'X');
+    expect(all).not.toContain('XY');
+  });
+
   it('still refuses non-admins and signed-out callers', async () => {
     await expect(call({ category: 'bug' }, null)).rejects.toMatchObject({ code: 'unauthenticated' });
     await expect(call({ category: 'bug' }, 'uid_fan_12345')).rejects.toMatchObject({ code: 'permission-denied' });

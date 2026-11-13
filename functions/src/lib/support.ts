@@ -68,6 +68,18 @@ export function normalizeCategory(raw: string): CategoryKey {
   return 'other';
 }
 
+/** The display label ONLY when [raw] is on the app's fixed category list
+ *  (a key or a label, case/whitespace-insensitive); null for anything else.
+ *  Used where client text must not reach a person's inbox (unverified
+ *  addresses): an unknown value is omitted, never echoed. */
+export function fixedCategoryLabel(raw: string): string | null {
+  const v = String(raw ?? '').trim().toLowerCase();
+  for (const key of CATEGORY_KEYS) {
+    if (key === v || CATEGORY_LABELS[key].toLowerCase() === v) return CATEGORY_LABELS[key];
+  }
+  return null;
+}
+
 /** Human display label for a category ("Something is broken", ...). */
 export function categoryLabel(raw: string): string {
   return CATEGORY_LABELS[normalizeCategory(raw)];
@@ -235,12 +247,33 @@ export function ackEmailHtml(input: {
   );
 }
 
+/** Acknowledgement for an account whose Auth address is NOT verified: the
+ *  address may not belong to the person who wrote the ticket, so the email
+ *  carries no client-supplied text at all - no name, no message, no
+ *  free-text category (a category on the fixed list is named). Only the
+ *  server-assigned ticket number and fixed wording. */
+export function ackEmailHtmlUnverified(input: { num: string; category: string }): string {
+  const label = fixedCategoryLabel(input.category);
+  return emailShell(
+    `<p>We received your support request #${escapeHtml(input.num)}.` +
+    (label ? ` Category: <strong>${escapeHtml(label)}</strong>.` : '') +
+    `</p>` +
+    `<p>You can follow it in the app under <strong>Help &amp; Feedback → My Tickets</strong>.</p>`,
+  );
+}
+
+const UNVERIFIED_INBOX_LINE =
+  `<p style="color:${BRAND};font-size:13px;"><strong>Email not verified — reply in the ` +
+  `Manager, not by email.</strong></p>`;
+
 /** New-ticket email to the support inbox: message first, then the captured
  *  context (platform, app version, screen, screenshot count, uid). */
 export function newTicketEmailHtml(input: {
   num: string; name: string; email: string; uid: string; category: string;
   message: string; platform: string; appVersion: string; screen: string;
   screenshotCount: number;
+  /** false: no Reply-To was set (the account address is unverified). */
+  emailVerified?: boolean;
 }): string {
   const row = (label: string, value: string) =>
     `<tr><td style="padding:2px 12px 2px 0;color:#666;">${label}</td>` +
@@ -257,19 +290,24 @@ export function newTicketEmailHtml(input: {
     row('Screenshots', String(input.screenshotCount)) +
     row('Uid', input.uid) +
     `</table>` +
-    `<p style="color:#666;font-size:13px;">Reply-To is set to the user — but app ` +
-    `replies go through the Manager Support inbox.</p>`,
+    (input.emailVerified === false
+      ? UNVERIFIED_INBOX_LINE
+      : `<p style="color:#666;font-size:13px;">Reply-To is set to the user — but app ` +
+        `replies go through the Manager Support inbox.</p>`),
   );
 }
 
 /** User-reply email to the support inbox (ticket reopened -> 'open'). */
 export function replyNoticeEmailHtml(input: {
   num: string; name: string; text: string;
+  /** false: no Reply-To was set (the account address is unverified). */
+  emailVerified?: boolean;
 }): string {
   return emailShell(
     `<p><strong>${escapeHtml(input.name)}</strong> replied on ticket ` +
     `<strong>#${escapeHtml(input.num)}</strong> (status is back to <strong>Open</strong>):</p>` +
-    quoteBlock(escapeMultiline(input.text)),
+    quoteBlock(escapeMultiline(input.text)) +
+    (input.emailVerified === false ? UNVERIFIED_INBOX_LINE : ''),
   );
 }
 
@@ -379,8 +417,7 @@ export const JOKE_SYSTEM_PROMPT =
  *  is the generic 'Something else' (normalizeCategory). Extra arguments from
  *  an older caller are ignored. */
 export function buildJokePrompt(category: string): string {
-  return `Ticket category: ${categoryLabel(String(category ?? ''))}
-` +
+  return `Ticket category: ${categoryLabel(String(category ?? ''))}\n` +
     'Write the closing one-liner now.';
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  ackEmailHtml, ackSubject, MAIL_CAP_WINDOW_MS, MAIL_CAPS, mailCapStep, becameClosed, buildJokePrompt, cannedJoke,
+  ackEmailHtml, ackEmailHtmlUnverified, ackSubject, fixedCategoryLabel, MAIL_CAP_WINDOW_MS, MAIL_CAPS, mailCapStep, becameClosed, buildJokePrompt, cannedJoke,
   CATEGORY_KEYS, categoryLabel, closedOutcomePhrase, closingEmailHtml,
   closingSubject, escapeHtml, escapeMultiline, FetchLike, generateJoke,
   isValidEmail, JOKE_BANK, JOKE_MODEL, mailLogEntry, newTicketEmailHtml,
@@ -501,5 +501,67 @@ describe('mailCapStep', () => {
   it('the documented limits', () => {
     expect(MAIL_CAPS).toEqual({ Ack: 6, Reply: 20 });
     expect(MAIL_CAP_WINDOW_MS).toBe(HOUR);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unverified account addresses: no client-supplied text in person-facing mail
+// ---------------------------------------------------------------------------
+
+describe('fixedCategoryLabel', () => {
+  it('returns the label only for a value on the fixed list (key or label)', () => {
+    expect(fixedCategoryLabel('bug')).toBe('Something is broken');
+    expect(fixedCategoryLabel(' Something is broken ')).toBe('Something is broken');
+    expect(fixedCategoryLabel('Buy cheap pills at spam.example')).toBeNull();
+    expect(fixedCategoryLabel('')).toBeNull();
+  });
+});
+
+describe('ackEmailHtmlUnverified', () => {
+  it('is the fixed wording with the server-assigned number and nothing the client wrote', () => {
+    const html = ackEmailHtmlUnverified({ num: '42', category: 'Visit spam.example now' });
+    expect(html).toContain('We received your support request #42.');
+    expect(html).toContain('Help &amp; Feedback → My Tickets');
+    expect(html).not.toContain('spam.example');
+    expect(html).not.toContain('Hi ');
+  });
+
+  it('names the category only when it is on the fixed list', () => {
+    expect(ackEmailHtmlUnverified({ num: '1', category: 'bug' })).toContain('Something is broken');
+  });
+});
+
+describe('inbox emails for an unverified address', () => {
+  const base = {
+    num: '9', name: 'N', email: 'x@example.com', uid: 'uid_x', category: 'bug', message: 'm',
+    platform: 'iOS', appVersion: '1', screen: 's', screenshotCount: 0,
+  };
+  it('the new-ticket email says to reply in the Manager when not verified', () => {
+    const html = newTicketEmailHtml({ ...base, emailVerified: false });
+    expect(html).toContain('Email not verified — reply in the Manager, not by email.');
+    expect(html).not.toContain('Reply-To is set to the user');
+  });
+  it('is unchanged when verified (or not stated)', () => {
+    expect(newTicketEmailHtml(base)).toBe(newTicketEmailHtml({ ...base, emailVerified: true }));
+    expect(newTicketEmailHtml(base)).not.toContain('Email not verified');
+  });
+  it('the reply notice carries the same line when not verified', () => {
+    const html = replyNoticeEmailHtml({ num: '9', name: 'N', text: 't', emailVerified: false });
+    expect(html).toContain('Email not verified — reply in the Manager, not by email.');
+    expect(replyNoticeEmailHtml({ num: '9', name: 'N', text: 't' })).not.toContain('Email not verified');
+  });
+});
+
+describe('mailCapStep window boundary', () => {
+  const NOW = 10_000_000;
+  const HOUR = 60 * 60 * 1000;
+  it('a stamp exactly 60 minutes old no longer counts', () => {
+    expect(mailCapStep([NOW - HOUR], NOW, 1)).toEqual([NOW]);
+    expect(mailCapStep([NOW - HOUR + 1], NOW, 1)).toBeNull();
+  });
+  it('a window of mixed ages counts only the recent stamps', () => {
+    const mixed = [NOW - 2 * HOUR, NOW - HOUR, NOW - HOUR + 1, NOW - 1000, NOW - 1];
+    expect(mailCapStep(mixed, NOW, 4)).toEqual([NOW - HOUR + 1, NOW - 1000, NOW - 1, NOW]);
+    expect(mailCapStep(mixed, NOW, 3)).toBeNull();
   });
 });

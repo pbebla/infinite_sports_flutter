@@ -8,7 +8,11 @@
 // mail) goes ONLY to the address Firebase Auth holds for the ticket's Uid -
 // never the client-written Email field (a scripted account could otherwise
 // make infinitesports.org mail its own text to any stranger). No Auth email
-// -> no mail to the person. Server-side caps per uid (rolling hour, counter
+// -> no mail to the person. The app never requires email verification, so
+// an Auth address may itself be a stranger's: when it is NOT verified, the
+// person-facing emails carry no client-supplied text (fixed acknowledgement
+// wording, no name/message/free-text category; the closing email keeps only
+// the admin-written outcome and note) and inbox mail gets no Reply-To. Server-side caps per uid (rolling hour, counter
 // at Support/MailCaps/<uid>/<kind>, functions-only): 6 new-ticket emails
 // (ack + inbox) and 20 user-reply notices to the inbox. Over a cap the
 // ticket/reply is stored and processed as normal, but no email goes out for
@@ -28,7 +32,7 @@ import * as logger from 'firebase-functions/logger';
 import { onValueCreated, onValueUpdated } from 'firebase-functions/v2/database';
 import type { Reference } from 'firebase-admin/database';
 import {
-  ackEmailHtml, ackSubject, becameClosed, closingEmailHtml, closingSubject,
+  ackEmailHtml, ackEmailHtmlUnverified, ackSubject, becameClosed, closingEmailHtml, closingSubject,
   MAIL_CAPS, mailCapStep, MailCapKind, newTicketEmailHtml, newTicketSubject,
   replyNoticeEmailHtml, replySubject, screenshotCount, statusAfterThreadMessage,
 } from './lib/support';
@@ -80,11 +84,16 @@ async function sendSupportPush(
   }
 }
 
+/** The account's Auth address and whether Firebase has verified it
+ *  (Google/Apple addresses arrive verified; email/password ones only after
+ *  the link is clicked). */
+export interface AuthEmail { email: string; verified: boolean; }
+
 /** Injected seams so the handlers unit-test without Auth, SMTP or FCM. */
 export interface SupportDeps {
   /** The Auth account's email for [uid]; null when there is none or the
    *  user is gone (auth/user-not-found). May throw on other Auth errors. */
-  getAuthEmail(uid: string): Promise<string | null>;
+  getAuthEmail(uid: string): Promise<AuthEmail | null>;
   /** Never throws (sendSupportMail). */
   sendMail(root: Reference, message: SupportMailMessage): Promise<void>;
   /** Never throws (sendSupportPush). */
@@ -96,8 +105,9 @@ function liveDeps(): SupportDeps {
   return {
     getAuthEmail: async (uid) => {
       try {
-        const email = (await admin.auth().getUser(uid)).email;
-        return typeof email === 'string' && email.trim() ? email.trim() : null;
+        const user = await admin.auth().getUser(uid);
+        const email = typeof user.email === 'string' ? user.email.trim() : '';
+        return email ? { email, verified: user.emailVerified === true } : null;
       } catch (err) {
         if ((err as { code?: string } | null)?.code === 'auth/user-not-found') return null;
         throw err;
@@ -112,11 +122,13 @@ function liveDeps(): SupportDeps {
 /** The account's Auth address for [uid], or null (no uid, no Auth email,
  *  user gone, or the lookup failed - logged with a uid prefix, never
  *  thrown). */
-async function authEmailFor(deps: SupportDeps, uid: string, num: string): Promise<string | null> {
+async function authEmailFor(
+  deps: SupportDeps, uid: string, num: string,
+): Promise<AuthEmail | null> {
   if (!uid) return null;
   try {
     const email = await deps.getAuthEmail(uid);
-    if (!email) {
+    if (!email || !email.email) {
       logger.info('support: account has no email; no mail to the person', {
         num, uid: uidPrefix(uid),
       });
@@ -193,15 +205,18 @@ export async function handleTicketCreated(
 ): Promise<void> {
   const ticket = parseTicket(raw);
   if (!(await underMailCap(root, deps, ticket.uid, 'Ack', num))) return;
-  const email = await authEmailFor(deps, ticket.uid, num);
+  const account = await authEmailFor(deps, ticket.uid, num);
 
-  if (email) {
+  if (account) {
     await deps.sendMail(root, {
-      to: email,
+      to: account.email,
       subject: ackSubject(num),
-      html: ackEmailHtml({
-        num, name: ticket.name, category: ticket.category, message: ticket.message,
-      }),
+      html: account.verified
+        ? ackEmailHtml({
+          num, name: ticket.name, category: ticket.category, message: ticket.message,
+        })
+        // Unverified: the address may be a stranger's - fixed wording only.
+        : ackEmailHtmlUnverified({ num, category: ticket.category }),
     });
   }
 
@@ -211,7 +226,9 @@ export async function handleTicketCreated(
     html: newTicketEmailHtml({
       num,
       name: ticket.name,
-      email: email ?? '(no account email)',
+      email: account
+        ? `${account.email}${account.verified ? '' : ' (not verified)'}`
+        : '(no account email)',
       uid: ticket.uid,
       category: ticket.category,
       message: ticket.message,
@@ -219,8 +236,9 @@ export async function handleTicketCreated(
       appVersion: ticket.appVersion,
       screen: ticket.screen,
       screenshotCount: ticket.screenshots,
+      emailVerified: account?.verified === true,
     }),
-    ...(email ? { replyTo: email } : {}),
+    ...(account?.verified ? { replyTo: account.email } : {}),
   });
 }
 
@@ -244,13 +262,15 @@ export async function handleThreadMessage(
 
   if (nextStatus === 'open') {
     if (!(await underMailCap(root, deps, ticket.uid, 'Reply', num))) return;
-    const email = await authEmailFor(deps, ticket.uid, num);
+    const account = await authEmailFor(deps, ticket.uid, num);
     const text = typeof msg['Text'] === 'string' ? msg['Text'] as string : '';
     await deps.sendMail(root, {
       to: SUPPORT_INBOX,
       subject: replySubject(num, ticket.name),
-      html: replyNoticeEmailHtml({ num, name: ticket.name, text }),
-      ...(email ? { replyTo: email } : {}),
+      html: replyNoticeEmailHtml({
+        num, name: ticket.name, text, emailVerified: account?.verified === true,
+      }),
+      ...(account?.verified ? { replyTo: account.email } : {}),
     });
   } else {
     await deps.sendPush(
@@ -262,19 +282,23 @@ export async function handleThreadMessage(
 }
 
 /** Ticket became closed: closing email to the account's Auth address (none
- *  when there is no Auth email) + push. Admin-driven, so not capped. */
+ *  when there is no Auth email; no client text when it is unverified) +
+ *  push. Admin-driven, so not capped. */
 export async function handleTicketClosed(
   root: Reference, num: string, deps: SupportDeps = liveDeps(),
 ): Promise<void> {
   const ticket = parseTicket((await root.child(`Support/Tickets/${num}`).get()).val());
-  const email = await authEmailFor(deps, ticket.uid, num);
-  if (email) {
+  const account = await authEmailFor(deps, ticket.uid, num);
+  if (account) {
     await deps.sendMail(root, {
-      to: email,
+      to: account.email,
       subject: closingSubject(num),
+      // Outcome and note are admin-written (the Manager's close writes both
+      // ClosedOutcome and ClosedNote with Status in one update); the name is
+      // client-written, so an unverified address gets "Hi there".
       html: closingEmailHtml({
         num,
-        name: ticket.name,
+        name: account.verified ? ticket.name : '',
         outcome: ticket.closedOutcome,
         note: ticket.closedNote,
       }),

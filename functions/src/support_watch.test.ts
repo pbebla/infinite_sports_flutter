@@ -51,6 +51,7 @@ function fakeRef(tree: Tree, path: string): any {
       for (const [k, val] of Object.entries(v)) fakeRef(tree, `${path}/${k}`).set(val);
     },
     transaction: async (fn: (cur: unknown) => unknown) => {
+      if (path.includes('MailCaps') && tree.__failCaps) throw new Error('db unavailable');
       const cur = read();
       const next = fn(cur);
       if (next === undefined) return { committed: false, snapshot: { val: () => cur } };
@@ -64,7 +65,7 @@ function harness(over: Partial<SupportDeps> = {}, tree: Tree = {}) {
   const mails: Array<{ to: string; subject: string; html: string; replyTo?: string }> = [];
   const pushes: string[] = [];
   const deps: SupportDeps = {
-    getAuthEmail: async (uid) => (uid === UID ? AUTH_EMAIL : null),
+    getAuthEmail: async (uid) => (uid === UID ? { email: AUTH_EMAIL, verified: true } : null),
     sendMail: async (_root, m) => { mails.push(m); },
     sendPush: async (_root, uid, title) => { pushes.push(`${uid}:${title}`); },
     now: () => NOW,
@@ -189,5 +190,83 @@ describe('handleTicketClosed', () => {
     await handleTicketClosed(h.root, '7', h.deps);
     expect(h.mails).toEqual([]);
     expect(h.pushes).toHaveLength(1);
+  });
+});
+
+describe("an UNVERIFIED account address (it may not be the writer's)", () => {
+  const NAME = 'Evil Name spam.example';
+  const MESSAGE = 'Click https://spam.example/win now';
+  const CATEGORY = 'Free prizes at spam.example';
+  const unverified = { getAuthEmail: async () => ({ email: AUTH_EMAIL, verified: false }) };
+  const clientText = [NAME, MESSAGE, CATEGORY, 'spam.example', 'Evil'];
+
+  it('the acknowledgement is fixed wording with none of the supplied Name/Message/category', async () => {
+    const h = harness(unverified);
+    await handleTicketCreated(h.root, '7', ticket({ Name: NAME, Message: MESSAGE, Category: CATEGORY }), h.deps);
+    const ack = h.mails.find((m) => m.to === AUTH_EMAIL)!;
+    expect(ack.html).toContain('We received your support request #7.');
+    expect(ack.html).toContain('Help &amp; Feedback → My Tickets');
+    for (const t of clientText) {
+      expect(ack.html).not.toContain(t);
+      expect(ack.subject).not.toContain(t);
+    }
+  });
+
+  it('a fixed-list category is still named in the unverified acknowledgement', async () => {
+    const h = harness(unverified);
+    await handleTicketCreated(h.root, '7', ticket({ Category: 'bug' }), h.deps);
+    expect(h.mails.find((m) => m.to === AUTH_EMAIL)!.html).toContain('Something is broken');
+  });
+
+  it("a verified user's acknowledgement is unchanged (name, category and message quoted)", async () => {
+    const h = harness();
+    await handleTicketCreated(h.root, '7', ticket({ Name: 'Alice', Message: 'It broke' }), h.deps);
+    const ack = h.mails.find((m) => m.to === AUTH_EMAIL)!;
+    expect(ack.html).toContain('Hi Alice');
+    expect(ack.html).toContain('It broke');
+    expect(ack.html).toContain('Something is broken');
+  });
+
+  it('inbox mail has no Reply-To and carries the not-verified line', async () => {
+    const h = harness(unverified, { Support: { Tickets: { '7': ticket() } } });
+    await handleTicketCreated(h.root, '8', ticket(), h.deps);
+    await handleThreadMessage(h.root, '7', { From: 'user', Text: 'more' }, h.deps);
+    const inbox = h.mails.filter((m) => m.to === SUPPORT_INBOX);
+    expect(inbox).toHaveLength(2);
+    for (const m of inbox) {
+      expect(m.replyTo).toBeUndefined();
+      expect(m.html).toContain('Email not verified — reply in the Manager, not by email.');
+    }
+  });
+
+  it('the closing email keeps the admin outcome and note but no client-supplied text', async () => {
+    const h = harness(unverified, {
+      Support: { Tickets: { '7': ticket({
+        Name: NAME, Message: MESSAGE, Category: CATEGORY, ClosedOutcome: 'fixed', ClosedNote: 'Admin joke here',
+      }) } },
+    });
+    await handleTicketClosed(h.root, '7', h.deps);
+    expect(h.mails).toHaveLength(1);
+    const mail = h.mails[0];
+    expect(mail.to).toBe(AUTH_EMAIL);
+    expect(mail.html).toContain('We fixed it.');
+    expect(mail.html).toContain('Admin joke here');
+    for (const t of clientText) expect(mail.html + mail.subject).not.toContain(t);
+  });
+});
+
+describe('mail cap failure', () => {
+  it('fails closed when the cap transaction throws: no email, an error logged, nothing thrown, ticket untouched', async () => {
+    const tree: Tree = { __failCaps: true, Support: { Tickets: { '7': ticket() } } };
+    const before = JSON.stringify(tree.Support.Tickets['7']);
+    const h = harness({}, tree);
+    logged.length = 0;
+    await expect(handleTicketCreated(h.root, '7', ticket(), h.deps)).resolves.toBeUndefined();
+    expect(h.mails).toEqual([]);
+    expect(JSON.stringify(tree.Support.Tickets['7'])).toBe(before);
+    const errors = logged.filter((l) => l.startsWith('error'));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('cap check failed');
+    expect(errors[0]).not.toContain(UID);
   });
 });

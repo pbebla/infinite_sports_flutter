@@ -48,7 +48,9 @@ export const generateTicketJoke = onCall(
     }
 
     const result = await generateJoke({ category, apiKey });
-    logger.info('generateTicketJoke', { uid: uid.slice(0, 6), category, source: result.source });
+    logger.info('generateTicketJoke', {
+      uid: uid.slice(0, 6), category: category.slice(0, 40), source: result.source,
+    });
     return result; // { joke, source: 'ai' | 'bank' }
   },
 );
