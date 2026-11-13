@@ -515,23 +515,15 @@ class _ProfilePageState extends State<ProfilePage>
     final group = positionGroup(sport, position);
     final priority = profileStatPriority(sport, group);
 
-    final result = <({String label, String value})>[];
-    for (final key in priority) {
-      if (statMap.containsKey(key)) {
-        result.add((
+    // Priority stats first, then any other non-zero stat; never padded
+    // with a "—" column (release report #2) — two stats → two columns.
+    return [
+      for (final key in pickHeadlineStatKeys(priority, statMap))
+        (
           label: _statLabel[key] ?? key,
           value: formatProfileStatValue(key, statMap[key]!),
-        ));
-        if (result.length == 3) break;
-      }
-    }
-
-    // Pad to 3 if fewer than 3 keys are present
-    while (result.length < 3) {
-      result.add((label: '—', value: '—'));
-    }
-
-    return result;
+        ),
+    ];
   }
 
   /// Build stat map from a single Player entry (for current season card).
