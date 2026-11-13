@@ -196,15 +196,34 @@ function parseTicket(raw: unknown): TicketFields {
   };
 }
 
+/** The ticket key comes from the database path, which the CLIENT chooses
+ *  (the rule only checks Uid on create). The app only ever creates a
+ *  plain counter number, so anything else is not a ticket it could have
+ *  made: it must never reach a subject, body or push. Do not rely on the
+ *  rules for this. */
+const TICKET_KEY_RE = /^\d{1,9}$/;
+
+/** True for a real ticket key. Otherwise one warning with the key LENGTH
+ *  only (never its text, never a uid) and the caller does nothing at all. */
+function ticketKeyOk(num: string, trigger: string): boolean {
+  if (TICKET_KEY_RE.test(num)) return true;
+  logger.warn('support: ignored a ticket key that is not a plain number', {
+    trigger, keyLength: num.length,
+  });
+  return false;
+}
+
 /** New ticket (already stored by the app): ack email to the account's Auth
  *  address + new-ticket email to the support inbox (Reply-To that address).
  *  Both count as one send against the Ack cap: over it, neither goes out
- *  (the ticket is still in the Manager inbox). */
+ *  (the ticket is still in the Manager inbox). Returns false (and does
+ *  nothing) for a key that is not a plain number. */
 export async function handleTicketCreated(
   root: Reference, num: string, raw: unknown, deps: SupportDeps = liveDeps(),
-): Promise<void> {
+): Promise<boolean> {
+  if (!ticketKeyOk(num, 'created')) return false;
   const ticket = parseTicket(raw);
-  if (!(await underMailCap(root, deps, ticket.uid, 'Ack', num))) return;
+  if (!(await underMailCap(root, deps, ticket.uid, 'Ack', num))) return true;
   const account = await authEmailFor(deps, ticket.uid, num);
 
   if (account) {
@@ -240,18 +259,21 @@ export async function handleTicketCreated(
     }),
     ...(account?.verified ? { replyTo: account.email } : {}),
   });
+  return true;
 }
 
 /** Thread message landed: user reply -> Status 'open' + inbox email (Reply
  *  cap); admin reply -> Status 'answered' + push to the owner; internal notes
- *  (From=='note') do nothing. The Status write always happens first. */
+ *  (From=='note') do nothing. The Status write always happens first. A key
+ *  that is not a plain number: nothing written or sent, returns false. */
 export async function handleThreadMessage(
   root: Reference, num: string, rawMsg: unknown, deps: SupportDeps = liveDeps(),
-): Promise<void> {
+): Promise<boolean> {
+  if (!ticketKeyOk(num, 'thread')) return false;
   const msg = (rawMsg ?? {}) as Record<string, unknown>;
   const from = typeof msg['From'] === 'string' ? msg['From'] as string : '';
   const nextStatus = statusAfterThreadMessage(from);
-  if (!nextStatus) return; // internal note (or unknown) — invisible to the user
+  if (!nextStatus) return true; // internal note (or unknown) — invisible to the user
 
   const ticketRef = root.child(`Support/Tickets/${num}`);
   // Data first, mail/push second (house rule: notifications never gate or
@@ -261,7 +283,7 @@ export async function handleThreadMessage(
   const ticket = parseTicket((await ticketRef.get()).val());
 
   if (nextStatus === 'open') {
-    if (!(await underMailCap(root, deps, ticket.uid, 'Reply', num))) return;
+    if (!(await underMailCap(root, deps, ticket.uid, 'Reply', num))) return true;
     const account = await authEmailFor(deps, ticket.uid, num);
     const text = typeof msg['Text'] === 'string' ? msg['Text'] as string : '';
     await deps.sendMail(root, {
@@ -279,14 +301,17 @@ export async function handleThreadMessage(
       'Open My Tickets in the app to read it.',
     );
   }
+  return true;
 }
 
 /** Ticket became closed: closing email to the account's Auth address (none
  *  when there is no Auth email; no client text when it is unverified) +
- *  push. Admin-driven, so not capped. */
+ *  push. Admin-driven, so not capped. A key that is not a plain number:
+ *  nothing sent, returns false. */
 export async function handleTicketClosed(
   root: Reference, num: string, deps: SupportDeps = liveDeps(),
-): Promise<void> {
+): Promise<boolean> {
+  if (!ticketKeyOk(num, 'closed')) return false;
   const ticket = parseTicket((await root.child(`Support/Tickets/${num}`).get()).val());
   const account = await authEmailFor(deps, ticket.uid, num);
   if (account) {
@@ -309,6 +334,7 @@ export async function handleTicketClosed(
     `Your ticket #${num} is closed`,
     'Check your email for the outcome (and the joke).',
   );
+  return true;
 }
 
 /** New ticket submitted (fan app writes the full node, ticket data is already
@@ -320,8 +346,10 @@ export const onTicketCreated = onValueCreated(
     const num = String(event.params['num']);
     const root = event.data.ref.root as Reference;
     const raw = event.data.val();
-    await handleTicketCreated(root, num, raw);
-    logger.info('support ticket created', { num, category: parseTicket(raw).category });
+    if (!(await handleTicketCreated(root, num, raw))) return; // not a real ticket key
+    logger.info('support ticket created', {
+      num, category: parseTicket(raw).category.slice(0, 40),
+    });
   },
 );
 
@@ -337,7 +365,7 @@ export const onTicketThreadMessage = onValueCreated(
     const from = typeof msg['From'] === 'string' ? msg['From'] as string : '';
     const nextStatus = statusAfterThreadMessage(from);
     if (!nextStatus) return;
-    await handleThreadMessage(root, num, msg);
+    if (!(await handleThreadMessage(root, num, msg))) return; // not a real ticket key
     logger.info('support thread message handled', { num, from, nextStatus });
   },
 );
@@ -354,7 +382,7 @@ export const onTicketStatusChanged = onValueUpdated(
 
     const num = String(event.params['num']);
     const root = event.data.after.ref.root as Reference;
-    await handleTicketClosed(root, num);
+    if (!(await handleTicketClosed(root, num))) return; // not a real ticket key
     logger.info('support ticket closed', { num });
   },
 );

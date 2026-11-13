@@ -93,7 +93,7 @@ describe('handleTicketCreated', () => {
   it('no Auth email (or user-not-found) -> no acknowledgement, no throw; the inbox still hears', async () => {
     logged.length = 0;
     const h = harness({ getAuthEmail: async () => null });
-    await expect(handleTicketCreated(h.root, '7', ticket(), h.deps)).resolves.toBeUndefined();
+    await expect(handleTicketCreated(h.root, '7', ticket(), h.deps)).resolves.toBe(true);
     expect(h.mails.map((m) => m.to)).toEqual([SUPPORT_INBOX]);
     expect(h.mails[0].replyTo).toBeUndefined();
     expect(logged.join('\n')).not.toContain(UID);
@@ -102,7 +102,7 @@ describe('handleTicketCreated', () => {
 
   it('an Auth lookup that throws is treated as no address (never throws into the trigger)', async () => {
     const h = harness({ getAuthEmail: async () => { throw new Error('auth down'); } });
-    await expect(handleTicketCreated(h.root, '7', ticket(), h.deps)).resolves.toBeUndefined();
+    await expect(handleTicketCreated(h.root, '7', ticket(), h.deps)).resolves.toBe(true);
     expect(h.mails.map((m) => m.to)).toEqual([SUPPORT_INBOX]);
   });
 
@@ -261,7 +261,7 @@ describe('mail cap failure', () => {
     const before = JSON.stringify(tree.Support.Tickets['7']);
     const h = harness({}, tree);
     logged.length = 0;
-    await expect(handleTicketCreated(h.root, '7', ticket(), h.deps)).resolves.toBeUndefined();
+    await expect(handleTicketCreated(h.root, '7', ticket(), h.deps)).resolves.toBe(true);
     expect(h.mails).toEqual([]);
     expect(JSON.stringify(tree.Support.Tickets['7'])).toBe(before);
     const errors = logged.filter((l) => l.startsWith('error'));
@@ -269,4 +269,55 @@ describe('mail cap failure', () => {
     expect(errors[0]).toContain('cap check failed');
     expect(errors[0]).not.toContain(UID);
   });
+});
+
+describe('the ticket key comes from the client: only a plain number is a ticket', () => {
+  const BAD = ['Call +1 555 0100 about your account', '12 urgent', '', '7a', '1234567890', '-1', '00x'];
+  const unverified = { getAuthEmail: async () => ({ email: AUTH_EMAIL, verified: false }) };
+
+  for (const key of BAD) {
+    it(`key ${JSON.stringify(key)}: no mail, no push, nothing stored, one length-only warning on each trigger`, async () => {
+      const tree: Tree = { Support: { Tickets: { [key]: ticket({ ClosedOutcome: 'fixed' }) } } };
+      const snapshot = JSON.stringify(tree);
+      const h = harness(unverified, tree);
+      logged.length = 0;
+      await expect(handleTicketCreated(h.root, key, ticket(), h.deps)).resolves.toBe(false);
+      await expect(handleThreadMessage(h.root, key, { From: 'user', Text: 'x' }, h.deps)).resolves.toBe(false);
+      await expect(handleThreadMessage(h.root, key, { From: 'admin', Text: 'x' }, h.deps)).resolves.toBe(false);
+      await expect(handleTicketClosed(h.root, key, h.deps)).resolves.toBe(false);
+      expect(h.mails).toEqual([]);
+      expect(h.pushes).toEqual([]);
+      expect(JSON.stringify(tree)).toBe(snapshot); // no Status write, no cap stamp
+      const warns = logged.filter((l) => l.startsWith('warn'));
+      expect(warns).toHaveLength(4);
+      for (const w of warns) {
+        expect(w).toContain(`"keyLength":${key.length}`);
+        if (key.length > 1) expect(w).not.toContain(key);
+        expect(w).not.toContain(UID);
+      }
+      expect(logged.filter((l) => !l.startsWith('warn'))).toEqual([]);
+    });
+  }
+
+  for (const key of ['7', '123456789']) {
+    it(`key ${key} behaves as before, and the acknowledgement shows only digits after #`, async () => {
+      for (const verified of [true, false]) {
+        const h = harness({ getAuthEmail: async () => ({ email: AUTH_EMAIL, verified }) }, {
+          Support: { Tickets: { [key]: ticket({ ClosedOutcome: 'fixed' }) } },
+        });
+        await expect(handleTicketCreated(h.root, key, ticket(), h.deps)).resolves.toBe(true);
+        await expect(handleThreadMessage(h.root, key, { From: 'user', Text: 'x' }, h.deps)).resolves.toBe(true);
+        await expect(handleTicketClosed(h.root, key, h.deps)).resolves.toBe(true);
+        expect(h.mails.map((m) => m.to)).toEqual([AUTH_EMAIL, SUPPORT_INBOX, SUPPORT_INBOX, AUTH_EMAIL]);
+        const ack = h.mails[0];
+        // Scan the visible text: drop style attributes (CSS colours use '#').
+        for (const text of [ack.subject, ack.html.replace(/ style="[^"]*"/g, '')]) {
+          const refs = [...text.matchAll(/(?<!&)#([^\s<.]*)/g)].map((m) => m[1]);
+          expect(refs.length).toBeGreaterThan(0);
+          for (const r of refs) expect(r).toMatch(/^\d{1,9}$/);
+        }
+        expect(h.pushes).toHaveLength(1);
+      }
+    });
+  }
 });
