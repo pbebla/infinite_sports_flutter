@@ -49,7 +49,7 @@ describe('sendMail', () => {
     expect(sent[0]).toMatchObject({ to: MSG.to, subject: 'Hello', html: '<p>hi</p>' });
     expect(logged).toHaveLength(1);
     expect(logged[0].path).toBe('Support/MailLog');
-    expect(logged[0].value).toMatchObject({ To: MSG.to, Subject: 'Hello', Ok: true });
+    expect(logged[0].value).toMatchObject({ To: 'pl••••••••@example.com', Subject: 'Hello', Ok: true });
   });
 
   it("returns 'skipped' (and logs nothing) when the SMTP secrets are not configured", async () => {
@@ -108,7 +108,7 @@ describe('sendSupportMail (unchanged: resolves void, never throws)', () => {
     const { root, logged } = fakeRoot();
     await expect(sendSupportMail(root, MSG)).resolves.toBeUndefined();
     expect(sent).toHaveLength(1);
-    expect(logged[0].value).toMatchObject({ To: MSG.to, Ok: true });
+    expect(logged[0].value).toMatchObject({ To: 'pl••••••••@example.com', Ok: true });
   });
 
   it('is a quiet no-op without SMTP secrets and swallows a failing transport', async () => {
@@ -122,11 +122,23 @@ describe('sendSupportMail (unchanged: resolves void, never throws)', () => {
     expect(logged[0].value).toMatchObject({ Ok: false });
   });
 
-  it('logs the raw recipient (support mail is not redacted)', async () => {
-    const { mailer } = fakeMailer();
-    __setMailerForTests(mailer);
+  it('redacts by default: the MailLog, the stored error and every log line carry no address', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
     const { root, logged } = fakeRoot();
+    __setMailerForTests(null); // SMTP not configured -> warn line
     await sendSupportMail(root, MSG);
-    expect(logged[0].value['To']).toBe('player.one@example.com');
+    const { mailer } = fakeMailer(async (o) => { throw new Error(`550 <${o.to}>: mailbox unavailable`); });
+    __setMailerForTests(mailer); // send failure -> error line + MailLog Err
+    await sendSupportMail(root, MSG);
+    __setMailerForTests(mailer);
+    await sendSupportMail(root, { ...MSG, to: 'player.one@' }); // invalid -> warn line
+    expect(logged[0].value['To']).toBe('pl••••••••@example.com');
+    expect(String(logged[0].value['Err'])).toContain('mailbox unavailable');
+    expect(JSON.stringify(logged)).not.toContain('player.one@');
+    const logs = JSON.stringify([...warn.mock.calls, ...error.mock.calls]);
+    expect(warn).toHaveBeenCalled();
+    expect(error).toHaveBeenCalled();
+    expect(logs).not.toContain('player.one@');
   });
 });

@@ -87,14 +87,17 @@ function getMailer(): Mailer | null {
 export type MailOutcome = 'sent' | 'skipped' | 'failed';
 
 export interface SendMailOptions {
-  /** The recipient is private (merge notices): the MailLog entry and the
-   *  logger carry maskEmail(to) instead of the address, and any address an
-   *  SMTP error quotes is redacted before it is stored or logged. */
+  /** Kept for callers that still pass it (merge notices). Redaction is now
+   *  ALWAYS on: the MailLog entry and every log line carry maskEmail(to)
+   *  instead of the address, and any address an SMTP error quotes is
+   *  redacted before it is stored or logged. Nothing reads the raw address
+   *  back out of Support/MailLog (admin-only, write-only audit trail). */
   redactRecipient?: boolean;
 }
 
 /** Sends one email, push-logs the attempt to Support/MailLog
- *  ({To, Subject, Ok, Err?, At}) and says how it went. Never throws: the
+ *  ({To (masked), Subject, Ok, Err? (addresses redacted), At}) and says how
+ *  it went. Never throws: the
  *  callers' data was written BEFORE any mail attempt, and a mail failure is a
  *  log line, not a reason to retry the trigger. Missing secrets -> warn +
  *  'skipped'. A MailLog write that fails after a successful send still
@@ -103,9 +106,9 @@ export async function sendMail(
   root: Reference, message: SupportMailMessage, options: SendMailOptions = {},
 ): Promise<MailOutcome> {
   const subject = sanitizeSubject(message.subject); // belt-and-braces: builders already sanitize
-  const redact = options.redactRecipient === true;
-  const shownTo = redact ? maskEmail(message.to) : message.to;
-  const shownErr = (e: string): string => (redact ? redactEmails(e) : e);
+  void options; // redaction is the default for every caller (see SendMailOptions)
+  const shownTo = maskEmail(message.to);
+  const shownErr = (e: string): string => redactEmails(e);
   let outcome: MailOutcome = 'failed';
   try {
     const mailer = getMailer();
