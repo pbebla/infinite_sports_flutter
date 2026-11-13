@@ -423,18 +423,18 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
       ...sub.answers.keys.where((k) => !byKey.containsKey(k)),
     ];
     final waived = team?.codeWaivesPayment ?? false;
-    // "Owes" is the SAME discounted total the payment screen shows: an
-    // admin comp to $0 or a 100% discount owes nothing (covered).
-    final owes = discountedAmountOwed(
-            config: widget.config,
-            submission: sub,
-            codeWaivesPayment: waived) >
-        0;
+    // "Owes" is the SAME whole-cent discounted total the payment screen
+    // shows: an admin comp to $0 or a 100% discount owes nothing (covered).
+    // owes / covered both come from that one rounded value.
+    final owed = discountedAmountOwed(
+        config: widget.config, submission: sub, codeWaivesPayment: waived);
+    final owes = owed > 0;
     final covered = !sub.paid &&
-        paymentCovered(
+        paymentOwed(
             config: widget.config,
             submission: sub,
-            codeWaivesPayment: waived);
+            codeWaivesPayment: waived) &&
+        owed == 0;
     final teamCard = _teamCard(sub, team);
     return Column(
       children: [

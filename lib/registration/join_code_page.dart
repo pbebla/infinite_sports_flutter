@@ -52,6 +52,9 @@ class _JoinCodePageState extends State<JoinCodePage> {
   RegTeam? _match;
   String? _error;
 
+  /// True when [_error] is the "couldn't check" failure — shows Try again.
+  bool _lookupFailed = false;
+
   @override
   void dispose() {
     _debounce?.cancel();
@@ -70,6 +73,7 @@ class _JoinCodePageState extends State<JoinCodePage> {
         _checking = false;
         _match = null;
         _error = null;
+        _lookupFailed = false;
       });
       return;
     }
@@ -77,8 +81,20 @@ class _JoinCodePageState extends State<JoinCodePage> {
       _checking = true;
       _match = null;
       _error = null;
+      _lookupFailed = false;
     });
     _debounce = Timer(const Duration(milliseconds: 350), _check);
+  }
+
+  void _retry() {
+    _debounce?.cancel();
+    _generation++;
+    setState(() {
+      _checking = true;
+      _error = null;
+      _lookupFailed = false;
+    });
+    _check();
   }
 
   void _onCompleted() {
@@ -96,6 +112,7 @@ class _JoinCodePageState extends State<JoinCodePage> {
     if (!mounted || gen != _generation) return; // superseded by newer input
     setState(() {
       _checking = false;
+      _lookupFailed = false;
       if (result.status == 'ok') {
         _match = result.team;
         _error = null;
@@ -106,9 +123,12 @@ class _JoinCodePageState extends State<JoinCodePage> {
       } else if (result.status == 'error') {
         // The lookup itself failed (offline, timeout, cold start) — that
         // says nothing about the code, so never call it a mismatch.
+        // Like a not-found, stay quiet until the code is complete.
         _match = null;
-        _error =
-            "Couldn't check the code. Check your connection and try again.";
+        _lookupFailed = entered.length >= 6;
+        _error = _lookupFailed
+            ? "Couldn't check the code. Check your connection and try again."
+            : null;
       } else {
         _match = null;
         // Only complain once all six boxes are filled; shorter input that
@@ -198,6 +218,13 @@ class _JoinCodePageState extends State<JoinCodePage> {
                   textAlign: TextAlign.center,
                   style:
                       TextStyle(color: Theme.of(context).colorScheme.error)),
+            ),
+          if (_lookupFailed && !_checking)
+            Center(
+              child: TextButton(
+                onPressed: _retry,
+                child: const Text('Try again'),
+              ),
             ),
           if (_match != null) ...[
             const SizedBox(height: 10),

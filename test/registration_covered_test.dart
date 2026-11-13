@@ -283,4 +283,138 @@ void main() {
       await tester.pump(const Duration(seconds: 5)); // drain snackbars
     });
   });
+
+  group('sub-cent balances round to whole cents everywhere', () {
+    const fee255 = RegistrationConfig(
+        targetType: 'league',
+        sport: 'Futsal',
+        season: '17',
+        fee: 255,
+        paymentMode: 'perPlayer',
+        venmo: true,
+        zelle: true,
+        stripe: true);
+    // 255 * (1 - 99.999/100) = 0.00255 -> rounds to $0.00.
+    const tiny = RegSubmission(
+        path: 'individual',
+        answers: {},
+        discountPct: 99.999,
+        eligibleFee: 255,
+        discountSource: 'manual');
+    // adjustedFee 0.006 -> rounds to $0.01.
+    const cent = RegSubmission(
+        path: 'individual',
+        answers: {},
+        adjustedFee: 0.006,
+        discountSource: 'manual');
+    const plain = RegSubmission(path: 'individual', answers: {});
+
+    Widget payment(RegSubmission sub) => MaterialApp(
+          home: PaymentScreen(
+            regId: 'Futsal-17',
+            config: fee255,
+            amount: 255,
+            submissionStream: Stream.value(sub),
+            publishableKeyOverride: 'pk_test_x',
+          ),
+        );
+    Widget status(RegSubmission sub) => MaterialApp(
+          home: RegistrationStatusPage(
+            regId: 'Futsal-17',
+            config: fee255,
+            submissionStream: Stream.value(sub),
+            formFuture: Future.value(const <RegQuestion>[]),
+          ),
+        );
+
+    test('helpers agree on one rounded value', () {
+      expect(discountedAmountOwed(config: fee255, submission: tiny), 0);
+      expect(paymentCovered(config: fee255, submission: tiny), isTrue);
+      expect(discountedAmountOwed(config: fee255, submission: cent), 0.01);
+      expect(paymentCovered(config: fee255, submission: cent), isFalse);
+      expect(discountedAmountOwed(config: fee255, submission: plain), 255);
+      expect(roundToCents(0.00255), 0);
+      expect(roundToCents(0.006), 0.01);
+    });
+
+    testWidgets('0.00255 is covered: status page has no pay button',
+        (tester) async {
+      await tester.pumpWidget(status(tiny));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text("Nothing to pay — you're covered"), findsOneWidget);
+      expect(find.text('Complete payment'), findsNothing);
+      expect(find.text('Payment pending'), findsNothing);
+    });
+
+    testWidgets('0.00255 is covered: payment screen has no pay buttons',
+        (tester) async {
+      await tester.pumpWidget(payment(tiny));
+      await tester.pump();
+      expect(find.text("Nothing to pay — you're covered"), findsOneWidget);
+      expect(find.text('Pay with card'), findsNothing);
+      expect(find.text('Pay with Venmo'), findsNothing);
+    });
+
+    testWidgets('0.006 owes \$0.01 on both screens', (tester) async {
+      await tester.pumpWidget(status(cent));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Complete payment'), findsOneWidget);
+      expect(find.textContaining("you're covered"), findsNothing);
+
+      await tester.pumpWidget(payment(cent));
+      await tester.pump();
+      expect(find.text('\$0.01'), findsOneWidget);
+      expect(find.text('Pay with card'), findsOneWidget);
+      expect(find.textContaining("you're covered"), findsNothing);
+    });
+
+    testWidgets('an ordinary \$255 registration is unchanged', (tester) async {
+      await tester.pumpWidget(status(plain));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Payment pending'), findsOneWidget);
+      expect(find.text('Complete payment'), findsOneWidget);
+
+      await tester.pumpWidget(payment(plain));
+      await tester.pump();
+      expect(find.text('\$255'), findsOneWidget);
+      expect(find.text('Pay with card'), findsOneWidget);
+    });
+  });
+
+  testWidgets('once Paid arrives, the processing timers stop',
+      (tester) async {
+    const stripeConfig = RegistrationConfig(
+        targetType: 'league',
+        sport: 'Futsal',
+        season: '17',
+        fee: 60,
+        paymentMode: 'perPlayer',
+        stripe: true);
+    final subs = StreamController<RegSubmission?>();
+    addTearDown(subs.close);
+    await tester.pumpWidget(
+        _payment(subs.stream, config: stripeConfig, card: () async {}));
+    subs.add(_unpaid);
+    await tester.pump();
+    await tester.tap(find.text('Pay with card'));
+    await tester.pump();
+    expect(find.text('Processing…'), findsOneWidget);
+
+    subs.add(const RegSubmission(
+        path: 'individual', answers: {}, paid: true, paidVia: 'card'));
+    await tester.pump();
+    expect(find.text("Payment received — you're all set."), findsOneWidget);
+
+    // Neither the 10s snackbar nor the 60s "went through" state may fire.
+    await tester.pump(const Duration(seconds: 11));
+    await tester.pump();
+    expect(find.textContaining('Still processing'), findsNothing);
+    await tester.pump(const Duration(seconds: 60));
+    await tester.pump();
+    expect(find.textContaining('Your payment went through'), findsNothing);
+    expect(find.text("Payment received — you're all set."), findsOneWidget);
+  });
 }

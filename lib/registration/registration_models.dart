@@ -841,6 +841,28 @@ num amountOwed({
   return submission.path == 'captain' ? config.teamFee : config.fee;
 }
 
+/// [amount] rounded to whole cents — the unit Stripe charges in. Every
+/// "how much is owed" number goes through this ONE rounding so the status
+/// page, the form page, the payment screen and the server always agree
+/// (a $0.00255 remainder is $0.00 everywhere, never "covered" on one
+/// screen and "pay" on another).
+double roundToCents(double amount) => (amount * 100).round() / 100;
+
+/// The discounted total for [baseFee] given [submission]'s stamped
+/// discount (null submission = no discount), in whole cents — what the
+/// payment screen shows as "Total due".
+double discountedTotal({
+  required double baseFee,
+  RegSubmission? submission,
+}) =>
+    roundToCents(bestDiscountedTotal(
+      baseFee: baseFee,
+      eligibleFee: submission?.eligibleFee,
+      adjustedFee: submission?.adjustedFee,
+      discountPct: submission?.discountPct,
+      discountSource: submission?.discountSource ?? '',
+    ));
+
 /// What this submission owes RIGHT NOW after any stamped discount — the
 /// same [bestDiscountedTotal] the payment screen shows as "Total due"
 /// (manual admin adjustment, first-timer promo or Insider tier discount).
@@ -857,21 +879,18 @@ double discountedAmountOwed({
       codeWaivesPayment: codeWaivesPayment)) {
     return 0;
   }
-  return bestDiscountedTotal(
+  return discountedTotal(
     baseFee: amountOwed(
             config: config,
             submission: submission,
             codeWaivesPayment: codeWaivesPayment)
         .toDouble(),
-    eligibleFee: submission.eligibleFee,
-    adjustedFee: submission.adjustedFee,
-    discountPct: submission.discountPct,
-    discountSource: submission.discountSource,
+    submission: submission,
   );
 }
 
-/// True when a fee applies to this submission but its discounted total is
-/// $0 — an admin comp to $0 or a 100% discount: "Nothing to pay — you're
+/// True when a fee applies to this submission but its discounted total
+/// (already in whole cents) is $0 — an admin comp to $0 or a 100% discount: "Nothing to pay — you're
 /// covered", never "Payment pending" with a $0 pay button.
 bool paymentCovered({
   required RegistrationConfig config,
@@ -885,5 +904,5 @@ bool paymentCovered({
     discountedAmountOwed(
             config: config,
             submission: submission,
-            codeWaivesPayment: codeWaivesPayment) <
-        0.005;
+            codeWaivesPayment: codeWaivesPayment) ==
+        0;

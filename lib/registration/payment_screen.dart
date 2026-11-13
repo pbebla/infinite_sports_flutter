@@ -114,8 +114,24 @@ class _PaymentScreenState extends State<PaymentScreen> {
   void initState() {
     super.initState();
     if (widget.config.stripe) _loadPublishableKey();
-    _submission = widget.submissionStream ??
-        RegistrationService.watchMySubmission(widget.regId);
+    _submission = _watchSubmission();
+  }
+
+  /// The live submission; a Paid read stops both processing timers at once
+  /// (no "still processing" snackbar / "went through" state after Paid).
+  Stream<RegSubmission?> _watchSubmission() =>
+      (widget.submissionStream ??
+              RegistrationService.watchMySubmission(widget.regId))
+          .map((sub) {
+        if (sub != null && sub.paid) _stopProcessingTimers();
+        return sub;
+      });
+
+  void _stopProcessingTimers() {
+    _processingFallback?.cancel();
+    _processingFallback = null;
+    _confirmationTimer?.cancel();
+    _confirmationTimer = null;
   }
 
   @override
@@ -166,13 +182,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// ever has both signals present at once (spec §5's best-discount-wins
   /// rule). An owner edit made in the Manager shows up here instantly since
   /// [_submission] is a live stream.
-  num _effectiveAmount(RegSubmission? sub) => bestDiscountedTotal(
-        baseFee: widget.amount.toDouble(),
-        eligibleFee: sub?.eligibleFee,
-        adjustedFee: sub?.adjustedFee,
-        discountPct: sub?.discountPct,
-        discountSource: sub?.discountSource ?? '',
-      );
+  num _effectiveAmount(RegSubmission? sub) =>
+      discountedTotal(baseFee: widget.amount.toDouble(), submission: sub);
 
   void _exit() {
     if (widget.fromSubmission) {
@@ -343,8 +354,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
             const SizedBox(height: 12),
             OutlinedButton(
               onPressed: () => setState(() {
-                _submission = widget.submissionStream ??
-                    RegistrationService.watchMySubmission(widget.regId);
+                _submission = _watchSubmission();
               }),
               child: const Text('Retry'),
             ),
