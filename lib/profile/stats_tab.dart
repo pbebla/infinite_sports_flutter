@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/sport_icon.dart';
 import 'package:infinite_sports_flutter/misc/profile_stat_priority.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
@@ -26,19 +27,6 @@ class CompetitionStats {
     required this.stats,
     this.sortKey = 0,
   });
-}
-
-/// Returns the appropriate icon for a given sport string.
-IconData sportIcon(String sport) {
-  final s = sport.toLowerCase();
-  if (s.contains('basket')) return Icons.sports_basketball;
-  if (s.contains('flag') || s.contains('football')) return Icons.sports_football;
-  // Futsal, AFC San Jose, Soccer, or any tournament defaulting to soccer-style
-  if (s.contains('futsal') || s.contains('afc') || s.contains('soccer')) {
-    return Icons.sports_soccer;
-  }
-  // Tournaments / unknown
-  return Icons.emoji_events;
 }
 
 /// The "Career" tab of the tabbed player profile (PR #10 — the former

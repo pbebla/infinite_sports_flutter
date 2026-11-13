@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/sport_icon.dart';
 import 'package:infinite_sports_flutter/eventpage.dart';
 import 'package:infinite_sports_flutter/league_detail_page.dart';
 import 'package:infinite_sports_flutter/misc/calendar_sources.dart';
@@ -208,7 +209,7 @@ class _CalendarTabState extends State<CalendarTab> {
                     switch (entry.kind) {
                       case CalendarKind.league:
                         return ListTile(
-                          leading: Icon(Icons.sports_soccer, color: accent),
+                          leading: Icon(calendarEntryIcon(entry), color: accent),
                           title: Text(entry.displayTitle),
                           subtitle: Text('Match day · Season ${entry.season}'),
                           trailing: const Icon(Icons.chevron_right),
@@ -222,7 +223,7 @@ class _CalendarTabState extends State<CalendarTab> {
                         );
                       case CalendarKind.tournament:
                         return ListTile(
-                          leading: Icon(Icons.emoji_events, color: accent),
+                          leading: Icon(calendarEntryIcon(entry), color: accent),
                           title: Text(entry.displayTitle),
                           subtitle: const Text('Tournament match day'),
                           trailing: const Icon(Icons.chevron_right),
@@ -238,7 +239,7 @@ class _CalendarTabState extends State<CalendarTab> {
                         final event = entry.event!;
                         return ListTile(
                           leading: event.imageSrc == null
-                              ? Icon(Icons.event, color: accent)
+                              ? Icon(calendarEntryIcon(entry), color: accent)
                               : SizedBox(width: 48, height: 48,
                                   child: FittedBox(fit: BoxFit.cover, clipBehavior: Clip.hardEdge, child: event.imageSrc!)),
                           title: Text(event.title ?? ''),
@@ -485,5 +486,20 @@ class _DayCell extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// The day-sheet icon for a calendar entry: league match days use their
+/// sport's icon (release report #7 — Flag Football showed a soccer ball);
+/// no sport on the entry means the Futsal league, matching the page's
+/// LeagueDetailPage default.
+IconData calendarEntryIcon(CalendarEntry entry) {
+  switch (entry.kind) {
+    case CalendarKind.league:
+      return sportIcon(entry.sport ?? 'Futsal');
+    case CalendarKind.tournament:
+      return Icons.emoji_events;
+    case CalendarKind.event:
+      return Icons.event;
   }
 }
