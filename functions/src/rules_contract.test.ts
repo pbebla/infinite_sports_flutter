@@ -208,6 +208,14 @@ const CONTRACT: ContractEntry[] = [
   // utility.dart createDatabaseLocation / uploadToken / setImage /
   // removeImage / addUpdateInfo; registration_service.dart
   // _writeBackProfile; notification_prefs.dart favourites.
+  //
+  // NEVER WRITE `Users/<uid>` BACK WHOLE FROM A CLIENT; UPDATE SPECIFIC KEYS.
+  // Awards / Played / TournamentsPlayed / MergedInto / MergedAt / MergedHint
+  // / MergedFrom carry an admin-only `.validate`, which runs on every child
+  // present in the new data: a `.set()` of the whole node that re-sends a
+  // person's own trophies UNCHANGED is refused. Every writer below uses
+  // `.update()` or a child `.set()`; keep it that way (probe_rules.ts pins
+  // the whole-node behaviour).
   { path: 'Users/UID', kind: 'own',
     note: 'main.dart + about_you_page.dart + registration_service.dart _writeBackProfile: update' },
   ...['First Name', 'Last Name', 'Phone Number', 'Date Joined', 'Token', 'ProfileUrl'].map((k) => (
@@ -496,8 +504,12 @@ for (const file of RULES_FILES) {
     it('paid access: Squads/$uid and Managers/$uid .write end with the Mode/Status gate', () => {
       const season = rules['rules']['Fantasy']['$sport']['$season'];
       expect(String(season['Squads']['$uid']['.write']).endsWith(` && ${ACCESS_GATE}`)).toBe(true);
+      // newData.exists(): the owner may never DELETE their row (a .validate
+      // never runs on a delete, so delete-then-recreate cleared a flagged
+      // name - 2026-11-13). Admins delete through the Managers-level grant.
       expect(season['Managers']['$uid']['.write'])
-        .toBe(`auth != null && auth.uid == $uid && ${ACCESS_GATE}`);
+        .toBe(`auth != null && auth.uid == $uid && newData.exists() && ${ACCESS_GATE}`);
+      expect(String(season['Managers']['.write'])).toContain(ADMIN_GATE);
       // The gate never leaks into .validate (validate binds admins too; an
       // admin client write to Managers/<uid>/NameFlagged must still land).
       expect(String(season['Managers']['$uid']['.validate'])).not.toContain('Config/Access');
@@ -786,13 +798,24 @@ describe.each(RULES_FILES)('rules contract: registration, profile history, team 
       "(newData.child('Status').val() == 'pending' && " +
       "(!newData.child('CodeWaivesPayment').exists() || newData.child('CodeWaivesPayment').val() == false) && " +
       "!newData.child('JoinCode').exists())");
+    // A non-admin writes ONLY the five keys the app sends, each a scalar:
+    // nothing can be planted INSIDE a team (TeamId used to be followed as a
+    // path - "-evil/X"). Members is the functions' mirror (admin SDK).
+    const scalar = { '.validate': "root.child('Admins').child(auth.uid).exists() || !newData.hasChildren()" };
+    for (const k of ['Name', 'CaptainUid', 'Status', 'CodeWaivesPayment', 'CreatedAt']) {
+      expect(team[k], `${file}: Teams/$tid/${k}`).toEqual(scalar);
+    }
+    expect(team['$other']).toEqual({ '.validate': ADMIN_ONLY });
+    expect(team['Members']['.validate']).toBe(ADMIN_ONLY);
+    expect(team['Members']['$uid']['.read']).toBe('auth != null && auth.uid == $uid');
   });
 
-  it('Registrations Submissions/$uid: a code waiver counts only on an APPROVED waiving team', () => {
+  it('Registrations Submissions/$uid: a code waiver counts only on an APPROVED waiving team, by a push-id TeamId', () => {
     const v = String(rules['Registrations']['$regId']['Submissions']['$uid']['.validate']);
     const team = "root.child('Registrations').child($regId).child('Teams').child(newData.child('TeamId').val())";
     expect(v).toContain(
-      `(${team}.child('CodeWaivesPayment').val() == true && ${team}.child('Status').val() == 'approved')`);
+      "(newData.child('TeamId').isString() && newData.child('TeamId').val().matches(/^[A-Za-z0-9_-]+$/) && " +
+      `${team}.child('CodeWaivesPayment').val() == true && ${team}.child('Status').val() == 'approved')`);
     expect(v).not.toMatch(/\|\| root\.child\('Registrations'\)[^(]*\.child\('CodeWaivesPayment'\)\.val\(\) == true$/);
   });
 

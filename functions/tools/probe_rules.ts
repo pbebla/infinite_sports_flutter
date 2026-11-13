@@ -13,6 +13,15 @@
 //
 // Never points at production: it refuses to run without
 // FIREBASE_DATABASE_EMULATOR_HOST, and every id here is made up.
+//
+// NEVER WRITE `Users/<uid>` BACK WHOLE FROM A CLIENT; UPDATE SPECIFIC KEYS.
+// Users/<uid>/{Awards, Played, TournamentsPlayed, MergedInto, MergedAt,
+// MergedHint, MergedFrom} carry an admin-only `.validate` (2026-11-13), and a
+// `.validate` runs on every child present in the new data. So a fan-app
+// `ref('Users/<uid>').set(<the node it just read>)` that re-sends a person's
+// own trophies UNCHANGED is refused for everyone who has one. Use `.update()`
+// with only the keys you change (as every writer does today). Pinned by the
+// "whole-node PUT" checks below. (Rules JSON cannot carry comments.)
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -121,6 +130,8 @@ const SEED_2026_11_13 = {
       '-pendingWaive': { Name: 'Pending FC', CaptainUid: 'uid_captain', Status: 'pending',
         CodeWaivesPayment: true, CreatedAt: 1 },
       '-fanPending': appTeam(FAN),
+      '-evil': { ...appTeam(FAN), X: { CodeWaivesPayment: true, Status: 'approved' },
+        Members: { m: { CodeWaivesPayment: true, Status: 'approved' } } },
     },
   } },
   Users: { [FAN]: { 'First Name': 'Test', Awards: { '-a1': { Title: 'Champion' } },
@@ -227,6 +238,32 @@ const CHECKS: Check[] = [
   { name: 'a fan cannot submit Paid:true against a missing team',
     who: 'fan', method: 'PUT', path: `${REG}/Submissions/${FAN}`,
     body: joinerSub('-nope'), expect: 'deny' },
+  // TeamId used to be followed as a PATH (child() follows slashes): a
+  // captain planted {CodeWaivesPayment:true, Status:'approved'} INSIDE the
+  // team they created and pointed TeamId at it. -evil is seeded by the
+  // owner, standing for data planted before this fix.
+  { name: 'a fan cannot point TeamId at nested data inside a team ("-evil/X")',
+    who: 'fan', method: 'PUT', path: `${REG}/Submissions/${FAN}`,
+    body: joinerSub('-evil/X'), expect: 'deny' },
+  { name: 'a fan cannot point TeamId into a team\'s Members ("-evil/Members/m")',
+    who: 'fan', method: 'PUT', path: `${REG}/Submissions/${FAN}`,
+    body: joinerSub('-evil/Members/m'), expect: 'deny' },
+  { name: 'a fan cannot submit Paid:true with a non-string TeamId',
+    who: 'fan', method: 'PUT', path: `${REG}/Submissions/${FAN}`,
+    body: { ...joinerSub('-adminTeam'), TeamId: 7 }, expect: 'deny' },
+  { name: 'a fan cannot plant a nested object under a new key of their team',
+    who: 'fan', method: 'PUT', path: `${REG}/Teams/-forge5`,
+    body: { ...appTeam(FAN), X: { CodeWaivesPayment: true, Status: 'approved' } }, expect: 'deny' },
+  { name: 'a fan cannot add any extra key to their team',
+    who: 'fan', method: 'PUT', path: `${REG}/Teams/-forge6`,
+    body: { ...appTeam(FAN), Note: 'hi' }, expect: 'deny' },
+  { name: 'a fan cannot plant a nested object under Name',
+    who: 'fan', method: 'PUT', path: `${REG}/Teams/-forge7`,
+    body: { ...appTeam(FAN), Name: { CodeWaivesPayment: true, Status: 'approved' } }, expect: 'deny' },
+  { name: 'a fan cannot plant data under Members',
+    who: 'fan', method: 'PUT', path: `${REG}/Teams/-forge8`,
+    body: { ...appTeam(FAN), Members: { m: { CodeWaivesPayment: true, Status: 'approved' } } },
+    expect: 'deny' },
   { name: 'a joiner of an admin-approved waiving team is born Paid (submitJoiner)',
     who: 'applicant', method: 'PUT', path: `${REG}/Submissions/${APPLICANT}`,
     body: joinerSub('-adminTeam'), expect: 'allow' },
@@ -244,6 +281,23 @@ const CHECKS: Check[] = [
   { name: 'an admin un-approves it (Manager unapproveTeam: nulls code + waiver)',
     who: 'admin', method: 'PATCH', path: `${REG}/Teams/-fanNew`,
     body: { Status: 'pending', JoinCode: null, CodeWaivesPayment: null }, expect: 'allow' },
+  { name: 'an admin rejects a team (Manager rejectTeam)',
+    who: 'admin', method: 'PUT', path: `${REG}/Teams/-fanNew/Status`, body: 'rejected', expect: 'allow' },
+  { name: 'an admin sets a join code (Manager setTeamCode)',
+    who: 'admin', method: 'PUT', path: `${REG}/Teams/-fanNew/JoinCode`, body: 'NEW123', expect: 'allow' },
+  { name: 'an admin sets the waiver (Manager setTeamWaive)',
+    who: 'admin', method: 'PUT', path: `${REG}/Teams/-fanNew/CodeWaivesPayment`, body: true, expect: 'allow' },
+  { name: 'an admin marks the tournament team (Manager setTeamTournamentId)',
+    who: 'admin', method: 'PUT', path: `${REG}/Teams/-fanNew/TournamentTeamId`, body: 'probe-fc', expect: 'allow' },
+  { name: 'an admin clears the marker (Manager clearTeamTournamentId)',
+    who: 'admin', method: 'DELETE', path: `${REG}/Teams/-fanNew/TournamentTeamId`, expect: 'allow' },
+  { name: 'an admin multi-path update across several team children',
+    who: 'admin', method: 'PATCH', path: '',
+    body: { [`${REG}/Teams/-fanNew/Status`]: 'approved', [`${REG}/Teams/-fanNew/JoinCode`]: 'MULTI1',
+      [`${REG}/Teams/-fanNew/CodeWaivesPayment`]: false, [`${REG}/Teams/-fanNew/TournamentTeamId`]: 'x' },
+    expect: 'allow' },
+  { name: 'an admin removes a team (Manager deleteTeam)',
+    who: 'admin', method: 'DELETE', path: `${REG}/Teams/-fanNew`, expect: 'allow' },
 
   // ── Users/<uid>: trophies, history and merge stamps (2026-11-13) ──────────
   // Every real fan write under Users/<uid> (tip + store build) must still
@@ -306,6 +360,13 @@ const CHECKS: Check[] = [
   { name: 'a fan profile update still lands next to existing trophies',
     who: 'fan', method: 'PATCH', path: `Users/${FAN}`,
     body: { 'First Name': 'Renamed' }, expect: 'allow' },
+  // Pins the "never write Users/<uid> back whole" note at the top of this file.
+  { name: 'a whole-node PUT that re-sends existing trophies unchanged is refused',
+    who: 'fan', method: 'PUT', path: `Users/${FAN}`,
+    body: { 'First Name': 'Renamed', Awards: { '-a1': { Title: 'Champion' } } }, expect: 'deny' },
+  { name: 'a whole-node PUT without the admin-only keys is allowed',
+    who: 'fan', method: 'PUT', path: `Users/${FAN}`,
+    body: { 'First Name': 'Renamed', 'Last Name': 'Fan', Token: 'tok' }, expect: 'allow' },
 
   // ── Fantasy team name flag (2026-11-13) ───────────────────────────────────
   // saveTeamName always writes {TeamName, NameFlagged:false}. Operator
@@ -331,6 +392,23 @@ const CHECKS: Check[] = [
     body: { TeamName: 'Other Team' }, expect: 'deny' },
   { name: 'an admin flags a name (Manager setNameFlagged)',
     who: 'admin', method: 'PUT', path: `${FS}/Managers/${FAN}/NameFlagged`, body: true, expect: 'allow' },
+  // Delete-then-recreate: a .validate never runs on a delete, so the owner
+  // could delete the flagged row and save the same name as a "first save".
+  { name: 'an owner cannot delete their own (flagged) Managers row',
+    who: 'fan', method: 'DELETE', path: `${FS}/Managers/${FAN}`, expect: 'deny' },
+  { name: 'an owner cannot null their row through a parent update',
+    who: 'fan', method: 'PATCH', path: `${FS}/Managers`, body: { [FAN]: null }, expect: 'deny' },
+  { name: 'the flagged name still cannot be re-saved after the refused delete',
+    who: 'fan', method: 'PUT', path: `${FS}/Managers/${FAN}`,
+    body: { TeamName: 'Nice Name', NameFlagged: false }, expect: 'deny' },
+  { name: 'an admin can remove a Managers row',
+    who: 'admin', method: 'DELETE', path: `${FS}/Managers/${APPLICANT}`, expect: 'allow' },
+  { name: 'a first save after an admin removal still works',
+    who: 'applicant', method: 'PUT', path: `${FS}/Managers/${APPLICANT}`,
+    body: { TeamName: 'Fresh Team', NameFlagged: false }, expect: 'allow' },
+  { name: 'a rename still works',
+    who: 'applicant', method: 'PUT', path: `${FS}/Managers/${APPLICANT}`,
+    body: { TeamName: 'Renamed Team', NameFlagged: false }, expect: 'allow' },
 
   // ── Signed out ────────────────────────────────────────────────────────────
   { name: 'signed out: no application',
