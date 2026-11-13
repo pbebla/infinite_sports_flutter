@@ -240,9 +240,9 @@ const CONTRACT: ContractEntry[] = [
   { path: 'Support/Counter', kind: 'signedIn',
     note: 'support/support_service.dart createTicket: runTransaction(+1) (validate pins +1)' },
   { path: 'Support/Tickets/12', kind: 'uidCreate',
-    note: 'support_service.dart createTicket: root multi-path update {Num, Uid, ...}' },
+    note: 'support_service.dart createTicket: root multi-path update {Num, Uid, ...} under the Counter-issued integer key ($n validated numeric)' },
   { path: 'Support/UserTickets/UID/12', kind: 'own',
-    note: 'support_service.dart createTicket: same multi-path update (true)' },
+    note: 'support_service.dart createTicket: same multi-path update (true); $n validated numeric' },
   { path: 'Support/Tickets/12/Thread/-pushId', kind: 'ticketReply',
     note: "support_service.dart addUserReply: push().set {From:'user', Uid, Name, Text, At}" },
   { path: 'CategorySuggestions/-pushId', kind: 'signedIn',
@@ -847,5 +847,28 @@ describe.each(RULES_FILES)('rules contract: registration, profile history, team 
   it('Fantasy Managers/$uid: explicit parentheses; a flagged name cannot be re-saved unchanged', () => {
     const v = rules['Fantasy']['$sport']['$season']['Managers']['$uid']['.validate'];
     expect(v).toBe(MANAGERS_VALIDATE);
+  });
+});
+
+// ── Support ticket keys are ticket numbers (2026-11-13) ─────────────────────
+// Support/Tickets/$n accepted ANY key and the server mails that key as the
+// "ticket number" (subject + body). The app only creates under the integer
+// the Support/Counter transaction issued (support_service.dart createTicket,
+// one multi-path update with the fan's UserTickets/<uid>/<n> index entry).
+// A .validate on $n also runs for every write below it, so admin status /
+// close / reply / note writes and the fan's Thread replies still need a
+// numeric ticket - which every real ticket is.
+const TICKET_KEY = '$n.matches(/^[0-9]{1,9}$/)';
+describe.each(RULES_FILES)('rules contract: support ticket keys - %s', (file) => {
+  const support = loadRules(file)['rules']['Support'];
+
+  it('Support/Tickets/$n and Support/UserTickets/$uid/$n accept only a 1-9 digit key', () => {
+    expect(support['Tickets']['$n']['.validate']).toBe(TICKET_KEY);
+    expect(support['UserTickets']['$uid']['$n']).toEqual({ '.validate': TICKET_KEY });
+    // The grants themselves are unchanged.
+    expect(support['Tickets']['$n']['.write'])
+      .toBe("auth != null && !data.exists() && newData.child('Uid').val() == auth.uid");
+    expect(support['UserTickets']['$uid']['.write'])
+      .toBe("auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())");
   });
 });

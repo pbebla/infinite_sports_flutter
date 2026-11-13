@@ -47,6 +47,9 @@ interface Check {
   /** One verdict for both files, or per file when the postures differ
    *  (stage 1 still has the open root read). */
   expect: Verdict | { stage1: Verdict; target: Verdict };
+  /** The database itself refuses this key's SYNTAX (HTTP 400, e.g. a '.' in
+   *  a key) before any rule runs; count that as a refusal. */
+  badRequestIsDeny?: boolean;
 }
 
 function b64url(o: unknown): string {
@@ -94,10 +97,33 @@ async function attempt(c: Check): Promise<Verdict> {
   });
   if (res.ok) return 'allow';
   if (res.status === 401 || res.status === 403) return 'deny';
+  if (res.status === 400 && c.badRequestIsDeny) return 'deny';
   throw new Error(`${c.name}: unexpected HTTP ${res.status} ${await res.text()}`);
 }
 
 const TS = { '.sv': 'timestamp' };
+
+/** support_service.dart createTicket: the ticket node + the fan's index
+ *  entry in ONE root multi-path update, under the Counter-issued key. */
+function ticketCreate(key: string, uid = FAN): Record<string, unknown> {
+  return {
+    [`Support/Tickets/${key}`]: {
+      Num: Number(key) || 0, Uid: uid, Name: 'Test Fan', Email: 'f***@example.com',
+      Category: 'bug', Message: 'It broke', Status: 'open', CreatedAt: TS, UpdatedAt: TS,
+      AppVersion: '3.0.0', Platform: 'android', Device: 'Pixel', Screen: 'home',
+      Screenshots: ['https://example.com/s.jpg'],
+    },
+    [`Support/UserTickets/${uid}/${key}`]: true,
+  };
+}
+
+/** Keys a client must not create a ticket under (the server mails the key as
+ *  the "ticket number"). '1.5' is refused by RTDB key syntax itself. */
+const BAD_TICKET_KEYS: Array<[string, string, boolean?]> = [
+  ['hello world', 'text'], ['12 urgent', 'number + text'], ['-7', 'negative'],
+  ['1.5', 'decimal', true], [' ', 'blank-looking'], ['1234567890', 'ten digits'],
+  ['9'.repeat(300), 'very long'], ['x'.repeat(300), 'very long text'],
+];
 
 function auditRow(adminUid: string): Record<string, unknown> {
   return {
@@ -137,6 +163,11 @@ const SEED_2026_11_13 = {
   Users: { [FAN]: { 'First Name': 'Test', Awards: { '-a1': { Title: 'Champion' } },
     Played: { '15': { Sport: 'Futsal', Team: 'Old' } } } },
   Fantasy: { Futsal: { '16': { Managers: { [FAN]: { TeamName: 'Rude Name', NameFlagged: true } } } } },
+  Support: {
+    Counter: 41,
+    Tickets: { '41': { Num: 41, Uid: FAN, Name: 'Test Fan', Message: 'old', Status: 'open', CreatedAt: 1 } },
+    UserTickets: { [FAN]: { '41': true } },
+  },
 };
 
 const CHECKS: Check[] = [
@@ -409,6 +440,42 @@ const CHECKS: Check[] = [
   { name: 'a rename still works',
     who: 'applicant', method: 'PUT', path: `${FS}/Managers/${APPLICANT}`,
     body: { TeamName: 'Renamed Team', NameFlagged: false }, expect: 'allow' },
+
+  // ── Support tickets: numeric keys only (2026-11-13) ───────────────────────
+  // Support/Tickets/$n took ANY key; the server mails that key as the
+  // "ticket number". The app only ever creates under the integer the
+  // Support/Counter transaction issued. Seed: Counter 41, ticket 41 (FAN).
+  ...BAD_TICKET_KEYS.flatMap(([key, label, bad]): Check[] => [
+    { name: `a fan cannot create a ticket under a ${label} key`,
+      who: 'fan', method: 'PATCH', path: '', body: ticketCreate(key), expect: 'deny',
+      badRequestIsDeny: bad },
+    { name: `a fan cannot index a ${label} key in UserTickets`,
+      who: 'fan', method: 'PUT', path: `Support/UserTickets/${FAN}/${key}`, body: true, expect: 'deny',
+      badRequestIsDeny: bad },
+  ]),
+  { name: 'the Counter transaction write (41 -> 42)',
+    who: 'fan', method: 'PUT', path: 'Support/Counter', body: 42, expect: 'allow' },
+  { name: "the app's real ticket create (multi-path, key 42)",
+    who: 'fan', method: 'PATCH', path: '', body: ticketCreate('42'), expect: 'allow' },
+  { name: 'a fan replies on their own ticket (addUserReply)',
+    who: 'fan', method: 'PUT', path: 'Support/Tickets/42/Thread/-m1',
+    body: { From: 'user', Uid: FAN, Name: 'Test Fan', Text: 'more info', At: TS }, expect: 'allow' },
+  { name: 'admin status change (setStatus)',
+    who: 'admin', method: 'PATCH', path: '',
+    body: { 'Support/Tickets/42/Status': 'in_progress', 'Support/Tickets/42/UpdatedAt': TS }, expect: 'allow' },
+  { name: 'admin reply (addAdminReply: Thread + UpdatedAt)',
+    who: 'admin', method: 'PATCH', path: '',
+    body: { 'Support/Tickets/42/Thread/-m2': { From: 'admin', Uid: ADMIN, Name: 'Admin', Text: 'on it', At: TS },
+      'Support/Tickets/42/UpdatedAt': TS }, expect: 'allow' },
+  { name: 'admin internal note (addNote)',
+    who: 'admin', method: 'PUT', path: 'Support/Tickets/42/Notes/-n1',
+    body: { Uid: ADMIN, Name: 'Admin', Text: 'internal', At: TS }, expect: 'allow' },
+  { name: 'admin closes with outcome + note (closeTicket)',
+    who: 'admin', method: 'PATCH', path: '',
+    body: { 'Support/Tickets/42/ClosedOutcome': 'fixed', 'Support/Tickets/42/ClosedNote': 'done',
+      'Support/Tickets/42/UpdatedAt': TS, 'Support/Tickets/42/Status': 'closed' }, expect: 'allow' },
+  { name: 'admin works on the seeded ticket 41',
+    who: 'admin', method: 'PUT', path: 'Support/Tickets/41/Status', body: 'answered', expect: 'allow' },
 
   // ── Signed out ────────────────────────────────────────────────────────────
   { name: 'signed out: no application',

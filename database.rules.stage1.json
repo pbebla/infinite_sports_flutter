@@ -340,6 +340,7 @@
         "$n": {
           ".read": "auth != null && data.child('Uid').val() == auth.uid",
           ".write": "auth != null && !data.exists() && newData.child('Uid').val() == auth.uid",
+          ".validate": "$n.matches(/^[0-9]{1,9}$/)",
           "Thread": {
             "$mid": {
               ".write": "auth != null && !data.exists() && root.child('Support').child('Tickets').child($n).child('Uid').val() == auth.uid && newData.child('From').val() == 'user'"
@@ -350,7 +351,10 @@
       "UserTickets": {
         "$uid": {
           ".read": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())",
-          ".write": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())"
+          ".write": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())",
+          "$n": {
+            ".validate": "$n.matches(/^[0-9]{1,9}$/)"
+          }
         }
       },
       "MailLog": {
