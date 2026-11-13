@@ -264,6 +264,11 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
       paid: bornPaid,
       paidVia: bornPaid ? 'team code' : '',
       submittedAt: DateTime.now().millisecondsSinceEpoch,
+      // The discount stamp just written — a 100% discount owes nothing, so
+      // it must not land on a "Total due $0.00" payment screen.
+      discountSource: stamp.discountSource,
+      discountPct: stamp.discountPct,
+      eligibleFee: stamp.eligibleFee,
     );
     // A successful submission ends the registration flow — clear the whole
     // entry -> path -> [join code] -> form stack underneath so the back
@@ -273,10 +278,11 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
     // opened from the drawer, or the Matches tab's nested navigator when
     // opened from the frontpage banner) landing on that navigator's home
     // route.
-    if (paymentOwed(
-        config: widget.config,
-        submission: submission,
-        codeWaivesPayment: waived)) {
+    if (discountedAmountOwed(
+            config: widget.config,
+            submission: submission,
+            codeWaivesPayment: waived) >
+        0) {
       Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute(
             builder: (_) => PaymentScreen(

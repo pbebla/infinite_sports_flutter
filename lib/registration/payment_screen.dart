@@ -21,6 +21,27 @@ import 'package:url_launcher/url_launcher.dart';
 /// a distinct payment method next to Venmo blue and the Zelle card.
 const Color kStripePurple = Color(0xFF635BFF);
 
+/// How long after the payment sheet reports success the screen waits for
+/// the Paid confirmation before saying the payment went through and may
+/// take a few minutes to show.
+const Duration kCardConfirmationWait = Duration(seconds: 60);
+
+/// A plain sentence for a card payment that could not be started — never
+/// the raw exception text ("[firebase_functions/failed-precondition] …").
+String cardPaymentErrorMessage(Object error) {
+  if (error is FirebaseFunctionsException &&
+      error.code == 'failed-precondition') {
+    final message = (error.message ?? '').toLowerCase();
+    if (message.contains('already paid')) {
+      return 'This registration is already paid.';
+    }
+    if (message.contains('nothing is owed')) {
+      return 'Nothing is owed for this registration.';
+    }
+  }
+  return "Card payment couldn't be started. Try again.";
+}
+
 /// Payment screen (L1a: Venmo + Zelle; L1c adds card via Stripe PaymentSheet;
 /// L1c.2 makes the screen itself live).
 ///
@@ -45,12 +66,22 @@ class PaymentScreen extends StatefulWidget {
   /// popping.
   final bool fromSubmission;
 
+  /// Test seams (Firebase-free widget tests): the live submission stream,
+  /// the Stripe publishable key (skips the AppConfig read) and the whole
+  /// card round trip (callable + payment sheet; throw to simulate a failure).
+  final Stream<RegSubmission?>? submissionStream;
+  final String? publishableKeyOverride;
+  final Future<void> Function()? cardPaymentOverride;
+
   const PaymentScreen({
     super.key,
     required this.regId,
     required this.config,
     required this.amount,
     this.fromSubmission = false,
+    this.submissionStream,
+    this.publishableKeyOverride,
+    this.cardPaymentOverride,
   });
 
   @override
@@ -71,22 +102,35 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// as a fallback instead of leaving the user staring at a spinner.
   Timer? _processingFallback;
 
-  late final Stream<RegSubmission?> _submission;
+  /// Set when the Paid confirmation still hasn't arrived
+  /// [kCardConfirmationWait] after the sheet succeeded: "Processing…" gives
+  /// way to "Your payment went through…" (pay buttons stay hidden).
+  bool _confirmationSlow = false;
+  Timer? _confirmationTimer;
+
+  late Stream<RegSubmission?> _submission;
 
   @override
   void initState() {
     super.initState();
     if (widget.config.stripe) _loadPublishableKey();
-    _submission = RegistrationService.watchMySubmission(widget.regId);
+    _submission = widget.submissionStream ??
+        RegistrationService.watchMySubmission(widget.regId);
   }
 
   @override
   void dispose() {
     _processingFallback?.cancel();
+    _confirmationTimer?.cancel();
     super.dispose();
   }
 
   Future<void> _loadPublishableKey() async {
+    final override = widget.publishableKeyOverride;
+    if (override != null) {
+      _publishableKey = override;
+      return;
+    }
     try {
       final snap = (await FirebaseDatabase.instance
               .ref('AppConfig/StripePublishableKey')
@@ -146,40 +190,12 @@ class _PaymentScreenState extends State<PaymentScreen> {
   Future<void> _payWithCard() async {
     setState(() => _payingWithCard = true);
     try {
-      final callable = FirebaseFunctions.instance
-          .httpsCallable('createRegistrationPaymentIntent');
-      final result = await callable.call<Map<String, dynamic>>({
-        'regId': widget.regId,
-      });
-      final clientSecret = result.data['clientSecret'] as String?;
-      final publishableKey =
-          (result.data['publishableKey'] as String?) ?? _publishableKey ?? '';
-      if (clientSecret == null || clientSecret.isEmpty) {
-        throw Exception('No client secret returned.');
+      final override = widget.cardPaymentOverride;
+      if (override != null) {
+        await override();
+      } else {
+        await _startCardPayment();
       }
-      if (publishableKey.isEmpty) {
-        throw Exception('No Stripe publishable key configured.');
-      }
-
-      Stripe.publishableKey = publishableKey;
-      await Stripe.instance.applySettings();
-
-      await Stripe.instance.initPaymentSheet(
-        paymentSheetParameters: SetupPaymentSheetParameters(
-          paymentIntentClientSecret: clientSecret,
-          merchantDisplayName: 'Infinite Sports',
-          googlePay: PaymentSheetGooglePay(
-            merchantCountryCode: 'US',
-            // Follows the configured key: test environment for pk_test,
-            // production for pk_live — no manual flip on go-live.
-            testEnv: publishableKey.startsWith('pk_test_'),
-          ),
-          // Apple Pay stays off until an Apple merchant identifier exists
-          // (Stripe.merchantIdentifier) — passing applePay without one
-          // asserts at runtime. Card + Google Pay cover Android fully.
-        ),
-      );
-      await Stripe.instance.presentPaymentSheet();
 
       if (!mounted) return;
       // The submission stream flips to Paid on its own once the webhook
@@ -195,6 +211,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
             content: Text(
                 'Still processing — your status page will update once the payment is confirmed.')));
       });
+      // Still no Paid flip after a minute: the card was charged (the sheet
+      // said so), the confirmation is just slow — say exactly that, and
+      // keep every pay button hidden so nobody pays twice.
+      _confirmationTimer?.cancel();
+      _confirmationTimer = Timer(kCardConfirmationWait, () {
+        if (!mounted || !_processing) return;
+        setState(() => _confirmationSlow = true);
+      });
     } on StripeException catch (e) {
       // User-cancelled the sheet is the common case — stay silent for that,
       // show everything else.
@@ -205,12 +229,52 @@ class _PaymentScreenState extends State<PaymentScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Card payment failed: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(cardPaymentErrorMessage(e))));
       }
     } finally {
       if (mounted) setState(() => _payingWithCard = false);
     }
+  }
+
+  /// The real card round trip: createRegistrationPaymentIntent, then the
+  /// Stripe PaymentSheet. Throws on any failure (a cancelled sheet throws a
+  /// [StripeException] with [FailureCode.Canceled]).
+  Future<void> _startCardPayment() async {
+    final callable = FirebaseFunctions.instance
+        .httpsCallable('createRegistrationPaymentIntent');
+    final result = await callable.call<Map<String, dynamic>>({
+      'regId': widget.regId,
+    });
+    final clientSecret = result.data['clientSecret'] as String?;
+    final publishableKey =
+        (result.data['publishableKey'] as String?) ?? _publishableKey ?? '';
+    if (clientSecret == null || clientSecret.isEmpty) {
+      throw Exception('No client secret returned.');
+    }
+    if (publishableKey.isEmpty) {
+      throw Exception('No Stripe publishable key configured.');
+    }
+
+    Stripe.publishableKey = publishableKey;
+    await Stripe.instance.applySettings();
+
+    await Stripe.instance.initPaymentSheet(
+      paymentSheetParameters: SetupPaymentSheetParameters(
+        paymentIntentClientSecret: clientSecret,
+        merchantDisplayName: 'Infinite Sports',
+        googlePay: PaymentSheetGooglePay(
+          merchantCountryCode: 'US',
+          // Follows the configured key: test environment for pk_test,
+          // production for pk_live — no manual flip on go-live.
+          testEnv: publishableKey.startsWith('pk_test_'),
+        ),
+        // Apple Pay stays off until an Apple merchant identifier exists
+        // (Stripe.merchantIdentifier) — passing applePay without one
+        // asserts at runtime. Card + Google Pay cover Android fully.
+      ),
+    );
+    await Stripe.instance.presentPaymentSheet();
   }
 
   @override
@@ -231,6 +295,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
           // _processing flag, killing the double-pay window for good.
           if (sub != null && sub.paid) return _paidBody(context);
           if (_processing) return _processingBody(context);
+          // A failed read must not fall back to the undiscounted base fee.
+          if (snapshot.hasError) return _loadFailedBody(context);
           return _unpaidBody(context, sub);
         },
       ),
@@ -265,7 +331,58 @@ class _PaymentScreenState extends State<PaymentScreen> {
     );
   }
 
+  Widget _loadFailedBody(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Couldn't load your registration. Try again.",
+                textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: () => setState(() {
+                _submission = widget.submissionStream ??
+                    RegistrationService.watchMySubmission(widget.regId);
+              }),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _processingBody(BuildContext context) {
+    if (_confirmationSlow) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.check_circle_outline,
+                  color: Colors.green, size: 72),
+              const SizedBox(height: 24),
+              const Text(
+                'Your payment went through. It can take a few minutes to '
+                "show here — you don't need to pay again.",
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: _exit,
+                  child: const Text('View my registration'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -291,6 +408,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   Widget _unpaidBody(BuildContext context, RegSubmission? sub) {
     final effectiveAmount = _effectiveAmount(sub);
+    // Comped to $0 / 100% discount: nothing to pay — no pay buttons at all.
+    if (sub != null && effectiveAmount <= 0) {
+      return _coveredBody(context, sub, effectiveAmount);
+    }
     final showCardButton = widget.config.stripe &&
         effectiveAmount > 0 &&
         _publishableKey != null &&
@@ -399,6 +520,30 @@ class _PaymentScreenState extends State<PaymentScreen> {
               ? 'Card payments confirm automatically — your status page updates as soon as Stripe processes it. Venmo/Zelle still require an admin to mark you Paid.'
               : 'Nothing confirms automatically yet — an admin marks you Paid once your payment arrives. You can reopen this screen from your registration status any time until then.',
           textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 15),
+        OutlinedButton(
+          onPressed: _exit,
+          child: const Text('View my registration'),
+        ),
+      ],
+    );
+  }
+
+  Widget _coveredBody(
+      BuildContext context, RegSubmission sub, num effectiveAmount) {
+    return ListView(
+      padding: EdgeInsets.fromLTRB(
+          15, 15, 15, 15 + MediaQuery.paddingOf(context).bottom),
+      children: [
+        _amountCard(context, sub, effectiveAmount),
+        const SizedBox(height: 15),
+        const Card(
+          elevation: 2,
+          child: ListTile(
+            leading: Icon(Icons.check_circle, color: Colors.green),
+            title: Text("Nothing to pay — you're covered"),
+          ),
         ),
         const SizedBox(height: 15),
         OutlinedButton(
