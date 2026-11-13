@@ -377,11 +377,16 @@ class _TeamBoxScoreTabState extends State<TeamBoxScoreTab> {
 
 /// Match-page tab for a team name: the TabBar gives each of the three tabs
 /// an equal share of the full width (owner feedback — no center-clustered
-/// scrollable strip), and long team names scale down to one fitting line
-/// rather than wrapping or truncating.
+/// scrollable strip). Long team names keep the TabBar's own label size and
+/// wrap to two lines, ellipsized past that (release report #4 — scaling
+/// them down to one line made "AFC San Jose Rising Stars" unreadably tiny).
+/// The tight line height keeps two lines inside the standard 46 px tab.
 Tab teamNameTab(String name) => Tab(
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Text(name, maxLines: 1),
+      child: Text(
+        name,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
+        style: const TextStyle(height: 1.15),
       ),
     );
