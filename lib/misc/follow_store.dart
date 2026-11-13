@@ -1,6 +1,10 @@
 import 'dart:convert';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:infinite_sports_flutter/misc/notification_topics.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart'
+    show removeUserTokenIfThisDevice, currentSignedInUid,
+        uploadCurrentDeviceToken;
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Thin seam over FCM topic calls so FollowStore is unit-testable.
@@ -39,14 +43,32 @@ class FollowedChannel {
 /// Device-local list of followed channels + the master notifications switch.
 /// Master OFF unsubscribes every topic but keeps the stored list, so turning
 /// it back ON restores all bells exactly as they were.
+///
+/// Master OFF means ALL notifications (Privacy Policy): the followed topics,
+/// the everyone topic ([allUsersTopic]) AND the per-person pushes sent to
+/// `Users/<uid>/Token` (removed here; `uploadToken` writes nothing while the
+/// switch is off). ON restores all three.
 class FollowStore {
   static const _followsKey = 'followedChannels';
   static const _masterKey = 'notificationsMasterEnabled';
 
   final TopicMessaging _messaging;
+  final Future<void> Function() _detachToken;
+  final Future<void> Function() _attachToken;
 
-  FollowStore({TopicMessaging? messaging})
-      : _messaging = messaging ?? FirebaseTopicMessaging();
+  /// [detachToken] / [attachToken] are test seams over removing / uploading
+  /// this phone's `Users/<uid>/Token` (no-ops when signed out).
+  FollowStore({
+    TopicMessaging? messaging,
+    Future<void> Function()? detachToken,
+    Future<void> Function()? attachToken,
+  })  : _messaging = messaging ?? FirebaseTopicMessaging(),
+        _detachToken = detachToken ?? _defaultDetachToken,
+        _attachToken = attachToken ?? uploadCurrentDeviceToken;
+
+  static Future<void> _defaultDetachToken() async {
+    await removeUserTokenIfThisDevice(currentSignedInUid());
+  }
 
   Future<List<FollowedChannel>> follows() async {
     final prefs = await SharedPreferences.getInstance();
@@ -105,6 +127,8 @@ class FollowStore {
 
   Future<void> setMasterEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
+    // Saved FIRST: from here on, uploadToken (sign-in, token refresh) obeys
+    // the new value, so nothing re-writes the token after the detach below.
     await prefs.setBool(_masterKey, enabled);
     final current = await follows();
     for (final c in current) {
@@ -113,6 +137,13 @@ class FollowStore {
       } else {
         await _tryMessaging(() => _messaging.unsubscribeFromTopic(c.topic));
       }
+    }
+    if (enabled) {
+      await _tryMessaging(() => _messaging.subscribeToTopic(allUsersTopic));
+      await _tryMessaging(_attachToken);
+    } else {
+      await _tryMessaging(() => _messaging.unsubscribeFromTopic(allUsersTopic));
+      await _tryMessaging(_detachToken);
     }
   }
 

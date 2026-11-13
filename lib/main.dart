@@ -17,6 +17,7 @@ import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
 import 'package:infinite_sports_flutter/misc/rtdb_emulator.dart';
 import 'package:infinite_sports_flutter/misc/server_time.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
+import 'package:infinite_sports_flutter/misc/follow_store.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
@@ -61,9 +62,11 @@ Future<void> main() async {
     print("device token: $token");
   }
   );
+  // uploadToken writes nothing while Settings' "All notifications" is off.
   FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
-    if (signedIn) {
-      await uploadToken(FirebaseAuth.instance.currentUser!, newToken);
+    final user = FirebaseAuth.instance.currentUser;
+    if (signedIn && user != null) {
+      await uploadToken(user, newToken);
     }
   });
   FirebaseMessaging.onMessage.listen((message) {
@@ -457,7 +460,8 @@ class _MyHomePageState extends State<MyHomePage> {
       return;
     }
     final prefs = NotificationPrefs();
-    await prefs.subscribeAllUsers();
+    // The everyone topic stays off while "All notifications" is off.
+    if (await FollowStore().masterEnabled()) await prefs.subscribeAllUsers();
     final user = FirebaseAuth.instance.currentUser;
     if (!signedIn || user == null) return;
     // A merged (old) account gets NEITHER prompt: the merged-account watcher
@@ -541,8 +545,11 @@ class _MyHomePageState extends State<MyHomePage> {
     if (FirebaseAuth.instance.currentUser != null) {
       signedIn = true;
       String? token = await FirebaseMessaging.instance.getToken();
-      if (token != null) {
-        await uploadToken(FirebaseAuth.instance.currentUser!, token);
+      // Re-read after the await (the person may have signed out); and
+      // uploadToken writes nothing while "All notifications" is off.
+      final user = FirebaseAuth.instance.currentUser;
+      if (token != null && user != null) {
+        await uploadToken(user, token);
       }
     }
     currentSport = await getCurrentSport();

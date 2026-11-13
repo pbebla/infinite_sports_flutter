@@ -1,9 +1,11 @@
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
+import 'package:infinite_sports_flutter/misc/follow_store.dart';
 import 'package:infinite_sports_flutter/misc/forfeit.dart';
 import 'package:infinite_sports_flutter/misc/home_nav.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
@@ -1059,17 +1061,106 @@ Future<void> createDatabaseLocation(User user, FileImage? fileImage, String phon
   await dateClient.set(DateTime.now().toString());
 }
 
-Future<void> uploadToken(User user, String token) async
-{
-  DatabaseReference newClient = FirebaseDatabase.instance.ref();
-  try
-  {
-    var dateClient = newClient.child("Users/${user.uid}/Token");
+/// Seam over `Users/<uid>/Token` (this phone's FCM token for per-person
+/// pushes) so the token rules below are unit-testable without Firebase.
+abstract class UserTokenNode {
+  Future<Object?> read(String uid);
+  Future<void> write(String uid, String token);
+  Future<void> remove(String uid);
+}
 
-    await dateClient.set(token);
+class FirebaseUserTokenNode implements UserTokenNode {
+  DatabaseReference _ref(String uid) =>
+      FirebaseDatabase.instance.ref('Users/$uid/Token');
+
+  // `once()`, never `get()` (house rule).
+  @override
+  Future<Object?> read(String uid) async =>
+      (await _ref(uid).once()).snapshot.value;
+
+  @override
+  Future<void> write(String uid, String token) => _ref(uid).set(token);
+
+  @override
+  Future<void> remove(String uid) => _ref(uid).remove();
+}
+
+/// This phone's FCM token, or null when unavailable.
+Future<String?> currentDeviceFcmToken() =>
+    FirebaseMessaging.instance.getToken();
+
+/// The signed-in uid, or null (also when Firebase is not available).
+String? currentSignedInUid() {
+  try {
+    return FirebaseAuth.instance.currentUser?.uid;
+  } catch (_) {
+    return null;
   }
-  catch (e) {
+}
 
+/// How long a token detach may take before it is abandoned: sign-out and
+/// the notifications switch must never wait on a slow or offline network.
+const Duration kTokenDetachTimeout = Duration(seconds: 2);
+
+/// Removes `Users/<uid>/Token` ONLY when it still holds THIS phone's token
+/// (another phone the same person signed into later keeps its pushes).
+/// Never throws and gives up after [timeout]. A missing node (a just-deleted
+/// account) is a silent no-op. Returns whether the node was removed.
+Future<bool> removeUserTokenIfThisDevice(
+  String? uid, {
+  UserTokenNode? node,
+  Future<String?> Function()? deviceToken,
+  Duration timeout = kTokenDetachTimeout,
+}) async {
+  if (uid == null || uid.isEmpty) return false;
+  Future<bool> run() async {
+    final mine = await (deviceToken ?? currentDeviceFcmToken)();
+    if (mine == null || mine.isEmpty) return false;
+    final store = node ?? FirebaseUserTokenNode();
+    final stored = await store.read(uid);
+    if (stored != mine) return false;
+    await store.remove(uid);
+    return true;
+  }
+
+  try {
+    return await run().timeout(timeout);
+  } catch (e) {
+    debugPrint('Device token detach skipped: ${e.runtimeType}');
+    return false;
+  }
+}
+
+/// Writes this phone's token for [uid] unless the Settings "All
+/// notifications" switch is off (then the phone must receive nothing, so
+/// nothing is written). Never throws.
+Future<void> uploadTokenForUid(
+  String uid,
+  String token, {
+  UserTokenNode? node,
+}) async {
+  try {
+    if (!await FollowStore().masterEnabled()) return;
+    await (node ?? FirebaseUserTokenNode()).write(uid, token);
+  } catch (e) {
+    debugPrint('Device token upload failed: ${e.runtimeType}');
+  }
+}
+
+Future<void> uploadToken(User user, String token) =>
+    uploadTokenForUid(user.uid, token);
+
+/// Uploads this phone's current token for the signed-in person (the
+/// notifications switch turned back ON). No-op when signed out.
+Future<void> uploadCurrentDeviceToken() async {
+  try {
+    final uid = currentSignedInUid();
+    if (uid == null) return;
+    final token = await currentDeviceFcmToken();
+    if (token == null) return;
+    await uploadTokenForUid(uid, token);
+  } catch (e) {
+    debugPrint('Device token upload skipped: ${e.runtimeType}');
   }
 }
 

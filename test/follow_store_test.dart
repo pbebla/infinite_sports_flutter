@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/misc/follow_store.dart';
+import 'package:infinite_sports_flutter/misc/notification_topics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class FakeMessaging implements TopicMessaging {
@@ -15,11 +16,17 @@ class FakeMessaging implements TopicMessaging {
 void main() {
   late FakeMessaging messaging;
   late FollowStore store;
+  late List<String> tokenCalls;
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     messaging = FakeMessaging();
-    store = FollowStore(messaging: messaging);
+    tokenCalls = [];
+    store = FollowStore(
+      messaging: messaging,
+      detachToken: () async => tokenCalls.add('detach'),
+      attachToken: () async => tokenCalls.add('attach'),
+    );
   });
 
   test('starts empty with master enabled', () async {
@@ -55,13 +62,61 @@ void main() {
     expect(await store.masterEnabled(), isFalse);
   });
 
+  test('master off also leaves the everyone topic and detaches the token',
+      () async {
+    await store.setMasterEnabled(false);
+    expect(messaging.unsubscribed, contains(allUsersTopic));
+    expect(tokenCalls, ['detach']);
+  });
+
+  test('master back on rejoins the everyone topic and uploads the token',
+      () async {
+    await store.setMasterEnabled(false);
+    tokenCalls.clear();
+    await store.setMasterEnabled(true);
+    expect(messaging.subscribed, contains(allUsersTopic));
+    expect(tokenCalls, ['attach']);
+  });
+
+  test('master off is saved BEFORE the token detach (no re-upload race)',
+      () async {
+    bool? masterDuringDetach;
+    final s = FollowStore(
+      messaging: messaging,
+      detachToken: () async => masterDuringDetach = await store.masterEnabled(),
+      attachToken: () async {},
+    );
+    await s.setMasterEnabled(false);
+    expect(masterDuringDetach, isFalse);
+  });
+
+  test('a failing token step never surfaces as an error', () async {
+    final s = FollowStore(
+      messaging: messaging,
+      detachToken: () async => throw Exception('offline'),
+      attachToken: () async => throw Exception('offline'),
+    );
+    await s.setMasterEnabled(false);
+    await s.setMasterEnabled(true);
+    expect(await s.masterEnabled(), isTrue);
+  });
+
+  test('signed out / no Firebase: default token steps do not crash',
+      () async {
+    final s = FollowStore(messaging: messaging);
+    await s.setMasterEnabled(false);
+    await s.setMasterEnabled(true);
+    expect(await s.masterEnabled(), isTrue);
+  });
+
   test('master back on resubscribes the whole list', () async {
     await store.follow(const FollowedChannel(
         topic: 't1', label: 'A', kind: 'tournament'));
     await store.setMasterEnabled(false);
     messaging.subscribed.clear();
     await store.setMasterEnabled(true);
-    expect(messaging.subscribed, ['t1']);
+    expect(messaging.subscribed, containsAll(['t1']));
+    expect(messaging.subscribed.where((t) => t != allUsersTopic), ['t1']);
   });
 
   test('following while master is off re-enables master', () async {
