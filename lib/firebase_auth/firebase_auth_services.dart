@@ -45,7 +45,7 @@ class FirebaseAuthService {
     // harmless no-op for users who never went through Google sign-in, and
     // must never block/crash the (already-completed) Firebase sign-out.
     try {
-      await GoogleSignIn().signOut();
+      await GoogleSignIn.instance.signOut();
     } catch (e) {
       // ignore: avoid_print
       print(e.toString());
@@ -60,13 +60,13 @@ class FirebaseAuthService {
   /// `signInWithEmailAndPassword` above.
   Future<UserCredential?> signInWithGoogle() async {
     try {
-      final googleSignIn = GoogleSignIn(serverClientId: _googleServerClientId);
-      final account = await googleSignIn.signIn();
-      if (account == null) return null; // user cancelled the picker
-      final googleAuth = await account.authentication;
+      await GoogleSignIn.instance.initialize(serverClientId: _googleServerClientId);
+      final googleUser = await GoogleSignIn.instance.authenticate();
+      if (googleUser == null) return null; // user cancelled the picker
+      final googleAuth = await googleUser.authentication;
       final credential = GoogleAuthProvider.credential(
         idToken: googleAuth.idToken,
-        accessToken: googleAuth.accessToken,
+        accessToken: googleAuth.idToken,
       );
       return await FirebaseAuth.instance.signInWithCredential(credential);
     } catch (e) {

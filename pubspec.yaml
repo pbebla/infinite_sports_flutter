@@ -34,48 +34,45 @@ dependencies:
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
-  cupertino_icons: ^1.0.6
+  cupertino_icons: ^2.0.0
   flutter_launcher_icons: ^0.14.1
-  firebase_core: ^4.2.1
-  firebase_database: ^12.0.4
+  firebase_core: ^5.1.0
+  firebase_database: ^13.0.1
   stack_trace: ^1.11.1
   percent_indicator: ^4.2.3
   intl: ^0.20.2
   webview_flutter: ^4.8.0
   flutter_dotenv: ^6.0.0
-  flutter_sticky_header: ^0.8.0
-  firebase_auth: ^6.1.2
+  flutter_sticky_header: ^0.11.0
+  firebase_auth: ^7.0.1
   email_validator: ^3.0.0
   image_picker: ^1.1.2
-  firebase_storage: ^13.0.4
-  firebase_messaging: ^16.0.4
-  flutter_local_notifications: ^19.5.0
+  firebase_storage: ^14.0.1
+  firebase_messaging: ^17.0.1
+  flutter_local_notifications: ^23.0.1
   provider: ^6.1.2
   shared_preferences: ^2.3.2
   google_maps_flutter: ^2.9.0
+  
   geolocator: ^14.0.2
   url_launcher: ^6.3.0
-  geocoding: ^4.0.0
-  share_plus: ^12.0.1
+  geocoding: ^5.0.1
+  share_plus: ^13.3.1
   path_provider: ^2.1.5
   flutter_native_splash: ^2.4.1
-  data_table_2: ^2.5.15
-  flutter_config:
-    git:
-      url: git://github.com/dev-mahmoud-elshenawy/flutter_config-flutter3.29.0-fix.git
-      ref: master
+  data_table_2: 2.6.0
   material_color_utilities: ^0.13.0
   font_awesome_flutter: ^11.0.0
-  cached_network_image: ^3.4.1
-  flutter_form_builder: ^10.2.0
+  flutter_form_builder: 10.0.1
   form_builder_validators: ^11.2.0
   mask_text_input_formatter: ^2.9.0
-  pin_code_fields: ^8.0.1
-  flutter_stripe: ^12.1.0
-  cloud_functions: ^6.1.0
-  google_sign_in: ^6.2.1
+  pin_code_fields: 8.0.1
+  flutter_stripe: ^14.2.0
+  cloud_functions: ^7.0.1
+  google_sign_in: ^7.2.0
   sign_in_with_apple: ^8.1.0
-
+  google_maps_flutter_ios_sdk9: ^2.19.0
+  cached_network_image: 3.4.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -853,7 +853,6 @@ All image files are in `assets/`. They are bundled into the app.
 | `image_picker` | Pick photo from camera or gallery |
 | `intl` | Date formatting |
 | `email_validator` | Validate email addresses on login/signup |
-| `flutter_config` | Load `.env` file (API keys) |
 | `flutter_dotenv` | Alternative env file loading |
 | `flutter_native_splash` | Splash screen on app launch |
 

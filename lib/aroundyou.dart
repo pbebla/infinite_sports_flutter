@@ -36,6 +36,7 @@ class AroundYou extends StatefulWidget {
 
 class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMixin {
   GoogleMapController? mapController;
+  final Geocoding _geocoding = Geocoding();
   // Map shows immediately centered on San Jose, then glides to the user
   // once their location resolves — no full-screen wait.
   static const LatLng _fallbackCenter = LatLng(37.3382, -121.8863);
@@ -155,7 +156,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
     if (address == null || address.isEmpty) return null;
     if (_geocodeCache.containsKey(address)) return _geocodeCache[address];
     try {
-      final locations = await GeocodingPlatform.instance!.locationFromAddress(address);
+      final locations = await _geocoding.locationFromAddress(address);
       _geocodeCache[address] = locations.isEmpty ? null : locations[0];
     } catch (_) {
       _geocodeCache[address] = null;
@@ -186,7 +187,7 @@ class _AroundYouState extends State<AroundYou> with SingleTickerProviderStateMix
 
   Future<String> getAddress(LatLng position) async
   {
-    List<Placemark> addresses = await placemarkFromCoordinates(position.latitude, position.longitude);
+    List<Placemark> addresses = await _geocoding.placemarkFromCoordinates(position.latitude, position.longitude);
     return addresses.isNotEmpty ? '${addresses[0].street}\n${addresses[0].locality} ${addresses[0].administrativeArea} ${addresses[0].postalCode}' : "";
 
   }

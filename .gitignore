@@ -8,9 +8,11 @@
 *.swp
 .DS_Store
 .atom/
+.build/
 .buildlog/
 .history
 .svn/
+.swiftpm/
 migrate_working_dir/
 .env
 
@@ -47,3 +49,4 @@ app.*.map.json
 /android/app/release
 /android/app/build/
 /android/app/.cxx/
+ios/Flutter/Secrets.xcconfig
