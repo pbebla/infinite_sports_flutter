@@ -272,7 +272,7 @@ describe('handleAccessClaimCreated', () => {
     const db = new FakeDb(world({
       claims: { u1: { k1: claim() } },
       templates: {
-        AdminEmail: 'zaya@infinitesports.org',
+        AdminEmail: 'owner@example.com',
         claimAdmin: { PushTitle: 'Cash!', PushBody: '', EmailSubject: '{name} paid {amount}', EmailBody: 'Check {method}.' },
       },
     }));
@@ -280,7 +280,7 @@ describe('handleAccessClaimCreated', () => {
     await handleAccessClaimCreated(d, { sport: 'Futsal', season: '16', uid: 'u1', key: 'k1' });
     expect(d.pusher.sends[0][0].title).toBe('Cash!');
     expect(d.pusher.sends[0][0].body).toBe('Zed Fan says they paid $10.00 by Venmo for Futsal Season 16 Fantasy access.');
-    expect(d.mailer.mails[0].to).toBe('zaya@infinitesports.org');
+    expect(d.mailer.mails[0].to).toBe('owner@example.com');
     expect(d.mailer.mails[0].subject).toBe('Zed Fan paid $10.00');
     expect(d.mailer.mails[0].html).toContain('<p>Check Venmo.</p>');
     const warn = d.log.lines.find((l) => l.level === 'warn' && l.message.includes('blank'));

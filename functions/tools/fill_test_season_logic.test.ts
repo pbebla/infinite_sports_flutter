@@ -13,8 +13,8 @@ import {
 
 const cfg = futsalDefault();
 const ROOT = TEST_SEASON_ROOT;
-const REAL = 'EsDzzsdVM9TASCyBmVbOviYZL4z1';
-const REAL_NO_SQUAD = '7w3JtYKaUZYyABN1In9N5xf8qWr2';
+const REAL = 'uid_owner_fixture';
+const REAL_NO_SQUAD = 'uid_member_fixture';
 const paused = { lockOverride: 'open', budgetTenths: 500 };
 
 /** A small but realistic market: prices 4.0..15.0, a couple of guests. */
@@ -84,7 +84,7 @@ function replayState(): Record<string, unknown> {
     ScheduledPushes: { p1: { At: 1 } },
     Analytics: { opens: 3 },
     Managers: {
-      [REAL]: { TeamName: 'Zaya.Arami', NameFlagged: false },
+      [REAL]: { TeamName: 'Owner Fixture FC', NameFlagged: false },
       'test-01': fakeManagerRow(defs[0]),
       'test-02': fakeManagerRow(defs[1]),
     },
@@ -99,7 +99,7 @@ function replayState(): Record<string, unknown> {
 const live = {
   config: paused,
   managers: {
-    [REAL]: { TeamName: 'Zaya.Arami', NameFlagged: false },
+    [REAL]: { TeamName: 'Owner Fixture FC', NameFlagged: false },
     [REAL_NO_SQUAD]: { TeamName: 'Nimrud', NameFlagged: false },
   },
   squads: { [REAL]: { picks: [], captainId: 'a', viceId: 'b' } },
