@@ -217,7 +217,28 @@
       ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
       "$uid": {
         ".read": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())",
-        ".write": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists()) && !root.child('DeletedAccounts').child($uid).exists()"
+        ".write": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists()) && !root.child('DeletedAccounts').child($uid).exists()",
+        "Awards": {
+          ".validate": "auth != null && root.child('Admins').child(auth.uid).exists()"
+        },
+        "Played": {
+          ".validate": "auth != null && root.child('Admins').child(auth.uid).exists()"
+        },
+        "TournamentsPlayed": {
+          ".validate": "auth != null && root.child('Admins').child(auth.uid).exists()"
+        },
+        "MergedInto": {
+          ".validate": "auth != null && root.child('Admins').child(auth.uid).exists()"
+        },
+        "MergedAt": {
+          ".validate": "auth != null && root.child('Admins').child(auth.uid).exists()"
+        },
+        "MergedHint": {
+          ".validate": "auth != null && root.child('Admins').child(auth.uid).exists()"
+        },
+        "MergedFrom": {
+          ".validate": "auth != null && root.child('Admins').child(auth.uid).exists()"
+        }
       }
     },
     "DeletedAccounts": {
@@ -241,13 +262,14 @@
           "$uid": {
             ".read": "auth != null && auth.uid == $uid",
             ".write": "auth != null && auth.uid == $uid && root.child('Registrations').child($regId).child('Config').child('Status').val() == 'open'",
-            ".validate": "root.child('Admins').child(auth.uid).exists() || !newData.child('Paid').exists() || newData.child('Paid').val() == false || data.child('Paid').val() == true || root.child('Registrations').child($regId).child('Teams').child(newData.child('TeamId').val()).child('CodeWaivesPayment').val() == true"
+            ".validate": "root.child('Admins').child(auth.uid).exists() || !newData.child('Paid').exists() || newData.child('Paid').val() == false || data.child('Paid').val() == true || (root.child('Registrations').child($regId).child('Teams').child(newData.child('TeamId').val()).child('CodeWaivesPayment').val() == true && root.child('Registrations').child($regId).child('Teams').child(newData.child('TeamId').val()).child('Status').val() == 'approved')"
           }
         },
         "Teams": {
           "$tid": {
             ".read": "auth != null && data.child('CaptainUid').val() == auth.uid",
             ".write": "auth != null && !data.exists() && newData.child('CaptainUid').val() == auth.uid",
+            ".validate": "root.child('Admins').child(auth.uid).exists() || (newData.child('Status').val() == 'pending' && (!newData.child('CodeWaivesPayment').exists() || newData.child('CodeWaivesPayment').val() == false) && !newData.child('JoinCode').exists())",
             "Members": {
               "$uid": {
                 ".read": "auth != null && auth.uid == $uid"
@@ -448,7 +470,7 @@
             ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
             "$uid": {
               ".write": "auth != null && auth.uid == $uid && (root.child('Fantasy/' + $sport + '/' + $season + '/Config/Access/Mode').val() !== 'pass' || root.child('Fantasy/' + $sport + '/' + $season + '/Access/' + $uid + '/Status').val() === 'active')",
-              ".validate": "newData.child('TeamName').isString() && newData.child('TeamName').val().length >= 3 && newData.child('TeamName').val().length <= 30 && (root.child('Admins').child(auth.uid).exists() || !newData.child('NameFlagged').exists() || newData.child('NameFlagged').val() == false && (!data.child('NameFlagged').exists() || data.child('NameFlagged').val() != true || newData.child('TeamName').val() != data.child('TeamName').val()))"
+              ".validate": "newData.child('TeamName').isString() && newData.child('TeamName').val().length >= 3 && newData.child('TeamName').val().length <= 30 && (root.child('Admins').child(auth.uid).exists() || (newData.child('NameFlagged').exists() && newData.child('NameFlagged').val() == false && (!data.child('NameFlagged').exists() || data.child('NameFlagged').val() != true || newData.child('TeamName').val() != data.child('TeamName').val())))"
             }
           },
           "Access": {
