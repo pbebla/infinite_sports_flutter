@@ -42,6 +42,18 @@ describe('copySystemPrompt', () => {
       expect(p).toContain('Reply with ONLY a JSON object {"title": string, "body": string}');
     }
   });
+
+  it('prices are always written with a leading "$" (release report #9: a body said "7.0M" next to a "$7.0M" card)', () => {
+    for (const mode of ['post', 'push', 'message'] as const) {
+      const p = copySystemPrompt(mode);
+      expect(p).toContain('Prices are always written with a leading "$" (e.g. "$7.0M")');
+      // The card-field explanation itself never models a bare price.
+      expect(p).toContain('(75 = $7.5M)');
+      expect(p).toContain('(5 = up $0.5M)');
+      expect(p).not.toContain('= 7.5M');
+      expect(p).not.toContain('up 0.5M');
+    }
+  });
 });
 
 describe('buildCopyPrompt', () => {

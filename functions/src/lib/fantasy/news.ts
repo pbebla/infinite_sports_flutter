@@ -181,7 +181,10 @@ export const NEWS_SYSTEM_PROMPT =
   'criticism of any player or manager. If a cold-streak stat is provided, ' +
   'mention it only as kind encouragement, or skip it entirely. Use ONLY ' +
   'the stats provided: invent no facts, no injuries, no quotes, no extra ' +
-  `numbers. Each draft: "title" at most ${NEWS_TITLE_MAX} characters, ` +
+  'numbers. Price moves (deltaTenths) are in tenths of $1M (5 = $0.5M). ' +
+  'Prices are always written with a leading "$" (e.g. "$7.0M"), never a ' +
+  'bare "7.0M". ' +
+  `Each draft: "title" at most ${NEWS_TITLE_MAX} characters, ` +
   `"body" at most ${NEWS_BODY_MAX} characters, "players" a list of the 0 ` +
   `to ${NEWS_PLAYERS_MAX} players the draft is about, each spelled exactly ` +
   'as a "name" in the stats JSON (never anyone who is not in it). Reply ' +

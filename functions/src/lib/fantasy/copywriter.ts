@@ -78,8 +78,10 @@ export function copySystemPrompt(mode: CopyMode): string {
     "current title and body, and the owner's hint): invent no facts, no " +
     'injuries, no quotes, no results, no extra numbers, and keep every ' +
     'date, time and number from the current text or the hint exactly as ' +
-    'written. Card fields: priceTenths is the price in tenths of a million ' +
-    '(75 = 7.5M), priceDeltaTenths the latest price move (5 = up 0.5M), ' +
+    'written. Prices are always written with a leading "$" (e.g. "$7.0M"), ' +
+    'never a bare "7.0M". Card fields: priceTenths is the price in tenths ' +
+    'of $1M (75 = $7.5M), priceDeltaTenths the latest price move (5 = up ' +
+    '$0.5M), ' +
     'gwPoints the fantasy points in gameweek gw, seasonPoints the fantasy ' +
     'points this season, ownershipPct the percent of managers who own the ' +
     'player, goals and assists the season totals; a missing field is ' +

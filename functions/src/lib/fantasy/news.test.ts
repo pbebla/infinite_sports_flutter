@@ -160,6 +160,11 @@ describe('generateNewsDrafts (fake fetch — never throws, null = skip)', () => 
     expect(NEWS_SYSTEM_PROMPT).toContain('stats JSON');
   });
 
+  it('prices are always written with a leading "$" (release report #9)', () => {
+    expect(NEWS_SYSTEM_PROMPT).toContain('Prices are always written with a leading "$" (e.g. "$7.0M")');
+    expect(NEWS_SYSTEM_PROMPT).toContain('tenths of $1M');
+  });
+
   it('tagged players must be named in the stats the model was given', async () => {
     // This week's stats name only A (top scorer). B is a market player the
     // model was never shown; Zed does not exist — both dropped.
