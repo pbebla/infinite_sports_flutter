@@ -195,10 +195,16 @@ class FirstTimerResult {
   final bool isFirstTimer;
   final bool matchedByEmail;
   final bool matchedByPhone;
+
+  /// True when the check itself FAILED (the checkFirstTimer call errored) —
+  /// [isFirstTimer] is then false so no promo discount is granted on a
+  /// guess, and the verdict is unknown rather than "returning player".
+  final bool checkFailed;
   const FirstTimerResult({
     required this.isFirstTimer,
     this.matchedByEmail = false,
     this.matchedByPhone = false,
+    this.checkFailed = false,
   });
 }
 
@@ -257,7 +263,10 @@ FirstTimerResult firstTimerResultFromCallable(Object? data) {
 /// the per-registration promo-config check all complete.
 class InsiderPromoOutcome {
   final String insiderCode; // normalized (uppercased)
-  final bool firstTimer;
+
+  /// null when the first-timer check failed (verdict unknown — nothing is
+  /// stamped rather than a guessed true/false).
+  final bool? firstTimer;
   final String discountSource; // '' | 'first_timer_promo'
   final double? discountPct;
   final double? eligibleFee;

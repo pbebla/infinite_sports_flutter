@@ -242,4 +242,43 @@ void main() {
     expect(outcome!.firstTimer, isTrue);
     expect(outcome.discountSource, '');
   });
+
+  testWidgets(
+      'a FAILED first-timer check gets no promo discount, says why, and '
+      'stamps no FirstTimer verdict', (tester) async {
+    await tester.pumpWidget(wrap(InsiderPromoCodeField(
+      eligibleFee: 60,
+      promo: const RegPromo(enabled: true, percent: 15),
+      firstTimerResult:
+          const FirstTimerResult(isFirstTimer: false, checkFailed: true),
+      lookupCodeOverride: (_) async => 'owner1',
+      insiderStatusOverride: (_) async => 'active',
+      alreadyReferredOverride: (_) async => false,
+      insiderNameOverride: (_) async => 'Sara',
+      myUidOverride: 'me',
+      nowOverride: DateTime(2026, 7, 27),
+    )));
+    await tester.pump();
+
+    await enterAndSubmitCode(tester, 'sara123');
+
+    expect(find.text("Code accepted — Sara's referral"), findsOneWidget);
+    expect(
+        find.text("Couldn't verify first-time status — the standard fee "
+            "applies. Contact us if that's wrong."),
+        findsOneWidget);
+    expect(find.textContaining('Welcome back!'), findsNothing);
+    expect(find.textContaining('discount will be applied'), findsNothing);
+
+    await tester.tap(find.text('Submit'));
+    await tester.pumpAndSettle();
+    final outcome = formKey.currentState!.value[kInsiderPromoAnswerKey]
+        as InsiderPromoOutcome?;
+    expect(outcome, isNotNull);
+    expect(outcome!.insiderCode, 'SARA123');
+    expect(outcome.firstTimer, isNull);
+    expect(outcome.discountSource, '');
+    expect(outcome.discountPct, isNull);
+    expect(outcome.eligibleFee, isNull);
+  });
 }

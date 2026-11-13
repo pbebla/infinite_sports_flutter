@@ -87,6 +87,7 @@ class _InsiderPromoCodeFieldState extends State<InsiderPromoCodeField> {
   String? _errorMessage; // null == no error
   String _insiderName = '';
   bool _friendlyNotFirstTimer = false;
+  bool _firstTimerUnverified = false;
   InsiderPromoOutcome? _outcome;
   String? _lastCheckedCode; // avoids re-validating an unchanged code
 
@@ -131,6 +132,7 @@ class _InsiderPromoCodeFieldState extends State<InsiderPromoCodeField> {
         _errorMessage = null;
         _insiderName = '';
         _friendlyNotFirstTimer = false;
+        _firstTimerUnverified = false;
         _outcome = null;
       });
       field.didChange(null);
@@ -173,6 +175,7 @@ class _InsiderPromoCodeFieldState extends State<InsiderPromoCodeField> {
         _errorMessage = result.message;
         _insiderName = '';
         _friendlyNotFirstTimer = false;
+        _firstTimerUnverified = false;
         _outcome = null;
       });
       field.didChange(null);
@@ -184,10 +187,14 @@ class _InsiderPromoCodeFieldState extends State<InsiderPromoCodeField> {
     final firstTimerResult = widget.firstTimerResult;
     final now = widget.nowOverride ?? DateTime.now();
     final promoOn = widget.promo.activeAt(now);
-    final applyDiscount = promoOn && firstTimerResult.isFirstTimer;
+    // A failed check is never a first-timer (no discount on a guess) and
+    // stamps no verdict at all (firstTimer null).
+    final checkFailed = firstTimerResult.checkFailed;
+    final applyDiscount =
+        promoOn && !checkFailed && firstTimerResult.isFirstTimer;
     final outcome = InsiderPromoOutcome(
       insiderCode: code,
-      firstTimer: firstTimerResult.isFirstTimer,
+      firstTimer: checkFailed ? null : firstTimerResult.isFirstTimer,
       discountSource: applyDiscount ? 'first_timer_promo' : '',
       discountPct: applyDiscount ? widget.promo.percent : null,
       eligibleFee: applyDiscount ? widget.eligibleFee : null,
@@ -198,7 +205,9 @@ class _InsiderPromoCodeFieldState extends State<InsiderPromoCodeField> {
       _checking = false;
       _errorMessage = null;
       _insiderName = name;
-      _friendlyNotFirstTimer = promoOn && !firstTimerResult.isFirstTimer;
+      _firstTimerUnverified = promoOn && checkFailed;
+      _friendlyNotFirstTimer =
+          promoOn && !checkFailed && !firstTimerResult.isFirstTimer;
       _outcome = outcome;
     });
     field.didChange(outcome);
@@ -260,7 +269,16 @@ class _InsiderPromoCodeFieldState extends State<InsiderPromoCodeField> {
                     : 'Code accepted.',
                 style: TextStyle(color: Colors.green.shade700),
               ),
-              if (_friendlyNotFirstTimer)
+              if (_firstTimerUnverified)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    "Couldn't verify first-time status — the standard fee "
+                    "applies. Contact us if that's wrong.",
+                    style: TextStyle(color: scheme.onSurfaceVariant),
+                  ),
+                )
+              else if (_friendlyNotFirstTimer)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: Text(

@@ -88,6 +88,23 @@ void main() {
         findsOneWidget);
   });
 
+  testWidgets(
+      'a lookup that FAILS says it could not check, never "no match"',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: _page(({required regId, required code}) async =>
+            const JoinCodeMatch('error'))));
+
+    await _enterCode(tester, 'ABC234');
+
+    expect(
+        find.text(
+            "Couldn't check the code. Check your connection and try again."),
+        findsOneWidget);
+    expect(find.textContaining("doesn't match"), findsNothing);
+    expect(find.text('Continue'), findsNothing);
+  });
+
   testWidgets('short partial input stays quiet (no error, no lookup spam)',
       (tester) async {
     var calls = 0;

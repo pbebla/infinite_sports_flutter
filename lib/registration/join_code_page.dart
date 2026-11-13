@@ -103,6 +103,12 @@ class _JoinCodePageState extends State<JoinCodePage> {
         _match = null;
         _error =
             'That team is still awaiting approval — ask your captain to check back soon.';
+      } else if (result.status == 'error') {
+        // The lookup itself failed (offline, timeout, cold start) — that
+        // says nothing about the code, so never call it a mismatch.
+        _match = null;
+        _error =
+            "Couldn't check the code. Check your connection and try again.";
       } else {
         _match = null;
         // Only complain once all six boxes are filled; shorter input that
