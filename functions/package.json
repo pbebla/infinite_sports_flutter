@@ -12,7 +12,8 @@
     "fill:s15": "tsc -p tools/tsconfig.json && node tools/rehearsal_out/build/tools/fill_test_season.js",
     "loadtest": "tsc -p tools/tsconfig.json && node tools/rehearsal_out/build/tools/load_test.js",
     "rehearse:deletion": "tsc -p tools/tsconfig.json && npx firebase-tools emulators:exec --only database --project demo-deletion \"node tools/rehearsal_out/build/tools/rehearse_account_deletion.js\"",
-    "merge:accounts": "tsc -p tools/tsconfig.json && node tools/rehearsal_out/build/tools/merge_accounts.js"
+    "merge:accounts": "tsc -p tools/tsconfig.json && node tools/rehearsal_out/build/tools/merge_accounts.js",
+    "probe:rules": "tsc -p tools/tsconfig.json && npx firebase-tools emulators:exec --only database --project demo-rules-probe \"node tools/rehearsal_out/build/tools/probe_rules.js\""
   },
   "dependencies": {
     "firebase-admin": "^13.0.0",

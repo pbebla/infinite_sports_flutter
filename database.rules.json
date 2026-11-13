@@ -215,11 +215,14 @@
     },
     "Users": {
       ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
-      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
       "$uid": {
         ".read": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())",
-        ".write": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())"
+        ".write": "auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists()) && !root.child('DeletedAccounts').child($uid).exists()"
       }
+    },
+    "DeletedAccounts": {
+      ".read": false,
+      ".write": false
     },
     "Registrations": {
       ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
@@ -333,6 +336,34 @@
     "Referrals": {
       ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
       ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+    },
+    "InsiderCodes": {
+      ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+        ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128 && $code.matches(/^[A-Z0-9]{4,15}$/)"
+      }
+    },
+    "InsiderAudit": {
+      ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$id": {
+        ".write": "auth != null && root.child('Admins').child(auth.uid).exists() && !data.exists() && newData.exists()",
+        ".validate": "newData.child('AdminUid').val() === auth.uid && newData.child('Target').isString() && newData.child('Field').isString() && newData.child('Reason').isString() && newData.child('At').isNumber()"
+      }
+    },
+    "ReferredUsers": {
+      ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid"
+      }
+    },
+    "Campaigns": {
+      ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
+      "$id": {
+        ".write": "auth != null && root.child('Admins').child(auth.uid).exists()"
+      }
     },
     "NotificationsMeta": {
       ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",

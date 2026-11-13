@@ -127,6 +127,35 @@ const CONTRACT: ContractEntry[] = [
     note: 'Manager saveTemplate: set; resetTemplate: remove' },
   { path: 'Fantasy/Templates/Access/AdminEmail', kind: 'admin',
     note: 'Manager saveAdminEmail: set' },
+
+  // ── Insiders program, audit rows, push campaigns (2026-11-13) ─────────────
+  // The Oct-27 lockdown wrote rules for Insiders + Referrals only; these
+  // nodes had NO rule at all, so the Manager's approve (an atomic multi-path
+  // update that also reserves the code), every audit row (Insider actions and
+  // manual registration fee adjustments) and every push campaign were
+  // permission_denied in production with no message. Sources: Manager
+  // lib/services/firebase/{insider,registration,campaign}_service.dart; fan
+  // lib/misc/insider_service.dart.
+  { path: 'Insiders/UID', kind: 'own',
+    note: 'fan apply: set {Status: pending, Name, Email, AppliedAt}' },
+  { path: 'Insiders/UID/PublicLeaderboardOptIn', kind: 'own',
+    note: 'fan Insider hub opt-in toggle: set(bool)' },
+  { path: 'Insiders/UID/ProfileBadgeOptIn', kind: 'own',
+    note: 'fan Insider hub opt-in toggle: set(bool)' },
+  { path: 'Insiders/someUid/Status', kind: 'admin',
+    note: 'Manager approve: root multi-path update (Status/Code/ApprovedBy/ApprovedAt + InsiderCodes); decline/suspend/reactivate: set' },
+  { path: 'Insiders/someUid/CurrentStanding', kind: 'admin',
+    note: 'Manager setStanding / referral counters: update' },
+  { path: 'InsiderCodes/ABCD12', kind: 'admin',
+    note: 'Manager approve: the code reservation leg of the multi-path update' },
+  { path: 'InsiderAudit/-pushId', kind: 'admin',
+    note: 'Manager audit rows: insider_service._audit + registration_service fee / first-timer / promo audits (push().set)' },
+  { path: 'Referrals/-pushId', kind: 'admin',
+    note: 'Manager addManualReferral: push().set; voidReferral: root multi-path update' },
+  { path: 'ReferredUsers/someUid', kind: 'admin',
+    note: 'Manager voidReferral: root multi-path update (null)' },
+  { path: 'Campaigns/-pushId', kind: 'admin',
+    note: 'Manager createCampaign: push().set (the send itself is the functions trigger)' },
 ];
 
 /** The paid-access gate (spec §5) appended to the Squads/$uid and
@@ -522,8 +551,10 @@ describe('rules contract: the walker itself', () => {
   });
 });
 
-describe('rules contract: account deletion (I4, stage-1 rules)', () => {
-  const rules = loadRules('database.rules.stage1.json');
+// Both files: the guard must survive the move to the target posture
+// (2026-11-13: it had landed in stage 1 only).
+describe.each(RULES_FILES)('rules contract: account deletion (I4) - %s', (file) => {
+  const rules = loadRules(file);
 
   it("nobody's client writes a deleted account's Users node back - admins included (no ancestor grant)", () => {
     for (const p of ['Users/someUid', 'Users/someUid/First Name', 'Users/someUid/Information/Age']) {
@@ -541,3 +572,93 @@ describe('rules contract: account deletion (I4, stage-1 rules)', () => {
     }
   });
 });
+
+// ── Insiders / audit / campaigns shapes + the whole-node gap (2026-11-13) ───
+for (const file of RULES_FILES) {
+  describe(`rules contract: insiders, audit, campaigns - ${file}`, () => {
+    const rules = loadRules(file)['rules'];
+    const ADMIN = "auth != null && root.child('Admins').child(auth.uid).exists()";
+
+    it('InsiderCodes: one code is readable by a signed-in user, written by admins only, never the whole list', () => {
+      const node = rules['InsiderCodes'];
+      expect(node['.write'], 'a node-level write would let one call wipe every code').toBeUndefined();
+      expect(node['$code']['.read']).toBe('auth != null');
+      expect(node['$code']['.write']).toBe(ADMIN);
+      // value = the owning uid; key = the stored code format (4-15 A-Z / 0-9,
+      // validateInsiderCode in both apps).
+      expect(node['$code']['.validate']).toContain('newData.isString()');
+      expect(node['$code']['.validate']).toContain('$code.matches(/^[A-Z0-9]{4,15}$/)');
+    });
+
+    it('InsiderAudit: rows are create-only and carry the writing admin', () => {
+      const row = rules['InsiderAudit']['$id'];
+      expect(rules['InsiderAudit']['.write'], 'no node-level write: history cannot be wiped').toBeUndefined();
+      expect(row['.write']).toContain(ADMIN_GATE);
+      expect(row['.write']).toContain('!data.exists()');
+      expect(row['.validate']).toContain("newData.child('AdminUid').val() === auth.uid");
+    });
+
+    it('ReferredUsers: a person reads only their own pointer; admins write', () => {
+      const node = rules['ReferredUsers'];
+      expect(node['.write']).toBe(ADMIN);
+      expect(node['$uid']['.read']).toBe('auth != null && auth.uid == $uid');
+    });
+
+    it('Campaigns: admin-only, per campaign', () => {
+      const node = rules['Campaigns'];
+      expect(node['.read']).toBe(ADMIN);
+      expect(node['.write']).toBeUndefined();
+      expect(node['$id']['.write']).toBe(ADMIN);
+    });
+
+    it("a non-admin has no grant on another person's Insider row, a code, an audit row or a campaign", () => {
+      for (const p of ['Insiders/someUid/Status', 'InsiderCodes/ABCD12', 'InsiderAudit/-x', 'Campaigns/-x', 'ReferredUsers/someUid']) {
+        const { links, bindings } = writeChain({ rules }, p);
+        expect(links.some((l) => grants('own', l, bindings)), `${file}: ${p}`).toBe(false);
+      }
+    });
+
+    // THE BUG CLASS: a top-level node an app reads or writes that has no
+    // entry in the rules is denied wholesale (writes always; reads too once
+    // the root read is gone). Scan what the apps actually reference.
+    it('every top-level node the fan app references has a rules entry', () => {
+      const names = fanTopLevelNodes();
+      expect(names.size, 'the scan found nothing - the regex or lib/ moved').toBeGreaterThan(8);
+      const missing = [...names].filter((n) => !(n in rules)).sort();
+      expect(missing, `${file}: top-level nodes referenced in lib/ with NO rules entry`).toEqual([]);
+    });
+
+    const managerPaths = path.join(repoRoot(), '..', 'InfiniteSportsManagerFlutter',
+      'lib', 'core', 'constants', 'firebase_paths.dart');
+    it.skipIf(!fs.existsSync(managerPaths))(
+      "every top-level node in the Manager's FirebasePaths has a rules entry (sibling checkout only)", () => {
+        const src = fs.readFileSync(managerPaths, 'utf8');
+        const names = new Set<string>();
+        for (const m of src.matchAll(/static const String \w+ = '([^'/$]+)';/g)) names.add(m[1]);
+        expect(names.size).toBeGreaterThan(8);
+        const missing = [...names].filter((n) => !(n in rules)).sort();
+        expect(missing, `${file}: Manager top-level nodes with NO rules entry`).toEqual([]);
+      });
+  });
+}
+
+/** Top-level RTDB node names the fan app passes straight to
+ *  `FirebaseDatabase.instance.ref('<Name>…')` (interpolated first segments
+ *  and Storage refs are skipped). */
+function fanTopLevelNodes(): Set<string> {
+  const out = new Set<string>();
+  const walk = (dir: string): void => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.name.endsWith('.dart')) {
+        const src = fs.readFileSync(full, 'utf8');
+        for (const m of src.matchAll(/FirebaseDatabase\.instance\s*\.ref\(\s*['"]([A-Za-z][^'"/$]*)/g)) {
+          out.add(m[1].trim());
+        }
+      }
+    }
+  };
+  walk(path.join(repoRoot(), 'lib'));
+  return out;
+}
