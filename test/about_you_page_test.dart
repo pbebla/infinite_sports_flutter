@@ -475,6 +475,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(calls, ['signOut']);
     expect(find.text(_rootLabel), findsOneWidget);
+    // The person is told why they were signed out (on the welcome wall —
+    // the root ScaffoldMessenger outlives the onboarding routes).
+    expect(find.text('This account no longer exists.'), findsOneWidget);
   });
 
   testWidgets(

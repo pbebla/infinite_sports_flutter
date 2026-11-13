@@ -266,9 +266,16 @@ class _AboutYouPageState extends State<AboutYouPage> {
       // An account deleted elsewhere (Manager admin delete, web request)
       // while this session is alive: every save is refused, and this page
       // blocks back, so leave instead of looping on "Something went wrong".
+      // Captured NOW, like the under-13 exit: the page is gone by the time
+      // the message shows, and the root ScaffoldMessenger (above AuthGate)
+      // survives the swap to the welcome wall.
       final navigator = Navigator.of(context);
+      final messenger = ScaffoldMessenger.maybeOf(
+          Navigator.of(context, rootNavigator: true).context);
       if (await _accountGone()) {
         await _popToRootAndSignOut(navigator);
+        messenger?.showSnackBar(const SnackBar(
+            content: Text('This account no longer exists.')));
         return;
       }
       if (mounted) {
