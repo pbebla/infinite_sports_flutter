@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/account/delete_account_flow.dart'
     show isSignedInAccountGone;
 import 'package:infinite_sports_flutter/account/session_sign_out.dart';
+import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart'
+    show FreshAccountDeletion;
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart' show auth;
 import 'package:infinite_sports_flutter/onboarding/profile_completion.dart';
@@ -51,9 +53,8 @@ class AboutYouPage extends StatefulWidget {
   final Future<void> Function(Map<String, Object?> data)? writeOverride;
 
   /// Test seam: replaces `FirebaseAuthService.deleteFreshAccount` (the
-  /// under-13 exit's server-side deletion of a recent account). Returns
-  /// whether the account was actually deleted.
-  final Future<bool> Function()? deleteFreshAccountOverride;
+  /// under-13 exit's server-side deletion of a recent account).
+  final Future<FreshAccountDeletion> Function()? deleteFreshAccountOverride;
 
   /// Test seam: replaces `signOutAndClearSession` on the under-13 exit and
   /// on the "account no longer exists" save failure.
@@ -138,17 +139,26 @@ class _AboutYouPageState extends State<AboutYouPage> {
   static DateTime? _firebaseCreatedAt() =>
       FirebaseAuth.instance.currentUser?.metadata.creationTime;
 
-  /// Whether the signed-in account counts as freshly created (deleted by the
-  /// under-13 exit). Unknown creation time: only the signup flow counts.
-  bool _isRecentAccount() {
+  /// How far in the future a creation time may look (phone clock slightly
+  /// behind) and still count as recent.
+  static const _clockSkewAllowance = Duration(minutes: 5);
+
+  /// Whether the under-13 exit deletes the account. The sign-up flow
+  /// ([stepIndex] set) ALWAYS does, whatever the phone clock says. Otherwise
+  /// the account must be under [_freshAccountWindow] old; a clock running
+  /// behind (creation time far in the "future") must not make an old account
+  /// look new.
+  bool _shouldDeleteAccount() {
+    if (widget.stepIndex != null) return true;
     DateTime? created;
     try {
       created = (widget.accountCreatedAtOverride ?? _firebaseCreatedAt)();
     } catch (_) {
       created = null;
     }
-    if (created == null) return widget.stepIndex != null;
-    return DateTime.now().difference(created) <= _freshAccountWindow;
+    if (created == null) return false;
+    final age = DateTime.now().difference(created);
+    return age >= -_clockSkewAllowance && age <= _freshAccountWindow;
   }
 
   /// True while the under-13 exit is deleting / signing out: the page is
@@ -169,14 +179,17 @@ class _AboutYouPageState extends State<AboutYouPage> {
   /// welcome wall says so: never silent.
   Future<void> _showUnderageExit() async {
     if (_exiting) return;
+    final shouldDelete = _shouldDeleteAccount();
     final leave = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Sorry, not yet'),
-        content: const Text(
+        content: Text(
             'Infinite Sports accounts are for people $kMinimumAccountAge and '
             'older. A parent or guardian can register you for a league from '
-            'their own account.'),
+            'their own account. '
+            '${shouldDelete ? 'This account will be removed and you will be '
+                'signed out.' : 'You will be signed out.'}'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -185,14 +198,14 @@ class _AboutYouPageState extends State<AboutYouPage> {
           FilledButton(
             key: const ValueKey('about_you_underage_sign_out'),
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Sign out'),
+            child:
+                Text(shouldDelete ? 'Remove account and sign out' : 'Sign out'),
           ),
         ],
       ),
     );
     if (leave != true || !mounted || _exiting) return;
     setState(() => _exiting = true);
-    final shouldDelete = _isRecentAccount();
     final deleteFresh =
         widget.deleteFreshAccountOverride ?? auth.deleteFreshAccount;
     // Captured NOW: the page is gone by the time the message shows. The
@@ -201,18 +214,18 @@ class _AboutYouPageState extends State<AboutYouPage> {
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.maybeOf(
         Navigator.of(context, rootNavigator: true).context);
-    var deleted = false;
+    var outcome = FreshAccountDeletion.nothingToRemove;
     if (shouldDelete) {
       try {
-        deleted = await deleteFresh();
+        outcome = await deleteFresh();
       } catch (e) {
         debugPrint('Under-13 account deletion failed: ${e.runtimeType}');
-        deleted = false;
+        outcome = FreshAccountDeletion.notDeleted;
       }
     }
     // Leave every onboarding route before the auth flip swaps the gate.
     await _popToRootAndSignOut(navigator);
-    if (shouldDelete && !deleted) {
+    if (outcome == FreshAccountDeletion.notDeleted) {
       messenger?.showSnackBar(const SnackBar(
         duration: Duration(seconds: 10),
         content: Text("We couldn't remove this account automatically. "
@@ -274,8 +287,8 @@ class _AboutYouPageState extends State<AboutYouPage> {
           Navigator.of(context, rootNavigator: true).context);
       if (await _accountGone()) {
         await _popToRootAndSignOut(navigator);
-        messenger?.showSnackBar(const SnackBar(
-            content: Text('This account no longer exists.')));
+        messenger?.showSnackBar(
+            const SnackBar(content: Text('This account no longer exists.')));
         return;
       }
       if (mounted) {
