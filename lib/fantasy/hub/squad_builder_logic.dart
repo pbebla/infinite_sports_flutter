@@ -87,13 +87,47 @@ List<({double x, double y})> starterOffsets(FantasyConfig cfg) {
     }
   }
 
-  // Rows spaced so a full chip (avatar + 2-line nameplate) can never touch
-  // the next row at phone widths (owner feedback): ≥0.42 flat-y between rows
-  // keeps ≥ a chip-height of separation after the asset perspective mapping.
-  row(cfg.startersGk, 0.02, 0);
-  row(cfg.startersDef, 0.44, 0.24);
-  row(cfg.startersAtt, 0.87, 0.26);
+  // Rows as far apart as the frame allows (release report #10: at 360 px the
+  // old 0.02 / 0.44 / 0.87 rows let a 2-line name box run into the photos
+  // of the row below). After pitchAssetPerspective these land at ~0 / 0.5 /
+  // ~1 of the court's height: the GK chip tops out at the far goal, the ATT
+  // chip bottoms out at the near edge, DEF sits midway — and
+  // [courtHeightFor] grows the court whenever even that is not a full chip
+  // apart (narrow phones, large text).
+  row(cfg.startersGk, kStarterRowGkY, 0);
+  row(cfg.startersDef, kStarterRowDefY, 0.24);
+  row(cfg.startersAtt, kStarterRowAttY, 0.26);
   return out;
+}
+
+/// Flat-y of the three starter rows ([starterOffsets]); outside 0..1 on
+/// purpose so the asset mapping puts GK / ATT on the frame's edges.
+const double kStarterRowGkY = -0.06;
+const double kStarterRowDefY = 0.5;
+const double kStarterRowAttY = 1.06;
+
+/// The court's height for [width]: the pitch's natural height
+/// (`width / aspect`), grown just enough that consecutive rows — whose
+/// chips are placed by [Align] at [rowFractions] of (height − chip) — sit
+/// at least a whole [chipHeight] + [gap] apart, so a name box never covers
+/// the next row's photo (release report #10).
+double courtHeightFor({
+  required double width,
+  required double aspect,
+  required List<double> rowFractions,
+  required double chipHeight,
+  double gap = 6,
+}) {
+  final natural = width / aspect;
+  final rows = rowFractions.toSet().toList()..sort();
+  var minStep = double.infinity;
+  for (var i = 1; i < rows.length; i++) {
+    final step = rows[i] - rows[i - 1];
+    if (step < minStep) minStep = step;
+  }
+  if (minStep == double.infinity || minStep <= 0) return natural;
+  final needed = chipHeight + (chipHeight + gap) / minStep;
+  return needed > natural ? needed : natural;
 }
 
 // ── Tilted pitch geometry (P3b feedback Task 2) ────────────────────────────

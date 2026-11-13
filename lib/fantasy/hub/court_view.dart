@@ -146,65 +146,88 @@ class FantasyCourtView extends StatelessWidget {
       children: [
         for (var i = 0; i < starterCount; i++)
           Align(
-            alignment: Alignment(offsets[i].x * 2 - 1, offsets[i].y * 2 - 1),
+            alignment: Alignment(
+                offsets[i].x * 2 - 1, offsets[i].y.clamp(0.0, 1.0) * 2 - 1),
             child: _slotWidget(i),
           ),
       ],
     );
 
-    return Column(
-      children: [
-        AspectRatio(
-          // The asset renders at its own (cropped) aspect; the painter keeps
-          // its 0.78 (taller than wide — room for the big photo chips either
-          // way; the page scrolls).
-          aspectRatio: useNeonPitchAsset ? pitchAssetAspect : 0.78,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(18),
-            child: useNeonPitchAsset
-                ? Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      // Transparent outside the pitch's gold boundary (the
-                      // artwork's glow halo is masked out) — the surround is
-                      // the theme's own card surface.
-                      ColoredBox(
-                        color: surround,
-                        child: Image.asset(
-                          kNeonPitchAsset,
-                          fit: BoxFit.fill,
+    // The asset renders at its own (cropped) aspect; the painter keeps its
+    // 0.78 (taller than wide, room for the big photo chips either way; the
+    // page scrolls). The court grows taller than that only when its rows
+    // would otherwise not be a whole chip apart (release report #10:
+    // narrow phones / large text); a bounded parent (the share image's own
+    // AspectRatio) caps it.
+    final aspect = useNeonPitchAsset ? pitchAssetAspect : 0.78;
+    final chipHeight = fantasyChipHeightEstimate(
+        chipAvatarSize, MediaQuery.textScalerOf(context));
+    final rowFractions = [for (final o in offsets) o.y.clamp(0.0, 1.0)];
+
+    // Measured from THIS widget's constraints (a Column child would only
+    // ever see an unbounded height).
+    return LayoutBuilder(builder: (context, constraints) {
+      var height = courtHeightFor(
+        width: constraints.maxWidth,
+        aspect: aspect,
+        rowFractions: rowFractions,
+        chipHeight: chipHeight,
+      );
+      if (constraints.hasBoundedHeight && height > constraints.maxHeight) {
+        height = constraints.maxHeight;
+      }
+      return Column(
+        children: [
+          SizedBox(
+            width: constraints.maxWidth,
+            height: height,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: useNeonPitchAsset
+                  ? Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        // Transparent outside the pitch's gold boundary (the
+                        // artwork's glow halo is masked out) — the surround is
+                        // the theme's own card surface.
+                        ColoredBox(
+                          color: surround,
+                          child: Image.asset(
+                            kNeonPitchAsset,
+                            fit: BoxFit.fill,
+                          ),
                         ),
+                        slotStack,
+                      ],
+                    )
+                  : CustomPaint(
+                      painter: _PitchPainter(
+                        surround: surround,
+                        grassFar: grassFar,
+                        grassNear: grassNear,
+                        stripe: stripe,
+                        lines: lines,
+                        glow: glow,
                       ),
-                      slotStack,
-                    ],
-                  )
-                : CustomPaint(
-                    painter: _PitchPainter(
-                      surround: surround,
-                      grassFar: grassFar,
-                      grassNear: grassNear,
-                      stripe: stripe,
-                      lines: lines,
-                      glow: glow,
+                      child: slotStack,
                     ),
-                    child: slotStack,
-                  ),
+            ),
           ),
-        ),
-        // No bench slots (the Dream Team's 5-starter mini mode) = no bench
-        // surface at all — an empty labelled shelf would just be noise.
-        if (slots.length > starterCount) ...[
-          const SizedBox(height: 10),
-          _BenchSurface(
-            label: 'Bench · ${config.benchFactorPercent}% points',
-            children: [
-              for (var i = starterCount; i < slots.length; i++)
-                _slotWidget(i),
-            ],
-          ),
+          // No bench slots (the Dream Team's 5-starter mini mode) = no bench
+          // surface at all — an empty labelled shelf would just be noise.
+          if (slots.length > starterCount) ...[
+            const SizedBox(height: 10),
+            _BenchSurface(
+              label: 'Bench · ${config.benchFactorPercent}% points',
+              children: [
+                for (var i = starterCount; i < slots.length; i++)
+                  _slotWidget(i),
+              ],
+            ),
+          ],
         ],
-      ],
-    );
+      );
+    });
   }
 
   Widget _slotWidget(int i) {
@@ -409,8 +432,7 @@ class _PitchPainter extends CustomPainter {
     canvas.drawLine(
         Offset(cx - nearHalf, bottomY), Offset(cx + nearHalf, bottomY), line);
     canvas.drawArc(
-      Rect.fromCircle(
-          center: Offset(cx, bottomY), radius: size.width * 0.14),
+      Rect.fromCircle(center: Offset(cx, bottomY), radius: size.width * 0.14),
       math.pi,
       math.pi,
       false,
