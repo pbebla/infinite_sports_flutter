@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/misc/tab_swap.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_home_banner.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
@@ -423,35 +422,20 @@ class _FrontPageState extends State<FrontPage> {
               }
               if (tabs.isNotEmpty) {
                 WidgetsBinding.instance.addPostFrameCallback((_) => executeAfterBuild());
-                // Keyed by tab count (release report #1): a count change can
-                // never leave TabBar/TabBarView on a disposed controller.
-                return LiveLengthTabController(
-                    length: tabs.length,
-                    child: Scaffold(
-                      appBar: AppBar(
-                        leading: IconButton(
-                            onPressed: () async {
-                              await _refreshData();
-                            },
-                            icon: const Icon(Icons.refresh)
-                        ),
-                        title: TabBar(
-                          isScrollable: true,
-                          tabs: tabNames,
-                          onTap: (value) {
-                            _onTournamentTab.value = tabIsTournament[value];
-                            if (tabNames[value].text == _leagueTabTitle) {
-                              headerNotifier.value = [currentSport, currentSeason];
-                            } else if (tabNames[value].text == "AFC San Jose") {
-                              headerNotifier.value = ["AFC San Jose", currentAFCSeason];
-                            }
-                          },
-                        ),
-                      ),
-                      body: TabBarView(
-                        children: tabs,
-                      ),
-                    )
+                return HomeTabShell(
+                  tabNames: tabNames,
+                  tabs: tabs,
+                  onRefresh: () async {
+                    await _refreshData();
+                  },
+                  onTabTap: (value) {
+                    _onTournamentTab.value = tabIsTournament[value];
+                    if (tabNames[value].text == _leagueTabTitle) {
+                      headerNotifier.value = [currentSport, currentSeason];
+                    } else if (tabNames[value].text == "AFC San Jose") {
+                      headerNotifier.value = ["AFC San Jose", currentAFCSeason];
+                    }
+                  },
                 );
               }
               return Column(children: [
@@ -555,6 +539,51 @@ class _FrontPageState extends State<FrontPage> {
     // If the first tab is a tournament, headerNotifier is intentionally left
     // unchanged: the table/leaderboard buttons it feeds are hidden on
     // tournament tabs (via _onTournamentTab), so its value is never read there.
+  }
+}
+
+/// The home screen's tab shell: the refresh button + scrollable TabBar in
+/// the app bar, and the tab bodies. Its tab count changes LIVE (the
+/// /Tournaments listener adds a tab when a tournament starts and drops it
+/// when one finishes), so it deliberately uses a plain
+/// [DefaultTabController] and does NOT key anything by the count: the
+/// surviving tab bodies keep their state (streams, scroll, selected day)
+/// across the change. Nothing below it is count-keyed, so the controller
+/// swap cannot strand a TabBar (fix round 1, I1 — contrast
+/// LiveLengthTabController, which is for pages whose subtree is remounted).
+class HomeTabShell extends StatelessWidget {
+  const HomeTabShell({
+    super.key,
+    required this.tabNames,
+    required this.tabs,
+    required this.onTabTap,
+    required this.onRefresh,
+  });
+
+  final List<Tab> tabNames;
+  final List<Widget> tabs;
+  final ValueChanged<int> onTabTap;
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: tabs.length,
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            onPressed: onRefresh,
+            icon: const Icon(Icons.refresh),
+          ),
+          title: TabBar(
+            isScrollable: true,
+            tabs: tabNames,
+            onTap: onTabTap,
+          ),
+        ),
+        body: TabBarView(children: tabs),
+      ),
+    );
   }
 }
 
