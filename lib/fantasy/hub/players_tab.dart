@@ -64,6 +64,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/data/next_game.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/collapsing_tab_shell.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart'
     show OrderChangedPill;
 import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
@@ -319,7 +320,43 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
     }
   }
 
+  /// The tab is on screen (CollapsingTabShell.isTabOnScreen; true outside
+  /// the hub). While hidden, the season totals feed — re-merged with the live
+  /// gameweek on every live update — is dropped; the numbers on screen stay
+  /// and the service's session cache answers at once on return (review 6,
+  /// M-b). Price changes and the watchlist are small and rarely change.
+  bool _onScreen = true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final on = CollapsingTabShell.isTabOnScreen(context);
+    if (on == _onScreen) return;
+    _onScreen = on;
+    if (on) {
+      _subscribeTotals();
+    } else {
+      _totalsSub?.cancel();
+      _totalsSub = null;
+    }
+  }
+
   void _subscribeMarketFeeds() {
+    _subscribeTotals();
+    _priceChangesSub = (widget.priceChangeStates ??
+            FantasyService.watchAllPriceChanges(widget.sport, widget.season))
+        .listen((changes) {
+      _session.priceChanges = changes;
+      if (!mounted) return;
+      setState(() => _priceChanges = changes);
+      _pushMovesForSheet();
+    }, onError: (Object _) {
+      if (mounted) setState(() => _priceChanges ??= const {});
+    });
+  }
+
+  void _subscribeTotals() {
+    if (_totalsSub != null) return;
     _totalsSub = (widget.totalsStates ??
             FantasyService.watchPlayerTotals(widget.sport, widget.season))
         .listen((totals) {
@@ -337,16 +374,6 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
       _pushMovesForSheet();
     }, onError: (Object _) {
       if (mounted) setState(() => _totalsLoaded = true);
-    });
-    _priceChangesSub = (widget.priceChangeStates ??
-            FantasyService.watchAllPriceChanges(widget.sport, widget.season))
-        .listen((changes) {
-      _session.priceChanges = changes;
-      if (!mounted) return;
-      setState(() => _priceChanges = changes);
-      _pushMovesForSheet();
-    }, onError: (Object _) {
-      if (mounted) setState(() => _priceChanges ??= const {});
     });
   }
 

@@ -40,6 +40,10 @@
 //    marks which tab is on screen and the controller's animateTo / jumpTo
 //    move only that tab's list (reaching the top reopens the header). The
 //    tabs see one stable controller, so nothing is remounted on a switch.
+//  • Every tab knows whether it is on screen ([CollapsingTabShell.isTabOnScreen],
+//    review 6, M-b): a kept-alive tab can drop a large or fast-changing
+//    feed while hidden and pick it up again (from the service's session
+//    cache, so nothing reloads visibly) when it comes back.
 //  • The tab row scrolls horizontally from the start; an edge fade marks the
 //    side where more tabs are off screen (five tabs never fit 360 px, and a
 //    label is never ellipsized).
@@ -66,6 +70,13 @@ class CollapsingTabShell extends StatelessWidget {
     this.initialIndex = 0,
     this.primaryScrollController,
   }) : assert(tabs.length == children.length);
+
+  /// Whether the tab around [context] is the one on screen (true outside a
+  /// shell). Depends on it: the tab rebuilds — and its didChangeDependencies
+  /// runs — when it is shown or hidden.
+  static bool isTabOnScreen(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_TabVisibility>()?.visible ??
+      true;
 
   /// When given, the tabs' primary scroll controller (put the SAME one above
   /// the page's Scaffold): a scroll-to-top through it moves only the tab on
@@ -141,6 +152,9 @@ class _ShellBodyState extends State<_ShellBody>
   double? _expandedHeight;
   final GlobalKey _headerBox = GlobalKey();
 
+  /// The tab on screen once a switch has settled.
+  int _activeIndex = 0;
+
   /// The header is collapsed or on its way there.
   bool _wantCollapsed = false;
 
@@ -200,6 +214,7 @@ class _ShellBodyState extends State<_ShellBody>
     _tabs?.removeListener(_onTabChanged);
     _tabs = next..addListener(_onTabChanged);
     widget.primaryScrollController?.activeTab = next.index;
+    _activeIndex = next.index;
   }
 
   @override
@@ -219,6 +234,7 @@ class _ShellBodyState extends State<_ShellBody>
     if (_bodyFocus.hasFocus) FocusManager.instance.primaryFocus?.unfocus();
     if (c.indexIsChanging) return;
     final i = c.index;
+    if (_activeIndex != i) setState(() => _activeIndex = i);
     widget.primaryScrollController?.activeTab = i;
     final m = _metrics[i];
     // Back to a tab left collapsed: only if it can still be left (it still
@@ -377,6 +393,7 @@ class _ShellBodyState extends State<_ShellBody>
                   _KeepAlive(
                     child: _TabMarker(
                       index: i,
+                      visible: i == _activeIndex,
                       child: _withPrimary(
                         primary,
                         NotificationListener<ScrollMetricsNotification>(
@@ -404,12 +421,24 @@ Widget _withPrimary(ScrollController? primary, Widget child) => primary == null
 
 /// Marks which tab a scroll position lives in (see [ActiveTabScrollController]).
 class _TabMarker extends StatelessWidget {
-  const _TabMarker({required this.index, required this.child});
+  const _TabMarker(
+      {required this.index, required this.visible, required this.child});
   final int index;
+  final bool visible;
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => child;
+  Widget build(BuildContext context) =>
+      _TabVisibility(visible: visible, child: child);
+}
+
+/// Tells a tab whether it is on screen ([CollapsingTabShell.isTabOnScreen]).
+class _TabVisibility extends InheritedWidget {
+  const _TabVisibility({required this.visible, required super.child});
+  final bool visible;
+
+  @override
+  bool updateShouldNotify(_TabVisibility old) => old.visible != visible;
 }
 
 /// The hub tabs' primary scroll controller (review 6, M-c). Every kept-alive

@@ -2173,6 +2173,61 @@ void main() {
       });
     }
 
+    testWidgets('a kept-alive Leaderboards tab drops its large live feeds '
+        'while off screen and picks them up on return with no reload '
+        '(review 6, M-b)', (tester) async {
+      await pumpHub(tester,
+          tab: FantasyHubTab.leaderboards,
+          size: const Size(360, 740),
+          gameweekStates: Stream.value(gws),
+          nowUtc: now);
+      await land(tester, lock: FantasyLockOverride.auto);
+      boards.add(leaderboardsFromNode({
+        'Overall': {
+          'u1': {'points': 50, 'rank': 1},
+        },
+      }));
+      managers.add({
+        'u1': const FantasyManager(teamName: 'Top Cats', nameFlagged: false),
+      });
+      leagues.add(const []);
+      dreams.add(const {});
+      await settle(tester);
+      expect(find.text('Top Cats'), findsOneWidget);
+      expect(boards.hasListener, isTrue);
+      expect(dreams.hasListener, isTrue);
+
+      await tester.ensureVisible(find.widgetWithText(Tab, 'My Team'));
+      await settle(tester);
+      await tester.tap(find.widgetWithText(Tab, 'My Team'));
+      await settle(tester);
+      await settle(tester);
+      expect(boards.hasListener, isFalse, reason: 'paused off screen');
+      expect(dreams.hasListener, isFalse);
+      expect(managers.hasListener, isTrue, reason: 'small, rare: kept');
+
+      await tester.ensureVisible(find.widgetWithText(Tab, 'Leaderboards'));
+      await settle(tester);
+      await tester.tap(find.widgetWithText(Tab, 'Leaderboards'));
+      // The tab slide (no feed has answered again yet: the new listeners
+      // only re-attached) — the rows it had are there, no skeleton.
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(find.text('Top Cats'), findsOneWidget);
+      await settle(tester);
+      expect(boards.hasListener, isTrue);
+      expect(dreams.hasListener, isTrue);
+      boards.add(leaderboardsFromNode({
+        'Overall': {
+          'u1': {'points': 61, 'rank': 1},
+        },
+      }));
+      await settle(tester);
+      expect(find.textContaining('61'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    });
+
     group('never stuck collapsed (review 6, I1)', () {
       testWidgets('News, one post (short): a slow drag never collapses',
           (tester) async {
