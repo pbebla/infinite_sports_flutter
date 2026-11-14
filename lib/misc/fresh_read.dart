@@ -589,6 +589,11 @@ class FreshReads {
     return () => _under.remove(entry);
   }
 
+  /// Number of registered newer-value callbacks (leak checks in tests).
+  @visibleForTesting
+  static int get debugNewerCallbackCount =>
+      _exact.values.fold(0, (n, l) => n + l.length) + _under.length;
+
   static void _dispatchNewer(String path, Object? value) {
     final key = normalizeFreshPath(path);
     for (final cb in List.of(_exact[key] ?? const [])) {

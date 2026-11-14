@@ -9,6 +9,7 @@ import 'package:infinite_sports_flutter/support/my_tickets_page.dart';
 import 'package:infinite_sports_flutter/support/support_models.dart';
 import 'package:infinite_sports_flutter/support/support_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:infinite_sports_flutter/misc/fresh_follow.dart';
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 /// The in-app "Help & Feedback" form (spec decision #1) — category cards
@@ -85,7 +86,8 @@ class SupportFormPage extends StatefulWidget {
   State<SupportFormPage> createState() => _SupportFormPageState();
 }
 
-class _SupportFormPageState extends State<SupportFormPage> {
+class _SupportFormPageState extends State<SupportFormPage>
+    with FreshFollowers {
   final TextEditingController _messageController = TextEditingController();
   String? _category;
   List<XFile> _screenshots = [];
@@ -121,12 +123,8 @@ class _SupportFormPageState extends State<SupportFormPage> {
     _device = widget.prefillDevice ?? _bestEffortDevice();
   }
 
-  /// Removes the newer-name follower (fresh reads, Task 4, #79).
-  VoidCallback? _stopNameFollow;
-
   @override
   void dispose() {
-    _stopNameFollow?.call();
     _messageController.dispose();
     super.dispose();
   }
@@ -163,8 +161,8 @@ class _SupportFormPageState extends State<SupportFormPage> {
           // the ticket, so a newer one from the server replaces it while
           // the form is open.
           final uid = _uid;
-          _stopNameFollow?.call();
-          _stopNameFollow = FreshReads.onNewer('Users/$uid', (v) {
+          // FreshFollowers: registers only while mounted, removed on dispose.
+          followNewer('name', 'Users/$uid', (v) {
             final newer = _nameFrom(v);
             if (newer.isNotEmpty && mounted) setState(() => _name = newer);
           });

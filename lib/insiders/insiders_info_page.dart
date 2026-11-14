@@ -7,6 +7,7 @@ import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:infinite_sports_flutter/misc/fresh_follow.dart';
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 // NOTE (owner decision 2026-07-27): the "sports of interest" question was
@@ -75,7 +76,8 @@ class InsidersInfoPage extends StatefulWidget {
   State<InsidersInfoPage> createState() => _InsidersInfoPageState();
 }
 
-class _InsidersInfoPageState extends State<InsidersInfoPage> {
+class _InsidersInfoPageState extends State<InsidersInfoPage>
+    with FreshFollowers {
   late final Stream<Insider?> _insiderStream;
   String _name = '';
   String _email = '';
@@ -90,14 +92,6 @@ class _InsidersInfoPageState extends State<InsidersInfoPage> {
 
   String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
-  /// Removes the newer-name follower (fresh reads, Task 4, #4).
-  VoidCallback? _stopNameFollow;
-
-  @override
-  void dispose() {
-    _stopNameFollow?.call();
-    super.dispose();
-  }
 
   /// "First Last" from a `Users/<uid>` value ('' when absent).
   static String _nameFrom(Object? raw) {
@@ -164,8 +158,8 @@ class _InsidersInfoPageState extends State<InsidersInfoPage> {
           // Insiders/<uid>/Name by Apply, so the read is a refreshing one
           // and a newer name from the server replaces it while the page is
           // open — Apply writes the server's name, not the saved copy's.
-          _stopNameFollow?.call();
-          _stopNameFollow = FreshReads.onNewer('Users/$uid', (v) {
+          // FreshFollowers: registers only while mounted, removed on dispose.
+          followNewer('name', 'Users/$uid', (v) {
             final newer = _nameFrom(v);
             if (newer.isNotEmpty && mounted) setState(() => _name = newer);
           });
