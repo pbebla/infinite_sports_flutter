@@ -2038,6 +2038,102 @@ void main() {
       await settle(tester);
     }
 
+    group('every tab collapses and expands (review 6)', () {
+      Future<void> roundTrip(WidgetTester tester, FantasyHubTab tab,
+          Future<void> Function() feed) async {
+        await pumpHub(tester,
+            tab: tab,
+            size: const Size(360, 740),
+            gameweekStates: Stream.value(gws),
+            nowUtc: now);
+        await land(tester, lock: FantasyLockOverride.auto);
+        await feed();
+        await settle(tester);
+        expect(collapsed(), isFalse);
+        await tester.dragFrom(const Offset(180, 650), const Offset(0, -400));
+        await settle(tester);
+        expect(collapsed(), isTrue, reason: '$tab');
+        expect(tester.widget<Text>(slimCountdown()).data, '1d 10:00:00');
+        expect(tester.getRect(slimCountdown()).top, greaterThanOrEqualTo(0));
+        await tester.flingFrom(
+            const Offset(180, 400), const Offset(0, 3000), 4000);
+        await settle(tester);
+        await settle(tester);
+        expect(collapsed(), isFalse, reason: '$tab');
+        expect(tester.takeException(), isNull);
+      }
+
+      testWidgets('Players (a long market)', (tester) async {
+        await roundTrip(tester, FantasyHubTab.players, () async {
+          players.add([
+            ...market,
+            for (var i = 0; i < 30; i++)
+              _player('Extra Player $i', FantasyPosition.att, 40 + i,
+                  team: 'Team ${i % 4}'),
+          ]);
+        });
+      });
+
+      testWidgets('Leaderboards (a long table)', (tester) async {
+        await roundTrip(tester, FantasyHubTab.leaderboards, () async {
+          boards.add(leaderboardsFromNode({
+            'Overall': {
+              for (var i = 1; i <= 40; i++)
+                'u$i': {'points': 200 - i, 'rank': i},
+            },
+          }));
+          managers.add({
+            for (var i = 1; i <= 40; i++)
+              'u$i': FantasyManager(teamName: 'Team $i', nameFlagged: false),
+          });
+          leagues.add(const []);
+          dreams.add(const {});
+        });
+      });
+
+      testWidgets('News (many posts)', (tester) async {
+        await roundTrip(tester, FantasyHubTab.news, () async {
+          news.add(newsPostsFromNode({
+            for (var i = 0; i < 20; i++) 'p$i': post(i),
+          }));
+        });
+      });
+
+      testWidgets('Rules', (tester) async {
+        await roundTrip(tester, FantasyHubTab.rules, () async {});
+      });
+    });
+
+    for (final scale in [1.0, 1.3]) {
+      testWidgets('Players search at 360 px with the keyboard open, text '
+          'scale $scale: no overflow; switching tabs drops the keyboard '
+          '(review 6, M-a)', (tester) async {
+        tester.platformDispatcher.textScaleFactorTestValue = scale;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        await pumpHub(tester,
+            tab: FantasyHubTab.players,
+            size: const Size(360, 740),
+            gameweekStates: Stream.value(gws),
+            nowUtc: now);
+        await land(tester, lock: FantasyLockOverride.auto);
+        await tester.tap(key('market_search_toggle'));
+        await settle(tester);
+        expect(tester.testTextInput.isVisible, isTrue);
+        tester.view.viewInsets = const FakeViewPadding(bottom: 320);
+        addTearDown(tester.view.resetViewInsets);
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+        expect(key('market_search'), findsOneWidget);
+
+        await tester.tap(find.widgetWithText(Tab, 'My Team'));
+        await settle(tester);
+        expect(tester.testTextInput.isVisible, isFalse);
+        tester.view.resetViewInsets();
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+      });
+    }
+
     group('never stuck collapsed (review 6, I1)', () {
       testWidgets('News, one post (short): a slow drag never collapses',
           (tester) async {

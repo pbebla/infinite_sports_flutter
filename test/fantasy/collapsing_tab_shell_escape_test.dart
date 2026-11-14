@@ -10,7 +10,9 @@
 // scroll view that only drags when it overflows with nothing to drag — so
 // the header must never collapse.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/collapsing_tab_shell.dart';
 
@@ -31,31 +33,46 @@ class _HarnessState extends State<_Harness> {
   late Map<String, int> rows = Map.of(widget.rows);
   void setRows(String tab, int n) => setState(() => rows[tab] = n);
 
+  /// As the hub does: the shell's controller is ALSO the primary one above
+  /// the Scaffold (the status-bar tap's source).
+  final ActiveTabScrollController ctrl = ActiveTabScrollController();
+
+  @override
+  void dispose() {
+    ctrl.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Hub')),
-      body: CollapsingTabShell(
-        expandedHeader: const SizedBox(
-            height: 260, child: Center(child: Text('BIG HEADER'))),
-        collapsedHeader:
-            const SizedBox(height: 40, child: Center(child: Text('SLIM BAR'))),
-        tabs: _labels,
-        children: [
-          // A: like My Team / News — its OWN controller, so it only drags
-          // while its content overflows.
-          _OwnControllerList(
-              key: const ValueKey('list_A'),
-              rows: rows['A']!,
-              withField: widget.withField),
-          // B: like Players — the route's primary controller (always drags).
-          ListView.builder(
-            key: const ValueKey('list_B'),
-            itemCount: rows['B']!,
-            itemBuilder: (_, i) => SizedBox(height: 48, child: Text('B row $i')),
-          ),
-          _OwnControllerList(key: const ValueKey('list_C'), rows: rows['C']!),
-        ],
+    return PrimaryScrollController(
+      controller: ctrl,
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Hub')),
+        body: CollapsingTabShell(
+          primaryScrollController: ctrl,
+          expandedHeader: const SizedBox(
+              height: 260, child: Center(child: Text('BIG HEADER'))),
+          collapsedHeader: const SizedBox(
+              height: 40, child: Center(child: Text('SLIM BAR'))),
+          tabs: _labels,
+          children: [
+            // A: like My Team / News — its OWN controller, so it only drags
+            // while its content overflows.
+            _OwnControllerList(
+                key: const ValueKey('list_A'),
+                rows: rows['A']!,
+                withField: widget.withField),
+            // B: like Players — the route's primary controller (always drags).
+            ListView.builder(
+              key: const ValueKey('list_B'),
+              itemCount: rows['B']!,
+              itemBuilder: (_, i) =>
+                  SizedBox(height: 48, child: Text('B row $i')),
+            ),
+            _OwnControllerList(key: const ValueKey('list_C'), rows: rows['C']!),
+          ],
+        ),
       ),
     );
   }
@@ -114,7 +131,7 @@ bool _collapsed(WidgetTester tester) =>
 ScrollPosition _pos(WidgetTester tester, String tab) => tester
     .state<ScrollableState>(find.descendant(
         of: find.byKey(ValueKey('list_$tab'), skipOffstage: false),
-        matching: find.byType(Scrollable),
+        matching: find.byType(Scrollable, skipOffstage: false),
         skipOffstage: false))
     .position;
 
@@ -149,7 +166,8 @@ Future<int> _slowDrag(WidgetTester tester, double dy,
 void main() {
   group('I1 — never stuck collapsed', () {
     for (final rows in [3, 8, 10, 12]) {
-      testWidgets('$rows rows (${rows * 48} px; short or fits only when '
+      testWidgets(
+          '$rows rows (${rows * 48} px; short or fits only when '
           'collapsed): a slow drag never collapses the header', (tester) async {
         await _pump(tester, rows: {'A': rows, 'B': 60, 'C': 60});
         final changes = await _slowDrag(tester, -200);
@@ -159,7 +177,8 @@ void main() {
       });
     }
 
-    testWidgets('long content: collapses, stays draggable, a pull-down at '
+    testWidgets(
+        'long content: collapses, stays draggable, a pull-down at '
         'the top expands it again', (tester) async {
       await _pump(tester, rows: {'A': 30, 'B': 60, 'C': 60});
       final changes = await _slowDrag(tester, -200);
@@ -171,7 +190,8 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('every drag that ends collapsed leaves the tab scrollable — '
+    testWidgets(
+        'every drag that ends collapsed leaves the tab scrollable — '
         'swept across the boundary band (8 to 20 rows)', (tester) async {
       for (var rows = 8; rows <= 20; rows++) {
         await _pump(tester, rows: {'A': rows, 'B': 60, 'C': 60});
@@ -185,7 +205,8 @@ void main() {
       }
     });
 
-    testWidgets('content shrinking under a collapsed header expands it (no '
+    testWidgets(
+        'content shrinking under a collapsed header expands it (no '
         'flicker back)', (tester) async {
       final key = await _pump(tester, rows: {'A': 30, 'B': 60, 'C': 60});
       await _slowDrag(tester, -200);
@@ -204,7 +225,8 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('tab switch from a scrolled tab to a short one expands; back '
+    testWidgets(
+        'tab switch from a scrolled tab to a short one expands; back '
         'restores the long tab collapsed', (tester) async {
       await _pump(tester, rows: {'A': 30, 'B': 60, 'C': 3});
       await _slowDrag(tester, -200);
@@ -219,7 +241,8 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('keyboard: collapsed while it is open, closing it (content '
+    testWidgets(
+        'keyboard: collapsed while it is open, closing it (content '
         'now fits) expands the header', (tester) async {
       await _pump(tester, rows: {'A': 11, 'B': 60, 'C': 60});
       tester.view.viewInsets = const FakeViewPadding(bottom: 300);
@@ -232,5 +255,85 @@ void main() {
       expect(_collapsed(tester), isFalse);
       expect(tester.takeException(), isNull);
     });
+  });
+
+  testWidgets('M-a: switching tabs drops the keyboard focus', (tester) async {
+    await _pump(tester, rows: {'A': 3, 'B': 60, 'C': 60}, withField: true);
+    await tester.tap(find.byKey(const ValueKey('field')));
+    await tester.pump();
+    final node = tester
+        .widget<EditableText>(find.byType(EditableText, skipOffstage: false))
+        .focusNode;
+    expect(node.hasFocus, isTrue);
+    expect(tester.testTextInput.isVisible, isTrue);
+    await tester.tap(find.widgetWithText(Tab, 'B'));
+    await tester.pumpAndSettle();
+    expect(node.hasFocus, isFalse);
+    expect(tester.testTextInput.isVisible, isFalse);
+  });
+
+  testWidgets(
+      'M-c: only the active tab answers the primary scroll '
+      'controller; scroll-to-top reopens the header and leaves other tabs '
+      'where they were', (tester) async {
+    await _pump(tester, rows: {'A': 3, 'B': 60, 'C': 60});
+    // B (primary-controller list) scrolled far down: collapsed.
+    await tester.tap(find.widgetWithText(Tab, 'B'));
+    await tester.pumpAndSettle();
+    await _slowDrag(tester, -600);
+    expect(_collapsed(tester), isTrue);
+    final controller =
+        PrimaryScrollController.of(tester.element(find.byType(TabBar)));
+    expect(controller.positions.length, 1);
+    expect(controller.position.pixels, greaterThan(0));
+
+    // The status-bar tap: Scaffold animates the primary controller to 0.
+    controller.animateTo(0,
+        duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+    await tester.pumpAndSettle();
+    expect(_pos(tester, 'B').pixels, 0);
+    expect(_collapsed(tester), isFalse);
+
+    // Scroll B again, switch to A: B is no longer the primary one.
+    await _slowDrag(tester, -600);
+    final bOffset = _pos(tester, 'B').pixels;
+    await tester.tap(find.widgetWithText(Tab, 'A'));
+    await tester.pumpAndSettle();
+    expect(controller.positions.length, lessThanOrEqualTo(1));
+    if (controller.hasClients) {
+      controller.animateTo(0,
+          duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      await tester.pumpAndSettle();
+    }
+    expect(_pos(tester, 'B').pixels, bOffset);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'M-c, the real iOS path: a status-bar tap scrolls only the tab '
+      'on screen to the top and reopens the header', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    tester.view.padding = const FakeViewPadding(top: 40);
+    addTearDown(tester.view.resetPadding);
+    try {
+      final key = await _pump(tester, rows: {'A': 3, 'B': 60, 'C': 60});
+      await tester.tap(find.widgetWithText(Tab, 'B'));
+      await tester.pumpAndSettle();
+      await _slowDrag(tester, -600);
+      expect(_collapsed(tester), isTrue);
+      expect(key.currentState!.ctrl.positions.length, 1);
+      // What the iOS engine sends on a status-bar tap.
+      await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+          SystemChannels.statusBar.name,
+          SystemChannels.statusBar.codec
+              .encodeMethodCall(const MethodCall('handleScrollToTop')),
+          (_) {});
+      await tester.pumpAndSettle();
+      expect(_pos(tester, 'B').pixels, 0);
+      expect(_collapsed(tester), isFalse);
+      expect(tester.takeException(), isNull);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 }

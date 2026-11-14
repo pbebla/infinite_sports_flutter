@@ -25,6 +25,21 @@
 //    expands. The two thresholds are at least [_kCollapseAfter] apart, so the
 //    states cannot oscillate. A tab switch restores the state that tab was
 //    left in only if it can still be left.
+//  • A tab switch drops the keyboard (review 6, M-a): a kept-alive tab's
+//    focused field (the Players search) would otherwise keep it open over
+//    the next tab.
+//  • Typing in a tab (the Players search) with the keyboard up collapses the
+//    header for as long as the keyboard stays open — at 360 px the full
+//    header + tab row + keyboard leave the tab no room at all. When the
+//    keyboard goes, the tab's own state (and the escape rule) decide again.
+//  • Only the ACTIVE tab answers a scroll-to-top (review 6, M-c): every
+//    kept-alive tab's list attaches to the primary scroll controller, so
+//    iOS's tap-the-status-bar-to-top would scroll them all. The owner gives
+//    the shell an [ActiveTabScrollController] and puts it as the primary
+//    controller above its Scaffold (the status-bar tap's source); the shell
+//    marks which tab is on screen and the controller's animateTo / jumpTo
+//    move only that tab's list (reaching the top reopens the header). The
+//    tabs see one stable controller, so nothing is remounted on a switch.
 //  • The tab row scrolls horizontally from the start; an edge fade marks the
 //    side where more tabs are off screen (five tabs never fit 360 px, and a
 //    label is never ellipsized).
@@ -49,7 +64,13 @@ class CollapsingTabShell extends StatelessWidget {
     required this.tabs,
     required this.children,
     this.initialIndex = 0,
+    this.primaryScrollController,
   }) : assert(tabs.length == children.length);
+
+  /// When given, the tabs' primary scroll controller (put the SAME one above
+  /// the page's Scaffold): a scroll-to-top through it moves only the tab on
+  /// screen. null = the tabs inherit whatever primary controller is above.
+  final ActiveTabScrollController? primaryScrollController;
 
   /// The full header shown at the top of the active tab.
   final Widget expandedHeader;
@@ -70,6 +91,7 @@ class CollapsingTabShell extends StatelessWidget {
       length: tabs.length,
       initialIndex: initialIndex.clamp(0, tabs.length - 1),
       child: _ShellBody(
+        primaryScrollController: primaryScrollController,
         expandedHeader: expandedHeader,
         collapsedHeader: collapsedHeader,
         tabs: tabs,
@@ -81,12 +103,14 @@ class CollapsingTabShell extends StatelessWidget {
 
 class _ShellBody extends StatefulWidget {
   const _ShellBody({
+    required this.primaryScrollController,
     required this.expandedHeader,
     required this.collapsedHeader,
     required this.tabs,
     required this.children,
   });
 
+  final ActiveTabScrollController? primaryScrollController;
   final Widget expandedHeader;
   final Widget collapsedHeader;
   final List<String> tabs;
@@ -97,7 +121,7 @@ class _ShellBody extends StatefulWidget {
 }
 
 class _ShellBodyState extends State<_ShellBody>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   /// 1 = expanded, 0 = collapsed.
   late final AnimationController _expand =
       AnimationController(vsync: this, duration: _kCollapseDuration, value: 1);
@@ -120,6 +144,55 @@ class _ShellBodyState extends State<_ShellBody>
   /// The header is collapsed or on its way there.
   bool _wantCollapsed = false;
 
+  /// The tab on screen once a switch has settled — the one that answers the
+  /// route's primary scroll controller.
+  int? _activeIndex;
+
+  /// Holds the tab bodies' focus, so a tab switch can drop it.
+  final FocusScopeNode _bodyFocus = FocusScopeNode(debugLabel: 'hub tabs');
+
+  /// Collapsed because a tab field is focused with the keyboard up.
+  bool _keyboardCollapsed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _bodyFocus.addListener(_syncKeyboard);
+  }
+
+  @override
+  void didChangeMetrics() => _syncKeyboard();
+
+  /// The Scaffold strips the keyboard inset from its body's MediaQuery, so
+  /// read it from the view itself.
+  void _syncKeyboard() {
+    if (!mounted) return;
+    final view = View.maybeOf(context);
+    final inset = view != null && view.viewInsets.bottom > 0;
+    // Entered by typing in a tab; left only once the keyboard has gone (not
+    // when the focus goes — the keyboard is still sliding away then).
+    final keyboard = _keyboardCollapsed ? inset : inset && _bodyFocus.hasFocus;
+    if (keyboard && !_keyboardCollapsed) {
+      _keyboardCollapsed = true;
+      // At once, in the same frame as the inset (the keyboard's own slide
+      // is the motion): an animated collapse would overflow the tab body
+      // for its first frames.
+      _wantCollapsed = true;
+      _expand.value = 0;
+    } else if (!keyboard && _keyboardCollapsed) {
+      _keyboardCollapsed = false;
+      final i = _tabs?.index;
+      final m = i == null ? null : _metrics[i];
+      final keep = i != null &&
+          (_collapsedByTab[i] ?? false) &&
+          m != null &&
+          !_nothingToScroll(m) &&
+          m.pixels > m.minScrollExtent;
+      _setCollapsed(keep);
+    }
+  }
+
   TabController? _tabs;
 
   @override
@@ -129,19 +202,29 @@ class _ShellBodyState extends State<_ShellBody>
     if (identical(next, _tabs)) return;
     _tabs?.removeListener(_onTabChanged);
     _tabs = next..addListener(_onTabChanged);
+    _activeIndex = next.index;
+    widget.primaryScrollController?.activeTab = next.index;
   }
 
   @override
   void dispose() {
     _tabs?.removeListener(_onTabChanged);
+    WidgetsBinding.instance.removeObserver(this);
+    _bodyFocus.removeListener(_syncKeyboard);
     _expand.dispose();
+    _bodyFocus.dispose();
     super.dispose();
   }
 
   void _onTabChanged() {
     final c = _tabs;
-    if (c == null || c.indexIsChanging) return;
+    if (c == null) return;
+    // Leaving a tab drops its keyboard at once (M-a).
+    if (_bodyFocus.hasFocus) FocusManager.instance.primaryFocus?.unfocus();
+    if (c.indexIsChanging) return;
     final i = c.index;
+    _activeIndex = i;
+    widget.primaryScrollController?.activeTab = i;
     final m = _metrics[i];
     // Back to a tab left collapsed: only if it can still be left (it still
     // has something to scroll and is not at its top).
@@ -170,6 +253,8 @@ class _ShellBodyState extends State<_ShellBody>
   }
 
   void _setCollapsed(bool collapsed) {
+    // The keyboard holds it collapsed until it has gone (see _syncKeyboard).
+    if (!collapsed && _keyboardCollapsed) return;
     _wantCollapsed = collapsed;
     final target = collapsed ? 0.0 : 1.0;
     // Notifications can arrive during layout: never drive the animation (and
@@ -198,7 +283,7 @@ class _ShellBodyState extends State<_ShellBody>
   /// the header is never out of reach.
   void _escapeIfStuck(int index) {
     final m = _metrics[index];
-    if (m == null || _tabs?.index != index) return;
+    if (m == null || _tabs?.index != index || _keyboardCollapsed) return;
     if (_wantCollapsed && _nothingToScroll(m)) {
       _collapsedByTab[index] = false;
       _setCollapsed(false);
@@ -252,6 +337,7 @@ class _ShellBodyState extends State<_ShellBody>
 
   @override
   Widget build(BuildContext context) {
+    final primary = widget.primaryScrollController;
     return Column(
       children: [
         AnimatedBuilder(
@@ -288,23 +374,83 @@ class _ShellBodyState extends State<_ShellBody>
         ),
         _EdgeFadeTabBar(tabs: widget.tabs),
         Expanded(
-          child: TabBarView(
-            children: [
-              for (var i = 0; i < widget.children.length; i++)
-                _KeepAlive(
-                  child: NotificationListener<ScrollMetricsNotification>(
-                    onNotification: (n) => _onMetrics(i, n),
-                    child: NotificationListener<ScrollNotification>(
-                      onNotification: (n) => _onScroll(i, n),
-                      child: widget.children[i],
+          child: FocusScope(
+            node: _bodyFocus,
+            child: TabBarView(
+              children: [
+                for (var i = 0; i < widget.children.length; i++)
+                  _KeepAlive(
+                    child: _TabMarker(
+                      index: i,
+                      child: _withPrimary(
+                        primary,
+                        NotificationListener<ScrollMetricsNotification>(
+                          onNotification: (n) => _onMetrics(i, n),
+                          child: NotificationListener<ScrollNotification>(
+                            onNotification: (n) => _onScroll(i, n),
+                            child: widget.children[i],
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ],
     );
+  }
+}
+
+Widget _withPrimary(ScrollController? primary, Widget child) => primary == null
+    ? child
+    : PrimaryScrollController(controller: primary, child: child);
+
+/// Marks which tab a scroll position lives in (see [ActiveTabScrollController]).
+class _TabMarker extends StatelessWidget {
+  const _TabMarker({required this.index, required this.child});
+  final int index;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => child;
+}
+
+/// The hub tabs' primary scroll controller (review 6, M-c). Every kept-alive
+/// tab's list attaches to it; [animateTo] / [jumpTo] — iOS's tap-the-status-
+/// bar-to-top among them — move only the list of the tab on screen
+/// ([activeTab], kept by [CollapsingTabShell]), so the other tabs keep their
+/// own offsets. Platform-neutral: nothing calls it on Android.
+class ActiveTabScrollController extends ScrollController {
+  ActiveTabScrollController({super.debugLabel});
+
+  /// The tab on screen (set by the shell).
+  int? activeTab;
+
+  int? _tabOf(ScrollPosition p) {
+    final ctx = p.context.storageContext;
+    if (!ctx.mounted) return null;
+    return ctx.findAncestorWidgetOfExactType<_TabMarker>()?.index;
+  }
+
+  Iterable<ScrollPosition> get _active =>
+      positions.where((p) => activeTab == null || _tabOf(p) == activeTab);
+
+  @override
+  Future<void> animateTo(double offset,
+      {required Duration duration, required Curve curve}) async {
+    await Future.wait<void>([
+      for (final p in _active)
+        p.animateTo(offset, duration: duration, curve: curve),
+    ]);
+  }
+
+  @override
+  void jumpTo(double value) {
+    for (final p in _active.toList()) {
+      p.jumpTo(value);
+    }
   }
 }
 

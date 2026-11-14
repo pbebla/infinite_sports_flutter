@@ -420,6 +420,11 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
 
   /// The header's ONE deadline tick (release report #8): the big countdown
   /// and the collapsed bar's slim line both read it — never a second timer.
+  /// The tabs' primary scroll controller, also put above the Scaffold (the
+  /// iOS status-bar tap's source): a scroll-to-top moves only the tab on
+  /// screen, never every kept-alive tab (review 6, M-c).
+  final ActiveTabScrollController _primaryScroll = ActiveTabScrollController();
+
   late final FantasyDeadlineClock _deadlineClock =
       FantasyDeadlineClock(nowUtc: widget.nowUtc);
 
@@ -854,6 +859,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     _alertForTabs.close();
     _accessForTabs.close();
     _deadlineClock.dispose();
+    _primaryScroll.dispose();
     _draft?.dispose();
     super.dispose();
   }
@@ -970,17 +976,21 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         newsStates: widget.newsStates,
         leaderboardsFeeds: widget.leaderboardsFeeds,
         deadlineClock: _deadlineClock,
+        primaryScroll: _primaryScroll,
       );
     } else {
       body = const _HubSkeleton(key: ValueKey('skeleton'));
     }
-    return Scaffold(
-      appBar: AppBar(title: const Text('Infinite Fantasy')),
-      // Single fade reveal: skeleton until config+players+manager have ALL
-      // arrived, then the whole hub fades in at once.
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 300),
-        child: body,
+    return PrimaryScrollController(
+      controller: _primaryScroll,
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Infinite Fantasy')),
+        // Single fade reveal: skeleton until config+players+manager have ALL
+        // arrived, then the whole hub fades in at once.
+        body: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          child: body,
+        ),
       ),
     );
   }
@@ -1041,12 +1051,16 @@ class _HubBody extends StatelessWidget {
     required this.onFocusHandled,
     required this.onOpenPlayer,
     required this.deadlineClock,
+    required this.primaryScroll,
     this.newsStates,
     this.leaderboardsFeeds,
   });
 
   /// The hub's one deadline tick, shared by both header faces.
   final FantasyDeadlineClock deadlineClock;
+
+  /// The tabs' primary scroll controller (see [ActiveTabScrollController]).
+  final ActiveTabScrollController primaryScroll;
 
   final String sport;
   final String season;
@@ -1113,6 +1127,7 @@ class _HubBody extends StatelessWidget {
     // active tab scrolls; the deadline stays on screen in both faces.
     return CollapsingTabShell(
       initialIndex: initialTab.index,
+      primaryScrollController: primaryScroll,
       tabs: const ['My Team', 'Players', 'Leaderboards', 'News', 'Rules'],
       expandedHeader: Padding(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
