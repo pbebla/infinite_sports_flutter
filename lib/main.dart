@@ -19,6 +19,7 @@ import 'package:infinite_sports_flutter/misc/season_pointers.dart';
 import 'package:infinite_sports_flutter/misc/server_time.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/follow_store.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
@@ -210,17 +211,18 @@ Future<void> _handleGoogleSignIn(BuildContext context) async {
   final user = credential.user;
   if (user == null) return;
 
-  var usersNodeExists = false;
+  // Fresh reads (Task 3, #6/#7): server-first. An existing node counts from
+  // any source; "missing" only when the server said so. Unknown (the saved
+  // copy said missing, or the read failed) leaves the decision to Firebase's
+  // own new-user flag, so a returning fan is never re-onboarded (nor their
+  // name re-written) on a stale or failed read — never a reason to block
+  // sign-in either.
+  bool? usersNodeExists;
   try {
-    final snap =
-        (await FirebaseDatabase.instance.ref('Users/${user.uid}').once())
-            .snapshot;
-    usersNodeExists = snap.exists;
+    usersNodeExists =
+        usersNodeFromRead(await serverFirstValue('Users/${user.uid}'));
   } catch (_) {
-    // Network hiccup reading the node: fall through with usersNodeExists
-    // false, which only means the (harmless, .update()-based) base-profile
-    // write below might redundantly re-run for an existing user — never a
-    // reason to block sign-in.
+    usersNodeExists = null;
   }
 
   final isNewUser = isNewSignInUser(
@@ -300,17 +302,18 @@ Future<void> _handleAppleSignIn(BuildContext context) async {
   final user = credential.user;
   if (user == null) return;
 
-  var usersNodeExists = false;
+  // Fresh reads (Task 3, #6/#7): server-first. An existing node counts from
+  // any source; "missing" only when the server said so. Unknown (the saved
+  // copy said missing, or the read failed) leaves the decision to Firebase's
+  // own new-user flag, so a returning fan is never re-onboarded (nor their
+  // name re-written) on a stale or failed read — never a reason to block
+  // sign-in either.
+  bool? usersNodeExists;
   try {
-    final snap =
-        (await FirebaseDatabase.instance.ref('Users/${user.uid}').once())
-            .snapshot;
-    usersNodeExists = snap.exists;
+    usersNodeExists =
+        usersNodeFromRead(await serverFirstValue('Users/${user.uid}'));
   } catch (_) {
-    // Network hiccup reading the node: fall through with usersNodeExists
-    // false, which only means the (harmless, .update()-based) base-profile
-    // write below might redundantly re-run for an existing user — never a
-    // reason to block sign-in.
+    usersNodeExists = null;
   }
 
   final isNewUser = isNewSignInUser(
@@ -476,9 +479,10 @@ class _MyHomePageState extends State<MyHomePage> {
     // shows its notice and signs the person out (final-review fix 1).
     final gate = await _showAboutYouIfIncomplete(user.uid);
     if (!gate.showsFavorites) return;
-    if (await prefs.hasAnswered(user.uid)) return;
-    final answered = await prefs.serverFavorites(user.uid);
-    if (answered != null) return; // already has favorites recorded
+    // true = already answered; null = could not confirm "not answered" with
+    // the server (fresh reads, Task 3) — ask again next launch, never re-ask
+    // on a stale or failed read.
+    if (await prefs.favoritesAnswered(user.uid) != false) return;
     final ctx = mainContext;
     if (ctx != null && mounted) {
       Navigator.push(ctx,
@@ -506,15 +510,20 @@ class _MyHomePageState extends State<MyHomePage> {
   /// neither page — the merged-account watcher handles it.
   Future<OnboardingGateDecision> _showAboutYouIfIncomplete(String uid) async {
     dynamic usersNode;
+    OnboardingGateDecision decision;
     try {
-      final snap =
-          (await FirebaseDatabase.instance.ref('Users/$uid').once()).snapshot;
-      usersNode = snap.value;
+      // Fresh reads (Task 3, #8): server-first. "Completed" and merged are
+      // trusted from any source; "not completed" only blocks the fan behind
+      // the mandatory page when the server said so — otherwise
+      // notCheckedYet: let them in, ask again next launch.
+      final read = await serverFirstValue('Users/$uid');
+      usersNode = read.value;
+      decision =
+          onboardingGateDecisionForRead(usersNode, fromServer: read.fromServer);
     } catch (_) {
       // network hiccup: don't block app entry over this check
       return OnboardingGateDecision.profileComplete;
     }
-    final decision = onboardingGateDecisionFor(usersNode);
     if (!decision.showsAboutYou) return decision;
     final ctx = mainContext;
     if (ctx == null || !ctx.mounted) return decision;
