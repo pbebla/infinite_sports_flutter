@@ -302,7 +302,7 @@ String? marketAddReason(
       MarketAddAvailability.ineligible =>
         'Guest player — not eligible for fantasy.',
       MarketAddAvailability.positionFull =>
-        '${position.db} slots are full — remove someone first.',
+        '${position.short} slots are full — remove someone first.',
       MarketAddAvailability.unaffordable =>
         'Over budget — free up some money first.',
       MarketAddAvailability.addable || MarketAddAvailability.inSquad => null,

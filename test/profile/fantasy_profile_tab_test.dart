@@ -1431,7 +1431,7 @@ void main() {
 
       expect(requestedWeeks.last.$1, _name);
       expect(requestedWeeks.last.$2, [1, 2, 3, 4, 5, 6, 7, 8]);
-      expect(find.text('Ishtar · Defender'), findsOneWidget);
+      expect(find.text('Ishtar · Fantasy: DEF'), findsOneWidget);
       expect(find.text('\$7.5M'), findsOneWidget);
       expect(find.text('▲ \$0.5M this week'), findsOneWidget);
       expect(find.text('64'), findsOneWidget); // total pts

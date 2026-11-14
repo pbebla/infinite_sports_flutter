@@ -499,7 +499,7 @@ class _SheetMoveRow extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    '${p.position.db} · ${p.teamName}',
+                    '${p.position.short} · ${p.teamName}',
                     softWrap: true,
                     style: TextStyle(
                       fontSize: 12,

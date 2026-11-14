@@ -968,11 +968,7 @@ class _NeedsNewSpotStrip extends StatelessWidget {
   final void Function(SquadPick pick) onSwap;
   final void Function(SquadPick pick) onRemove;
 
-  static String _nowA(FantasyPosition p) => switch (p) {
-        FantasyPosition.gk => 'Now a goalkeeper',
-        FantasyPosition.def => 'Now a defender',
-        FantasyPosition.att => 'Now an attacker',
-      };
+  static String _nowA(FantasyPosition p) => 'Now ${p.withArticle}';
 
   @override
   Widget build(BuildContext context) {

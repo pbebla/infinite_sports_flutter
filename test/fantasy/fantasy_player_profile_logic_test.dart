@@ -335,9 +335,9 @@ void main() {
     });
 
     test('position labels', () {
-      expect(positionLabel(FantasyPosition.gk), 'Goalkeeper');
-      expect(positionLabel(FantasyPosition.def), 'Defender');
-      expect(positionLabel(FantasyPosition.att), 'Attacker');
+      expect(FantasyPosition.gk.long, 'Goalkeeper');
+      expect(FantasyPosition.def.long, 'Defender');
+      expect(FantasyPosition.att.long, 'Attacker');
     });
   });
 

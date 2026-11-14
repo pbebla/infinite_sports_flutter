@@ -819,16 +819,14 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
                 children: [
                   for (final (label, pos) in [
                     ('All', null),
-                    ('GK', FantasyPosition.gk),
-                    ('DEF', FantasyPosition.def),
-                    ('ATT', FantasyPosition.att),
+                    for (final p in FantasyPosition.values) (p.short, p),
                   ]) ...[
                     _FilterPill(
                       key: ValueKey('market_pos_$label'),
                       selected: _positionFilter == pos,
                       semanticsLabel: label == 'All'
                           ? 'All positions'
-                          : '${positionLabel(pos!)}s',
+                          : pos!.longPlural,
                       onTap: () => setState(() {
                         _positionFilter = pos;
                         _reorder(atTop: true);
@@ -962,7 +960,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
                   ),
                 ),
                 Text(
-                  '${p.position.db} · ${p.teamName}',
+                  '${p.position.short} · ${p.teamName}',
                   softWrap: true,
                   style: TextStyle(
                     fontSize: 11.5,

@@ -146,7 +146,7 @@ class NewsPlayerCardView extends StatelessWidget {
                     Text.rich(
                       TextSpan(
                         text: [
-                          card.position.db,
+                          card.position.short,
                           if (card.team.isNotEmpty) card.team,
                           formatMoneyTenths(card.priceTenths),
                         ].join(' · '),
@@ -307,7 +307,7 @@ class NewsPlayerCompactRow extends StatelessWidget {
                   color: scheme.outlineVariant.withValues(alpha: 0.7)),
             ),
             child: Text(
-              card.position.db,
+              card.position.short,
               style: TextStyle(
                 fontSize: 10.5,
                 fontWeight: FontWeight.w800,

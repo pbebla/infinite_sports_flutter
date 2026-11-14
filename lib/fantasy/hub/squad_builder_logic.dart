@@ -232,7 +232,7 @@ String squadAlertText({
   required String deadline,
   required bool freeThisWeek,
 }) {
-  final parts = [for (final c in changes) '${c.player} moved to ${c.to.db}'];
+  final parts = [for (final c in changes) '${c.player} moved to ${c.to.short}'];
   final head = parts.length <= 1
       ? parts.join()
       : '${parts.sublist(0, parts.length - 1).join(', ')} and ${parts.last}';
@@ -472,16 +472,15 @@ List<String> issueSentences({
           : 'Pick $want $plural — you have $got.');
     }
 
-    need(FantasyPosition.gk, false, cfg.startersGk, 'a goalkeeper',
-        'goalkeepers');
-    need(FantasyPosition.def, false, cfg.startersDef, 'a defender',
-        'defenders');
-    need(FantasyPosition.att, false, cfg.startersAtt, 'an attacker',
-        'attackers');
-    need(FantasyPosition.def, true, cfg.benchDef, 'a bench defender',
-        'bench defenders');
-    need(FantasyPosition.att, true, cfg.benchAtt, 'a bench attacker',
-        'bench attackers');
+    const gk = FantasyPosition.gk, def = FantasyPosition.def;
+    const att = FantasyPosition.att;
+    need(gk, false, cfg.startersGk, gk.withArticle, gk.nounPlural);
+    need(def, false, cfg.startersDef, def.withArticle, def.nounPlural);
+    need(att, false, cfg.startersAtt, att.withArticle, att.nounPlural);
+    need(def, true, cfg.benchDef, 'a bench ${def.noun}',
+        'bench ${def.nounPlural}');
+    need(att, true, cfg.benchAtt, 'a bench ${att.noun}',
+        'bench ${att.nounPlural}');
   }
 
   // The engine's own overBudget (pick prices vs the bare budget) is NOT
@@ -518,11 +517,7 @@ List<String> issueSentences({
 }
 
 /// "Pick a goalkeeper" / "Pick a defender" / "Pick an attacker" sheet titles.
-String pickerTitle(FantasyPosition pos) => switch (pos) {
-      FantasyPosition.gk => 'Pick a goalkeeper',
-      FantasyPosition.def => 'Pick a defender',
-      FantasyPosition.att => 'Pick an attacker',
-    };
+String pickerTitle(FantasyPosition pos) => 'Pick ${pos.withArticle}';
 
 /// Two-letter initials for the avatar fallback (photos never gate content).
 String initialsFor(String name) {

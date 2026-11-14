@@ -1,5 +1,6 @@
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/playing_position.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/misc/season_title.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
@@ -293,7 +294,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     }
     else if (widget.sport == "AFC San Jose") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
-        DataCell(Text(key.position)),
+        DataCell(Text(formatPlayingPosition(key.position))),
         DataCell(Center(child: Text(key.number),)),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           openPlayerProfileById(context, uid: key.uid, name: key.name);

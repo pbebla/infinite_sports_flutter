@@ -502,7 +502,7 @@ void main() {
     await emitAll(tester);
 
     expect(find.text(_name), findsOneWidget);
-    expect(find.text('Ishtar · Defender #3'), findsOneWidget);
+    expect(find.text('Ishtar · #3 · Fantasy: DEF'), findsOneWidget);
     expect(find.text('\$7.5M'), findsWidgets);
     expect(find.text('▲ \$0.5M this week'), findsOneWidget);
     expect(find.text('64'), findsOneWidget); // total pts

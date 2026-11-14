@@ -10,6 +10,43 @@ enum FantasyPosition {
 
   String get db => switch (this) { gk => 'GK', def => 'DEF', att => 'ATT' };
 
+  // ── Display vocabulary (release report #11) ─────────────────────────────
+  // The ONE source of every fantasy position word shown to a fan. The
+  // fantasy group is NOT the player's own playing position (registration's
+  // "Striker" etc. — see misc/playing_position.dart); never mix the two.
+  // Display only: [db] stays the stored key.
+
+  /// Chips, filters, table cells and badges: GK / DEF / ATT.
+  String get short => switch (this) { gk => 'GK', def => 'DEF', att => 'ATT' };
+
+  /// Where a full word is spelled out (headings): Goalkeeper / Defender /
+  /// Attacker.
+  String get long => switch (this) {
+        gk => 'Goalkeeper',
+        def => 'Defender',
+        att => 'Attacker',
+      };
+
+  /// Goalkeepers / Defenders / Attackers.
+  String get longPlural => '${long}s';
+
+  /// The same word inside a sentence: goalkeeper / defender / attacker.
+  String get noun => long.toLowerCase();
+
+  /// goalkeepers / defenders / attackers.
+  String get nounPlural => '${noun}s';
+
+  /// "a goalkeeper" / "a defender" / "an attacker".
+  String get withArticle => this == att ? 'an $noun' : 'a $noun';
+
+  /// "1 goalkeeper", "2 defenders".
+  String count(int n) => '$n ${n == 1 ? noun : nounPlural}';
+
+  /// Outside the Fantasy hub (profile, league game, search) and next to a
+  /// playing position: "Fantasy: ATT", so it can't pass for the position a
+  /// player plays.
+  String get fantasyTag => 'Fantasy: $short';
+
   static FantasyPosition parse(String s) => switch (s) {
         'GK' => gk,
         'DEF' => def,

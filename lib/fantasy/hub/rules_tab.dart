@@ -95,9 +95,12 @@ class _RulesBody extends StatelessWidget {
           child: _Body(
             'Build a squad of ${cfg.squadSize} real league players within a '
             '${formatMoneyTenths(cfg.budgetTenths)} budget. '
-            '${cfg.startersGk} goalkeeper, ${cfg.startersDef} defenders and '
-            '${cfg.startersAtt} attackers start; ${cfg.benchDef} defender and '
-            '${cfg.benchAtt} attacker sit on your bench and normally score '
+            '${FantasyPosition.gk.count(cfg.startersGk)}, '
+            '${FantasyPosition.def.count(cfg.startersDef)} and '
+            '${FantasyPosition.att.count(cfg.startersAtt)} start; '
+            '${FantasyPosition.def.count(cfg.benchDef)} and '
+            '${FantasyPosition.att.count(cfg.benchAtt)} sit on your bench and '
+            'normally score '
             '${cfg.benchFactorPercent}% of their points. Pick a captain — '
             'their points count ×${cfg.captainMultiplier} — and a '
             'vice-captain who wears the armband any week the captain does '
@@ -514,7 +517,7 @@ class _ScoringTable extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 6),
                 child:
-                    Text(p.db, textAlign: TextAlign.center, style: head),
+                    Text(p.short, textAlign: TextAlign.center, style: head),
               ),
           ],
         ),

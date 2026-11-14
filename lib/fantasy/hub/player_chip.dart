@@ -204,7 +204,7 @@ class FantasyPlayerChip extends StatelessWidget {
                   const SizedBox(height: 1),
                   Text(
                     [
-                      if (position != null) position!.db,
+                      if (position != null) position!.short,
                       if (priceTenths != null)
                         formatMoneyTenths(priceTenths!),
                       if (isCaptain) '×$captainMultiplier',
@@ -346,7 +346,7 @@ class FantasyEmptySlot extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              '+ ${position.db}',
+              '+ ${position.short}',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,

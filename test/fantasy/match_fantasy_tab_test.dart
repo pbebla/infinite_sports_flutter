@@ -256,7 +256,7 @@ void main() {
     await emitAll(tester, node: gameNode(status: 0));
     expect(find.byKey(const ValueKey('match_fantasy_prekickoff')),
         findsOneWidget);
-    expect(find.text('Dana (DEF)'), findsNothing);
+    expect(find.text('Dana (Fantasy: DEF)'), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey('match_fantasy_open_hub')));
     expect(hubOpens, 1);
@@ -269,18 +269,18 @@ void main() {
 
     // Ranked: Dana 12, then the Alex/Gale tie at 10, Yara 5.
     expect(find.text('+12'), findsOneWidget);
-    expect(find.text('Dana (DEF)'), findsOneWidget);
+    expect(find.text('Dana (Fantasy: DEF)'), findsOneWidget);
     expect(find.text('+10'), findsNWidgets(2));
-    expect(find.text('Yara (DEF)'), findsOneWidget);
+    expect(find.text('Yara (Fantasy: DEF)'), findsOneWidget);
     // Wren is absent: omitted entirely despite the goal event.
     expect(find.textContaining('Wren'), findsNothing);
     // Zed (0 points) hides behind the collapsed "No returns yet".
     expect(find.text('No returns yet (1)'), findsOneWidget);
-    expect(find.text('Zed (DEF)'), findsNothing);
+    expect(find.text('Zed (Fantasy: DEF)'), findsNothing);
     await tester
         .tap(find.byKey(const ValueKey('match_fantasy_scoreless_toggle')));
     await settle(tester);
-    expect(find.text('Zed (DEF)'), findsOneWidget);
+    expect(find.text('Zed (Fantasy: DEF)'), findsOneWidget);
     // The raw-points disclaimer is always on the tab.
     expect(find.byKey(const ValueKey('match_fantasy_footnote')),
         findsOneWidget);
@@ -329,7 +329,7 @@ void main() {
     expect(find.textContaining('Wolves forfeited.'), findsOneWidget);
     // Sharks: four present rostered players, +1 each, stray stats ignored.
     expect(find.text('+1'), findsNWidgets(4));
-    for (final name in ['Alex (ATT)', 'Gale (GK)', 'Dana (DEF)', 'Yara (DEF)']) {
+    for (final name in ['Alex (Fantasy: ATT)', 'Gale (Fantasy: GK)', 'Dana (Fantasy: DEF)', 'Yara (Fantasy: DEF)']) {
       expect(find.text(name), findsOneWidget);
     }
     // Wolves forfeited: no rows, no "No returns yet" for Zed.
@@ -440,11 +440,11 @@ void main() {
       await pumpTab(tester);
       await emitAll(tester);
 
-      await tester.tap(find.text('Dana (DEF)'));
+      await tester.tap(find.text('Dana (Fantasy: DEF)'));
       await tester.pump();
       expect(profileOpens, [opened('Dana')]);
 
-      await tester.tap(find.text('Yara (DEF)'));
+      await tester.tap(find.text('Yara (Fantasy: DEF)'));
       await tester.pump();
       expect(profileOpens, [opened('Dana'), opened('Yara')]);
     });
@@ -467,7 +467,7 @@ void main() {
       await settle(tester);
       // The toggle itself opens nothing.
       expect(profileOpens, hasLength(2));
-      await tester.tap(find.text('Zed (DEF)'));
+      await tester.tap(find.text('Zed (Fantasy: DEF)'));
       await tester.pump();
       expect(profileOpens.last, opened('Zed'));
     });

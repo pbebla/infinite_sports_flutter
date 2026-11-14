@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/playing_position.dart';
 import 'package:infinite_sports_flutter/misc/sport_icon.dart';
 import 'package:infinite_sports_flutter/misc/profile_stat_priority.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/stat_icon.dart';
@@ -177,13 +178,15 @@ class _StatsTabState extends State<StatsTab> {
         );
     if (comp.team.isEmpty) {
       return Text(
-        comp.position.isNotEmpty ? comp.position : comp.sport,
+        playingPositionLabel(comp.position).isNotEmpty
+            ? playingPositionLabel(comp.position)
+            : comp.sport,
         style: style,
       );
     }
-    final text = comp.position.isNotEmpty
-        ? '${comp.team} · ${comp.position}'
-        : comp.team;
+    // His registration position, labelled (report #11).
+    final position = playingPositionLabel(comp.position);
+    final text = position.isNotEmpty ? '${comp.team} · $position' : comp.team;
     return Row(
       children: [
         if (comp.teamLogoUrl.isNotEmpty) ...[

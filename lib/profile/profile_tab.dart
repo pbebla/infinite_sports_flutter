@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/playing_position.dart';
 import 'package:infinite_sports_flutter/misc/sport_icon.dart';
 import 'package:infinite_sports_flutter/insiders/insider_tier_colors.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
@@ -329,14 +330,18 @@ class ProfileTab extends StatelessWidget {
                                     fontWeight: FontWeight.w700,
                                   ),
                         ),
-                        if (current!.position.isNotEmpty ||
+                        if (playingPositionLabel(current!.position)
+                                .isNotEmpty ||
                             (currentTeamNumber?.isNotEmpty ?? false))
                           Wrap(
                             spacing: 8,
                             children: [
-                              if (current!.position.isNotEmpty)
+                              // His registration position, labelled so it
+                              // can't pass for a fantasy group (report #11).
+                              if (playingPositionLabel(current!.position)
+                                  .isNotEmpty)
                                 Text(
-                                  current!.position,
+                                  playingPositionLabel(current!.position),
                                   style: Theme.of(context)
                                       .textTheme
                                       .bodyMedium
