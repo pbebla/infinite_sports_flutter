@@ -1,13 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
-import 'package:infinite_sports_flutter/registration/live_registration_config.dart';
 import 'package:infinite_sports_flutter/registration/my_registrations.dart';
 import 'package:infinite_sports_flutter/registration/registration_chip.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
-import 'package:infinite_sports_flutter/registration/registration_path_page.dart';
-import 'package:infinite_sports_flutter/registration/registration_service.dart';
-import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
+import 'package:infinite_sports_flutter/registration/registration_open.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 
 /// The list a "couldn't load" registration list shows (with Retry).
@@ -28,17 +25,10 @@ const String kRegistrationsCouldNotLoad =
 /// One loading state for both groups (no pop-in); a failed read is
 /// "couldn't load" with Retry.
 class RegistrationEntryPage extends StatefulWidget {
-  const RegistrationEntryPage({
-    super.key,
-    this.registrationsOverride,
-    this.openStatusOverride,
-  });
+  const RegistrationEntryPage({super.key, this.registrationsOverride});
 
-  /// Test seams: the live registrations (null = watchMyRegistrations) and
-  /// what tapping one of MY registrations does (null = the status page).
+  /// Test seam: the live registrations (null = watchMyRegistrations).
   final Stream<MyRegistrations> Function()? registrationsOverride;
-  final void Function(String regId, RegistrationConfig config)?
-      openStatusOverride;
 
   @override
   State<RegistrationEntryPage> createState() => _RegistrationEntryPageState();
@@ -59,51 +49,29 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
   /// The registration being checked with the server (one tap at a time).
   String? _opening;
 
-  void _openMine(MyRegistration m) {
-    final override = widget.openStatusOverride;
-    if (override != null) {
-      override(m.regId, m.config);
-      return;
-    }
-    // The status page follows the live config and submission itself.
-    Navigator.push(context, MaterialPageRoute(builder: (_) {
-      return RegistrationStatusPage(regId: m.regId, config: m.config);
-    }));
-  }
-
-  /// Fresh reads (Task 3, #74, and Task 4's entry-page fee): the list above
-  /// is live, but its first answer can be the phone's saved copy, so the
-  /// tile only shows what is open; the config (open state, fee, paths) that
-  /// goes into the form and the payment screen is re-read SERVER-FIRST here,
-  /// together with "already registered?" (one barrier, one 8 s bound). A
-  /// saved copy or a failed read shows "couldn't check".
+  /// Every tap — one of MY registrations or an open one — confirms with
+  /// the server first (RegistrationOpen.open → checkEntry) and follows its
+  /// outcome (way back fix round, Important 1: the list's config can be the
+  /// phone's saved copy, so it never opens the status page on its own).
+  /// One tap at a time, with a spinner on the tapped row.
   Future<void> _openRegistration(String regId) async {
     if (_opening != null) return;
     setState(() => _opening = regId);
-    final entry = await RegistrationService.checkEntry(regId);
-    if (!mounted) return;
-    setState(() => _opening = null);
-    final config = entry.config;
-    switch (entry.route) {
-      case RegistrationRoute.status:
-        Navigator.push(context, MaterialPageRoute(builder: (_) {
-          return RegistrationStatusPage(regId: regId, config: config!);
-        }));
-      case RegistrationRoute.register:
-        Navigator.push(context, MaterialPageRoute(builder: (_) {
-          return RegistrationPathPage(regId: regId, config: config!);
-        }));
-      case RegistrationRoute.closed:
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Registration is closed')));
-      case RegistrationRoute.couldNotCheck:
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text(kRegistrationCouldNotCheck)));
-      case RegistrationRoute.unavailable:
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text(kRegistrationUnavailable)));
+    try {
+      await RegistrationOpen.open(context, regId);
+    } finally {
+      if (mounted) setState(() => _opening = null);
     }
   }
+
+  Widget? _spinnerFor(String regId) => _opening == regId
+      ? SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(
+              strokeWidth: 2, color: Theme.of(context).colorScheme.primary),
+        )
+      : null;
 
   @override
   Widget build(BuildContext context) {
@@ -195,8 +163,8 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
           style: const TextStyle(fontWeight: FontWeight.bold)),
       subtitle:
           Text('Registered as: ${registrationPathLabel(m.submission.path)}'),
-      trailing: chip,
-      onTap: () => _openMine(m),
+      trailing: _spinnerFor(m.regId) ?? chip,
+      onTap: () => _openRegistration(m.regId),
     );
   }
 
@@ -219,14 +187,7 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
       title: Text(config.label,
           style: const TextStyle(fontWeight: FontWeight.bold)),
       subtitle: Text(signedIn ? feeText : 'Log in to register'),
-      trailing: _opening == regId
-          ? SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: Theme.of(context).colorScheme.primary),
-            )
-          : null,
+      trailing: _spinnerFor(regId),
       onTap: () => _openRegistration(regId),
     );
   }

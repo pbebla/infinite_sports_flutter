@@ -14,9 +14,9 @@ import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/registration/my_registrations.dart';
 import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
+import 'package:infinite_sports_flutter/registration/registration_open.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
-import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
 import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -93,7 +93,7 @@ List<String>? followHeader(
 
 /// The home registration banner (way back, owner-approved 2026-11-14): a
 /// registration the fan still owes money on (open OR closed, not removed)
-/// takes priority — "Finish your payment: <name>" with the amount, opening
+/// takes priority — "Finish your payment: `name`" with the amount, opening
 /// that registration's status page; otherwise today's "Registration open"
 /// banner; null = no banner. [mine] is null until the fan's own
 /// registrations have answered (and for signed-out fans).
@@ -124,10 +124,16 @@ List<String>? followHeader(
 /// The banner card (primary fill, white-on-primary text), both modes.
 class HomeRegistrationBanner extends StatelessWidget {
   const HomeRegistrationBanner(
-      {super.key, required this.banner, required this.onTap});
+      {super.key,
+      required this.banner,
+      required this.onTap,
+      this.busy = false});
 
   final ({String title, String subtitle, MyRegistration? owing}) banner;
   final VoidCallback onTap;
+
+  /// The tap is being checked with the server (spinner, no second tap).
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -148,7 +154,15 @@ class HomeRegistrationBanner extends StatelessWidget {
           subtitle: Text(banner.subtitle,
               style:
                   TextStyle(color: scheme.onPrimary.withValues(alpha: 0.7))),
-          onTap: onTap,
+          trailing: busy
+              ? SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: scheme.onPrimary),
+                )
+              : null,
+          onTap: busy ? null : onTap,
         ),
       ),
     );
@@ -422,20 +436,31 @@ class _FrontPageState extends State<FrontPage> {
   ({String title, String subtitle, MyRegistration? owing})? get _banner =>
       homeRegistrationBanner(mine: _myRegistrations, open: openRegistrations);
 
+  /// The owing banner's tap is being checked with the server.
+  bool _bannerChecking = false;
+
   Widget _registrationBanner(BuildContext context) {
     final banner = _banner!;
     return HomeRegistrationBanner(
       banner: banner,
-      onTap: () {
+      busy: _bannerChecking,
+      onTap: () async {
         final owing = banner.owing;
-        Navigator.push(context, MaterialPageRoute(builder: (_) {
-          // Owing: straight to that registration's status page (it follows
-          // the live config and submission; closed keeps its pay actions).
-          return owing != null
-              ? RegistrationStatusPage(
-                  regId: owing.regId, config: owing.config)
-              : const RegistrationEntryPage();
-        }));
+        if (owing == null) {
+          Navigator.push(context, MaterialPageRoute(builder: (_) {
+            return const RegistrationEntryPage();
+          }));
+          return;
+        }
+        // Way back fix round, Important 1: confirm with the server before
+        // the status page (and its pay actions) opens — the banner's config
+        // can be the phone's saved copy.
+        setState(() => _bannerChecking = true);
+        try {
+          await RegistrationOpen.open(context, owing.regId);
+        } finally {
+          if (mounted) setState(() => _bannerChecking = false);
+        }
       },
     );
   }

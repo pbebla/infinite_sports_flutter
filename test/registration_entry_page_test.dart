@@ -11,6 +11,8 @@ import 'package:infinite_sports_flutter/misc/utility.dart' show signedIn;
 import 'package:infinite_sports_flutter/registration/my_registrations.dart';
 import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
+import 'package:infinite_sports_flutter/registration/registration_open.dart';
+import 'package:infinite_sports_flutter/registration/registration_service.dart';
 
 RegistrationConfig _config(String sport, String status, {num fee = 60}) =>
     RegistrationConfig(
@@ -55,13 +57,26 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final opened = <String>[];
+    // The real tap path: RegistrationOpen.open -> the (seamed) server check
+    // -> the (seamed) status page. Only what the CHECK returns can open it.
+    RegistrationOpen.checkOverride = (regId) async {
+      opened.add('checked:$regId');
+      return (route: RegistrationRoute.status, config: closedMine);
+    };
+    RegistrationOpen.statusPageOverride = (regId, config) {
+      opened.add('status:$regId');
+      return const Scaffold(body: Text('status page'));
+    };
+    addTearDown(() {
+      RegistrationOpen.checkOverride = null;
+      RegistrationOpen.statusPageOverride = null;
+    });
     await tester.pumpWidget(MaterialApp(
       theme: ThemeData(brightness: Brightness.light),
       darkTheme: ThemeData(brightness: Brightness.dark),
       themeMode: mode,
       home: RegistrationEntryPage(
         registrationsOverride: () => s,
-        openStatusOverride: (regId, config) => opened.add(regId),
       ),
     ));
     await tester.pump();
@@ -95,11 +110,27 @@ void main() {
     expect(find.text('Paid'), findsOneWidget);
   });
 
-  testWidgets('tapping my registration opens its status page', (tester) async {
+  testWidgets(
+      'tapping my registration checks with the server first, then '
+      'opens its status page', (tester) async {
     final opened = await pump(tester, Stream.value(data()));
     await tester.tap(find.text(closedMine.label));
-    await tester.pump();
-    expect(opened, ['futsal']);
+    await tester.pumpAndSettle();
+    expect(opened, ['checked:futsal', 'status:futsal']);
+  });
+
+  testWidgets(
+      'a check that cannot reach the server never opens the status '
+      'page', (tester) async {
+    final opened = await pump(tester, Stream.value(data()));
+    RegistrationOpen.checkOverride = (regId) async {
+      opened.add('checked:$regId');
+      return (route: RegistrationRoute.couldNotCheck, config: null);
+    };
+    await tester.tap(find.text(closedMine.label));
+    await tester.pumpAndSettle();
+    expect(opened, ['checked:futsal']);
+    expect(find.text(kRegistrationCouldNotCheck), findsOneWidget);
   });
 
   testWidgets('one loading state, then the list (no pop-in)', (tester) async {
