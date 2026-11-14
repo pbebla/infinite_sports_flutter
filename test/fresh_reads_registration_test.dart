@@ -59,14 +59,55 @@ void main() {
           RegistrationRoute.couldNotCheck);
     });
 
-    test('a confirmed closed registration is closed', () {
+    final closed =
+        RegistrationConfig.fromFirebase({..._openConfig, 'Status': 'closed'});
+
+    test('way back: a closed registration with NO submission is closed', () {
       expect(
           registrationRoute(
               configChecked: true,
-              config: null,
+              config: closed,
               submissionExists: false,
               submissionChecked: true),
           RegistrationRoute.closed);
+    });
+
+    test(
+        'way back: a closed registration WITH a submission opens the status '
+        'page (the fan can still see it and pay)', () {
+      expect(
+          registrationRoute(
+              configChecked: true,
+              config: closed,
+              submissionExists: true,
+              submissionChecked: true),
+          RegistrationRoute.status);
+    });
+
+    test(
+        'way back: a removed registration is unavailable, with or without '
+        'a submission', () {
+      for (final exists in [true, false]) {
+        expect(
+            registrationRoute(
+                configChecked: true,
+                config: null,
+                submissionExists: exists,
+                submissionChecked: true),
+            RegistrationRoute.unavailable);
+      }
+    });
+
+    test(
+        'way back: a closed registration whose "no submission" is not '
+        'confirmed is couldn\'t-check, never closed as a guess', () {
+      expect(
+          registrationRoute(
+              configChecked: true,
+              config: closed,
+              submissionExists: false,
+              submissionChecked: false),
+          RegistrationRoute.couldNotCheck);
     });
 
     test('an existing submission opens the status page', () {
@@ -102,26 +143,60 @@ void main() {
     });
   });
 
-  group('checkOpenRegistration (#72)', () {
+  group('checkRegistration (#72, way back)', () {
     test('the server\'s config is checked', () async {
       answers['RegistrationsPublic/r1'] =
           () => const FreshValue(_openConfig, fromServer: true);
-      final r = await RegistrationService.checkOpenRegistration('r1');
+      final r = await RegistrationService.checkRegistration('r1');
       expect(r.checked, isTrue);
       expect(r.config!.fee, 60);
+    });
+
+    test('a closed registration keeps its config (way back)', () async {
+      answers['RegistrationsPublic/r1'] = () => FreshValue(
+          {..._openConfig, 'Status': 'closed'},
+          fromServer: true);
+      final r = await RegistrationService.checkRegistration('r1');
+      expect(r.checked, isTrue);
+      expect(r.config!.isOpen, isFalse);
     });
 
     test('the saved copy is not checked', () async {
       answers['RegistrationsPublic/r1'] =
           () => const FreshValue(_openConfig, fromServer: false);
-      final r = await RegistrationService.checkOpenRegistration('r1');
+      final r = await RegistrationService.checkRegistration('r1');
       expect(r.checked, isFalse);
     });
 
     test('a failed read is not "closed"', () async {
       answers['RegistrationsPublic/r1'] = () => throw StateError('offline');
-      final r = await RegistrationService.checkOpenRegistration('r1');
+      final r = await RegistrationService.checkRegistration('r1');
       expect(r.checked, isFalse);
+    });
+  });
+
+  group('checkEntry way back', () {
+    test('closed + my submission -> status page with the config', () async {
+      answers['RegistrationsPublic/r1'] = () => FreshValue(
+          {..._openConfig, 'Status': 'closed'},
+          fromServer: true);
+      answers['Registrations/r1/Submissions/u1'] = () => const FreshValue(
+          {'Path': 'individual', 'Paid': false},
+          fromServer: true);
+      final e = await RegistrationService.checkEntry('r1');
+      expect(e.route, RegistrationRoute.status);
+      expect(e.config!.isOpen, isFalse);
+    });
+
+    test('removed -> unavailable', () async {
+      answers['RegistrationsPublic/r1'] =
+          () => const FreshValue(null, fromServer: true);
+      answers['Registrations/r1/Submissions/u1'] = () => const FreshValue(
+          {'Path': 'individual', 'Paid': false},
+          fromServer: true);
+      final e = await RegistrationService.checkEntry('r1');
+      expect(e.route, RegistrationRoute.unavailable);
+      expect(e.config, isNull);
     });
   });
 

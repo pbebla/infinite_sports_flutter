@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/registration/live_registration_config.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_path_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
@@ -64,6 +65,9 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
       case RegistrationRoute.couldNotCheck:
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text(kRegistrationCouldNotCheck)));
+      case RegistrationRoute.unavailable:
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text(kRegistrationUnavailable)));
     }
   }
 

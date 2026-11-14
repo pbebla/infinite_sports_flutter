@@ -13,14 +13,22 @@ import 'package:infinite_sports_flutter/registration/registration_models.dart';
 /// submission, and never writes on an answer the server did not confirm.
 enum SubmitOutcome { ok, alreadyRegistered, couldNotCheck, failed }
 
-/// Where a Register tap leads (fresh-reads Task 3, #72/#74).
-enum RegistrationRoute { status, register, closed, couldNotCheck }
+/// Where a Register tap leads (fresh-reads Task 3, #72/#74; way back).
+enum RegistrationRoute { status, register, closed, unavailable, couldNotCheck }
 
 /// The routing decision, pure. [configChecked]/[submissionChecked] say the
 /// answers came from the server (a saved copy or a failed read is not a
-/// fact): an existing submission (from any source) opens the status page;
-/// "not registered" only counts when the server said so; a registration's
-/// open/closed state and fee only count when the server said so.
+/// fact).
+///
+/// Owner's rule (way back, 2026-11-14): a fan who already registered is
+/// taken to their status / payment page whatever the registration's status
+/// — open OR closed. So:
+///   • a registration that no longer exists (config gone) → [unavailable];
+///   • an existing submission (from any source) → [status];
+///   • "not registered" only counts when the server said so → otherwise
+///     [couldNotCheck] (never "closed" as a guess);
+///   • no submission on a closed registration → [closed];
+///   • no submission on an open one → [register].
 RegistrationRoute registrationRoute({
   required bool configChecked,
   required RegistrationConfig? config,
@@ -28,9 +36,10 @@ RegistrationRoute registrationRoute({
   required bool submissionChecked,
 }) {
   if (!configChecked) return RegistrationRoute.couldNotCheck;
-  if (config == null || !config.isOpen) return RegistrationRoute.closed;
+  if (config == null) return RegistrationRoute.unavailable;
   if (submissionExists) return RegistrationRoute.status;
   if (!submissionChecked) return RegistrationRoute.couldNotCheck;
+  if (!config.isOpen) return RegistrationRoute.closed;
   return RegistrationRoute.register;
 }
 
@@ -90,17 +99,18 @@ class RegistrationService {
   }
 
   /// One registration's config checked against the server (fresh-reads
-  /// Task 3, #72) — the event page's Register passes this config (and its
-  /// fee) into the whole flow, so a saved copy is not enough. `config` is
-  /// null when the registration is missing or not open; `checked` is false
-  /// when the server could not confirm the answer (offline, timeout, error).
+  /// Task 3, #72) — the entry passes this config (and its fee) into the
+  /// whole flow, so a saved copy is not enough. `config` is the config
+  /// whatever its Status (way back: a registered fan reaches a CLOSED
+  /// registration's status page); null only when the registration is
+  /// missing or malformed (removed). `checked` is false when the server
+  /// could not confirm the answer (offline, timeout, error).
   static Future<({RegistrationConfig? config, bool checked})>
-      checkOpenRegistration(String regId) async {
+      checkRegistration(String regId) async {
     try {
       final r = await serverFirstValue('RegistrationsPublic/$regId');
-      final config = RegistrationConfig.fromFirebase(r.value);
       return (
-        config: config != null && config.isOpen ? config : null,
+        config: RegistrationConfig.fromFirebase(r.value),
         checked: r.fromServer,
       );
     } catch (_) {
@@ -120,7 +130,7 @@ class RegistrationService {
   static Future<({RegistrationRoute route, RegistrationConfig? config})>
       checkEntry(String regId) async {
     final checks = await Future.wait<Object>([
-      checkOpenRegistration(regId),
+      checkRegistration(regId),
       checkMySubmission(regId),
     ]);
     final open = checks[0] as ({RegistrationConfig? config, bool checked});

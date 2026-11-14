@@ -17,6 +17,7 @@ import 'package:infinite_sports_flutter/model/attendee.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
 import 'package:infinite_sports_flutter/model/myuser.dart';
 import 'package:infinite_sports_flutter/registration/registration_path_page.dart';
+import 'package:infinite_sports_flutter/registration/live_registration_config.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
 import 'package:infinite_sports_flutter/misc/ics.dart';
@@ -274,6 +275,9 @@ class _EventPageState extends State<EventPage> {
       case RegistrationRoute.couldNotCheck:
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text(kRegistrationCouldNotCheck)));
+      case RegistrationRoute.unavailable:
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text(kRegistrationUnavailable)));
       case RegistrationRoute.status:
         Navigator.push(context, MaterialPageRoute(builder: (_) {
           return RegistrationStatusPage(regId: regId, config: config!);
