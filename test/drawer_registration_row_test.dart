@@ -1,0 +1,90 @@
+// "My registration" way back: the drawer's registration row. It shows its
+// saved state at once (today's row until the fan's own registrations have
+// answered) and then: enabled with "My registrations" when the fan has a
+// registration of their own (open or closed), else today's label/state.
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/navbar.dart';
+import 'package:infinite_sports_flutter/registration/my_registrations.dart';
+import 'package:infinite_sports_flutter/registration/registration_models.dart';
+
+const _closed = RegistrationConfig(
+  targetType: 'league',
+  sport: 'Futsal',
+  season: '16',
+  status: 'closed',
+  fee: 60,
+  paymentMode: 'perPlayer',
+);
+
+MyRegistrations _mine({bool paid = false}) => MyRegistrations(mine: [
+      MyRegistration(
+          regId: 'futsal',
+          config: _closed,
+          submission:
+              RegSubmission(path: 'individual', answers: const {}, paid: paid)),
+    ], openForSignUp: const {});
+
+void main() {
+  test('before the own registrations answer: today\'s row (no waiting)', () {
+    final r = drawerRegistrationRow(
+        signedIn: true,
+        signUpsOpen: false,
+        signUpDetail: 'Sign Ups Closed',
+        hasOpenRegistrations: false,
+        mine: null);
+    expect(r.title, 'Sign Up List');
+    expect(r.subtitle, 'Sign Ups Closed');
+    expect(r.enabled, isFalse);
+    expect(r.opensRegistrationList, isFalse);
+  });
+
+  test(
+      'a closed registration of mine that I owe on: My registrations, '
+      'enabled, with the amount', () {
+    final r = drawerRegistrationRow(
+        signedIn: true,
+        signUpsOpen: false,
+        signUpDetail: 'Sign Ups Closed',
+        hasOpenRegistrations: false,
+        mine: _mine());
+    expect(r.title, 'My registrations');
+    expect(r.enabled, isTrue);
+    expect(r.opensRegistrationList, isTrue);
+    expect(r.subtitle, 'You owe ${formatOwed(60)}');
+  });
+
+  test('paid up: My registrations with today\'s detail', () {
+    final r = drawerRegistrationRow(
+        signedIn: true,
+        signUpsOpen: true,
+        signUpDetail: 'Sign Up for Futsal 17',
+        hasOpenRegistrations: true,
+        mine: _mine(paid: true));
+    expect(r.title, 'My registrations');
+    expect(r.subtitle, 'Sign Up for Futsal 17');
+    expect(r.enabled, isTrue);
+  });
+
+  test('none of my own, an open registration: today\'s row', () {
+    final r = drawerRegistrationRow(
+        signedIn: true,
+        signUpsOpen: true,
+        signUpDetail: 'Sign Up for Futsal 17',
+        hasOpenRegistrations: true,
+        mine: MyRegistrations.empty);
+    expect(r.title, 'Sign Up List');
+    expect(r.enabled, isTrue);
+    expect(r.opensRegistrationList, isTrue);
+  });
+
+  test('signed out: never enabled', () {
+    final r = drawerRegistrationRow(
+        signedIn: false,
+        signUpsOpen: true,
+        signUpDetail: 'Sign Ups Open',
+        hasOpenRegistrations: true,
+        mine: null);
+    expect(r.enabled, isFalse);
+  });
+}

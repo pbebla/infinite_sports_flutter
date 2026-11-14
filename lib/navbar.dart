@@ -1,3 +1,4 @@
+import 'dart:async';
 
 import 'dart:io';
 
@@ -16,6 +17,7 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
 import 'package:infinite_sports_flutter/playerpage.dart';
+import 'package:infinite_sports_flutter/registration/my_registrations.dart';
 import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
@@ -44,6 +46,38 @@ class NavBar extends StatefulWidget {
   @override
   State<NavBar> createState() => _NavBarState();
 }
+/// The drawer's registration row (way back, owner-approved 2026-11-14).
+/// [mine] is null until the fan's own registrations have answered: the row
+/// then shows today's state at once (the drawer never waits on the
+/// network). With a registration of their own (open or closed) the row is
+/// "My registrations", enabled, opening the registration list — with
+/// "You owe $X" when money is still owed.
+({String title, String subtitle, bool enabled, bool opensRegistrationList})
+    drawerRegistrationRow({
+  required bool signedIn,
+  required bool signUpsOpen,
+  required String signUpDetail,
+  required bool hasOpenRegistrations,
+  required MyRegistrations? mine,
+}) {
+  final hasMine = signedIn && (mine?.mine.isNotEmpty ?? false);
+  if (hasMine) {
+    final owing = mine!.firstOwing;
+    return (
+      title: 'My registrations',
+      subtitle: owing != null ? 'You owe ${formatOwed(owing.owed)}' : signUpDetail,
+      enabled: true,
+      opensRegistrationList: true,
+    );
+  }
+  return (
+    title: 'Sign Up List',
+    subtitle: signUpDetail,
+    enabled: signUpsOpen && signedIn,
+    opensRegistrationList: hasOpenRegistrations,
+  );
+}
+
 class _NavBarState extends State<NavBar> {
   String nextleague = "";
   String season = "";
@@ -64,6 +98,15 @@ class _NavBarState extends State<NavBar> {
     super.initState();
     _loadProfilePic = retrieveProfilePic();
     _getSignUpStatus = setUp();
+    // Way back: the fan's own registrations, live. Never awaited — the row
+    // shows today's state at once and updates when they answer.
+    if (signedIn) {
+      try {
+        _mineSub = watchMyRegistrations().listen((m) {
+          if (mounted) setState(() => _myRegistrations = m);
+        }, onError: (Object _) {});
+      } catch (_) {}
+    }
     final uid = FirebaseAuth.instance.currentUser?.uid;
     _insiderStream = (signedIn && uid != null)
         ? InsiderService.watchMyInsider(uid)
@@ -89,6 +132,9 @@ class _NavBarState extends State<NavBar> {
 
   final List<VoidCallback> _stopFollowing = [];
 
+  StreamSubscription<MyRegistrations>? _mineSub;
+  MyRegistrations? _myRegistrations;
+
   /// One sign-up-row refresh at a time; a change during one queues exactly
   /// one more (second review, Minor 4 — the bug class).
   late final CoalescedRefresh _signUpRow = CoalescedRefresh(_refreshSignUpRow);
@@ -98,6 +144,7 @@ class _NavBarState extends State<NavBar> {
     for (final stop in _stopFollowing) {
       stop();
     }
+    _mineSub?.cancel();
     SeasonPointers.listenable.removeListener(_signUpRow.request);
     _signUpRow.dispose();
     super.dispose();
@@ -352,16 +399,22 @@ class _NavBarState extends State<NavBar> {
                 // this resolves into below.
                 return const SkeletonListTile();
               }
-              signUpEnabled = signUpsOpen && signedIn;
+              final row = drawerRegistrationRow(
+                  signedIn: signedIn,
+                  signUpsOpen: signUpsOpen,
+                  signUpDetail: signUpDetail,
+                  hasOpenRegistrations: openRegistrations.isNotEmpty,
+                  mine: _myRegistrations);
+              signUpEnabled = row.enabled;
               return ListTile(
                 enabled: signUpEnabled,
                 leading: const ImageIcon(AssetImage("assets/events.png"), color: Colors.white,),
-                title: const Text("Sign Up List", style: TextStyle(fontWeight: FontWeight.bold),),
-                subtitle: Text(signUpDetail),
+                title: Text(row.title, style: const TextStyle(fontWeight: FontWeight.bold),),
+                subtitle: Text(row.subtitle),
                 textColor: Colors.white,
                 onTap: () {
                   Navigator.push(context, MaterialPageRoute(builder:(context) {
-                    if (openRegistrations.isNotEmpty) {
+                    if (row.opensRegistrationList) {
                       return const RegistrationEntryPage();
                     }
                     return Signup(nextleague: nextleague, season: season);
