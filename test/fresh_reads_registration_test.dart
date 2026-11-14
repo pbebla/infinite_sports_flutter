@@ -651,6 +651,44 @@ void main() {
     expect(find.text('Pay with card'), findsOneWidget);
   });
 
+  // Final round, item 4: a removed registration shows only the unavailable
+  // message — never the fee-changed notice above it.
+  testWidgets('removed after a fee change: only the unavailable message',
+      (tester) async {
+    const config = RegistrationConfig(
+      targetType: 'league',
+      sport: 'Futsal',
+      season: '16',
+      status: 'open',
+      fee: 60,
+      paymentMode: 'perPlayer',
+      venmo: true,
+    );
+    const sub = RegSubmission(path: 'individual', answers: {});
+    final live = StreamController<RegistrationConfig?>();
+    await tester.pumpWidget(MaterialApp(
+      home: PaymentScreen(
+        regId: 'r1',
+        config: config,
+        amount: 60,
+        amountFor: (c) => amountOwed(config: c, submission: sub),
+        submissionStream: Stream.value(sub),
+        configStream: live.stream,
+      ),
+    ));
+    await tester.pump();
+    live.add(config.copyWithForTest(fee: 75));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text(kRegistrationFeeChanged), findsOneWidget);
+    live.add(null);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text(kRegistrationUnavailable), findsOneWidget);
+    expect(find.text(kRegistrationFeeChanged), findsNothing);
+    await live.close();
+  });
+
   group('status page follows the live config', _statusPageLiveConfigTests);
 }
 

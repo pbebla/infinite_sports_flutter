@@ -481,7 +481,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
       padding: EdgeInsets.fromLTRB(
           15, 15, 15, 15 + MediaQuery.paddingOf(context).bottom),
       children: [
-        if (_live.feeChanged) ...[
+        // A removed registration shows only the unavailable message (final
+        // round, item 4).
+        if (_live.feeChanged && !_live.removed) ...[
           _notice(context, kRegistrationFeeChanged),
           const SizedBox(height: 10),
         ],

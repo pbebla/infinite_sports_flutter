@@ -501,7 +501,7 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
             padding: EdgeInsets.fromLTRB(15, 15, 15,
                 15 + (owes ? 0.0 : MediaQuery.paddingOf(context).bottom)),
             children: [
-              if (owes && _live.feeChanged) ...[
+              if (owes && _live.feeChanged && !_live.removed) ...[
                 _notice(context, kRegistrationFeeChanged),
                 const SizedBox(height: 8),
               ],
