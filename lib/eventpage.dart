@@ -18,6 +18,7 @@ import 'package:infinite_sports_flutter/model/event.dart';
 import 'package:infinite_sports_flutter/model/myuser.dart';
 import 'package:infinite_sports_flutter/registration/registration_path_page.dart';
 import 'package:infinite_sports_flutter/registration/live_registration_config.dart';
+import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
 import 'package:infinite_sports_flutter/misc/ics.dart';
@@ -38,6 +39,7 @@ class EventPage extends StatefulWidget {
     this.tempDirectory,
     this.shareSheet,
     this.loadUsers,
+    this.mySubmissionFor,
   }) : assert(index != null || v2Id != null);
 
   final int? index;
@@ -57,6 +59,10 @@ class EventPage extends StatefulWidget {
   /// loaded).
   final Future<Map<String, MyUser>?> Function()? loadUsers;
 
+  /// Test seam: the signed-in fan's own submission for a registration
+  /// (null = RegistrationService.watchMySubmission).
+  final Stream<RegSubmission?> Function(String regId)? mySubmissionFor;
+
   @override
   _EventPageState createState() => _EventPageState();
 }
@@ -67,6 +73,27 @@ class _EventPageState extends State<EventPage> {
 
   /// True while Register checks the registration with the server.
   bool _registering = false;
+
+  /// Way back (owner-approved 2026-11-14): the fan's own submission for
+  /// this event's registration, LIVE — the button reads "View my
+  /// registration" when there is one (open OR closed). Display only: the
+  /// tap still decides server-first (checkEntry).
+  Stream<RegSubmission?>? _mine;
+  String? _mineRegId;
+
+  Stream<RegSubmission?> _mineFor(String regId) {
+    if (_mine == null || _mineRegId != regId) {
+      _mineRegId = regId;
+      try {
+        _mine = (widget.mySubmissionFor ??
+                RegistrationService.watchMySubmission)(regId)
+            .handleError((Object _) {}); // a failed read: no guess
+      } catch (_) {
+        _mine = Stream<RegSubmission?>.value(null);
+      }
+    }
+    return _mine!;
+  }
   final NotificationPrefs _notifPrefs = NotificationPrefs();
   late Event event;
   // Live record: attend/edit changes appear without reopening the page.
@@ -452,7 +479,11 @@ class _EventPageState extends State<EventPage> {
                   // Attend/Share, address, then the write-up.
                   event.imageSrc ?? SizedBox(width: 0, height: 0),
                   if (event.registrationId?.isNotEmpty ?? false)
-                    Padding(
+                    StreamBuilder<RegSubmission?>(
+                      stream: _mineFor(event.registrationId!),
+                      builder: (context, mine) {
+                    final registered = mine.data != null;
+                    return Padding(
                       padding: const EdgeInsets.fromLTRB(15, 8, 15, 0),
                       child: SizedBox(
                         width: double.infinity,
@@ -472,14 +503,21 @@ class _EventPageState extends State<EventPage> {
                                           .colorScheme
                                           .onPrimary),
                                 )
-                              : const Icon(Icons.how_to_reg),
-                          label: const Text('Register',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                              : Icon(registered
+                                  ? Icons.assignment_turned_in
+                                  : Icons.how_to_reg),
+                          label: Text(
+                              registered ? 'View my registration' : 'Register',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                           // Checking with the server takes a moment (up to
-                          // 8 s offline): one tap at a time.
+                          // 8 s offline): one tap at a time. The same
+                          // server-first decision either way: a registered
+                          // fan lands on the status page, open or closed.
                           onPressed: _registering ? null : _register,
                         ),
                       ),
+                    );
+                      },
                     ),
                   if (_canRemind)
                     Padding(
