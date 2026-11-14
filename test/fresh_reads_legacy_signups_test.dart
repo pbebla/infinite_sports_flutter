@@ -68,20 +68,14 @@ void main() {
     void fresh(String path, Object? v, {bool fromServer = true}) =>
         answers[path] = () => FreshValue(v, fromServer: fromServer);
 
-    test('isSignedUpUid reads only this fan\'s two entries', () async {
-      fresh('Sign Ups/Futsal/16/NotPaid/u1', null);
-      fresh('Sign Ups/Futsal/16/Paid/u1', 'Sam');
-      final r = await isSignedUpUid('u1', 'Futsal', '16');
-      expect(r.signedUp, isTrue);
-      expect(r.fromServer, isTrue);
-    });
-
-    test('isSignedUpUid: a saved copy is today\'s display, flagged', () async {
-      fresh('Sign Ups/Futsal/16/NotPaid/u1', null, fromServer: false);
-      fresh('Sign Ups/Futsal/16/Paid/u1', null);
-      final r = await isSignedUpUid('u1', 'Futsal', '16');
-      expect(r.signedUp, isFalse);
-      expect(r.fromServer, isFalse);
+    test("isSignedUpUid reads only this fan's two entries, refreshing",
+        () async {
+      FreshReads.refreshingValueOverride = (path) async => {
+            'Sign Ups/Futsal/16/NotPaid/u1': null,
+            'Sign Ups/Futsal/16/Paid/u1': 'Sam',
+          }[path];
+      addTearDown(() => FreshReads.refreshingValueOverride = null);
+      expect(await isSignedUpUid('u1', 'Futsal', '16'), isTrue);
     });
 
     test('checkLegacySignUp: the write is allowed only on server facts',
@@ -102,13 +96,17 @@ void main() {
           LegacySignUpVerdict.couldNotCheck);
     });
 
-    test('getSignUpStatus: the server value, today\'s display otherwise',
+    test('getSignUpStatus: the saved state at once (refreshing), 0 on error',
         () async {
-      fresh('Sign Ups/Sign Up Status', 2);
+      Object? answer = 2;
+      FreshReads.refreshingValueOverride = (path) async {
+        expect(path, 'Sign Ups/Sign Up Status');
+        if (answer is Error) throw answer as Error;
+        return answer;
+      };
+      addTearDown(() => FreshReads.refreshingValueOverride = null);
       expect(await getSignUpStatus(), 2);
-      fresh('Sign Ups/Sign Up Status', 1, fromServer: false);
-      expect(await getSignUpStatus(), 1);
-      answers['Sign Ups/Sign Up Status'] = () => throw StateError('offline');
+      answer = StateError('offline');
       expect(await getSignUpStatus(), 0);
     });
   });

@@ -31,9 +31,19 @@ class Signup extends StatefulWidget {
 
 class _SignupState extends State<Signup> {
   Future<List<ListTile>> populateMenus() async {
-    UserInformation? oldInfo = await getInformation();
-    String? phoneNumber = await getPhone();
-    bool isSignedUpForNextSeason = await isSignedUp(FirebaseAuth.instance.currentUser!, widget.nextleague, widget.season);
+    // Fresh reads (Task 4): every read here is a refreshing read (saved copy
+    // at once, renewed in the background), all started together — the page
+    // never waits on the server; the sign-up write re-checks with the
+    // server (leagueform.dart, checkLegacySignUp).
+    final otherSignups = getOtherSignups();
+    final reads = await Future.wait<Object?>([
+      getInformation(),
+      getPhone(),
+      isSignedUp(FirebaseAuth.instance.currentUser!, widget.nextleague, widget.season),
+    ]);
+    UserInformation? oldInfo = reads[0] as UserInformation?;
+    String? phoneNumber = reads[1] as String?;
+    bool isSignedUpForNextSeason = reads[2] as bool;
     List<ListTile> list = List<ListTile>.empty(growable: true);
     if (widget.nextleague.isNotEmpty && widget.season.isNotEmpty) {
       ListTile nextSeasonTile = ListTile(
@@ -47,7 +57,7 @@ class _SignupState extends State<Signup> {
       list.add(nextSeasonTile);
     }
 
-    var signups = await getOtherSignups();
+    var signups = await otherSignups;
     signups.forEach((k, v) {
       try {
         if (v.containsKey("Sign Up Status") && v["Sign Up Status"] == 1) {

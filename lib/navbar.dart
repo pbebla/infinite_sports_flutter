@@ -10,6 +10,7 @@ import 'package:infinite_sports_flutter/account/session_sign_out.dart';
 import 'package:infinite_sports_flutter/insiders/insiders_info_page.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
+import 'package:infinite_sports_flutter/misc/season_pointers.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
@@ -66,6 +67,45 @@ class _NavBarState extends State<NavBar> {
     _insiderStream = (signedIn && uid != null)
         ? InsiderService.watchMyInsider(uid)
         : Stream<Insider?>.value(null);
+    // Fresh reads (Task 4): the drawer opens from the phone's saved copy at
+    // once (refreshing reads, never a server wait) and repaints in place —
+    // one setState, no skeleton — when a newer value arrives while it is
+    // open: the avatar (Users/<uid>), the sign-up row (RegistrationsPublic,
+    // Sign Up Status) and the season pointers behind "Season N+1".
+    if (uid != null) {
+      _stopFollowing.add(FreshReads.onNewer('Users/$uid', (v) {
+        final url = v is Map ? (v['ProfileUrl'] ?? '').toString() : '';
+        if (mounted && url != (profileImagePath ?? '')) {
+          setState(() => profileImagePath = url);
+        }
+      }));
+    }
+    for (final path in ['RegistrationsPublic', 'Sign Ups/Sign Up Status']) {
+      _stopFollowing.add(FreshReads.onNewer(path, (_) => _refreshSignUpRow()));
+    }
+    SeasonPointers.listenable.addListener(_refreshSignUpRow);
+  }
+
+  final List<VoidCallback> _stopFollowing = [];
+
+  @override
+  void dispose() {
+    for (final stop in _stopFollowing) {
+      stop();
+    }
+    SeasonPointers.listenable.removeListener(_refreshSignUpRow);
+    super.dispose();
+  }
+
+  /// Re-derives the sign-up row from the (now renewed) saved copy and
+  /// repaints it in place.
+  Future<void> _refreshSignUpRow() async {
+    try {
+      await setUp();
+    } catch (_) {
+      return; // a failed re-read keeps the row as it is
+    }
+    if (mounted) setState(() {});
   }
 
   /// Drawer-row subtitle per Insider state (Task F2): null (no subtitle) when

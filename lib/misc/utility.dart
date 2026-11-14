@@ -895,15 +895,15 @@ String? convertUrlToId(String url, {bool trimWhitespaces = true}) {
 }
 
 /// The legacy drawer's sign-up switch (0 closed, 1 Futsal, 2 Basketball,
-/// 3 other forms). Server-first (fresh reads, Task 3, #54); when the server
-/// cannot be reached in time it is today's display from the saved copy, and
-/// the sign-up write re-checks it ([checkLegacySignUp]). 0 on error.
+/// 3 other forms), survey #54. A refreshing read (fresh reads, Task 4): the
+/// drawer is never held up by the server — it shows the saved state at once
+/// and repaints when a newer value arrives (navbar.dart); the sign-up WRITE
+/// re-checks it server-first ([checkLegacySignUp]). 0 on error.
 Future<int> getSignUpStatus() async
 {
   try
   {
-    var read = await serverFirstValue("Sign Ups/Sign Up Status");
-    var status = read.value as int;
+    var status = await refreshingValue("Sign Ups/Sign Up Status") as int;
     return status;
   }
   catch (e)
@@ -1252,7 +1252,7 @@ Future<bool> isSignedUp(User user, String league, String season) async
 {
   try
   {
-    return (await isSignedUpUid(user.uid, league, season)).signedUp;
+    return await isSignedUpUid(user.uid, league, season);
   }
   catch (e)
   {
@@ -1260,21 +1260,17 @@ Future<bool> isSignedUp(User user, String league, String season) async
   }
 }
 
-/// [isSignedUp] by uid, server-first (fresh reads, Task 3): reads only this
-/// fan's own `NotPaid/<uid>` and `Paid/<uid>` entries (it used to download
-/// everyone's lists). `fromServer` false = today's display from the saved
-/// copy; the sign-up write re-checks ([checkLegacySignUp]). Throws on a
-/// failed read.
-Future<({bool signedUp, bool fromServer})> isSignedUpUid(
-    String uid, String league, String season) async {
+/// [isSignedUp] by uid: reads only this fan's own `NotPaid/<uid>` and
+/// `Paid/<uid>` entries (it used to download everyone's lists), both
+/// refreshing reads at once (fresh reads, Task 4: the Sign Up page opens
+/// from the saved copy, no server wait); the sign-up WRITE re-checks them
+/// server-first ([checkLegacySignUp]). Throws on a failed read.
+Future<bool> isSignedUpUid(String uid, String league, String season) async {
   final reads = await Future.wait([
-    serverFirstValue("Sign Ups/$league/$season/NotPaid/$uid"),
-    serverFirstValue("Sign Ups/$league/$season/Paid/$uid"),
+    refreshingValue("Sign Ups/$league/$season/NotPaid/$uid"),
+    refreshingValue("Sign Ups/$league/$season/Paid/$uid"),
   ]);
-  return (
-    signedUp: reads.any((r) => r.value != null),
-    fromServer: reads.every((r) => r.fromServer),
-  );
+  return reads.any((v) => v != null);
 }
 
 /// What the legacy sign-up write may do (fresh reads, Task 3).
@@ -1396,12 +1392,11 @@ Future<String> getSeason(league) async {
 }
 
 /// The whole `Sign Ups` node, for the list of other open sign-up forms
-/// (survey #64). Server-first; today's display from the saved copy when the
-/// server cannot be reached. {} on error.
+/// (survey #64). A refreshing read (fresh reads, Task 4: opens from the
+/// saved copy, renews it). {} on error.
 Future<Map<dynamic, dynamic>> getOtherSignups() async {
   try {
-    var read = await serverFirstValue("Sign Ups");
-    var status = read.value as Map<dynamic, dynamic>;
+    var status = await refreshingValue("Sign Ups") as Map<dynamic, dynamic>;
     return status;
   } catch (e) {
     return {};

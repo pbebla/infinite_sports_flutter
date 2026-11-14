@@ -477,12 +477,15 @@ class _MyHomePageState extends State<MyHomePage> {
     if (!signedIn || user == null) return;
     // A merged (old) account gets NEITHER prompt: the merged-account watcher
     // shows its notice and signs the person out (final-review fix 1).
+    // Both server-first checks start together (one barrier, one bound —
+    // fresh reads, Task 4); favoritesAnswered never throws.
+    final favorites = prefs.favoritesAnswered(user.uid);
     final gate = await _showAboutYouIfIncomplete(user.uid);
     if (!gate.showsFavorites) return;
     // true = already answered; null = could not confirm "not answered" with
     // the server (fresh reads, Task 3) — ask again next launch, never re-ask
     // on a stale or failed read.
-    if (await prefs.favoritesAnswered(user.uid) != false) return;
+    if (await favorites != false) return;
     final ctx = mainContext;
     if (ctx != null && mounted) {
       Navigator.push(ctx,
