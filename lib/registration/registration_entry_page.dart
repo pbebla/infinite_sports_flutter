@@ -28,18 +28,32 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
     _openRegs = RegistrationService.watchOpenRegistrations();
   }
 
+  /// Fresh reads (Task 3, #74): "not registered" only counts when the server
+  /// said so — a saved copy or a failed read shows "couldn't check" instead
+  /// of sending a registered fan back into the form. ([config] comes from
+  /// the live list above.)
   Future<void> _openRegistration(
       String regId, RegistrationConfig config) async {
-    final existing = await RegistrationService.getMySubmission(regId);
+    final mine = await RegistrationService.checkMySubmission(regId);
     if (!mounted) return;
-    if (existing != null) {
-      Navigator.push(context, MaterialPageRoute(builder: (_) {
-        return RegistrationStatusPage(regId: regId, config: config);
-      }));
-    } else {
-      Navigator.push(context, MaterialPageRoute(builder: (_) {
-        return RegistrationPathPage(regId: regId, config: config);
-      }));
+    final route = registrationRoute(
+        configChecked: true,
+        config: config,
+        submissionExists: mine.exists,
+        submissionChecked: mine.checked);
+    switch (route) {
+      case RegistrationRoute.status:
+        Navigator.push(context, MaterialPageRoute(builder: (_) {
+          return RegistrationStatusPage(regId: regId, config: config);
+        }));
+      case RegistrationRoute.register:
+        Navigator.push(context, MaterialPageRoute(builder: (_) {
+          return RegistrationPathPage(regId: regId, config: config);
+        }));
+      case RegistrationRoute.couldNotCheck:
+      case RegistrationRoute.closed:
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text(kRegistrationCouldNotCheck)));
     }
   }
 

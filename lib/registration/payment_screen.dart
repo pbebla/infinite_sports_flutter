@@ -2,10 +2,10 @@ import 'dart:async';
 
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_stripe/flutter_stripe.dart' hide Card;
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/registration/payment_links.dart';
 import 'package:infinite_sports_flutter/registration/promo_engine.dart';
@@ -147,14 +147,17 @@ class _PaymentScreenState extends State<PaymentScreen> {
       _publishableKey = override;
       return;
     }
+    // Fresh reads (Task 3, #71): server-first. A key the server did not
+    // confirm (the phone's saved copy after a key rotation, or a failed
+    // read) is not used: the card button gives way to the existing "Card
+    // payments unavailable right now." line, so no card payment starts on
+    // it. (The payment-intent callable also returns the server's key.)
     try {
-      final snap = (await FirebaseDatabase.instance
-              .ref('AppConfig/StripePublishableKey')
-              .once())
-          .snapshot;
-      final key = snap.value;
+      final r = await serverFirstValue('AppConfig/StripePublishableKey');
+      final key = r.value;
       if (!mounted) return;
-      setState(() => _publishableKey = key is String ? key : '');
+      setState(() =>
+          _publishableKey = r.fromServer && key is String ? key : '');
     } catch (_) {
       if (mounted) setState(() => _publishableKey = '');
     }

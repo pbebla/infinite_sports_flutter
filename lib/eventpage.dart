@@ -64,6 +64,9 @@ class EventPage extends StatefulWidget {
 class _EventPageState extends State<EventPage> {
   bool attending = false;
   bool _reminding = false;
+
+  /// True while Register checks the registration with the server.
+  bool _registering = false;
   final NotificationPrefs _notifPrefs = NotificationPrefs();
   late Event event;
   // Live record: attend/edit changes appear without reopening the page.
@@ -251,26 +254,48 @@ class _EventPageState extends State<EventPage> {
   /// Same routing the registrations hub uses: status page if this user
   /// already submitted, otherwise the registration flow. Falls back to a
   /// snackbar when the linked registration has closed.
+  ///
+  /// Fresh reads (Task 3, #72/#74): the config (its open state and fee,
+  /// passed into the whole flow) and the "already registered?" answer must
+  /// come from the server — a saved copy or a failed read shows "couldn't
+  /// check" instead of letting the fan in on an old fee or back into the
+  /// form over an existing submission. [registrationRoute] decides.
   Future<void> _register() async {
     final regId = event.registrationId!;
-    Map<String, RegistrationConfig> open = {};
-    try {
-      open = await RegistrationService.getOpenRegistrations();
-    } catch (_) {}
+    setState(() => _registering = true);
+    // Both checks at once: one round trip online, one bound offline.
+    final checks = await Future.wait<Object>([
+      RegistrationService.checkOpenRegistration(regId),
+      RegistrationService.checkMySubmission(regId),
+    ]);
     if (!mounted) return;
-    final config = open[regId];
-    if (config == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Registration is closed')));
-      return;
+    setState(() => _registering = false);
+    final open =
+        checks[0] as ({RegistrationConfig? config, bool checked});
+    final mine = checks[1]
+        as ({RegSubmission? submission, bool exists, bool checked});
+    final config = open.config;
+    final route = registrationRoute(
+        configChecked: open.checked,
+        config: config,
+        submissionExists: mine.exists,
+        submissionChecked: mine.checked);
+    switch (route) {
+      case RegistrationRoute.closed:
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Registration is closed')));
+      case RegistrationRoute.couldNotCheck:
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text(kRegistrationCouldNotCheck)));
+      case RegistrationRoute.status:
+        Navigator.push(context, MaterialPageRoute(builder: (_) {
+          return RegistrationStatusPage(regId: regId, config: config!);
+        }));
+      case RegistrationRoute.register:
+        Navigator.push(context, MaterialPageRoute(builder: (_) {
+          return RegistrationPathPage(regId: regId, config: config!);
+        }));
     }
-    final existing = await RegistrationService.getMySubmission(regId);
-    if (!mounted) return;
-    Navigator.push(context, MaterialPageRoute(builder: (_) {
-      return existing != null
-          ? RegistrationStatusPage(regId: regId, config: config)
-          : RegistrationPathPage(regId: regId, config: config);
-    }));
   }
 
   /// Round icon buttons for phone/social contact, only for filled fields.
@@ -446,10 +471,22 @@ class _EventPageState extends State<EventPage> {
                             foregroundColor: Theme.of(context).colorScheme.onPrimary,
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
-                          icon: const Icon(Icons.how_to_reg),
+                          icon: _registering
+                              ? SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onPrimary),
+                                )
+                              : const Icon(Icons.how_to_reg),
                           label: const Text('Register',
                               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          onPressed: _register,
+                          // Checking with the server takes a moment (up to
+                          // 8 s offline): one tap at a time.
+                          onPressed: _registering ? null : _register,
                         ),
                       ),
                     ),
