@@ -12,9 +12,11 @@ import 'package:infinite_sports_flutter/misc/game_day.dart';
 import 'package:infinite_sports_flutter/misc/season_pointers.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/registration/my_registrations.dart';
 import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
+import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
 import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -89,6 +91,70 @@ List<String>? followHeader(
   return null;
 }
 
+/// The home registration banner (way back, owner-approved 2026-11-14): a
+/// registration the fan still owes money on (open OR closed, not removed)
+/// takes priority — "Finish your payment: <name>" with the amount, opening
+/// that registration's status page; otherwise today's "Registration open"
+/// banner; null = no banner. [mine] is null until the fan's own
+/// registrations have answered (and for signed-out fans).
+@visibleForTesting
+({String title, String subtitle, MyRegistration? owing})?
+    homeRegistrationBanner({
+  required MyRegistrations? mine,
+  required Map<String, RegistrationConfig> open,
+}) {
+  final owing = mine?.firstOwing;
+  if (owing != null) {
+    return (
+      title: 'Finish your payment: ${owing.config.label}',
+      subtitle: 'You owe ${formatOwed(owing.owed)} — tap to pay',
+      owing: owing,
+    );
+  }
+  if (open.isEmpty) return null;
+  return (
+    title: open.length == 1
+        ? 'Registration open: ${open.values.first.label}'
+        : 'Registrations are open',
+    subtitle: 'Tap to sign up',
+    owing: null,
+  );
+}
+
+/// The banner card (primary fill, white-on-primary text), both modes.
+class HomeRegistrationBanner extends StatelessWidget {
+  const HomeRegistrationBanner(
+      {super.key, required this.banner, required this.onTap});
+
+  final ({String title, String subtitle, MyRegistration? owing}) banner;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(19, 4, 19, 0),
+      child: Card(
+        color: scheme.primary,
+        child: ListTile(
+          leading: Icon(
+              banner.owing != null ? Icons.payments : Icons.how_to_reg,
+              color: scheme.onPrimary),
+          title: Text(
+            banner.title,
+            style: TextStyle(
+                color: scheme.onPrimary, fontWeight: FontWeight.bold),
+          ),
+          subtitle: Text(banner.subtitle,
+              style:
+                  TextStyle(color: scheme.onPrimary.withValues(alpha: 0.7))),
+          onTap: onTap,
+        ),
+      ),
+    );
+  }
+}
+
 class FrontPage extends StatefulWidget {
   const FrontPage({super.key, required this.onTitleSelect});
   final Function(String) onTitleSelect;
@@ -153,11 +219,24 @@ class _FrontPageState extends State<FrontPage> {
     // right after start) moves the league + AFC sections and the top-bar
     // header in one update, without the first-load skeleton.
     SeasonPointers.listenable.addListener(_onSeasonPointersChanged);
+    // Way back: the fan's own registrations, live (signed-in fans only), so
+    // the banner can say "Finish your payment" and drops it once paid.
+    if (signedIn) {
+      try {
+        _myRegistrationsSub = watchMyRegistrations().listen((m) {
+          if (mounted) setState(() => _myRegistrations = m);
+        }, onError: (Object _) {});
+      } catch (_) {}
+    }
   }
+
+  StreamSubscription<MyRegistrations>? _myRegistrationsSub;
+  MyRegistrations? _myRegistrations;
 
   @override
   void dispose() {
     SeasonPointers.listenable.removeListener(_onSeasonPointersChanged);
+    _myRegistrationsSub?.cancel();
     _onTournamentTab.dispose();
     _tournamentsWatchSub?.cancel();
     super.dispose();
@@ -339,36 +418,25 @@ class _FrontPageState extends State<FrontPage> {
 
   /// Banner card shown while any new-style registration is open; tapping it
   /// opens the registration entry page.
+  /// The registration banner, or null (see [homeRegistrationBanner]).
+  ({String title, String subtitle, MyRegistration? owing})? get _banner =>
+      homeRegistrationBanner(mine: _myRegistrations, open: openRegistrations);
+
   Widget _registrationBanner(BuildContext context) {
-    final config = openRegistrations.values.first;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(19, 4, 19, 0),
-      child: Card(
-        color: Theme.of(context).colorScheme.primary,
-        child: ListTile(
-          leading: Icon(Icons.how_to_reg,
-              color: Theme.of(context).colorScheme.onPrimary),
-          title: Text(
-            openRegistrations.length == 1
-                ? 'Registration open: ${config.label}'
-                : 'Registrations are open',
-            style: TextStyle(
-                color: Theme.of(context).colorScheme.onPrimary,
-                fontWeight: FontWeight.bold),
-          ),
-          subtitle: Text('Tap to sign up',
-              style: TextStyle(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .onPrimary
-                      .withValues(alpha: 0.7))),
-          onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) {
-              return const RegistrationEntryPage();
-            }));
-          },
-        ),
-      ),
+    final banner = _banner!;
+    return HomeRegistrationBanner(
+      banner: banner,
+      onTap: () {
+        final owing = banner.owing;
+        Navigator.push(context, MaterialPageRoute(builder: (_) {
+          // Owing: straight to that registration's status page (it follows
+          // the live config and submission; closed keeps its pay actions).
+          return owing != null
+              ? RegistrationStatusPage(
+                  regId: owing.regId, config: owing.config)
+              : const RegistrationEntryPage();
+        }));
+      },
     );
   }
 
@@ -444,8 +512,7 @@ class _FrontPageState extends State<FrontPage> {
                 tabIsTournament.add(false);
                 tabKeys.add('league');
                 tabs.add(Column(children: [
-                  if (openRegistrations.isNotEmpty)
-                    _registrationBanner(context),
+                  if (_banner != null) _registrationBanner(context),
                   // In-season Infinite Fantasy entry (P6): stream-gates
                   // ITSELF on Fantasy/<sport>/<season>/Config — renders
                   // nothing while the node is absent.
@@ -581,7 +648,7 @@ class _FrontPageState extends State<FrontPage> {
                 );
               }
               return Column(children: [
-                if (openRegistrations.isNotEmpty)
+                if (_banner != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: _registrationBanner(context),
