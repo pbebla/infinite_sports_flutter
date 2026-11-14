@@ -5,7 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:infinite_sports_flutter/misc/share_card_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/registration/live_registration_config.dart';
+import 'package:infinite_sports_flutter/registration/my_registrations.dart'
+    show registrationPathLabel;
 import 'package:infinite_sports_flutter/registration/payment_screen.dart';
+import 'package:infinite_sports_flutter/registration/registration_chip.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
@@ -132,16 +135,7 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
     return value?.toString() ?? '';
   }
 
-  String _pathLabel(String path) {
-    switch (path) {
-      case 'captain':
-        return 'Team captain';
-      case 'joiner':
-        return 'Team member';
-      default:
-        return 'Individual';
-    }
-  }
+  String _pathLabel(String path) => registrationPathLabel(path);
 
   void _copyCode(RegTeam team) {
     Clipboard.setData(ClipboardData(text: team.joinCode));
@@ -334,21 +328,8 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
   /// Paid/Not-paid chip that reads correctly in BOTH light and dark mode
   /// (pale shade100 fills wash out on a dark background).
   Widget _paidChip(BuildContext context,
-      {required bool paid, required String label}) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-    final Color background = paid
-        ? (dark ? Colors.green.shade900 : Colors.green.shade100)
-        : (dark ? Colors.orange.shade900 : Colors.orange.shade100);
-    final Color foreground = paid
-        ? (dark ? Colors.green.shade100 : Colors.green.shade900)
-        : (dark ? Colors.orange.shade100 : Colors.orange.shade900);
-    return Chip(
-      label: Text(label),
-      labelStyle: TextStyle(color: foreground),
-      backgroundColor: background,
-      side: BorderSide.none,
-    );
-  }
+          {required bool paid, required String label}) =>
+      RegistrationStatusChip(paid: paid, label: label);
 
   /// Skeleton sweep (F3 Fix 2): "sign-ups/registration list" priority spot —
   /// matches the stack of Cards _statusBody resolves into (status/team card,

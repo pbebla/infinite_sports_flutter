@@ -12,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart' show signedIn;
 import 'package:infinite_sports_flutter/registration/live_registration_config.dart';
+import 'package:infinite_sports_flutter/registration/my_registrations.dart';
 import 'package:infinite_sports_flutter/registration/payment_screen.dart';
 import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_path_page.dart';
@@ -153,9 +154,8 @@ void main() {
     });
 
     test('a closed registration keeps its config (way back)', () async {
-      answers['RegistrationsPublic/r1'] = () => FreshValue(
-          {..._openConfig, 'Status': 'closed'},
-          fromServer: true);
+      answers['RegistrationsPublic/r1'] = () =>
+          FreshValue({..._openConfig, 'Status': 'closed'}, fromServer: true);
       final r = await RegistrationService.checkRegistration('r1');
       expect(r.checked, isTrue);
       expect(r.config!.isOpen, isFalse);
@@ -177,9 +177,8 @@ void main() {
 
   group('checkEntry way back', () {
     test('closed + my submission -> status page with the config', () async {
-      answers['RegistrationsPublic/r1'] = () => FreshValue(
-          {..._openConfig, 'Status': 'closed'},
-          fromServer: true);
+      answers['RegistrationsPublic/r1'] = () =>
+          FreshValue({..._openConfig, 'Status': 'closed'}, fromServer: true);
       answers['Registrations/r1/Submissions/u1'] = () => const FreshValue(
           {'Path': 'individual', 'Paid': false},
           fromServer: true);
@@ -384,7 +383,8 @@ void main() {
 
     Widget page() => MaterialApp(
           home: RegistrationEntryPage(
-            openRegistrationsOverride: Stream.value({'r1': savedCopy}),
+            registrationsOverride: () => Stream.value(MyRegistrations(
+                mine: const [], openForSignUp: {'r1': savedCopy})),
           ),
         );
 
