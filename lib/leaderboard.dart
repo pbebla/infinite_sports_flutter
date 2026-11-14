@@ -4,6 +4,8 @@ import 'package:infinite_sports_flutter/misc/playing_position.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/misc/season_title.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
+import 'package:infinite_sports_flutter/misc/team_logos.dart' show teamLogoUrl;
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/flagfootballplayer.dart';
@@ -13,6 +15,12 @@ import 'package:infinite_sports_flutter/profile/open_player_profile.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:data_table_2/data_table_2.dart';
+
+/// The node the top-bar Leaderboard is built from (normalized path).
+String leaderboardSourcePath(String sport, String season) =>
+    sport == 'AFC San Jose'
+        ? 'AFC San Jose/Seasons/$season/Roster'
+        : '$sport/$season/Line Ups';
 
 class LeaderboardPage extends StatefulWidget {
   const LeaderboardPage({
@@ -50,8 +58,41 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
   /// edge fade that says so.
   final ValueNotifier<bool> _moreToRight = ValueNotifier(true);
 
+  /// Read once per open (it was re-created on every build, which also
+  /// flashed the skeleton on any rebuild).
+  late final Future<List<Player>> _playersFuture = getPlayersList();
+
+  VoidCallback? _stopNewerFollow;
+
+  @override
+  void initState() {
+    super.initState();
+    // Fresh reads (Task 4, survey list C): while open, a newer server value
+    // of this season's Line Ups (AFC: Roster) repaints the table IN PLACE —
+    // one setState, current sort kept, no skeleton, scroll kept.
+    _stopNewerFollow = FreshReads.onNewerUnder('', (path, _) {
+      if (path == leaderboardSourcePath(widget.sport, widget.season)) {
+        _refreshInPlace();
+      }
+    });
+  }
+
+  Future<void> _refreshInPlace() async {
+    try {
+      final list = await getPlayersList();
+      if (!mounted) return;
+      setState(() {
+        players = list;
+        sortTable(sortColumnIndex ?? 3, isAscending);
+      });
+    } catch (_) {
+      // A failed re-read keeps what is on screen.
+    }
+  }
+
   @override
   void dispose() {
+    _stopNewerFollow?.call();
     _moreToRight.dispose();
     super.dispose();
   }
@@ -68,7 +109,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       for (var team in lineups!.keys) {
         for (var player in lineups[team]!.keys) {
           lineups[team]![player]!.name = player;
-          lineups[team]![player]!.teamPath = teamLogos["Futsal"][widget.season][team];
+          lineups[team]![player]!.teamPath = teamLogoUrl("Futsal", widget.season, team);
           players.add(lineups[team]![player]!);
         }
       }
@@ -84,7 +125,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       for (String team in lineups!.keys) {
         for (String player in lineups[team]!.keys) {
           lineups[team]![player]!.name = player;
-          lineups[team]![player]!.teamPath = teamLogos["Flag Football"][widget.season][team];
+          lineups[team]![player]!.teamPath = teamLogoUrl("Flag Football", widget.season, team);
           players.add(lineups[team]![player]!);
         }
       }
@@ -96,7 +137,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       for (String team in lineups!.keys) {
         for (String player in lineups[team]!.keys) {
           lineups[team]![player]!.name = player;
-          lineups[team]![player]!.teamPath = teamLogos["Basketball"][widget.season][team];
+          lineups[team]![player]!.teamPath = teamLogoUrl("Basketball", widget.season, team);
           players.add(lineups[team]![player]!);
         }
       }
@@ -398,7 +439,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           foregroundColor: TournamentColors.headerForeground(context),
         ),
         body: FutureBuilder(
-            future: getPlayersList(),
+            future: _playersFuture,
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 // Skeleton sweep (F3 Fix 2): matches the leaderboard rows

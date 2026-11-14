@@ -118,6 +118,26 @@ class ProfilePage extends StatefulWidget {
   /// profile data must be refetched; tests call it between cases.
   static void clearCareerCache() => _careerCache.clear();
 
+  /// Whether a newer server value at [path] (fresh reads, Task 4) can change
+  /// a cached career: league Line Ups, AFC San Jose seasons, tournaments,
+  /// or a profile node (Played / TournamentsPlayed / identity).
+  @visibleForTesting
+  static bool careerPathAffected(String path) =>
+      path.contains('/Line Ups') ||
+      path.startsWith('AFC San Jose/Seasons') ||
+      path == 'Tournaments' ||
+      path.startsWith('Tournaments/') ||
+      path.startsWith('Users/') ||
+      path.startsWith('PublicProfiles/');
+
+  /// Session cache drop (survey list B): any newer career value clears the
+  /// whole career cache, so the next visit re-reads. App lifetime; started
+  /// by the first profile (lazy static).
+  static final VoidCallback _careerCacheFollow =
+      FreshReads.onNewerUnder('', (path, _) {
+    if (careerPathAffected(path)) _careerCache.clear();
+  });
+
   @override
   State<ProfilePage> createState() => _ProfilePageState();
 }
@@ -181,9 +201,53 @@ class _ProfilePageState extends State<ProfilePage>
   String? _currentTeamNumber;
   String? _currentStatsLabel;
 
+  /// Stops the in-place repaint follower (fresh reads, Task 4).
+  VoidCallback? _stopNewerFollow;
+  Timer? _repaintDebounce;
+  bool _repainting = false;
+
+  /// Fresh reads (Task 4, survey list C): while this profile is open, a
+  /// newer server value for its identity node or its career reads repaints
+  /// it IN PLACE — identity and career are re-read (from the now renewed
+  /// saved copy, no skeleton) and land in the career load's single
+  /// setState; scroll and tab are kept. Debounced so a burst of newer
+  /// values is one repaint.
+  void _onNewerPath(String path, Object? _) {
+    final own = normalizeFreshPath(profileNodePathFor(widget.uid));
+    final mine = path == own || path.startsWith('$own/');
+    if (!mine && !ProfilePage.careerPathAffected(path)) return;
+    if (path.startsWith('Users/') || path.startsWith('PublicProfiles/')) {
+      if (!mine) return; // another person's profile node
+    }
+    _careerCache.remove(widget.uid);
+    _repaintDebounce?.cancel();
+    _repaintDebounce =
+        Timer(const Duration(milliseconds: 300), _repaintInPlace);
+  }
+
+  Future<void> _repaintInPlace() async {
+    if (!mounted || _repainting || !_careerLoaded) return;
+    _repainting = true;
+    try {
+      await _loadIdentity();
+      if (!mounted) return;
+      await _loadCareer(); // one setState at its end
+    } catch (_) {
+      // A failed re-read keeps what is on screen.
+    } finally {
+      _repainting = false;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    ProfilePage._careerCacheFollow;
+    if (!widget._isLimited &&
+        widget.uid.trim().isNotEmpty &&
+        widget.loadOverride == null) {
+      _stopNewerFollow = FreshReads.onNewerUnder('', _onNewerPath);
+    }
     // The Fantasy tab (round 3) exists only on full (uid) profiles. start()
     // runs BEFORE the listener is attached so a synchronous (session-cached)
     // decision never calls setState inside initState — it is simply read
@@ -243,6 +307,8 @@ class _ProfilePageState extends State<ProfilePage>
 
   @override
   void dispose() {
+    _stopNewerFollow?.call();
+    _repaintDebounce?.cancel();
     _fantasy
       ?..removeListener(_onFantasyChanged)
       ..dispose();
