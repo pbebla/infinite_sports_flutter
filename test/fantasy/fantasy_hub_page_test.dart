@@ -9,6 +9,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_access.dart';
@@ -28,6 +29,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/my_team_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/transfer_preview.dart';
 import 'package:infinite_sports_flutter/registration/payment_links.dart';
@@ -1935,5 +1937,115 @@ void main() {
         }
       });
     }
+  });
+
+  // Release report #8: the hub header shrinks on scroll to a slim pinned bar
+  // that keeps the live deadline countdown; the tab row stays pinned and
+  // shows every label whole at 360 px; each tab keeps its scroll offset.
+  group('collapsing header (report #8)', () {
+    // GW n locks Oct 4 + 7(n-1), 22:00 UTC; "now" (Oct 17 12:00) is GW3,
+    // 1d 10h before its lock.
+    final gws = [
+      for (var n = 1; n <= 5; n++)
+        Gameweek(
+          number: n,
+          date: '10${(4 + 7 * (n - 1)).toString().padLeft(2, '0')}2026',
+          lockUtc: DateTime.utc(2026, 10, 4 + 7 * (n - 1), 22),
+          opensUtc: null,
+        ),
+    ];
+    DateTime now() => DateTime.utc(2026, 10, 17, 12);
+
+    Future<void> pumpOpenHub(WidgetTester tester, Brightness brightness) async {
+      await pumpHub(tester,
+          size: const Size(360, 740),
+          brightness: brightness,
+          gameweekStates: Stream.value(gws),
+          nowUtc: now);
+      await land(tester, lock: FantasyLockOverride.auto);
+    }
+
+    ScrollableState myTeamList(WidgetTester tester) => tester.state(find
+        .descendant(
+            of: find.byType(FantasyMyTeamTab, skipOffstage: false),
+            matching: find.byType(Scrollable),
+            skipOffstage: false)
+        .first);
+
+    Finder slimCountdown() => key('deadline_slim_countdown');
+
+    for (final brightness in Brightness.values) {
+      testWidgets('360 px, $brightness: expanded at the top; a scroll '
+          'collapses it with the countdown still on screen; back at the top '
+          'it expands', (tester) async {
+        await pumpOpenHub(tester, brightness);
+        expect(find.byType(FantasyBanner), findsOneWidget);
+        expect(key('deadline_countdown'), findsOneWidget);
+        expect(slimCountdown(), findsNothing);
+
+        await tester.dragFrom(const Offset(180, 600), const Offset(0, -300));
+        await settle(tester);
+        expect(find.byType(FantasyBanner), findsNothing);
+        expect(slimCountdown(), findsOneWidget);
+        expect(tester.widget<Text>(slimCountdown()).data, '1d 10:00:00');
+        expect(find.text('GW3 locks in'), findsOneWidget);
+        expect(tester.getRect(slimCountdown()).top, greaterThanOrEqualTo(0));
+        expect(tester.takeException(), isNull);
+
+        await tester.flingFrom(
+            const Offset(180, 400), const Offset(0, 1500), 3000);
+        await settle(tester);
+        await settle(tester);
+        expect(find.byType(FantasyBanner), findsOneWidget);
+        expect(slimCountdown(), findsNothing);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('360 px, $brightness: every tab label is whole — none '
+          'ellipsized', (tester) async {
+        await pumpOpenHub(tester, brightness);
+        for (final l in ['My Team', 'Players', 'Leaderboards', 'News', 'Rules']) {
+          final p = tester.renderObject<RenderParagraph>(find.descendant(
+              of: find.widgetWithText(Tab, l), matching: find.text(l)));
+          expect(p.didExceedMaxLines, isFalse, reason: l);
+          expect(
+              p.size.width,
+              greaterThanOrEqualTo(
+                  p.getMaxIntrinsicWidth(double.infinity) - 0.5),
+              reason: l);
+        }
+        // More tabs off the right edge: the fade says so.
+        expect(key('tabs_more_end'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    testWidgets('switching tabs and coming back keeps My Team\'s scroll '
+        'offset', (tester) async {
+      await pumpOpenHub(tester, Brightness.light);
+      await tester.dragFrom(const Offset(180, 600), const Offset(0, -300));
+      await settle(tester);
+      final offset = myTeamList(tester).position.pixels;
+      expect(offset, greaterThan(0));
+
+      await tester.tap(find.widgetWithText(Tab, 'Players'));
+      await settle(tester);
+      await tester.tap(find.widgetWithText(Tab, 'My Team'));
+      await settle(tester);
+      expect(myTeamList(tester).position.pixels, offset);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('text scale 1.3 at 360 px: expanded and collapsed headers do '
+        'not overflow', (tester) async {
+      tester.platformDispatcher.textScaleFactorTestValue = 1.3;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await pumpOpenHub(tester, Brightness.dark);
+      expect(tester.takeException(), isNull);
+      await tester.dragFrom(const Offset(180, 600), const Offset(0, -300));
+      await settle(tester);
+      expect(slimCountdown(), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
   });
 }
