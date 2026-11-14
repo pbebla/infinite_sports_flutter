@@ -30,6 +30,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/my_team_tab.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/news_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/transfer_preview.dart';
 import 'package:infinite_sports_flutter/registration/payment_links.dart';
@@ -1973,6 +1974,169 @@ void main() {
         .first);
 
     Finder slimCountdown() => key('deadline_slim_countdown');
+
+    bool collapsed() =>
+        slimCountdown().evaluate().isNotEmpty &&
+        find.byType(FantasyBanner).evaluate().isEmpty;
+
+    /// The active tab's own vertical list.
+    ScrollPosition tabList(WidgetTester tester, Type tab) => tester
+        .state<ScrollableState>(find
+            .descendant(
+                of: find.byType(tab),
+                matching: find.byWidgetPredicate((w) =>
+                    w is Scrollable && w.axisDirection == AxisDirection.down))
+            .first)
+        .position;
+
+    /// A slow finger drag with the finger held down while the collapse runs
+    /// (review 6, I1), then release; returns how often the header changed
+    /// state while pumping.
+    Future<int> slowDrag(WidgetTester tester, double dy,
+        {Offset at = const Offset(180, 600)}) async {
+      var changes = 0;
+      var last = collapsed();
+      void sample() {
+        final now = collapsed();
+        if (now != last) changes++;
+        last = now;
+      }
+
+      final g = await tester.startGesture(at);
+      final steps = (dy.abs() / 4).ceil();
+      for (var i = 0; i < steps; i++) {
+        await g.moveBy(Offset(0, dy / steps));
+        await tester.pump(const Duration(milliseconds: 16));
+        sample();
+      }
+      await g.up();
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        sample();
+      }
+      return changes;
+    }
+
+    Map<String, Object?> post(int i) => {
+          'Title': 'Post $i',
+          'Body': 'A line of league news number $i.',
+          'At': 100 - i,
+          'Template': 'custom',
+        };
+
+    Future<void> openNews(WidgetTester tester, int posts,
+        {Size size = const Size(360, 740)}) async {
+      await pumpHub(tester,
+          tab: FantasyHubTab.news,
+          size: size,
+          gameweekStates: Stream.value(gws),
+          nowUtc: now);
+      await land(tester, lock: FantasyLockOverride.auto);
+      news.add(newsPostsFromNode({
+        for (var i = 0; i < posts; i++) 'p$i': post(i),
+      }));
+      await settle(tester);
+    }
+
+    group('never stuck collapsed (review 6, I1)', () {
+      testWidgets('News, one post (short): a slow drag never collapses',
+          (tester) async {
+        await openNews(tester, 1);
+        expect(await slowDrag(tester, -200), 0);
+        expect(collapsed(), isFalse);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('News, many posts (long): collapses once, stays draggable, '
+          'pulling down at the top expands', (tester) async {
+        await openNews(tester, 20);
+        expect(await slowDrag(tester, -200), 1);
+        expect(collapsed(), isTrue);
+        expect(tabList(tester, FantasyNewsTab).maxScrollExtent,
+            greaterThan(0));
+        await slowDrag(tester, 600, at: const Offset(180, 300));
+        expect(collapsed(), isFalse);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('News across the boundary band (screen heights sweep): a '
+          'drag that ends collapsed always leaves something to drag back',
+          (tester) async {
+        for (var h = 600.0; h <= 1100; h += 50) {
+          await tester.pumpWidget(const SizedBox()); // a fresh hub each time
+          await openNews(tester, 3, size: Size(360, h));
+          final changes = await slowDrag(tester, -220,
+              at: Offset(180, h - 120));
+          expect(changes, lessThanOrEqualTo(1), reason: 'height $h');
+          if (collapsed()) {
+            expect(tabList(tester, FantasyNewsTab).maxScrollExtent,
+                greaterThan(16),
+                reason: 'height $h: collapsed with nothing to drag');
+          }
+          expect(tester.takeException(), isNull, reason: 'height $h');
+        }
+      });
+
+      testWidgets('My Team across the boundary band (screen heights sweep)',
+          (tester) async {
+        for (var h = 600.0; h <= 1300; h += 50) {
+          await tester.pumpWidget(const SizedBox()); // a fresh hub each time
+          await pumpHub(tester,
+              size: Size(360, h),
+              gameweekStates: Stream.value(gws),
+              nowUtc: now);
+          await land(tester, lock: FantasyLockOverride.auto);
+          final changes = await slowDrag(tester, -220,
+              at: Offset(180, h - 120));
+          expect(changes, lessThanOrEqualTo(1), reason: 'height $h');
+          if (collapsed()) {
+            expect(tabList(tester, FantasyMyTeamTab).maxScrollExtent,
+                greaterThan(16),
+                reason: 'height $h: collapsed with nothing to drag');
+          }
+          expect(tester.takeException(), isNull, reason: 'height $h');
+        }
+      });
+
+      testWidgets('My Team, short (no team name yet): a slow drag never '
+          'collapses', (tester) async {
+        await pumpHub(tester,
+            size: const Size(360, 740),
+            gameweekStates: Stream.value(gws),
+            nowUtc: now);
+        await land(tester,
+            lock: FantasyLockOverride.auto, withManager: false);
+        expect(await slowDrag(tester, -200), 0);
+        expect(collapsed(), isFalse);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('scrolled My Team → a short News tab opens the header; '
+          'back on My Team it is collapsed again', (tester) async {
+        await pumpHub(tester,
+            size: const Size(360, 740),
+            gameweekStates: Stream.value(gws),
+            nowUtc: now);
+        await land(tester, lock: FantasyLockOverride.auto);
+        news.add(newsPostsFromNode({'p0': post(0)}));
+        await tester.dragFrom(const Offset(180, 600), const Offset(0, -300));
+        await settle(tester);
+        expect(collapsed(), isTrue);
+        await tester.ensureVisible(find.widgetWithText(Tab, 'News'));
+        await settle(tester);
+        await tester.tap(find.widgetWithText(Tab, 'News'));
+        await settle(tester);
+        await settle(tester);
+        expect(collapsed(), isFalse);
+        await tester.ensureVisible(find.widgetWithText(Tab, 'My Team'));
+        await settle(tester);
+        await tester.tap(find.widgetWithText(Tab, 'My Team'));
+        await settle(tester);
+        await settle(tester);
+        expect(collapsed(), isTrue);
+        expect(tester.takeException(), isNull);
+      });
+    });
 
     for (final brightness in Brightness.values) {
       testWidgets('360 px, $brightness: expanded at the top; a scroll '

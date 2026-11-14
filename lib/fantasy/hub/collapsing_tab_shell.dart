@@ -9,13 +9,22 @@
 //    (no jump); only the header rebuilds — the tab bodies are siblings, never
 //    rebuilt, and keep their own scroll offsets (each tab is kept alive, so a
 //    tab switch and back lands where the fan left it).
-//  • Which state: the ACTIVE tab's own list, from its scroll notifications
-//    (no ScrollController — lists stay on the route's PrimaryScrollController,
-//    see steady_scroll.dart). A fan scrolling down past [_kCollapseAfter]
-//    collapses it; reaching the very top (or pulling down at it) expands it.
-//    Only finger-driven scrolling counts, so the viewport growing under the
-//    collapse can never bounce it back open. A tab switch restores the state
-//    that tab was left in.
+//  • Which state: the ACTIVE tab's own list, from its scroll and metrics
+//    notifications (no ScrollController — lists stay on the route's
+//    PrimaryScrollController, see steady_scroll.dart). Only a finger
+//    scrolling down past [_kCollapseAfter] collapses it; reaching the very
+//    top (however — a finger, a fling, the status-bar tap) or pulling down at
+//    it expands it.
+//  • Never stuck collapsed (review 6, I1): a scroll view that only drags
+//    while its content overflows (My Team, News, Team of the Week) loses its
+//    drag once the content fits — so the header collapses ONLY when the tab
+//    overflows by more than the WHOLE expanded header (+ [_kCollapseAfter]):
+//    the viewport grows by less than that, so the tab still overflows and
+//    stays draggable. And whenever the active tab has nothing left to scroll
+//    while collapsed (content shrank, the keyboard closed), the header
+//    expands. The two thresholds are at least [_kCollapseAfter] apart, so the
+//    states cannot oscillate. A tab switch restores the state that tab was
+//    left in only if it can still be left.
 //  • The tab row scrolls horizontally from the start; an edge fade marks the
 //    side where more tabs are off screen (five tabs never fit 360 px, and a
 //    label is never ellipsized).
@@ -24,6 +33,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:infinite_sports_flutter/misc/tab_swap.dart';
 
 /// Scrolling further than this (logical px) collapses the header.
@@ -98,6 +108,18 @@ class _ShellBodyState extends State<_ShellBody>
   /// A finger is dragging/flinging the given tab's list.
   final Map<int, bool> _userScrolling = {};
 
+  /// Each tab's list metrics as last reported (scroll or metrics
+  /// notification).
+  final Map<int, ScrollMetrics> _metrics = {};
+
+  /// The header's height when last measured fully expanded (null: unknown —
+  /// never collapse on a guess).
+  double? _expandedHeight;
+  final GlobalKey _headerBox = GlobalKey();
+
+  /// The header is collapsed or on its way there.
+  bool _wantCollapsed = false;
+
   TabController? _tabs;
 
   @override
@@ -119,11 +141,50 @@ class _ShellBodyState extends State<_ShellBody>
   void _onTabChanged() {
     final c = _tabs;
     if (c == null || c.indexIsChanging) return;
-    _setCollapsed(_collapsedByTab[c.index] ?? false);
+    final i = c.index;
+    final m = _metrics[i];
+    // Back to a tab left collapsed: only if it can still be left (it still
+    // has something to scroll and is not at its top).
+    final keep = (_collapsedByTab[i] ?? false) &&
+        m != null &&
+        !_nothingToScroll(m) &&
+        m.pixels > m.minScrollExtent;
+    _collapsedByTab[i] = keep;
+    _setCollapsed(keep);
+  }
+
+  static bool _nothingToScroll(ScrollMetrics m) =>
+      m.maxScrollExtent - m.minScrollExtent <= 0.5;
+
+  /// Collapsing this tab leaves it scrollable: it overflows the expanded
+  /// viewport by more than the whole expanded header (the most the viewport
+  /// can grow) plus the collapse threshold.
+  bool _canCollapse(ScrollMetrics m) {
+    if (!_wantCollapsed && _expand.value == 1) {
+      final box = _headerBox.currentContext?.findRenderObject();
+      if (box is RenderBox && box.hasSize) _expandedHeight = box.size.height;
+    }
+    final header = _expandedHeight;
+    if (header == null) return false;
+    return m.maxScrollExtent - m.minScrollExtent > header + _kCollapseAfter;
   }
 
   void _setCollapsed(bool collapsed) {
+    _wantCollapsed = collapsed;
     final target = collapsed ? 0.0 : 1.0;
+    // Notifications can arrive during layout: never drive the animation (and
+    // its rebuild) from inside a frame's build/layout.
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _wantCollapsed == collapsed) _animateTo(target);
+      });
+      return;
+    }
+    _animateTo(target);
+  }
+
+  void _animateTo(double target) {
     if (_expand.value == target && !_expand.isAnimating) return;
     final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     if (reduce) {
@@ -133,32 +194,57 @@ class _ShellBodyState extends State<_ShellBody>
     }
   }
 
+  /// The active tab has nothing left to scroll while collapsed: expand, so
+  /// the header is never out of reach.
+  void _escapeIfStuck(int index) {
+    final m = _metrics[index];
+    if (m == null || _tabs?.index != index) return;
+    if (_wantCollapsed && _nothingToScroll(m)) {
+      _collapsedByTab[index] = false;
+      _setCollapsed(false);
+    }
+  }
+
+  bool _onMetrics(int index, ScrollMetricsNotification n) {
+    if (n.depth != 0 || n.metrics.axis != Axis.vertical) return false;
+    _metrics[index] = n.metrics;
+    _escapeIfStuck(index);
+    return false;
+  }
+
   bool _onScroll(int index, ScrollNotification n) {
     // The tab's own vertical list only — not a horizontal chip strip or a
     // list nested inside it.
     if (n.depth != 0 || n.metrics.axis != Axis.vertical) return false;
+    _metrics[index] = n.metrics;
     if (n is UserScrollNotification) {
       _userScrolling[index] = n.direction != ScrollDirection.idle;
+      _escapeIfStuck(index);
       return false;
     }
     if (n is ScrollStartNotification && n.dragDetails != null) {
       _userScrolling[index] = true;
     }
-    if (_userScrolling[index] != true) return false;
 
     bool? collapse;
-    if (n is ScrollUpdateNotification) {
-      final delta = n.scrollDelta ?? 0;
-      if (n.metrics.pixels <= n.metrics.minScrollExtent) {
-        collapse = false;
-      } else if (delta > 0 &&
-          n.metrics.pixels - n.metrics.minScrollExtent > _kCollapseAfter) {
-        collapse = true;
-      }
+    if (n is ScrollUpdateNotification &&
+        n.metrics.pixels <= n.metrics.minScrollExtent) {
+      // Reaching the very top expands, however it got there.
+      collapse = false;
     } else if (n is OverscrollNotification && n.overscroll < 0) {
       collapse = false; // pulling down at the top
+    } else if (n is ScrollUpdateNotification &&
+        _userScrolling[index] == true &&
+        (n.scrollDelta ?? 0) > 0 &&
+        n.metrics.pixels - n.metrics.minScrollExtent > _kCollapseAfter &&
+        (_wantCollapsed || _canCollapse(n.metrics))) {
+      // Only a finger collapses it, and only when it can be left again.
+      collapse = true;
     }
-    if (collapse == null) return false;
+    if (collapse == null) {
+      _escapeIfStuck(index);
+      return false;
+    }
     _collapsedByTab[index] = collapse;
     if (_tabs?.index == index) _setCollapsed(collapse);
     return false;
@@ -172,28 +258,31 @@ class _ShellBodyState extends State<_ShellBody>
           animation: _expand,
           builder: (context, _) {
             final t = Curves.easeInOut.transform(_expand.value);
-            return _CollapsingHeader(
-              key: const ValueKey('collapsing_header'),
-              t: t,
-              // Mounted only while visible: at rest exactly one face exists.
-              expanded: t > 0
-                  ? IgnorePointer(
-                      ignoring: t < 0.5,
-                      child: Opacity(
-                        opacity: ((t - 0.4) / 0.6).clamp(0.0, 1.0),
-                        child: widget.expandedHeader,
-                      ),
-                    )
-                  : null,
-              collapsed: t < 1
-                  ? IgnorePointer(
-                      ignoring: t >= 0.5,
-                      child: Opacity(
-                        opacity: ((0.6 - t) / 0.6).clamp(0.0, 1.0),
-                        child: widget.collapsedHeader,
-                      ),
-                    )
-                  : null,
+            return KeyedSubtree(
+              key: _headerBox,
+              child: _CollapsingHeader(
+                key: const ValueKey('collapsing_header'),
+                t: t,
+                // Mounted only while visible: at rest exactly one face exists.
+                expanded: t > 0
+                    ? IgnorePointer(
+                        ignoring: t < 0.5,
+                        child: Opacity(
+                          opacity: ((t - 0.4) / 0.6).clamp(0.0, 1.0),
+                          child: widget.expandedHeader,
+                        ),
+                      )
+                    : null,
+                collapsed: t < 1
+                    ? IgnorePointer(
+                        ignoring: t >= 0.5,
+                        child: Opacity(
+                          opacity: ((0.6 - t) / 0.6).clamp(0.0, 1.0),
+                          child: widget.collapsedHeader,
+                        ),
+                      )
+                    : null,
+              ),
             );
           },
         ),
@@ -203,9 +292,12 @@ class _ShellBodyState extends State<_ShellBody>
             children: [
               for (var i = 0; i < widget.children.length; i++)
                 _KeepAlive(
-                  child: NotificationListener<ScrollNotification>(
-                    onNotification: (n) => _onScroll(i, n),
-                    child: widget.children[i],
+                  child: NotificationListener<ScrollMetricsNotification>(
+                    onNotification: (n) => _onMetrics(i, n),
+                    child: NotificationListener<ScrollNotification>(
+                      onNotification: (n) => _onScroll(i, n),
+                      child: widget.children[i],
+                    ),
                   ),
                 ),
             ],
@@ -308,10 +400,14 @@ class _EdgeFadeTabBarState extends State<_EdgeFadeTabBar> {
         // Test/semantics markers for the visible affordance.
         if (_moreStart)
           const Positioned(
-              left: 0, top: 0, child: SizedBox(key: ValueKey('tabs_more_start'))),
+              left: 0,
+              top: 0,
+              child: SizedBox(key: ValueKey('tabs_more_start'))),
         if (_moreEnd)
           const Positioned(
-              right: 0, top: 0, child: SizedBox(key: ValueKey('tabs_more_end'))),
+              right: 0,
+              top: 0,
+              child: SizedBox(key: ValueKey('tabs_more_end'))),
       ],
     );
   }
@@ -321,7 +417,8 @@ class _EdgeFadeTabBarState extends State<_EdgeFadeTabBar> {
 /// expanded, [t]) from their natural heights, both faces bottom-aligned (the
 /// big header slides up under the clip as it shrinks), clipped to the
 /// current height.
-class _CollapsingHeader extends SlottedMultiChildRenderObjectWidget<_Face, RenderBox> {
+class _CollapsingHeader
+    extends SlottedMultiChildRenderObjectWidget<_Face, RenderBox> {
   const _CollapsingHeader({
     super.key,
     required this.t,
@@ -370,7 +467,8 @@ class _RenderCollapsingHeader extends RenderBox
   RenderBox? get _collapsed => childForSlot(_Face.collapsed);
 
   @override
-  Iterable<RenderBox> get children => [if (_expanded != null) _expanded!, if (_collapsed != null) _collapsed!];
+  Iterable<RenderBox> get children =>
+      [if (_expanded != null) _expanded!, if (_collapsed != null) _collapsed!];
 
   final LayerHandle<ClipRectLayer> _clip = LayerHandle<ClipRectLayer>();
 
@@ -426,7 +524,10 @@ class _RenderCollapsingHeader extends RenderBox
   @override
   bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
     if (!(Offset.zero & size).contains(position)) return false;
-    for (final child in [if (_collapsed != null) _collapsed!, if (_expanded != null) _expanded!]) {
+    for (final child in [
+      if (_collapsed != null) _collapsed!,
+      if (_expanded != null) _expanded!
+    ]) {
       final offset = (child.parentData! as BoxParentData).offset;
       final hit = result.addWithPaintOffset(
         offset: offset,
