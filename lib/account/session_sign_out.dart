@@ -8,6 +8,7 @@
 // add a new cache to clear HERE, not at a call site.
 
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_session.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/profile/profile_page.dart';
@@ -38,6 +39,9 @@ Future<void> signOutAndClearSession({
   } catch (_) {
     // Offline / slow / already-deleted account: sign out regardless.
   }
+  // Lingering fresh-read listeners on per-user paths end with the session
+  // (before the sign-out, so none of them sees a permission error).
+  FreshReads.cancelUserScoped();
   await (firebaseSignOut ?? auth.signOut)();
   ProfilePage.clearCareerCache();
   LeagueService.clearRostersSnapshotCache();

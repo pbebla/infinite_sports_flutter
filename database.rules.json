@@ -245,6 +245,12 @@
       ".read": false,
       ".write": false
     },
+    "SyncBarrier": {
+      ".write": false,
+      "$k": {
+        ".read": true
+      }
+    },
     "Registrations": {
       ".read": "auth != null && root.child('Admins').child(auth.uid).exists()",
       ".write": "auth != null && root.child('Admins').child(auth.uid).exists()",

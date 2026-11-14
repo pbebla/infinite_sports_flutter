@@ -677,6 +677,23 @@ describe.each(RULES_FILES)('rules contract: account deletion (I4) - %s', (file) 
   });
 });
 
+// Fresh reads (fan plan 2026-11-13-fresh-reads.md): the server-first and
+// refreshing reads prove "the server has answered" with a one-shot read of a
+// NEW unique child of SyncBarrier (lib/misc/fresh_read.dart). Anyone may read
+// a child (signed out too: the probe and cold start), nobody may write.
+describe.each(RULES_FILES)('rules contract: sync barrier - %s', (file) => {
+  const rules = loadRules(file);
+
+  it('SyncBarrier: every child is publicly readable, nothing is writable', () => {
+    const node = rules['rules']['SyncBarrier'];
+    expect(node).toEqual({ '.write': false, '$k': { '.read': true } });
+    const { links, bindings } = writeChain(rules, 'SyncBarrier/-pushId');
+    for (const kind of ALL_KINDS) {
+      expect(links.some((l) => grants(kind, l, bindings)), kind).toBe(false);
+    }
+  });
+});
+
 // ── Insiders / audit / campaigns shapes + the whole-node gap (2026-11-13) ───
 for (const file of RULES_FILES) {
   describe(`rules contract: insiders, audit, campaigns - ${file}`, () => {
