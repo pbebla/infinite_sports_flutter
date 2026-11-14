@@ -767,7 +767,9 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
     final gws = _schedule.gameweeks;
     final players = _players;
     final editingGw = saleEditingGameweek(
-      gameweeks: gws,
+      // A schedule that failed to load is unknown, never "GW1" (review 6,
+      // I2): the draft's money then stays not-ready.
+      gameweeks: _schedule.scheduleUnknown ? null : gws,
       lockOverride: _configState?.lockOverride ?? FantasyLockOverride.auto,
       baseline: _sale?.baseline,
       nowUtc: now,
@@ -951,7 +953,12 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         // A failed History read is UNKNOWN (null), never "nothing used": it
         // holds arming of Wildcard / Free Hit (a spent one would be voided
         // at the lock and every transfer charged).
-        chipHistory: _schedule.weekUnknown ? null : _chipHistory,
+        // A failed schedule read is unknown too: no weeks were listened to,
+        // so the empty history says nothing (review 6, I2).
+        chipHistory: _schedule.weekUnknown || _schedule.scheduleUnknown
+            ? null
+            : _chipHistory,
+        scheduleUnknown: _schedule.scheduleUnknown,
         voidedWeeks: _voidedWeeks,
         lockedWeek: _lockedModel(),
         // The banner's live line: from the live feed the locked-week streams
@@ -1051,6 +1058,7 @@ class _HubBody extends StatelessWidget {
     required this.onFocusHandled,
     required this.onOpenPlayer,
     required this.deadlineClock,
+    required this.scheduleUnknown,
     required this.primaryScroll,
     this.newsStates,
     this.leaderboardsFeeds,
@@ -1058,6 +1066,11 @@ class _HubBody extends StatelessWidget {
 
   /// The hub's one deadline tick, shared by both header faces.
   final FantasyDeadlineClock deadlineClock;
+
+  /// The schedule read failed ([gameweeks] is empty for that reason only):
+  /// the deadline faces, My Team and the market say so instead of "Season
+  /// complete" / "Locked" (review 6, I2).
+  final bool scheduleUnknown;
 
   /// The tabs' primary scroll controller (see [ActiveTabScrollController]).
   final ActiveTabScrollController primaryScroll;
@@ -1149,6 +1162,7 @@ class _HubBody extends StatelessWidget {
             gameweeks: gameweeks,
             lockOverride: configState.lockOverride,
             clock: deadlineClock,
+            scheduleUnknown: scheduleUnknown,
           ),
         ),
       ),
@@ -1163,6 +1177,7 @@ class _HubBody extends StatelessWidget {
             gameweeks: gameweeks,
             lockOverride: configState.lockOverride,
             clock: deadlineClock,
+            scheduleUnknown: scheduleUnknown,
           ),
         ),
       ),
@@ -1176,6 +1191,7 @@ class _HubBody extends StatelessWidget {
           configState: configState,
           players: players,
           gameweeks: gameweeks,
+          scheduleUnknown: scheduleUnknown,
           squadStates: squadStates,
           initialSquad: squad,
           onSaveSquad: saveSquad,
@@ -1205,6 +1221,7 @@ class _HubBody extends StatelessWidget {
           draft: draft,
           lockOverride: configState.lockOverride,
           gameweeks: gameweeks,
+          scheduleUnknown: scheduleUnknown,
         ),
         // Overall/gameweek standings, mini-leagues and the manager
         // squad viewer (P3d, spec §9/§10).
@@ -1244,6 +1261,7 @@ class _HubBody extends StatelessWidget {
           configStates: configStates,
           initialState: configState,
           gameweeks: gameweeks,
+          scheduleUnknown: scheduleUnknown,
         ),
       ],
     );

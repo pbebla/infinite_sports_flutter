@@ -410,6 +410,11 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
       case FantasyLockOverride.locked:
         return 'Squads locked by the league';
       case FantasyLockOverride.auto:
+        // The schedule failed to load: whether saving is open is unknown —
+        // the neutral line, never "set your squad" (review 6, I2).
+        if (_schedule.scheduleUnknown) {
+          return fantasySeasonNeutralLine(widget.sport, widget.season);
+        }
         final gw = _lockedGameweek();
         if (gw == null) return setYourSquad;
         // Hour 24 = the midnight that ends match day, league time.

@@ -90,6 +90,7 @@ class FantasyPlayersTab extends StatefulWidget {
     required this.draft,
     required this.lockOverride,
     required this.gameweeks,
+    this.scheduleUnknown = false,
     this.totalsStates,
     this.priceChangeStates,
     this.gamesStates,
@@ -113,6 +114,10 @@ class FantasyPlayersTab extends StatefulWidget {
 
   final FantasyLockOverride lockOverride;
   final List<Gameweek> gameweeks;
+
+  /// The schedule read failed (FantasyScheduleFeed.scheduleUnknown, review 6
+  /// I2): never "Locked" / "Season complete" from that empty list.
+  final bool scheduleUnknown;
 
   // ── Test seams — null = the real FantasyService / LeagueService feeds ──
   final Stream<Map<String, FantasyPlayerTotals>?>? totalsStates;
@@ -271,11 +276,15 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
       _leagueGames.ready &&
       _watchlistLoaded;
 
-  bool get _editable => squadEditable(
+  /// open / locked / unknown (a failed schedule read — review 6, I2).
+  SquadEditState get _editState => squadEditState(
         lockOverride: widget.lockOverride,
         gameweeks: widget.gameweeks,
         nowUtc: _now,
+        scheduleUnknown: widget.scheduleUnknown,
       );
+
+  bool get _editable => _editState == SquadEditState.open;
 
   @override
   void initState() {
@@ -927,6 +936,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
       priceOf: widget.draft.addCostOf,
       editable: editable,
       unplaced: widget.draft.unplaced,
+      deadlineUnknown: _editState == SquadEditState.unknown,
     );
     final totals = _totals?[p.name];
     final unaffordable = availability == MarketAddAvailability.unaffordable;

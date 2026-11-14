@@ -253,10 +253,16 @@ void main() {
     List<TournamentMatch> gamesValue = const [],
     Set<String> watchlistValue = const {},
     List<FantasyPlayer>? playersValue,
+    // The schedule read fails before any value (review 6, I2).
+    bool weeksError = false,
   }) async {
     config.add(FantasyConfigState(
         config: FantasyConfig.futsalDefault(), lockOverride: lock));
-    gameweeks.add(weeks ?? _gameweeks(3));
+    if (weeksError) {
+      gameweeks.addError(StateError('permission-denied'));
+    } else {
+      gameweeks.add(weeks ?? _gameweeks(3));
+    }
     players.add(playersValue ?? market);
     totals.add(totalsValue);
     history.add(historyValue);
@@ -793,6 +799,21 @@ void main() {
       final button = tester.widget<FilledButton>(key('profile_add'));
       expect(button.onPressed, isNull);
       expect(find.text('Gameweek locked — no changes now.'), findsOneWidget);
+    });
+
+    testWidgets('a failed schedule read: the button is dead and says the '
+        "deadline can't be checked — never 'Gameweek locked' (review 6, I2)",
+        (tester) async {
+      await pumpPage(tester);
+      await emitAll(tester,
+          lock: FantasyLockOverride.auto, weeksError: true);
+      final button = tester.widget<FilledButton>(key('profile_add'));
+      expect(button.onPressed, isNull);
+      expect(
+          find.text(
+              "Can't check the deadline right now — try again in a moment."),
+          findsOneWidget);
+      expect(find.text('Gameweek locked — no changes now.'), findsNothing);
     });
 
     testWidgets('from outside the hub the primary button is Open in Fantasy',

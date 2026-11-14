@@ -72,7 +72,6 @@ void main() {
       schedules[0].addError(StateError('permission-denied'));
       expect(f.gameweeks, isEmpty);
       expect(f.scheduleUnknown, isTrue);
-      expect(schedules[0].hasListener, isFalse);
 
       await tester.pump(const Duration(seconds: 3));
       expect(schedules, hasLength(2), reason: 're-subscribed on the back-off');

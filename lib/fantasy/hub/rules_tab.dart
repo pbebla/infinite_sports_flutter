@@ -27,6 +27,7 @@ class FantasyRulesTab extends StatelessWidget {
     required this.configStates,
     this.initialState,
     this.gameweeks = const [],
+    this.scheduleUnknown = false,
     this.nowUtc,
     this.supportPageBuilder,
   });
@@ -36,6 +37,10 @@ class FantasyRulesTab extends StatelessWidget {
   final Stream<FantasyConfigState?> configStates;
   final FantasyConfigState? initialState;
   final List<Gameweek> gameweeks;
+
+  /// The schedule read failed (FantasyScheduleFeed.scheduleUnknown, review 6
+  /// I2): never "Locked" / "Season complete" from that empty list.
+  final bool scheduleUnknown;
   final DateTime Function()? nowUtc;
 
   /// Test seam replacing the real SupportFormPage push (whose default wiring
@@ -54,6 +59,7 @@ class FantasyRulesTab extends StatelessWidget {
         return _RulesBody(
             state: state,
             gameweeks: gameweeks,
+            scheduleUnknown: scheduleUnknown,
             nowUtc: nowUtc,
             supportPageBuilder: supportPageBuilder);
       },
@@ -65,12 +71,17 @@ class _RulesBody extends StatelessWidget {
   const _RulesBody({
     required this.state,
     required this.gameweeks,
+    required this.scheduleUnknown,
     required this.nowUtc,
     required this.supportPageBuilder,
   });
 
   final FantasyConfigState state;
   final List<Gameweek> gameweeks;
+
+  /// The schedule read failed (FantasyScheduleFeed.scheduleUnknown, review 6
+  /// I2): never "Locked" / "Season complete" from that empty list.
+  final bool scheduleUnknown;
   final DateTime Function()? nowUtc;
   final Widget Function()? supportPageBuilder;
 
@@ -166,6 +177,7 @@ class _RulesBody extends StatelessWidget {
                 gameweeks: gameweeks,
                 lockOverride: state.lockOverride,
                 nowUtc: nowUtc,
+                scheduleUnknown: scheduleUnknown,
               ),
             ],
           ),

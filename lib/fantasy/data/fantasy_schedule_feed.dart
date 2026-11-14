@@ -339,6 +339,7 @@ class FantasyScheduleFeed<W> {
     _config = state;
     _configLoaded = true;
     _configAbsent = state == null;
+    _configRetry.cancel();
     _configRetry.reset();
     if (state == null) {
       // Fantasy removed for the season: nothing stale may seed a revisit.
@@ -381,11 +382,9 @@ class FantasyScheduleFeed<W> {
       _gameweeks = const [];
       _scheduleFromError = true;
     }
-    if (!_configSubscribing) {
-      _configSub?.cancel();
-      _configSub = null;
-      _configRetry.retry(_subscribeConfig);
-    }
+    // An RTDB stream ends after an error: unless it answers again first,
+    // re-subscribe on the back-off (the retry is dropped by the next data).
+    if (!_configSubscribing) _configRetry.retry(_subscribeConfig);
     _syncWeeks();
     _notify();
   }
@@ -410,6 +409,7 @@ class FantasyScheduleFeed<W> {
           if (_derived) _gameweeksSession[_sessionKey] = gws;
           _gameweeks = gws;
           _scheduleFromError = false;
+          _scheduleRetry.cancel();
           _scheduleRetry.reset();
           _syncWeeks();
           _notify();
@@ -421,11 +421,13 @@ class FantasyScheduleFeed<W> {
             _gameweeks = const [];
             _scheduleFromError = true;
           }
+          // The stream ends after an error: unless it answers again first,
+          // re-subscribe on the back-off.
           if (!_scheduleSubscribing) {
-            _gameweeksSub?.cancel();
-            _gameweeksSub = null;
             _scheduleRetry.retry(() {
-              if (identical(_scheduleMake, make)) _listenSchedule(make);
+              if (!identical(_scheduleMake, make)) return;
+              _gameweeksSub?.cancel();
+              _listenSchedule(make);
             });
           }
           _syncWeeks();

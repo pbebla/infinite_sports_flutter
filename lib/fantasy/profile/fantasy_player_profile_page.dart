@@ -550,15 +550,20 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
     Navigator.push(context, fantasyHubPageRoute(route));
   }
 
-  bool get _editable {
+  /// open / locked / unknown — unknown = the schedule read failed (review 6,
+  /// I2): Add/Remove stay off and say the deadline can't be checked.
+  SquadEditState get _editState {
     final config = _config;
-    if (config == null) return false;
-    return squadEditable(
+    if (config == null) return SquadEditState.locked;
+    return squadEditState(
       lockOverride: config.lockOverride,
       gameweeks: _gameweeks ?? const [],
       nowUtc: _nowUtc,
+      scheduleUnknown: _schedule.scheduleUnknown,
     );
   }
+
+  bool get _editable => _editState == SquadEditState.open;
 
   // ── Build ───────────────────────────────────────────────────────────────
 
@@ -776,6 +781,7 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
           player: player,
           draft: draft,
           editable: _editable,
+          deadlineUnknown: _editState == SquadEditState.unknown,
         ),
       );
     } else {
@@ -863,11 +869,13 @@ class _DraftAction extends StatelessWidget {
     required this.player,
     required this.draft,
     required this.editable,
+    this.deadlineUnknown = false,
   });
 
   final FantasyPlayer player;
   final SquadDraftController draft;
   final bool editable;
+  final bool deadlineUnknown;
 
   @override
   Widget build(BuildContext context) {
@@ -881,6 +889,7 @@ class _DraftAction extends StatelessWidget {
       priceOf: draft.addCostOf,
       editable: editable,
       unplaced: draft.unplaced,
+      deadlineUnknown: deadlineUnknown,
     );
     final inSquad = availability == MarketAddAvailability.inSquad;
     final addable = availability == MarketAddAvailability.addable;

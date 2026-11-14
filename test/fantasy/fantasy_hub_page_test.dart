@@ -2134,6 +2134,45 @@ void main() {
       });
     }
 
+    for (final brightness in Brightness.values) {
+      testWidgets('$brightness: a failed schedule read — both header faces '
+          'say "Deadline unavailable", My Team never says "Locked", the '
+          'market says it cannot check (review 6, I2)', (tester) async {
+        await pumpHub(tester,
+            size: const Size(360, 740),
+            brightness: brightness,
+            gameweekStates: Stream<List<Gameweek>>.error(
+                StateError('permission-denied')),
+            nowUtc: now);
+        await land(tester, lock: FantasyLockOverride.auto);
+        expect(find.byType(FantasyBanner), findsOneWidget);
+        expect(find.text('Deadline unavailable'), findsOneWidget);
+        expect(find.text('Season complete'), findsNothing);
+        expect(find.text('Locked'), findsNothing);
+        expect(key('locked_live_strip'), findsNothing);
+        expect(key('deadline_unknown_strip'), findsOneWidget);
+
+        await tester.dragFrom(const Offset(180, 650), const Offset(0, -400));
+        await settle(tester);
+        expect(collapsed(), isFalse,
+            reason: 'no countdown: the slim bar has a label only');
+        expect(find.byType(FantasyBanner), findsNothing);
+        expect(tester.widget<Text>(key('deadline_slim_label')).data,
+            'Deadline unavailable');
+        expect(find.text('Season complete'), findsNothing);
+
+        await tester.ensureVisible(find.widgetWithText(Tab, 'Players'));
+        await tester.tap(find.widgetWithText(Tab, 'Players'));
+        await settle(tester);
+        await settle(tester);
+        final tip = tester.widget<Tooltip>(
+            key('market_add_disabled_Ava Striker'));
+        expect(tip.message,
+            'Can\'t check the deadline right now — try again in a moment.');
+        expect(tester.takeException(), isNull);
+      });
+    }
+
     group('never stuck collapsed (review 6, I1)', () {
       testWidgets('News, one post (short): a slow drag never collapses',
           (tester) async {

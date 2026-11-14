@@ -49,6 +49,8 @@ import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/chip_row.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart'
+    show kDeadlineUnavailable;
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart'
     show movementDirection;
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart'
@@ -71,6 +73,7 @@ class FantasySquadBuilder extends StatefulWidget {
     required this.config,
     required this.lockOverride,
     required this.gameweeks,
+    this.scheduleUnknown = false,
     required this.players,
     required this.squadStates,
     this.initialSquad,
@@ -134,6 +137,10 @@ class FantasySquadBuilder extends StatefulWidget {
   final FantasyLockOverride lockOverride;
   final List<Gameweek> gameweeks;
 
+  /// The schedule read failed (FantasyScheduleFeed.scheduleUnknown, review 6
+  /// I2): never "Locked" / "Season complete" from that empty list.
+  final bool scheduleUnknown;
+
   /// The live market (guests arrive eligible=false and are filtered by the
   /// picker).
   final List<FantasyPlayer> players;
@@ -179,10 +186,16 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
 
   /// The schedule's verdict alone (the owner's lock override, the deadline):
   /// whether the WEEK is open for editing — what decides the locked view.
-  bool get _scheduleEditable => squadEditable(
+  bool get _scheduleEditable => _editState == SquadEditState.open;
+
+  /// open / locked / unknown — unknown = the schedule read failed (review 6,
+  /// I2): the court is not editable, and the strip says the deadline can't
+  /// be checked instead of "Locked".
+  SquadEditState get _editState => squadEditState(
         lockOverride: widget.lockOverride,
         gameweeks: widget.gameweeks,
         nowUtc: _now,
+        scheduleUnknown: widget.scheduleUnknown,
       );
 
   /// Whether THIS manager can edit right now (the schedule, and a pass).
@@ -545,7 +558,9 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
                 const SizedBox(height: 8),
                 _TransfersLine(preview: transfers),
               ],
-            ] else
+            ] else if (_editState == SquadEditState.unknown)
+              const _DeadlineUnknownStrip()
+            else
               // Nothing known about the week (no model yet): just "Locked" —
               // never a claim about kickoff.
               _LockedWeekStrip(
@@ -829,6 +844,46 @@ class _TransfersLine extends StatelessWidget {
 /// the hub; the movement reads in the leaderboard's own up / down colours
 /// (pitch green / the bright fantasy red), both themes. Text wraps, never
 /// ellipsizes, so it fits 360 px.
+/// My Team while the schedule could not be read (review 6, I2): editing is
+/// paused because the deadline can't be checked — never "Locked". The
+/// schedule feed retries on its own.
+class _DeadlineUnknownStrip extends StatelessWidget {
+  const _DeadlineUnknownStrip();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const ValueKey('deadline_unknown_strip'),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.schedule, size: 18, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              "$kDeadlineUnavailable — can't check whether editing is open "
+              'right now. Trying again…',
+              softWrap: true,
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.25,
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurface,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _LockedWeekStrip extends StatelessWidget {
   const _LockedWeekStrip({required this.view});
 

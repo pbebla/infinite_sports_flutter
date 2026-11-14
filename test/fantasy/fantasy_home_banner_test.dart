@@ -913,4 +913,20 @@ void main() {
       }
     });
   });
+
+  testWidgets('a failed schedule read under the automatic lock: the neutral '
+      'line — never "set your squad" (review 6, I2)', (tester) async {
+    await pumpBanner(tester);
+    configs.add(state());
+    gameweeks.addError(StateError('permission-denied'));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('fantasy_home_banner')), findsOneWidget);
+    expect(title(tester), 'Futsal Season 15 · Open Infinite Fantasy');
+    expect(find.byKey(const ValueKey('fantasy_home_banner_deadline')),
+        findsNothing);
+    // The league override is a Config fact: still stated.
+    configs.add(state(FantasyLockOverride.locked));
+    await tester.pump();
+    expect(title(tester), 'Squads locked by the league');
+  });
 }
