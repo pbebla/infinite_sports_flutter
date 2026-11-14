@@ -153,4 +153,36 @@ void main() {
       expect(find.textContaining('Code accepted'), findsOneWidget);
     });
   });
+
+  // Task 4 (#14, OWN-WRITE treated as a decision): apply() writes only when
+  // there is no application or it was declined. A pending/active/suspended
+  // record counts from any source (never clobbered); "absent/declined" only
+  // counts when the server said so.
+  group('insiderApplyDecision (#14)', () {
+    test('an existing application from any source: no write', () {
+      for (final fromServer in [true, false]) {
+        expect(
+            insiderApplyDecision({'Status': 'pending'}, 'u1',
+                fromServer: fromServer),
+            InsiderApplyDecision.alreadyApplied);
+      }
+    });
+
+    test('absent or declined from the server: write', () {
+      expect(insiderApplyDecision(null, 'u1', fromServer: true),
+          InsiderApplyDecision.write);
+      expect(
+          insiderApplyDecision({'Status': 'declined'}, 'u1', fromServer: true),
+          InsiderApplyDecision.write);
+    });
+
+    test('absent or declined from the saved copy: could not check', () {
+      expect(insiderApplyDecision(null, 'u1', fromServer: false),
+          InsiderApplyDecision.couldNotCheck);
+      expect(
+          insiderApplyDecision({'Status': 'declined'}, 'u1',
+              fromServer: false),
+          InsiderApplyDecision.couldNotCheck);
+    });
+  });
 }

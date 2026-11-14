@@ -31,6 +31,24 @@ Future<Object?> _checkedValue(String path) async {
   return r.value;
 }
 
+/// What [InsiderService.apply] may do.
+enum InsiderApplyDecision { write, alreadyApplied, couldNotCheck }
+
+/// [InsiderService.apply]'s guard, pure (fresh reads, Task 4, #14): an
+/// existing pending/active/suspended application counts from ANY source (it
+/// is never clobbered); "no application" or "declined" only allows a write
+/// when the server said so — the saved copy can be older than an approval.
+InsiderApplyDecision insiderApplyDecision(Object? raw, String uid,
+    {required bool fromServer}) {
+  final existing = Insider.fromFirebase(uid, raw);
+  if (existing != null && !existing.isDeclined) {
+    return InsiderApplyDecision.alreadyApplied;
+  }
+  return fromServer
+      ? InsiderApplyDecision.write
+      : InsiderApplyDecision.couldNotCheck;
+}
+
 /// Live reads + the application write for the Infinite Insiders program
 /// (Task F2). Mirrors the static-method service style of
 /// lib/registration/registration_service.dart.
@@ -61,9 +79,23 @@ class InsiderService {
     required String email,
   }) async {
     final nodeRef = _ref(uid);
-    final snapshot = (await nodeRef.once()).snapshot;
-    final existing = Insider.fromFirebase(uid, snapshot.value);
-    if (existing != null && !existing.isDeclined) return;
+    // Fresh reads (Task 4, #14): server-first — see insiderApplyDecision.
+    // "Couldn't check" throws, and the info page's existing "Something went
+    // wrong. Please try again." snackbar shows.
+    final FreshValue read;
+    try {
+      read = await serverFirstValue('Insiders/$uid');
+    } catch (e) {
+      throw InsiderCheckUnavailable(e);
+    }
+    switch (insiderApplyDecision(read.value, uid, fromServer: read.fromServer)) {
+      case InsiderApplyDecision.alreadyApplied:
+        return;
+      case InsiderApplyDecision.couldNotCheck:
+        throw const InsiderCheckUnavailable('not from server');
+      case InsiderApplyDecision.write:
+        break;
+    }
 
     await nodeRef.set({
       'Name': name,
@@ -121,7 +153,7 @@ class InsiderService {
   static Future<String> getInsiderName(String uid) async {
     try {
       final snap =
-          (await FirebaseDatabase.instance.ref('Insiders/$uid/Name').once())
+          (await refreshingOnce(FirebaseDatabase.instance.ref('Insiders/$uid/Name')))
               .snapshot;
       return snap.value?.toString() ?? '';
     } catch (_) {

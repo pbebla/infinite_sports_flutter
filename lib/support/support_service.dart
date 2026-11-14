@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:infinite_sports_flutter/support/support_models.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 /// Thrown by [SupportService.createTicket] when the soft 6-tickets/hour gate
 /// trips (spec decision #3). The message is user-facing — the form shows it
@@ -42,7 +43,7 @@ Future<({List<String> urls, int failed})> uploadScreenshotsBestEffort(
 
 /// Ticket creation + live reads + replies for the player-facing support
 /// system (zaya-support). Static-method service in the house style of
-/// lib/misc/insider_service.dart — and like it, iOS-parity clean: `.once()`
+/// lib/misc/insider_service.dart — and like it, iOS-parity clean: fresh reads
 /// / `onValue` streams only, never `.get()` (firebase-ios-sdk wrong-node
 /// bug).
 ///
@@ -169,12 +170,12 @@ class SupportService {
   static Future<List<int>> _myRecentCreatedAts(String uid) async {
     try {
       final index =
-          (await _root.child('Support/UserTickets/$uid').once()).snapshot;
+          (await refreshingOnce(_root.child('Support/UserTickets/$uid'))).snapshot;
       final nums = ticketNumsFromIndex(index.value);
       final out = <int>[];
       for (final n in nums.take(kSupportRateLimitPerHour + 2)) {
         final created =
-            (await _root.child('Support/Tickets/$n/CreatedAt').once())
+            (await refreshingOnce(_root.child('Support/Tickets/$n/CreatedAt')))
                 .snapshot
                 .value;
         if (created is num) out.add(created.toInt());

@@ -7,6 +7,7 @@ import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 // NOTE (owner decision 2026-07-27): the "sports of interest" question was
 // removed from the application — Insiders can refer anyone for any sport.
@@ -89,6 +90,23 @@ class _InsidersInfoPageState extends State<InsidersInfoPage> {
 
   String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
+  /// Removes the newer-name follower (fresh reads, Task 4, #4).
+  VoidCallback? _stopNameFollow;
+
+  @override
+  void dispose() {
+    _stopNameFollow?.call();
+    super.dispose();
+  }
+
+  /// "First Last" from a `Users/<uid>` value ('' when absent).
+  static String _nameFrom(Object? raw) {
+    if (raw is! Map) return '';
+    final first = raw['First Name']?.toString() ?? '';
+    final last = raw['Last Name']?.toString() ?? '';
+    return [first, last].where((s) => s.isNotEmpty).join(' ');
+  }
+
   @override
   void initState() {
     super.initState();
@@ -107,9 +125,8 @@ class _InsidersInfoPageState extends State<InsidersInfoPage> {
 
   Future<void> _loadPlaybookUrl() async {
     try {
-      final snap = (await FirebaseDatabase.instance
-              .ref('AppConfig/InsidersPlaybookUrl')
-              .once())
+      final snap = (await refreshingOnce(FirebaseDatabase.instance
+              .ref('AppConfig/InsidersPlaybookUrl')))
           .snapshot;
       final url = snap.value?.toString() ?? '';
       if (url.isNotEmpty && mounted) setState(() => _playbookUrl = url);
@@ -139,16 +156,19 @@ class _InsidersInfoPageState extends State<InsidersInfoPage> {
         final uid = _uid;
         if (uid.isNotEmpty) {
           final snap =
-              (await FirebaseDatabase.instance.ref('Users/$uid').once())
+              (await refreshingOnce(FirebaseDatabase.instance.ref('Users/$uid')))
                   .snapshot;
-          final raw = snap.value;
-          if (raw is Map) {
-            final first = raw['First Name']?.toString() ?? '';
-            final last = raw['Last Name']?.toString() ?? '';
-            final combined =
-                [first, last].where((s) => s.isNotEmpty).join(' ');
-            if (combined.isNotEmpty) _name = combined;
-          }
+          final combined = _nameFrom(snap.value);
+          if (combined.isNotEmpty) _name = combined;
+          // Own-write row #4 (fresh reads, Task 4): this name is written to
+          // Insiders/<uid>/Name by Apply, so the read is a refreshing one
+          // and a newer name from the server replaces it while the page is
+          // open — Apply writes the server's name, not the saved copy's.
+          _stopNameFollow?.call();
+          _stopNameFollow = FreshReads.onNewer('Users/$uid', (v) {
+            final newer = _nameFrom(v);
+            if (newer.isNotEmpty && mounted) setState(() => _name = newer);
+          });
         }
       }
     } catch (_) {

@@ -9,6 +9,7 @@ import 'package:infinite_sports_flutter/support/my_tickets_page.dart';
 import 'package:infinite_sports_flutter/support/support_models.dart';
 import 'package:infinite_sports_flutter/support/support_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 /// The in-app "Help & Feedback" form (spec decision #1) — category cards
 /// with emoji + helper text, required message (≤5,000 chars), up to 5
@@ -60,7 +61,7 @@ class SupportFormPage extends StatefulWidget {
   })? submitOverride;
 
   /// Test seams for the auto-captured context — production reads
-  /// FirebaseAuth + `Users/<uid>` (name/email/uid via `.once()`),
+  /// FirebaseAuth + `Users/<uid>` (name/email/uid via `refreshingOnce`),
   /// package_info_plus (app version) and dart:io Platform
   /// (platform/device).
   final String? prefillName;
@@ -120,10 +121,22 @@ class _SupportFormPageState extends State<SupportFormPage> {
     _device = widget.prefillDevice ?? _bestEffortDevice();
   }
 
+  /// Removes the newer-name follower (fresh reads, Task 4, #79).
+  VoidCallback? _stopNameFollow;
+
   @override
   void dispose() {
+    _stopNameFollow?.call();
     _messageController.dispose();
     super.dispose();
+  }
+
+  /// "First Last" from a `Users/<uid>` value ('' when absent).
+  static String _nameFrom(Object? raw) {
+    if (raw is! Map) return '';
+    final first = raw['First Name']?.toString() ?? '';
+    final last = raw['Last Name']?.toString() ?? '';
+    return [first, last].where((s) => s.isNotEmpty).join(' ');
   }
 
   static String _bestEffortDevice() {
@@ -143,14 +156,18 @@ class _SupportFormPageState extends State<SupportFormPage> {
         _name = user?.displayName ?? '';
         if (_name.isEmpty && _uid.isNotEmpty) {
           final snap =
-              (await FirebaseDatabase.instance.ref('Users/$_uid').once())
+              (await refreshingOnce(FirebaseDatabase.instance.ref('Users/$_uid')))
                   .snapshot;
-          final raw = snap.value;
-          if (raw is Map) {
-            final first = raw['First Name']?.toString() ?? '';
-            final last = raw['Last Name']?.toString() ?? '';
-            _name = [first, last].where((s) => s.isNotEmpty).join(' ');
-          }
+          _name = _nameFrom(snap.value);
+          // Own-write row #79 (fresh reads, Task 4): the name is stamped on
+          // the ticket, so a newer one from the server replaces it while
+          // the form is open.
+          final uid = _uid;
+          _stopNameFollow?.call();
+          _stopNameFollow = FreshReads.onNewer('Users/$uid', (v) {
+            final newer = _nameFrom(v);
+            if (newer.isNotEmpty && mounted) setState(() => _name = newer);
+          });
         }
       }
     } catch (_) {
