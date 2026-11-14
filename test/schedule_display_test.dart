@@ -40,5 +40,28 @@ void main() {
       expect(isPlaceholderTeam('Winnerless FC'), isFalse);
       expect(isPlaceholderTeam(''), isFalse);
     });
+
+    // S16 Task 2: seed placeholders ('3rd Place', filled in by the Manager
+    // once the regular season ends) behave like 'Winner of QF1'.
+    test('ordinal seed placeholders are placeholders', () {
+      expect(isPlaceholderTeam('1st Place'), isTrue);
+      expect(isPlaceholderTeam('2nd Place'), isTrue);
+      expect(isPlaceholderTeam('3rd Place'), isTrue);
+      expect(isPlaceholderTeam('6th Place'), isTrue);
+      expect(isPlaceholderTeam('12th place '), isTrue);
+      expect(isPlaceholderTeam(' 4TH PLACE'), isTrue);
+      expect(isPlaceholderTeam('Winner of QF1'), isTrue);
+    });
+
+    test('real teams that merely mention a place are still teams', () {
+      expect(isPlaceholderTeam('Park Place FC'), isFalse);
+      expect(isPlaceholderTeam('1st Place FC'), isFalse);
+      expect(isPlaceholderTeam('The 3rd Place'), isFalse);
+      expect(isPlaceholderTeam('123rd Place'), isFalse);
+      expect(isPlaceholderTeam('Place'), isFalse);
+      expect(isPlaceholderTeam('3rdPlace'), isFalse);
+      expect(isPlaceholderTeam(''), isFalse);
+      expect(isPlaceholderTeam('   '), isFalse);
+    });
   });
 }
