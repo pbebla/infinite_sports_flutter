@@ -558,17 +558,28 @@ class FantasyLeagueGamesFeed {
   }
 }
 
+/// The league season as the Finished flag says it is — three-way, because a
+/// failed read is not a fact (fix round 1, I2): [unknown] until a REAL
+/// answer (a live emission or the session cache) says running or over.
+enum FantasySeasonPhase { running, over, unknown }
+
 /// The league's own season-over flag (`/<sport>/<season>/Finished`) behind the
 /// screens that drop their price arrows once the season is over (the Players
 /// market, the player profile's stat strip, the Infinite profile's Fantasy
-/// tab). One wiring, one behaviour:
-///   • [ready] joins the owner's reveal gate — nothing paints the arrows
-///     before the flag has answered (no arrow flashing in then out);
+/// tab) and the entry points that word the season (home banner, Search hub
+/// card). One wiring, one behaviour:
+///   • [ready] joins the owner's reveal gate — nothing paints before the flag
+///     has answered or failed (no copy flashing in then out);
+///   • [phase] is the three-way answer; [finished] stays the simple "over"
+///     test for the arrow screens (unknown reads as not over there);
 ///   • an error (or a stream that cannot even be created — no Firebase app in
-///     a widget test) is logged with debugPrint and opens the gate: "not
-///     finished" unless an earlier real answer says otherwise (last good kept);
-///   • the last answer is session-cached per `<sport>|<season>`, so a revisit
-///     paints at once and the live stream then refreshes it in place.
+///     a widget test) is logged with debugPrint and opens the gate; the last
+///     good answer is kept, none = [FantasySeasonPhase.unknown];
+///   • a STREAM error re-subscribes on a bounded back-off (an RTDB onValue
+///     stream ends after an error), so one blip does not pin the answer for
+///     the session; a stream that cannot even be created is not retried;
+///   • only real answers are session-cached per `<sport>|<season>`, so a
+///     revisit paints at once and a failure never poisons the next open.
 class FantasySeasonFinishedFeed {
   FantasySeasonFinishedFeed({
     required this.sport,
@@ -586,6 +597,16 @@ class FantasySeasonFinishedFeed {
   /// Test seam REPLACING `FantasyService.watchLeagueSeasonFinished`.
   final Stream<bool>? finishedStates;
 
+  /// Back-off between re-subscriptions after a stream error; the feed gives
+  /// up after the last one (the next screen open starts a fresh feed).
+  static const List<Duration> retryDelays = [
+    Duration(seconds: 2),
+    Duration(seconds: 5),
+    Duration(seconds: 15),
+    Duration(seconds: 30),
+    Duration(seconds: 60),
+  ];
+
   /// The last answer per `<sport>|<season>` (written by every real emission).
   static final Map<String, bool> _session = {};
 
@@ -596,13 +617,22 @@ class FantasySeasonFinishedFeed {
 
   bool _started = false;
   bool _starting = false;
+  bool _subscribing = false;
   bool _disposed = false;
   bool _finished = false;
+  bool _known = false;
   bool _loaded = false;
+  int _retries = 0;
+  Timer? _retryTimer;
   StreamSubscription<bool>? _sub;
 
-  /// The season is over (false until the flag says so).
+  /// The season is over (false until a real answer says so).
   bool get finished => _finished;
+
+  /// running / over from a real answer; unknown while none has arrived.
+  FantasySeasonPhase get phase => !_known
+      ? FantasySeasonPhase.unknown
+      : (_finished ? FantasySeasonPhase.over : FantasySeasonPhase.running);
 
   /// The flag has answered (or failed) — joins the owner's reveal gate.
   bool get ready => _loaded;
@@ -617,8 +647,20 @@ class FantasySeasonFinishedFeed {
       final seed = _session[_sessionKey];
       if (seed != null) {
         _finished = seed;
+        _known = true;
         _loaded = true;
       }
+      _subscribe();
+    } finally {
+      _starting = false;
+    }
+  }
+
+  void _subscribe() {
+    _sub?.cancel();
+    _sub = null;
+    _subscribing = true;
+    try {
       _sub = _listenLogged<bool>(
         owner: owner,
         what: 'season finished feed',
@@ -629,21 +671,39 @@ class FantasySeasonFinishedFeed {
         onData: (finished) {
           _session[_sessionKey] = finished;
           _finished = finished;
+          _known = true;
           _loaded = true;
+          _retries = 0;
           _notify();
         },
         onError: () {
-          _loaded = true; // the last good answer stays; none = not finished
+          _loaded = true; // the last good answer stays; none = unknown
+          // A stream error ends the RTDB stream: drop it and try again
+          // later. A synchronous failure (no stream at all) is not retried.
+          if (!_subscribing) {
+            _sub?.cancel();
+            _sub = null;
+            _scheduleRetry();
+          }
           _notify();
         },
       );
     } finally {
-      _starting = false;
+      _subscribing = false;
     }
+  }
+
+  void _scheduleRetry() {
+    if (_disposed || _retries >= retryDelays.length) return;
+    _retryTimer?.cancel();
+    _retryTimer = Timer(retryDelays[_retries++], () {
+      if (!_disposed) _subscribe();
+    });
   }
 
   void dispose() {
     _disposed = true;
+    _retryTimer?.cancel();
     _sub?.cancel();
   }
 

@@ -67,14 +67,24 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 /// see the final standings") and the Search hub's Fantasy card.
 const String kFantasySeasonOverCta = 'see the final standings';
 
-/// The Search hub's Fantasy card line (release report #16): "is live" only
-/// while the league season is running, decided by the SAME
-/// [FantasySeasonFinishedFeed] flag this banner uses.
-String fantasyEntryCardSubtitle(String sport, String season,
-        {required bool finished}) =>
-    finished
-        ? '$sport Season $season is over — $kFantasySeasonOverCta'
-        : 'Pick your seven — $sport Season $season is live';
+/// The neutral line for a season whose state could not be read (fix round
+/// 1, I2 — a failed read is not a fact): claims neither "live" nor "over".
+String fantasySeasonNeutralLine(String sport, String season) =>
+    '$sport Season $season · Open Infinite Fantasy';
+
+/// The Search hub's Fantasy card line (release report #16, fix round 1 I2):
+/// "is live" only while the league season is RUNNING and "is over" only once
+/// it is OVER — both read from the SAME [FantasySeasonFinishedFeed.phase]
+/// this banner uses — and the neutral line while that is unknown.
+String fantasyEntryCardSubtitle(
+        String sport, String season, FantasySeasonPhase phase) =>
+    switch (phase) {
+      FantasySeasonPhase.over =>
+        '$sport Season $season is over — $kFantasySeasonOverCta',
+      FantasySeasonPhase.running =>
+        'Pick your seven — $sport Season $season is live',
+      FantasySeasonPhase.unknown => fantasySeasonNeutralLine(sport, season),
+    };
 
 class FantasyHomeBanner extends StatefulWidget {
   const FantasyHomeBanner({
@@ -388,7 +398,12 @@ class _FantasyHomeBannerState extends State<FantasyHomeBanner> {
     if (_seasonFinished.finished) {
       return 'Season over — $kFantasySeasonOverCta';
     }
-    const setYourSquad = 'Fantasy is live — set your squad';
+    // "Fantasy is live" only when the league flag SAYS the season is
+    // running; a failed read gets the neutral line (fix round 1, I2).
+    final setYourSquad =
+        _seasonFinished.phase == FantasySeasonPhase.running
+            ? 'Fantasy is live — set your squad'
+            : fantasySeasonNeutralLine(widget.sport, widget.season);
     switch (_config?.lockOverride ?? FantasyLockOverride.auto) {
       case FantasyLockOverride.open:
         return setYourSquad;

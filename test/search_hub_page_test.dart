@@ -142,12 +142,24 @@ void main() {
             findsOneWidget);
       });
 
-      testWidgets('a failing flag feed reads as not finished (house rule: '
-          'the same fallback as the banner)', (tester) async {
+      testWidgets('a failed read is not a fact: neutral line (neither live '
+          'nor over), then the retry corrects it', (tester) async {
         final finished = await pumpHub(tester);
         finished.addError(StateError('offline'));
         await tester.pump();
-        expect(find.text('Pick your seven — Futsal Season 15 is live'),
+        expect(find.text('Infinite Fantasy'), findsOneWidget);
+        expect(find.text('Futsal Season 15 · Open Infinite Fantasy'),
+            findsOneWidget);
+        expect(find.textContaining('is live'), findsNothing);
+        expect(find.textContaining('is over'), findsNothing);
+
+        // The feed re-subscribes after its back-off; the next answer lands.
+        await tester.pump(const Duration(seconds: 3));
+        finished.add(true);
+        await tester.pump();
+        await tester.pump();
+        expect(
+            find.text('Futsal Season 15 is over — see the final standings'),
             findsOneWidget);
       });
     });

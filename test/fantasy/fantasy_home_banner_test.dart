@@ -305,6 +305,40 @@ void main() {
     });
   });
 
+  // Fix round 1, I2: a failed read of the Finished flag is not a fact.
+  group('Finished flag read fails', () {
+    testWidgets('neutral title (never "Fantasy is live"), then the retry '
+        'corrects it', (tester) async {
+      final finished = StreamController<bool>.broadcast(sync: true);
+      addTearDown(finished.close);
+      await pumpBanner(tester, finished: finished.stream);
+      configs.add(state());
+      gameweeks.add(const []);
+      finished.addError(StateError('permission-denied'));
+      await tester.pump();
+      expect(title(tester), 'Futsal Season 15 · Open Infinite Fantasy');
+      expect(find.text('Fantasy is live — set your squad'), findsNothing);
+      expect(find.textContaining('Season over'), findsNothing);
+
+      await tester.pump(const Duration(seconds: 3));
+      finished.add(false);
+      await tester.pump();
+      expect(title(tester), 'Fantasy is live — set your squad');
+    });
+
+    testWidgets('a league lock is still stated (a fact from Config)',
+        (tester) async {
+      final finished = StreamController<bool>.broadcast(sync: true);
+      addTearDown(finished.close);
+      await pumpBanner(tester, finished: finished.stream);
+      configs.add(state(FantasyLockOverride.locked));
+      gameweeks.add(const []);
+      finished.addError(StateError('offline'));
+      await tester.pump();
+      expect(title(tester), 'Squads locked by the league');
+    });
+  });
+
   // Opus audit item 7: 360 px in light AND dark — the live state with its
   // deadline chip, and the season-over state.
   group('360 px, light + dark', () {

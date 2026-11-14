@@ -147,7 +147,8 @@ class _SearchHubPageState extends State<SearchHubPage> {
     feed.start();
   }
 
-  bool get _fantasyFinished => _finishedFeed?.finished ?? false;
+  bool get _fantasyFinished =>
+      _finishedFeed?.phase == FantasySeasonPhase.over;
 
   void _openFantasy(String sport, String season) {
     final builder = widget.fantasyHubPageBuilder ??
@@ -316,7 +317,7 @@ class _SearchHubPageState extends State<SearchHubPage> {
                 ),
                 subtitle: Text(
                   fantasyEntryCardSubtitle(_fantasy!.$1, _fantasy!.$2,
-                      finished: _fantasyFinished),
+                      _finishedFeed!.phase),
                   style:
                       TextStyle(color: FantasyBanner.foregroundMuted(context)),
                 ),
