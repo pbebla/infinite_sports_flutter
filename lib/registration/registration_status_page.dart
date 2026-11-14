@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:infinite_sports_flutter/misc/share_card_service.dart';
@@ -65,6 +67,13 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
     _submission = widget.submissionStream ??
         RegistrationService.watchMySubmission(widget.regId);
     _form = widget.formFuture ?? RegistrationService.getForm(widget.regId);
+    // Review fix (Minor 1): complete a half-finished submit's legacy Sign Ups
+    // entry (idempotent, server-checked, own uid only). Skipped under the
+    // widget-test seams.
+    if (widget.submissionStream == null) {
+      unawaited(
+          RegistrationService.repairLegacySignUp(widget.regId, widget.config));
+    }
   }
 
   Stream<RegTeam?> _teamStreamFor(String teamId) {

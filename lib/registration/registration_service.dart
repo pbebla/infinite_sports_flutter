@@ -1,7 +1,7 @@
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/stream_resilience.dart';
 import 'package:infinite_sports_flutter/registration/promo_engine.dart';
@@ -188,6 +188,52 @@ class RegistrationService {
       );
     } catch (_) {
       return (submission: null, exists: false, checked: false);
+    }
+  }
+
+  /// Test seam replacing the legacy sign-up repair write (path, value).
+  @visibleForTesting
+  static Future<void> Function(String path, Object value)? legacyWriteOverride;
+
+  /// Review fix (Minor 1): a submit whose submission write landed but whose
+  /// legacy `Sign Ups/<league>/<season>/<bucket>/<uid>` dual-write did not
+  /// (the "try again" now meets the existing submission) is completed here,
+  /// on the retry and when the status page opens. Idempotent and safe: the
+  /// three reads are server-first and run together; nothing is written
+  /// unless all three came from the server ([legacyRepairBucket]); an entry
+  /// in EITHER bucket means nothing to do (a Paid entry is never touched);
+  /// only the signed-in fan's own uid is written. Never throws.
+  static Future<void> repairLegacySignUp(
+      String regId, RegistrationConfig config,
+      {String? displayName}) async {
+    try {
+      final uid = _uid;
+      if (uid == null) return;
+      final target = legacySignUpTarget(config);
+      final base = 'Sign Ups/${target.league}/${target.season}';
+      final reads = await Future.wait([
+        serverFirstValue('Registrations/$regId/Submissions/$uid'),
+        serverFirstValue('$base/NotPaid/$uid'),
+        serverFirstValue('$base/Paid/$uid'),
+      ]);
+      if (!reads.every((r) => r.fromServer)) return;
+      final bucket = legacyRepairBucket(
+          submission: RegSubmission.fromFirebase(reads[0].value),
+          notPaidExists: reads[1].value != null,
+          paidExists: reads[2].value != null);
+      if (bucket == null) return;
+      final name = displayName ??
+          collapseTrailingSpaces(
+              FirebaseAuth.instance.currentUser?.displayName ?? '');
+      final path = '$base/$bucket/$uid';
+      final write = legacyWriteOverride;
+      if (write != null) {
+        await write(path, name);
+      } else {
+        await FirebaseDatabase.instance.ref(path).set(name);
+      }
+    } catch (e) {
+      debugPrint('RegistrationService: legacy sign-up repair failed: $e');
     }
   }
 
@@ -589,6 +635,22 @@ class RegistrationService {
       return SubmitOutcome.failed;
     }
   }
+}
+
+/// Which legacy Sign Ups bucket a resumed submit must fill in (review fix
+/// Minor 1), or null for nothing: no submission, an entry already in either
+/// bucket (never downgrade a Paid entry), or a submission paid some other
+/// way (the Manager's flip moves it). Same buckets the submit writes: a
+/// team-code-waived joiner is born Paid, everyone else NotPaid.
+String? legacyRepairBucket({
+  required RegSubmission? submission,
+  required bool notPaidExists,
+  required bool paidExists,
+}) {
+  if (submission == null || notPaidExists || paidExists) return null;
+  if (!submission.paid) return 'NotPaid';
+  if (submission.paidVia == 'team code') return 'Paid';
+  return null;
 }
 
 /// What the registration write-back writes (fresh reads, Task 3, #75): only

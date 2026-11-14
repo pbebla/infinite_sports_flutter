@@ -400,4 +400,77 @@ void main() {
       expect(sw.elapsedMilliseconds, lessThan(38));
     });
   });
+
+  // Review fix Minor 1: a submit whose legacy dual-write failed is completed
+  // on the retry / status-page open.
+  group('legacy sign-up repair', () {
+    const sub = 'Registrations/r1/Submissions/u1';
+    const notPaid = 'Sign Ups/Futsal/16/NotPaid/u1';
+    const paid = 'Sign Ups/Futsal/16/Paid/u1';
+    final config = RegistrationConfig.fromFirebase(_openConfig)!;
+    late List<String> writes;
+
+    setUp(() {
+      writes = [];
+      RegistrationService.legacyWriteOverride =
+          (path, value) async => writes.add('$path=$value');
+    });
+    tearDown(() => RegistrationService.legacyWriteOverride = null);
+
+    void server(Object? submission,
+        {Object? np, Object? p, bool fromServer = true}) {
+      answers[sub] = () => FreshValue(submission, fromServer: fromServer);
+      answers[notPaid] = () => FreshValue(np, fromServer: true);
+      answers[paid] = () => FreshValue(p, fromServer: true);
+    }
+
+    test('a missing NotPaid entry for an unpaid submission is written',
+        () async {
+      server({'Path': 'individual', 'Paid': false});
+      await RegistrationService.repairLegacySignUp('r1', config,
+          displayName: 'Sam');
+      expect(writes, ['$notPaid=Sam']);
+    });
+
+    test('an existing entry (either bucket) means nothing to do', () async {
+      server({'Path': 'individual', 'Paid': false}, np: 'Sam');
+      await RegistrationService.repairLegacySignUp('r1', config,
+          displayName: 'Sam');
+      server({'Path': 'individual', 'Paid': false}, p: 'Sam');
+      await RegistrationService.repairLegacySignUp('r1', config,
+          displayName: 'Sam');
+      expect(writes, isEmpty);
+    });
+
+    test('never on an unconfirmed read', () async {
+      server({'Path': 'individual', 'Paid': false}, fromServer: false);
+      await RegistrationService.repairLegacySignUp('r1', config,
+          displayName: 'Sam');
+      expect(writes, isEmpty);
+    });
+
+    test('bucket rule', () {
+      const unpaid = RegSubmission(path: 'individual', answers: {});
+      const waived = RegSubmission(
+          path: 'joiner', answers: {}, paid: true, paidVia: 'team code');
+      const managerPaid = RegSubmission(
+          path: 'individual', answers: {}, paid: true, paidVia: 'venmo');
+      expect(
+          legacyRepairBucket(
+              submission: unpaid, notPaidExists: false, paidExists: false),
+          'NotPaid');
+      expect(
+          legacyRepairBucket(
+              submission: waived, notPaidExists: false, paidExists: false),
+          'Paid');
+      expect(
+          legacyRepairBucket(
+              submission: managerPaid, notPaidExists: false, paidExists: false),
+          isNull);
+      expect(
+          legacyRepairBucket(
+              submission: null, notPaidExists: false, paidExists: false),
+          isNull);
+    });
+  });
 }
