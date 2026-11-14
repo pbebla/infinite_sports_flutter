@@ -12,8 +12,13 @@
 // `Fantasy/<sport>` would pull every season's squads and weekly records), so
 // step 2 probes the tiny `Config` nodes of the seasons just below the current
 // one, newest first, in small parallel batches — one extra read in the usual
-// "new season created, Fantasy not set up yet" case. `once()` reads only —
+// "new season created, Fantasy not set up yet" case. Live listeners only —
 // NEVER `.get()` (house rule; the Manager's guard test enforces it there).
+//
+// Fresh reads (plan 2026-11-13-fresh-reads.md): the pointers come from the
+// live season pointers (season_pointers.dart) and the Config probes are
+// server-first ([configExistsFromRead]), so a new season is found on the
+// first open after it starts, and the memo is dropped when a pointer moves.
 //
 // The answer is THREE-way ([FantasySeasonResolution]): a season, a real
 // "none", or an error. A failed read (a network blip, a permission hiccup)
@@ -31,12 +36,12 @@
 // test/fantasy/fantasy_season_resolver_test.dart); the Firebase readers in
 // [resolveFantasySeason] are not (repo convention).
 
-import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_badges.dart'
     show kFantasyReservedRootKeys;
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/misc/bounded_read.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/season_pointers.dart';
 
 /// A resolved fantasy season.
@@ -145,13 +150,23 @@ void debugSetLastResolvedFantasySeason(FantasySeasonKey? season) {
   _lastResolvedVersion = SeasonPointers.version;
 }
 
+/// Server-first (fresh reads, Task 3, #1): see [configExistsFromRead].
 Future<bool> _configExists(String sport, String season) async {
-  final snap = (await FirebaseDatabase.instance
-          .ref('Fantasy/$sport/$season/Config')
-          .once())
-      .snapshot;
-  // Same gate as FantasyService.watchConfig: absent/malformed = no fantasy.
-  return configStateFromNode(snap.value) != null;
+  return configExistsFromRead(
+      await serverFirstValue('Fantasy/$sport/$season/Config'));
+}
+
+/// Whether a Config read says the season has fantasy — same gate as
+/// FantasyService.watchConfig (absent/malformed = no fantasy). A Config
+/// that exists counts from any source; "no Config" only when the server
+/// said so. An unconfirmed "no Config" (the phone's saved copy, e.g. a new
+/// season's Config the phone has never loaded) THROWS: the resolve fails
+/// and is retried on the next open, instead of falling back to an older
+/// season and memoising it for the session.
+bool configExistsFromRead(FreshValue read) {
+  final exists = configStateFromNode(read.value) != null;
+  if (exists || read.fromServer) return exists;
+  throw StateError('Fantasy Config not confirmed by the server');
 }
 
 /// A top-level pointer node (`Current League`, `<Sport> Season`) from the
