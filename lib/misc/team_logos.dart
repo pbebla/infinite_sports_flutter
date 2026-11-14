@@ -28,6 +28,7 @@ import 'dart:async';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
 import 'package:infinite_sports_flutter/misc/bounded_read.dart';
+import 'package:infinite_sports_flutter/misc/feed_backoff.dart';
 
 /// Every team logo url: `teamLogos[sport][season][team]`, plus
 /// `teamLogos['AFC San Jose']` (one url). Replaced (never mutated) on each
@@ -48,6 +49,11 @@ class TeamLogoFeed {
 
   /// How long the first `getAllTeamLogo()` waits for the first event.
   static Duration firstEventTimeout = kRevealReadTimeout;
+
+  /// Re-subscribe schedule after a stream error (the shared feed back-off,
+  /// lib/misc/feed_backoff.dart). Test seam.
+  static List<Duration> retryDelays = kFeedRetryDelays;
+  static FeedBackoff? _backoff;
 
   static StreamSubscription<Map>? _sub;
   static Completer<void>? _first;
@@ -81,6 +87,13 @@ class TeamLogoFeed {
         _sub?.cancel();
         _sub = null; // the next getAllTeamLogo() re-subscribes
         _openFirstGate();
+        // Fresh reads, Task 4 (S16 fan review): re-subscribe by itself on
+        // the shared bounded back-off, so a lost stream does not freeze the
+        // crests until some screen calls getAllTeamLogo() again.
+        (_backoff ??= FeedBackoff(() => false, delays: retryDelays))
+            .retry(() {
+          if (_sub == null) _start();
+        });
       }, onDone: () {
         _sub = null;
         _openFirstGate();
@@ -93,6 +106,7 @@ class TeamLogoFeed {
   }
 
   static void _onLogos(Map logos) {
+    _backoff?.reset();
     teamLogos = logos;
     teamLogosVersion.value++;
     _openFirstGate();
@@ -156,6 +170,9 @@ class TeamLogoFeed {
   /// Test seam: drops the subscription and the cached map.
   @visibleForTesting
   static void debugReset() {
+    _backoff?.cancel();
+    _backoff = null;
+    retryDelays = kFeedRetryDelays;
     _sub?.cancel();
     _sub = null;
     _firstTimer?.cancel();
@@ -167,6 +184,12 @@ class TeamLogoFeed {
     teamLogosVersion.value = 0;
   }
 }
+
+/// One team's logo url from [teamLogos], '' when the map is empty or lacks
+/// the sport, season or team (null-safe lookup for the top-bar Table and
+/// Leaderboard — S16 fan review).
+String teamLogoUrl(String sport, String season, String team) =>
+    seasonLogoUrlsFrom(teamLogos, sport, season)[team] ?? '';
 
 /// One season's logos (team name → url) out of a [teamLogos]-shaped map;
 /// `{}` when the sport or season is missing or not a map.

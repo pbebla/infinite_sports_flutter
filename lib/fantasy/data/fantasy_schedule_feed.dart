@@ -60,20 +60,17 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/misc/bounded_read.dart';
+import 'package:infinite_sports_flutter/misc/feed_backoff.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 /// Back-off between re-subscriptions after a stream error (an RTDB onValue
 /// stream ends after an error); the feed gives up after the last one and the
-/// next screen open starts a fresh feed. Shared by the season-finished feed
-/// and the schedule feed (review 6, I2) through [_Backoff].
-const List<Duration> kFantasyFeedRetryDelays = [
-  Duration(seconds: 2),
-  Duration(seconds: 5),
-  Duration(seconds: 15),
-  Duration(seconds: 30),
-  Duration(seconds: 60),
-];
+/// next screen open starts a fresh feed. Shared by the season-finished feed,
+/// the schedule feed (review 6, I2) and the team-logo feed through
+/// [FeedBackoff] (lib/misc/feed_backoff.dart).
+const List<Duration> kFantasyFeedRetryDelays = kFeedRetryDelays;
 
 /// Where a failing feed's recovery stands (re-review 6b, item 2): [none] —
 /// nothing failed (or a real answer came back); [retrying] — a retry is
@@ -83,51 +80,8 @@ const List<Duration> kFantasyFeedRetryDelays = [
 /// again" ([FantasyScheduleFeed.restart]) — starts it again.
 enum FantasyFeedRetry { none, retrying, gaveUp }
 
-/// One bounded re-subscribe schedule ([kFantasyFeedRetryDelays]).
-class _Backoff {
-  _Backoff(this._disposed);
-  final bool Function() _disposed;
-  int _tries = 0;
-  Timer? _timer;
-
-  /// A retry fired and its answer has not come back yet.
-  bool _inFlight = false;
-
-  /// A retry is scheduled or waiting for its answer.
-  bool get active => _timer != null || _inFlight;
-
-  /// Runs [again] after the next delay, unless the retries are used up.
-  void retry(void Function() again) {
-    _inFlight = false;
-    if (_disposed() || _tries >= kFantasyFeedRetryDelays.length) return;
-    _timer?.cancel();
-    _timer = Timer(kFantasyFeedRetryDelays[_tries++], () {
-      _timer = null;
-      if (_disposed()) return;
-      _inFlight = true;
-      again();
-    });
-  }
-
-  /// A manual / triggered attempt starts now with a fresh back-off.
-  void startNow() {
-    cancel();
-    _tries = 0;
-    _inFlight = true;
-  }
-
-  /// A real answer arrived: the next failure starts the back-off afresh.
-  void reset() {
-    _tries = 0;
-    _inFlight = false;
-  }
-
-  void cancel() {
-    _timer?.cancel();
-    _timer = null;
-    _inFlight = false;
-  }
-}
+/// The shared bounded re-subscribe schedule (lib/misc/feed_backoff.dart).
+typedef _Backoff = FeedBackoff;
 
 /// Restarts a failing feed by itself (re-review 6b, item 2): when the app
 /// returns to the foreground and when the database connection comes back
@@ -659,6 +613,29 @@ class FantasyLeagueGamesFeed {
   /// Only a REAL start hour (> 0): absent / failed is retried next visit.
   static final Map<String, int> _startHourSession = {};
 
+  /// Fresh reads (Task 4, survey list B): a newer `Start Time` (under a
+  /// sport/season) from the server drops that season's memoised hour, so the next
+  /// visit re-derives it. App lifetime; started by [start] (lazy static).
+  static final VoidCallback _startHourFollow =
+      FreshReads.onNewerUnder('', (path, _) {
+    final parts = path.split('/');
+    if (parts.length == 3 && parts[2] == 'Start Time') {
+      _startHourSession.remove('${parts[0]}|${parts[1]}');
+    }
+  });
+
+  /// Test seam: the key a newer Start Time at [path] drops, if memoised.
+  @visibleForTesting
+  static bool debugHasStartHour(String sport, String season) =>
+      _startHourSession.containsKey('$sport|$season');
+
+  /// Test seam: memoises an hour as a finished visit would.
+  @visibleForTesting
+  static void debugSetStartHour(String sport, String season, int hour) {
+    _startHourFollow;
+    _startHourSession['$sport|$season'] = hour;
+  }
+
   /// Clears the shared games caches (sign-out hygiene, tests).
   static void clearSessionCache() {
     _gamesSession.clear();
@@ -715,6 +692,7 @@ class FantasyLeagueGamesFeed {
         if (seam != null) _gamesHourKnown = true;
         return;
       }
+      _startHourFollow; // refill/drop on newer server values
       final cachedHour = _startHourSession[_sessionKey];
       if (cachedHour != null) {
         _applyHour(cachedHour);

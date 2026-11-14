@@ -208,6 +208,54 @@ void main() {
     await source.close();
   });
 
+  test(
+      'after a stream error the feed re-subscribes on the shared back-off '
+      '(fresh-reads Task 4 / S16 review)', () async {
+    TeamLogoFeed.retryDelays = const [
+      Duration(milliseconds: 10),
+      Duration(milliseconds: 10),
+    ];
+    var subscriptions = 0;
+    final sources = <StreamController<Map>>[];
+    TeamLogoFeed.sourceOverride = () {
+      subscriptions++;
+      final c = StreamController<Map>();
+      sources.add(c);
+      return c.stream;
+    };
+    final f = TeamLogoFeed.ensureStarted();
+    sources.last.add(_oldCopy);
+    await f;
+    sources.last.addError(StateError('lost'));
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    expect(subscriptions, 2, reason: 're-subscribed without a new caller');
+    sources.last.add(_newCopy);
+    await Future<void>.delayed(Duration.zero);
+    expect(teamLogos['Futsal']['16']['Lions'], _s16Url);
+    // Bounded: errors past the schedule stop re-subscribing.
+    sources.last.addError(StateError('lost'));
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    sources.last.addError(StateError('lost'));
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    sources.last.addError(StateError('lost'));
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    expect(subscriptions, lessThanOrEqualTo(5));
+    for (final c in sources) {
+      await c.close();
+    }
+  });
+
+  test('teamLogoUrl is null-safe: empty map, missing sport/season/team', () {
+    teamLogos = {};
+    expect(teamLogoUrl('Futsal', '16', 'Lions'), '');
+    teamLogos = {'Futsal': 'junk'};
+    expect(teamLogoUrl('Futsal', '16', 'Lions'), '');
+    teamLogos = _newCopy;
+    expect(teamLogoUrl('Futsal', '16', 'Lions'), _s16Url);
+    expect(teamLogoUrl('Futsal', '16', 'Nobody'), '');
+    expect(teamLogoUrl('Basketball', '3', 'Lions'), '');
+  });
+
   test('the production bound is the reveal-read convention (8 s)', () {
     expect(TeamLogoFeed.firstEventTimeout, const Duration(seconds: 8));
   });
