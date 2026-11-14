@@ -136,6 +136,16 @@ class RegistrationService {
     return (route: route, config: goes ? open.config : null);
   }
 
+  /// Live config of ONE registration from `Registrations/<regId>/Config` —
+  /// the node the card charge is computed from (second review, Important
+  /// 2; readable by everyone under both rules files). null = missing or
+  /// malformed. Errors are forwarded (a failed read is not a fact).
+  static Stream<RegistrationConfig?> watchConfig(String regId) =>
+      FirebaseDatabase.instance
+          .ref('Registrations/$regId/Config')
+          .onValue
+          .map((event) => RegistrationConfig.fromFirebase(event.snapshot.value));
+
   /// Live {regId: config} stream of every open registration. Emits
   /// immediately from RTDB's local cache (if any) then on every change, so
   /// registrations opening/closing appear on the entry page without a

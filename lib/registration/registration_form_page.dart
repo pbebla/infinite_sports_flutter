@@ -337,6 +337,11 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
                     config: widget.config,
                     submission: submission,
                     codeWaivesPayment: waived),
+                // Second review, Important 2: follows the live config.
+                amountFor: (c) => amountOwed(
+                    config: c,
+                    submission: submission,
+                    codeWaivesPayment: waived),
                 fromSubmission: true)),
         (route) => route.isFirst,
       );

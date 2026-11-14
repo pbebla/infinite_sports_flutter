@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:infinite_sports_flutter/misc/share_card_service.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
+import 'package:infinite_sports_flutter/registration/live_registration_config.dart';
 import 'package:infinite_sports_flutter/registration/payment_screen.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
@@ -33,6 +34,10 @@ class RegistrationStatusPage extends StatefulWidget {
   final Stream<List<RegSubmission>>? rosterStream;
   final ShareSheet? shareSheet;
 
+  /// Test seam: the live config stream (null = RegistrationService
+  /// .watchConfig — second review, Important 2).
+  final Stream<RegistrationConfig?>? configStream;
+
   const RegistrationStatusPage({
     super.key,
     required this.regId,
@@ -42,6 +47,7 @@ class RegistrationStatusPage extends StatefulWidget {
     this.teamStream,
     this.rosterStream,
     this.shareSheet,
+    this.configStream,
   });
 
   @override
@@ -61,9 +67,31 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
   Stream<List<RegSubmission>>? _rosterStream;
   String _rosterStreamTeamId = '';
 
+  /// The registration's config, live (second review, Important 2): what is
+  /// owed, the "Complete payment" action and the config handed to the
+  /// payment screen all follow the latest value.
+  late final LiveRegistrationConfig _live = LiveRegistrationConfig(
+    initial: widget.config,
+    source: () =>
+        widget.configStream ?? RegistrationService.watchConfig(widget.regId),
+  )..addListener(_onLiveConfig);
+
+  void _onLiveConfig() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _live
+      ..removeListener(_onLiveConfig)
+      ..dispose();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
+    _live.start();
     _submission = widget.submissionStream ??
         RegistrationService.watchMySubmission(widget.regId);
     _form = widget.formFuture ?? RegistrationService.getForm(widget.regId);
@@ -425,6 +453,22 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
     );
   }
 
+  /// A short plain notice (fee changed / closed / couldn't check).
+  Widget _notice(BuildContext context, String text) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(text,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: scheme.onSurface)),
+    );
+  }
+
   Widget _statusBody(RegSubmission sub, List<RegQuestion> form, RegTeam? team) {
     final byKey = {for (final q in form) q.key: q};
     final orderedKeys = [
@@ -435,12 +479,13 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
     // "Owes" is the SAME whole-cent discounted total the payment screen
     // shows: an admin comp to $0 or a 100% discount owes nothing (covered).
     // owes / covered both come from that one rounded value.
+    final config = _live.config;
     final owed = discountedAmountOwed(
-        config: widget.config, submission: sub, codeWaivesPayment: waived);
+        config: config, submission: sub, codeWaivesPayment: waived);
     final owes = owed > 0;
     final covered = !sub.paid &&
         paymentOwed(
-            config: widget.config,
+            config: config,
             submission: sub,
             codeWaivesPayment: waived) &&
         owed == 0;
@@ -456,10 +501,14 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
             padding: EdgeInsets.fromLTRB(15, 15, 15,
                 15 + (owes ? 0.0 : MediaQuery.paddingOf(context).bottom)),
             children: [
+              if (owes && _live.feeChanged) ...[
+                _notice(context, kRegistrationFeeChanged),
+                const SizedBox(height: 8),
+              ],
               Card(
                 elevation: 2,
                 child: ListTile(
-                  title: Text(widget.config.label,
+                  title: Text(config.label,
                       style: const TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text('Registered as: ${_pathLabel(sub.path)}'),
                   trailing: covered
@@ -497,7 +546,32 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
             ],
           ),
         ),
-        if (owes)
+        if (owes && !_live.canPay)
+          // Second review, Important 2: no payment on a closed registration
+          // or an unconfirmed config — the existing wordings.
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(15),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _notice(
+                      context,
+                      _live.closed
+                          ? 'Registration is closed'
+                          : kRegistrationCouldNotCheck),
+                  if (!_live.closed) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton(
+                      onPressed: _live.retry,
+                      child: const Text('Try again'),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        if (owes && _live.canPay)
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(15),
@@ -517,12 +591,17 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
                       MaterialPageRoute(
                           builder: (_) => PaymentScreen(
                               regId: widget.regId,
-                              config: widget.config,
+                              config: config,
                               amount: amountOwed(
-                                  config: widget.config,
+                                  config: config,
                                   submission: sub,
-                                  codeWaivesPayment:
-                                      team?.codeWaivesPayment ?? false))),
+                                  codeWaivesPayment: waived),
+                              // The payment screen keeps following the
+                              // live config itself.
+                              amountFor: (c) => amountOwed(
+                                  config: c,
+                                  submission: sub,
+                                  codeWaivesPayment: waived))),
                     );
                   },
                   child: const Text('Complete payment',

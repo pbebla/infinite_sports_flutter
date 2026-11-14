@@ -45,6 +45,7 @@ Widget _status(Stream<RegSubmission?> stream) => MaterialApp(
       home: RegistrationStatusPage(
         regId: 'Futsal-17',
         config: _config,
+        configStream: Stream.value(_config),
         submissionStream: stream,
         formFuture: Future.value(const <RegQuestion>[]),
       ),
@@ -56,6 +57,7 @@ Widget _payment(Stream<RegSubmission?> stream,
       home: PaymentScreen(
         regId: 'Futsal-17',
         config: config,
+        configStream: Stream.value(config),
         amount: 60,
         submissionStream: stream,
         publishableKeyOverride: 'pk_test_x',
@@ -215,6 +217,7 @@ void main() {
         targetType: 'league',
         sport: 'Futsal',
         season: '17',
+        status: 'open',
         fee: 60,
         paymentMode: 'perPlayer',
         stripe: true);
@@ -289,6 +292,7 @@ void main() {
         targetType: 'league',
         sport: 'Futsal',
         season: '17',
+        status: 'open',
         fee: 255,
         paymentMode: 'perPlayer',
         venmo: true,
@@ -313,6 +317,7 @@ void main() {
           home: PaymentScreen(
             regId: 'Futsal-17',
             config: fee255,
+            configStream: Stream.value(fee255),
             amount: 255,
             submissionStream: Stream.value(sub),
             publishableKeyOverride: 'pk_test_x',
@@ -322,6 +327,7 @@ void main() {
           home: RegistrationStatusPage(
             regId: 'Futsal-17',
             config: fee255,
+            configStream: Stream.value(fee255),
             submissionStream: Stream.value(sub),
             formFuture: Future.value(const <RegQuestion>[]),
           ),
@@ -390,6 +396,7 @@ void main() {
         targetType: 'league',
         sport: 'Futsal',
         season: '17',
+        status: 'open',
         fee: 60,
         paymentMode: 'perPlayer',
         stripe: true);

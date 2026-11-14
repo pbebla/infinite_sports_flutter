@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 // Fresh reads, Task 3 — registration (survey list A #1, #2, #3, #5): money
@@ -10,11 +11,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart' show signedIn;
+import 'package:infinite_sports_flutter/registration/live_registration_config.dart';
 import 'package:infinite_sports_flutter/registration/payment_screen.dart';
 import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_path_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
+import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
 
 const _openConfig = {
   'TargetType': 'league',
@@ -247,6 +250,7 @@ void main() {
         home: PaymentScreen(
           regId: 'r1',
           config: stripeConfig,
+          configStream: Stream.value(stripeConfig),
           amount: 60,
           submissionStream: Stream.value(unpaid),
         ),
@@ -264,6 +268,7 @@ void main() {
         home: PaymentScreen(
           regId: 'r1',
           config: stripeConfig,
+          configStream: Stream.value(stripeConfig),
           amount: 60,
           submissionStream: Stream.value(unpaid),
           cardPaymentOverride: () async {
@@ -491,4 +496,161 @@ void main() {
             .hasMatch(status),
         isTrue);
   });
+
+  // Second review, Important 2: the payment screen watches the registration's
+  // config live; every amount follows the latest value.
+  group('payment screen follows the live config', () {
+    const base = RegistrationConfig(
+      targetType: 'league',
+      sport: 'Futsal',
+      season: '16',
+      status: 'open',
+      fee: 60,
+      paymentMode: 'perPlayer',
+      venmo: true,
+      stripe: true,
+    );
+    const unpaid = RegSubmission(path: 'individual', answers: {});
+
+    Future<({StreamController<RegistrationConfig?> config, List<Uri> launched})>
+        pump(WidgetTester tester) async {
+      final config = StreamController<RegistrationConfig?>();
+      final launched = <Uri>[];
+      await tester.pumpWidget(MaterialApp(
+        home: PaymentScreen(
+          regId: 'r1',
+          config: base,
+          amount: 60,
+          amountFor: (c) => amountOwed(config: c, submission: unpaid),
+          submissionStream: Stream.value(unpaid),
+          configStream: config.stream,
+          launchOverride: (uri) async => launched.add(uri),
+        ),
+      ));
+      await tester.pump();
+      return (config: config, launched: launched);
+    }
+
+    testWidgets(
+        'a fee change updates the amount and the Venmo link, with '
+        'the notice', (tester) async {
+      final h = await pump(tester);
+      expect(find.text(r'$60'), findsOneWidget);
+      expect(find.text(kRegistrationFeeChanged), findsNothing);
+      h.config.add(base.copyWithForTest(fee: 75));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text(r'$75'), findsOneWidget);
+      expect(find.text(r'$60'), findsNothing);
+      expect(find.text(kRegistrationFeeChanged), findsOneWidget);
+      await tester.tap(find.text('Pay with Venmo'));
+      await tester.pump();
+      expect(h.launched.single.queryParameters['amount'], contains('75'));
+      await h.config.close();
+    });
+
+    testWidgets(
+        'a live read error: pay actions show could-not-check, last '
+        'amount kept', (tester) async {
+      final h = await pump(tester);
+      h.config.addError(StateError('permission-denied'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text(kRegistrationCouldNotCheck), findsOneWidget);
+      expect(find.text('Pay with card'), findsNothing);
+      expect(find.text('Pay with Venmo'), findsNothing);
+      expect(find.text(r'$60'), findsOneWidget);
+      unawaited(h.config.close()); // the listener is gone after the error
+    });
+
+    testWidgets(
+        'closed while open: pay actions disabled with the closed '
+        'wording', (tester) async {
+      final h = await pump(tester);
+      h.config.add(base.copyWithForTest(status: 'closed'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Registration is closed'), findsOneWidget);
+      expect(find.text('Pay with card'), findsNothing);
+      expect(find.text('Pay with Venmo'), findsNothing);
+      await h.config.close();
+    });
+  });
+
+  group('status page follows the live config', _statusPageLiveConfigTests);
+}
+
+// Second review, Important 2: the status page follows the live config too.
+void _statusPageLiveConfigTests() {
+  const base = RegistrationConfig(
+    targetType: 'league',
+    sport: 'Futsal',
+    season: '16',
+    status: 'open',
+    fee: 60,
+    paymentMode: 'perPlayer',
+    venmo: true,
+  );
+  const unpaid = RegSubmission(path: 'individual', answers: {});
+
+  Future<StreamController<RegistrationConfig?>> pump(
+      WidgetTester tester) async {
+    final config = StreamController<RegistrationConfig?>();
+    await tester.pumpWidget(MaterialApp(
+      home: RegistrationStatusPage(
+        regId: 'r1',
+        config: base,
+        submissionStream: Stream.value(unpaid),
+        formFuture: Future.value(const <RegQuestion>[]),
+        configStream: config.stream,
+      ),
+    ));
+    await tester.pump();
+    await tester.pump();
+    return config;
+  }
+
+  testWidgets(
+      'status page: a fee change shows the notice; closed disables '
+      'Complete payment', (tester) async {
+    final config = await pump(tester);
+    expect(find.text('Complete payment'), findsOneWidget);
+    config.add(base.copyWithForTest(fee: 80));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text(kRegistrationFeeChanged), findsOneWidget);
+    config.add(base.copyWithForTest(status: 'closed'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Complete payment'), findsNothing);
+    expect(find.text('Registration is closed'), findsOneWidget);
+    await config.close();
+  });
+
+  testWidgets(
+      'status page: a live read error shows could-not-check instead '
+      'of Complete payment', (tester) async {
+    final config = await pump(tester);
+    config.addError(StateError('denied'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Complete payment'), findsNothing);
+    expect(find.text(kRegistrationCouldNotCheck), findsOneWidget);
+    expect(find.text('Try again'), findsOneWidget);
+    unawaited(config.close());
+  });
+}
+
+extension on RegistrationConfig {
+  RegistrationConfig copyWithForTest({num? fee, String? status}) =>
+      RegistrationConfig(
+        targetType: targetType,
+        sport: sport,
+        season: season,
+        status: status ?? this.status,
+        fee: fee ?? this.fee,
+        paymentMode: paymentMode,
+        venmo: venmo,
+        stripe: stripe,
+      );
 }

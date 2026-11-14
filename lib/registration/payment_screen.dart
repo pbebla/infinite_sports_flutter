@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_stripe/flutter_stripe.dart' hide Card;
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
+import 'package:infinite_sports_flutter/registration/live_registration_config.dart';
 import 'package:infinite_sports_flutter/registration/payment_links.dart';
 import 'package:infinite_sports_flutter/registration/promo_engine.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
@@ -67,7 +68,19 @@ class PaymentScreen extends StatefulWidget {
 
   /// The dollar amount THIS registrant owes — captains owe config.teamFee,
   /// individuals/joiners config.fee. Callers compute it with [amountOwed].
+  /// Only the starting value when [amountFor] is given.
   final num amount;
+
+  /// The amount owed for a given config (second review, Important 2): the
+  /// screen watches the registration's config live and recomputes every
+  /// amount — the amount card, "Total due" and the Venmo link — from the
+  /// latest value through [discountedTotal]. null = always [amount].
+  final num Function(RegistrationConfig config)? amountFor;
+
+  /// Test seams: the live config stream (null = RegistrationService
+  /// .watchConfig) and the URL launcher behind "Pay with Venmo".
+  final Stream<RegistrationConfig?>? configStream;
+  final Future<void> Function(Uri uri)? launchOverride;
 
   /// True when reached straight from a fresh submission (the status page is
   /// not underneath us) — the exit button pushes the status page instead of
@@ -86,6 +99,9 @@ class PaymentScreen extends StatefulWidget {
     required this.regId,
     required this.config,
     required this.amount,
+    this.amountFor,
+    this.configStream,
+    this.launchOverride,
     this.fromSubmission = false,
     this.submissionStream,
     this.publishableKeyOverride,
@@ -119,10 +135,25 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   late Stream<RegSubmission?> _submission;
 
+  /// The registration's config, live (second review, Important 2).
+  late final LiveRegistrationConfig _live = LiveRegistrationConfig(
+    initial: widget.config,
+    source: () =>
+        widget.configStream ?? RegistrationService.watchConfig(widget.regId),
+  )..addListener(_onLiveConfig);
+
+  void _onLiveConfig() {
+    if (mounted) setState(() {});
+  }
+
+  /// What this registrant owes before any discount, from the LATEST config.
+  num get _baseAmount => widget.amountFor?.call(_live.config) ?? widget.amount;
+
   @override
   void initState() {
     super.initState();
     _submission = _watchSubmission();
+    _live.start();
   }
 
   /// The live submission; a Paid read stops both processing timers at once
@@ -144,6 +175,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
   @override
   void dispose() {
+    _live
+      ..removeListener(_onLiveConfig)
+      ..dispose();
     _processingFallback?.cancel();
     _confirmationTimer?.cancel();
     super.dispose();
@@ -168,7 +202,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// EFFECTIVE amount (after any manual admin adjustment) so the pre-filled
   /// Venmo request never asks for more than is actually owed.
   Uri _venmoUri(num amount) {
-    final name = FirebaseAuth.instance.currentUser?.displayName ?? '';
+    String name = '';
+    try {
+      name = FirebaseAuth.instance.currentUser?.displayName ?? '';
+    } catch (_) {}
     return venmoPayUri(amount: amount, note: '${widget.regId} - $name');
   }
 
@@ -187,7 +224,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// rule). An owner edit made in the Manager shows up here instantly since
   /// [_submission] is a live stream.
   num _effectiveAmount(RegSubmission? sub) =>
-      discountedTotal(baseFee: widget.amount.toDouble(), submission: sub);
+      discountedTotal(baseFee: _baseAmount.toDouble(), submission: sub);
 
   void _exit() {
     if (widget.fromSubmission) {
@@ -195,7 +232,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
         context,
         MaterialPageRoute(
             builder: (_) => RegistrationStatusPage(
-                regId: widget.regId, config: widget.config)),
+                regId: widget.regId, config: _live.config)),
       );
     } else {
       Navigator.pop(context);
@@ -435,7 +472,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
     }
     // Review fix (Important 2): shown at once whenever card payments are
     // on — never gated on a key read (the callable returns the key).
-    final showCardButton = widget.config.stripe && effectiveAmount > 0;
+    final config = _live.config;
+    final showCardButton = config.stripe && effectiveAmount > 0;
 
     return ListView(
       // Bottom inset lets the pay buttons scroll clear of the floating glass
@@ -443,8 +481,27 @@ class _PaymentScreenState extends State<PaymentScreen> {
       padding: EdgeInsets.fromLTRB(
           15, 15, 15, 15 + MediaQuery.paddingOf(context).bottom),
       children: [
+        if (_live.feeChanged) ...[
+          _notice(context, kRegistrationFeeChanged),
+          const SizedBox(height: 10),
+        ],
         _amountCard(context, sub, effectiveAmount),
         const SizedBox(height: 15),
+        // Pay actions only on a confirmed, open config (second review,
+        // Important 2): closed → the existing closed wording; a failed live
+        // read → the existing "couldn't check" state with a retry.
+        if (_live.closed) ...[
+          _notice(context, 'Registration is closed'),
+          const SizedBox(height: 15),
+        ] else if (_live.error) ...[
+          _notice(context, kRegistrationCouldNotCheck),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: _live.retry,
+            child: const Text('Try again'),
+          ),
+          const SizedBox(height: 15),
+        ] else ...[
         if (showCardButton) ...[
           SizedBox(
             height: 50,
@@ -468,7 +525,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           ),
           const SizedBox(height: 15),
         ],
-        if (widget.config.venmo) ...[
+        if (config.venmo) ...[
           SizedBox(
             height: 50,
             child: ElevatedButton.icon(
@@ -480,14 +537,21 @@ class _PaymentScreenState extends State<PaymentScreen> {
               label:
                   const Text('Pay with Venmo', style: TextStyle(fontSize: 18)),
               onPressed: () async {
-                await launchUrl(_venmoUri(effectiveAmount),
-                    mode: LaunchMode.externalApplication);
+                // The latest amount: this button is rebuilt on every
+                // live config event.
+                final uri = _venmoUri(effectiveAmount);
+                final launch = widget.launchOverride;
+                if (launch != null) {
+                  await launch(uri);
+                } else {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                }
               },
             ),
           ),
           const SizedBox(height: 15),
         ],
-        if (widget.config.zelle) ...[
+        if (config.zelle) ...[
           Card(
             elevation: 2,
             child: Column(
@@ -519,6 +583,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
             ),
           ),
           const SizedBox(height: 15),
+        ],
         ],
         Text(
           showCardButton
@@ -580,17 +645,17 @@ class _PaymentScreenState extends State<PaymentScreen> {
       return Card(
         elevation: 2,
         child: ListTile(
-          title: Text('\$${widget.amount}',
+          title: Text('\$$_baseAmount',
               style: Theme.of(context).textTheme.headlineSmall),
           subtitle: Text([
-            widget.config.label,
-            if (widget.config.feeNote.isNotEmpty) widget.config.feeNote,
+            _live.config.label,
+            if (_live.config.feeNote.isNotEmpty) _live.config.feeNote,
           ].join(' — ')),
         ),
       );
     }
 
-    final baseFee = widget.amount;
+    final baseFee = _baseAmount;
     final discount = baseFee - effectiveAmount;
     final isPromo = sub.discountSource == 'first_timer_promo';
     final isInsiderTier = sub.discountSource == 'insider_tier';
@@ -608,8 +673,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text([
-              widget.config.label,
-              if (widget.config.feeNote.isNotEmpty) widget.config.feeNote,
+              _live.config.label,
+              if (_live.config.feeNote.isNotEmpty) _live.config.feeNote,
             ].join(' — '), style: TextStyle(color: mutedColor)),
             const SizedBox(height: 12),
             _amountRow(context, 'Registration fee', _money(baseFee)),
@@ -622,6 +687,22 @@ class _PaymentScreenState extends State<PaymentScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  /// A short plain notice (fee changed / closed / couldn't check).
+  Widget _notice(BuildContext context, String text) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(text,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: scheme.onSurface)),
     );
   }
 
