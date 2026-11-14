@@ -89,9 +89,15 @@ class FreshValue {
   bool get exists => value != null;
 }
 
+/// A database path with empty segments dropped: `ref('/AFC San Jose/')
+/// .child('Seasons').path` is `/AFC San Jose//Seasons` in this plugin — the
+/// sharing key and the onNewer key are `AFC San Jose/Seasons`.
+String normalizeFreshPath(String path) =>
+    path.split('/').where((s) => s.isNotEmpty).join('/');
+
 /// Per-user paths whose lingering listeners must not outlive a sign-out.
 bool isUserScopedPath(String path) {
-  final p = path.startsWith('/') ? path.substring(1) : path;
+  final p = normalizeFreshPath(path);
   return p.startsWith('Users/') ||
       p.startsWith('ReferredUsers/') ||
       p.startsWith('Insiders/') ||
@@ -161,7 +167,12 @@ class FreshReadEngine<Q, E> {
     required this.connection,
     this.lingerFor = kLingerFor,
     this.batchWindow = kBarrierBatchWindow,
+    this.onAnyNewer,
   });
+
+  /// Called for EVERY newer value on any key (after the per-key callbacks)
+  /// — FreshReads' path/prefix dispatch.
+  final void Function(String key, E event)? onAnyNewer;
 
   /// The live value-event stream for a query (`onValue`).
   final Stream<E> Function(Q query) valueEvents;
@@ -320,6 +331,11 @@ class FreshReadEngine<Q, E> {
         } catch (err) {
           debugPrint('Fresh read ${entry.key}: onNewer callback failed: $err');
         }
+      }
+      try {
+        onAnyNewer?.call(entry.key, e);
+      } catch (err) {
+        debugPrint('Fresh read ${entry.key}: onNewer dispatch failed: $err');
       }
     }
     if (entry.firstWaiters.isNotEmpty) {
@@ -482,8 +498,9 @@ FreshReadEngine<Query, DatabaseEvent> _firebaseEngine() =>
       valueEvents: (q) => q.onValue,
       // Every one-shot read in lib/ is on a plain reference (no
       // orderBy/limit); a query with modifiers would need its own key.
-      keyOf: (q) => q.path,
+      keyOf: (q) => normalizeFreshPath(q.path),
       valueOf: (e) => e.snapshot.value,
+      onAnyNewer: (key, e) => FreshReads._dispatchNewer(key, e.snapshot.value),
       barrier: () async {
         // push() only makes a new unique key on the phone; nothing is
         // written. The literal node name keeps the rules-contract scan
@@ -509,12 +526,64 @@ class FreshReads {
   @visibleForTesting
   static Future<FreshValue> Function(String path)? serverFirstValueOverride;
 
-  /// Calls [callback] with the newer snapshot when a lingering listener on
-  /// [path] receives a value different from the one last handed out (drop
-  /// a session cache / repaint). Returns the remover.
+  /// Test seam: answers [refreshingValue] by path (null = real).
+  @visibleForTesting
+  static Future<Object?> Function(String path)? refreshingValueOverride;
+
+  static final Map<String, List<void Function(Object? value)>> _exact = {};
+  static final List<(String, void Function(String path, Object? value))>
+      _under = [];
+
+  /// Calls [callback] with the newer value when a lingering refreshing
+  /// listener on [path] receives a value different from the one last handed
+  /// out (drop/refill a session cache, repaint an open screen). Returns the
+  /// remover. Paths are compared normalized ([normalizeFreshPath]).
   static VoidCallback onNewer(
-          String path, void Function(DataSnapshot snapshot) callback) =>
-      engine.onNewer(path, (e) => callback(e.snapshot));
+      String path, void Function(Object? value) callback) {
+    final key = normalizeFreshPath(path);
+    final list = _exact.putIfAbsent(key, () => []);
+    list.add(callback);
+    return () {
+      list.remove(callback);
+      if (list.isEmpty && identical(_exact[key], list)) _exact.remove(key);
+    };
+  }
+
+  /// [onNewer] for every path under [prefix] (e.g. `PublicProfiles/`,
+  /// `Futsal/`): [callback] gets the normalized path and the newer value.
+  static VoidCallback onNewerUnder(
+      String prefix, void Function(String path, Object? value) callback) {
+    final p = normalizeFreshPath(prefix);
+    final entry = (p, callback);
+    _under.add(entry);
+    return () => _under.remove(entry);
+  }
+
+  static void _dispatchNewer(String path, Object? value) {
+    final key = normalizeFreshPath(path);
+    for (final cb in List.of(_exact[key] ?? const [])) {
+      try {
+        cb(value);
+      } catch (e) {
+        debugPrint('Fresh read $key: onNewer callback failed: $e');
+      }
+    }
+    for (final (prefix, cb) in List.of(_under)) {
+      if (key == prefix || key.startsWith('$prefix/')) {
+        try {
+          cb(key, value);
+        } catch (e) {
+          debugPrint('Fresh read $key: onNewerUnder callback failed: $e');
+        }
+      }
+    }
+  }
+
+  /// Test seam: reports [value] as newer at [path], as a lingering listener
+  /// would.
+  @visibleForTesting
+  static void debugReportNewer(String path, Object? value) =>
+      _dispatchNewer(path, value);
 
   /// Cancels lingering listeners on per-user paths ([isUserScopedPath]).
   /// Called at sign-out (session_sign_out.dart).
@@ -535,13 +604,25 @@ Future<FreshResult> serverFirstOnce(Query q,
   return FreshResult(out.event.snapshot, fromServer: out.fromServer);
 }
 
+/// [refreshingOnce] by path, answering just the value (testable through
+/// [FreshReads.refreshingValueOverride]).
+Future<Object?> refreshingValue(String path) async {
+  final key = normalizeFreshPath(path);
+  final override = FreshReads.refreshingValueOverride;
+  if (override != null) return override(key);
+  return (await refreshingOnce(FirebaseDatabase.instance.ref(key)))
+      .snapshot
+      .value;
+}
+
 /// [serverFirstOnce] by path, answering just the value (testable through
 /// [FreshReads.serverFirstValueOverride]).
 Future<FreshValue> serverFirstValue(String path,
     {Duration timeout = kRevealReadTimeout}) async {
+  final key = normalizeFreshPath(path);
   final override = FreshReads.serverFirstValueOverride;
-  if (override != null) return override(path);
-  final r = await serverFirstOnce(FirebaseDatabase.instance.ref(path),
+  if (override != null) return override(key);
+  final r = await serverFirstOnce(FirebaseDatabase.instance.ref(key),
       timeout: timeout);
   return FreshValue(r.snapshot.value, fromServer: r.fromServer);
 }

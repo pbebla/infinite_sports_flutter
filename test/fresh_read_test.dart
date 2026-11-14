@@ -470,4 +470,59 @@ void main() {
       expect(f.path('Current League').live, 0);
     });
   });
+
+  group('paths and newer-value dispatch (Task 4)', () {
+    test('normalizeFreshPath drops empty segments', () {
+      expect(
+          normalizeFreshPath('/AFC San Jose//Seasons'), 'AFC San Jose/Seasons');
+      expect(normalizeFreshPath('Users/u1/'), 'Users/u1');
+      expect(normalizeFreshPath('/'), '');
+    });
+
+    test('the engine reports every newer value to onAnyNewer', () async {
+      final seen = <String>[];
+      final e = FreshReadEngine<String, _Ev>(
+        valueEvents: (q) => f.path(q).open(),
+        keyOf: (q) => q,
+        valueOf: (ev) => ev.value,
+        barrier: () => Completer<void>().future,
+        connection: f.connection.stream,
+        onAnyNewer: (key, ev) => seen.add('$key=${ev.value}'),
+      );
+      final read = e.refreshing('A');
+      await _tick(0);
+      f.path('A').emit(1);
+      await read;
+      f.path('A').emit(1);
+      f.path('A').emit(2);
+      await _tick(0);
+      expect(seen, ['A=2']);
+      e.debugReset();
+    });
+
+    test('FreshReads.onNewer / onNewerUnder by normalized path', () {
+      final exact = <Object?>[];
+      final under = <String>[];
+      final r1 = FreshReads.onNewer('Futsal/16/Line Ups', exact.add);
+      final r2 = FreshReads.onNewerUnder(
+          'PublicProfiles/', (path, v) => under.add('$path=$v'));
+      FreshReads.debugReportNewer('/Futsal/16//Line Ups', {'a': 1});
+      FreshReads.debugReportNewer('PublicProfiles/u1/ProfileUrl', 'x');
+      FreshReads.debugReportNewer('Futsal/15/Line Ups', 'no');
+      expect(exact, [
+        {'a': 1}
+      ]);
+      expect(under, ['PublicProfiles/u1/ProfileUrl=x']);
+      r1();
+      r2();
+      FreshReads.debugReportNewer('Futsal/16/Line Ups', 'gone');
+      expect(exact, hasLength(1));
+    });
+
+    test('refreshingValue answers through its seam', () async {
+      FreshReads.refreshingValueOverride = (path) async => 'v:$path';
+      addTearDown(() => FreshReads.refreshingValueOverride = null);
+      expect(await refreshingValue('/A//B'), 'v:A/B');
+    });
+  });
 }
