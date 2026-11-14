@@ -64,10 +64,15 @@ class LiveLengthTabController extends StatefulWidget {
     super.key,
     required this.length,
     required this.child,
+    this.initialIndex = 0,
   });
 
   final int length;
   final Widget child;
+
+  /// The tab selected on first build (clamped to [length]); later length
+  /// changes keep the tab the user is on instead.
+  final int initialIndex;
 
   @override
   State<LiveLengthTabController> createState() =>
@@ -75,7 +80,7 @@ class LiveLengthTabController extends StatefulWidget {
 }
 
 class _LiveLengthTabControllerState extends State<LiveLengthTabController> {
-  int _index = 0;
+  late int _index = widget.initialIndex;
 
   @override
   Widget build(BuildContext context) {
