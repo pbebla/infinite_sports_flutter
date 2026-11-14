@@ -1,3 +1,5 @@
+import 'dart:async';
+
 // Second review, Important 1: the player profile's in-place reload rebuilds
 // the career into FRESH collections and swaps them in with one setState —
 // it never appends to what is shown. Driven through the real load and the
@@ -183,5 +185,58 @@ void main() {
     await tester.pump(ProfilePage.kProfileReloadGap);
     await tester.pumpAndSettle();
     expect(reads, before);
+  });
+
+  // Final round, item 1: a newer value that arrives DURING the first load
+  // (before the career appears) is remembered: exactly one reload runs
+  // right after the first commit, and the cache holds the reloaded career.
+  group('first load', () {
+    testWidgets(
+        'a newer value before the first commit: the screen ends on '
+        'the newer stats and the cache holds them', (tester) async {
+      final bundleGate = Completer<void>();
+      final base = sources();
+      final gated = ProfileCareerSources(
+        read: base.read,
+        tournamentBundle: (id) async {
+          await bundleGate.future; // phase 2 is still running
+          return base.tournamentBundle(id);
+        },
+        afcSeasons: base.afcSeasons,
+        afcRoster: base.afcRoster,
+      );
+      tester.view.physicalSize = const Size(420, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+        home: ProfilePage(
+          uid: _uid,
+          careerSources: gated,
+          fantasySeams: FantasyProfileSeams(resolveSeason: () async => null),
+        ),
+      ));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(reads, 1, reason: 'the first load read the team (saved copy)');
+      goals = 7; // the server's newer value
+      FreshReads.debugReportNewer(_teamPath, {'changed': 7});
+      await tester.pump(const Duration(milliseconds: 50));
+      bundleGate.complete(); // first load commits with goals 3
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(ProfilePage.kProfileReloadGap);
+      await tester.pumpAndSettle();
+      expect(reads, 2, reason: 'exactly one reload after the first commit');
+      expect(ProfilePage.debugShownLeagueGoals(), 7);
+      expect(ProfilePage.debugCachedLeagueGoals(_uid), 7);
+      expectNoDuplicates();
+    });
+
+    testWidgets('no newer value: no extra reload', (tester) async {
+      await pumpProfile(tester);
+      await tester.pump(ProfilePage.kProfileReloadGap);
+      await tester.pumpAndSettle();
+      expect(reads, 1);
+      expect(ProfilePage.debugShownLeagueGoals(), 3);
+    });
   });
 }

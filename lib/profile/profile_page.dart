@@ -161,6 +161,27 @@ class ProfilePage extends StatefulWidget {
   /// game changes Line Ups every few seconds; the profile must not thrash).
   static const Duration kProfileReloadGap = Duration(seconds: 2);
 
+  /// Test seam: the league goals of the first Futsal season competition in
+  /// [uid]'s CACHED career (null = not cached / none).
+  @visibleForTesting
+  static num? debugCachedLeagueGoals(String uid) =>
+      _leagueGoals(_careerCache[uid]?.competitions);
+
+  /// Test seam: the same, from the most recently opened profile's SHOWN
+  /// career.
+  @visibleForTesting
+  static num? debugShownLeagueGoals() => _leagueGoals(_debugShown?.call());
+
+  static List<CompetitionStats> Function()? _debugShown;
+
+  static num? _leagueGoals(List<CompetitionStats>? competitions) {
+    if (competitions == null) return null;
+    for (final c in competitions) {
+      if (c.label.contains('· Season')) return c.stats['goals'];
+    }
+    return null;
+  }
+
   /// Test seam: the cached career's sizes for [uid] (null = not cached).
   @visibleForTesting
   static ({int stints, int competitions, int appearances})? debugCachedCounts(
@@ -260,13 +281,40 @@ class _ProfilePageState extends State<ProfilePage>
   void _onNewerPath(String path, Object? _) {
     final own = normalizeFreshPath(profileNodePathFor(widget.uid));
     final mine = path == own || path.startsWith('$own/');
-    if (!mine && !ProfilePage.careerReadsAffected(_readPaths, path)) return;
+    final building = _building;
+    final affects = mine ||
+        ProfilePage.careerReadsAffected(_readPaths, path) ||
+        (building != null &&
+            ProfilePage.careerReadsAffected(building.readPaths, path));
+    if (!affects) return;
     _careerCache.remove(widget.uid);
     _careerReads.remove(widget.uid);
+    if (!_careerLoaded) {
+      // Final round, item 1: a newer value during the FIRST load (the
+      // career is not on screen yet) is remembered; one reload runs right
+      // after the first commit (_loadCareer).
+      _newerDuringFirstLoad = true;
+      return;
+    }
+    _scheduleReload();
+  }
+
+  /// The same debounced, coalesced path every reload takes.
+  void _scheduleReload() {
     _repaintDebounce?.cancel();
     _repaintDebounce =
         Timer(const Duration(milliseconds: 300), _reload.request);
   }
+
+  /// The career build in progress (its read paths count for newer values
+  /// that arrive while it runs).
+  _CareerWork? _building;
+
+  /// A newer value arrived before the first career appeared.
+  bool _newerDuringFirstLoad = false;
+
+  /// Test seam target (ProfilePage.debugShownLeagueGoals).
+  List<CompetitionStats> _shownCompetitions() => _competitions;
 
   Future<void> _repaintInPlace() async {
     if (!mounted || !_careerLoaded) return;
@@ -281,6 +329,7 @@ class _ProfilePageState extends State<ProfilePage>
   void initState() {
     super.initState();
     ProfilePage._careerCacheFollow;
+    ProfilePage._debugShown = _shownCompetitions;
     if (!widget._isLimited &&
         widget.uid.trim().isNotEmpty &&
         widget.loadOverride == null) {
@@ -348,6 +397,9 @@ class _ProfilePageState extends State<ProfilePage>
     _stopNewerFollow?.call();
     _repaintDebounce?.cancel();
     _reload.dispose();
+    if (ProfilePage._debugShown == _shownCompetitions) {
+      ProfilePage._debugShown = null;
+    }
     _fantasy
       ?..removeListener(_onFantasyChanged)
       ..dispose();
@@ -1156,6 +1208,7 @@ class _ProfilePageState extends State<ProfilePage>
       lastName: identity?.lastName ?? _lastName,
     )..degraded = identity == null ? _careerDegraded : false;
     w.readPaths.add(normalizeFreshPath(profileNodePathFor(widget.uid)));
+    _building = w;
     var ok = true;
     Future<Color?>? colorFuture;
     Color? color;
@@ -1190,6 +1243,16 @@ class _ProfilePageState extends State<ProfilePage>
       setState(apply);
     } else {
       apply();
+    }
+    if (identical(_building, w)) _building = null;
+    if (_newerDuringFirstLoad) {
+      // Final round, item 1: the first career is already older than the
+      // server — do not cache it; reload once, in place (the reload caches).
+      _newerDuringFirstLoad = false;
+      _careerCache.remove(widget.uid);
+      _careerReads.remove(widget.uid);
+      if (mounted) _scheduleReload();
+      return;
     }
     if (!ok || _careerDegraded) {
       // A failed or timed-out (offline) career is shown but never cached —
