@@ -1,5 +1,5 @@
 import 'package:firebase_database/firebase_database.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show VoidCallback, debugPrint;
 import 'package:infinite_sports_flutter/model/leaderboard_entry.dart';
 import 'package:infinite_sports_flutter/model/prediction.dart';
 import 'package:infinite_sports_flutter/model/prediction_config.dart';
@@ -10,6 +10,7 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
+import 'package:infinite_sports_flutter/misc/public_profiles.dart' show followProfileUrlCache;
 
 /// ONE-SHOT READS UNDER /Tournaments USE refreshingOnce (lib/misc/
 /// fresh_read.dart — an onValue listener, like once()), NEVER get() (iOS bug):
@@ -27,6 +28,13 @@ class TournamentService {
   /// Session-scoped cache of /Users/{uid}/ProfileUrl values.
   /// Keyed by uid. Cleared by [clearProfileUrlCache] if needed.
   static final Map<String, String> _profileUrlCache = {};
+
+  /// Refilled from newer server values (fresh reads, Task 4); app lifetime.
+  static final VoidCallback _profileUrlFollow =
+      followProfileUrlCache(_profileUrlCache);
+
+  /// Starts [_profileUrlFollow] (Dart statics are lazy).
+  static void _ensureProfileUrlFollow() => _profileUrlFollow;
 
   /// Clears the in-memory ProfileUrl cache. Call after a sign-out or when
   /// you need fresh user photos (rare).
@@ -407,6 +415,7 @@ class TournamentService {
         }
       }
     }
+    _ensureProfileUrlFollow();
     if (uidsToFetch.isNotEmpty) {
       await Future.wait(uidsToFetch.map((uid) async {
         try {

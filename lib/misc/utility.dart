@@ -57,6 +57,41 @@ Color onBrandAccent(BuildContext context) =>
 Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
 Map<String, Map<String, Map<String, BasketballPlayer>>> basketballLineups = {};
 Map<String, Map<String, Map<String, FlagFootballPlayer>>> flagFootballLineups = {};
+
+/// Bumped whenever a lineups cache above is refilled from a newer server
+/// value (fresh reads, Task 4) — open screens built on it (the top-bar
+/// Leaderboard) repaint.
+final ValueNotifier<int> lineupsVersion = ValueNotifier<int>(0);
+
+bool _followingLineUps = false;
+
+/// Session cache refill (survey list B): when a refreshing `Line Ups` read
+/// reports a newer value, the matching cache entry is re-parsed in place
+/// and [lineupsVersion] bumps. Registered once, app lifetime.
+void followLineUps() {
+  if (_followingLineUps) return;
+  _followingLineUps = true;
+  FreshReads.onNewerUnder('', (path, value) {
+    final parts = path.split('/');
+    if (parts.length != 3 || parts[2] != 'Line Ups') return;
+    final season = parts[1];
+    try {
+      switch (parts[0]) {
+        case 'Futsal':
+          futsalLineups[season] = parseFutsalLineUps(value);
+        case 'Basketball':
+          basketballLineups[season] = parseBasketballLineUps(value);
+        case 'Flag Football':
+          flagFootballLineups[season] = parseFlagFootballLineUps(value);
+        default:
+          return;
+      }
+      lineupsVersion.value++;
+    } catch (_) {
+      // A malformed newer value leaves the cache as it was.
+    }
+  });
+}
 FirebaseAuthService auth = FirebaseAuthService();
 bool signedIn = false;
 bool darkModeEnabled = false;
@@ -346,7 +381,15 @@ Future<void> getAllFutsalLineUps(String season) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref("/Futsal/$season");
   var event = await refreshingOnce(newClient.child("Line Ups"));
-  var lineups = event.snapshot.value as Map;
+  futsalLineups[season] = parseFutsalLineUps(event.snapshot.value);
+  followLineUps();
+}
+
+/// `Futsal/<season>/Line Ups` → the [futsalLineups] shape. Throws on a
+/// malformed node (as the read always did).
+Map<String, Map<String, FutsalPlayer>> parseFutsalLineUps(Object? value)
+{
+  var lineups = value as Map;
   Map<String, Map<String, FutsalPlayer>> result = {};
   lineups.forEach((team, lineup) {
     Map<String, FutsalPlayer> temp = {};
@@ -363,14 +406,22 @@ Future<void> getAllFutsalLineUps(String season) async
     result[team] = temp;
   },);
 
-  futsalLineups[season] = result;
+  return result;
 }
 
 Future<void> getAllFlagFootballLineUps(String season) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref("/Flag Football/$season");
   var event = await refreshingOnce(newClient.child("Line Ups"));
-  var lineups = event.snapshot.value as Map;
+  flagFootballLineups[season] = parseFlagFootballLineUps(event.snapshot.value);
+  followLineUps();
+}
+
+/// `Flag Football/<season>/Line Ups` → the [flagFootballLineups] shape. Throws on a
+/// malformed node (as the read always did).
+Map<String, Map<String, FlagFootballPlayer>> parseFlagFootballLineUps(Object? value)
+{
+  var lineups = value as Map;
   Map<String, Map<String, FlagFootballPlayer>> result = {};
   lineups.forEach((team, lineup) {
     Map<String, FlagFootballPlayer> temp = {};
@@ -408,14 +459,22 @@ Future<void> getAllFlagFootballLineUps(String season) async
     result[team] = temp;
   },);
 
-  flagFootballLineups[season] = result;
+  return result;
 }
 
 Future<void> getAllBasketballLineUps(String season) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref("/Basketball/$season");
   var event = await refreshingOnce(newClient.child("Line Ups"));
-  var lineups = event.snapshot.value as Map;
+  basketballLineups[season] = parseBasketballLineUps(event.snapshot.value);
+  followLineUps();
+}
+
+/// `Basketball/<season>/Line Ups` → the [basketballLineups] shape. Throws on a
+/// malformed node (as the read always did).
+Map<String, Map<String, BasketballPlayer>> parseBasketballLineUps(Object? value)
+{
+  var lineups = value as Map;
   Map<String, Map<String, BasketballPlayer>> result = {};
   lineups.forEach((team, lineup) {
     Map<String, BasketballPlayer> temp = {};
@@ -436,7 +495,7 @@ Future<void> getAllBasketballLineUps(String season) async
     });
     result[team] = temp;
   },);
-  basketballLineups[season] = result;
+  return result;
 }
 
 int compareValues(dynamic value1, dynamic value2, bool ascending) =>

@@ -569,7 +569,7 @@ class FreshReads {
       }
     }
     for (final (prefix, cb) in List.of(_under)) {
-      if (key == prefix || key.startsWith('$prefix/')) {
+      if (prefix.isEmpty || key == prefix || key.startsWith('$prefix/')) {
         try {
           cb(key, value);
         } catch (e) {

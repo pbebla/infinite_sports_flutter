@@ -75,6 +75,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
 import 'package:infinite_sports_flutter/misc/share_card_service.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 enum LeaderboardScope { overall, gameweek, teamOfWeek, leagues }
 
@@ -218,6 +219,12 @@ class FantasyLeaderboardsTab extends StatefulWidget {
   /// stream — names/photos only; an empty result retries on next mount).
   static Future<Map<String, PublicProfile>>? profilesSession;
 
+  /// Fresh reads (Task 4, survey list B): a newer PublicProfiles mirror from
+  /// the server drops [profilesSession] (the next mount re-reads the renewed
+  /// saved copy). App lifetime; started by the first load (lazy static).
+  static final VoidCallback profilesSessionFollow = FreshReads.onNewer(
+      'PublicProfiles', (_) => FantasyLeaderboardsTab.profilesSession = null);
+
   @override
   State<FantasyLeaderboardsTab> createState() => _FantasyLeaderboardsTabState();
 }
@@ -351,6 +358,7 @@ class _FantasyLeaderboardsTabState extends State<FantasyLeaderboardsTab> {
     if (load != null) {
       profiles = await load();
     } else {
+      FantasyLeaderboardsTab.profilesSessionFollow;
       final future =
           FantasyLeaderboardsTab.profilesSession ??= PublicProfiles.getAllOnce();
       profiles = await future;

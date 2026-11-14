@@ -5,6 +5,7 @@
 // pure in league_adapters.dart / league_playoffs_view.dart).
 
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart' show VoidCallback;
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/misc/league_playoffs_view.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -16,6 +17,7 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
+import 'package:infinite_sports_flutter/misc/public_profiles.dart' show followProfileUrlCache;
 
 class LeagueService {
   static DatabaseReference _ref(String path) =>
@@ -112,6 +114,13 @@ class LeagueService {
   /// so squad avatars resolve once per player per session.
   static final Map<String, String> _profileUrlCache = {};
 
+  /// Refilled from newer server values (fresh reads, Task 4); app lifetime.
+  static final VoidCallback _profileUrlFollow =
+      followProfileUrlCache(_profileUrlCache);
+
+  /// Starts [_profileUrlFollow] (Dart statics are lazy).
+  static void _ensureProfileUrlFollow() => _profileUrlFollow;
+
   /// Clears the in-memory ProfileUrl cache (rare — e.g. after sign-out).
   static void clearProfileUrlCache() => _profileUrlCache.clear();
 
@@ -206,6 +215,7 @@ class LeagueService {
         }
       }
     }
+    _ensureProfileUrlFollow();
     if (uidsToFetch.isNotEmpty) {
       await Future.wait(uidsToFetch.map((uid) async {
         try {

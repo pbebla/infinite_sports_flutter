@@ -10,6 +10,7 @@
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_session.dart';
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
+import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/profile/profile_page.dart';
 
@@ -45,6 +46,9 @@ Future<void> signOutAndClearSession({
   await (firebaseSignOut ?? auth.signOut)();
   ProfilePage.clearCareerCache();
   LeagueService.clearRostersSnapshotCache();
+  // Roster-photo caches (survey list B: had no caller before).
+  LeagueService.clearProfileUrlCache();
+  TournamentService.clearProfileUrlCache();
   // Every fantasy session cache (shared-phone hygiene): one call, so no
   // screen's cache can be forgotten here.
   clearFantasySessionState();

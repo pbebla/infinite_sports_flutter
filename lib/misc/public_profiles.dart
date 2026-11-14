@@ -17,7 +17,7 @@
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/foundation.dart' show VoidCallback, visibleForTesting;
 import 'package:infinite_sports_flutter/misc/bounded_read.dart';
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
@@ -118,7 +118,29 @@ bool isSignedInUid(String uid) {
 String profileNodePathFor(String uid) =>
     isSignedInUid(uid) ? 'Users/$uid' : 'PublicProfiles/$uid';
 
-/// Firebase reads over the mirror — once()/onValue only (iOS parity).
+/// Keeps a session `uid → ProfileUrl` cache (LeagueService's and
+/// TournamentService's roster-photo caches) refilled from newer server
+/// values (fresh reads, Task 4, survey list B): a refreshing read of
+/// `PublicProfiles/<uid>/ProfileUrl` (or of the whole mirror) that reports
+/// a newer value overwrites the uids already in [cache]. Returns the
+/// remover.
+VoidCallback followProfileUrlCache(Map<String, String> cache) =>
+    FreshReads.onNewerUnder('PublicProfiles', (path, value) {
+      final parts = path.split('/');
+      if (parts.length == 3 && parts[2] == 'ProfileUrl') {
+        if (cache.containsKey(parts[1])) {
+          cache[parts[1]] = value?.toString() ?? '';
+        }
+      } else if (parts.length == 1 && value is Map) {
+        for (final uid in cache.keys.toList()) {
+          final node = value[uid];
+          cache[uid] = node is Map ? (node['ProfileUrl'] ?? '').toString() : '';
+        }
+      }
+    });
+
+/// Firebase reads over the mirror — refreshing reads / onValue only (iOS
+/// parity).
 class PublicProfiles {
   static DatabaseReference _root() =>
       FirebaseDatabase.instance.ref('PublicProfiles');
