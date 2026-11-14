@@ -105,4 +105,33 @@ void main() {
     expect(
         tableSourcePath('AFC San Jose', 'S1'), 'AFC San Jose/Seasons/S1/Table');
   });
+
+  testWidgets('a failed read shows a plain message, not a crash',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 740);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      home: LeaderboardPage(
+        sport: 'Futsal',
+        season: '16',
+        playersLoader: () async => throw StateError('no answer'),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text("Couldn't load this right now. Try again later."),
+        findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(MaterialApp(
+      home: TablePage(
+        sport: 'Futsal',
+        season: '16',
+        tableLoader: () async => throw StateError('no answer'),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text("Couldn't load this right now. Try again later."),
+        findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

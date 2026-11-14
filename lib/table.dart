@@ -457,6 +457,13 @@ class _TablePageState extends State<TablePage> {
                 // this resolves into below.
                 return const SkeletonList(count: 8);
               }
+              // A failed read (offline with nothing saved: the fresh read
+              // gives up at its bound) is a plain message, not a crash.
+              if (snapshot.hasError && _newer == null) {
+                return const Center(
+                    child: Text("Couldn't load this right now. Try again later.",
+                        textAlign: TextAlign.center));
+              }
               teams = _newer ?? snapshot.data as Map<String, TeamInfo>;
               return SizedBox(
                   width: MediaQuery.of(context).size.width,

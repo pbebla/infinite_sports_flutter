@@ -446,6 +446,13 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
                 // this resolves into below.
                 return const SkeletonList(count: 8);
               }
+              // A failed read (offline with nothing saved: the fresh read
+              // gives up at its bound) is a plain message, not a crash.
+              if (snapshot.hasError && players.isEmpty) {
+                return const Center(
+                    child: Text("Couldn't load this right now. Try again later.",
+                        textAlign: TextAlign.center));
+              }
               if (players.isEmpty) {
                 players = snapshot.data!;
                 sortTable(3, isAscending);
