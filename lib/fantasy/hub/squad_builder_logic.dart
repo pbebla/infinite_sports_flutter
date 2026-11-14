@@ -87,13 +87,47 @@ List<({double x, double y})> starterOffsets(FantasyConfig cfg) {
     }
   }
 
-  // Rows spaced so a full chip (avatar + 2-line nameplate) can never touch
-  // the next row at phone widths (owner feedback): ≥0.42 flat-y between rows
-  // keeps ≥ a chip-height of separation after the asset perspective mapping.
-  row(cfg.startersGk, 0.02, 0);
-  row(cfg.startersDef, 0.44, 0.24);
-  row(cfg.startersAtt, 0.87, 0.26);
+  // Rows as far apart as the frame allows (release report #10: at 360 px the
+  // old 0.02 / 0.44 / 0.87 rows let a 2-line name box run into the photos
+  // of the row below). After pitchAssetPerspective these land at ~0 / 0.5 /
+  // ~1 of the court's height: the GK chip tops out at the far goal, the ATT
+  // chip bottoms out at the near edge, DEF sits midway — and
+  // [courtHeightFor] grows the court whenever even that is not a full chip
+  // apart (narrow phones, large text).
+  row(cfg.startersGk, kStarterRowGkY, 0);
+  row(cfg.startersDef, kStarterRowDefY, 0.24);
+  row(cfg.startersAtt, kStarterRowAttY, 0.26);
   return out;
+}
+
+/// Flat-y of the three starter rows ([starterOffsets]); outside 0..1 on
+/// purpose so the asset mapping puts GK / ATT on the frame's edges.
+const double kStarterRowGkY = -0.06;
+const double kStarterRowDefY = 0.5;
+const double kStarterRowAttY = 1.06;
+
+/// The court's height for [width]: the pitch's natural height
+/// (`width / aspect`), grown just enough that consecutive rows — whose
+/// chips are placed by [Align] at [rowFractions] of (height − chip) — sit
+/// at least a whole [chipHeight] + [gap] apart, so a name box never covers
+/// the next row's photo (release report #10).
+double courtHeightFor({
+  required double width,
+  required double aspect,
+  required List<double> rowFractions,
+  required double chipHeight,
+  double gap = 6,
+}) {
+  final natural = width / aspect;
+  final rows = rowFractions.toSet().toList()..sort();
+  var minStep = double.infinity;
+  for (var i = 1; i < rows.length; i++) {
+    final step = rows[i] - rows[i - 1];
+    if (step < minStep) minStep = step;
+  }
+  if (minStep == double.infinity || minStep <= 0) return natural;
+  final needed = chipHeight + (chipHeight + gap) / minStep;
+  return needed > natural ? needed : natural;
 }
 
 // ── Tilted pitch geometry (P3b feedback Task 2) ────────────────────────────
@@ -198,7 +232,7 @@ String squadAlertText({
   required String deadline,
   required bool freeThisWeek,
 }) {
-  final parts = [for (final c in changes) '${c.player} moved to ${c.to.db}'];
+  final parts = [for (final c in changes) '${c.player} moved to ${c.to.short}'];
   final head = parts.length <= 1
       ? parts.join()
       : '${parts.sublist(0, parts.length - 1).join(', ')} and ${parts.last}';
@@ -386,6 +420,29 @@ bool squadEditable({
     ) ==
     GameweekStatus.open;
 
+/// Whether the squad can be edited — three-way (review 6, I2): [unknown]
+/// when the schedule read failed under the automatic lock, so the app
+/// neither claims "locked" nor lets an edit through it could not check (the
+/// server stays the authority; the schedule feed retries).
+enum SquadEditState { open, locked, unknown }
+
+SquadEditState squadEditState({
+  required FantasyLockOverride lockOverride,
+  required List<Gameweek> gameweeks,
+  required DateTime nowUtc,
+  bool scheduleUnknown = false,
+}) {
+  if (lockOverride == FantasyLockOverride.auto &&
+      scheduleUnknown &&
+      currentGameweek(gameweeks, nowUtc) == null) {
+    return SquadEditState.unknown;
+  }
+  return squadEditable(
+          lockOverride: lockOverride, gameweeks: gameweeks, nowUtc: nowUtc)
+      ? SquadEditState.open
+      : SquadEditState.locked;
+}
+
 /// The engine's validateSquad, rendered as human sentences the builder shows
 /// inline. Formation problems come out per position ("Pick 2 defenders — you
 /// have 1"); the armband line appears only once there's a squad to captain.
@@ -438,16 +495,15 @@ List<String> issueSentences({
           : 'Pick $want $plural — you have $got.');
     }
 
-    need(FantasyPosition.gk, false, cfg.startersGk, 'a goalkeeper',
-        'goalkeepers');
-    need(FantasyPosition.def, false, cfg.startersDef, 'a defender',
-        'defenders');
-    need(FantasyPosition.att, false, cfg.startersAtt, 'an attacker',
-        'attackers');
-    need(FantasyPosition.def, true, cfg.benchDef, 'a bench defender',
-        'bench defenders');
-    need(FantasyPosition.att, true, cfg.benchAtt, 'a bench attacker',
-        'bench attackers');
+    const gk = FantasyPosition.gk, def = FantasyPosition.def;
+    const att = FantasyPosition.att;
+    need(gk, false, cfg.startersGk, gk.withArticle, gk.nounPlural);
+    need(def, false, cfg.startersDef, def.withArticle, def.nounPlural);
+    need(att, false, cfg.startersAtt, att.withArticle, att.nounPlural);
+    need(def, true, cfg.benchDef, 'a bench ${def.noun}',
+        'bench ${def.nounPlural}');
+    need(att, true, cfg.benchAtt, 'a bench ${att.noun}',
+        'bench ${att.nounPlural}');
   }
 
   // The engine's own overBudget (pick prices vs the bare budget) is NOT
@@ -484,11 +540,7 @@ List<String> issueSentences({
 }
 
 /// "Pick a goalkeeper" / "Pick a defender" / "Pick an attacker" sheet titles.
-String pickerTitle(FantasyPosition pos) => switch (pos) {
-      FantasyPosition.gk => 'Pick a goalkeeper',
-      FantasyPosition.def => 'Pick a defender',
-      FantasyPosition.att => 'Pick an attacker',
-    };
+String pickerTitle(FantasyPosition pos) => 'Pick ${pos.withArticle}';
 
 /// Two-letter initials for the avatar fallback (photos never gate content).
 String initialsFor(String name) {

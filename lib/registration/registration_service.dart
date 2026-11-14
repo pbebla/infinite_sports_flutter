@@ -1,6 +1,7 @@
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:infinite_sports_flutter/misc/stream_resilience.dart';
 import 'package:infinite_sports_flutter/registration/promo_engine.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
@@ -12,6 +13,24 @@ import 'package:infinite_sports_flutter/registration/registration_models.dart';
 /// Paid/'team code' (spec section 5); everything else is the Manager's
 /// markPaid.
 class RegistrationService {
+  /// Test seam replacing the real callable round trip for
+  /// [checkFirstTimer] / [resolveJoinCode]: receives the callable name and
+  /// payload and returns the callable's `data` (or throws, like a failed
+  /// call). null in production.
+  @visibleForTesting
+  static Future<Object?> Function(String name, Map<String, dynamic> data)?
+      callableOverride;
+
+  static Future<Object?> _callable(
+      String name, Map<String, dynamic> data) async {
+    final override = callableOverride;
+    if (override != null) return override(name, data);
+    final result = await FirebaseFunctions.instance
+        .httpsCallable(name)
+        .call<Map<String, dynamic>>(data);
+    return result.data;
+  }
+
   /// {regId: config} for every registration whose Status is "open".
   ///
   /// DB lockdown B2: reads the RegistrationsPublic mirror (each child is
@@ -161,22 +180,23 @@ class RegistrationService {
   /// same normalization as promo_engine.dart's [firstTimer]) and returns
   /// the same FirstTimerResult shape.
   ///
-  /// Defensive: any error degrades to "first-timer" — exactly what the old
-  /// scan's silent-failure path produced (an empty prior-submissions list).
-  /// Same callable pattern as createRegistrationPaymentIntent
+  /// An error is not a verdict: a failed call (offline, timeout, cold
+  /// start) comes back as NOT a first-timer with
+  /// [FirstTimerResult.checkFailed] set, so no first-timer promo discount is
+  /// handed out on a guess — the promo field tells the person the standard
+  /// fee applies and to contact us (an admin can still grant the promo in
+  /// the Manager). Same callable pattern as createRegistrationPaymentIntent
   /// (payment_screen.dart).
   static Future<FirstTimerResult> checkFirstTimer({
     required String email,
     required String phone,
   }) async {
     try {
-      final callable =
-          FirebaseFunctions.instance.httpsCallable('checkFirstTimer');
-      final result = await callable
-          .call<Map<String, dynamic>>({'email': email, 'phone': phone});
-      return firstTimerResultFromCallable(result.data);
+      final data =
+          await _callable('checkFirstTimer', {'email': email, 'phone': phone});
+      return firstTimerResultFromCallable(data);
     } catch (_) {
-      return const FirstTimerResult(isFirstTimer: true);
+      return const FirstTimerResult(isFirstTimer: false, checkFailed: true);
     }
   }
 
@@ -185,20 +205,19 @@ class RegistrationService {
   /// registration's teams — join codes included, payment-waiving ones among
   /// them — and matched locally; the callable never returns other teams'
   /// codes. The result maps onto the same [JoinCodeMatch] statuses the page
-  /// has always branched on ('ok' | 'notApproved' | 'notFound'); errors
-  /// degrade to 'notFound'.
+  /// has always branched on ('ok' | 'notApproved' | 'notFound'). A FAILED
+  /// call (offline, timeout, cold start) is 'error' — never 'notFound', which
+  /// would tell a teammate holding a correct code that it is wrong.
   static Future<JoinCodeMatch> resolveJoinCode({
     required String regId,
     required String code,
   }) async {
     try {
-      final callable =
-          FirebaseFunctions.instance.httpsCallable('resolveJoinCode');
-      final result = await callable
-          .call<Map<String, dynamic>>({'regId': regId, 'code': code});
-      return joinCodeMatchFromCallable(result.data);
+      final data =
+          await _callable('resolveJoinCode', {'regId': regId, 'code': code});
+      return joinCodeMatchFromCallable(data);
     } catch (_) {
-      return const JoinCodeMatch('notFound');
+      return const JoinCodeMatch('error');
     }
   }
 

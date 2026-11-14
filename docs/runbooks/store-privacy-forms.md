@@ -63,7 +63,7 @@ For every row: processed ephemerally **No**; data **not** shared with third part
 
 **Tracking:** No. **Privacy nutrition label "Data used to track you":** none.
 
-**Required permissions text (Info.plist, already set):** location when-in-use (Around You map), camera and photo library (profile photo / support screenshots). The two "Always" location keys were removed on 2026-11-09 — the app never asks for background location.
+**Required permissions text (Info.plist):** location when-in-use (Around You map), camera and photo library (profile photo / support screenshots). `NSLocationAlwaysAndWhenInUseUsageDescription` must ALSO be present: the app only ever asks for location while it is open, but the location plugin (geolocator) links Apple's "always" location API, and App Store Connect rejects an upload without that purpose string (ITMS-90683). It was removed on 2026-11-09 by mistake and restored for build 5.0.0 (30) on 2026-11-13. Never remove a purpose string because the app "does not use" a permission — check whether a plugin references the API first.
 
 **Account deletion (Apple 5.1.1(v)):** in-app Settings → Delete Account is built for email, Google and Apple sign-ins and removes the account and its data as the policy promises. The email and Google paths were verified on the Android emulator. The Apple path (re-sign-in plus revoking the Sign in with Apple token) is built but NOT yet verified on an iPhone — Paul/Bronsin run the checklist in the runbook before the iOS release. The Play "Account deletion URL" (`https://infinite-sports-app.web.app/delete-account`) is live. Emailed requests: Manager → Users → row menu → Delete account…. Full steps, messages and the iOS checklist: `docs/runbooks/deleting-an-account.md`.
 

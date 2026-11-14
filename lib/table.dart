@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/season_title.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/basketballteaminfo.dart';
@@ -393,7 +394,7 @@ class _TablePageState extends State<TablePage> {
                 style: TextStyle(fontSize: Theme.of(context).textTheme.headlineSmall!.fontSize),
                 children: <TextSpan>[
                   TextSpan(
-                    text: '\n${widget.season} Table',
+                    text: '\n${seasonTitle(widget.season)} Table',
                     style: TextStyle(
                       fontSize: Theme.of(context).textTheme.bodySmall!.fontSize,
                     ),

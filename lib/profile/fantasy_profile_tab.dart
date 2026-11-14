@@ -307,7 +307,7 @@ class _PlayerCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final teamLine = [
       if (player.teamName.trim().isNotEmpty) player.teamName.trim(),
-      positionLabel(player.position),
+      player.position.fantasyTag,
     ].join(' · ');
     // Season over: no move line, and the label reads "Final price".
     final finished = source.seasonFinished;

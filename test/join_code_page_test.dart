@@ -88,6 +88,23 @@ void main() {
         findsOneWidget);
   });
 
+  testWidgets(
+      'a lookup that FAILS says it could not check, never "no match"',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: _page(({required regId, required code}) async =>
+            const JoinCodeMatch('error'))));
+
+    await _enterCode(tester, 'ABC234');
+
+    expect(
+        find.text(
+            "Couldn't check the code. Check your connection and try again."),
+        findsOneWidget);
+    expect(find.textContaining("doesn't match"), findsNothing);
+    expect(find.text('Continue'), findsNothing);
+  });
+
   testWidgets('short partial input stays quiet (no error, no lookup spam)',
       (tester) async {
     var calls = 0;
@@ -122,5 +139,47 @@ void main() {
     // Not waived: the player-fee line renders instead.
     expect(find.textContaining('player fee after registering'),
         findsOneWidget);
+  });
+
+  testWidgets('a failed check offers "Try again", which re-runs the lookup',
+      (tester) async {
+    var calls = 0;
+    await tester.pumpWidget(MaterialApp(
+        home: _page(({required regId, required code}) async {
+      calls++;
+      if (calls == 1) return const JoinCodeMatch('error');
+      return const JoinCodeMatch(
+          'ok',
+          RegTeam(
+              id: 't1',
+              name: 'The Boys',
+              captainUid: '',
+              status: 'approved'));
+    })));
+
+    await _enterCode(tester, 'ABC234');
+    final before = calls;
+    expect(find.text('Try again'), findsOneWidget);
+
+    await tester.tap(find.text('Try again'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(calls, before + 1);
+    expect(find.text('Joining The Boys'), findsOneWidget);
+    expect(find.textContaining("Couldn't check the code"), findsNothing);
+    expect(find.text('Try again'), findsNothing);
+  });
+
+  testWidgets('a failed check on a still-incomplete code stays quiet',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: _page(({required regId, required code}) async =>
+            const JoinCodeMatch('error'))));
+
+    await _enterCode(tester, 'ABCD');
+
+    expect(find.textContaining("Couldn't check the code"), findsNothing);
+    expect(find.text('Try again'), findsNothing);
   });
 }

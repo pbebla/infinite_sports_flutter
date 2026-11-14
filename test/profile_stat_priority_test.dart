@@ -45,4 +45,42 @@ void main() {
     ];
     expect(careerHistory(stints).first.sortKey, 2026);
   });
+
+  group('pickHeadlineStatKeys (release report #2)', () {
+    test('a striker with saves fills the third slot with Saves, not a dash',
+        () {
+      // Futsal ATT priority is games/goals/assists/dpl, but a single-season
+      // futsal map only carries goals/assists/saves.
+      final keys = pickHeadlineStatKeys(
+        profileStatPriority('Futsal', 'ATT'),
+        {'goals': 39, 'assists': 19, 'saves': 43},
+      );
+      expect(keys, ['goals', 'assists', 'saves']);
+    });
+
+    test('priority keys come first, in priority order', () {
+      final keys = pickHeadlineStatKeys(
+        ['games', 'goals', 'assists', 'dpl'],
+        {'saves': 4, 'assists': 2, 'goals': 9, 'games': 7},
+      );
+      expect(keys, ['games', 'goals', 'assists']);
+    });
+
+    test('zero-valued fallbacks are skipped; only two stats → two keys', () {
+      final keys = pickHeadlineStatKeys(
+        profileStatPriority('Futsal', 'ATT'),
+        {'goals': 39, 'assists': 19, 'saves': 0},
+      );
+      expect(keys, ['goals', 'assists']);
+    });
+
+    test('never pads and never exceeds the maximum', () {
+      expect(pickHeadlineStatKeys(['goals'], const {}), isEmpty);
+      expect(
+        pickHeadlineStatKeys(
+            ['a', 'b'], {'a': 1, 'b': 2, 'c': 3, 'd': 4}),
+        ['a', 'b', 'c'],
+      );
+    });
+  });
 }

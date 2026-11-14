@@ -49,6 +49,7 @@ import 'package:infinite_sports_flutter/fantasy/profile/profile_hero.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/profile_stat_strip.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/profile_tabs.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
+import 'package:infinite_sports_flutter/misc/team_logos.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -214,13 +215,19 @@ SystemUiOverlayStyle profileStatusBarStyle({required bool lightIcons}) =>
 double _heroHeightFor(BuildContext context) =>
     (MediaQuery.sizeOf(context).height * 0.42).clamp(260.0, 380.0);
 
+/// Height of the row the floating back/star buttons sit in, below the status
+/// bar: 6 px gap + 48 px IconButton + 6 px gap.
+const double _kButtonRowHeight = 60;
+
 class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs = TabController(length: 4, vsync: this);
   int _tabIndex = 0;
 
-  /// The page scroll; [_pastHero] flips once the hero has scrolled out from
-  /// under the status bar (status-bar icons + backing follow).
+  /// The page scroll; [_pastHero] flips once the hero's bottom edge scrolls
+  /// up into the back/star row — the solid pinned bar then backs the
+  /// status bar and both buttons, so content never shows under them
+  /// (release report #3), and the status-bar icons follow the theme.
   final ScrollController _scroll = ScrollController();
   bool _pastHero = false;
 
@@ -292,6 +299,7 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
   /// The tapped star's state until the watchlist stream echoes it.
   bool? _starOverride;
   Map<String, String> _logoUrls = const {};
+  VoidCallback? _stopLogos;
 
   StreamSubscription<List<FantasyPlayer>>? _playersSub;
   StreamSubscription<Map<String, FantasyPlayerTotals>?>? _totalsSub;
@@ -349,7 +357,9 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
     _scroll.addListener(() {
       if (!mounted || !_scroll.hasClients) return;
       final past = _scroll.offset >
-          _heroHeightFor(context) - MediaQuery.paddingOf(context).top - 4;
+          _heroHeightFor(context) -
+              MediaQuery.paddingOf(context).top -
+              _kButtonRowHeight;
       if (past != _pastHero) setState(() => _pastHero = past);
     });
     _seedFromSession();
@@ -358,11 +368,17 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
     _subscribeMarketFeeds();
     _subscribeLeagueFeeds();
     _subscribeWatchlist();
-    (widget.loadLogoUrls ??
-            () => LeagueService.leagueLogoUrls(widget.sport, widget.season))()
-        .then((urls) {
-      if (mounted) setState(() => _logoUrls = urls);
-    }, onError: (Object _) {});
+    final loadLogoUrls = widget.loadLogoUrls;
+    if (loadLogoUrls != null) {
+      loadLogoUrls().then((urls) {
+        if (mounted) setState(() => _logoUrls = urls);
+      }, onError: (Object _) {});
+    } else {
+      // Live (S16 Task 1): a crest added to Logo Urls fills in while open.
+      _stopLogos = watchSeasonLogos(widget.sport, widget.season, (urls) {
+        if (mounted) setState(() => _logoUrls = urls);
+      });
+    }
     if (_showsDraftAction) {
       // Keeps the editable/locked flip honest around the deadline (the
       // market's cadence).
@@ -488,6 +504,7 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
     _lockTicker?.cancel();
     _tabs.dispose();
     _scroll.dispose();
+    _stopLogos?.call();
     super.dispose();
   }
 
@@ -542,15 +559,20 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
     Navigator.push(context, fantasyHubPageRoute(route));
   }
 
-  bool get _editable {
+  /// open / locked / unknown — unknown = the schedule read failed (review 6,
+  /// I2): Add/Remove stay off and say the deadline can't be checked.
+  SquadEditState get _editState {
     final config = _config;
-    if (config == null) return false;
-    return squadEditable(
+    if (config == null) return SquadEditState.locked;
+    return squadEditState(
       lockOverride: config.lockOverride,
       gameweeks: _gameweeks ?? const [],
       nowUtc: _nowUtc,
+      scheduleUnknown: _schedule.scheduleUnknown,
     );
   }
+
+  bool get _editable => _editState == SquadEditState.open;
 
   // ── Build ───────────────────────────────────────────────────────────────
 
@@ -594,21 +616,36 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
                 child: body,
               ),
             ),
-            // Status-bar backing once the hero has scrolled away, so content
-            // never runs under the clock/battery icons.
+            // Solid pinned bar once the hero has scrolled up to the button
+            // row: backs the status bar AND the back/star buttons, so the
+            // stat strip / tabs never run under the clock or the buttons
+            // (release report #3 — the star used to cover "Owned").
             Positioned(
+              key: const ValueKey('profile_pinned_bar'),
               top: 0,
               left: 0,
               right: 0,
-              height: top,
+              height: top + _kButtonRowHeight,
               child: IgnorePointer(
                 child: AnimatedOpacity(
                   opacity: _pastHero ? 1 : 0,
                   duration: reduceMotion
                       ? Duration.zero
                       : const Duration(milliseconds: 150),
-                  child:
-                      ColoredBox(color: Theme.of(context).colorScheme.surface),
+                  child: DecoratedBox(
+                    key: const ValueKey('profile_bar_fill'),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      border: Border(
+                        bottom: BorderSide(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .outlineVariant
+                              .withValues(alpha: 0.5),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -753,6 +790,11 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
           player: player,
           draft: draft,
           editable: _editable,
+          deadlineUnknown: _editState == SquadEditState.unknown,
+          // Given up retrying (re-review 6b, item 2): "Try again" here.
+          onRetrySchedule: _schedule.scheduleRetry == FantasyFeedRetry.gaveUp
+              ? _schedule.restart
+              : null,
         ),
       );
     } else {
@@ -840,11 +882,15 @@ class _DraftAction extends StatelessWidget {
     required this.player,
     required this.draft,
     required this.editable,
+    this.deadlineUnknown = false,
+    this.onRetrySchedule,
   });
 
   final FantasyPlayer player;
   final SquadDraftController draft;
   final bool editable;
+  final bool deadlineUnknown;
+  final VoidCallback? onRetrySchedule;
 
   @override
   Widget build(BuildContext context) {
@@ -858,10 +904,17 @@ class _DraftAction extends StatelessWidget {
       priceOf: draft.addCostOf,
       editable: editable,
       unplaced: draft.unplaced,
+      deadlineUnknown: deadlineUnknown,
     );
     final inSquad = availability == MarketAddAvailability.inSquad;
     final addable = availability == MarketAddAvailability.addable;
-    final reason = marketAddReason(availability, player.position);
+    final retry = availability == MarketAddAvailability.deadlineUnknown
+        ? onRetrySchedule
+        : null;
+    final reason = availability == MarketAddAvailability.deadlineUnknown &&
+            retry != null
+        ? "Couldn't check the deadline."
+        : marketAddReason(availability, player.position);
     // An owned baseline player's Remove says what he was bought at and
     // what selling him banks; anyone bought this week has no such line.
     // Only once the draft's money is real (never a stale sell price).
@@ -921,6 +974,12 @@ class _DraftAction extends StatelessWidget {
                   : scheme.onSurfaceVariant,
             ),
           ),
+          if (retry != null)
+            TextButton(
+              key: const ValueKey('profile_deadline_retry'),
+              onPressed: retry,
+              child: const Text('Try again'),
+            ),
         ] else if (draft.dirty) ...[
           const SizedBox(height: 6),
           Text(

@@ -37,6 +37,7 @@ class EventPage extends StatefulWidget {
     this.flyerDownloader,
     this.tempDirectory,
     this.shareSheet,
+    this.loadUsers,
   }) : assert(index != null || v2Id != null);
 
   final int? index;
@@ -52,6 +53,10 @@ class EventPage extends StatefulWidget {
   final Future<Directory> Function()? tempDirectory;
   final ShareSheet? shareSheet;
 
+  /// Test seam replacing [getAllUsers] (null = attendee names couldn't be
+  /// loaded).
+  final Future<Map<String, MyUser>?> Function()? loadUsers;
+
   @override
   _EventPageState createState() => _EventPageState();
 }
@@ -63,15 +68,46 @@ class _EventPageState extends State<EventPage> {
   late Event event;
   // Live record: attend/edit changes appear without reopening the page.
   Stream<Event?>? _eventStream;
-  Future<Map<String, MyUser>>? _users;
+
+  /// Attendee names/photos (PublicProfiles mirror). null until the first
+  /// load answers; [_usersFailed] when it failed / timed out — then the
+  /// attendee list says so and the next live event update retries.
+  Map<String, MyUser>? _users;
+  bool _usersFailed = false;
+  bool _usersLoading = false;
 
   @override
   void initState() {
     super.initState();
     _loadReminding();
-    _eventStream = widget.eventStream ??
+    final source = widget.eventStream ??
         watchEvent(v2Id: widget.v2Id, legacyIndex: widget.index);
-    _users = getAllUsers();
+    _eventStream = source.map((event) {
+      if (_usersFailed) _loadUsers();
+      return event;
+    });
+    _loadUsers();
+  }
+
+  Future<void> _loadUsers() async {
+    if (_usersLoading) return;
+    _usersLoading = true;
+    Map<String, MyUser>? users;
+    try {
+      users = await (widget.loadUsers ?? getAllUsers)();
+    } catch (_) {
+      users = null;
+    }
+    _usersLoading = false;
+    if (!mounted) return;
+    setState(() {
+      if (users == null) {
+        _usersFailed = true;
+      } else {
+        _users = users;
+        _usersFailed = false;
+      }
+    });
   }
 
   /// Attendees live under the record the page was opened from.
@@ -353,14 +389,16 @@ class _EventPageState extends State<EventPage> {
     return StreamBuilder<Event?>(
       stream: _eventStream,
       builder: (context, eventSnapshot) {
-        return FutureBuilder(
-          future: _users,
-          builder: (context, snapshot) {
-        if (!eventSnapshot.hasData || !snapshot.hasData) {
+        return Builder(
+          builder: (context) {
+        // First reveal waits for the names (single fade, no name pop-in);
+        // a FAILED names load reveals the page and says so below.
+        if (!eventSnapshot.hasData || (_users == null && !_usersFailed)) {
           return _skeleton(context);
         }
         event = eventSnapshot.data ?? Event();
-        Map<String, MyUser> users = snapshot.data!;
+        final users = _users ?? const <String, MyUser>{};
+        final namesMissing = _users == null;
         List<Attendee> attendees = List.empty(growable: true);
         // Recomputed on every live update so un-attending elsewhere is
         // reflected here too.
@@ -545,6 +583,13 @@ class _EventPageState extends State<EventPage> {
                   Column(
                     children: [
                       Text(attendees.isNotEmpty ? "Attendees" : "", style: Theme.of(context).textTheme.headlineMedium,),
+                      if (attendees.isNotEmpty && namesMissing)
+                        Padding(
+                          padding: const EdgeInsets.all(15),
+                          child: Text("Couldn't load attendees",
+                              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                        )
+                      else
                       ListView.builder(
                         shrinkWrap: true,
                           itemCount: attendees.length,

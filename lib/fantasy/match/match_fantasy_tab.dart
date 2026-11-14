@@ -847,7 +847,7 @@ class _PointsRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${row.name} (${row.position.db})',
+                  '${row.name} (${row.position.fantasyTag})',
                   // Wraps, never underlined or ellipsized (house rules).
                   softWrap: true,
                   style: TextStyle(

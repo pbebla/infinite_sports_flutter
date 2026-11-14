@@ -49,6 +49,8 @@ import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/chip_row.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart'
+    show kDeadlineUnavailable;
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart'
     show movementDirection;
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_rows.dart'
@@ -71,6 +73,8 @@ class FantasySquadBuilder extends StatefulWidget {
     required this.config,
     required this.lockOverride,
     required this.gameweeks,
+    this.scheduleUnknown = false,
+    this.onRetrySchedule,
     required this.players,
     required this.squadStates,
     this.initialSquad,
@@ -134,6 +138,14 @@ class FantasySquadBuilder extends StatefulWidget {
   final FantasyLockOverride lockOverride;
   final List<Gameweek> gameweeks;
 
+  /// The schedule read failed (FantasyScheduleFeed.scheduleUnknown, review 6
+  /// I2): never "Locked" / "Season complete" from that empty list.
+  final bool scheduleUnknown;
+
+  /// Non-null once the schedule feed has GIVEN UP retrying (re-review 6b,
+  /// item 2): the strip says so and offers "Try again" (this callback).
+  final VoidCallback? onRetrySchedule;
+
   /// The live market (guests arrive eligible=false and are filtered by the
   /// picker).
   final List<FantasyPlayer> players;
@@ -179,10 +191,16 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
 
   /// The schedule's verdict alone (the owner's lock override, the deadline):
   /// whether the WEEK is open for editing — what decides the locked view.
-  bool get _scheduleEditable => squadEditable(
+  bool get _scheduleEditable => _editState == SquadEditState.open;
+
+  /// open / locked / unknown — unknown = the schedule read failed (review 6,
+  /// I2): the court is not editable, and the strip says the deadline can't
+  /// be checked instead of "Locked".
+  SquadEditState get _editState => squadEditState(
         lockOverride: widget.lockOverride,
         gameweeks: widget.gameweeks,
         nowUtc: _now,
+        scheduleUnknown: widget.scheduleUnknown,
       );
 
   /// Whether THIS manager can edit right now (the schedule, and a pass).
@@ -384,7 +402,10 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
         for (final c in alert.changes) (player: c.player, to: c.to),
       ],
       deadline: target == null ? 'the deadline' : formatAbsoluteLock(target),
-      freeThisWeek: current == null || current.number == alert.gameweek,
+      // A failed schedule read promises nothing that depends on the
+      // schedule (re-review 6b, item 3): no free swap, and "the deadline".
+      freeThisWeek: !widget.scheduleUnknown &&
+          (current == null || current.number == alert.gameweek),
     );
   }
 
@@ -545,7 +566,9 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
                 const SizedBox(height: 8),
                 _TransfersLine(preview: transfers),
               ],
-            ] else
+            ] else if (_editState == SquadEditState.unknown)
+              _DeadlineUnknownStrip(onRetry: widget.onRetrySchedule)
+            else
               // Nothing known about the week (no model yet): just "Locked" —
               // never a claim about kickoff.
               _LockedWeekStrip(
@@ -829,6 +852,60 @@ class _TransfersLine extends StatelessWidget {
 /// the hub; the movement reads in the leaderboard's own up / down colours
 /// (pitch green / the bright fantasy red), both themes. Text wraps, never
 /// ellipsizes, so it fits 360 px.
+/// My Team while the schedule could not be read (review 6, I2): editing is
+/// paused because the deadline can't be checked — never "Locked". The
+/// schedule feed retries on its own.
+class _DeadlineUnknownStrip extends StatelessWidget {
+  const _DeadlineUnknownStrip({this.onRetry});
+
+  /// Non-null once retrying has stopped: plain wording + "Try again".
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const ValueKey('deadline_unknown_strip'),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.schedule, size: 18, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              onRetry == null
+                  ? "$kDeadlineUnavailable — can't check whether editing is "
+                      'open right now. Trying again…'
+                  : "$kDeadlineUnavailable — couldn't check whether editing "
+                      'is open.',
+              softWrap: true,
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.25,
+                fontWeight: FontWeight.w600,
+                color: scheme.onSurface,
+              ),
+            ),
+          ),
+          if (onRetry != null) ...[
+            const SizedBox(width: 8),
+            TextButton(
+              key: const ValueKey('deadline_unknown_retry'),
+              onPressed: onRetry,
+              child: const Text('Try again'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _LockedWeekStrip extends StatelessWidget {
   const _LockedWeekStrip({required this.view});
 
@@ -968,11 +1045,7 @@ class _NeedsNewSpotStrip extends StatelessWidget {
   final void Function(SquadPick pick) onSwap;
   final void Function(SquadPick pick) onRemove;
 
-  static String _nowA(FantasyPosition p) => switch (p) {
-        FantasyPosition.gk => 'Now a goalkeeper',
-        FantasyPosition.def => 'Now a defender',
-        FantasyPosition.att => 'Now an attacker',
-      };
+  static String _nowA(FantasyPosition p) => 'Now ${p.withArticle}';
 
   @override
   Widget build(BuildContext context) {

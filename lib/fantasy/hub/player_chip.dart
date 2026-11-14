@@ -204,7 +204,7 @@ class FantasyPlayerChip extends StatelessWidget {
                   const SizedBox(height: 1),
                   Text(
                     [
-                      if (position != null) position!.db,
+                      if (position != null) position!.short,
                       if (priceTenths != null)
                         formatMoneyTenths(priceTenths!),
                       if (isCaptain) '×$captainMultiplier',
@@ -239,6 +239,15 @@ class FantasyPlayerChip extends StatelessWidget {
     );
   }
 }
+
+/// Upper bound of a [FantasyPlayerChip]'s height with a two-line name and a
+/// points/price line: avatar + ring (2 padding + 2.5 border each side), the
+/// 3 px gap, the nameplate's padding + border, and its text (2 × 11.5 at
+/// 1.15 + 1 + a 10.5 line + a 10 line ≈ 54, rounded up to 58 for font
+/// metrics) scaled by the reader's text size. The court sizes its rows by
+/// this (release report #10).
+double fantasyChipHeightEstimate(double avatarSize, TextScaler textScaler) =>
+    avatarSize + 9 + 3 + 7.4 + textScaler.scale(58);
 
 class _ArmbandBadge extends StatelessWidget {
   const _ArmbandBadge({
@@ -337,7 +346,7 @@ class FantasyEmptySlot extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              '+ ${position.db}',
+              '+ ${position.short}',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,

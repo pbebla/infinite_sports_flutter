@@ -1,6 +1,8 @@
 
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/playing_position.dart';
 import 'package:flutter_launcher_icons/constants.dart';
+import 'package:infinite_sports_flutter/misc/season_title.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
@@ -13,7 +15,12 @@ import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:data_table_2/data_table_2.dart';
 
 class LeaderboardPage extends StatefulWidget {
-  const LeaderboardPage({super.key, required this.sport, required this.season});
+  const LeaderboardPage({
+    super.key,
+    required this.sport,
+    required this.season,
+    this.playersLoader,
+  });
 
   // This widget is the home page of your application. It is stateful, meaning
   // that it has a State object (defined below) that contains fields that affect
@@ -28,16 +35,32 @@ class LeaderboardPage extends StatefulWidget {
   final String sport;
   final String season;
 
+  /// Test seam: replaces the Firebase lineup read (null = the real one).
+  final Future<List<Player>> Function()? playersLoader;
+
   @override
   State<LeaderboardPage> createState() => _LeaderboardPageState();
 }
 
 class _LeaderboardPageState extends State<LeaderboardPage> {
   List<dynamic> players = List.empty();
+
+  /// Flag Football only (fix round 1, M5): its 13 stat columns scroll
+  /// sideways; true while more columns sit off the right edge, driving the
+  /// edge fade that says so.
+  final ValueNotifier<bool> _moreToRight = ValueNotifier(true);
+
+  @override
+  void dispose() {
+    _moreToRight.dispose();
+    super.dispose();
+  }
   int? sortColumnIndex;
   bool isAscending = false;
 
   Future<List<Player>> getPlayersList() async {
+    final loader = widget.playersLoader;
+    if (loader != null) return loader();
     if (widget.sport == "Futsal") {
       await getAllFutsalLineUps(widget.season);
       var players = <FutsalPlayer>[];
@@ -147,7 +170,10 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     sortTable(columnIndex, ascending);
   }
 
-  DataTable2 buildLeaderboard(setState) {
+  // Narrow fixed columns also carry a matching `minWidth`: DataTable2
+  // otherwise widens every column to its 50 px default minimum, which pushed
+  // the last stat column ("S") off a 360 px screen (release report #5).
+  DataTable2 buildLeaderboard(StateSetter setState) {
     if (widget.sport == "Futsal") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Center(child: Text(key.number),)),
@@ -169,8 +195,8 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           return Theme.of(context).colorScheme.surfaceContainerHighest; // Use the default value.
         }),
         columns: [
-          const DataColumn2(fixedWidth: 30.0, label: SizedBox(width: 0, height: 0), numeric: true),
-          DataColumn2(fixedWidth: windowsDefaultIconSize.toDouble()/1.5, label: SizedBox(width: 0, height: 0),),
+          const DataColumn2(fixedWidth: 30.0, minWidth: 30.0, label: Text('#'), numeric: true),
+          DataColumn2(fixedWidth: windowsDefaultIconSize.toDouble()/1.5, minWidth: windowsDefaultIconSize.toDouble()/1.5, label: SizedBox(width: 0, height: 0),),
           DataColumn2(label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 50.0, label: const Text("G"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 50.0, label: const Text("A"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
@@ -200,8 +226,8 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           return Theme.of(context).colorScheme.surfaceContainerHighest; // Use the default value.
         }),
         columns: [
-          const DataColumn2(fixedWidth: 30.0, label: SizedBox(width: 0, height: 0), numeric: true),
-          DataColumn2(fixedWidth: windowsDefaultIconSize.toDouble()/1.5, label: SizedBox(width: 0, height: 0),),
+          const DataColumn2(fixedWidth: 30.0, minWidth: 30.0, label: Text('#'), numeric: true),
+          DataColumn2(fixedWidth: windowsDefaultIconSize.toDouble()/1.5, minWidth: windowsDefaultIconSize.toDouble()/1.5, label: SizedBox(width: 0, height: 0),),
           DataColumn2(label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 50.0, label: const Text("PTS"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 50.0, label: const Text("REB"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
@@ -210,11 +236,13 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         rows: teamsList,
       );
     } else if (widget.sport == "Flag Football") {
+      // Theme divider colour (was a fixed light grey) — both modes.
+      final dividerColor = Theme.of(context).colorScheme.outlineVariant;
       final verticalDividerRight = BoxDecoration(
-          border: Border(right: BorderSide(color: Colors.grey.shade300, width: 1))
+          border: Border(right: BorderSide(color: dividerColor, width: 1))
       );
       final verticalDividerLeft = BoxDecoration(
-          border: Border(left: BorderSide(color: Colors.grey.shade300, width: 1))
+          border: Border(left: BorderSide(color: dividerColor, width: 1))
       );
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Center(child: Text(key.number),)),
@@ -246,8 +274,8 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           return Theme.of(context).colorScheme.surfaceContainerHighest; // Use the default value.
         }),
         columns: [
-          const DataColumn2(fixedWidth: 25, label: SizedBox(width: 0, height: 0), numeric: true),
-          DataColumn2(fixedWidth: 35, label: SizedBox(width: 0, height: 0),),
+          const DataColumn2(fixedWidth: 25, minWidth: 25, label: Text('#'), numeric: true),
+          DataColumn2(fixedWidth: 35, minWidth: 35, label: SizedBox(width: 0, height: 0),),
           DataColumn2(size: ColumnSize.L, label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(size: ColumnSize.M, label: const Text("CMP%"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(size: ColumnSize.M, label: const Text("P-TD"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
@@ -266,7 +294,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     }
     else if (widget.sport == "AFC San Jose") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
-        DataCell(Text(key.position)),
+        DataCell(Text(formatPlayingPosition(key.position))),
         DataCell(Center(child: Text(key.number),)),
         DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           openPlayerProfileById(context, uid: key.uid, name: key.name);
@@ -285,8 +313,8 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           return Theme.of(context).colorScheme.surfaceContainerHighest; // Use the default value.
         }),
         columns: [
-          const DataColumn2(fixedWidth: 30.0, label: Text("Pos")),
-          const DataColumn2(fixedWidth: 30.0, label: Text("#")),
+          const DataColumn2(fixedWidth: 30.0, minWidth: 30.0, label: Text("Pos")),
+          const DataColumn2(fixedWidth: 30.0, minWidth: 30.0, label: Text("#")),
           DataColumn2(label: const Text("Name"), onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 50.0, label: const Text("G"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 50.0, label: const Text("A"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
@@ -296,6 +324,54 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       );
     }
     return DataTable2(columns: const [DataColumn(label: Text("Error"))], rows: const []);
+  }
+
+  /// The Flag Football table is wider than any phone: a fade on the right
+  /// edge (theme surface colour) shows while more columns are off screen,
+  /// and goes once the reader reaches the last column (fix round 1, M5).
+  Widget _withScrollFade(BuildContext context, Widget table) {
+    bool onMetrics(ScrollMetrics m) {
+      if (m.axis == Axis.horizontal) {
+        _moreToRight.value = m.extentAfter > 0.5;
+      }
+      return false;
+    }
+
+    final surface = Theme.of(context).colorScheme.surface;
+    return Stack(
+      children: [
+        NotificationListener<ScrollMetricsNotification>(
+          onNotification: (n) => onMetrics(n.metrics),
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (n) => onMetrics(n.metrics),
+            child: table,
+          ),
+        ),
+        Positioned(
+          top: 0,
+          bottom: 0,
+          right: 0,
+          width: 32,
+          child: IgnorePointer(
+            child: ValueListenableBuilder<bool>(
+              valueListenable: _moreToRight,
+              builder: (context, more, _) => AnimatedOpacity(
+                opacity: more ? 1 : 0,
+                duration: const Duration(milliseconds: 150),
+                child: DecoratedBox(
+                  key: const ValueKey('leaderboard_scroll_fade'),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [surface.withValues(alpha: 0), surface],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -310,7 +386,7 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
                 style: TextStyle(fontSize: Theme.of(context).textTheme.headlineSmall!.fontSize),
                 children: <TextSpan>[
                   TextSpan(
-                    text: '\n${widget.season} Leaderboard',
+                    text: '\n${seasonTitle(widget.season)} Leaderboard',
                     style: TextStyle(
                       fontSize: Theme.of(context).textTheme.bodySmall!.fontSize,
                     ),
@@ -335,10 +411,12 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
               }
               return StatefulBuilder(
                   builder: (context, setState) {
-                    return SizedBox(
+                    final table = SizedBox(
                       width: MediaQuery.sizeOf(context).width,
                       child: buildLeaderboard(setState),
                     );
+                    if (widget.sport != "Flag Football") return table;
+                    return _withScrollFade(context, table);
                   }
               );
             }

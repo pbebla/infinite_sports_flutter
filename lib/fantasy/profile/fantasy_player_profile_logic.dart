@@ -23,7 +23,6 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/next_game.dart';
 import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
-import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 
 /// How many gameweeks the form bars fit on screen at once; a longer season
@@ -434,13 +433,6 @@ String nextGameText(NextGame g, {required bool startHourKnown}) {
     placeholder: g.placeholder,
   ));
 }
-
-/// "Goalkeeper" / "Defender" / "Attacker" (the hero's "Team · Position").
-String positionLabel(FantasyPosition p) => switch (p) {
-      FantasyPosition.gk => 'Goalkeeper',
-      FantasyPosition.def => 'Defender',
-      FantasyPosition.att => 'Attacker',
-    };
 
 /// His league roster row (season stats, shirt number): team AND name, the
 /// same join as the account link (player_account_link.dart) — the same name

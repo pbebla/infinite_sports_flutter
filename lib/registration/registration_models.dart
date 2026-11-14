@@ -8,6 +8,9 @@
 
 import 'dart:math';
 
+import 'package:infinite_sports_flutter/registration/promo_engine.dart'
+    show bestDiscountedTotal;
+
 // ---------------------------------------------------------------------------
 // Question model
 // ---------------------------------------------------------------------------
@@ -781,7 +784,8 @@ String? validateJoinCode(String code, {Set<String> taken = const {}}) {
 
 /// Outcome of matching an entered code against a registration's teams.
 /// status: 'ok' (approved team found — [team] set), 'notApproved' (the code
-/// belongs to a pending/rejected team — [team] set), 'notFound'.
+/// belongs to a pending/rejected team — [team] set), 'notFound', or 'error'
+/// (the server lookup itself failed — the code may well be right).
 class JoinCodeMatch {
   final String status;
   final RegTeam? team;
@@ -836,3 +840,69 @@ num amountOwed({
   }
   return submission.path == 'captain' ? config.teamFee : config.fee;
 }
+
+/// [amount] rounded to whole cents — the unit Stripe charges in. Every
+/// "how much is owed" number goes through this ONE rounding so the status
+/// page, the form page, the payment screen and the server always agree
+/// (a $0.00255 remainder is $0.00 everywhere, never "covered" on one
+/// screen and "pay" on another).
+double roundToCents(double amount) => (amount * 100).round() / 100;
+
+/// The discounted total for [baseFee] given [submission]'s stamped
+/// discount (null submission = no discount), in whole cents — what the
+/// payment screen shows as "Total due".
+double discountedTotal({
+  required double baseFee,
+  RegSubmission? submission,
+}) =>
+    roundToCents(bestDiscountedTotal(
+      baseFee: baseFee,
+      eligibleFee: submission?.eligibleFee,
+      adjustedFee: submission?.adjustedFee,
+      discountPct: submission?.discountPct,
+      discountSource: submission?.discountSource ?? '',
+    ));
+
+/// What this submission owes RIGHT NOW after any stamped discount — the
+/// same [bestDiscountedTotal] the payment screen shows as "Total due"
+/// (manual admin adjustment, first-timer promo or Insider tier discount).
+/// 0 whenever [paymentOwed] says nothing is owed at all (a stale adjustment
+/// on a submission that owes nothing never invents a debt).
+double discountedAmountOwed({
+  required RegistrationConfig config,
+  required RegSubmission submission,
+  bool codeWaivesPayment = false,
+}) {
+  if (!paymentOwed(
+      config: config,
+      submission: submission,
+      codeWaivesPayment: codeWaivesPayment)) {
+    return 0;
+  }
+  return discountedTotal(
+    baseFee: amountOwed(
+            config: config,
+            submission: submission,
+            codeWaivesPayment: codeWaivesPayment)
+        .toDouble(),
+    submission: submission,
+  );
+}
+
+/// True when a fee applies to this submission but its discounted total
+/// (already in whole cents) is $0 — an admin comp to $0 or a 100% discount: "Nothing to pay — you're
+/// covered", never "Payment pending" with a $0 pay button.
+bool paymentCovered({
+  required RegistrationConfig config,
+  required RegSubmission submission,
+  bool codeWaivesPayment = false,
+}) =>
+    paymentOwed(
+        config: config,
+        submission: submission,
+        codeWaivesPayment: codeWaivesPayment) &&
+    discountedAmountOwed(
+            config: config,
+            submission: submission,
+            codeWaivesPayment: codeWaivesPayment) ==
+        0;

@@ -47,6 +47,8 @@ class LeagueDayView extends StatefulWidget {
 }
 
 class _LeagueDayViewState extends State<LeagueDayView> {
+  /// Stops the live season-logo watch (team_logos.dart).
+  VoidCallback? _stopLogos;
   List<TournamentMatch>? _matches; // null = first paint -> skeleton
   Map<String, String> _logos = {};
   int _startHour = 0;
@@ -71,7 +73,9 @@ class _LeagueDayViewState extends State<LeagueDayView> {
       _startHour = h;
       _subscribeGames();
     });
-    LeagueService.leagueLogoUrls(widget.sport, widget.season).then((logos) {
+    // Live (S16 Task 1): a crest added to Logo Urls fills in while open.
+    _stopLogos?.call();
+    _stopLogos = watchSeasonLogos(widget.sport, widget.season, (logos) {
       if (!mounted || logos.isEmpty) return;
       setState(() => _logos = logos);
     });
@@ -92,6 +96,7 @@ class _LeagueDayViewState extends State<LeagueDayView> {
   @override
   void dispose() {
     _gamesSub?.cancel();
+    _stopLogos?.call();
     super.dispose();
   }
 

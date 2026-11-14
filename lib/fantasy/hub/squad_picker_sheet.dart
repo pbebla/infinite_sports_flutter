@@ -239,7 +239,7 @@ class _PickerSheetState extends State<_PickerSheet> {
                       ),
                     ),
                     Text(
-                      '${p.teamName} · ${p.position.db}',
+                      '${p.teamName} · ${p.position.short}',
                       softWrap: true,
                       style: TextStyle(
                         fontSize: 11.5,

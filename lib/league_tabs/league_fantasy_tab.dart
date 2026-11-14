@@ -62,7 +62,7 @@ class LeagueFantasyTab extends StatelessWidget {
         _FeatureRow(
           icon: Icons.groups,
           title: 'Build your seven',
-          body: 'One keeper, two defenders, two attackers and a two-player '
+          body: 'One goalkeeper, two defenders, two attackers and a two-player '
               'bench — all within budget.',
           scheme: scheme,
         ),

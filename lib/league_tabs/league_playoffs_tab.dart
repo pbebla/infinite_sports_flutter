@@ -45,6 +45,9 @@ class LeaguePlayoffsTab extends StatelessWidget {
             matches: bracket,
             teams: teams,
             onMatchTap: onMatchTap,
+            // S16 Task 3: place cards / draw connectors from the Manager's
+            // real wiring (a semifinal fed by ONE quarterfinal + a bye).
+            feeders: leagueBracketFeeders(playoffs),
           ),
         ),
       ],

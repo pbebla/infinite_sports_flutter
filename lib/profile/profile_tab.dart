@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:infinite_sports_flutter/misc/playing_position.dart';
+import 'package:infinite_sports_flutter/misc/sport_icon.dart';
 import 'package:infinite_sports_flutter/insiders/insider_tier_colors.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/profile_stat_priority.dart';
@@ -312,7 +314,7 @@ class ProfileTab extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Icon(
-                    _sportIcon(current!.sport),
+                    sportIcon(current!.sport),
                     size: 28,
                     color: Theme.of(context).colorScheme.primary,
                   ),
@@ -328,14 +330,18 @@ class ProfileTab extends StatelessWidget {
                                     fontWeight: FontWeight.w700,
                                   ),
                         ),
-                        if (current!.position.isNotEmpty ||
+                        if (playingPositionLabel(current!.position)
+                                .isNotEmpty ||
                             (currentTeamNumber?.isNotEmpty ?? false))
                           Wrap(
                             spacing: 8,
                             children: [
-                              if (current!.position.isNotEmpty)
+                              // His registration position, labelled so it
+                              // can't pass for a fantasy group (report #11).
+                              if (playingPositionLabel(current!.position)
+                                  .isNotEmpty)
                                 Text(
-                                  current!.position,
+                                  playingPositionLabel(current!.position),
                                   style: Theme.of(context)
                                       .textTheme
                                       .bodyMedium
@@ -402,20 +408,6 @@ class ProfileTab extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  static IconData _sportIcon(String sport) {
-    switch (sport) {
-      case 'Basketball':
-        return Icons.sports_basketball;
-      case 'Flag Football':
-        return Icons.sports_football;
-      case 'Tournament':
-        return Icons.emoji_events;
-      default:
-        // Futsal, AFC San Jose, Soccer — all soccer ball
-        return Icons.sports_soccer;
-    }
   }
 }
 

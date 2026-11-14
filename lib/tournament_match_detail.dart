@@ -344,7 +344,7 @@ class _TournamentMatchDetailPageState extends State<TournamentMatchDetailPage> {
                 bottom: TabBar(
                   // Owner feedback: the three tabs spread evenly across the
                   // full width (scrollable clustered them in the center);
-                  // long team names scale down to fit their third.
+                  // long team names wrap to two lines at full size (teamNameTab).
                   tabs: [
                     const Tab(text: 'Summary'),
                     teamNameTab(team1?.name ?? _match.team1Id ?? 'Team 1'),

@@ -29,11 +29,12 @@ export const generateTicketJoke = onCall(
       throw new HttpsError('permission-denied', 'Admins only.');
     }
 
-    const category = typeof request.data?.category === 'string' ? request.data.category : '';
-    const message = typeof request.data?.message === 'string' ? request.data.message : '';
-    if (!message.trim()) {
-      throw new HttpsError('invalid-argument', 'Missing ticket message.');
-    }
+    // { category } only. A `message` sent by an older Manager build is
+    // deliberately never read: the person's words must not reach the AI
+    // service (Privacy Policy) or the logs. Missing/unknown category -> the
+    // generic one (normalizeCategory).
+    const data = (request.data ?? {}) as Record<string, unknown>;
+    const category = typeof data['category'] === 'string' ? data['category'] : '';
 
     // Key absent/unbound -> '' -> generateJoke falls back to the canned bank.
     let apiKey = '';
@@ -46,8 +47,10 @@ export const generateTicketJoke = onCall(
       logger.warn('generateTicketJoke: ANTHROPIC_API_KEY not configured — using canned bank');
     }
 
-    const result = await generateJoke({ category, message, apiKey });
-    logger.info('generateTicketJoke', { uid, category, source: result.source });
+    const result = await generateJoke({ category, apiKey });
+    logger.info('generateTicketJoke', {
+      uid: uid.slice(0, 6), category: category.slice(0, 40), source: result.source,
+    });
     return result; // { joke, source: 'ai' | 'bank' }
   },
 );

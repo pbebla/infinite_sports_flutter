@@ -3,14 +3,17 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/aroundyou.dart';
 import 'package:infinite_sports_flutter/eventpage.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_home_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
 import 'package:infinite_sports_flutter/insiders/insiders_leaderboard_page.dart';
 import 'package:infinite_sports_flutter/misc/event_repo.dart';
 import 'package:infinite_sports_flutter/misc/search_index.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
+import 'package:infinite_sports_flutter/model/myuser.dart';
 import 'package:infinite_sports_flutter/playerpage.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 import 'package:infinite_sports_flutter/tournamentdetail.dart';
@@ -25,7 +28,13 @@ class SearchHubPage extends StatefulWidget {
     this.insidersLeaderboardPageBuilder,
     this.fantasyGateOverride,
     this.fantasyHubPageBuilder,
+    this.fantasyFinishedStates,
+    this.loadUsers,
   });
+
+  /// Test seam replacing [getAllUsers] (null = the player list couldn't be
+  /// loaded).
+  final Future<Map<String, MyUser>?> Function()? loadUsers;
 
   /// Test seam replacing the real `Navigator.push(... InsidersLeaderboardPage
   /// ...)` the "Infinite Insiders" card makes (Task F6) — the real page
@@ -42,6 +51,11 @@ class SearchHubPage extends StatefulWidget {
   /// Test seam replacing the real `Navigator.push(... FantasyHubPage ...)`.
   final Widget Function(String sport, String season)? fantasyHubPageBuilder;
 
+  /// Test seam replacing `FantasyService.watchLeagueSeasonFinished` for the
+  /// gated (sport, season) — the league's Finished flag.
+  final Stream<bool> Function(String sport, String season)?
+      fantasyFinishedStates;
+
   @override
   State<SearchHubPage> createState() => _SearchHubPageState();
 }
@@ -51,11 +65,22 @@ class _SearchHubPageState extends State<SearchHubPage> {
   Future<SearchIndex>? _indexFuture;
   String _query = '';
 
+  /// True while the index was built WITHOUT players because their load
+  /// failed / timed out — the next search retries just that part.
+  bool _playersMissing = false;
+  bool _retryingPlayers = false;
+
   /// (sport, season) while the current league has a Fantasy Config node —
   /// the card appears/disappears live with it (same stream gate as the
   /// league page's Fantasy tab).
   (String, String)? _fantasy;
   StreamSubscription<Object?>? _fantasySub;
+
+  /// The league's season-over flag for [_fantasy] — the home banner's own
+  /// shared feed (release report #16: the card said "is live" after the
+  /// season ended). The card waits for its first answer (session-cached, a
+  /// failing feed = not finished) so its line never flips after it shows.
+  FantasySeasonFinishedFeed? _finishedFeed;
 
   @override
   void initState() {
@@ -68,6 +93,7 @@ class _SearchHubPageState extends State<SearchHubPage> {
   void dispose() {
     _controller.dispose();
     _fantasySub?.cancel();
+    _finishedFeed?.dispose();
     super.dispose();
   }
 
@@ -75,7 +101,7 @@ class _SearchHubPageState extends State<SearchHubPage> {
     final override = widget.fantasyGateOverride;
     if (override != null) {
       _fantasySub = override.listen((v) {
-        if (mounted) setState(() => _fantasy = v);
+        if (mounted) setState(() => _setFantasy(v));
       });
       return;
     }
@@ -91,17 +117,50 @@ class _SearchHubPageState extends State<SearchHubPage> {
     _fantasySub =
         FantasyService.watchConfig(sport, season).listen((state) {
       if (mounted) {
-        setState(() => _fantasy = state != null ? (sport, season) : null);
+        setState(() => _setFantasy(state != null ? (sport, season) : null));
       }
     }, onError: (Object _) {
       // Offline/unreachable: the card simply stays hidden.
-      if (mounted) setState(() => _fantasy = null);
+      if (mounted) setState(() => _setFantasy(null));
     });
   }
 
+  /// Moves the card to [value]'s season, (re)starting its Finished feed only
+  /// when the season actually changes.
+  void _setFantasy((String, String)? value) {
+    if (value == _fantasy) return;
+    _finishedFeed?.dispose();
+    _finishedFeed = null;
+    _fantasy = value;
+    if (value == null) return;
+    final (sport, season) = value;
+    final feed = FantasySeasonFinishedFeed(
+      sport: sport,
+      season: season,
+      owner: 'SearchHubPage',
+      onChanged: () {
+        if (mounted) setState(() {});
+      },
+      finishedStates: widget.fantasyFinishedStates?.call(sport, season),
+    );
+    _finishedFeed = feed;
+    feed.start();
+  }
+
+  bool get _fantasyFinished =>
+      _finishedFeed?.phase == FantasySeasonPhase.over;
+
   void _openFantasy(String sport, String season) {
     final builder = widget.fantasyHubPageBuilder ??
-        (String s, String n) => FantasyHubPage(sport: s, season: n);
+        (String s, String n) => FantasyHubPage(
+              sport: s,
+              season: n,
+              // Season over: straight to the final standings (the home
+              // banner's rule).
+              initialTab: _fantasyFinished
+                  ? FantasyHubTab.leaderboards
+                  : FantasyHubTab.myTeam,
+            );
     Navigator.push(context,
         MaterialPageRoute(builder: (context) => builder(sport, season)));
   }
@@ -120,10 +179,41 @@ class _SearchHubPageState extends State<SearchHubPage> {
       // the calendar and Around You (never a stripped-down mirror row).
       index.addEvents(await getAllEvents());
     } catch (_) {}
-    try {
-      index.addUsers(await getAllUsers());
-    } catch (_) {}
+    final users = await _loadUsers();
+    if (users == null) {
+      _playersMissing = true;
+    } else {
+      index.addUsers(users);
+    }
     return index;
+  }
+
+  Future<Map<String, MyUser>?> _loadUsers() async {
+    try {
+      return await (widget.loadUsers ?? getAllUsers)();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// A slow/failed first player load must not mean "no players" for the
+  /// rest of the visit: on the next search, load them again and add them to
+  /// the already-built index.
+  Future<void> _retryPlayersIfMissing() async {
+    final indexFuture = _indexFuture;
+    if (!_playersMissing || _retryingPlayers || indexFuture == null) return;
+    _retryingPlayers = true;
+    try {
+      final index = await indexFuture;
+      final users = await _loadUsers();
+      if (users != null && _playersMissing) {
+        index.addUsers(users);
+        _playersMissing = false;
+        if (mounted) setState(() {});
+      }
+    } finally {
+      _retryingPlayers = false;
+    }
   }
 
   void _open(SearchResult result) {
@@ -200,7 +290,7 @@ class _SearchHubPageState extends State<SearchHubPage> {
         // exists — the shared FantasyBanner surface (dark gradient + gold in
         // dark mode, light card + primary accents in light; the logo gets
         // its dark backdrop pill from FantasyBanner.logo).
-        if (_fantasy != null) ...[
+        if (_fantasy != null && (_finishedFeed?.ready ?? false)) ...[
           Card(
             clipBehavior: Clip.antiAlias,
             elevation: 0,
@@ -226,8 +316,8 @@ class _SearchHubPageState extends State<SearchHubPage> {
                       fontWeight: FontWeight.w700),
                 ),
                 subtitle: Text(
-                  'Pick your seven — ${_fantasy!.$1} Season ${_fantasy!.$2} '
-                  'is live',
+                  fantasyEntryCardSubtitle(_fantasy!.$1, _fantasy!.$2,
+                      _finishedFeed!.phase),
                   style:
                       TextStyle(color: FantasyBanner.foregroundMuted(context)),
                 ),
@@ -319,7 +409,10 @@ class _SearchHubPageState extends State<SearchHubPage> {
                 color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6)),
             border: InputBorder.none,
           ),
-          onChanged: (value) => setState(() { _query = value; }),
+          onChanged: (value) {
+            setState(() { _query = value; });
+            if (value.trim().isNotEmpty) _retryPlayersIfMissing();
+          },
         ),
         actions: [
           if (_query.isNotEmpty)

@@ -47,7 +47,7 @@ class RegistrationStatusPage extends StatefulWidget {
 }
 
 class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
-  late final Stream<RegSubmission?> _submission;
+  late Stream<RegSubmission?> _submission;
   late final Future<List<RegQuestion>> _form;
 
   // The team stream is created lazily from the live submission's teamId and
@@ -364,6 +364,11 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
                 subSnapshot.connectionState == ConnectionState.waiting) {
               return _spinner(context);
             }
+            if (subSnapshot.hasError) {
+              // A failed/denied read is not "no registration" — say so and
+              // offer a fresh subscription.
+              return _loadFailed(context);
+            }
             final sub = subSnapshot.data;
             if (sub == null) {
               return const Center(
@@ -388,16 +393,48 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
     );
   }
 
+  Widget _loadFailed(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Couldn't load your registration. Try again.",
+                textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: () => setState(() {
+                _submission = widget.submissionStream ??
+                    RegistrationService.watchMySubmission(widget.regId);
+              }),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _statusBody(RegSubmission sub, List<RegQuestion> form, RegTeam? team) {
     final byKey = {for (final q in form) q.key: q};
     final orderedKeys = [
       ...form.map((q) => q.key).where(sub.answers.containsKey),
       ...sub.answers.keys.where((k) => !byKey.containsKey(k)),
     ];
-    final owes = paymentOwed(
-        config: widget.config,
-        submission: sub,
-        codeWaivesPayment: team?.codeWaivesPayment ?? false);
+    final waived = team?.codeWaivesPayment ?? false;
+    // "Owes" is the SAME whole-cent discounted total the payment screen
+    // shows: an admin comp to $0 or a 100% discount owes nothing (covered).
+    // owes / covered both come from that one rounded value.
+    final owed = discountedAmountOwed(
+        config: widget.config, submission: sub, codeWaivesPayment: waived);
+    final owes = owed > 0;
+    final covered = !sub.paid &&
+        paymentOwed(
+            config: widget.config,
+            submission: sub,
+            codeWaivesPayment: waived) &&
+        owed == 0;
     final teamCard = _teamCard(sub, team);
     return Column(
       children: [
@@ -416,15 +453,27 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
                   title: Text(widget.config.label,
                       style: const TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text('Registered as: ${_pathLabel(sub.path)}'),
-                  trailing: _paidChip(context,
-                      paid: sub.paid,
-                      label: sub.paid
-                          ? (sub.paidVia == 'team code'
-                              ? 'Paid via team code'
-                              : 'Paid')
-                          : 'Payment pending'),
+                  trailing: covered
+                      ? _paidChip(context, paid: true, label: 'Covered')
+                      : _paidChip(context,
+                          paid: sub.paid,
+                          label: sub.paid
+                              ? (sub.paidVia == 'team code'
+                                  ? 'Paid via team code'
+                                  : 'Paid')
+                              : 'Payment pending'),
                 ),
               ),
+              if (covered) ...[
+                const SizedBox(height: 8),
+                const Card(
+                  elevation: 2,
+                  child: ListTile(
+                    leading: Icon(Icons.check_circle, color: Colors.green),
+                    title: Text("Nothing to pay — you're covered"),
+                  ),
+                ),
+              ],
               if (teamCard != null) ...[
                 const SizedBox(height: 8),
                 teamCard,

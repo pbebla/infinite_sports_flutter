@@ -236,6 +236,10 @@ enum MarketAddAvailability {
   /// Gameweek locked (or season over) — nothing edits.
   locked,
 
+  /// The schedule could not be read (review 6, I2): nothing edits, and the
+  /// app does not claim the week is locked.
+  deadlineUnknown,
+
   /// Ineligible guest (spec §3) — never selectable.
   ineligible,
 
@@ -262,8 +266,13 @@ MarketAddAvailability marketAddState({
   required int Function(FantasyPlayer player) priceOf,
   required bool editable,
   List<SquadPick> unplaced = const [],
+  bool deadlineUnknown = false,
 }) {
-  if (!editable) return MarketAddAvailability.locked;
+  if (!editable) {
+    return deadlineUnknown
+        ? MarketAddAvailability.deadlineUnknown
+        : MarketAddAvailability.locked;
+  }
   for (final pick in [...slotPicks, ...unplaced]) {
     if (pick?.playerId == player.name) return MarketAddAvailability.inSquad;
   }
@@ -295,14 +304,21 @@ String realizedSalesLine(int realizedTenths) =>
 
 /// The tooltip-style sentence for a disabled add control; null when the
 /// control is live (addable or Remove).
+///
+/// [gaveUp] (re-review 6b, item 2): the schedule feed has stopped retrying —
+/// the note says so and points at the "Try again" in the header.
 String? marketAddReason(
-        MarketAddAvailability availability, FantasyPosition position) =>
+        MarketAddAvailability availability, FantasyPosition position,
+        {bool gaveUp = false}) =>
     switch (availability) {
       MarketAddAvailability.locked => 'Gameweek locked — no changes now.',
+      MarketAddAvailability.deadlineUnknown => gaveUp
+          ? 'Couldn\'t check the deadline — tap Try again at the top.'
+          : 'Can\'t check the deadline right now — try again in a moment.',
       MarketAddAvailability.ineligible =>
         'Guest player — not eligible for fantasy.',
       MarketAddAvailability.positionFull =>
-        '${position.db} slots are full — remove someone first.',
+        '${position.short} slots are full — remove someone first.',
       MarketAddAvailability.unaffordable =>
         'Over budget — free up some money first.',
       MarketAddAvailability.addable || MarketAddAvailability.inSquad => null,

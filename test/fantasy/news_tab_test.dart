@@ -14,6 +14,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/news_tab.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
+import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 
 Map<String, Object?> _card(
   String name, {
@@ -59,14 +61,19 @@ void main() {
     VoidCallback? onFocusHandled,
     void Function(String name)? onOpenPlayer,
     bool reduceMotion = false,
+    ThemeMode themeMode = ThemeMode.light,
+    Size size = const Size(420, 900),
   }) async {
-    tester.view.physicalSize = const Size(420, 900);
+    tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(brightness: Brightness.light),
+      darkTheme: ThemeData(brightness: Brightness.dark),
+      themeMode: themeMode,
       home: MediaQuery(
         data: MediaQueryData(
-          size: const Size(420, 900),
+          size: size,
           disableAnimations: reduceMotion,
         ),
         child: Scaffold(
@@ -245,6 +252,41 @@ void main() {
 
       expect(find.text('View player'), findsNWidgets(2));
     });
+
+    for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+      testWidgets(
+          '${mode.name} 360 px: View player looks enabled — the fantasy accent '
+          'fill, not the grey tonal one (release report #9)', (tester) async {
+        await pumpTab(tester,
+            onOpenPlayer: (_) {},
+            themeMode: mode,
+            size: const Size(360, 800));
+        news.add(newsPostsFromNode({
+          's': {
+            'Title': 'Spotlight: Bruno Siva',
+            'At': 1,
+            'Template': 'spotlight',
+            'Players': [_card('Bruno Siva', gwPoints: 3)],
+          },
+        }));
+        await tester.pumpAndSettle();
+        final finder =
+            find.byKey(const ValueKey('news_view_player_Bruno Siva'));
+        final button = tester.widget<ButtonStyleButton>(finder);
+        expect(button.enabled, isTrue);
+        final ctx = tester.element(finder);
+        final dark = mode == ThemeMode.dark;
+        final scheme = Theme.of(ctx).colorScheme;
+        final bg = button.style!.backgroundColor!.resolve(const {});
+        final fg = button.style!.foregroundColor!.resolve(const {});
+        // Gold on dark, brand primary on light — the hub's accent.
+        expect(bg, fantasyAccent(ctx));
+        expect(bg, dark ? TournamentColors.gold : scheme.primary);
+        expect(bg, isNot(scheme.secondaryContainer));
+        expect(fg, dark ? Colors.black : scheme.onPrimary);
+        expect(tester.takeException(), isNull);
+      });
+    }
 
     testWidgets('View player invokes the hub callback with the player name',
         (tester) async {

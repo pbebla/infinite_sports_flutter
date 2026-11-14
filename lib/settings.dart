@@ -138,6 +138,7 @@ class _SettingsState extends State<Settings> {
                     value: _masterEnabled,
                     onChanged: (value) async {
                       await _followStore.setMasterEnabled(value);
+                      if (!mounted) return;
                       setState(() => _masterEnabled = value);
                     },
                   ),

@@ -13,6 +13,15 @@
 //
 // Never points at production: it refuses to run without
 // FIREBASE_DATABASE_EMULATOR_HOST, and every id here is made up.
+//
+// NEVER WRITE `Users/<uid>` BACK WHOLE FROM A CLIENT; UPDATE SPECIFIC KEYS.
+// Users/<uid>/{Awards, Played, TournamentsPlayed, MergedInto, MergedAt,
+// MergedHint, MergedFrom} carry an admin-only `.validate` (2026-11-13), and a
+// `.validate` runs on every child present in the new data. So a fan-app
+// `ref('Users/<uid>').set(<the node it just read>)` that re-sends a person's
+// own trophies UNCHANGED is refused for everyone who has one. Use `.update()`
+// with only the keys you change (as every writer does today). Pinned by the
+// "whole-node PUT" checks below. (Rules JSON cannot carry comments.)
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -38,6 +47,9 @@ interface Check {
   /** One verdict for both files, or per file when the postures differ
    *  (stage 1 still has the open root read). */
   expect: Verdict | { stage1: Verdict; target: Verdict };
+  /** The database itself refuses this key's SYNTAX (HTTP 400, e.g. a '.' in
+   *  a key) before any rule runs; count that as a refusal. */
+  badRequestIsDeny?: boolean;
 }
 
 function b64url(o: unknown): string {
@@ -85,10 +97,33 @@ async function attempt(c: Check): Promise<Verdict> {
   });
   if (res.ok) return 'allow';
   if (res.status === 401 || res.status === 403) return 'deny';
+  if (res.status === 400 && c.badRequestIsDeny) return 'deny';
   throw new Error(`${c.name}: unexpected HTTP ${res.status} ${await res.text()}`);
 }
 
 const TS = { '.sv': 'timestamp' };
+
+/** support_service.dart createTicket: the ticket node + the fan's index
+ *  entry in ONE root multi-path update, under the Counter-issued key. */
+function ticketCreate(key: string, uid = FAN): Record<string, unknown> {
+  return {
+    [`Support/Tickets/${key}`]: {
+      Num: Number(key) || 0, Uid: uid, Name: 'Test Fan', Email: 'f***@example.com',
+      Category: 'bug', Message: 'It broke', Status: 'open', CreatedAt: TS, UpdatedAt: TS,
+      AppVersion: '3.0.0', Platform: 'android', Device: 'Pixel', Screen: 'home',
+      Screenshots: ['https://example.com/s.jpg'],
+    },
+    [`Support/UserTickets/${uid}/${key}`]: true,
+  };
+}
+
+/** Keys a client must not create a ticket under (the server mails the key as
+ *  the "ticket number"). '1.5' is refused by RTDB key syntax itself. */
+const BAD_TICKET_KEYS: Array<[string, string, boolean?]> = [
+  ['hello world', 'text'], ['12 urgent', 'number + text'], ['-7', 'negative'],
+  ['1.5', 'decimal', true], [' ', 'blank-looking'], ['1234567890', 'ten digits'],
+  ['9'.repeat(300), 'very long'], ['x'.repeat(300), 'very long text'],
+];
 
 function auditRow(adminUid: string): Record<string, unknown> {
   return {
@@ -96,6 +131,44 @@ function auditRow(adminUid: string): Record<string, unknown> {
     Old: 'pending', New: 'active', Reason: 'Application approved - code PZAB12', At: 1,
   };
 }
+
+const REG = 'Registrations/Reg-Probe';
+const FS = 'Fantasy/Futsal/16';
+
+/** RegTeam.toFirebaseMap for a new captain's team (submitCaptain). */
+function appTeam(captainUid: string): Record<string, unknown> {
+  return { Name: 'Probe FC', CaptainUid: captainUid, Status: 'pending', CodeWaivesPayment: false, CreatedAt: 1 };
+}
+
+/** RegSubmission.toFirebaseMap from submitJoiner on a waiving team. */
+function joinerSub(teamId: string): Record<string, unknown> {
+  return { Path: 'joiner', Answers: { firstName: 'Test' }, TeamId: teamId, TeamName: 'Probe FC',
+    Paid: true, PaidVia: 'team code', DisplayName: 'Test Person', SubmittedAt: 1 };
+}
+
+/** Owner-seeded data for the 2026-11-13 registration / profile / fantasy checks. */
+const SEED_2026_11_13 = {
+  Registrations: { 'Reg-Probe': {
+    Config: { Status: 'open' },
+    Teams: {
+      '-adminTeam': { Name: 'Approved FC', CaptainUid: 'uid_captain', Status: 'approved',
+        JoinCode: 'WAIVE1', CodeWaivesPayment: true, CreatedAt: 1 },
+      '-pendingWaive': { Name: 'Pending FC', CaptainUid: 'uid_captain', Status: 'pending',
+        CodeWaivesPayment: true, CreatedAt: 1 },
+      '-fanPending': appTeam(FAN),
+      '-evil': { ...appTeam(FAN), X: { CodeWaivesPayment: true, Status: 'approved' },
+        Members: { m: { CodeWaivesPayment: true, Status: 'approved' } } },
+    },
+  } },
+  Users: { [FAN]: { 'First Name': 'Test', Awards: { '-a1': { Title: 'Champion' } },
+    Played: { '15': { Sport: 'Futsal', Team: 'Old' } } } },
+  Fantasy: { Futsal: { '16': { Managers: { [FAN]: { TeamName: 'Rude Name', NameFlagged: true } } } } },
+  Support: {
+    Counter: 41,
+    Tickets: { '41': { Num: 41, Uid: FAN, Name: 'Test Fan', Message: 'old', Status: 'open', CreatedAt: 1 } },
+    UserTickets: { [FAN]: { '41': true } },
+  },
+};
 
 const CHECKS: Check[] = [
   // ── The owner's exact tap: approve = one atomic multi-path update ─────────
@@ -166,6 +239,244 @@ const CHECKS: Check[] = [
   { name: 'a fan reads the campaign history',
     who: 'fan', method: 'GET', path: 'Campaigns', expect: { stage1: 'allow', target: 'deny' } },
 
+  // ── Registration: teams + the team-code payment waiver (2026-11-13) ───────
+  // A registrant could mark themselves Paid by CREATING a team with
+  // CodeWaivesPayment: true and pointing their submission at it. The app
+  // creates exactly {Name, CaptainUid, Status:'pending',
+  // CodeWaivesPayment:false, CreatedAt} (registration_service.dart
+  // submitCaptain); approval, JoinCode and the waiver are the Manager's.
+  { name: "a fan creates a team with the app's exact payload",
+    who: 'fan', method: 'PUT', path: `${REG}/Teams/-fanNew`, body: appTeam(FAN), expect: 'allow' },
+  { name: 'a fan cannot create a team that waives payment',
+    who: 'fan', method: 'PUT', path: `${REG}/Teams/-forge1`,
+    body: { ...appTeam(FAN), CodeWaivesPayment: true }, expect: 'deny' },
+  { name: 'a fan cannot create an already-approved team',
+    who: 'fan', method: 'PUT', path: `${REG}/Teams/-forge2`,
+    body: { ...appTeam(FAN), Status: 'approved' }, expect: 'deny' },
+  { name: 'a fan cannot create a team with a join code',
+    who: 'fan', method: 'PUT', path: `${REG}/Teams/-forge3`,
+    body: { ...appTeam(FAN), JoinCode: 'FREE1' }, expect: 'deny' },
+  { name: "a fan cannot create a team in someone else's name",
+    who: 'fan', method: 'PUT', path: `${REG}/Teams/-forge4`, body: appTeam(APPLICANT), expect: 'deny' },
+  { name: 'a captain cannot edit their team after creating it',
+    who: 'fan', method: 'PUT', path: `${REG}/Teams/-fanNew/CodeWaivesPayment`, body: true, expect: 'deny' },
+  { name: 'a fan cannot submit Paid:true against their own pending team',
+    who: 'fan', method: 'PUT', path: `${REG}/Submissions/${FAN}`,
+    body: { ...joinerSub('-fanPending'), Path: 'captain' }, expect: 'deny' },
+  { name: 'a fan cannot submit Paid:true against a waiving team that is not approved',
+    who: 'fan', method: 'PUT', path: `${REG}/Submissions/${FAN}`,
+    body: joinerSub('-pendingWaive'), expect: 'deny' },
+  { name: 'a fan cannot submit Paid:true against a missing team',
+    who: 'fan', method: 'PUT', path: `${REG}/Submissions/${FAN}`,
+    body: joinerSub('-nope'), expect: 'deny' },
+  // TeamId used to be followed as a PATH (child() follows slashes): a
+  // captain planted {CodeWaivesPayment:true, Status:'approved'} INSIDE the
+  // team they created and pointed TeamId at it. -evil is seeded by the
+  // owner, standing for data planted before this fix.
+  { name: 'a fan cannot point TeamId at nested data inside a team ("-evil/X")',
+    who: 'fan', method: 'PUT', path: `${REG}/Submissions/${FAN}`,
+    body: joinerSub('-evil/X'), expect: 'deny' },
+  { name: 'a fan cannot point TeamId into a team\'s Members ("-evil/Members/m")',
+    who: 'fan', method: 'PUT', path: `${REG}/Submissions/${FAN}`,
+    body: joinerSub('-evil/Members/m'), expect: 'deny' },
+  { name: 'a fan cannot submit Paid:true with a non-string TeamId',
+    who: 'fan', method: 'PUT', path: `${REG}/Submissions/${FAN}`,
+    body: { ...joinerSub('-adminTeam'), TeamId: 7 }, expect: 'deny' },
+  { name: 'a fan cannot plant a nested object under a new key of their team',
+    who: 'fan', method: 'PUT', path: `${REG}/Teams/-forge5`,
+    body: { ...appTeam(FAN), X: { CodeWaivesPayment: true, Status: 'approved' } }, expect: 'deny' },
+  { name: 'a fan cannot add any extra key to their team',
+    who: 'fan', method: 'PUT', path: `${REG}/Teams/-forge6`,
+    body: { ...appTeam(FAN), Note: 'hi' }, expect: 'deny' },
+  { name: 'a fan cannot plant a nested object under Name',
+    who: 'fan', method: 'PUT', path: `${REG}/Teams/-forge7`,
+    body: { ...appTeam(FAN), Name: { CodeWaivesPayment: true, Status: 'approved' } }, expect: 'deny' },
+  { name: 'a fan cannot plant data under Members',
+    who: 'fan', method: 'PUT', path: `${REG}/Teams/-forge8`,
+    body: { ...appTeam(FAN), Members: { m: { CodeWaivesPayment: true, Status: 'approved' } } },
+    expect: 'deny' },
+  { name: 'a joiner of an admin-approved waiving team is born Paid (submitJoiner)',
+    who: 'applicant', method: 'PUT', path: `${REG}/Submissions/${APPLICANT}`,
+    body: joinerSub('-adminTeam'), expect: 'allow' },
+  { name: 'a plain individual submission (Paid:false) is allowed',
+    who: 'fan', method: 'PUT', path: `${REG}/Submissions/${FAN}`,
+    body: { Path: 'individual', Answers: { firstName: 'Test' }, Paid: false,
+      DisplayName: 'Test Fan', SubmittedAt: 1 }, expect: 'allow' },
+  { name: "a captain's submission (Paid:false, own new team) is allowed",
+    who: 'fan', method: 'PUT', path: `${REG}/Submissions/${FAN}`,
+    body: { Path: 'captain', Answers: { firstName: 'Test' }, TeamId: '-fanNew', Paid: false,
+      DisplayName: 'Test Fan', SubmittedAt: 1 }, expect: 'allow' },
+  { name: 'an admin approves a team with a waiving code (Manager approveTeam)',
+    who: 'admin', method: 'PATCH', path: `${REG}/Teams/-fanNew`,
+    body: { Status: 'approved', JoinCode: 'TEAM12', CodeWaivesPayment: true }, expect: 'allow' },
+  { name: 'an admin un-approves it (Manager unapproveTeam: nulls code + waiver)',
+    who: 'admin', method: 'PATCH', path: `${REG}/Teams/-fanNew`,
+    body: { Status: 'pending', JoinCode: null, CodeWaivesPayment: null }, expect: 'allow' },
+  { name: 'an admin rejects a team (Manager rejectTeam)',
+    who: 'admin', method: 'PUT', path: `${REG}/Teams/-fanNew/Status`, body: 'rejected', expect: 'allow' },
+  { name: 'an admin sets a join code (Manager setTeamCode)',
+    who: 'admin', method: 'PUT', path: `${REG}/Teams/-fanNew/JoinCode`, body: 'NEW123', expect: 'allow' },
+  { name: 'an admin sets the waiver (Manager setTeamWaive)',
+    who: 'admin', method: 'PUT', path: `${REG}/Teams/-fanNew/CodeWaivesPayment`, body: true, expect: 'allow' },
+  { name: 'an admin marks the tournament team (Manager setTeamTournamentId)',
+    who: 'admin', method: 'PUT', path: `${REG}/Teams/-fanNew/TournamentTeamId`, body: 'probe-fc', expect: 'allow' },
+  { name: 'an admin clears the marker (Manager clearTeamTournamentId)',
+    who: 'admin', method: 'DELETE', path: `${REG}/Teams/-fanNew/TournamentTeamId`, expect: 'allow' },
+  { name: 'an admin multi-path update across several team children',
+    who: 'admin', method: 'PATCH', path: '',
+    body: { [`${REG}/Teams/-fanNew/Status`]: 'approved', [`${REG}/Teams/-fanNew/JoinCode`]: 'MULTI1',
+      [`${REG}/Teams/-fanNew/CodeWaivesPayment`]: false, [`${REG}/Teams/-fanNew/TournamentTeamId`]: 'x' },
+    expect: 'allow' },
+  { name: 'an admin removes a team (Manager deleteTeam)',
+    who: 'admin', method: 'DELETE', path: `${REG}/Teams/-fanNew`, expect: 'allow' },
+
+  // ── Users/<uid>: trophies, history and merge stamps (2026-11-13) ──────────
+  // Every real fan write under Users/<uid> (tip + store build) must still
+  // land; Awards / Played / TournamentsPlayed / Merged* are admin-only.
+  { name: 'Google/Apple first sign-in base profile (update)',
+    who: 'fan', method: 'PATCH', path: `Users/${FAN}`,
+    body: { 'First Name': 'Test', 'Last Name': 'Fan', 'Date Joined': '2026-11-13 10:00:00.000' }, expect: 'allow' },
+  { name: 'About You (update)',
+    who: 'fan', method: 'PATCH', path: `Users/${FAN}`,
+    body: { DOB: '01/01/2000', City: 'Town', Zip: '95000', Gender: 'Prefer not to say',
+      ReferralSource: 'Friend', ProfileCompleted: true, 'Phone Number': '5550000000' }, expect: 'allow' },
+  { name: 'email sign-up fields + token + photo url (sets)',
+    who: 'fan', method: 'PATCH', path: '',
+    body: { [`Users/${FAN}/First Name`]: 'Test', [`Users/${FAN}/Last Name`]: 'Fan',
+      [`Users/${FAN}/Phone Number`]: '5550000000', [`Users/${FAN}/Date Joined`]: 'x',
+      [`Users/${FAN}/Token`]: 'tok', [`Users/${FAN}/ProfileUrl`]: 'https://example.com/p.jpg' },
+    expect: 'allow' },
+  { name: 'Information set (addUpdateInfo)',
+    who: 'fan', method: 'PUT', path: `Users/${FAN}/Information`,
+    body: { Age: 20, Height: '5ft10', FutsalPosition: 'ATT', BasketballPosition: 'G' }, expect: 'allow' },
+  { name: 'registration write-back (Information update)',
+    who: 'fan', method: 'PATCH', path: `Users/${FAN}/Information`,
+    body: { FutsalPosition: 'DEF;ATT', Age: 21, Height: '5ft11' }, expect: 'allow' },
+  { name: 'favourite sports + answered flag',
+    who: 'fan', method: 'PATCH', path: `Users/${FAN}`,
+    body: { 'FavoriteSports/Futsal': true, FavoriteSportsAnswered: true }, expect: 'allow' },
+  { name: 'photo removed / favourite turned off (removes)',
+    who: 'fan', method: 'PATCH', path: `Users/${FAN}`,
+    body: { ProfileUrl: null, 'FavoriteSports/Futsal': null }, expect: 'allow' },
+  { name: 'a fan cannot give themselves a trophy',
+    who: 'fan', method: 'PUT', path: `Users/${FAN}/Awards/-forged`,
+    body: { Title: 'Champion', Season: '16' }, expect: 'deny' },
+  { name: 'a fan cannot edit an existing trophy',
+    who: 'fan', method: 'PUT', path: `Users/${FAN}/Awards/-a1/Title`, body: 'MVP', expect: 'deny' },
+  { name: 'a fan cannot slip a trophy into a profile update',
+    who: 'fan', method: 'PATCH', path: `Users/${FAN}`,
+    body: { 'First Name': 'Test', Awards: { '-forged': { Title: 'MVP' } } }, expect: 'deny' },
+  { name: 'a fan cannot rewrite their whole node with forged history',
+    who: 'fan', method: 'PUT', path: `Users/${FAN}`,
+    body: { 'First Name': 'Test', Played: { '16': { Sport: 'Futsal', Team: 'X' } } }, expect: 'deny' },
+  { name: 'a fan cannot add league history',
+    who: 'fan', method: 'PUT', path: `Users/${FAN}/Played/17`,
+    body: { Sport: 'Futsal', Team: 'Champs' }, expect: 'deny' },
+  { name: 'a fan cannot add tournament history',
+    who: 'fan', method: 'PUT', path: `Users/${FAN}/TournamentsPlayed/t1`, body: true, expect: 'deny' },
+  { name: 'a fan cannot stamp MergedInto',
+    who: 'fan', method: 'PUT', path: `Users/${FAN}/MergedInto`, body: 'uid_other', expect: 'deny' },
+  { name: 'a fan cannot stamp MergedAt',
+    who: 'fan', method: 'PUT', path: `Users/${FAN}/MergedAt`, body: 1, expect: 'deny' },
+  { name: 'a fan cannot stamp MergedHint',
+    who: 'fan', method: 'PUT', path: `Users/${FAN}/MergedHint`, body: 'x***@example.com', expect: 'deny' },
+  { name: 'a fan cannot stamp MergedFrom',
+    who: 'fan', method: 'PUT', path: `Users/${FAN}/MergedFrom/uid_other`, body: true, expect: 'deny' },
+  { name: 'an admin awards a trophy (Manager)',
+    who: 'admin', method: 'PUT', path: `Users/${FAN}/Awards/-a2`,
+    body: { Title: 'Champion', Season: '16' }, expect: 'allow' },
+  { name: 'an admin writes league history (Manager)',
+    who: 'admin', method: 'PUT', path: `Users/${FAN}/Played/16`,
+    body: { Sport: 'Futsal', Team: 'Champs' }, expect: 'allow' },
+  { name: 'a fan profile update still lands next to existing trophies',
+    who: 'fan', method: 'PATCH', path: `Users/${FAN}`,
+    body: { 'First Name': 'Renamed' }, expect: 'allow' },
+  // Pins the "never write Users/<uid> back whole" note at the top of this file.
+  { name: 'a whole-node PUT that re-sends existing trophies unchanged is refused',
+    who: 'fan', method: 'PUT', path: `Users/${FAN}`,
+    body: { 'First Name': 'Renamed', Awards: { '-a1': { Title: 'Champion' } } }, expect: 'deny' },
+  { name: 'a whole-node PUT without the admin-only keys is allowed',
+    who: 'fan', method: 'PUT', path: `Users/${FAN}`,
+    body: { 'First Name': 'Renamed', 'Last Name': 'Fan', Token: 'tok' }, expect: 'allow' },
+
+  // ── Fantasy team name flag (2026-11-13) ───────────────────────────────────
+  // saveTeamName always writes {TeamName, NameFlagged:false}. Operator
+  // precedence let an owner write {TeamName} with NO flag key and clear an
+  // admin's flag while keeping the flagged name.
+  { name: 'a flagged owner cannot clear the flag by omitting NameFlagged',
+    who: 'fan', method: 'PUT', path: `${FS}/Managers/${FAN}`,
+    body: { TeamName: 'Rude Name' }, expect: 'deny' },
+  { name: 'a flagged name cannot be re-saved unchanged',
+    who: 'fan', method: 'PUT', path: `${FS}/Managers/${FAN}`,
+    body: { TeamName: 'Rude Name', NameFlagged: false }, expect: 'deny' },
+  { name: 'a fan cannot flag their own name',
+    who: 'fan', method: 'PUT', path: `${FS}/Managers/${FAN}`,
+    body: { TeamName: 'Nice Name', NameFlagged: true }, expect: 'deny' },
+  { name: 'a flagged owner saves a NEW name (saveTeamName)',
+    who: 'fan', method: 'PUT', path: `${FS}/Managers/${FAN}`,
+    body: { TeamName: 'Nice Name', NameFlagged: false }, expect: 'allow' },
+  { name: 'a first-time team name save (saveTeamName)',
+    who: 'applicant', method: 'PUT', path: `${FS}/Managers/${APPLICANT}`,
+    body: { TeamName: 'Fresh Team', NameFlagged: false }, expect: 'allow' },
+  { name: 'a first-time save with no flag key is refused (the app always sends it)',
+    who: 'applicant', method: 'PUT', path: `${FS}/Managers/${APPLICANT}`,
+    body: { TeamName: 'Other Team' }, expect: 'deny' },
+  { name: 'an admin flags a name (Manager setNameFlagged)',
+    who: 'admin', method: 'PUT', path: `${FS}/Managers/${FAN}/NameFlagged`, body: true, expect: 'allow' },
+  // Delete-then-recreate: a .validate never runs on a delete, so the owner
+  // could delete the flagged row and save the same name as a "first save".
+  { name: 'an owner cannot delete their own (flagged) Managers row',
+    who: 'fan', method: 'DELETE', path: `${FS}/Managers/${FAN}`, expect: 'deny' },
+  { name: 'an owner cannot null their row through a parent update',
+    who: 'fan', method: 'PATCH', path: `${FS}/Managers`, body: { [FAN]: null }, expect: 'deny' },
+  { name: 'the flagged name still cannot be re-saved after the refused delete',
+    who: 'fan', method: 'PUT', path: `${FS}/Managers/${FAN}`,
+    body: { TeamName: 'Nice Name', NameFlagged: false }, expect: 'deny' },
+  { name: 'an admin can remove a Managers row',
+    who: 'admin', method: 'DELETE', path: `${FS}/Managers/${APPLICANT}`, expect: 'allow' },
+  { name: 'a first save after an admin removal still works',
+    who: 'applicant', method: 'PUT', path: `${FS}/Managers/${APPLICANT}`,
+    body: { TeamName: 'Fresh Team', NameFlagged: false }, expect: 'allow' },
+  { name: 'a rename still works',
+    who: 'applicant', method: 'PUT', path: `${FS}/Managers/${APPLICANT}`,
+    body: { TeamName: 'Renamed Team', NameFlagged: false }, expect: 'allow' },
+
+  // ── Support tickets: numeric keys only (2026-11-13) ───────────────────────
+  // Support/Tickets/$n took ANY key; the server mails that key as the
+  // "ticket number". The app only ever creates under the integer the
+  // Support/Counter transaction issued. Seed: Counter 41, ticket 41 (FAN).
+  ...BAD_TICKET_KEYS.flatMap(([key, label, bad]): Check[] => [
+    { name: `a fan cannot create a ticket under a ${label} key`,
+      who: 'fan', method: 'PATCH', path: '', body: ticketCreate(key), expect: 'deny',
+      badRequestIsDeny: bad },
+    { name: `a fan cannot index a ${label} key in UserTickets`,
+      who: 'fan', method: 'PUT', path: `Support/UserTickets/${FAN}/${key}`, body: true, expect: 'deny',
+      badRequestIsDeny: bad },
+  ]),
+  { name: 'the Counter transaction write (41 -> 42)',
+    who: 'fan', method: 'PUT', path: 'Support/Counter', body: 42, expect: 'allow' },
+  { name: "the app's real ticket create (multi-path, key 42)",
+    who: 'fan', method: 'PATCH', path: '', body: ticketCreate('42'), expect: 'allow' },
+  { name: 'a fan replies on their own ticket (addUserReply)',
+    who: 'fan', method: 'PUT', path: 'Support/Tickets/42/Thread/-m1',
+    body: { From: 'user', Uid: FAN, Name: 'Test Fan', Text: 'more info', At: TS }, expect: 'allow' },
+  { name: 'admin status change (setStatus)',
+    who: 'admin', method: 'PATCH', path: '',
+    body: { 'Support/Tickets/42/Status': 'in_progress', 'Support/Tickets/42/UpdatedAt': TS }, expect: 'allow' },
+  { name: 'admin reply (addAdminReply: Thread + UpdatedAt)',
+    who: 'admin', method: 'PATCH', path: '',
+    body: { 'Support/Tickets/42/Thread/-m2': { From: 'admin', Uid: ADMIN, Name: 'Admin', Text: 'on it', At: TS },
+      'Support/Tickets/42/UpdatedAt': TS }, expect: 'allow' },
+  { name: 'admin internal note (addNote)',
+    who: 'admin', method: 'PUT', path: 'Support/Tickets/42/Notes/-n1',
+    body: { Uid: ADMIN, Name: 'Admin', Text: 'internal', At: TS }, expect: 'allow' },
+  { name: 'admin closes with outcome + note (closeTicket)',
+    who: 'admin', method: 'PATCH', path: '',
+    body: { 'Support/Tickets/42/ClosedOutcome': 'fixed', 'Support/Tickets/42/ClosedNote': 'done',
+      'Support/Tickets/42/UpdatedAt': TS, 'Support/Tickets/42/Status': 'closed' }, expect: 'allow' },
+  { name: 'admin works on the seeded ticket 41',
+    who: 'admin', method: 'PUT', path: 'Support/Tickets/41/Status', body: 'answered', expect: 'allow' },
+
   // ── Signed out ────────────────────────────────────────────────────────────
   { name: 'signed out: no application',
     who: 'anon', method: 'PUT', path: 'Insiders/uid_nobody',
@@ -184,6 +495,7 @@ async function probe(file: string, which: 'stage1' | 'target'): Promise<number> 
     Admins: { [ADMIN]: true, [OTHER_ADMIN]: true },
     Insiders: { [APPLICANT]: { Status: 'pending', Name: 'Test Applicant', Email: 'a***@example.com', AppliedAt: 1 } },
     ReferredUsers: { uid_referred: '-ref1', [FAN]: '-ref0' },
+    ...SEED_2026_11_13,
   });
   let bad = 0;
   console.log(`\n${file}`);

@@ -27,6 +27,19 @@
 //                  uid).
 //   ownerCreate  — some `.write` on the chain requires the NEW row's Owner to
 //                  be auth.uid (mini-league create under a fresh push id).
+//   captainCreate — some `.write` on the chain requires the NEW team's
+//                  CaptainUid to be auth.uid (registration team create under
+//                  a fresh push id).
+//   uidCreate    — some `.write` on the chain requires the NEW row's Uid to
+//                  be auth.uid (support ticket create).
+//   ticketReply  — some `.write` on the chain requires the EXISTING ticket's
+//                  Uid (root.child('Support').child('Tickets').child($n)) to
+//                  be auth.uid (a user's reply on their own ticket).
+//   signedIn     — some `.write` on the chain is exactly `auth != null`,
+//                  optionally create-only (`&& !data.exists()`): any
+//                  signed-in person may write and `.validate` does the rest
+//                  (Support/Counter, sign-up comments, category
+//                  suggestions).
 //
 // Both rules files are checked: database.rules.stage1.json is what firebase.json
 // deploys today (live), database.rules.json the target posture — a grant must
@@ -38,7 +51,10 @@ import { describe, expect, it } from 'vitest';
 import { configFromMap, squadSize } from './lib/fantasy/fantasy_config';
 
 type Json = Record<string, any>;
-type Kind = 'admin' | 'own' | 'ownerCreate';
+type Kind = 'admin' | 'own' | 'ownerCreate' | 'captainCreate' | 'uidCreate' | 'ticketReply' |
+  'signedIn';
+const ALL_KINDS: readonly Kind[] = ['admin', 'own', 'ownerCreate', 'captainCreate', 'uidCreate',
+  'ticketReply', 'signedIn'];
 
 interface ContractEntry {
   /** Root-relative RTDB path, as the client writes it. `UID` = the signed-in
@@ -156,6 +172,81 @@ const CONTRACT: ContractEntry[] = [
     note: 'Manager voidReferral: root multi-path update (null)' },
   { path: 'Campaigns/-pushId', kind: 'admin',
     note: 'Manager createCampaign: push().set (the send itself is the functions trigger)' },
+
+  // ── Every other fan-app client write (2026-11-13) ─────────────────────────
+  // Paths resolved from the writer code; `UID` = the signed-in writer.
+  // Game votes: lib/livescore.dart + lib/scorepage.dart write
+  // game.databaseReference/<GameNum>/team{1,2}vote/<uid> = 1; the reference
+  // is built in lib/misc/utility.dart (<sport>/<season>/Date/<date>, AFC
+  // under "AFC San Jose/Seasons").
+  ...(['Futsal', 'Basketball', 'Flag Football'] as const).flatMap((sport) => [
+    { path: `${sport}/16/Date/10042026/0/team1vote/UID`, kind: 'own' as const,
+      note: 'livescore.dart / scorepage.dart vote: set(1)' },
+    { path: `${sport}/16/Date/10042026/0/team2vote/UID`, kind: 'own' as const,
+      note: 'livescore.dart / scorepage.dart vote: set(1)' },
+    { path: `${sport}/16/Predictions/10042026_0/UID/q1`, kind: 'own' as const,
+      note: 'league_service.dart submitAnswer: set {Answer, UpdatedAt} (key = leaguePredictionMatchKey)' },
+  ]),
+  { path: 'AFC San Jose/Seasons/2026/Date/10042026/0/team1vote/UID', kind: 'own',
+    note: 'livescore.dart / scorepage.dart AFC vote: set(1) (utility.dart builds the Seasons path)' },
+  { path: 'AFC San Jose/Seasons/2026/Date/10042026/0/team2vote/UID', kind: 'own',
+    note: 'livescore.dart / scorepage.dart AFC vote: set(1)' },
+  { path: 'Tournaments/t1/Predictions/m1/UID', kind: 'own',
+    note: 'tournament_service.dart submitPrediction: set(pred.toFirebase())' },
+  { path: 'Tournaments/t1/Predictions/m1/UID/q1', kind: 'own',
+    note: 'tournament_service.dart submitAnswer: set {Answer, UpdatedAt}' },
+  { path: 'Events/0/Attendees/UID', kind: 'own',
+    note: 'eventpage.dart attend_Clicked: set(photoURL | 1) / remove()' },
+  { path: 'EventsV2/e1/Attendees/UID', kind: 'own',
+    note: 'eventpage.dart attend_Clicked (v2 record): set(photoURL | 1) / remove()' },
+  { path: 'EventsV2/e1/Reminders/UID', kind: 'own',
+    note: 'notification_prefs.dart setEventReminder: set(true) / remove()' },
+  // Users/<uid> — every real child (inventory in the 2026-11-13 rules fix
+  // report): main.dart Google/Apple base profile update {First Name, Last
+  // Name, Date Joined}; onboarding/about_you_page.dart update {DOB, City,
+  // Zip, Gender, ReferralSource, ProfileCompleted, Phone Number?};
+  // utility.dart createDatabaseLocation / uploadToken / setImage /
+  // removeImage / addUpdateInfo; registration_service.dart
+  // _writeBackProfile; notification_prefs.dart favourites.
+  //
+  // NEVER WRITE `Users/<uid>` BACK WHOLE FROM A CLIENT; UPDATE SPECIFIC KEYS.
+  // Awards / Played / TournamentsPlayed / MergedInto / MergedAt / MergedHint
+  // / MergedFrom carry an admin-only `.validate`, which runs on every child
+  // present in the new data: a `.set()` of the whole node that re-sends a
+  // person's own trophies UNCHANGED is refused. Every writer below uses
+  // `.update()` or a child `.set()`; keep it that way (probe_rules.ts pins
+  // the whole-node behaviour).
+  { path: 'Users/UID', kind: 'own',
+    note: 'main.dart + about_you_page.dart + registration_service.dart _writeBackProfile: update' },
+  ...['First Name', 'Last Name', 'Phone Number', 'Date Joined', 'Token', 'ProfileUrl'].map((k) => (
+    { path: `Users/UID/${k}`, kind: 'own' as const,
+      note: 'utility.dart createDatabaseLocation / uploadToken / setImage / removeImage / addUpdateInfo: set / remove' })),
+  { path: 'Users/UID/Information', kind: 'own',
+    note: 'utility.dart addUpdateInfo: set; registration_service.dart _writeBackProfile: update' },
+  { path: 'Users/UID/FavoriteSports/Futsal', kind: 'own',
+    note: 'notification_prefs.dart setCategory: set(true) / remove()' },
+  { path: 'Users/UID/FavoriteSportsAnswered', kind: 'own',
+    note: 'notification_prefs.dart markAnswered: set(true)' },
+  { path: 'Registrations/Reg-1/Submissions/UID', kind: 'own',
+    note: 'registration_service.dart submitIndividual / submitCaptain / submitJoiner: set' },
+  { path: 'Registrations/Reg-1/Teams/-pushId', kind: 'captainCreate',
+    note: 'registration_service.dart submitCaptain: push().set {Name, CaptainUid, Status:pending, CodeWaivesPayment:false, CreatedAt}' },
+  { path: 'Sign Ups/Futsal/16/NotPaid/UID', kind: 'own',
+    note: 'registration_service.dart legacy dual-write + utility.dart signUpToPlay: set(displayName)' },
+  { path: 'Sign Ups/Futsal/16/Paid/UID', kind: 'own',
+    note: 'registration_service.dart submitJoiner on a waiving team: set(displayName)' },
+  { path: 'Sign Ups/Futsal/16/Comments/Some Name', kind: 'signedIn',
+    note: 'utility.dart addComment: set("<uid>:<comment>") (create-only; validate pins the uid prefix)' },
+  { path: 'Support/Counter', kind: 'signedIn',
+    note: 'support/support_service.dart createTicket: runTransaction(+1) (validate pins +1)' },
+  { path: 'Support/Tickets/12', kind: 'uidCreate',
+    note: 'support_service.dart createTicket: root multi-path update {Num, Uid, ...} under the Counter-issued integer key ($n validated numeric)' },
+  { path: 'Support/UserTickets/UID/12', kind: 'own',
+    note: 'support_service.dart createTicket: same multi-path update (true); $n validated numeric' },
+  { path: 'Support/Tickets/12/Thread/-pushId', kind: 'ticketReply',
+    note: "support_service.dart addUserReply: push().set {From:'user', Uid, Name, Text, At}" },
+  { path: 'CategorySuggestions/-pushId', kind: 'signedIn',
+    note: 'notification_prefs.dart submitCategorySuggestion: push().set {Text, Uid, CreatedAt}' },
 ];
 
 /** The paid-access gate (spec §5) appended to the Squads/$uid and
@@ -240,6 +331,15 @@ function grants(kind: Kind, link: ChainLink, bindings: Record<string, string>): 
     }
     case 'ownerCreate':
       return /newData\.child\('Owner'\)\.val\(\)\s*={2,3}\s*auth\.uid/.test(w);
+    case 'captainCreate':
+      return /newData\.child\('CaptainUid'\)\.val\(\)\s*={2,3}\s*auth\.uid/.test(w);
+    case 'uidCreate':
+      return /newData\.child\('Uid'\)\.val\(\)\s*={2,3}\s*auth\.uid/.test(w);
+    case 'ticketReply':
+      return /root\.child\('Support'\)\.child\('Tickets'\)\.child\(\$n\)\.child\('Uid'\)\.val\(\)\s*={2,3}\s*auth\.uid/
+        .test(w);
+    case 'signedIn':
+      return /^auth != null( && !data\.exists\(\))?$/.test(w.trim());
   }
 }
 
@@ -404,8 +504,12 @@ for (const file of RULES_FILES) {
     it('paid access: Squads/$uid and Managers/$uid .write end with the Mode/Status gate', () => {
       const season = rules['rules']['Fantasy']['$sport']['$season'];
       expect(String(season['Squads']['$uid']['.write']).endsWith(` && ${ACCESS_GATE}`)).toBe(true);
+      // newData.exists(): the owner may never DELETE their row (a .validate
+      // never runs on a delete, so delete-then-recreate cleared a flagged
+      // name - 2026-11-13). Admins delete through the Managers-level grant.
       expect(season['Managers']['$uid']['.write'])
-        .toBe(`auth != null && auth.uid == $uid && ${ACCESS_GATE}`);
+        .toBe(`auth != null && auth.uid == $uid && newData.exists() && ${ACCESS_GATE}`);
+      expect(String(season['Managers']['.write'])).toContain(ADMIN_GATE);
       // The gate never leaks into .validate (validate binds admins too; an
       // admin client write to Managers/<uid>/NameFlagged must still land).
       expect(String(season['Managers']['$uid']['.validate'])).not.toContain('Config/Access');
@@ -532,7 +636,7 @@ describe('rules contract: the walker itself', () => {
       `${S}/Baselines/UID/RealizedTenths`, `${S}/Baselines/UID/Prev`,
       `${S}/Live/Board/UID`, `${S}/LiveBase/3`, `${S}/LockedWeeks/3`]) {
       const { links, bindings } = writeChain(rules, p);
-      for (const kind of ['admin', 'own', 'ownerCreate'] as const) {
+      for (const kind of ALL_KINDS) {
         expect(links.some((l) => grants(kind, l, bindings)), `${p} ${kind}`).toBe(false);
       }
     }
@@ -567,7 +671,7 @@ describe.each(RULES_FILES)('rules contract: account deletion (I4) - %s', (file) 
   it('DeletedAccounts is functions-only: no client read or write', () => {
     expect(rules['rules']['DeletedAccounts']).toEqual({ '.read': false, '.write': false });
     const { links, bindings } = writeChain(rules, 'DeletedAccounts/someUid');
-    for (const kind of ['admin', 'own', 'ownerCreate'] as const) {
+    for (const kind of ALL_KINDS) {
       expect(links.some((l) => grants(kind, l, bindings)), kind).toBe(false);
     }
   });
@@ -662,3 +766,109 @@ function fanTopLevelNodes(): Set<string> {
   walk(path.join(repoRoot(), 'lib'));
   return out;
 }
+
+// ── Registration waiver, forged profile history, flagged names (2026-11-13) ─
+// Each closes a hole verified on the emulator (functions/tools/probe_rules.ts
+// proves the expressions on real payloads; these pin their shape).
+const ADMIN_ONLY = "auth != null && root.child('Admins').child(auth.uid).exists()";
+const USERS_ADMIN_ONLY_CHILDREN = ['Awards', 'Played', 'TournamentsPlayed', 'MergedInto',
+  'MergedAt', 'MergedHint', 'MergedFrom'];
+const MANAGERS_VALIDATE =
+  "newData.child('TeamName').isString() && newData.child('TeamName').val().length >= 3 && " +
+  "newData.child('TeamName').val().length <= 30 && " +
+  "(root.child('Admins').child(auth.uid).exists() || " +
+  "(newData.child('NameFlagged').exists() && newData.child('NameFlagged').val() == false && " +
+  "(!data.child('NameFlagged').exists() || data.child('NameFlagged').val() != true || " +
+  "newData.child('TeamName').val() != data.child('TeamName').val())))";
+
+describe.each(RULES_FILES)('rules contract: registration, profile history, team names - %s', (file) => {
+  const rules = loadRules(file)['rules'];
+
+  // A registrant could create a team with CodeWaivesPayment: true and point
+  // their own submission at it to be born Paid. The app creates exactly
+  // {Name, CaptainUid, Status:'pending', CodeWaivesPayment:false, CreatedAt}
+  // (registration_service.dart submitCaptain); the Manager approves, sets
+  // the JoinCode and the waiver.
+  it('Registrations Teams/$tid: create-only captain write; a non-admin team is pending, unwaived, codeless', () => {
+    const team = rules['Registrations']['$regId']['Teams']['$tid'];
+    expect(team['.write'])
+      .toBe("auth != null && !data.exists() && newData.child('CaptainUid').val() == auth.uid");
+    expect(team['.validate']).toBe(
+      "root.child('Admins').child(auth.uid).exists() || " +
+      "(newData.child('Status').val() == 'pending' && " +
+      "(!newData.child('CodeWaivesPayment').exists() || newData.child('CodeWaivesPayment').val() == false) && " +
+      "!newData.child('JoinCode').exists())");
+    // A non-admin writes ONLY the five keys the app sends, each a scalar:
+    // nothing can be planted INSIDE a team (TeamId used to be followed as a
+    // path - "-evil/X"). Members is the functions' mirror (admin SDK).
+    const scalar = { '.validate': "root.child('Admins').child(auth.uid).exists() || !newData.hasChildren()" };
+    for (const k of ['Name', 'CaptainUid', 'Status', 'CodeWaivesPayment', 'CreatedAt']) {
+      expect(team[k], `${file}: Teams/$tid/${k}`).toEqual(scalar);
+    }
+    expect(team['$other']).toEqual({ '.validate': ADMIN_ONLY });
+    expect(team['Members']['.validate']).toBe(ADMIN_ONLY);
+    expect(team['Members']['$uid']['.read']).toBe('auth != null && auth.uid == $uid');
+  });
+
+  it('Registrations Submissions/$uid: a code waiver counts only on an APPROVED waiving team, by a push-id TeamId', () => {
+    const v = String(rules['Registrations']['$regId']['Submissions']['$uid']['.validate']);
+    const team = "root.child('Registrations').child($regId).child('Teams').child(newData.child('TeamId').val())";
+    expect(v).toContain(
+      "(newData.child('TeamId').isString() && newData.child('TeamId').val().matches(/^[A-Za-z0-9_-]+$/) && " +
+      `${team}.child('CodeWaivesPayment').val() == true && ${team}.child('Status').val() == 'approved')`);
+    expect(v).not.toMatch(/\|\| root\.child\('Registrations'\)[^(]*\.child\('CodeWaivesPayment'\)\.val\(\) == true$/);
+  });
+
+  // Trophies, league/tournament history (mirrored to the public profile)
+  // and the account-combine stamps are written by admins (Manager) and
+  // Cloud Functions only. No fan-app write carries these keys (inventory in
+  // the 2026-11-13 rules fix report), so a child .validate is safe. A
+  // .validate never runs on a delete, so this blocks forging, not removal.
+  it('Users/$uid: trophies, history and merge stamps are admin-only (validate)', () => {
+    const user = rules['Users']['$uid'];
+    for (const k of USERS_ADMIN_ONLY_CHILDREN) {
+      expect(user[k], `${file}: Users/$uid/${k}`).toEqual({ '.validate': ADMIN_ONLY });
+    }
+    // Every real fan-app child of Users/<uid> has NO such rule.
+    const fanChildren = CONTRACT.filter((e) => e.path.startsWith('Users/UID/'))
+      .map((e) => e.path.split('/')[2]);
+    expect(fanChildren.length).toBeGreaterThan(5);
+    for (const k of fanChildren) {
+      expect(user[k], `${file}: Users/$uid/${k} is a fan write`).toBeUndefined();
+      expect(USERS_ADMIN_ONLY_CHILDREN).not.toContain(k);
+    }
+  });
+
+  // saveTeamName always writes {TeamName, NameFlagged:false}. The old
+  // `!exists || ==false && (...)` let an owner write {TeamName} with no
+  // flag key (precedence: `||` before `&&`-group) and clear an admin's flag
+  // while keeping the flagged name. The non-admin branch now requires the
+  // flag key, false, AND (not flagged before OR a new name).
+  it('Fantasy Managers/$uid: explicit parentheses; a flagged name cannot be re-saved unchanged', () => {
+    const v = rules['Fantasy']['$sport']['$season']['Managers']['$uid']['.validate'];
+    expect(v).toBe(MANAGERS_VALIDATE);
+  });
+});
+
+// ── Support ticket keys are ticket numbers (2026-11-13) ─────────────────────
+// Support/Tickets/$n accepted ANY key and the server mails that key as the
+// "ticket number" (subject + body). The app only creates under the integer
+// the Support/Counter transaction issued (support_service.dart createTicket,
+// one multi-path update with the fan's UserTickets/<uid>/<n> index entry).
+// A .validate on $n also runs for every write below it, so admin status /
+// close / reply / note writes and the fan's Thread replies still need a
+// numeric ticket - which every real ticket is.
+const TICKET_KEY = '$n.matches(/^[0-9]{1,9}$/)';
+describe.each(RULES_FILES)('rules contract: support ticket keys - %s', (file) => {
+  const support = loadRules(file)['rules']['Support'];
+
+  it('Support/Tickets/$n and Support/UserTickets/$uid/$n accept only a 1-9 digit key', () => {
+    expect(support['Tickets']['$n']['.validate']).toBe(TICKET_KEY);
+    expect(support['UserTickets']['$uid']['$n']).toEqual({ '.validate': TICKET_KEY });
+    // The grants themselves are unchanged.
+    expect(support['Tickets']['$n']['.write'])
+      .toBe("auth != null && !data.exists() && newData.child('Uid').val() == auth.uid");
+    expect(support['UserTickets']['$uid']['.write'])
+      .toBe("auth != null && (auth.uid == $uid || root.child('Admins').child(auth.uid).exists())");
+  });
+});

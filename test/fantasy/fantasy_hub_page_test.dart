@@ -9,6 +9,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_access.dart';
@@ -16,6 +17,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_prefs.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart';
 import 'package:infinite_sports_flutter/fantasy/data/per_week_stream.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
@@ -28,6 +30,8 @@ import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/my_team_tab.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/news_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/transfer_preview.dart';
 import 'package:infinite_sports_flutter/registration/payment_links.dart';
@@ -195,6 +199,7 @@ void main() {
     Stream<HistoryWeek?> Function(int week)? historyWeekFor,
     Stream<FantasySquad?> Function(int week)? publishedPicksFor,
     Stream<OverallStanding?>? overallStandingStates,
+    Stream<Map<String, FantasyPlayerTotals>?>? playerTotalsStates,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -224,6 +229,7 @@ void main() {
         historyWeekFor: historyWeekFor,
         publishedPicksFor: publishedPicksFor,
         overallStandingStates: overallStandingStates,
+        playerTotalsStates: playerTotalsStates,
         priceHistoryStates: priceHistory.stream,
         createCheckoutUrl: () async {
           checkoutCalls++;
@@ -1935,5 +1941,734 @@ void main() {
         }
       });
     }
+  });
+
+  // Release report #8: the hub header shrinks on scroll to a slim pinned bar
+  // that keeps the live deadline countdown; the tab row stays pinned and
+  // shows every label whole at 360 px; each tab keeps its scroll offset.
+  group('collapsing header (report #8)', () {
+    // GW n locks Oct 4 + 7(n-1), 22:00 UTC; "now" (Oct 17 12:00) is GW3,
+    // 1d 10h before its lock.
+    final gws = [
+      for (var n = 1; n <= 5; n++)
+        Gameweek(
+          number: n,
+          date: '10${(4 + 7 * (n - 1)).toString().padLeft(2, '0')}2026',
+          lockUtc: DateTime.utc(2026, 10, 4 + 7 * (n - 1), 22),
+          opensUtc: null,
+        ),
+    ];
+    DateTime now() => DateTime.utc(2026, 10, 17, 12);
+
+    Future<void> pumpOpenHub(WidgetTester tester, Brightness brightness) async {
+      await pumpHub(tester,
+          size: const Size(360, 740),
+          brightness: brightness,
+          gameweekStates: Stream.value(gws),
+          nowUtc: now);
+      await land(tester, lock: FantasyLockOverride.auto);
+    }
+
+    ScrollableState myTeamList(WidgetTester tester) => tester.state(find
+        .descendant(
+            of: find.byType(FantasyMyTeamTab, skipOffstage: false),
+            matching: find.byType(Scrollable),
+            skipOffstage: false)
+        .first);
+
+    Finder slimCountdown() => key('deadline_slim_countdown');
+
+    bool collapsed() =>
+        slimCountdown().evaluate().isNotEmpty &&
+        find.byType(FantasyBanner).evaluate().isEmpty;
+
+    /// The active tab's own vertical list.
+    ScrollPosition tabList(WidgetTester tester, Type tab) => tester
+        .state<ScrollableState>(find
+            .descendant(
+                of: find.byType(tab),
+                matching: find.byWidgetPredicate((w) =>
+                    w is Scrollable && w.axisDirection == AxisDirection.down))
+            .first)
+        .position;
+
+    /// A slow finger drag with the finger held down while the collapse runs
+    /// (review 6, I1), then release; returns how often the header changed
+    /// state while pumping.
+    Future<int> slowDrag(WidgetTester tester, double dy,
+        {Offset at = const Offset(180, 600)}) async {
+      var changes = 0;
+      var last = collapsed();
+      void sample() {
+        final now = collapsed();
+        if (now != last) changes++;
+        last = now;
+      }
+
+      final g = await tester.startGesture(at);
+      final steps = (dy.abs() / 4).ceil();
+      for (var i = 0; i < steps; i++) {
+        await g.moveBy(Offset(0, dy / steps));
+        await tester.pump(const Duration(milliseconds: 16));
+        sample();
+      }
+      await g.up();
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        sample();
+      }
+      return changes;
+    }
+
+    Map<String, Object?> post(int i) => {
+          'Title': 'Post $i',
+          'Body': 'A line of league news number $i.',
+          'At': 100 - i,
+          'Template': 'custom',
+        };
+
+    Future<void> openNews(WidgetTester tester, int posts,
+        {Size size = const Size(360, 740)}) async {
+      await pumpHub(tester,
+          tab: FantasyHubTab.news,
+          size: size,
+          gameweekStates: Stream.value(gws),
+          nowUtc: now);
+      await land(tester, lock: FantasyLockOverride.auto);
+      news.add(newsPostsFromNode({
+        for (var i = 0; i < posts; i++) 'p$i': post(i),
+      }));
+      await settle(tester);
+    }
+
+    group('every tab collapses and expands (review 6)', () {
+      Future<void> roundTrip(WidgetTester tester, FantasyHubTab tab,
+          Future<void> Function() feed) async {
+        await pumpHub(tester,
+            tab: tab,
+            size: const Size(360, 740),
+            gameweekStates: Stream.value(gws),
+            nowUtc: now);
+        await land(tester, lock: FantasyLockOverride.auto);
+        await feed();
+        await settle(tester);
+        expect(collapsed(), isFalse);
+        await tester.dragFrom(const Offset(180, 650), const Offset(0, -400));
+        await settle(tester);
+        expect(collapsed(), isTrue, reason: '$tab');
+        expect(tester.widget<Text>(slimCountdown()).data, '1d 10:00:00');
+        expect(tester.getRect(slimCountdown()).top, greaterThanOrEqualTo(0));
+        await tester.flingFrom(
+            const Offset(180, 400), const Offset(0, 3000), 4000);
+        await settle(tester);
+        await settle(tester);
+        expect(collapsed(), isFalse, reason: '$tab');
+        expect(tester.takeException(), isNull);
+      }
+
+      testWidgets('Players (a long market)', (tester) async {
+        await roundTrip(tester, FantasyHubTab.players, () async {
+          players.add([
+            ...market,
+            for (var i = 0; i < 30; i++)
+              _player('Extra Player $i', FantasyPosition.att, 40 + i,
+                  team: 'Team ${i % 4}'),
+          ]);
+        });
+      });
+
+      testWidgets('Leaderboards (a long table)', (tester) async {
+        await roundTrip(tester, FantasyHubTab.leaderboards, () async {
+          boards.add(leaderboardsFromNode({
+            'Overall': {
+              for (var i = 1; i <= 40; i++)
+                'u$i': {'points': 200 - i, 'rank': i},
+            },
+          }));
+          managers.add({
+            for (var i = 1; i <= 40; i++)
+              'u$i': FantasyManager(teamName: 'Team $i', nameFlagged: false),
+          });
+          leagues.add(const []);
+          dreams.add(const {});
+        });
+      });
+
+      testWidgets('News (many posts)', (tester) async {
+        await roundTrip(tester, FantasyHubTab.news, () async {
+          news.add(newsPostsFromNode({
+            for (var i = 0; i < 20; i++) 'p$i': post(i),
+          }));
+        });
+      });
+
+      testWidgets('Rules', (tester) async {
+        await roundTrip(tester, FantasyHubTab.rules, () async {});
+      });
+    });
+
+    for (final scale in [1.0, 1.3]) {
+      testWidgets('Players search at 360 px with the keyboard open, text '
+          'scale $scale: no overflow; switching tabs drops the keyboard '
+          '(review 6, M-a)', (tester) async {
+        tester.platformDispatcher.textScaleFactorTestValue = scale;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        await pumpHub(tester,
+            tab: FantasyHubTab.players,
+            size: const Size(360, 740),
+            gameweekStates: Stream.value(gws),
+            nowUtc: now);
+        await land(tester, lock: FantasyLockOverride.auto);
+        await tester.tap(key('market_search_toggle'));
+        await settle(tester);
+        expect(tester.testTextInput.isVisible, isTrue);
+        tester.view.viewInsets = const FakeViewPadding(bottom: 320);
+        addTearDown(tester.view.resetViewInsets);
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+        expect(key('market_search'), findsOneWidget);
+
+        await tester.tap(find.widgetWithText(Tab, 'My Team'));
+        await settle(tester);
+        expect(tester.testTextInput.isVisible, isFalse);
+        tester.view.resetViewInsets();
+        await settle(tester);
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    for (final brightness in Brightness.values) {
+      testWidgets('$brightness: a failed schedule read — both header faces '
+          'say "Deadline unavailable", My Team never says "Locked", the '
+          'market says it cannot check (review 6, I2)', (tester) async {
+        // A re-listenable source (an RTDB-like stream): the feed is still
+        // retrying here (re-review 6b, item 2 covers giving up).
+        final gwc = StreamController<List<Gameweek>>.broadcast();
+        addTearDown(gwc.close);
+        await pumpHub(tester,
+            size: const Size(360, 740),
+            brightness: brightness,
+            gameweekStates: gwc.stream,
+            nowUtc: now);
+        await land(tester, lock: FantasyLockOverride.auto);
+        gwc.addError(StateError('permission-denied'));
+        await settle(tester);
+        expect(find.byType(FantasyBanner), findsOneWidget);
+        expect(find.text('Deadline unavailable'), findsOneWidget);
+        expect(find.text('Season complete'), findsNothing);
+        expect(find.text('Locked'), findsNothing);
+        expect(key('locked_live_strip'), findsNothing);
+        expect(key('deadline_unknown_strip'), findsOneWidget);
+
+        await tester.dragFrom(const Offset(180, 650), const Offset(0, -400));
+        await settle(tester);
+        expect(collapsed(), isFalse,
+            reason: 'no countdown: the slim bar has a label only');
+        expect(find.byType(FantasyBanner), findsNothing);
+        expect(tester.widget<Text>(key('deadline_slim_label')).data,
+            'Deadline unavailable');
+        expect(find.text('Season complete'), findsNothing);
+
+        await tester.ensureVisible(find.widgetWithText(Tab, 'Players'));
+        await tester.tap(find.widgetWithText(Tab, 'Players'));
+        await settle(tester);
+        await settle(tester);
+        final tip = tester.widget<Tooltip>(
+            key('market_add_disabled_Ava Striker'));
+        expect(tip.message,
+            'Can\'t check the deadline right now — try again in a moment.');
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    testWidgets('a kept-alive Leaderboards tab drops its large live feeds '
+        'while off screen and picks them up on return with no reload '
+        '(review 6, M-b)', (tester) async {
+      await pumpHub(tester,
+          tab: FantasyHubTab.leaderboards,
+          size: const Size(360, 740),
+          gameweekStates: Stream.value(gws),
+          nowUtc: now);
+      await land(tester, lock: FantasyLockOverride.auto);
+      boards.add(leaderboardsFromNode({
+        'Overall': {
+          'u1': {'points': 50, 'rank': 1},
+        },
+      }));
+      managers.add({
+        'u1': const FantasyManager(teamName: 'Top Cats', nameFlagged: false),
+      });
+      leagues.add(const []);
+      dreams.add(const {});
+      await settle(tester);
+      expect(find.text('Top Cats'), findsOneWidget);
+      expect(boards.hasListener, isTrue);
+      expect(dreams.hasListener, isTrue);
+
+      await tester.ensureVisible(find.widgetWithText(Tab, 'My Team'));
+      await settle(tester);
+      await tester.tap(find.widgetWithText(Tab, 'My Team'));
+      await settle(tester);
+      await settle(tester);
+      expect(boards.hasListener, isFalse, reason: 'paused off screen');
+      expect(dreams.hasListener, isFalse);
+      expect(managers.hasListener, isTrue, reason: 'small, rare: kept');
+
+      await tester.ensureVisible(find.widgetWithText(Tab, 'Leaderboards'));
+      await settle(tester);
+      await tester.tap(find.widgetWithText(Tab, 'Leaderboards'));
+      // The tab slide (no feed has answered again yet: the new listeners
+      // only re-attached) — the rows it had are there, no skeleton.
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(find.text('Top Cats'), findsOneWidget);
+      await settle(tester);
+      expect(boards.hasListener, isTrue);
+      expect(dreams.hasListener, isTrue);
+      boards.add(leaderboardsFromNode({
+        'Overall': {
+          'u1': {'points': 61, 'rank': 1},
+        },
+      }));
+      await settle(tester);
+      expect(find.textContaining('61'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    });
+
+    group('first visit and hide/show of a kept-alive tab (review 6b)', () {
+      Future<void> tapTab(WidgetTester tester, String label) async {
+        await tester.ensureVisible(find.widgetWithText(Tab, label));
+        await settle(tester);
+        await tester.tap(find.widgetWithText(Tab, label));
+      }
+
+      testWidgets('Leaderboards, first open: its feeds attach once (no '
+          'cancel / re-attach), from the first frame of the switch',
+          (tester) async {
+        var listens = 0, cancels = 0;
+        await boards.close();
+        boards = StreamController<FantasyLeaderboards>.broadcast(
+            onListen: () => listens++, onCancel: () => cancels++);
+        await pumpHub(tester,
+            size: const Size(360, 740),
+            gameweekStates: Stream.value(gws),
+            nowUtc: now);
+        await land(tester, lock: FantasyLockOverride.auto);
+        expect(listens, 0, reason: 'not built before its first visit');
+
+        await tapTab(tester, 'Leaderboards');
+        await tester.pump();
+        // Mid-switch (the slide takes 300 ms): attached from the first
+        // frame of the switch and never dropped.
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(listens, 1);
+        expect(cancels, 0);
+        expect(tester.binding.hasScheduledFrame, isTrue,
+            reason: 'still mid-switch');
+        boards.add(leaderboardsFromNode({
+          'Overall': {
+            'u1': {'points': 50, 'rank': 1},
+          },
+        }));
+        managers.add({
+          'u1': const FantasyManager(teamName: 'Top Cats', nameFlagged: false),
+        });
+        leagues.add(const []);
+        dreams.add(const {});
+        await settle(tester);
+        expect(find.text('Top Cats'), findsOneWidget);
+        expect(listens, 1);
+        expect(cancels, 0);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('Players, first open: totals attach at the start of the '
+          'switch, once', (tester) async {
+        var listens = 0, cancels = 0;
+        final totals = StreamController<Map<String, FantasyPlayerTotals>?>
+            .broadcast(onListen: () => listens++, onCancel: () => cancels++);
+        addTearDown(totals.close);
+        await pumpHub(tester,
+            size: const Size(360, 740),
+            gameweekStates: Stream.value(gws),
+            nowUtc: now,
+            playerTotalsStates: totals.stream);
+        await land(tester, lock: FantasyLockOverride.auto);
+        expect(listens, 0);
+
+        await tapTab(tester, 'Players');
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(listens, 1, reason: 'attached from the first frame');
+        expect(cancels, 0);
+        totals.add(const {});
+        await settle(tester);
+        expect(key('market_row_Ava Striker'), findsOneWidget);
+        expect(listens, 1);
+        expect(cancels, 0);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('Players hidden then shown: totals drop and re-attach; no '
+          'reload, the filter and scroll offset are kept', (tester) async {
+        var listens = 0, cancels = 0;
+        final totals = StreamController<Map<String, FantasyPlayerTotals>?>
+            .broadcast(onListen: () => listens++, onCancel: () => cancels++);
+        addTearDown(totals.close);
+        await pumpHub(tester,
+            tab: FantasyHubTab.players,
+            size: const Size(360, 740),
+            gameweekStates: Stream.value(gws),
+            nowUtc: now,
+            playerTotalsStates: totals.stream);
+        await land(tester, lock: FantasyLockOverride.auto);
+        players.add([
+          ...market,
+          for (var i = 0; i < 30; i++)
+            _player('Extra Def $i', FantasyPosition.def, 40 + i,
+                team: 'Team ${i % 4}'),
+        ]);
+        totals.add(const {});
+        await settle(tester);
+        await tester.tap(key('market_pos_DEF'));
+        await settle(tester);
+        expect(key('market_row_Ava Striker'), findsNothing);
+        await tester.dragFrom(const Offset(180, 650), const Offset(0, -300));
+        await settle(tester);
+        final list = tester.state<ScrollableState>(find
+            .descendant(
+                of: key('players_market'),
+                matching: find.byWidgetPredicate((w) =>
+                    w is Scrollable && w.axisDirection == AxisDirection.down))
+            .first);
+        final offset = list.position.pixels;
+        expect(offset, greaterThan(0));
+        expect(listens, 1);
+
+        await tapTab(tester, 'My Team');
+        await settle(tester);
+        await settle(tester);
+        expect(cancels, 1, reason: 'dropped while hidden');
+
+        await tapTab(tester, 'Players');
+        await tester.pump();
+        expect(key('players_market_skeleton'), findsNothing);
+        await settle(tester);
+        await settle(tester);
+        expect(listens, 2, reason: 're-attached on return');
+        expect(key('players_market_skeleton'), findsNothing);
+        expect(key('market_row_Ava Striker'), findsNothing,
+            reason: 'the DEF filter is kept');
+        expect(list.position.pixels, offset);
+        expect(tester.takeException(), isNull);
+      });
+    });
+
+    testWidgets('a failed schedule read: the squad alert promises no free '
+        'swap and names no deadline it could not read (review 6b, item 3)',
+        (tester) async {
+      await pumpHub(tester,
+          size: const Size(360, 1200),
+          gameweekStates:
+              Stream<List<Gameweek>>.error(StateError('permission-denied')),
+          nowUtc: now);
+      await land(tester, lock: FantasyLockOverride.auto);
+      alert.add(const FantasySquadAlert(gameweek: 3, changes: [
+        FantasyPositionChange(
+            player: 'Ava Striker',
+            from: FantasyPosition.att,
+            to: FantasyPosition.def),
+      ]));
+      await settle(tester);
+      expect(
+          find.text('Ava Striker moved to DEF — your team needs rearranging '
+              'before the deadline.'),
+          findsOneWidget);
+      expect(find.textContaining('free this week'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    group('a schedule that keeps failing (re-review 6b, item 2)', () {
+      late StreamController<List<Gameweek>> gwc;
+      late int listens;
+
+      /// One open gameweek a few days ahead of the REAL clock (My Team reads
+      /// the real clock), so a recovered schedule is editable.
+      List<Gameweek> liveSchedule() {
+        final lock = DateTime.now().toUtc().add(const Duration(days: 3));
+        final d = lock.toLocal();
+        String two(int v) => v.toString().padLeft(2, '0');
+        return [
+          Gameweek(
+            number: 1,
+            date: '${two(d.month)}${two(d.day)}${d.year}',
+            lockUtc: lock,
+            opensUtc: null,
+          ),
+        ];
+      }
+      setUp(() {
+        listens = 0;
+        gwc = StreamController<List<Gameweek>>.broadcast(
+            onListen: () => listens++);
+      });
+      tearDown(() => gwc.close());
+
+      /// Fails the schedule read, then every bounded retry.
+      Future<void> failUntilGivenUp(WidgetTester tester) async {
+        await pumpHub(tester,
+            size: const Size(360, 1200), gameweekStates: gwc.stream);
+        await land(tester, lock: FantasyLockOverride.auto);
+        gwc.addError(StateError('permission-denied'));
+        await settle(tester);
+        expect(key('deadline_unknown_strip'), findsOneWidget);
+        expect(find.textContaining('Trying again'), findsOneWidget);
+        expect(find.text('Try again'), findsNothing,
+            reason: 'no button while it is still retrying');
+        for (final d in kFantasyFeedRetryDelays) {
+          await tester.pump(d + const Duration(milliseconds: 10));
+          await tester.pump();
+          gwc.addError(StateError('permission-denied'));
+          await tester.pump();
+        }
+        await settle(tester);
+      }
+
+      Future<void> recover(WidgetTester tester, int listensBefore) async {
+        expect(listens, listensBefore + 1, reason: 'reading again');
+        gwc.add(liveSchedule());
+        await settle(tester);
+        expect(key('deadline_unknown_strip'), findsNothing);
+        expect(key('budget_bar'), findsOneWidget, reason: 'editable again');
+        expect(find.text('Try again'), findsNothing);
+      }
+
+      testWidgets('gives up: the strip and the header say so with a Try again '
+          'button; Try again reads again and a good read makes My Team '
+          'editable', (tester) async {
+        await failUntilGivenUp(tester);
+        expect(find.textContaining('Trying again'), findsNothing);
+        expect(find.textContaining("couldn't check"), findsOneWidget);
+        expect(key('deadline_unknown_retry'), findsOneWidget);
+        expect(key('deadline_retry'), findsOneWidget,
+            reason: 'the header chip too');
+        final before = listens;
+        await tester.tap(key('deadline_unknown_retry'));
+        await tester.pump();
+        expect(find.textContaining('Trying again'), findsOneWidget);
+        await recover(tester, before);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('the app returning to the foreground reads again by itself',
+          (tester) async {
+        await failUntilGivenUp(tester);
+        final before = listens;
+        for (final st in [
+          AppLifecycleState.inactive,
+          AppLifecycleState.hidden,
+          AppLifecycleState.paused,
+          AppLifecycleState.hidden,
+          AppLifecycleState.inactive,
+          AppLifecycleState.resumed,
+        ]) {
+          tester.binding.handleAppLifecycleStateChanged(st);
+        }
+        await tester.pump();
+        await recover(tester, before);
+      });
+
+      testWidgets('the connection coming back reads again by itself',
+          (tester) async {
+        final connected = StreamController<bool>.broadcast();
+        debugFantasyConnectedStates = connected.stream;
+        addTearDown(() {
+          debugFantasyConnectedStates = null;
+          connected.close();
+        });
+        await failUntilGivenUp(tester);
+        final before = listens;
+        connected.add(false);
+        await tester.pump();
+        connected.add(true);
+        await tester.pump();
+        await recover(tester, before);
+      });
+    });
+
+    group('never stuck collapsed (review 6, I1)', () {
+      testWidgets('News, one post (short): a slow drag never collapses',
+          (tester) async {
+        await openNews(tester, 1);
+        expect(await slowDrag(tester, -200), 0);
+        expect(collapsed(), isFalse);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('News, many posts (long): collapses once, stays draggable, '
+          'pulling down at the top expands', (tester) async {
+        await openNews(tester, 20);
+        expect(await slowDrag(tester, -200), 1);
+        expect(collapsed(), isTrue);
+        expect(tabList(tester, FantasyNewsTab).maxScrollExtent,
+            greaterThan(0));
+        await slowDrag(tester, 600, at: const Offset(180, 300));
+        expect(collapsed(), isFalse);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('News across the boundary band (screen heights sweep): a '
+          'drag that ends collapsed always leaves something to drag back',
+          (tester) async {
+        for (var h = 600.0; h <= 1100; h += 50) {
+          await tester.pumpWidget(const SizedBox()); // a fresh hub each time
+          await openNews(tester, 3, size: Size(360, h));
+          final changes = await slowDrag(tester, -220,
+              at: Offset(180, h - 120));
+          expect(changes, lessThanOrEqualTo(1), reason: 'height $h');
+          if (collapsed()) {
+            expect(tabList(tester, FantasyNewsTab).maxScrollExtent,
+                greaterThan(16),
+                reason: 'height $h: collapsed with nothing to drag');
+          }
+          expect(tester.takeException(), isNull, reason: 'height $h');
+        }
+      });
+
+      testWidgets('My Team across the boundary band (screen heights sweep)',
+          (tester) async {
+        for (var h = 600.0; h <= 1300; h += 50) {
+          await tester.pumpWidget(const SizedBox()); // a fresh hub each time
+          await pumpHub(tester,
+              size: Size(360, h),
+              gameweekStates: Stream.value(gws),
+              nowUtc: now);
+          await land(tester, lock: FantasyLockOverride.auto);
+          final changes = await slowDrag(tester, -220,
+              at: Offset(180, h - 120));
+          expect(changes, lessThanOrEqualTo(1), reason: 'height $h');
+          if (collapsed()) {
+            expect(tabList(tester, FantasyMyTeamTab).maxScrollExtent,
+                greaterThan(16),
+                reason: 'height $h: collapsed with nothing to drag');
+          }
+          expect(tester.takeException(), isNull, reason: 'height $h');
+        }
+      });
+
+      testWidgets('My Team, short (no team name yet): a slow drag never '
+          'collapses', (tester) async {
+        await pumpHub(tester,
+            size: const Size(360, 740),
+            gameweekStates: Stream.value(gws),
+            nowUtc: now);
+        await land(tester,
+            lock: FantasyLockOverride.auto, withManager: false);
+        expect(await slowDrag(tester, -200), 0);
+        expect(collapsed(), isFalse);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('scrolled My Team → a short News tab opens the header; '
+          'back on My Team it is collapsed again', (tester) async {
+        await pumpHub(tester,
+            size: const Size(360, 740),
+            gameweekStates: Stream.value(gws),
+            nowUtc: now);
+        await land(tester, lock: FantasyLockOverride.auto);
+        news.add(newsPostsFromNode({'p0': post(0)}));
+        await tester.dragFrom(const Offset(180, 600), const Offset(0, -300));
+        await settle(tester);
+        expect(collapsed(), isTrue);
+        await tester.ensureVisible(find.widgetWithText(Tab, 'News'));
+        await settle(tester);
+        await tester.tap(find.widgetWithText(Tab, 'News'));
+        await settle(tester);
+        await settle(tester);
+        expect(collapsed(), isFalse);
+        await tester.ensureVisible(find.widgetWithText(Tab, 'My Team'));
+        await settle(tester);
+        await tester.tap(find.widgetWithText(Tab, 'My Team'));
+        await settle(tester);
+        await settle(tester);
+        expect(collapsed(), isTrue);
+        expect(tester.takeException(), isNull);
+      });
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('360 px, $brightness: expanded at the top; a scroll '
+          'collapses it with the countdown still on screen; back at the top '
+          'it expands', (tester) async {
+        await pumpOpenHub(tester, brightness);
+        expect(find.byType(FantasyBanner), findsOneWidget);
+        expect(key('deadline_countdown'), findsOneWidget);
+        expect(slimCountdown(), findsNothing);
+
+        await tester.dragFrom(const Offset(180, 600), const Offset(0, -300));
+        await settle(tester);
+        expect(find.byType(FantasyBanner), findsNothing);
+        expect(slimCountdown(), findsOneWidget);
+        expect(tester.widget<Text>(slimCountdown()).data, '1d 10:00:00');
+        expect(find.text('GW3 locks in'), findsOneWidget);
+        expect(tester.getRect(slimCountdown()).top, greaterThanOrEqualTo(0));
+        expect(tester.takeException(), isNull);
+
+        await tester.flingFrom(
+            const Offset(180, 400), const Offset(0, 1500), 3000);
+        await settle(tester);
+        await settle(tester);
+        expect(find.byType(FantasyBanner), findsOneWidget);
+        expect(slimCountdown(), findsNothing);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('360 px, $brightness: every tab label is whole — none '
+          'ellipsized', (tester) async {
+        await pumpOpenHub(tester, brightness);
+        for (final l in ['My Team', 'Players', 'Leaderboards', 'News', 'Rules']) {
+          final p = tester.renderObject<RenderParagraph>(find.descendant(
+              of: find.widgetWithText(Tab, l), matching: find.text(l)));
+          expect(p.didExceedMaxLines, isFalse, reason: l);
+          expect(
+              p.size.width,
+              greaterThanOrEqualTo(
+                  p.getMaxIntrinsicWidth(double.infinity) - 0.5),
+              reason: l);
+        }
+        // More tabs off the right edge: the fade says so.
+        expect(key('tabs_more_end'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    testWidgets('switching tabs and coming back keeps My Team\'s scroll '
+        'offset', (tester) async {
+      await pumpOpenHub(tester, Brightness.light);
+      await tester.dragFrom(const Offset(180, 600), const Offset(0, -300));
+      await settle(tester);
+      final offset = myTeamList(tester).position.pixels;
+      expect(offset, greaterThan(0));
+
+      await tester.tap(find.widgetWithText(Tab, 'Players'));
+      await settle(tester);
+      await tester.tap(find.widgetWithText(Tab, 'My Team'));
+      await settle(tester);
+      expect(myTeamList(tester).position.pixels, offset);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('text scale 1.3 at 360 px: expanded and collapsed headers do '
+        'not overflow', (tester) async {
+      tester.platformDispatcher.textScaleFactorTestValue = 1.3;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await pumpOpenHub(tester, Brightness.dark);
+      expect(tester.takeException(), isNull);
+      await tester.dragFrom(const Offset(180, 600), const Offset(0, -300));
+      await settle(tester);
+      expect(slimCountdown(), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
   });
 }

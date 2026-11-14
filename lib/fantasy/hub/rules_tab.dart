@@ -27,6 +27,8 @@ class FantasyRulesTab extends StatelessWidget {
     required this.configStates,
     this.initialState,
     this.gameweeks = const [],
+    this.scheduleUnknown = false,
+    this.onRetrySchedule,
     this.nowUtc,
     this.supportPageBuilder,
   });
@@ -36,6 +38,13 @@ class FantasyRulesTab extends StatelessWidget {
   final Stream<FantasyConfigState?> configStates;
   final FantasyConfigState? initialState;
   final List<Gameweek> gameweeks;
+
+  /// The schedule read failed (FantasyScheduleFeed.scheduleUnknown, review 6
+  /// I2): never "Locked" / "Season complete" from that empty list.
+  final bool scheduleUnknown;
+
+  /// Non-null once the schedule feed has given up: "Try again".
+  final VoidCallback? onRetrySchedule;
   final DateTime Function()? nowUtc;
 
   /// Test seam replacing the real SupportFormPage push (whose default wiring
@@ -54,6 +63,8 @@ class FantasyRulesTab extends StatelessWidget {
         return _RulesBody(
             state: state,
             gameweeks: gameweeks,
+            scheduleUnknown: scheduleUnknown,
+            onRetrySchedule: onRetrySchedule,
             nowUtc: nowUtc,
             supportPageBuilder: supportPageBuilder);
       },
@@ -65,12 +76,21 @@ class _RulesBody extends StatelessWidget {
   const _RulesBody({
     required this.state,
     required this.gameweeks,
+    required this.scheduleUnknown,
+    this.onRetrySchedule,
     required this.nowUtc,
     required this.supportPageBuilder,
   });
 
   final FantasyConfigState state;
   final List<Gameweek> gameweeks;
+
+  /// The schedule read failed (FantasyScheduleFeed.scheduleUnknown, review 6
+  /// I2): never "Locked" / "Season complete" from that empty list.
+  final bool scheduleUnknown;
+
+  /// Non-null once the schedule feed has given up: "Try again".
+  final VoidCallback? onRetrySchedule;
   final DateTime Function()? nowUtc;
   final Widget Function()? supportPageBuilder;
 
@@ -95,9 +115,12 @@ class _RulesBody extends StatelessWidget {
           child: _Body(
             'Build a squad of ${cfg.squadSize} real league players within a '
             '${formatMoneyTenths(cfg.budgetTenths)} budget. '
-            '${cfg.startersGk} goalkeeper, ${cfg.startersDef} defenders and '
-            '${cfg.startersAtt} attackers start; ${cfg.benchDef} defender and '
-            '${cfg.benchAtt} attacker sit on your bench and normally score '
+            '${FantasyPosition.gk.count(cfg.startersGk)}, '
+            '${FantasyPosition.def.count(cfg.startersDef)} and '
+            '${FantasyPosition.att.count(cfg.startersAtt)} start; '
+            '${FantasyPosition.def.count(cfg.benchDef)} and '
+            '${FantasyPosition.att.count(cfg.benchAtt)} sit on your bench and '
+            'normally score '
             '${cfg.benchFactorPercent}% of their points. Pick a captain — '
             'their points count ×${cfg.captainMultiplier} — and a '
             'vice-captain who wears the armband any week the captain does '
@@ -163,6 +186,8 @@ class _RulesBody extends StatelessWidget {
                 gameweeks: gameweeks,
                 lockOverride: state.lockOverride,
                 nowUtc: nowUtc,
+                scheduleUnknown: scheduleUnknown,
+                onRetry: onRetrySchedule,
               ),
             ],
           ),
@@ -514,7 +539,7 @@ class _ScoringTable extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 6),
                 child:
-                    Text(p.db, textAlign: TextAlign.center, style: head),
+                    Text(p.short, textAlign: TextAlign.center, style: head),
               ),
           ],
         ),
