@@ -477,6 +477,23 @@ const CHECKS: Check[] = [
   { name: 'admin works on the seeded ticket 41',
     who: 'admin', method: 'PUT', path: 'Support/Tickets/41/Status', body: 'answered', expect: 'allow' },
 
+  // ── Fresh-read barrier (fan plan 2026-11-13-fresh-reads.md) ──────────────
+  // lib/misc/fresh_read.dart reads a NEW unique child of SyncBarrier (a
+  // never-loaded path) to prove the server has answered. Anyone can read a
+  // child, signed out too; nobody can write one or the node.
+  { name: 'signed out: reads a SyncBarrier child (the barrier)',
+    who: 'anon', method: 'GET', path: 'SyncBarrier/-barrier1', expect: 'allow' },
+  { name: 'a fan reads a SyncBarrier child (the barrier)',
+    who: 'fan', method: 'GET', path: 'SyncBarrier/-barrier2', expect: 'allow' },
+  { name: 'signed out: cannot write a SyncBarrier child',
+    who: 'anon', method: 'PUT', path: 'SyncBarrier/-barrier3', body: true, expect: 'deny' },
+  { name: 'a fan cannot write a SyncBarrier child',
+    who: 'fan', method: 'PUT', path: 'SyncBarrier/-barrier4', body: true, expect: 'deny' },
+  { name: 'an admin cannot write a SyncBarrier child either (no ancestor grant)',
+    who: 'admin', method: 'PUT', path: 'SyncBarrier/-barrier5', body: true, expect: 'deny' },
+  { name: 'a fan cannot write the SyncBarrier node',
+    who: 'fan', method: 'PUT', path: 'SyncBarrier', body: { x: true }, expect: 'deny' },
+
   // ── Signed out ────────────────────────────────────────────────────────────
   { name: 'signed out: no application',
     who: 'anon', method: 'PUT', path: 'Insiders/uid_nobody',
