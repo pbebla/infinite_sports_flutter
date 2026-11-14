@@ -501,8 +501,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
           _notice(context, kRegistrationCouldNotCheck),
           const SizedBox(height: 8),
           OutlinedButton(
-            onPressed: _live.retry,
-            child: const Text('Try again'),
+            onPressed: _live.retrying ? null : _live.retry,
+            child: Text(_live.retrying ? 'Checking…' : 'Try again'),
           ),
           const SizedBox(height: 15),
         ] else ...[

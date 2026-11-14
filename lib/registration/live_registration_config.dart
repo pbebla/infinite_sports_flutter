@@ -40,6 +40,7 @@ class LiveRegistrationConfig extends ChangeNotifier {
   StreamSubscription<RegistrationConfig?>? _sub;
   bool _removed = false;
   bool _error = false;
+  bool _retrying = false;
   bool _feeChanged = false;
   bool _disposed = false;
 
@@ -52,6 +53,11 @@ class LiveRegistrationConfig extends ChangeNotifier {
   /// The live read failed; [config] is the last confirmed value.
   bool get error => _error;
 
+  /// A "Try again" is waiting for its first answer (the pay actions stay in
+  /// the couldn't-check state until a confirmed config arrives — final
+  /// round, item 3).
+  bool get retrying => _retrying;
+
   /// The fee changed while the screen was open.
   bool get feeChanged => _feeChanged;
 
@@ -59,32 +65,39 @@ class LiveRegistrationConfig extends ChangeNotifier {
   /// its config is confirmed.
   bool get canPay => !_removed && !_error;
 
+  /// Subscribes. [error] is NOT cleared here: only a confirmed config event
+  /// clears it, so a retry never shows the pay actions before anything is
+  /// confirmed.
   void start() {
     if (_sub != null || _disposed) return;
-    _error = false;
     try {
       _sub = _source().listen(_onConfig, onError: (Object _) {
         _sub?.cancel();
         _sub = null;
         _error = true;
+        _retrying = false;
         _notify();
       });
     } catch (_) {
       _error = true;
+      _retrying = false;
       _notify();
     }
   }
 
-  /// Re-subscribes after an error (the "Try again" on the pay actions).
+  /// Re-subscribes after an error (the "Try again" on the pay actions); the
+  /// couldn't-check state stays until the first confirmed event.
   void retry() {
     _sub?.cancel();
     _sub = null;
-    start();
+    _retrying = true;
     _notify();
+    start();
   }
 
   void _onConfig(RegistrationConfig? next) {
     _error = false;
+    _retrying = false;
     if (next == null) {
       _removed = true;
       _notify();

@@ -564,8 +564,8 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
                   if (!_live.removed) ...[
                     const SizedBox(height: 8),
                     OutlinedButton(
-                      onPressed: _live.retry,
-                      child: const Text('Try again'),
+                      onPressed: _live.retrying ? null : _live.retry,
+                      child: Text(_live.retrying ? 'Checking…' : 'Try again'),
                     ),
                   ],
                 ],

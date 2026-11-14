@@ -606,6 +606,51 @@ void main() {
     });
   });
 
+  // Final round, item 3: after "Try again" the pay actions stay in the
+  // couldn't-check state until a confirmed config event arrives.
+  testWidgets("Try again keeps couldn't-check until a confirmed event",
+      (tester) async {
+    const config = RegistrationConfig(
+      targetType: 'league',
+      sport: 'Futsal',
+      season: '16',
+      status: 'open',
+      fee: 60,
+      paymentMode: 'perPlayer',
+      venmo: true,
+      stripe: true,
+    );
+    final live = StreamController<RegistrationConfig?>.broadcast();
+    addTearDown(live.close);
+    await tester.pumpWidget(MaterialApp(
+      home: PaymentScreen(
+        regId: 'r1',
+        config: config,
+        amount: 60,
+        submissionStream:
+            Stream.value(const RegSubmission(path: 'individual', answers: {})),
+        configStream: live.stream,
+      ),
+    ));
+    await tester.pump();
+    live.addError(StateError('denied'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text(kRegistrationCouldNotCheck), findsOneWidget);
+    await tester.tap(find.text('Try again'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text(kRegistrationCouldNotCheck), findsOneWidget,
+        reason: 'nothing confirmed yet');
+    expect(find.text('Pay with card'), findsNothing);
+    expect(find.text('Pay with Venmo'), findsNothing);
+    live.add(config);
+    await tester.pump();
+    await tester.pump();
+    expect(find.text(kRegistrationCouldNotCheck), findsNothing);
+    expect(find.text('Pay with card'), findsOneWidget);
+  });
+
   group('status page follows the live config', _statusPageLiveConfigTests);
 }
 
