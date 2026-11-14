@@ -102,8 +102,14 @@ List<String>? followHeader(
     homeRegistrationBanner({
   required MyRegistrations? mine,
   required Map<String, RegistrationConfig> open,
+  String? Function(String sport)? seasonPointer,
+  Set<String>? activeTournamentIds,
 }) {
-  final owing = mine?.firstOwing;
+  // Fix round, Important 4: only a CURRENT registration nags (the shared
+  // firstCurrentOwing — the drawer uses the same one).
+  final owing = firstCurrentOwing(mine,
+      seasonPointer: seasonPointer ?? (_) => null,
+      activeTournamentIds: activeTournamentIds);
   if (owing != null) {
     return (
       title: 'Finish your payment: ${owing.config.label}',
@@ -229,6 +235,10 @@ class _FrontPageState extends State<FrontPage> {
   // update inside an already-known tournament fires the same stream but
   // must not churn the tabs).
   List<String> _lastActiveTournamentIds = [];
+
+  /// The /Tournaments stream has answered at least once (until then a
+  /// closed tournament registration is never "current" for the banner).
+  bool _tournamentsKnown = false;
   StreamSubscription<List<Tournament>>? _tournamentsWatchSub;
 
   /// Matches-tab header for the current-league section, e.g. "Futsal League"
@@ -288,7 +298,11 @@ class _FrontPageState extends State<FrontPage> {
 
   int _pointerFollowGen = 0;
 
-  void _onSeasonPointersChanged() => unawaited(_followSeasonPointers());
+  void _onSeasonPointersChanged() {
+    // The banner's "current registration" rule reads the live pointers.
+    if (mounted) setState(() {});
+    unawaited(_followSeasonPointers());
+  }
 
   /// Re-reads only the sections whose pointer moved, then applies them in
   /// ONE setState and moves [headerNotifier] with them. Waits for the first
@@ -384,6 +398,11 @@ class _FrontPageState extends State<FrontPage> {
   /// on every emission.
   void _onTournamentsChanged(List<Tournament> tournaments) {
     final ids = TournamentService.activeTournamentIds(tournaments);
+    if (!_tournamentsKnown) {
+      // The banner may now judge closed tournament registrations.
+      _tournamentsKnown = true;
+      if (mounted) setState(() {});
+    }
     if (listEquals(ids, _lastActiveTournamentIds)) return;
     _lastActiveTournamentIds = ids;
     _refreshActiveTournamentTabs();
@@ -467,7 +486,12 @@ class _FrontPageState extends State<FrontPage> {
   /// opens the registration entry page.
   /// The registration banner, or null (see [homeRegistrationBanner]).
   ({String title, String subtitle, MyRegistration? owing})? get _banner =>
-      homeRegistrationBanner(mine: _myRegistrations, open: openRegistrations);
+      homeRegistrationBanner(
+          mine: _myRegistrations,
+          open: openRegistrations,
+          seasonPointer: (sport) => SeasonPointers.current.seasonFor(sport),
+          activeTournamentIds:
+              _tournamentsKnown ? _lastActiveTournamentIds.toSet() : null);
 
   /// The owing banner's tap is being checked with the server.
   bool _bannerChecking = false;

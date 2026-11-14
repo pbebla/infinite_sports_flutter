@@ -47,7 +47,8 @@ void main() {
         signUpsOpen: false,
         signUpDetail: 'Sign Ups Closed',
         hasOpenRegistrations: false,
-        mine: _mine());
+        mine: _mine(),
+        seasonPointer: (_) => '16');
     expect(r.title, 'My registrations');
     expect(r.enabled, isTrue);
     expect(r.opensRegistrationList, isTrue);
@@ -86,5 +87,17 @@ void main() {
         hasOpenRegistrations: true,
         mine: null);
     expect(r.enabled, isFalse);
+  });
+
+  test('fix round Important 4: an old owing registration: no "You owe"', () {
+    final r = drawerRegistrationRow(
+        signedIn: true,
+        signUpsOpen: false,
+        signUpDetail: 'Sign Ups Closed',
+        hasOpenRegistrations: false,
+        mine: _mine(),
+        seasonPointer: (_) => '17');
+    expect(r.title, 'My registrations', reason: 'still reachable');
+    expect(r.subtitle, 'Sign Ups Closed');
   });
 }

@@ -34,7 +34,9 @@ void main() {
 
   test('owing (closed registration) wins over an open registration', () {
     final b = homeRegistrationBanner(
-        mine: mine(paid: false), open: {'basket': open17})!;
+        seasonPointer: (_) => '16',
+        mine: mine(paid: false),
+        open: {'basket': open17})!;
     expect(b.title, 'Finish your payment: ${closedOwing.label}');
     expect(b.subtitle, 'You owe ${formatOwed(80)} — tap to pay');
     expect(b.owing!.regId, 'futsal');
@@ -42,7 +44,9 @@ void main() {
 
   test('paid up: today\'s banner', () {
     final b = homeRegistrationBanner(
-        mine: mine(paid: true), open: {'basket': open17})!;
+        seasonPointer: (_) => '16',
+        mine: mine(paid: true),
+        open: {'basket': open17})!;
     expect(b.title, 'Registration open: ${open17.label}');
     expect(b.subtitle, 'Tap to sign up');
     expect(b.owing, isNull);
@@ -50,7 +54,9 @@ void main() {
 
   test('two open registrations: today\'s plural banner', () {
     final b = homeRegistrationBanner(
-        mine: null, open: {'a': open17, 'b': _config('Futsal', 'open')})!;
+        seasonPointer: (_) => '16',
+        mine: null,
+        open: {'a': open17, 'b': _config('Futsal', 'open')})!;
     expect(b.title, 'Registrations are open');
   });
 
@@ -67,8 +73,8 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       var tapped = 0;
-      final b =
-          homeRegistrationBanner(mine: mine(paid: false), open: const {})!;
+      final b = homeRegistrationBanner(
+          seasonPointer: (_) => '16', mine: mine(paid: false), open: const {})!;
       await tester.pumpWidget(MaterialApp(
         theme: ThemeData(brightness: Brightness.light),
         darkTheme: ThemeData(brightness: Brightness.dark),
@@ -130,5 +136,22 @@ void main() {
     test('the production bound is 3 s', () {
       expect(kBannerFirstPaintBound, const Duration(seconds: 3));
     });
+  });
+
+  test('fix round Important 4: an old owing registration never nags', () {
+    // Futsal 16 closed, the league has moved to 17: silent.
+    expect(
+        homeRegistrationBanner(
+            seasonPointer: (_) => '17',
+            mine: mine(paid: false),
+            open: const {}),
+        isNull);
+    // Pointer not known yet: silent (never nag on a guess).
+    expect(
+        homeRegistrationBanner(
+            seasonPointer: (_) => null,
+            mine: mine(paid: false),
+            open: const {}),
+        isNull);
   });
 }

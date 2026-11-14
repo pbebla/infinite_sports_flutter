@@ -71,6 +71,53 @@ class MyRegistrations {
   static const empty = MyRegistrations(mine: [], openForSignUp: {});
 }
 
+/// Whether a registration is CURRENT — the only kind the home banner and
+/// the drawer's "You owe" nag about (way back fix round, Important 4,
+/// owner's ruling; the registration list shows every registration):
+///   • open → current;
+///   • closed, league → current only while its Season >= the live public
+///     season pointer for its Sport (`>=`: a registration for an upcoming
+///     season can close before that season is published);
+///   • closed, tournament → current only while the tournament still exists
+///     and is not finished ([activeTournamentIds]);
+///   • pointer / tournaments not known (null) or unparsable → a closed
+///     registration is NOT current (never nag on a guess).
+bool isCurrentRegistration(
+  RegistrationConfig config, {
+  required String? Function(String sport) seasonPointer,
+  required Set<String>? activeTournamentIds,
+}) {
+  if (config.isOpen) return true;
+  if (config.targetType == 'tournament') {
+    final active = activeTournamentIds;
+    return active != null && active.contains(config.tournamentId);
+  }
+  final pointer = int.tryParse(seasonPointer(config.sport) ?? '');
+  final season = int.tryParse(config.season);
+  if (pointer == null || season == null) return false;
+  return season >= pointer;
+}
+
+/// THE pick for the home banner and the drawer: the first registration the
+/// fan still owes on that is current ([isCurrentRegistration]); null =
+/// none (or [mine] not known yet).
+MyRegistration? firstCurrentOwing(
+  MyRegistrations? mine, {
+  required String? Function(String sport) seasonPointer,
+  required Set<String>? activeTournamentIds,
+}) {
+  if (mine == null) return null;
+  for (final m in mine.mine) {
+    if (m.owed > 0 &&
+        isCurrentRegistration(m.config,
+            seasonPointer: seasonPointer,
+            activeTournamentIds: activeTournamentIds)) {
+      return m;
+    }
+  }
+  return null;
+}
+
 /// "$54.00" — the payment screen's breakdown format.
 String formatOwed(num amount) => '\$${amount.toStringAsFixed(2)}';
 

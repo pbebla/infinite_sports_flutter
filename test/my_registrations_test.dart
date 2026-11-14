@@ -216,4 +216,87 @@ void main() {
       expect(configs.hasListener, isFalse);
     });
   });
+
+  // Way back fix round, Important 4 (ruling): the home banner and the
+  // drawer's "You owe" only nag for a CURRENT registration. The list is
+  // unchanged (every registration, its true chip).
+  group('isCurrentRegistration / firstCurrentOwing', () {
+    RegistrationConfig league(String status, String season) =>
+        RegistrationConfig(
+          targetType: 'league',
+          sport: 'Futsal',
+          season: season,
+          status: status,
+          fee: 60,
+          paymentMode: 'perPlayer',
+        );
+    RegistrationConfig cup(String status, String id) => RegistrationConfig(
+          targetType: 'tournament',
+          sport: 'Soccer',
+          tournamentId: id,
+          tournamentName: 'Cup',
+          status: status,
+          fee: 60,
+          paymentMode: 'perPlayer',
+        );
+    bool current(RegistrationConfig c,
+            {String? pointer, Set<String>? active}) =>
+        isCurrentRegistration(c, seasonPointer: (sport) {
+          expect(sport, c.sport);
+          return pointer;
+        }, activeTournamentIds: active);
+
+    test('open is always current (even with nothing known)', () {
+      expect(current(league('open', '9')), isTrue);
+      expect(current(cup('open', 't1')), isTrue);
+    });
+
+    test('Season 16 closed with pointer 16: current (nags)', () {
+      expect(current(league('closed', '16'), pointer: '16'), isTrue);
+    });
+
+    test('Season 16 closed with pointer 17: not current (silent)', () {
+      expect(current(league('closed', '16'), pointer: '17'), isFalse);
+    });
+
+    test('a registration for 17 closed while the pointer is 16: current', () {
+      expect(current(league('closed', '17'), pointer: '16'), isTrue);
+    });
+
+    test('unknown pointer: a closed league registration is silent', () {
+      expect(current(league('closed', '16'), pointer: null), isFalse);
+      expect(current(league('closed', '16'), pointer: 'oops'), isFalse);
+    });
+
+    test('closed tournament: current only while it exists and is active', () {
+      expect(current(cup('closed', 't1'), active: {'t1'}), isTrue);
+      expect(current(cup('closed', 't1'), active: {'t2'}), isFalse);
+      expect(current(cup('closed', 't1'), active: null), isFalse,
+          reason: 'tournaments not known yet: never nag on a guess');
+    });
+
+    test('firstCurrentOwing skips an old owing registration', () {
+      final regs = MyRegistrations(mine: [
+        MyRegistration(
+            regId: 'old',
+            config: league('closed', '15'),
+            submission: const RegSubmission(path: 'individual', answers: {})),
+        MyRegistration(
+            regId: 'now',
+            config: league('closed', '16'),
+            submission: const RegSubmission(path: 'individual', answers: {})),
+      ], openForSignUp: const {});
+      final pick = firstCurrentOwing(regs,
+          seasonPointer: (_) => '16', activeTournamentIds: null);
+      expect(pick!.regId, 'now');
+      expect(
+          firstCurrentOwing(regs,
+              seasonPointer: (_) => '17', activeTournamentIds: null),
+          isNull);
+      expect(
+          firstCurrentOwing(null,
+              seasonPointer: (_) => '16', activeTournamentIds: null),
+          isNull);
+    });
+  });
 }

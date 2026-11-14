@@ -12,6 +12,8 @@ import 'package:infinite_sports_flutter/insiders/insiders_info_page.dart';
 import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/notification_prefs.dart';
 import 'package:infinite_sports_flutter/misc/season_pointers.dart';
+import 'package:infinite_sports_flutter/misc/tournament_service.dart';
+import 'package:infinite_sports_flutter/model/tournament.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
@@ -59,10 +61,16 @@ class NavBar extends StatefulWidget {
   required String signUpDetail,
   required bool hasOpenRegistrations,
   required MyRegistrations? mine,
+  String? Function(String sport)? seasonPointer,
+  Set<String>? activeTournamentIds,
 }) {
   final hasMine = signedIn && (mine?.mine.isNotEmpty ?? false);
   if (hasMine) {
-    final owing = mine!.firstOwing;
+    // Fix round, Important 4: "You owe" only for a CURRENT registration
+    // (the same firstCurrentOwing as the home banner).
+    final owing = firstCurrentOwing(mine,
+        seasonPointer: seasonPointer ?? (_) => null,
+        activeTournamentIds: activeTournamentIds);
     return (
       title: 'My registrations',
       subtitle: owing != null ? 'You owe ${formatOwed(owing.owed)}' : signUpDetail,
@@ -106,6 +114,13 @@ class _NavBarState extends State<NavBar> {
           if (mounted) setState(() => _myRegistrations = m);
         }, onError: (Object _) {});
       } catch (_) {}
+      // Which tournaments are still active (for "current" registrations).
+      try {
+        _tournamentsSub = TournamentService.watchAllTournaments().listen((t) {
+          final ids = TournamentService.activeTournamentIds(t).toSet();
+          if (mounted) setState(() => _activeTournamentIds = ids);
+        }, onError: (Object _) {});
+      } catch (_) {}
     }
     final uid = FirebaseAuth.instance.currentUser?.uid;
     _insiderStream = (signedIn && uid != null)
@@ -134,6 +149,8 @@ class _NavBarState extends State<NavBar> {
 
   StreamSubscription<MyRegistrations>? _mineSub;
   MyRegistrations? _myRegistrations;
+  StreamSubscription<List<Tournament>>? _tournamentsSub;
+  Set<String>? _activeTournamentIds;
 
   /// One sign-up-row refresh at a time; a change during one queues exactly
   /// one more (second review, Minor 4 — the bug class).
@@ -145,6 +162,7 @@ class _NavBarState extends State<NavBar> {
       stop();
     }
     _mineSub?.cancel();
+    _tournamentsSub?.cancel();
     SeasonPointers.listenable.removeListener(_signUpRow.request);
     _signUpRow.dispose();
     super.dispose();
@@ -404,7 +422,10 @@ class _NavBarState extends State<NavBar> {
                   signUpsOpen: signUpsOpen,
                   signUpDetail: signUpDetail,
                   hasOpenRegistrations: openRegistrations.isNotEmpty,
-                  mine: _myRegistrations);
+                  mine: _myRegistrations,
+                  seasonPointer: (sport) =>
+                      SeasonPointers.current.seasonFor(sport),
+                  activeTournamentIds: _activeTournamentIds);
               signUpEnabled = row.enabled;
               return ListTile(
                 enabled: signUpEnabled,
