@@ -117,10 +117,13 @@ List<String>? followHeader(
       owing: owing,
     );
   }
-  if (open.isEmpty) return null;
+  // Fix round, Minor 3: once the fan's registrations are known, only the
+  // open registrations they have NOT registered for are offered.
+  final offer = mine?.openForSignUp ?? open;
+  if (offer.isEmpty) return null;
   return (
-    title: open.length == 1
-        ? 'Registration open: ${open.values.first.label}'
+    title: offer.length == 1
+        ? 'Registration open: ${offer.values.first.label}'
         : 'Registrations are open',
     subtitle: 'Tap to sign up',
     owing: null,

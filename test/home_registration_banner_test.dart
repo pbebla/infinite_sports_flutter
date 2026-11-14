@@ -24,13 +24,16 @@ void main() {
   final closedOwing = _config('Futsal', 'closed', fee: 80);
   final open17 = _config('Basketball', 'open');
 
-  MyRegistrations mine({required bool paid}) => MyRegistrations(mine: [
+  MyRegistrations mine(
+          {required bool paid,
+          Map<String, RegistrationConfig> openForSignUp = const {}}) =>
+      MyRegistrations(mine: [
         MyRegistration(
             regId: 'futsal',
             config: closedOwing,
             submission: RegSubmission(
                 path: 'individual', answers: const {}, paid: paid)),
-      ], openForSignUp: const {});
+      ], openForSignUp: openForSignUp);
 
   test('owing (closed registration) wins over an open registration', () {
     final b = homeRegistrationBanner(
@@ -45,7 +48,7 @@ void main() {
   test('paid up: today\'s banner', () {
     final b = homeRegistrationBanner(
         seasonPointer: (_) => '16',
-        mine: mine(paid: true),
+        mine: mine(paid: true, openForSignUp: {'basket': open17}),
         open: {'basket': open17})!;
     expect(b.title, 'Registration open: ${open17.label}');
     expect(b.subtitle, 'Tap to sign up');
@@ -153,5 +156,52 @@ void main() {
             mine: mine(paid: false),
             open: const {}),
         isNull);
+  });
+
+  // Way back fix round, Minor 3: once the fan's registrations are known, the
+  // "Registration open" banner only offers what they have NOT registered for
+  // (MyRegistrations.openForSignUp), never "Tap to sign up" for their own.
+  group('the open banner skips registrations the fan already has', () {
+    final futsalOpen = _config('Futsal', 'open');
+
+    test('registered for the only open one: no "sign up" banner', () {
+      final known = MyRegistrations(mine: [
+        MyRegistration(
+            regId: 'futsal',
+            config: futsalOpen,
+            submission: const RegSubmission(
+                path: 'individual', answers: {}, paid: true)),
+      ], openForSignUp: const {});
+      expect(
+          homeRegistrationBanner(
+              seasonPointer: (_) => '16',
+              mine: known,
+              open: {'futsal': futsalOpen}),
+          isNull);
+    });
+
+    test('registered for one of two: the singular banner for the other', () {
+      final known = MyRegistrations(mine: [
+        MyRegistration(
+            regId: 'futsal',
+            config: futsalOpen,
+            submission: const RegSubmission(
+                path: 'individual', answers: {}, paid: true)),
+      ], openForSignUp: {
+        'basket': open17
+      });
+      final b = homeRegistrationBanner(
+          seasonPointer: (_) => '16',
+          mine: known,
+          open: {'futsal': futsalOpen, 'basket': open17})!;
+      expect(b.title, 'Registration open: ${open17.label}');
+    });
+
+    test('registrations not known yet (signed out / loading): every open one',
+        () {
+      final b =
+          homeRegistrationBanner(mine: null, open: {'futsal': futsalOpen})!;
+      expect(b.title, 'Registration open: ${futsalOpen.label}');
+    });
   });
 }
