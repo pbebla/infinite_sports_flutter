@@ -100,4 +100,55 @@ void main() {
     expect(r.title, 'My registrations', reason: 'still reachable');
     expect(r.subtitle, 'Sign Ups Closed');
   });
+
+  // Way back fix round, Minor 4: when the drawer row becomes "My
+  // registrations", the OLD sign-up page (legacy Sign Up Status, no
+  // new-style registration open) must stay reachable from the list.
+  group('the old sign-up page stays reachable', () {
+    test('legacy sign-ups open, no new-style one: the list offers it', () {
+      final r = drawerRegistrationRow(
+          signedIn: true,
+          signUpsOpen: true,
+          signUpDetail: 'Sign Up for Futsal Season 17',
+          hasOpenRegistrations: false,
+          mine: _mine(paid: true),
+          seasonPointer: (_) => '16');
+      expect(r.title, 'My registrations');
+      expect(r.offersLegacySignUp, isTrue);
+    });
+
+    test('a new-style registration is open: no legacy offer', () {
+      final r = drawerRegistrationRow(
+          signedIn: true,
+          signUpsOpen: true,
+          signUpDetail: 'Sign Ups Open',
+          hasOpenRegistrations: true,
+          mine: _mine(paid: true),
+          seasonPointer: (_) => '16');
+      expect(r.offersLegacySignUp, isFalse);
+    });
+
+    test('sign-ups closed: no legacy offer', () {
+      final r = drawerRegistrationRow(
+          signedIn: true,
+          signUpsOpen: false,
+          signUpDetail: 'Sign Ups Closed',
+          hasOpenRegistrations: false,
+          mine: _mine(paid: true),
+          seasonPointer: (_) => '16');
+      expect(r.offersLegacySignUp, isFalse);
+    });
+
+    test('no registration of my own: today\'s row goes there directly', () {
+      final r = drawerRegistrationRow(
+          signedIn: true,
+          signUpsOpen: true,
+          signUpDetail: 'Sign Up for Futsal Season 17',
+          hasOpenRegistrations: false,
+          mine: MyRegistrations.empty);
+      expect(r.title, 'Sign Up List');
+      expect(r.opensRegistrationList, isFalse);
+      expect(r.offersLegacySignUp, isFalse);
+    });
+  });
 }

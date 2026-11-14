@@ -54,7 +54,16 @@ class NavBar extends StatefulWidget {
 /// network). With a registration of their own (open or closed) the row is
 /// "My registrations", enabled, opening the registration list — with
 /// "You owe $X" when money is still owed.
-({String title, String subtitle, bool enabled, bool opensRegistrationList})
+/// [offersLegacySignUp] (way back fix round, Minor 4): the row opens the
+/// registration list while the OLD sign-up page (legacy Sign Up Status, no
+/// new-style registration open) is open, so the list must offer it.
+({
+  String title,
+  String subtitle,
+  bool enabled,
+  bool opensRegistrationList,
+  bool offersLegacySignUp
+})
     drawerRegistrationRow({
   required bool signedIn,
   required bool signUpsOpen,
@@ -76,6 +85,7 @@ class NavBar extends StatefulWidget {
       subtitle: owing != null ? 'You owe ${formatOwed(owing.owed)}' : signUpDetail,
       enabled: true,
       opensRegistrationList: true,
+      offersLegacySignUp: signUpsOpen && !hasOpenRegistrations,
     );
   }
   return (
@@ -83,6 +93,7 @@ class NavBar extends StatefulWidget {
     subtitle: signUpDetail,
     enabled: signUpsOpen && signedIn,
     opensRegistrationList: hasOpenRegistrations,
+    offersLegacySignUp: false,
   );
 }
 
@@ -436,7 +447,15 @@ class _NavBarState extends State<NavBar> {
                 onTap: () {
                   Navigator.push(context, MaterialPageRoute(builder:(context) {
                     if (row.opensRegistrationList) {
-                      return const RegistrationEntryPage();
+                      return RegistrationEntryPage(
+                        legacySignUp: row.offersLegacySignUp
+                            ? (
+                                detail: signUpDetail,
+                                page: (_) => Signup(
+                                    nextleague: nextleague, season: season),
+                              )
+                            : null,
+                      );
                     }
                     return Signup(nextleague: nextleague, season: season);
                   },));

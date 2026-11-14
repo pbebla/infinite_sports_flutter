@@ -25,10 +25,16 @@ const String kRegistrationsCouldNotLoad =
 /// One loading state for both groups (no pop-in); a failed read is
 /// "couldn't load" with Retry.
 class RegistrationEntryPage extends StatefulWidget {
-  const RegistrationEntryPage({super.key, this.registrationsOverride});
+  const RegistrationEntryPage(
+      {super.key, this.registrationsOverride, this.legacySignUp});
 
   /// Test seam: the live registrations (null = watchMyRegistrations).
   final Stream<MyRegistrations> Function()? registrationsOverride;
+
+  /// The OLD sign-up page (legacy Sign Up Status), when the drawer brought
+  /// the fan here while it is open and no new-style registration is (way
+  /// back fix round, Minor 4): a "Sign Up List" row at the bottom opens it.
+  final ({String detail, WidgetBuilder page})? legacySignUp;
 
   @override
   State<RegistrationEntryPage> createState() => _RegistrationEntryPageState();
@@ -94,7 +100,10 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
             return const SkeletonList();
           }
           final regs = snapshot.data!;
-          if (regs.mine.isEmpty && regs.openForSignUp.isEmpty) {
+          final legacy = widget.legacySignUp;
+          if (regs.mine.isEmpty &&
+              regs.openForSignUp.isEmpty &&
+              legacy == null) {
             return const Center(
                 child: Text('No registrations are open right now.'));
           }
@@ -110,6 +119,18 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
                 _header(context, 'Open for sign-up'),
                 for (final e in regs.openForSignUp.entries)
                   _openTile(context, e.key, e.value),
+              ],
+              if (legacy != null) ...[
+                if (regs.openForSignUp.isEmpty)
+                  _header(context, 'Open for sign-up'),
+                ListTile(
+                  leading: const Icon(Icons.how_to_reg),
+                  title: const Text('Sign Up List',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text(legacy.detail),
+                  onTap: () => Navigator.push(
+                      context, MaterialPageRoute(builder: legacy.page)),
+                ),
               ],
             ],
           );
@@ -155,10 +176,10 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
     final decision = m.chip;
     final chip = RegistrationStatusChip(
         paid: decision.settled,
-        label: decision.kind == RegistrationChipKind.pending &&
-                decision.owed > 0
-            ? 'You owe ${formatOwed(decision.owed)}'
-            : decision.label);
+        label:
+            decision.kind == RegistrationChipKind.pending && decision.owed > 0
+                ? 'You owe ${formatOwed(decision.owed)}'
+                : decision.label);
     return ListTile(
       leading: const Icon(Icons.assignment_turned_in),
       title: Text(m.config.label,

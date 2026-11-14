@@ -202,4 +202,56 @@ void main() {
     expect(find.text('Payment pending'), findsOneWidget);
     expect(find.text('Covered'), findsNothing);
   });
+
+  // Way back fix round, Minor 4: the old sign-up page stays reachable from
+  // the registration list (the drawer passes it when a legacy sign-up is
+  // open and no new-style registration is).
+  group('the old sign-up page', () {
+    MyRegistrations onlyMine() => MyRegistrations(mine: [
+          MyRegistration(
+              regId: 'futsal', config: closedMine, submission: _promoUnpaid),
+        ], openForSignUp: const {});
+
+    Future<void> pumpLegacy(WidgetTester tester,
+        {required ({String detail, WidgetBuilder page})? legacy,
+        ThemeMode mode = ThemeMode.light}) async {
+      tester.view.physicalSize = const Size(360, 740);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(brightness: Brightness.light),
+        darkTheme: ThemeData(brightness: Brightness.dark),
+        themeMode: mode,
+        home: RegistrationEntryPage(
+          registrationsOverride: () => Stream.value(onlyMine()),
+          legacySignUp: legacy,
+        ),
+      ));
+      await tester.pump();
+    }
+
+    for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+      testWidgets('${mode.name} 360 px: a Sign Up List row opens it',
+          (tester) async {
+        await pumpLegacy(tester, mode: mode, legacy: (
+          detail: 'Sign Up for Futsal Season 17',
+          page: (_) => const Scaffold(body: Text('old sign-up page')),
+        ));
+        expect(tester.takeException(), isNull);
+        expect(find.text('Sign Up List'), findsOneWidget);
+        expect(find.text('Sign Up for Futsal Season 17'), findsOneWidget);
+        expect(tester.getTopLeft(find.text(closedMine.label)).dy,
+            lessThan(tester.getTopLeft(find.text('Sign Up List')).dy),
+            reason: 'below my registrations');
+        await tester.tap(find.text('Sign Up List'));
+        await tester.pumpAndSettle();
+        expect(find.text('old sign-up page'), findsOneWidget);
+      });
+    }
+
+    testWidgets('not offered: no Sign Up List row', (tester) async {
+      await pumpLegacy(tester, legacy: null);
+      expect(find.text('Sign Up List'), findsNothing);
+    });
+  });
 }
