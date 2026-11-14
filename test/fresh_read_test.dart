@@ -224,6 +224,26 @@ void main() {
       e.debugReset();
     });
 
+    test(
+        'second review Minor 2: a refreshing reader that joins after the '
+        'linger pass still gets its own bound, and the entry closes', () async {
+      final e = f.engine(lingerFor: const Duration(milliseconds: 30));
+      final p = f.path('A');
+      // A server-first read joins late and holds the entry past the linger.
+      await _tick(0);
+      final hold =
+          e.serverFirst('A', timeout: const Duration(milliseconds: 60));
+      unawaited(hold
+          .catchError((_) => FreshOutcome<_Ev>(_Ev(null), fromServer: false)));
+      await _tick(40); // linger has fired; the hold keeps it open
+      expect(p.live, 1);
+      final late = e.refreshing('A');
+      await expectLater(late, throwsA(isA<TimeoutException>()));
+      await _tick(30);
+      expect(p.live, 0, reason: 'no waiters, no holders: closed');
+      e.debugReset();
+    });
+
     test('two reads of one path share ONE listener', () async {
       final e = f.engine();
       final p = f.path('Current League');

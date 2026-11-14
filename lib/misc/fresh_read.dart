@@ -220,6 +220,15 @@ class FreshReadEngine<Q, E> {
     }
     final c = Completer<E>();
     entry.firstWaiters.add(c);
+    // Second review, Minor 2: EVERY reader gets its own bound from the
+    // moment it joins (a reader joining after the entry's linger pass used
+    // to wait for the connection).
+    Timer(lingerFor, () {
+      if (c.isCompleted || !entry.firstWaiters.remove(c)) return;
+      c.completeError(
+          TimeoutException('Fresh read ${entry.key}: no answer', lingerFor));
+      _maybeClose(entry);
+    });
     return c.future;
   }
 
@@ -315,18 +324,10 @@ class FreshReadEngine<Q, E> {
     entry.lingerTimer = Timer(lingerFor, () {
       entry.lingerTimer = null;
       entry.lingerExpired = true;
-      // Review m3: the bound ALWAYS ends the listener. Readers still waiting
-      // for a first answer fail with a TimeoutException (callers bound or
-      // catch their reads; a failed read is not a fact). Server-first reads
-      // in progress finish on their own (shorter) bound, then it closes.
-      if (entry.firstWaiters.isNotEmpty) {
-        final waiters = List.of(entry.firstWaiters);
-        entry.firstWaiters.clear();
-        for (final w in waiters) {
-          w.completeError(TimeoutException(
-              'Fresh read ${entry.key}: no answer', lingerFor));
-        }
-      }
+      // Review m3 / second review Minor 2: past the linger the entry closes
+      // as soon as it has no waiters and no holders. Each first-reader and
+      // each server-first read carries its own bound (refreshing: lingerFor
+      // from joining; server-first: its timeout), so that always happens.
       _maybeClose(entry);
     });
     try {
