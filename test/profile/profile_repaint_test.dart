@@ -239,4 +239,49 @@ void main() {
       expect(ProfilePage.debugShownLeagueGoals(), 3);
     });
   });
+
+  // Final round, item 2: a reload commits only when every read it needs
+  // succeeded; otherwise the career on screen stays as it was.
+  testWidgets(
+      'a reload with a failed sub-read keeps the shown career; the '
+      'next newer value tries again', (tester) async {
+    var bundleFails = false;
+    final base = sources();
+    final flaky = ProfileCareerSources(
+      read: base.read,
+      tournamentBundle: (id) async {
+        if (bundleFails) throw StateError('tournament read failed');
+        return base.tournamentBundle(id);
+      },
+      afcSeasons: base.afcSeasons,
+      afcRoster: base.afcRoster,
+    );
+    tester.view.physicalSize = const Size(420, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      home: ProfilePage(
+        uid: _uid,
+        careerSources: flaky,
+        fantasySeams: FantasyProfileSeams(resolveSeason: () async => null),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(ProfilePage.debugShownLeagueGoals(), 3);
+
+    bundleFails = true;
+    goals = 9;
+    await newer(tester);
+    expect(ProfilePage.debugShownLeagueGoals(), 3,
+        reason: 'a partial career (no tournament) is never swapped in');
+    expect(ProfilePage.debugCachedCounts(_uid), isNull,
+        reason: 'and never cached');
+
+    bundleFails = false;
+    await newer(tester);
+    expect(ProfilePage.debugShownLeagueGoals(), 9);
+    expectNoDuplicates();
+  });
 }

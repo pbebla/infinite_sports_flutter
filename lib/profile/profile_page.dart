@@ -542,7 +542,10 @@ class _ProfilePageState extends State<ProfilePage>
       }));
     } on TimeoutException {
       w.degraded = true;
-    } catch (_) {}
+    } catch (_) {
+      // A swallowed failure: a RELOAD with it does not commit.
+      w.failed = true;
+    }
   }
 
   // ─── Stat map builders ──────────────────────────────────────────────────
@@ -1230,6 +1233,15 @@ class _ProfilePageState extends State<ProfilePage>
     } catch (_) {
       ok = false;
     }
+    // Final round, item 2: a RELOAD commits only when every read it needed
+    // succeeded; otherwise the career on screen stays as it was (an error is
+    // not a fact) and the next newer value or the next visit tries again.
+    // The FIRST load keeps its existing behaviour (shows what it has).
+    final isReload = identity != null;
+    if (isReload && (!ok || w.failed || w.degraded)) {
+      if (identical(_building, w)) _building = null;
+      return;
+    }
     void apply() {
       if (identity != null) _applyIdentity(identity);
       if (ok) _applyCareer(w, color);
@@ -1315,7 +1327,10 @@ class _ProfilePageState extends State<ProfilePage>
       // (futsalLineups[season] etc. in utility.dart), so the fetches are
       // safe to run in parallel instead of the old sequential forEach.
       await Future.wait(tasks);
-    } catch (_) {}
+    } catch (_) {
+      // A swallowed failure: a RELOAD with it does not commit.
+      w.failed = true;
+    }
   }
 
   Future<void> _loadLeagueSeason(_CareerWork w,
@@ -1350,7 +1365,10 @@ class _ProfilePageState extends State<ProfilePage>
           await _extractPlayerStats(w, sport, seasonNum, team);
     } on TimeoutException {
       w.degraded = true;
-    } catch (_) {}
+    } catch (_) {
+      // A swallowed failure: a RELOAD with it does not commit.
+      w.failed = true;
+    }
   }
 
   /// Reads `/<Sport>/<season>/Line Ups/<team>` (one team's node) and pulls
@@ -1511,11 +1529,16 @@ class _ProfilePageState extends State<ProfilePage>
               }
             }
           }
-        } catch (_) {}
+        } catch (_) {
+          w.failed = true; // a RELOAD with it does not commit
+        }
       }));
     } on TimeoutException {
       w.degraded = true;
-    } catch (_) {}
+    } catch (_) {
+      // A swallowed failure: a RELOAD with it does not commit.
+      w.failed = true;
+    }
   }
 
   Future<void> _buildCareer(_CareerWork w) async {
@@ -1537,6 +1560,7 @@ class _ProfilePageState extends State<ProfilePage>
               .bounded('ProfilePage: $sport current season');
         } catch (_) {
           cachedCurrentSeason[sport] = '';
+          w.failed = true; // a RELOAD with it does not commit
         }
       }
       final currentSeasonForSport = cachedCurrentSeason[sport] ?? '';
@@ -1555,7 +1579,9 @@ class _ProfilePageState extends State<ProfilePage>
                     ? isAFCSeasonFinished(seasonNum)
                     : isSeasonFinished(sport, seasonNum))
                 .bounded('ProfilePage: $sport $seasonNum Finished'));
-          } catch (_) {}
+          } catch (_) {
+            w.failed = true; // a RELOAD with it does not commit
+          }
         }
 
         final position = w.sportPositions[sport] ??
@@ -1791,6 +1817,10 @@ class _CareerWork {
   String firstName;
   String lastName;
   bool degraded = false;
+
+  /// A sub-read failed and was swallowed (the first load still shows what
+  /// it has; a reload with it does not commit — final round, item 2).
+  bool failed = false;
   final Set<String> readPaths = {};
   final Map<String, Map<String, (String, Color, Player)>> tableEntries = {};
   final Map<String, String> sportPositions = {};
