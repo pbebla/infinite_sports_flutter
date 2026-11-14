@@ -6,10 +6,13 @@
 // both rules files. Firebase-free: the sources are seamed.
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/registration/my_registrations.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
+import 'package:infinite_sports_flutter/registration/registration_models.dart'
+    as models show allRegistrationsFromNode;
 
 RegistrationConfig _config(String status, {num fee = 60}) => RegistrationConfig(
       targetType: 'league',
@@ -375,6 +378,33 @@ void main() {
       expect(out, hasLength(1));
       expect(teams, isEmpty);
       await sub.cancel();
+    });
+  });
+
+  // Way back fix round, Minor 5: no circular import between the service and
+  // the "my registrations" file; the mirror parser lives with the models.
+  group('no circular import', () {
+    test('registration_service.dart does not import my_registrations.dart', () {
+      final src =
+          File('lib/registration/registration_service.dart').readAsStringSync();
+      expect(
+          RegExp(r"^import .*my_registrations\.dart'", multiLine: true)
+              .hasMatch(src),
+          isFalse);
+    });
+
+    test('the mirror parser lives in registration_models.dart', () {
+      final all = models.allRegistrationsFromNode({
+        'a': {
+          'TargetType': 'league',
+          'Sport': 'Futsal',
+          'Season': '16',
+          'Status': 'closed',
+        },
+        'bad': 'not a config',
+      });
+      expect(all.keys, ['a']);
+      expect(all['a']!.status, 'closed');
     });
   });
 }

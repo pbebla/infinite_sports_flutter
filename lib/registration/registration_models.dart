@@ -956,3 +956,24 @@ bool paymentCovered({
             submission: submission,
             codeWaivesPayment: codeWaivesPayment) ==
         0;
+
+/// Every registration config in the mirror, whatever its Status (null-safe
+/// parse; malformed children skipped). Lives with the models so the service
+/// and my_registrations.dart share it without importing each other (way back
+/// fix round, Minor 5).
+Map<String, RegistrationConfig> allRegistrationsFromNode(Object? raw) {
+  final out = <String, RegistrationConfig>{};
+  void add(String regId, Object? node) {
+    final config = RegistrationConfig.fromFirebase(node);
+    if (config != null) out[regId] = config;
+  }
+
+  if (raw is Map) {
+    raw.forEach((regId, node) => add(regId.toString(), node));
+  } else if (raw is List) {
+    for (var i = 0; i < raw.length; i++) {
+      add('$i', raw[i]);
+    }
+  }
+  return out;
+}

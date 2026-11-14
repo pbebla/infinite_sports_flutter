@@ -149,25 +149,6 @@ String registrationPathLabel(String path) {
   }
 }
 
-/// Every registration config in the mirror, whatever its Status (null-safe
-/// parse; malformed children skipped).
-Map<String, RegistrationConfig> allRegistrationsFromNode(Object? raw) {
-  final out = <String, RegistrationConfig>{};
-  void add(String regId, Object? node) {
-    final config = RegistrationConfig.fromFirebase(node);
-    if (config != null) out[regId] = config;
-  }
-
-  if (raw is Map) {
-    raw.forEach((regId, node) => add(regId.toString(), node));
-  } else if (raw is List) {
-    for (var i = 0; i < raw.length; i++) {
-      add('$i', raw[i]);
-    }
-  }
-  return out;
-}
-
 String? _signedInUid() {
   try {
     return FirebaseAuth.instance.currentUser?.uid;

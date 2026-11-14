@@ -3,8 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
-import 'package:infinite_sports_flutter/registration/my_registrations.dart'
-    show allRegistrationsFromNode;
 import 'package:infinite_sports_flutter/misc/stream_resilience.dart';
 import 'package:infinite_sports_flutter/registration/promo_engine.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
