@@ -92,6 +92,7 @@ class FantasyPlayersTab extends StatefulWidget {
     required this.lockOverride,
     required this.gameweeks,
     this.scheduleUnknown = false,
+    this.scheduleGaveUp = false,
     this.totalsStates,
     this.priceChangeStates,
     this.gamesStates,
@@ -119,6 +120,9 @@ class FantasyPlayersTab extends StatefulWidget {
   /// The schedule read failed (FantasyScheduleFeed.scheduleUnknown, review 6
   /// I2): never "Locked" / "Season complete" from that empty list.
   final bool scheduleUnknown;
+
+  /// The schedule feed has stopped retrying (re-review 6b, item 2).
+  final bool scheduleGaveUp;
 
   // ── Test seams — null = the real FantasyService / LeagueService feeds ──
   final Stream<Map<String, FantasyPlayerTotals>?>? totalsStates;
@@ -1087,6 +1091,7 @@ class _FantasyPlayersTabState extends State<FantasyPlayersTab> {
           _MarketAddControl(
             player: p,
             availability: availability,
+            gaveUp: widget.scheduleGaveUp,
             onAdd: () => _add(p),
             onRemove: () => _remove(p),
           ),
@@ -1346,10 +1351,12 @@ class _MarketAddControl extends StatelessWidget {
     required this.availability,
     required this.onAdd,
     required this.onRemove,
+    this.gaveUp = false,
   });
 
   final FantasyPlayer player;
   final MarketAddAvailability availability;
+  final bool gaveUp;
   final VoidCallback onAdd;
   final VoidCallback onRemove;
 
@@ -1382,7 +1389,8 @@ class _MarketAddControl extends StatelessWidget {
         // Tooltip-style reason on tap (the button is dead, the WHY isn't).
         return Tooltip(
           key: ValueKey('market_add_disabled_${player.name}'),
-          message: marketAddReason(availability, player.position)!,
+          message: marketAddReason(availability, player.position,
+              gaveUp: gaveUp)!,
           triggerMode: TooltipTriggerMode.tap,
           child: Padding(
             padding: const EdgeInsets.all(8),

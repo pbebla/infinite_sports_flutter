@@ -782,6 +782,10 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
           draft: draft,
           editable: _editable,
           deadlineUnknown: _editState == SquadEditState.unknown,
+          // Given up retrying (re-review 6b, item 2): "Try again" here.
+          onRetrySchedule: _schedule.scheduleRetry == FantasyFeedRetry.gaveUp
+              ? _schedule.restart
+              : null,
         ),
       );
     } else {
@@ -870,12 +874,14 @@ class _DraftAction extends StatelessWidget {
     required this.draft,
     required this.editable,
     this.deadlineUnknown = false,
+    this.onRetrySchedule,
   });
 
   final FantasyPlayer player;
   final SquadDraftController draft;
   final bool editable;
   final bool deadlineUnknown;
+  final VoidCallback? onRetrySchedule;
 
   @override
   Widget build(BuildContext context) {
@@ -893,7 +899,13 @@ class _DraftAction extends StatelessWidget {
     );
     final inSquad = availability == MarketAddAvailability.inSquad;
     final addable = availability == MarketAddAvailability.addable;
-    final reason = marketAddReason(availability, player.position);
+    final retry = availability == MarketAddAvailability.deadlineUnknown
+        ? onRetrySchedule
+        : null;
+    final reason = availability == MarketAddAvailability.deadlineUnknown &&
+            retry != null
+        ? "Couldn't check the deadline."
+        : marketAddReason(availability, player.position);
     // An owned baseline player's Remove says what he was bought at and
     // what selling him banks; anyone bought this week has no such line.
     // Only once the draft's money is real (never a stale sell price).
@@ -953,6 +965,12 @@ class _DraftAction extends StatelessWidget {
                   : scheme.onSurfaceVariant,
             ),
           ),
+          if (retry != null)
+            TextButton(
+              key: const ValueKey('profile_deadline_retry'),
+              onPressed: retry,
+              child: const Text('Try again'),
+            ),
         ] else if (draft.dirty) ...[
           const SizedBox(height: 6),
           Text(

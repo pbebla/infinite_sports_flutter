@@ -10,6 +10,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart'
+    show kFantasyFeedRetryDelays;
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/player_week_stats.dart';
@@ -814,6 +816,30 @@ void main() {
               "Can't check the deadline right now — try again in a moment."),
           findsOneWidget);
       expect(find.text('Gameweek locked — no changes now.'), findsNothing);
+    });
+
+    testWidgets("the schedule read keeps failing: once retrying has stopped "
+        "the note says so with Try again, which reads again (re-review 6b)",
+        (tester) async {
+      await pumpPage(tester);
+      await emitAll(tester,
+          lock: FantasyLockOverride.auto, weeksError: true);
+      expect(key('profile_deadline_retry'), findsNothing);
+      for (final d in kFantasyFeedRetryDelays) {
+        await tester.pump(d + const Duration(milliseconds: 10));
+        gameweeks.addError(StateError('permission-denied'));
+        await tester.pump();
+      }
+      await tester.pump();
+      expect(find.text("Couldn't check the deadline."), findsOneWidget);
+      expect(key('profile_deadline_retry'), findsOneWidget);
+      await tester.tap(key('profile_deadline_retry'));
+      await tester.pump();
+      gameweeks.add(_gameweeks(3));
+      await tester.pump();
+      await tester.pump();
+      expect(key('profile_deadline_retry'), findsNothing);
+      expect(find.text("Couldn't check the deadline."), findsNothing);
     });
 
     testWidgets('from outside the hub the primary button is Open in Fantasy',

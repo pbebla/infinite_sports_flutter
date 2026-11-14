@@ -382,4 +382,42 @@ void main() {
       expect(f.retry, FantasyFeedRetry.none);
     });
   });
+
+  testWidgets('given up: the chip and the slim line say so and their Try '
+      'again calls back; the market note points at it (re-review 6b)',
+      (tester) async {
+    final clock = FantasyDeadlineClock(nowUtc: () => DateTime.utc(2026, 10, 17));
+    var taps = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Column(children: [
+          FantasyDeadlineChip(
+            gameweeks: const [],
+            lockOverride: FantasyLockOverride.auto,
+            clock: clock,
+            scheduleUnknown: true,
+            onRetry: () => taps++,
+          ),
+          FantasyDeadlineSlimLine(
+            gameweeks: const [],
+            lockOverride: FantasyLockOverride.auto,
+            clock: clock,
+            scheduleUnknown: true,
+            onRetry: () => taps++,
+          ),
+        ]),
+      ),
+    ));
+    expect(find.text("Couldn't load the schedule"), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('deadline_retry')));
+    await tester.tap(find.byKey(const ValueKey('deadline_slim_retry')));
+    expect(taps, 2);
+    expect(
+        marketAddReason(
+            MarketAddAvailability.deadlineUnknown, FantasyPosition.att,
+            gaveUp: true),
+        "Couldn't check the deadline — tap Try again at the top.");
+    await tester.pumpWidget(const SizedBox());
+    clock.dispose();
+  });
 }

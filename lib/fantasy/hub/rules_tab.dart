@@ -28,6 +28,7 @@ class FantasyRulesTab extends StatelessWidget {
     this.initialState,
     this.gameweeks = const [],
     this.scheduleUnknown = false,
+    this.onRetrySchedule,
     this.nowUtc,
     this.supportPageBuilder,
   });
@@ -41,6 +42,9 @@ class FantasyRulesTab extends StatelessWidget {
   /// The schedule read failed (FantasyScheduleFeed.scheduleUnknown, review 6
   /// I2): never "Locked" / "Season complete" from that empty list.
   final bool scheduleUnknown;
+
+  /// Non-null once the schedule feed has given up: "Try again".
+  final VoidCallback? onRetrySchedule;
   final DateTime Function()? nowUtc;
 
   /// Test seam replacing the real SupportFormPage push (whose default wiring
@@ -60,6 +64,7 @@ class FantasyRulesTab extends StatelessWidget {
             state: state,
             gameweeks: gameweeks,
             scheduleUnknown: scheduleUnknown,
+            onRetrySchedule: onRetrySchedule,
             nowUtc: nowUtc,
             supportPageBuilder: supportPageBuilder);
       },
@@ -72,6 +77,7 @@ class _RulesBody extends StatelessWidget {
     required this.state,
     required this.gameweeks,
     required this.scheduleUnknown,
+    this.onRetrySchedule,
     required this.nowUtc,
     required this.supportPageBuilder,
   });
@@ -82,6 +88,9 @@ class _RulesBody extends StatelessWidget {
   /// The schedule read failed (FantasyScheduleFeed.scheduleUnknown, review 6
   /// I2): never "Locked" / "Season complete" from that empty list.
   final bool scheduleUnknown;
+
+  /// Non-null once the schedule feed has given up: "Try again".
+  final VoidCallback? onRetrySchedule;
   final DateTime Function()? nowUtc;
   final Widget Function()? supportPageBuilder;
 
@@ -178,6 +187,7 @@ class _RulesBody extends StatelessWidget {
                 lockOverride: state.lockOverride,
                 nowUtc: nowUtc,
                 scheduleUnknown: scheduleUnknown,
+                onRetry: onRetrySchedule,
               ),
             ],
           ),

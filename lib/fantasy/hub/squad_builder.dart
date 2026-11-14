@@ -74,6 +74,7 @@ class FantasySquadBuilder extends StatefulWidget {
     required this.lockOverride,
     required this.gameweeks,
     this.scheduleUnknown = false,
+    this.onRetrySchedule,
     required this.players,
     required this.squadStates,
     this.initialSquad,
@@ -140,6 +141,10 @@ class FantasySquadBuilder extends StatefulWidget {
   /// The schedule read failed (FantasyScheduleFeed.scheduleUnknown, review 6
   /// I2): never "Locked" / "Season complete" from that empty list.
   final bool scheduleUnknown;
+
+  /// Non-null once the schedule feed has GIVEN UP retrying (re-review 6b,
+  /// item 2): the strip says so and offers "Try again" (this callback).
+  final VoidCallback? onRetrySchedule;
 
   /// The live market (guests arrive eligible=false and are filtered by the
   /// picker).
@@ -562,7 +567,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
                 _TransfersLine(preview: transfers),
               ],
             ] else if (_editState == SquadEditState.unknown)
-              const _DeadlineUnknownStrip()
+              _DeadlineUnknownStrip(onRetry: widget.onRetrySchedule)
             else
               // Nothing known about the week (no model yet): just "Locked" —
               // never a claim about kickoff.
@@ -851,7 +856,10 @@ class _TransfersLine extends StatelessWidget {
 /// paused because the deadline can't be checked — never "Locked". The
 /// schedule feed retries on its own.
 class _DeadlineUnknownStrip extends StatelessWidget {
-  const _DeadlineUnknownStrip();
+  const _DeadlineUnknownStrip({this.onRetry});
+
+  /// Non-null once retrying has stopped: plain wording + "Try again".
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -870,8 +878,11 @@ class _DeadlineUnknownStrip extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              "$kDeadlineUnavailable — can't check whether editing is open "
-              'right now. Trying again…',
+              onRetry == null
+                  ? "$kDeadlineUnavailable — can't check whether editing is "
+                      'open right now. Trying again…'
+                  : "$kDeadlineUnavailable — couldn't check whether editing "
+                      'is open.',
               softWrap: true,
               style: TextStyle(
                 fontSize: 13,
@@ -881,6 +892,14 @@ class _DeadlineUnknownStrip extends StatelessWidget {
               ),
             ),
           ),
+          if (onRetry != null) ...[
+            const SizedBox(width: 8),
+            TextButton(
+              key: const ValueKey('deadline_unknown_retry'),
+              onPressed: onRetry,
+              child: const Text('Try again'),
+            ),
+          ],
         ],
       ),
     );

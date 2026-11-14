@@ -39,6 +39,7 @@ class FantasyDeadlineChip extends StatefulWidget {
     this.nowUtc,
     this.clock,
     this.scheduleUnknown = false,
+    this.onRetry,
   });
 
   final List<Gameweek> gameweeks;
@@ -53,6 +54,10 @@ class FantasyDeadlineChip extends StatefulWidget {
 
   /// The schedule read failed ([gameweeks] is empty for that reason only).
   final bool scheduleUnknown;
+
+  /// Non-null once the schedule feed has GIVEN UP retrying (re-review 6b,
+  /// item 2): the unknown face says so and shows "Try again".
+  final VoidCallback? onRetry;
 
   @override
   State<FantasyDeadlineChip> createState() => _FantasyDeadlineChipState();
@@ -92,7 +97,9 @@ class _FantasyDeadlineChipState extends State<FantasyDeadlineChip> {
         : Theme.of(context).colorScheme.primary;
 
     final face = deadlineChipFace(widget.gameweeks, widget.lockOverride, _now,
-        scheduleUnknown: widget.scheduleUnknown);
+        scheduleUnknown: widget.scheduleUnknown,
+        gaveUp: widget.onRetry != null);
+    final retry = face.title == kDeadlineUnavailable ? widget.onRetry : null;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -129,6 +136,17 @@ class _FantasyDeadlineChipState extends State<FantasyDeadlineChip> {
                       fontSize: 11.5,
                     ),
                   ),
+                if (retry != null)
+                  TextButton(
+                    key: const ValueKey('deadline_retry'),
+                    onPressed: retry,
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(0, 32),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Try again'),
+                  ),
               ],
             ),
           ),
@@ -143,7 +161,7 @@ class _FantasyDeadlineChipState extends State<FantasyDeadlineChip> {
 /// [deadlineSlimFace]) the collapsed header's slim line.
 ({IconData icon, String title, String? detail}) deadlineChipFace(
     List<Gameweek> gameweeks, FantasyLockOverride lockOverride, DateTime now,
-    {bool scheduleUnknown = false}) {
+    {bool scheduleUnknown = false, bool gaveUp = false}) {
   switch (lockOverride) {
     case FantasyLockOverride.open:
       return (
@@ -160,7 +178,8 @@ class _FantasyDeadlineChipState extends State<FantasyDeadlineChip> {
         return (
           icon: Icons.schedule,
           title: kDeadlineUnavailable,
-          detail: null,
+          // Retrying: nothing to add. Given up: say so plainly.
+          detail: gaveUp ? "Couldn't load the schedule" : null,
         );
       }
       if (gw == null) {
@@ -273,6 +292,7 @@ class FantasyDeadlineSlimLine extends StatelessWidget {
     required this.lockOverride,
     required this.clock,
     this.scheduleUnknown = false,
+    this.onRetry,
   });
 
   final List<Gameweek> gameweeks;
@@ -281,6 +301,9 @@ class FantasyDeadlineSlimLine extends StatelessWidget {
 
   /// The schedule read failed (see [deadlineSlimFace]).
   final bool scheduleUnknown;
+
+  /// Non-null once retrying has stopped: a "Try again" button on the line.
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -308,6 +331,19 @@ class FantasyDeadlineSlimLine extends StatelessWidget {
                   color: FantasyBanner.foreground(context),
                 ),
               ),
+              if (onRetry != null && f.label == kDeadlineUnavailable) ...[
+                const SizedBox(width: 6),
+                TextButton(
+                  key: const ValueKey('deadline_slim_retry'),
+                  onPressed: onRetry,
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 28),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Try again'),
+                ),
+              ],
               if (f.countdown != null) ...[
                 const SizedBox(width: 6),
                 Text(
@@ -345,6 +381,7 @@ class FantasyDeadlineCountdown extends StatefulWidget {
     this.nowUtc,
     this.clock,
     this.scheduleUnknown = false,
+    this.onRetry,
   });
 
   final List<Gameweek> gameweeks;
@@ -355,6 +392,9 @@ class FantasyDeadlineCountdown extends StatefulWidget {
 
   /// The schedule read failed: the chip face says "Deadline unavailable".
   final bool scheduleUnknown;
+
+  /// Non-null once retrying has stopped (passed to the chip face).
+  final VoidCallback? onRetry;
 
   /// A shared ticking clock (the hub header's — release report #8): when
   /// set, the countdown follows it and owns no timer, so the collapsed
@@ -411,6 +451,7 @@ class _FantasyDeadlineCountdownState extends State<FantasyDeadlineCountdown> {
         nowUtc: widget.nowUtc,
         clock: widget.clock,
         scheduleUnknown: widget.scheduleUnknown,
+        onRetry: widget.onRetry,
       );
     }
 

@@ -17,6 +17,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_prefs.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart';
 import 'package:infinite_sports_flutter/fantasy/data/per_week_stream.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
@@ -2140,13 +2141,18 @@ void main() {
       testWidgets('$brightness: a failed schedule read — both header faces '
           'say "Deadline unavailable", My Team never says "Locked", the '
           'market says it cannot check (review 6, I2)', (tester) async {
+        // A re-listenable source (an RTDB-like stream): the feed is still
+        // retrying here (re-review 6b, item 2 covers giving up).
+        final gwc = StreamController<List<Gameweek>>.broadcast();
+        addTearDown(gwc.close);
         await pumpHub(tester,
             size: const Size(360, 740),
             brightness: brightness,
-            gameweekStates: Stream<List<Gameweek>>.error(
-                StateError('permission-denied')),
+            gameweekStates: gwc.stream,
             nowUtc: now);
         await land(tester, lock: FantasyLockOverride.auto);
+        gwc.addError(StateError('permission-denied'));
+        await settle(tester);
         expect(find.byType(FantasyBanner), findsOneWidget);
         expect(find.text('Deadline unavailable'), findsOneWidget);
         expect(find.text('Season complete'), findsNothing);
@@ -2381,6 +2387,114 @@ void main() {
           findsOneWidget);
       expect(find.textContaining('free this week'), findsNothing);
       expect(tester.takeException(), isNull);
+    });
+
+    group('a schedule that keeps failing (re-review 6b, item 2)', () {
+      late StreamController<List<Gameweek>> gwc;
+      late int listens;
+
+      /// One open gameweek a few days ahead of the REAL clock (My Team reads
+      /// the real clock), so a recovered schedule is editable.
+      List<Gameweek> liveSchedule() {
+        final lock = DateTime.now().toUtc().add(const Duration(days: 3));
+        final d = lock.toLocal();
+        String two(int v) => v.toString().padLeft(2, '0');
+        return [
+          Gameweek(
+            number: 1,
+            date: '${two(d.month)}${two(d.day)}${d.year}',
+            lockUtc: lock,
+            opensUtc: null,
+          ),
+        ];
+      }
+      setUp(() {
+        listens = 0;
+        gwc = StreamController<List<Gameweek>>.broadcast(
+            onListen: () => listens++);
+      });
+      tearDown(() => gwc.close());
+
+      /// Fails the schedule read, then every bounded retry.
+      Future<void> failUntilGivenUp(WidgetTester tester) async {
+        await pumpHub(tester,
+            size: const Size(360, 1200), gameweekStates: gwc.stream);
+        await land(tester, lock: FantasyLockOverride.auto);
+        gwc.addError(StateError('permission-denied'));
+        await settle(tester);
+        expect(key('deadline_unknown_strip'), findsOneWidget);
+        expect(find.textContaining('Trying again'), findsOneWidget);
+        expect(find.text('Try again'), findsNothing,
+            reason: 'no button while it is still retrying');
+        for (final d in kFantasyFeedRetryDelays) {
+          await tester.pump(d + const Duration(milliseconds: 10));
+          await tester.pump();
+          gwc.addError(StateError('permission-denied'));
+          await tester.pump();
+        }
+        await settle(tester);
+      }
+
+      Future<void> recover(WidgetTester tester, int listensBefore) async {
+        expect(listens, listensBefore + 1, reason: 'reading again');
+        gwc.add(liveSchedule());
+        await settle(tester);
+        expect(key('deadline_unknown_strip'), findsNothing);
+        expect(key('budget_bar'), findsOneWidget, reason: 'editable again');
+        expect(find.text('Try again'), findsNothing);
+      }
+
+      testWidgets('gives up: the strip and the header say so with a Try again '
+          'button; Try again reads again and a good read makes My Team '
+          'editable', (tester) async {
+        await failUntilGivenUp(tester);
+        expect(find.textContaining('Trying again'), findsNothing);
+        expect(find.textContaining("couldn't check"), findsOneWidget);
+        expect(key('deadline_unknown_retry'), findsOneWidget);
+        expect(key('deadline_retry'), findsOneWidget,
+            reason: 'the header chip too');
+        final before = listens;
+        await tester.tap(key('deadline_unknown_retry'));
+        await tester.pump();
+        expect(find.textContaining('Trying again'), findsOneWidget);
+        await recover(tester, before);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('the app returning to the foreground reads again by itself',
+          (tester) async {
+        await failUntilGivenUp(tester);
+        final before = listens;
+        for (final st in [
+          AppLifecycleState.inactive,
+          AppLifecycleState.hidden,
+          AppLifecycleState.paused,
+          AppLifecycleState.hidden,
+          AppLifecycleState.inactive,
+          AppLifecycleState.resumed,
+        ]) {
+          tester.binding.handleAppLifecycleStateChanged(st);
+        }
+        await tester.pump();
+        await recover(tester, before);
+      });
+
+      testWidgets('the connection coming back reads again by itself',
+          (tester) async {
+        final connected = StreamController<bool>.broadcast();
+        debugFantasyConnectedStates = connected.stream;
+        addTearDown(() {
+          debugFantasyConnectedStates = null;
+          connected.close();
+        });
+        await failUntilGivenUp(tester);
+        final before = listens;
+        connected.add(false);
+        await tester.pump();
+        connected.add(true);
+        await tester.pump();
+        await recover(tester, before);
+      });
     });
 
     group('never stuck collapsed (review 6, I1)', () {

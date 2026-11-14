@@ -963,6 +963,10 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
             ? null
             : _chipHistory,
         scheduleUnknown: _schedule.scheduleUnknown,
+        // Given up retrying (re-review 6b, item 2): "Try again" restarts it.
+        onRetrySchedule: _schedule.scheduleRetry == FantasyFeedRetry.gaveUp
+            ? _schedule.restart
+            : null,
         voidedWeeks: _voidedWeeks,
         lockedWeek: _lockedModel(),
         // The banner's live line: from the live feed the locked-week streams
@@ -1064,6 +1068,7 @@ class _HubBody extends StatelessWidget {
     required this.onOpenPlayer,
     required this.deadlineClock,
     required this.scheduleUnknown,
+    required this.onRetrySchedule,
     required this.primaryScroll,
     this.newsStates,
     this.leaderboardsFeeds,
@@ -1077,6 +1082,10 @@ class _HubBody extends StatelessWidget {
   /// the deadline faces, My Team and the market say so instead of "Season
   /// complete" / "Locked" (review 6, I2).
   final bool scheduleUnknown;
+
+  /// Non-null once the schedule feed has GIVEN UP retrying: every unknown
+  /// face says so plainly and offers "Try again" (this restarts the reads).
+  final VoidCallback? onRetrySchedule;
 
   /// The tabs' primary scroll controller (see [ActiveTabScrollController]).
   final ActiveTabScrollController primaryScroll;
@@ -1172,6 +1181,7 @@ class _HubBody extends StatelessWidget {
             lockOverride: configState.lockOverride,
             clock: deadlineClock,
             scheduleUnknown: scheduleUnknown,
+            onRetry: onRetrySchedule,
           ),
         ),
       ),
@@ -1187,6 +1197,7 @@ class _HubBody extends StatelessWidget {
             lockOverride: configState.lockOverride,
             clock: deadlineClock,
             scheduleUnknown: scheduleUnknown,
+            onRetry: onRetrySchedule,
           ),
         ),
       ),
@@ -1201,6 +1212,7 @@ class _HubBody extends StatelessWidget {
           players: players,
           gameweeks: gameweeks,
           scheduleUnknown: scheduleUnknown,
+          onRetrySchedule: onRetrySchedule,
           squadStates: squadStates,
           initialSquad: squad,
           onSaveSquad: saveSquad,
@@ -1231,6 +1243,7 @@ class _HubBody extends StatelessWidget {
           lockOverride: configState.lockOverride,
           gameweeks: gameweeks,
           scheduleUnknown: scheduleUnknown,
+          scheduleGaveUp: onRetrySchedule != null,
           totalsStates: playerTotalsStates,
         ),
         // Overall/gameweek standings, mini-leagues and the manager
@@ -1272,6 +1285,7 @@ class _HubBody extends StatelessWidget {
           initialState: configState,
           gameweeks: gameweeks,
           scheduleUnknown: scheduleUnknown,
+          onRetrySchedule: onRetrySchedule,
         ),
       ],
     );

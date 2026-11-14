@@ -304,12 +304,17 @@ String realizedSalesLine(int realizedTenths) =>
 
 /// The tooltip-style sentence for a disabled add control; null when the
 /// control is live (addable or Remove).
+///
+/// [gaveUp] (re-review 6b, item 2): the schedule feed has stopped retrying —
+/// the note says so and points at the "Try again" in the header.
 String? marketAddReason(
-        MarketAddAvailability availability, FantasyPosition position) =>
+        MarketAddAvailability availability, FantasyPosition position,
+        {bool gaveUp = false}) =>
     switch (availability) {
       MarketAddAvailability.locked => 'Gameweek locked — no changes now.',
-      MarketAddAvailability.deadlineUnknown =>
-        'Can\'t check the deadline right now — try again in a moment.',
+      MarketAddAvailability.deadlineUnknown => gaveUp
+          ? 'Couldn\'t check the deadline — tap Try again at the top.'
+          : 'Can\'t check the deadline right now — try again in a moment.',
       MarketAddAvailability.ineligible =>
         'Guest player — not eligible for fantasy.',
       MarketAddAvailability.positionFull =>
