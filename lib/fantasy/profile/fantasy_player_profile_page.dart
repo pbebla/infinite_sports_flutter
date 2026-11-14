@@ -49,6 +49,7 @@ import 'package:infinite_sports_flutter/fantasy/profile/profile_hero.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/profile_stat_strip.dart';
 import 'package:infinite_sports_flutter/fantasy/profile/profile_tabs.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
+import 'package:infinite_sports_flutter/misc/team_logos.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
@@ -298,6 +299,7 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
   /// The tapped star's state until the watchlist stream echoes it.
   bool? _starOverride;
   Map<String, String> _logoUrls = const {};
+  VoidCallback? _stopLogos;
 
   StreamSubscription<List<FantasyPlayer>>? _playersSub;
   StreamSubscription<Map<String, FantasyPlayerTotals>?>? _totalsSub;
@@ -366,11 +368,17 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
     _subscribeMarketFeeds();
     _subscribeLeagueFeeds();
     _subscribeWatchlist();
-    (widget.loadLogoUrls ??
-            () => LeagueService.leagueLogoUrls(widget.sport, widget.season))()
-        .then((urls) {
-      if (mounted) setState(() => _logoUrls = urls);
-    }, onError: (Object _) {});
+    final loadLogoUrls = widget.loadLogoUrls;
+    if (loadLogoUrls != null) {
+      loadLogoUrls().then((urls) {
+        if (mounted) setState(() => _logoUrls = urls);
+      }, onError: (Object _) {});
+    } else {
+      // Live (S16 Task 1): a crest added to Logo Urls fills in while open.
+      _stopLogos = watchSeasonLogos(widget.sport, widget.season, (urls) {
+        if (mounted) setState(() => _logoUrls = urls);
+      });
+    }
     if (_showsDraftAction) {
       // Keeps the editable/locked flip honest around the deadline (the
       // market's cadence).
@@ -496,6 +504,7 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
     _lockTicker?.cancel();
     _tabs.dispose();
     _scroll.dispose();
+    _stopLogos?.call();
     super.dispose();
   }
 

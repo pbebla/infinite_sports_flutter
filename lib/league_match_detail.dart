@@ -62,6 +62,8 @@ class LeagueMatchDetailPage extends StatefulWidget {
 }
 
 class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
+  /// Stops the live season-logo watch (team_logos.dart).
+  VoidCallback? _stopLogos;
   TournamentMatch? _match;
   Map<String, List<TournamentPlayer>> _rosters = {};
   Map<String, String> _logos = {};
@@ -110,7 +112,9 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
       _startHour = h;
       _subscribeMatch();
     });
-    LeagueService.leagueLogoUrls(widget.sport, widget.season).then((logos) {
+    // Live (S16 Task 1): a crest added to Logo Urls fills in while open.
+    _stopLogos?.call();
+    _stopLogos = watchSeasonLogos(widget.sport, widget.season, (logos) {
       if (!mounted || logos.isEmpty) return;
       setState(() => _logos = logos);
     });
@@ -161,6 +165,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
     _rosterSub?.cancel();
     _configSub?.cancel();
     _fantasyConfigSub?.cancel();
+    _stopLogos?.call();
     super.dispose();
   }
 

@@ -15,6 +15,7 @@ import 'package:infinite_sports_flutter/league_team_detail.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/misc/league_playoffs_view.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
+import 'package:infinite_sports_flutter/misc/team_logos.dart';
 import 'package:infinite_sports_flutter/misc/notification_topics.dart';
 import 'package:infinite_sports_flutter/misc/prediction_scope.dart';
 import 'package:infinite_sports_flutter/misc/tab_swap.dart';
@@ -71,6 +72,8 @@ const List<Tab> _leagueBaseTabs = [
 // and new TabController alive for one frame during the tab-count transition.
 class _LeagueDetailPageState extends State<LeagueDetailPage>
     with TickerProviderStateMixin {
+  /// Stops the live season-logo watch (team_logos.dart).
+  VoidCallback? _stopLogos;
   List<Tab> _tabs = _leagueBaseTabs;
   late TabController _tabController =
       TabController(length: _tabs.length, vsync: this);
@@ -239,7 +242,9 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
       _startHour = h;
       _subscribeGames();
     });
-    LeagueService.leagueLogoUrls(widget.sport, widget.season).then((logos) {
+    // Live (S16 Task 1): a crest added to Logo Urls fills in while open.
+    _stopLogos?.call();
+    _stopLogos = watchSeasonLogos(widget.sport, widget.season, (logos) {
       if (!mounted || logos.isEmpty) return;
       setState(() => _logos = logos);
       _subscribeStandings();
@@ -255,6 +260,7 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
     _configSub?.cancel();
     _fantasySub?.cancel();
     _tabController.dispose();
+    _stopLogos?.call();
     super.dispose();
   }
 

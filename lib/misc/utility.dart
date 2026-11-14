@@ -9,6 +9,7 @@ import 'package:infinite_sports_flutter/misc/follow_store.dart';
 import 'package:infinite_sports_flutter/misc/forfeit.dart';
 import 'package:infinite_sports_flutter/misc/home_nav.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
+import 'package:infinite_sports_flutter/misc/team_logos.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
 import 'package:infinite_sports_flutter/model/business.dart';
@@ -24,6 +25,11 @@ import 'package:infinite_sports_flutter/model/soccerplayer.dart';
 import 'package:infinite_sports_flutter/model/userinformation.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
+
+// The team-logo cache moved to team_logos.dart (live, S16 Task 1); every
+// legacy reader keeps importing it from here.
+export 'package:infinite_sports_flutter/misc/team_logos.dart'
+    show seasonLogoUrlsFrom, teamLogos, teamLogosVersion, watchSeasonLogos;
 
 
 var infiniteSportsPrimaryColor = const Color.fromARGB(255, 208, 0, 0);
@@ -49,7 +55,6 @@ Color onBrandAccent(BuildContext context) =>
 Map<String, Map<String, Map<String, FutsalPlayer>>> futsalLineups = {};
 Map<String, Map<String, Map<String, BasketballPlayer>>> basketballLineups = {};
 Map<String, Map<String, Map<String, FlagFootballPlayer>>> flagFootballLineups = {};
-Map teamLogos = {};
 FirebaseAuthService auth = FirebaseAuthService();
 bool signedIn = false;
 bool darkModeEnabled = false;
@@ -843,20 +848,10 @@ Future<Map<String, BasketballPlayer>> getBasketballLineUp(season, team) async {
   return lineup;
 }
 
-Future<void> getAllTeamLogo() async
-{
-  if (teamLogos.isNotEmpty) return;
-
-  DatabaseReference newClient = FirebaseDatabase.instance.ref();
-  var event = await newClient.child("Logo Urls").once();
-  final raw = event.snapshot.value;
-  if (raw is Map) teamLogos = raw;
-
-  newClient = FirebaseDatabase.instance.ref("AFC San Jose");
-  var afcEvent = await newClient.child("Logo URL").once();
-  final afcLogo = afcEvent.snapshot.value;
-  if (afcLogo != null) teamLogos["AFC San Jose"] = afcLogo.toString();
-}
+/// Starts (once) the live `Logo Urls` subscription behind [teamLogos] and
+/// completes when its first event (the saved copy) is in — bounded, never
+/// throws. See lib/misc/team_logos.dart.
+Future<void> getAllTeamLogo() => TeamLogoFeed.ensureStarted();
 
 Future<Game> getGame(widget, sport, season, date, times, num) async {
   try {

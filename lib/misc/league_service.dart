@@ -35,21 +35,15 @@ class LeagueService {
     }
   }
 
-  /// Season logo urls (team name → url) via the cached global Logo Urls map
-  /// (utility.getAllTeamLogo caches on first call; shape
-  /// teamLogos[sport][season][team]).
+  /// Season logo urls (team name → url) from the live global Logo Urls map
+  /// (lib/misc/team_logos.dart; shape teamLogos[sport][season][team]) as
+  /// they are once its first event is in. Screens that must repaint when a
+  /// crest is added use [watchSeasonLogos] instead.
   static Future<Map<String, String>> leagueLogoUrls(
       String sport, String season) async {
     try {
       await getAllTeamLogo();
-      final bySport = teamLogos[sport];
-      if (bySport is! Map) return {};
-      final bySeason = bySport[season];
-      if (bySeason is! Map) return {};
-      return {
-        for (final e in bySeason.entries)
-          if (e.value != null) e.key.toString(): e.value.toString(),
-      };
+      return seasonLogoUrlsFrom(teamLogos, sport, season);
     } catch (_) {
       return {};
     }
