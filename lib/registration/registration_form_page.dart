@@ -267,12 +267,11 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
       case SubmitOutcome.alreadyRegistered:
         // Fresh reads, Task 3 (#74): a submission already exists (another
         // device, an admin, or this fan's own earlier submit whose legacy
-        // dual-write failed) — nothing is overwritten; a missing legacy
-        // Sign Ups entry is filled in (review fix Minor 1), then the
-        // existing "already registered" route: the status page.
-        await RegistrationService.repairLegacySignUp(
-            widget.regId, widget.config);
-        if (!mounted) return;
+        // dual-write failed) — nothing is overwritten. The existing
+        // "already registered" route: the status page, which fills in a
+        // missing legacy Sign Ups entry itself on open (review fix Minor 1)
+        // — not awaited here, so an offline retry never waits a second
+        // bound before the page opens (second review, Minor 3).
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
               builder: (_) => RegistrationStatusPage(

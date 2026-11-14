@@ -1,3 +1,5 @@
+import 'dart:io';
+
 // Fresh reads, Task 3 — registration (survey list A #1, #2, #3, #5): money
 // decisions never act on the phone's saved copy or on a failed read.
 // Firebase-free: serverFirstValue is answered through
@@ -472,5 +474,21 @@ void main() {
               submission: null, notPaidExists: false, paidExists: false),
           isNull);
     });
+  });
+
+  // Second review, Minor 3: the "already registered" submit path opens the
+  // status page at once; the status page runs the legacy repair itself
+  // (not awaited). A source check: the form page has no harness.
+  test('the form page never awaits the legacy repair', () {
+    final src =
+        File('lib/registration/registration_form_page.dart').readAsStringSync();
+    expect(
+        src.contains('await RegistrationService.repairLegacySignUp'), isFalse);
+    final status = File('lib/registration/registration_status_page.dart')
+        .readAsStringSync();
+    expect(
+        RegExp(r'unawaited\(\s*RegistrationService\.repairLegacySignUp')
+            .hasMatch(status),
+        isTrue);
   });
 }
