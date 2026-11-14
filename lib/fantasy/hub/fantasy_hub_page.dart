@@ -145,6 +145,7 @@ class FantasyHubPage extends StatefulWidget {
     this.historyWeekFor,
     this.publishedPicksFor,
     this.overallStandingStates,
+    this.playerTotalsStates,
   });
 
   final String sport;
@@ -245,6 +246,9 @@ class FantasyHubPage extends StatefulWidget {
 
   /// Replaces `FantasyService.watchOverallStanding` (the official rank).
   final Stream<OverallStanding?>? overallStandingStates;
+
+  /// Forwarded to the Players tab (replaces `FantasyService.watchPlayerTotals`).
+  final Stream<Map<String, FantasyPlayerTotals>?>? playerTotalsStates;
 
   @override
   State<FantasyHubPage> createState() => _FantasyHubPageState();
@@ -982,6 +986,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         onOpenPlayer: _openPlayerProfile,
         newsStates: widget.newsStates,
         leaderboardsFeeds: widget.leaderboardsFeeds,
+        playerTotalsStates: widget.playerTotalsStates,
         deadlineClock: _deadlineClock,
         primaryScroll: _primaryScroll,
       );
@@ -1062,6 +1067,7 @@ class _HubBody extends StatelessWidget {
     required this.primaryScroll,
     this.newsStates,
     this.leaderboardsFeeds,
+    this.playerTotalsStates,
   });
 
   /// The hub's one deadline tick, shared by both header faces.
@@ -1133,6 +1139,9 @@ class _HubBody extends StatelessWidget {
 
   /// Test seams forwarded to the Leaderboards tab (null = the real feeds).
   final FantasyLeaderboardsFeeds? leaderboardsFeeds;
+
+  /// Test seam forwarded to the Players tab (null = the real feed).
+  final Stream<Map<String, FantasyPlayerTotals>?>? playerTotalsStates;
 
   @override
   Widget build(BuildContext context) {
@@ -1222,6 +1231,7 @@ class _HubBody extends StatelessWidget {
           lockOverride: configState.lockOverride,
           gameweeks: gameweeks,
           scheduleUnknown: scheduleUnknown,
+          totalsStates: playerTotalsStates,
         ),
         // Overall/gameweek standings, mini-leagues and the manager
         // squad viewer (P3d, spec §9/§10).

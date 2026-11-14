@@ -198,6 +198,7 @@ void main() {
     Stream<HistoryWeek?> Function(int week)? historyWeekFor,
     Stream<FantasySquad?> Function(int week)? publishedPicksFor,
     Stream<OverallStanding?>? overallStandingStates,
+    Stream<Map<String, FantasyPlayerTotals>?>? playerTotalsStates,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -227,6 +228,7 @@ void main() {
         historyWeekFor: historyWeekFor,
         publishedPicksFor: publishedPicksFor,
         overallStandingStates: overallStandingStates,
+        playerTotalsStates: playerTotalsStates,
         priceHistoryStates: priceHistory.stream,
         createCheckoutUrl: () async {
           checkoutCalls++;
@@ -2226,6 +2228,135 @@ void main() {
       await settle(tester);
       expect(find.textContaining('61'), findsWidgets);
       expect(tester.takeException(), isNull);
+    });
+
+    group('first visit and hide/show of a kept-alive tab (review 6b)', () {
+      Future<void> tapTab(WidgetTester tester, String label) async {
+        await tester.ensureVisible(find.widgetWithText(Tab, label));
+        await settle(tester);
+        await tester.tap(find.widgetWithText(Tab, label));
+      }
+
+      testWidgets('Leaderboards, first open: its feeds attach once (no '
+          'cancel / re-attach), from the first frame of the switch',
+          (tester) async {
+        var listens = 0, cancels = 0;
+        await boards.close();
+        boards = StreamController<FantasyLeaderboards>.broadcast(
+            onListen: () => listens++, onCancel: () => cancels++);
+        await pumpHub(tester,
+            size: const Size(360, 740),
+            gameweekStates: Stream.value(gws),
+            nowUtc: now);
+        await land(tester, lock: FantasyLockOverride.auto);
+        expect(listens, 0, reason: 'not built before its first visit');
+
+        await tapTab(tester, 'Leaderboards');
+        await tester.pump();
+        // Mid-switch (the slide takes 300 ms): attached from the first
+        // frame of the switch and never dropped.
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(listens, 1);
+        expect(cancels, 0);
+        expect(tester.binding.hasScheduledFrame, isTrue,
+            reason: 'still mid-switch');
+        boards.add(leaderboardsFromNode({
+          'Overall': {
+            'u1': {'points': 50, 'rank': 1},
+          },
+        }));
+        managers.add({
+          'u1': const FantasyManager(teamName: 'Top Cats', nameFlagged: false),
+        });
+        leagues.add(const []);
+        dreams.add(const {});
+        await settle(tester);
+        expect(find.text('Top Cats'), findsOneWidget);
+        expect(listens, 1);
+        expect(cancels, 0);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('Players, first open: totals attach at the start of the '
+          'switch, once', (tester) async {
+        var listens = 0, cancels = 0;
+        final totals = StreamController<Map<String, FantasyPlayerTotals>?>
+            .broadcast(onListen: () => listens++, onCancel: () => cancels++);
+        addTearDown(totals.close);
+        await pumpHub(tester,
+            size: const Size(360, 740),
+            gameweekStates: Stream.value(gws),
+            nowUtc: now,
+            playerTotalsStates: totals.stream);
+        await land(tester, lock: FantasyLockOverride.auto);
+        expect(listens, 0);
+
+        await tapTab(tester, 'Players');
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(listens, 1, reason: 'attached from the first frame');
+        expect(cancels, 0);
+        totals.add(const {});
+        await settle(tester);
+        expect(key('market_row_Ava Striker'), findsOneWidget);
+        expect(listens, 1);
+        expect(cancels, 0);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('Players hidden then shown: totals drop and re-attach; no '
+          'reload, the filter and scroll offset are kept', (tester) async {
+        var listens = 0, cancels = 0;
+        final totals = StreamController<Map<String, FantasyPlayerTotals>?>
+            .broadcast(onListen: () => listens++, onCancel: () => cancels++);
+        addTearDown(totals.close);
+        await pumpHub(tester,
+            tab: FantasyHubTab.players,
+            size: const Size(360, 740),
+            gameweekStates: Stream.value(gws),
+            nowUtc: now,
+            playerTotalsStates: totals.stream);
+        await land(tester, lock: FantasyLockOverride.auto);
+        players.add([
+          ...market,
+          for (var i = 0; i < 30; i++)
+            _player('Extra Def $i', FantasyPosition.def, 40 + i,
+                team: 'Team ${i % 4}'),
+        ]);
+        totals.add(const {});
+        await settle(tester);
+        await tester.tap(key('market_pos_DEF'));
+        await settle(tester);
+        expect(key('market_row_Ava Striker'), findsNothing);
+        await tester.dragFrom(const Offset(180, 650), const Offset(0, -300));
+        await settle(tester);
+        final list = tester.state<ScrollableState>(find
+            .descendant(
+                of: key('players_market'),
+                matching: find.byWidgetPredicate((w) =>
+                    w is Scrollable && w.axisDirection == AxisDirection.down))
+            .first);
+        final offset = list.position.pixels;
+        expect(offset, greaterThan(0));
+        expect(listens, 1);
+
+        await tapTab(tester, 'My Team');
+        await settle(tester);
+        await settle(tester);
+        expect(cancels, 1, reason: 'dropped while hidden');
+
+        await tapTab(tester, 'Players');
+        await tester.pump();
+        expect(key('players_market_skeleton'), findsNothing);
+        await settle(tester);
+        await settle(tester);
+        expect(listens, 2, reason: 're-attached on return');
+        expect(key('players_market_skeleton'), findsNothing);
+        expect(key('market_row_Ava Striker'), findsNothing,
+            reason: 'the DEF filter is kept');
+        expect(list.position.pixels, offset);
+        expect(tester.takeException(), isNull);
+      });
     });
 
     group('never stuck collapsed (review 6, I1)', () {

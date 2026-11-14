@@ -50,6 +50,7 @@
 //  • The tab count may change live: [LiveLengthTabController] keys the
 //    controller with its tabs (release report #1 / f4fdad6).
 
+import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
@@ -152,12 +153,43 @@ class _ShellBodyState extends State<_ShellBody>
   double? _expandedHeight;
   final GlobalKey _headerBox = GlobalKey();
 
-  /// The tab on screen once a switch has settled.
-  int _activeIndex = 0;
+  /// The tabs that count as on screen (review 6b, item 1): the settled tab;
+  /// while a tapped switch runs, the tab being left AND the one being opened;
+  /// during a swipe, every tab at least partly visible. So a tab's feeds
+  /// start the moment it begins to appear and the tab being left keeps its
+  /// own until the switch settles — nothing is cancelled and re-attached
+  /// mid-animation.
+  ///
+  /// A notifier ABOVE the TabBarView, read by each tab's marker: TabBarView
+  /// ignores new children while a switch animates, so a value passed down
+  /// through its children would arrive only after the switch settled.
+  final ValueNotifier<Set<int>> _visible = ValueNotifier(const {});
+
+  static Set<int> _visibleOf(TabController c) {
+    if (c.indexIsChanging) return {c.index, c.previousIndex};
+    final v = c.animation?.value ?? c.index.toDouble();
+    return {
+      c.index,
+      for (var i = 0; i < c.length; i++)
+        if ((v - i).abs() < 1) i,
+    };
+  }
+
+  void _syncVisible() {
+    final c = _tabs;
+    if (c == null || !mounted) return;
+    final next = _visibleOf(c);
+    if (setEquals(next, _visible.value)) return;
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      SchedulerBinding.instance.addPostFrameCallback((_) => _syncVisible());
+      return;
+    }
+    _visible.value = next;
+  }
 
   /// The header is collapsed or on its way there.
   bool _wantCollapsed = false;
-
 
   /// Holds the tab bodies' focus, so a tab switch can drop it.
   final FocusScopeNode _bodyFocus = FocusScopeNode(debugLabel: 'hub tabs');
@@ -212,18 +244,22 @@ class _ShellBodyState extends State<_ShellBody>
     final next = DefaultTabController.of(context);
     if (identical(next, _tabs)) return;
     _tabs?.removeListener(_onTabChanged);
+    _tabs?.animation?.removeListener(_syncVisible);
     _tabs = next..addListener(_onTabChanged);
+    next.animation?.addListener(_syncVisible);
     widget.primaryScrollController?.activeTab = next.index;
-    _activeIndex = next.index;
+    _visible.value = _visibleOf(next);
   }
 
   @override
   void dispose() {
     _tabs?.removeListener(_onTabChanged);
+    _tabs?.animation?.removeListener(_syncVisible);
     WidgetsBinding.instance.removeObserver(this);
     _bodyFocus.removeListener(_syncKeyboard);
     _expand.dispose();
     _bodyFocus.dispose();
+    _visible.dispose();
     super.dispose();
   }
 
@@ -232,9 +268,9 @@ class _ShellBodyState extends State<_ShellBody>
     if (c == null) return;
     // Leaving a tab drops its keyboard at once (M-a).
     if (_bodyFocus.hasFocus) FocusManager.instance.primaryFocus?.unfocus();
+    _syncVisible();
     if (c.indexIsChanging) return;
     final i = c.index;
-    if (_activeIndex != i) setState(() => _activeIndex = i);
     widget.primaryScrollController?.activeTab = i;
     final m = _metrics[i];
     // Back to a tab left collapsed: only if it can still be left (it still
@@ -387,26 +423,28 @@ class _ShellBodyState extends State<_ShellBody>
         Expanded(
           child: FocusScope(
             node: _bodyFocus,
-            child: TabBarView(
-              children: [
-                for (var i = 0; i < widget.children.length; i++)
-                  _KeepAlive(
-                    child: _TabMarker(
-                      index: i,
-                      visible: i == _activeIndex,
-                      child: _withPrimary(
-                        primary,
-                        NotificationListener<ScrollMetricsNotification>(
-                          onNotification: (n) => _onMetrics(i, n),
-                          child: NotificationListener<ScrollNotification>(
-                            onNotification: (n) => _onScroll(i, n),
-                            child: widget.children[i],
+            child: _VisibleTabs(
+              notifier: _visible,
+              child: TabBarView(
+                children: [
+                  for (var i = 0; i < widget.children.length; i++)
+                    _KeepAlive(
+                      child: _TabMarker(
+                        index: i,
+                        child: _withPrimary(
+                          primary,
+                          NotificationListener<ScrollMetricsNotification>(
+                            onNotification: (n) => _onMetrics(i, n),
+                            child: NotificationListener<ScrollNotification>(
+                              onNotification: (n) => _onScroll(i, n),
+                              child: widget.children[i],
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -421,15 +459,23 @@ Widget _withPrimary(ScrollController? primary, Widget child) => primary == null
 
 /// Marks which tab a scroll position lives in (see [ActiveTabScrollController]).
 class _TabMarker extends StatelessWidget {
-  const _TabMarker(
-      {required this.index, required this.visible, required this.child});
+  const _TabMarker({required this.index, required this.child});
   final int index;
-  final bool visible;
   final Widget child;
 
   @override
-  Widget build(BuildContext context) =>
-      _TabVisibility(visible: visible, child: child);
+  Widget build(BuildContext context) => _TabVisibility(
+      visible: _VisibleTabs.of(context)?.contains(index) ?? true, child: child);
+}
+
+/// The set of tabs that count as on screen, above the TabBarView.
+class _VisibleTabs extends InheritedNotifier<ValueNotifier<Set<int>>> {
+  const _VisibleTabs({required super.notifier, required super.child});
+
+  static Set<int>? of(BuildContext context) => context
+      .dependOnInheritedWidgetOfExactType<_VisibleTabs>()
+      ?.notifier
+      ?.value;
 }
 
 /// Tells a tab whether it is on screen ([CollapsingTabShell.isTabOnScreen]).
