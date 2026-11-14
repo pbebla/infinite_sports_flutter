@@ -43,6 +43,17 @@ class LeaderboardPage extends StatefulWidget {
 
 class _LeaderboardPageState extends State<LeaderboardPage> {
   List<dynamic> players = List.empty();
+
+  /// Flag Football only (fix round 1, M5): its 13 stat columns scroll
+  /// sideways; true while more columns sit off the right edge, driving the
+  /// edge fade that says so.
+  final ValueNotifier<bool> _moreToRight = ValueNotifier(true);
+
+  @override
+  void dispose() {
+    _moreToRight.dispose();
+    super.dispose();
+  }
   int? sortColumnIndex;
   bool isAscending = false;
 
@@ -224,11 +235,13 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         rows: teamsList,
       );
     } else if (widget.sport == "Flag Football") {
+      // Theme divider colour (was a fixed light grey) — both modes.
+      final dividerColor = Theme.of(context).colorScheme.outlineVariant;
       final verticalDividerRight = BoxDecoration(
-          border: Border(right: BorderSide(color: Colors.grey.shade300, width: 1))
+          border: Border(right: BorderSide(color: dividerColor, width: 1))
       );
       final verticalDividerLeft = BoxDecoration(
-          border: Border(left: BorderSide(color: Colors.grey.shade300, width: 1))
+          border: Border(left: BorderSide(color: dividerColor, width: 1))
       );
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
         DataCell(Center(child: Text(key.number),)),
@@ -312,6 +325,54 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     return DataTable2(columns: const [DataColumn(label: Text("Error"))], rows: const []);
   }
 
+  /// The Flag Football table is wider than any phone: a fade on the right
+  /// edge (theme surface colour) shows while more columns are off screen,
+  /// and goes once the reader reaches the last column (fix round 1, M5).
+  Widget _withScrollFade(BuildContext context, Widget table) {
+    bool onMetrics(ScrollMetrics m) {
+      if (m.axis == Axis.horizontal) {
+        _moreToRight.value = m.extentAfter > 0.5;
+      }
+      return false;
+    }
+
+    final surface = Theme.of(context).colorScheme.surface;
+    return Stack(
+      children: [
+        NotificationListener<ScrollMetricsNotification>(
+          onNotification: (n) => onMetrics(n.metrics),
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (n) => onMetrics(n.metrics),
+            child: table,
+          ),
+        ),
+        Positioned(
+          top: 0,
+          bottom: 0,
+          right: 0,
+          width: 32,
+          child: IgnorePointer(
+            child: ValueListenableBuilder<bool>(
+              valueListenable: _moreToRight,
+              builder: (context, more, _) => AnimatedOpacity(
+                opacity: more ? 1 : 0,
+                duration: const Duration(milliseconds: 150),
+                child: DecoratedBox(
+                  key: const ValueKey('leaderboard_scroll_fade'),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [surface.withValues(alpha: 0), surface],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -349,10 +410,12 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
               }
               return StatefulBuilder(
                   builder: (context, setState) {
-                    return SizedBox(
+                    final table = SizedBox(
                       width: MediaQuery.sizeOf(context).width,
                       child: buildLeaderboard(setState),
                     );
+                    if (widget.sport != "Flag Football") return table;
+                    return _withScrollFade(context, table);
                   }
               );
             }
