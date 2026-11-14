@@ -156,10 +156,32 @@ class _InsiderPromoCodeFieldState extends State<InsiderPromoCodeField> {
     final myUid =
         widget.myUidOverride ?? (FirebaseAuth.instance.currentUser?.uid ?? '');
 
-    final ownerUid = await lookupCode(code);
-    final ownerStatus =
-        ownerUid == null ? null : await insiderStatusFn(ownerUid);
-    final referred = await alreadyReferredFn(myUid);
+    final String? ownerUid;
+    final String? ownerStatus;
+    final bool referred;
+    try {
+      ownerUid = await lookupCode(code);
+      ownerStatus = ownerUid == null ? null : await insiderStatusFn(ownerUid);
+      referred = await alreadyReferredFn(myUid);
+    } on InsiderCheckUnavailable {
+      // Fresh reads, Task 3 (#15-#17): the server could not confirm the
+      // code, its owner's status or the once-ever referral guard — the code
+      // cannot be applied yet (never "Invalid code" on a failed read). The
+      // same code is checked again on the next try.
+      if (!mounted) return;
+      _lastCheckedCode = null;
+      setState(() {
+        _checking = false;
+        _errorMessage = kInsiderCodeCouldNotCheck;
+        _insiderName = '';
+        _friendlyNotFirstTimer = false;
+        _firstTimerUnverified = false;
+        _outcome = null;
+      });
+      field.didChange(null);
+      field.validate();
+      return;
+    }
 
     final result = evaluateCode(
       codeOwnerUid: ownerUid,

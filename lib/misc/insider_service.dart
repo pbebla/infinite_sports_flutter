@@ -1,6 +1,35 @@
 import 'package:firebase_database/firebase_database.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/stream_resilience.dart';
 import 'package:infinite_sports_flutter/model/insider.dart';
+
+/// An Insider code check whose answer the server did not confirm (the
+/// phone's saved copy, or a failed read) — fresh reads, Task 3 (#15-#17).
+/// The promo field shows [kInsiderCodeCouldNotCheck] and stamps nothing.
+class InsiderCheckUnavailable implements Exception {
+  const InsiderCheckUnavailable([this.cause]);
+  final Object? cause;
+  @override
+  String toString() => 'InsiderCheckUnavailable($cause)';
+}
+
+/// The promo field's "couldn't check" sentence (same shape as the join-code
+/// page's).
+const String kInsiderCodeCouldNotCheck =
+    "Couldn't check the code. Check your connection and try again.";
+
+/// [serverFirstValue] for a code check: the server's value, or
+/// [InsiderCheckUnavailable].
+Future<Object?> _checkedValue(String path) async {
+  final FreshValue r;
+  try {
+    r = await serverFirstValue(path);
+  } catch (e) {
+    throw InsiderCheckUnavailable(e);
+  }
+  if (!r.fromServer) throw const InsiderCheckUnavailable('not from server');
+  return r.value;
+}
 
 /// Live reads + the application write for the Infinite Insiders program
 /// (Task F2). Mirrors the static-method service style of
@@ -52,49 +81,38 @@ class InsiderService {
   // rather than one big Insider fetch, matching /InsiderCodes' spec §9
   // "O(1) validation lookup" intent.
 
+  //
+  // The three checks below decide a discount and a referral credit, so they
+  // are server-first (fresh reads, Task 3): an answer the server did not
+  // confirm — the phone's saved copy (a revoked code, a suspended owner, a
+  // stale "not referred yet") or a failed read — throws
+  // [InsiderCheckUnavailable] instead of being treated as a fact.
+
   /// The uid owning [code] (normalized uppercase before lookup), or null
-  /// when the code is blank/unclaimed/on error — evaluateCode's `invalid`
-  /// branch for either case.
+  /// when the code is blank or the server says it is unclaimed
+  /// (evaluateCode's `invalid` branch). Throws [InsiderCheckUnavailable]
+  /// when the server could not confirm the answer.
   static Future<String?> lookupCode(String code) async {
     final normalized = normalizeInsiderCode(code);
     if (normalized.isEmpty) return null;
-    try {
-      final snap = (await FirebaseDatabase.instance
-              .ref('InsiderCodes/$normalized')
-              .once())
-          .snapshot;
-      final uid = snap.value;
-      return (uid is String && uid.isNotEmpty) ? uid : null;
-    } catch (_) {
-      return null;
-    }
+    final uid = await _checkedValue('InsiderCodes/$normalized');
+    return (uid is String && uid.isNotEmpty) ? uid : null;
   }
 
-  /// Just the Status field for [uid] ('' when missing/error — evaluateCode
-  /// treats any non-'active' status, including '', as suspended).
+  /// Just the Status field for [uid] ('' when missing — evaluateCode treats
+  /// any non-'active' status, including '', as suspended). Throws
+  /// [InsiderCheckUnavailable] when the server could not confirm it.
   static Future<String> insiderStatus(String uid) async {
-    try {
-      final snap =
-          (await FirebaseDatabase.instance.ref('Insiders/$uid/Status').once())
-              .snapshot;
-      return snap.value?.toString() ?? '';
-    } catch (_) {
-      return '';
-    }
+    final status = await _checkedValue('Insiders/$uid/Status');
+    return status?.toString() ?? '';
   }
 
   /// True when `/ReferredUsers/{uid}` exists — the global once-ever guard
-  /// (spec §3). False (never blocks) on error, matching this file's
-  /// existing silent-failure convention.
+  /// (spec §3). Throws [InsiderCheckUnavailable] when the server could not
+  /// confirm it (it used to answer false on an error — a second referral
+  /// discount on a failed read).
   static Future<bool> alreadyReferred(String uid) async {
-    try {
-      final snap =
-          (await FirebaseDatabase.instance.ref('ReferredUsers/$uid').once())
-              .snapshot;
-      return snap.exists;
-    } catch (_) {
-      return false;
-    }
+    return (await _checkedValue('ReferredUsers/$uid')) != null;
   }
 
   /// The code owner's display Name, for the "Code accepted — [Name]'s
