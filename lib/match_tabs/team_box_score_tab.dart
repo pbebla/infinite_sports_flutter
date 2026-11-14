@@ -380,13 +380,27 @@ class _TeamBoxScoreTabState extends State<TeamBoxScoreTab> {
 /// scrollable strip). Long team names keep the TabBar's own label size and
 /// wrap to two lines, ellipsized past that (release report #4 — scaling
 /// them down to one line made "AFC San Jose Rising Stars" unreadably tiny).
-/// The tight line height keeps two lines inside the standard 46 px tab.
+/// The Tab is a fixed [_kTeamTabHeight] tall, so the line count follows the
+/// reader's text size: two lines while two fit, one line (ellipsized) above
+/// that — nothing paints outside the tab (fix round 1, M3).
 Tab teamNameTab(String name) => Tab(
-      child: Text(
-        name,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        textAlign: TextAlign.center,
-        style: const TextStyle(height: 1.15),
-      ),
+      height: _kTeamTabHeight,
+      child: Builder(builder: (context) {
+        final fontSize = DefaultTextStyle.of(context).style.fontSize ?? 14;
+        final lineHeight =
+            MediaQuery.textScalerOf(context).scale(fontSize) * _kTeamTabLine;
+        final lines = lineHeight * 2 <= _kTeamTabHeight ? 2 : 1;
+        return Text(
+          name,
+          maxLines: lines,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: const TextStyle(height: _kTeamTabLine),
+        );
+      }),
     );
+
+/// Material's text-only Tab height, and the tight line height that lets two
+/// lines of the default 14 px label fit inside it.
+const double _kTeamTabHeight = 46;
+const double _kTeamTabLine = 1.15;

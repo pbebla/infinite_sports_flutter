@@ -10,11 +10,17 @@ import 'package:infinite_sports_flutter/match_tabs/team_box_score_tab.dart';
 void main() {
   const longName = 'AFC San Jose Rising Stars';
 
-  Future<void> pumpTabs(WidgetTester tester, String team2) async {
+  Future<void> pumpTabs(WidgetTester tester, String team2,
+      {double textScale = 1.0}) async {
     tester.view.physicalSize = const Size(360, 700);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context)
+            .copyWith(textScaler: TextScaler.linear(textScale)),
+        child: child!,
+      ),
       home: DefaultTabController(
         length: 3,
         child: Scaffold(
@@ -61,4 +67,26 @@ void main() {
     expect(t.maxLines, 2);
     expect(t.overflow, TextOverflow.ellipsis);
   });
+
+  // Fix round 1, M3: the Tab is a fixed 46 px tall, so two wrapped lines
+  // painted past it from ~1.45x text scale. Two lines only while they fit;
+  // above that one line with an ellipsis — nothing paints outside the tab.
+  for (final scale in [1.0, 1.3, 2.0]) {
+    testWidgets('text scale $scale at 360 px: the name stays inside its tab',
+        (tester) async {
+      await pumpTabs(tester, longName, textScale: scale);
+      expect(tester.takeException(), isNull);
+      final text = find.text(longName);
+      final tab = find.ancestor(of: text, matching: find.byType(Tab));
+      final textRect = tester.getRect(text);
+      final tabRect = tester.getRect(tab);
+      expect(textRect.top, greaterThanOrEqualTo(tabRect.top - 0.01));
+      expect(textRect.bottom, lessThanOrEqualTo(tabRect.bottom + 0.01));
+      final widget = tester.widget<Text>(text);
+      expect(widget.overflow, TextOverflow.ellipsis);
+      expect(widget.maxLines, scale <= 1.3 ? 2 : 1);
+      // Never shrunk: the label keeps the tab's own (scaled) size.
+      expect(fontSize(tester, longName), fontSize(tester, 'Summary'));
+    });
+  }
 }
