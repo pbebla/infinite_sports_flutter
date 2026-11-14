@@ -112,6 +112,12 @@ class _FrontPageState extends State<FrontPage> {
   // Parallel to [tabNames]: true when the tab at that index is a tournament tab.
   List<bool> tabIsTournament = List.empty(growable: true);
 
+  // Parallel to [tabNames]: a stable identity per tab ('league', 'afc',
+  // 'tournament:<id>') — the league tab's TITLE changes with the league, so
+  // the fan's selected tab is remembered by key (review fix m2).
+  final List<String> tabKeys = [];
+  String? _selectedTabKey;
+
   // Active tournaments (not finished, each having a current game day).
   List<_ActiveTournamentTab> activeTournaments = [];
 
@@ -432,9 +438,11 @@ class _FrontPageState extends State<FrontPage> {
               tabs.clear();
               tabNames.clear();
               tabIsTournament.clear();
+              tabKeys.clear();
               if (!isCurrentFinished) {
                 tabNames.add(Tab(text: _leagueTabTitle));
                 tabIsTournament.add(false);
+                tabKeys.add('league');
                 tabs.add(Column(children: [
                   if (openRegistrations.isNotEmpty)
                     _registrationBanner(context),
@@ -512,6 +520,7 @@ class _FrontPageState extends State<FrontPage> {
               if (!isCurrentAFCFinished) {
                 tabNames.add(Tab(text: "AFC San Jose"));
                 tabIsTournament.add(false);
+                tabKeys.add('afc');
                 tabs.add(Column(children: [
                   LayoutBuilder(
                       builder: (context, constraints) {
@@ -553,6 +562,7 @@ class _FrontPageState extends State<FrontPage> {
               for (final data in activeTournaments) {
                 tabNames.add(Tab(text: data.tournament.name));
                 tabIsTournament.add(true);
+                tabKeys.add('tournament:${data.tournament.id}');
                 tabs.add(_buildTournamentTab(context, data));
               }
               if (tabs.isNotEmpty) {
@@ -560,17 +570,14 @@ class _FrontPageState extends State<FrontPage> {
                 return HomeTabShell(
                   tabNames: tabNames,
                   tabs: tabs,
+                  // Review fix m2: the fan stays on the tab they were on
+                  // (by key) when tabs come or go or the league changes.
+                  selectedIndex: _selectedIndex,
+                  onIndexChanged: _selectTab,
                   onRefresh: () async {
                     await _refreshData();
                   },
-                  onTabTap: (value) {
-                    _onTournamentTab.value = tabIsTournament[value];
-                    if (tabNames[value].text == _leagueTabTitle) {
-                      headerNotifier.value = [currentSport, currentSeason];
-                    } else if (tabNames[value].text == "AFC San Jose") {
-                      headerNotifier.value = ["AFC San Jose", currentAFCSeason];
-                    }
-                  },
+                  onTabTap: _selectTab,
                 );
               }
               return Column(children: [
@@ -661,19 +668,46 @@ class _FrontPageState extends State<FrontPage> {
     setState(() {});
   }
 
+  /// The selected tab's index in the current tab list (the remembered key,
+  /// else the first tab).
+  int get _selectedIndex {
+    final i = _selectedTabKey == null ? -1 : tabKeys.indexOf(_selectedTabKey!);
+    return i < 0 ? 0 : i;
+  }
+
+  /// A tab was chosen (tap or swipe): remember it by key and point the
+  /// top-bar Table/Leaderboard at it.
+  void _selectTab(int index) {
+    if (index < 0 || index >= tabKeys.length) return;
+    _selectedTabKey = tabKeys[index];
+    _applyHeaderFor(index);
+  }
+
+  /// [headerNotifier] and the tournament flag for the tab at [index], from
+  /// the SAME fields the tab bodies were just built from (review fix m2: the
+  /// header changes in the same update as the games).
+  void _applyHeaderFor(int index) {
+    _onTournamentTab.value = tabIsTournament[index];
+    List<String>? next;
+    if (tabKeys[index] == 'league') {
+      next = [currentSport, currentSeason];
+    } else if (tabKeys[index] == 'afc') {
+      next = ["AFC San Jose", currentAFCSeason];
+    }
+    // A tournament tab leaves headerNotifier unchanged: the table and
+    // leaderboard buttons it feeds are hidden there (_onTournamentTab).
+    if (next != null && !listEquals(headerNotifier.value as List, next)) {
+      headerNotifier.value = next;
+    }
+  }
+
   void executeAfterBuild() {
     if (!mounted) return;
-    if (tabNames.isEmpty) return;
-    _onTournamentTab.value =
-        tabIsTournament.isNotEmpty ? tabIsTournament[0] : false;
-    if (tabNames[0].text == _leagueTabTitle) {
-      headerNotifier.value = [currentSport, currentSeason];
-    } else if (tabNames[0].text == "AFC San Jose") {
-      headerNotifier.value = ["AFC San Jose", currentAFCSeason];
-    }
-    // If the first tab is a tournament, headerNotifier is intentionally left
-    // unchanged: the table/leaderboard buttons it feeds are hidden on
-    // tournament tabs (via _onTournamentTab), so its value is never read there.
+    if (tabKeys.isEmpty) return;
+    // Every build: keep the fan's tab (not tab 0) and its header.
+    final index = _selectedIndex;
+    _selectedTabKey = tabKeys[index];
+    _applyHeaderFor(index);
   }
 }
 
@@ -693,6 +727,8 @@ class HomeTabShell extends StatelessWidget {
     required this.tabs,
     required this.onTabTap,
     required this.onRefresh,
+    this.selectedIndex,
+    this.onIndexChanged,
   });
 
   final List<Tab> tabNames;
@@ -700,11 +736,21 @@ class HomeTabShell extends StatelessWidget {
   final ValueChanged<int> onTabTap;
   final VoidCallback onRefresh;
 
+  /// The tab to show (review fix m2): when tabs come or go, the controller
+  /// keeps an index NUMBER, so the fan's tab is moved back to here.
+  final int? selectedIndex;
+
+  /// Every settled index change (taps AND swipes).
+  final ValueChanged<int>? onIndexChanged;
+
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
       length: tabs.length,
-      child: Scaffold(
+      child: _SelectedTabKeeper(
+        selectedIndex: selectedIndex,
+        onIndexChanged: onIndexChanged,
+        child: Scaffold(
         appBar: AppBar(
           leading: IconButton(
             onPressed: onRefresh,
@@ -717,9 +763,74 @@ class HomeTabShell extends StatelessWidget {
           ),
         ),
         body: TabBarView(children: tabs),
+        ),
       ),
     );
   }
+}
+
+/// Follows the DefaultTabController above it (it is replaced when the tab
+/// count changes): reports settled index changes and moves the controller to
+/// [selectedIndex] when it differs (a jump, no animation).
+class _SelectedTabKeeper extends StatefulWidget {
+  const _SelectedTabKeeper({
+    required this.selectedIndex,
+    required this.onIndexChanged,
+    required this.child,
+  });
+
+  final int? selectedIndex;
+  final ValueChanged<int>? onIndexChanged;
+  final Widget child;
+
+  @override
+  State<_SelectedTabKeeper> createState() => _SelectedTabKeeperState();
+}
+
+class _SelectedTabKeeperState extends State<_SelectedTabKeeper> {
+  TabController? _controller;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final c = DefaultTabController.maybeOf(context);
+    if (!identical(c, _controller)) {
+      _controller?.removeListener(_onChanged);
+      _controller = c;
+      c?.addListener(_onChanged);
+    }
+    _keepSelected();
+  }
+
+  @override
+  void didUpdateWidget(covariant _SelectedTabKeeper oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _keepSelected();
+  }
+
+  void _onChanged() {
+    final c = _controller;
+    if (c == null || c.indexIsChanging) return;
+    widget.onIndexChanged?.call(c.index);
+  }
+
+  void _keepSelected() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final c = _controller;
+      final want = widget.selectedIndex;
+      if (!mounted || c == null || want == null) return;
+      if (want >= 0 && want < c.length && c.index != want) c.index = want;
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller?.removeListener(_onChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 /// Live body of a home-screen tournament tab: streams the tournament's matches

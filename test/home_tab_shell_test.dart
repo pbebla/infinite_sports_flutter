@@ -114,4 +114,40 @@ void main() {
     expect(league.day, dayBefore);
     expect(find.widgetWithText(Tab, 'Cup'), findsNothing);
   });
+
+  // Review fix m2: tabs are kept by identity. When a tab before the fan's
+  // tab disappears (the league season finishes), the controller would keep
+  // the index NUMBER and land on another tab; selectedIndex moves it back.
+  testWidgets('the fan stays on their tab when an earlier tab goes away; '
+      'swipes and taps are reported', (tester) async {
+    tester.view.physicalSize = const Size(360, 780);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    var names = ['League', 'AFC San Jose', 'Cup'];
+    var selectedKey = 'League';
+    late StateSetter rebuild;
+    await tester.pumpWidget(MaterialApp(
+      home: StatefulBuilder(builder: (context, setState) {
+        rebuild = setState;
+        final i = names.indexOf(selectedKey);
+        return HomeTabShell(
+          tabNames: [for (final n in names) Tab(text: n)],
+          tabs: [for (final n in names) Center(child: Text('body $n'))],
+          selectedIndex: i < 0 ? 0 : i,
+          onIndexChanged: (index) => selectedKey = names[index],
+          onTabTap: (_) {},
+          onRefresh: () {},
+        );
+      }),
+    ));
+    await tester.tap(find.widgetWithText(Tab, 'AFC San Jose'));
+    await tester.pumpAndSettle();
+    expect(selectedKey, 'AFC San Jose');
+
+    rebuild(() => names = ['AFC San Jose', 'Cup']); // league tab gone
+    await tester.pumpAndSettle();
+    expect(find.text('body AFC San Jose'), findsOneWidget);
+    expect(selectedKey, 'AFC San Jose');
+    expect(tester.takeException(), isNull);
+  });
 }

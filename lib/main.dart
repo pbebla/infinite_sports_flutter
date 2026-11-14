@@ -574,7 +574,13 @@ class _MyHomePageState extends State<MyHomePage> {
     }
     currentSport = await getCurrentSport();
     currentSeason = await getCurrentSeason(currentSport);
-    headerNotifier.value = [currentSport, currentSeason];
+    // Review fix m2: only a starting value. FrontPage owns the header and
+    // sets it from the same values its tabs were built from, so this never
+    // overrides a header that already agrees with the games on screen.
+    final header = headerNotifier.value as List;
+    if (header.every((v) => '$v'.isEmpty)) {
+      headerNotifier.value = [currentSport, currentSeason];
+    }
     await getAllTeamLogo();
     return 1;
   }
