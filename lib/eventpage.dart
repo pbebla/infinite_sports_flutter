@@ -16,7 +16,6 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/attendee.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
 import 'package:infinite_sports_flutter/model/myuser.dart';
-import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_path_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
@@ -264,23 +263,11 @@ class _EventPageState extends State<EventPage> {
     final regId = event.registrationId!;
     setState(() => _registering = true);
     // Both checks at once: one round trip online, one bound offline.
-    final checks = await Future.wait<Object>([
-      RegistrationService.checkOpenRegistration(regId),
-      RegistrationService.checkMySubmission(regId),
-    ]);
+    final entry = await RegistrationService.checkEntry(regId);
     if (!mounted) return;
     setState(() => _registering = false);
-    final open =
-        checks[0] as ({RegistrationConfig? config, bool checked});
-    final mine = checks[1]
-        as ({RegSubmission? submission, bool exists, bool checked});
-    final config = open.config;
-    final route = registrationRoute(
-        configChecked: open.checked,
-        config: config,
-        submissionExists: mine.exists,
-        submissionChecked: mine.checked);
-    switch (route) {
+    final config = entry.config;
+    switch (entry.route) {
       case RegistrationRoute.closed:
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Registration is closed')));

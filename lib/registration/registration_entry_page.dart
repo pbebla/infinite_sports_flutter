@@ -45,22 +45,11 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
   Future<void> _openRegistration(String regId) async {
     if (_opening != null) return;
     setState(() => _opening = regId);
-    final checks = await Future.wait<Object>([
-      RegistrationService.checkOpenRegistration(regId),
-      RegistrationService.checkMySubmission(regId),
-    ]);
+    final entry = await RegistrationService.checkEntry(regId);
     if (!mounted) return;
     setState(() => _opening = null);
-    final open = checks[0] as ({RegistrationConfig? config, bool checked});
-    final mine = checks[1]
-        as ({RegSubmission? submission, bool exists, bool checked});
-    final config = open.config;
-    final route = registrationRoute(
-        configChecked: open.checked,
-        config: config,
-        submissionExists: mine.exists,
-        submissionChecked: mine.checked);
-    switch (route) {
+    final config = entry.config;
+    switch (entry.route) {
       case RegistrationRoute.status:
         Navigator.push(context, MaterialPageRoute(builder: (_) {
           return RegistrationStatusPage(regId: regId, config: config!);

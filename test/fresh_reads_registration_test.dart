@@ -352,4 +352,52 @@ void main() {
       expect(find.text('Registration is closed'), findsOneWidget);
     });
   });
+
+  // Review fix Important 1: every entry (event page Register, the list from
+  // the banner / the drawer) goes through checkEntry, which hands on ONLY a
+  // server-confirmed config.
+  group('checkEntry (every way in)', () {
+    void server(Object? config, {bool fromServer = true, Object? mine}) {
+      answers['RegistrationsPublic/r1'] =
+          () => FreshValue(config, fromServer: fromServer);
+      answers['Registrations/r1/Submissions/u1'] =
+          () => FreshValue(mine, fromServer: true);
+    }
+
+    test('register with the server config', () async {
+      server(_openConfig);
+      final e = await RegistrationService.checkEntry('r1');
+      expect(e.route, RegistrationRoute.register);
+      expect(e.config!.fee, 60);
+    });
+
+    test(
+        'a returning (half-paid) fan gets the status page with the server '
+        'config', () async {
+      server(_openConfig, mine: {'Path': 'individual', 'Paid': false});
+      final e = await RegistrationService.checkEntry('r1');
+      expect(e.route, RegistrationRoute.status);
+      expect(e.config!.fee, 60);
+    });
+
+    test('an unconfirmed config hands nothing on', () async {
+      server(_openConfig, fromServer: false);
+      final e = await RegistrationService.checkEntry('r1');
+      expect(e.route, RegistrationRoute.couldNotCheck);
+      expect(e.config, isNull);
+    });
+
+    test('the two reads run together (one bound offline)', () async {
+      final started = <String>[];
+      FreshReads.serverFirstValueOverride = (path) async {
+        started.add(path);
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        return const FreshValue(null, fromServer: true);
+      };
+      final sw = Stopwatch()..start();
+      await RegistrationService.checkEntry('r1');
+      expect(started, hasLength(2));
+      expect(sw.elapsedMilliseconds, lessThan(38));
+    });
+  });
 }

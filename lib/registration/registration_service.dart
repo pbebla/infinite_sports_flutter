@@ -108,6 +108,34 @@ class RegistrationService {
     }
   }
 
+  /// THE entry decision every way into a registration uses (the event
+  /// page's Register, the registration list reached from the home banner or
+  /// the drawer — review fix Important 1). The config is re-read
+  /// SERVER-FIRST together with "already registered?" (one barrier, one
+  /// bound), and only that server config is handed to the path, form,
+  /// status and payment pages — the fee shown and the Venmo/Zelle amount
+  /// come from the same config the card charge does
+  /// (createRegistrationPaymentIntent reads the server Config).
+  /// `config` is null unless the route is status/register.
+  static Future<({RegistrationRoute route, RegistrationConfig? config})>
+      checkEntry(String regId) async {
+    final checks = await Future.wait<Object>([
+      checkOpenRegistration(regId),
+      checkMySubmission(regId),
+    ]);
+    final open = checks[0] as ({RegistrationConfig? config, bool checked});
+    final mine =
+        checks[1] as ({RegSubmission? submission, bool exists, bool checked});
+    final route = registrationRoute(
+        configChecked: open.checked,
+        config: open.config,
+        submissionExists: mine.exists,
+        submissionChecked: mine.checked);
+    final goes =
+        route == RegistrationRoute.status || route == RegistrationRoute.register;
+    return (route: route, config: goes ? open.config : null);
+  }
+
   /// Live {regId: config} stream of every open registration. Emits
   /// immediately from RTDB's local cache (if any) then on every change, so
   /// registrations opening/closing appear on the entry page without a
