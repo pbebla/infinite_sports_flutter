@@ -42,6 +42,14 @@ String cardPaymentErrorMessage(Object error) {
   return "Card payment couldn't be started. Try again.";
 }
 
+/// The publishable key the card sheet uses: the one the payment-intent
+/// callable returned (the server's, the authority), else the phone's saved
+/// copy of `AppConfig/StripePublishableKey`, else '' (no card start).
+String cardPublishableKey({String? fromCallable, String? saved}) {
+  if (fromCallable != null && fromCallable.isNotEmpty) return fromCallable;
+  return saved ?? '';
+}
+
 /// Payment screen (L1a: Venmo + Zelle; L1c adds card via Stripe PaymentSheet;
 /// L1c.2 makes the screen itself live).
 ///
@@ -89,7 +97,8 @@ class PaymentScreen extends StatefulWidget {
 }
 
 class _PaymentScreenState extends State<PaymentScreen> {
-  /// null while loading, '' when no key is configured (card button hidden).
+  /// The saved-copy fallback key, read only when the callable returns none
+  /// (review fix, Important 2: the card button is never gated on a key read).
   String? _publishableKey;
   bool _payingWithCard = false;
 
@@ -113,7 +122,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.config.stripe) _loadPublishableKey();
     _submission = _watchSubmission();
   }
 
@@ -141,25 +149,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
     super.dispose();
   }
 
-  Future<void> _loadPublishableKey() async {
+  /// The saved key (a refreshing read: the phone's copy at once) — only the
+  /// fallback when the payment-intent callable returns no key.
+  Future<String> _savedPublishableKey() async {
     final override = widget.publishableKeyOverride;
-    if (override != null) {
-      _publishableKey = override;
-      return;
-    }
-    // Fresh reads (Task 3, #71): server-first. A key the server did not
-    // confirm (the phone's saved copy after a key rotation, or a failed
-    // read) is not used: the card button gives way to the existing "Card
-    // payments unavailable right now." line, so no card payment starts on
-    // it. (The payment-intent callable also returns the server's key.)
+    if (override != null) return override;
+    final cached = _publishableKey;
+    if (cached != null && cached.isNotEmpty) return cached;
     try {
-      final r = await serverFirstValue('AppConfig/StripePublishableKey');
-      final key = r.value;
-      if (!mounted) return;
-      setState(() =>
-          _publishableKey = r.fromServer && key is String ? key : '');
+      final key = await refreshingValue('AppConfig/StripePublishableKey');
+      return _publishableKey = key is String ? key : '';
     } catch (_) {
-      if (mounted) setState(() => _publishableKey = '');
+      return '';
     }
   }
 
@@ -261,8 +262,15 @@ class _PaymentScreenState extends State<PaymentScreen> {
       'regId': widget.regId,
     });
     final clientSecret = result.data['clientSecret'] as String?;
-    final publishableKey =
-        (result.data['publishableKey'] as String?) ?? _publishableKey ?? '';
+    // The server's key (returned with the intent) is the authority; the
+    // saved copy only fills in when it is missing. No key at all is the
+    // plain "couldn't be started — try again" error, and the button stays.
+    final fromCallable = result.data['publishableKey'] as String?;
+    final publishableKey = cardPublishableKey(
+        fromCallable: fromCallable,
+        saved: (fromCallable == null || fromCallable.isEmpty)
+            ? await _savedPublishableKey()
+            : null);
     if (clientSecret == null || clientSecret.isEmpty) {
       throw Exception('No client secret returned.');
     }
@@ -425,14 +433,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
     if (sub != null && effectiveAmount <= 0) {
       return _coveredBody(context, sub, effectiveAmount);
     }
-    final showCardButton = widget.config.stripe &&
-        effectiveAmount > 0 &&
-        _publishableKey != null &&
-        _publishableKey!.isNotEmpty;
-    final cardUnavailable = widget.config.stripe &&
-        effectiveAmount > 0 &&
-        _publishableKey != null &&
-        _publishableKey!.isEmpty;
+    // Review fix (Important 2): shown at once whenever card payments are
+    // on — never gated on a key read (the callable returns the key).
+    final showCardButton = widget.config.stripe && effectiveAmount > 0;
 
     return ListView(
       // Bottom inset lets the pay buttons scroll clear of the floating glass
@@ -464,17 +467,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
             ),
           ),
           const SizedBox(height: 15),
-        ] else if (cardUnavailable) ...[
-          Padding(
-            padding: const EdgeInsets.only(bottom: 15),
-            child: Text(
-              'Card payments unavailable right now.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  color: Theme.of(context).textTheme.bodySmall?.color,
-                  fontStyle: FontStyle.italic),
-            ),
-          ),
         ],
         if (widget.config.venmo) ...[
           SizedBox(

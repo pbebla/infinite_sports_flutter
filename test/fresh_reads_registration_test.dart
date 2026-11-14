@@ -222,7 +222,11 @@ void main() {
     });
   });
 
-  group('Stripe publishable key (#71)', () {
+  // Review fix (Important 2): the card option is NOT gated on a key read —
+  // the payment-intent callable returns the key and is the authority; a key
+  // that cannot be obtained at tap time is the existing plain error, and the
+  // button stays for a retry on the same screen.
+  group('Stripe card button (#71, review Important 2)', () {
     const stripeConfig = RegistrationConfig(
       targetType: 'league',
       sport: 'Futsal',
@@ -234,33 +238,58 @@ void main() {
     );
     const unpaid = RegSubmission(path: 'individual', answers: {});
 
-    Widget payment() => MaterialApp(
-          home: PaymentScreen(
-            regId: 'r1',
-            config: stripeConfig,
-            amount: 60,
-            submissionStream: Stream.value(unpaid),
-          ),
-        );
-
-    testWidgets('a key the server confirmed shows the card button',
+    testWidgets('shows at once, with no key read and no server wait',
         (tester) async {
-      answers['AppConfig/StripePublishableKey'] =
-          () => const FreshValue('pk_test_new', fromServer: true);
-      await tester.pumpWidget(payment());
-      await tester.pumpAndSettle();
+      // answers is empty: any server-first read would throw.
+      await tester.pumpWidget(MaterialApp(
+        home: PaymentScreen(
+          regId: 'r1',
+          config: stripeConfig,
+          amount: 60,
+          submissionStream: Stream.value(unpaid),
+        ),
+      ));
+      await tester.pump();
       expect(find.text('Pay with card'), findsOneWidget);
+      expect(find.text('Card payments unavailable right now.'), findsNothing);
     });
 
     testWidgets(
-        'a saved-copy key (maybe rotated) starts no card payment: the '
-        'existing "unavailable" line', (tester) async {
-      answers['AppConfig/StripePublishableKey'] =
-          () => const FreshValue('pk_test_old', fromServer: false);
-      await tester.pumpWidget(payment());
+        'a card start that fails shows the plain error and can be retried '
+        'without leaving', (tester) async {
+      var attempts = 0;
+      await tester.pumpWidget(MaterialApp(
+        home: PaymentScreen(
+          regId: 'r1',
+          config: stripeConfig,
+          amount: 60,
+          submissionStream: Stream.value(unpaid),
+          cardPaymentOverride: () async {
+            attempts++;
+            if (attempts == 1) {
+              throw Exception('No Stripe publishable key configured.');
+            }
+          },
+        ),
+      ));
+      await tester.pump();
+      await tester.tap(find.text('Pay with card'));
       await tester.pumpAndSettle();
-      expect(find.text('Pay with card'), findsNothing);
-      expect(find.text('Card payments unavailable right now.'), findsOneWidget);
+      expect(find.text("Card payment couldn't be started. Try again."),
+          findsOneWidget);
+      expect(find.text('Pay with card'), findsOneWidget);
+      await tester.tap(find.text('Pay with card'));
+      await tester.pump();
+      expect(attempts, 2);
+      expect(find.text('Processing…'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 61));
+    });
+
+    test("the key: the callable's first, then the saved one, else none", () {
+      expect(cardPublishableKey(fromCallable: 'pk_new', saved: 'pk_old'),
+          'pk_new');
+      expect(cardPublishableKey(fromCallable: '', saved: 'pk_old'), 'pk_old');
+      expect(cardPublishableKey(fromCallable: null, saved: null), '');
     });
   });
 
