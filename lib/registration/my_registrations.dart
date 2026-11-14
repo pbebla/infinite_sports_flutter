@@ -41,6 +41,11 @@ class MyRegistration {
 
   bool get paid => submission.paid;
 
+  /// The status page's chip decision for this registration (fix round,
+  /// Minor 1).
+  ({RegistrationChipKind kind, String label, double owed, bool settled})
+      get chip => registrationChipFor(config: config, submission: submission);
+
   /// What the fan still owes: the SAME [discountedAmountOwed] (through
   /// discountedTotal) the status page shows — never a second formula. A
   /// team-code waiver makes a joiner's submission born Paid, so no team read

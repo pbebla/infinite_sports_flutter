@@ -892,6 +892,56 @@ double discountedAmountOwed({
 /// True when a fee applies to this submission but its discounted total
 /// (already in whole cents) is $0 — an admin comp to $0 or a 100% discount: "Nothing to pay — you're
 /// covered", never "Payment pending" with a $0 pay button.
+/// What a registration's status chip says (way back fix round, Minor 1):
+/// THE decision the status page's top chip and the registration list's
+/// chip share, so they can never disagree.
+enum RegistrationChipKind { paid, covered, pending }
+
+/// The chip for [submission] under [config] — exactly the status page's
+/// rule: Paid ("Paid via team code" when born paid by a team code);
+/// "Covered" only when a payment WAS owed and a discount/comp brought it
+/// to 0 ([paymentCovered]); otherwise "Payment pending" (which includes a
+/// free registration and an individual when only a team fee is charged).
+/// [owed] is the amount the status page shows as owed (through
+/// discountedTotal); the list words a pending chip with it ("You owe $X")
+/// when it is above 0.
+({RegistrationChipKind kind, String label, double owed, bool settled})
+    registrationChipFor({
+  required RegistrationConfig config,
+  required RegSubmission submission,
+  bool codeWaivesPayment = false,
+}) {
+  final owed = discountedAmountOwed(
+      config: config,
+      submission: submission,
+      codeWaivesPayment: codeWaivesPayment);
+  if (submission.paid) {
+    return (
+      kind: RegistrationChipKind.paid,
+      label: submission.paidVia == 'team code' ? 'Paid via team code' : 'Paid',
+      owed: 0,
+      settled: true,
+    );
+  }
+  if (paymentCovered(
+      config: config,
+      submission: submission,
+      codeWaivesPayment: codeWaivesPayment)) {
+    return (
+      kind: RegistrationChipKind.covered,
+      label: 'Covered',
+      owed: 0,
+      settled: true,
+    );
+  }
+  return (
+    kind: RegistrationChipKind.pending,
+    label: 'Payment pending',
+    owed: owed,
+    settled: false,
+  );
+}
+
 bool paymentCovered({
   required RegistrationConfig config,
   required RegSubmission submission,

@@ -150,13 +150,15 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
   }
 
   Widget _mineTile(BuildContext context, MyRegistration m) {
-    final owed = m.owed;
-    final chip = m.paid
-        ? const RegistrationStatusChip(paid: true, label: 'Paid')
-        : owed > 0
-            ? RegistrationStatusChip(
-                paid: false, label: 'You owe ${formatOwed(owed)}')
-            : const RegistrationStatusChip(paid: true, label: 'Covered');
+    // The status page's own chip decision (fix round, Minor 1); a pending
+    // chip with money owed is worded with the amount.
+    final decision = m.chip;
+    final chip = RegistrationStatusChip(
+        paid: decision.settled,
+        label: decision.kind == RegistrationChipKind.pending &&
+                decision.owed > 0
+            ? 'You owe ${formatOwed(decision.owed)}'
+            : decision.label);
     return ListTile(
       leading: const Icon(Icons.assignment_turned_in),
       title: Text(m.config.label,

@@ -470,6 +470,8 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
             submission: sub,
             codeWaivesPayment: waived) &&
         owed == 0;
+    final chip = registrationChipFor(
+        config: config, submission: sub, codeWaivesPayment: waived);
     final teamCard = _teamCard(sub, team);
     return Column(
       children: [
@@ -492,15 +494,10 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
                   title: Text(config.label,
                       style: const TextStyle(fontWeight: FontWeight.bold)),
                   subtitle: Text('Registered as: ${_pathLabel(sub.path)}'),
-                  trailing: covered
-                      ? _paidChip(context, paid: true, label: 'Covered')
-                      : _paidChip(context,
-                          paid: sub.paid,
-                          label: sub.paid
-                              ? (sub.paidVia == 'team code'
-                                  ? 'Paid via team code'
-                                  : 'Paid')
-                              : 'Payment pending'),
+                  // The shared chip decision (fix round, Minor 1) — the
+                  // registration list uses the same one.
+                  trailing: _paidChip(context,
+                      paid: chip.settled, label: chip.label),
                 ),
               ),
               if (covered) ...[
