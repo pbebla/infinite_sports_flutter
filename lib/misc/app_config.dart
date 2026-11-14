@@ -1,4 +1,5 @@
 import 'package:firebase_database/firebase_database.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 /// App store listing URLs, owner-configurable at `AppConfig/StoreLinks`
 /// in the manager so a listing change never needs an app release.
@@ -24,7 +25,7 @@ Future<StoreLinks> getStoreLinks() async {
   String? ios;
   try {
     final snap =
-        (await FirebaseDatabase.instance.ref('AppConfig/StoreLinks').once())
+        (await refreshingOnce(FirebaseDatabase.instance.ref('AppConfig/StoreLinks')))
             .snapshot;
     if (snap.value is Map) {
       final map = snap.value as Map;

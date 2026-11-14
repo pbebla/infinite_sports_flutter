@@ -220,7 +220,7 @@ Future<bool> isSeasonFinished(sport, season) async {
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-    var seasonFinished = (await newClient.child("Finished").once()).snapshot;
+    var seasonFinished = (await refreshingOnce(newClient.child("Finished"))).snapshot;
     return seasonFinished.value as bool;
   }
   catch (e)
@@ -247,7 +247,7 @@ Future<bool> isAFCSeasonFinished(season) async {
   {
 
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/AFC San Jose/Seasons/$season");
-    var seasonFinished = (await newClient.child("Finished").once()).snapshot;
+    var seasonFinished = (await refreshingOnce(newClient.child("Finished"))).snapshot;
     return seasonFinished.value as bool;
   }
   catch (e)
@@ -263,7 +263,7 @@ Future<List<String>> getDates(String sport, String season) async {
       sport = "AFC San Jose/Seasons";
     }
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-    var event = await newClient.child("Date").once();
+    var event = await refreshingOnce(newClient.child("Date"));
     var datesGotten = event.snapshot.value as Map<dynamic, dynamic>;
 
     var dates = List<String>.from(datesGotten.keys);
@@ -299,7 +299,7 @@ Future<String> getMinSeason(sport) async {
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport");
-    var seasonNum = (await newClient.child("Init Season").once()).snapshot;
+    var seasonNum = (await refreshingOnce(newClient.child("Init Season"))).snapshot;
     return seasonNum.value.toString();
   }
   catch (e)
@@ -311,7 +311,7 @@ Future<String> getMinSeason(sport) async {
 Future<List<String>> getSoccerSeasons(sport) async {
   if (sport == "AFC San Jose") {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/");
-    var event = await newClient.child("Seasons").once();
+    var event = await refreshingOnce(newClient.child("Seasons"));
     if (event.snapshot.value == null) return [];
     var seasons = event.snapshot.value as Map<dynamic, dynamic>;
     return seasons.keys.toList().cast<String>();
@@ -323,7 +323,7 @@ Future<Map<String, SoccerPlayer>> getSoccerRoster(sport, season) async {
   Map<String, SoccerPlayer> roster = {};
   if (sport == "AFC San Jose") {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/Seasons/$season");
-    var event = await newClient.child("Roster").once();
+    var event = await refreshingOnce(newClient.child("Roster"));
     var lineup = event.snapshot.value as Map;
     lineup.forEach((name, info) {
       SoccerPlayer temp = SoccerPlayer();
@@ -345,7 +345,7 @@ Future<Map<String, SoccerPlayer>> getSoccerRoster(sport, season) async {
 Future<void> getAllFutsalLineUps(String season) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref("/Futsal/$season");
-  var event = await newClient.child("Line Ups").once();
+  var event = await refreshingOnce(newClient.child("Line Ups"));
   var lineups = event.snapshot.value as Map;
   Map<String, Map<String, FutsalPlayer>> result = {};
   lineups.forEach((team, lineup) {
@@ -369,7 +369,7 @@ Future<void> getAllFutsalLineUps(String season) async
 Future<void> getAllFlagFootballLineUps(String season) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref("/Flag Football/$season");
-  var event = await newClient.child("Line Ups").once();
+  var event = await refreshingOnce(newClient.child("Line Ups"));
   var lineups = event.snapshot.value as Map;
   Map<String, Map<String, FlagFootballPlayer>> result = {};
   lineups.forEach((team, lineup) {
@@ -414,7 +414,7 @@ Future<void> getAllFlagFootballLineUps(String season) async
 Future<void> getAllBasketballLineUps(String season) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref("/Basketball/$season");
-  var event = await newClient.child("Line Ups").once();
+  var event = await refreshingOnce(newClient.child("Line Ups"));
   var lineups = event.snapshot.value as Map;
   Map<String, Map<String, BasketballPlayer>> result = {};
   lineups.forEach((team, lineup) {
@@ -525,7 +525,7 @@ Future<Map<String, List<SoccerGame>>> getAllSoccerGames(sport, season) async {
     } else {
       newClient = FirebaseDatabase.instance.ref("/$sport/$season");
     }
-    var games = (await newClient.child("Date").once()).snapshot;
+    var games = (await refreshingOnce(newClient.child("Date"))).snapshot;
     dynamic data = games.value;
     var result = <String, List<SoccerGame>>{};
     data.forEach((key, value) {
@@ -572,7 +572,7 @@ Future<Map<String, List<FutsalGame>>> getAllFutsalGames(sport, season) async {
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-    var games = (await newClient.child("Date").once()).snapshot;
+    var games = (await refreshingOnce(newClient.child("Date"))).snapshot;
     dynamic data = games.value;
     var result = <String, List<FutsalGame>>{};
     data.forEach((key, value) {
@@ -619,7 +619,7 @@ Future<Map<String, List<BasketballGame>>> getAllBasketballGames(sport, season) a
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-    var games = (await newClient.child("Date").once()).snapshot;
+    var games = (await refreshingOnce(newClient.child("Date"))).snapshot;
     dynamic data = games.value;
     var result = <String, List<BasketballGame>>{};
     data.forEach((key, value) {
@@ -666,7 +666,7 @@ Future<Map<String, List<FlagFootballGame>>> getAllFlagFootballGames(sport, seaso
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-    var games = (await newClient.child("Date").once()).snapshot;
+    var games = (await refreshingOnce(newClient.child("Date"))).snapshot;
     dynamic data = games.value;
     var result = <String, List<FlagFootballGame>>{};
     data.forEach((key, value) {
@@ -808,7 +808,7 @@ Future<int> getSeasonStartTime(times, sport, season) async {
   try
   {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/$sport/$season");
-    var event = await newClient.child("Start Time").once();
+    var event = await refreshingOnce(newClient.child("Start Time"));
     late int seasonStart;
     if (event.snapshot.value != null) {
       seasonStart = event.snapshot.value as int;
@@ -918,7 +918,7 @@ Future<String> getSignUpDue() async
 
   try
   {
-    var event = await newClient.child("Due").once();
+    var event = await refreshingOnce(newClient.child("Due"));
     var status = event.snapshot.value as String;
     return status;
   }
@@ -934,7 +934,7 @@ Future<String> getSignUpInformation() async
 
   try
   {
-    var event = await newClient.child("Information").once();
+    var event = await refreshingOnce(newClient.child("Information"));
     var status = event.snapshot.value as String;
     return status;
   }
@@ -949,7 +949,7 @@ Future<UserInformation?> getInformation() async
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   try
   {
-    var event = await newClient.child("Users/${FirebaseAuth.instance.currentUser!.uid}/Information/").once();
+    var event = await refreshingOnce(newClient.child("Users/${FirebaseAuth.instance.currentUser!.uid}/Information/"));
     var info = event.snapshot.value as Map<dynamic, dynamic>;
     var result = UserInformation();
     result.age = info["Age"] ?? info["age"];
@@ -1338,7 +1338,7 @@ Future<String?> getPhone() async
   DatabaseReference newClient = FirebaseDatabase.instance.ref("");
   try
   {
-    var event = await newClient.child("Users/${FirebaseAuth.instance.currentUser!.uid}/Phone Number/").once();
+    var event = await refreshingOnce(newClient.child("Users/${FirebaseAuth.instance.currentUser!.uid}/Phone Number/"));
     var info = event.snapshot.value.toString();
 
     return info;
@@ -1355,7 +1355,7 @@ Future<String> getSignUpRules() async
 
   try
   {
-    var event = await newClient.child("Rules").once();
+    var event = await refreshingOnce(newClient.child("Rules"));
     var status = event.snapshot.value as String;
     return status;
   }
@@ -1371,7 +1371,7 @@ Future<String> getSignUpWaiver() async
 
   try
   {
-    var event = await newClient.child("Waiver").once();
+    var event = await refreshingOnce(newClient.child("Waiver"));
     var status = event.snapshot.value as String;
     return status;
   }
@@ -1412,7 +1412,7 @@ Future<List<Business>> getBusinesses() async {
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   var businesses = List<Business>.empty(growable: true);
   try {
-    var event = await newClient.child("Map").once();
+    var event = await refreshingOnce(newClient.child("Map"));
     var list = event.snapshot.value as List;
     for (var value in list) {
       Business business = Business();
@@ -1438,7 +1438,7 @@ Future<List<Event>> getEvents() async {
   DatabaseReference newClient = FirebaseDatabase.instance.ref();
   var events = List<Event>.empty(growable: true);
   try {
-    var snapshot = await newClient.child("Events").once();
+    var snapshot = await refreshingOnce(newClient.child("Events"));
     var list = snapshot.snapshot.value as List;
     for (var value in list) {
       Event event = Event();

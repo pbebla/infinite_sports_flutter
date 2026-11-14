@@ -25,6 +25,7 @@ import 'package:infinite_sports_flutter/profile/profile_tab.dart';
 import 'package:infinite_sports_flutter/profile/stats_tab.dart';
 import 'package:infinite_sports_flutter/widgets/share_profile_card.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 // ─── Human-readable labels for stat keys (shared across ProfileTab + StatsTab) ─
 const Map<String, String> _statLabel = {
@@ -963,9 +964,8 @@ class _ProfilePageState extends State<ProfilePage>
       // read — keeps whatever identity is already on screen (a cache-hit
       // refresh must never blank the cached name); a first visit then shows
       // the empty page instead of a skeleton forever.
-      final userSnap = (await ref
-              .child(profileNodePathFor(widget.uid))
-              .once()
+      final userSnap = (await refreshingOnce(ref
+              .child(profileNodePathFor(widget.uid)))
               .bounded('ProfilePage: profile node'))
           .snapshot;
       rawUser = userSnap.value as Map? ?? {};
@@ -1124,9 +1124,8 @@ class _ProfilePageState extends State<ProfilePage>
   Future<(String, Color, Player)?> _extractFromTeamNode(
       String sport, String season, String team) async {
     try {
-      final snap = (await FirebaseDatabase.instance
-              .ref('/$sport/$season/Line Ups/$team')
-              .once()
+      final snap = (await refreshingOnce(FirebaseDatabase.instance
+              .ref('/$sport/$season/Line Ups/$team'))
               .bounded('ProfilePage: $sport $season $team'))
           .snapshot;
       final node = snap.value;
@@ -1230,9 +1229,8 @@ class _ProfilePageState extends State<ProfilePage>
       // Lockdown B1: own profile reads Users, visited profiles read the
       // PublicProfiles mirror (TournamentsPlayed is mirrored verbatim).
       // Bounded like every career read: no answer = no appearances.
-      final idxSnap = (await FirebaseDatabase.instance
-              .ref('${profileNodePathFor(widget.uid)}/TournamentsPlayed')
-              .once()
+      final idxSnap = (await refreshingOnce(FirebaseDatabase.instance
+              .ref('${profileNodePathFor(widget.uid)}/TournamentsPlayed'))
               .bounded('ProfilePage: TournamentsPlayed'))
           .snapshot;
       final index = idxSnap.value;

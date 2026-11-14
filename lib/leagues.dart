@@ -6,6 +6,7 @@ import 'package:infinite_sports_flutter/misc/season_pointers.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 class LeaguesPage extends StatefulWidget {
   const LeaguesPage({super.key});
@@ -106,7 +107,7 @@ Future<List<Widget>> getSeasonTiles(sport, context) async {
   List<Widget> seasons = List<Widget>.empty(growable: true);
   if (sport == "AFC San Jose") {
     DatabaseReference newClient = FirebaseDatabase.instance.ref("/AFC San Jose/");
-    var event = await newClient.child("Seasons").once();
+    var event = await refreshingOnce(newClient.child("Seasons"));
     var seasonsMap = event.snapshot.value as Map;
     seasonsMap.forEach((k, v) {
       var seasonView = ListTile(

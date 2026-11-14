@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_database/firebase_database.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 /// Parses the legacy Events node keyed by true list index. RTDB hands back a
 /// List normally, but a Map with numeric keys once rows have been nulled out
@@ -88,13 +89,13 @@ Future<List<Event>> getAllEvents() async {
   Map<dynamic, dynamic> v2 = {};
   try {
     final snapshot =
-        (await FirebaseDatabase.instance.ref('EventsV2').once()).snapshot;
+        (await refreshingOnce(FirebaseDatabase.instance.ref('EventsV2'))).snapshot;
     if (snapshot.value is Map) v2 = snapshot.value as Map;
   } catch (_) {}
   Map<int, Event> legacy = {};
   try {
     final snapshot =
-        (await FirebaseDatabase.instance.ref('Events').once()).snapshot;
+        (await refreshingOnce(FirebaseDatabase.instance.ref('Events'))).snapshot;
     legacy = parseLegacyEvents(snapshot.value);
   } catch (_) {}
   return mergeEventsIndexed(v2, legacy);
@@ -139,7 +140,7 @@ Stream<List<Event>> watchAllEvents() {
 Future<Event?> getEventV2(String id) async {
   try {
     final snapshot =
-        (await FirebaseDatabase.instance.ref('EventsV2/$id').once()).snapshot;
+        (await refreshingOnce(FirebaseDatabase.instance.ref('EventsV2/$id'))).snapshot;
     if (snapshot.value is! Map) return null;
     return Event.fromV2(id, snapshot.value as Map);
   } catch (_) {

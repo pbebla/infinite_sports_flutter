@@ -81,7 +81,7 @@ class RegistrationService {
   static Future<Map<String, RegistrationConfig>> getOpenRegistrations() async {
     try {
       final snap =
-          (await FirebaseDatabase.instance.ref('RegistrationsPublic').once())
+          (await refreshingOnce(FirebaseDatabase.instance.ref('RegistrationsPublic')))
               .snapshot;
       return openRegistrationsFromNode(snap.value);
     } catch (_) {
@@ -131,9 +131,8 @@ class RegistrationService {
   static Future<List<RegQuestion>> getForm(String regId) async {
     try {
       // once(), not get(): firebase-ios-sdk returns wrong/empty data for one-shot
-      final snap = (await FirebaseDatabase.instance
-              .ref('Registrations/$regId/Form')
-              .once())
+      final snap = (await refreshingOnce(FirebaseDatabase.instance
+              .ref('Registrations/$regId/Form')))
           .snapshot;
       return regQuestionsFromNode(snap.value);
     } catch (_) {
@@ -209,7 +208,7 @@ class RegistrationService {
     if (uid == null) return {};
     try {
       final snap =
-          (await FirebaseDatabase.instance.ref('Users/$uid').once()).snapshot;
+          (await refreshingOnce(FirebaseDatabase.instance.ref('Users/$uid'))).snapshot;
       if (snap.value is! Map) return {};
       final user = snap.value as Map;
       final out = <String, dynamic>{};
@@ -390,9 +389,8 @@ class RegistrationService {
   static Future<RegTeam?> getTeam(String regId, String teamId) async {
     if (teamId.isEmpty) return null;
     try {
-      final snap = (await FirebaseDatabase.instance
-              .ref('Registrations/$regId/Teams/$teamId')
-              .once())
+      final snap = (await refreshingOnce(FirebaseDatabase.instance
+              .ref('Registrations/$regId/Teams/$teamId')))
           .snapshot;
       return RegTeam.fromNode(teamId, snap.value);
     } catch (_) {

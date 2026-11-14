@@ -11,6 +11,7 @@ import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_launcher_icons/constants.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 class TablePage extends StatefulWidget {
   const TablePage({super.key, required this.sport, required this.season});
@@ -35,7 +36,7 @@ class _TablePageState extends State<TablePage> {
     if (widget.sport == "Futsal") {
       var logos = sport![widget.season];
       Map<String, FutsalTeamInfo> gottenLineUp = <String, FutsalTeamInfo>{};
-      final event = (await newClient.child("Teams").once()).snapshot;
+      final event = (await refreshingOnce(newClient.child("Teams"))).snapshot;
       Map eventData = event.value as Map;
       eventData.forEach((key, value) {
         var temp = FutsalTeamInfo();
@@ -57,7 +58,7 @@ class _TablePageState extends State<TablePage> {
       newClient =
           FirebaseDatabase.instance.ref("/${widget.sport}/Seasons/${widget.season}");
       Map<String, SoccerTeamInfo> gottenLineUp = <String, SoccerTeamInfo>{};
-      final event = (await newClient.child("Table").once()).snapshot;
+      final event = (await refreshingOnce(newClient.child("Table"))).snapshot;
       Map eventData = event.value as Map;
       eventData.forEach((key, value) {
         var temp = SoccerTeamInfo();
@@ -77,7 +78,7 @@ class _TablePageState extends State<TablePage> {
     } else if (widget.sport == "Flag Football") {
       var logos = sport![widget.season];
       Map<String, FlagFootballTeamInfo> gottenLineUp = <String, FlagFootballTeamInfo>{};
-      final event = (await newClient.child("Teams").once()).snapshot;
+      final event = (await refreshingOnce(newClient.child("Teams"))).snapshot;
       Map eventData = event.value as Map;
       eventData.forEach((key, value) {
         var temp = FlagFootballTeamInfo();
@@ -96,7 +97,7 @@ class _TablePageState extends State<TablePage> {
       var logos = sport![widget.season];
       Map<String, BasketballTeamInfo> gottenLineUp =
       <String, BasketballTeamInfo>{};
-      final event = (await newClient.child("Teams").once()).snapshot;
+      final event = (await refreshingOnce(newClient.child("Teams"))).snapshot;
       Map eventData = event.value as Map;
       eventData.forEach((key, value) {
         var temp = BasketballTeamInfo();

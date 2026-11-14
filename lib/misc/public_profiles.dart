@@ -19,6 +19,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:infinite_sports_flutter/misc/bounded_read.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 /// One user's public identity + career data, as mirrored.
 class PublicProfile {
@@ -130,7 +131,7 @@ class PublicProfiles {
   static Future<Object?> _readRoot() async {
     final override = rootReadOverride;
     if (override != null) return override();
-    return (await _root().once()).snapshot.value;
+    return (await refreshingOnce(_root())).snapshot.value;
   }
 
   /// One-shot {uid: profile} of the whole mirror — the search index /
@@ -156,7 +157,7 @@ class PublicProfiles {
   /// enrichment.
   static Future<String> getProfileUrlOnce(String uid) async {
     try {
-      final event = await _root().child('$uid/ProfileUrl').once();
+      final event = await refreshingOnce(_root().child('$uid/ProfileUrl'));
       return event.snapshot.value?.toString() ?? '';
     } catch (_) {
       return '';

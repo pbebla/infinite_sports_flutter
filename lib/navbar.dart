@@ -23,6 +23,7 @@ import 'package:infinite_sports_flutter/signup.dart';
 import 'package:infinite_sports_flutter/support/support_form_page.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:provider/provider.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 
 class NavBar extends StatefulWidget {
@@ -85,7 +86,7 @@ class _NavBarState extends State<NavBar> {
   Future<void> retrieveProfilePic() async {
     DatabaseReference newClient = FirebaseDatabase.instance.ref();
     if (signedIn) {
-      var event = (await newClient.child("Users/${FirebaseAuth.instance.currentUser?.uid}").once()).snapshot;
+      var event = (await refreshingOnce(newClient.child("Users/${FirebaseAuth.instance.currentUser?.uid}"))).snapshot;
       var player = event.value as Map;
       profileImagePath = player["ProfileUrl"] ?? "";
     }

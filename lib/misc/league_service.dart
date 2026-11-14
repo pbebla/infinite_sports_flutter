@@ -15,6 +15,7 @@ import 'package:infinite_sports_flutter/model/prediction_question.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 class LeagueService {
   static DatabaseReference _ref(String path) =>
@@ -26,7 +27,7 @@ class LeagueService {
   /// legacy rendering exactly.
   static Future<int> getStartHour(String sport, String season) async {
     try {
-      final snap = (await _ref('/$sport/$season/Start Time').once()).snapshot;
+      final snap = (await refreshingOnce(_ref('/$sport/$season/Start Time'))).snapshot;
       final v = snap.value;
       if (v is int) return v;
       return int.tryParse(v?.toString() ?? '') ?? 0;
@@ -210,7 +211,7 @@ class LeagueService {
         try {
           // Lockdown B1: other-user photos come from the public mirror.
           final snap =
-              (await _ref('/PublicProfiles/$uid/ProfileUrl').once()).snapshot;
+              (await refreshingOnce(_ref('/PublicProfiles/$uid/ProfileUrl'))).snapshot;
           _profileUrlCache[uid] = snap.value?.toString() ?? '';
         } catch (_) {
           _profileUrlCache[uid] = '';
