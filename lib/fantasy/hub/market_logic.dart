@@ -236,6 +236,10 @@ enum MarketAddAvailability {
   /// Gameweek locked (or season over) — nothing edits.
   locked,
 
+  /// The schedule could not be read (review 6, I2): nothing edits, and the
+  /// app does not claim the week is locked.
+  deadlineUnknown,
+
   /// Ineligible guest (spec §3) — never selectable.
   ineligible,
 
@@ -262,8 +266,13 @@ MarketAddAvailability marketAddState({
   required int Function(FantasyPlayer player) priceOf,
   required bool editable,
   List<SquadPick> unplaced = const [],
+  bool deadlineUnknown = false,
 }) {
-  if (!editable) return MarketAddAvailability.locked;
+  if (!editable) {
+    return deadlineUnknown
+        ? MarketAddAvailability.deadlineUnknown
+        : MarketAddAvailability.locked;
+  }
   for (final pick in [...slotPicks, ...unplaced]) {
     if (pick?.playerId == player.name) return MarketAddAvailability.inSquad;
   }
@@ -299,6 +308,8 @@ String? marketAddReason(
         MarketAddAvailability availability, FantasyPosition position) =>
     switch (availability) {
       MarketAddAvailability.locked => 'Gameweek locked — no changes now.',
+      MarketAddAvailability.deadlineUnknown =>
+        'Can\'t check the deadline right now — try again in a moment.',
       MarketAddAvailability.ineligible =>
         'Guest player — not eligible for fantasy.',
       MarketAddAvailability.positionFull =>

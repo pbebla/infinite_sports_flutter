@@ -22,9 +22,13 @@
 //   • a REAL null Config (fantasy removed) clears the schedule, cancels its
 //     listener and drops the cached schedule (an error is NOT "removed");
 //   • every stream has an error handler: logged with debugPrint, the last
-//     good value kept; with nothing good yet the gates still open ("no
-//     data"), never an eternal skeleton; a stream that cannot even be
-//     created (no Firebase app in a widget test) degrades the same way;
+//     good value kept; with nothing good yet the gates still open on an
+//     empty schedule — but [FantasyScheduleFeed.scheduleUnknown] says it is
+//     UNKNOWN, not "no gameweeks" (review 6, I2: never "Season complete" or
+//     "Locked" from a failed read), and the Config / schedule stream is
+//     re-subscribed on the shared bounded back-off; a stream that cannot
+//     even be created (no Firebase app in a widget test) degrades the same
+//     way without retries;
 //   • the schedule resubscribes only when the lock hour or the owner's
 //     schedule overrides change (moved deadlines, skipped days, the kickoff
 //     margin — every one of them moves a week); the per-week listener only
@@ -56,6 +60,44 @@ import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/misc/bounded_read.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
+
+/// Back-off between re-subscriptions after a stream error (an RTDB onValue
+/// stream ends after an error); the feed gives up after the last one and the
+/// next screen open starts a fresh feed. Shared by the season-finished feed
+/// and the schedule feed (review 6, I2) through [_Backoff].
+const List<Duration> kFantasyFeedRetryDelays = [
+  Duration(seconds: 2),
+  Duration(seconds: 5),
+  Duration(seconds: 15),
+  Duration(seconds: 30),
+  Duration(seconds: 60),
+];
+
+/// One bounded re-subscribe schedule ([kFantasyFeedRetryDelays]).
+class _Backoff {
+  _Backoff(this._disposed);
+  final bool Function() _disposed;
+  int _tries = 0;
+  Timer? _timer;
+
+  /// Runs [again] after the next delay, unless the retries are used up.
+  void retry(void Function() again) {
+    if (_disposed() || _tries >= kFantasyFeedRetryDelays.length) return;
+    _timer?.cancel();
+    _timer = Timer(kFantasyFeedRetryDelays[_tries++], () {
+      _timer = null;
+      if (!_disposed()) again();
+    });
+  }
+
+  /// A real answer arrived: the next failure starts the back-off afresh.
+  void reset() => _tries = 0;
+
+  void cancel() {
+    _timer?.cancel();
+    _timer = null;
+  }
+}
 
 /// `<owner>: <what> failed: <error>` — the fantasy screens' log line shape.
 void _logFailure(String owner, String what, Object error) =>
@@ -170,6 +212,13 @@ class FantasyScheduleFeed<W> {
   W? _weekData;
   bool _weekLoaded = false;
 
+  bool _scheduleFromError = false;
+  late final _Backoff _configRetry = _Backoff(() => _disposed);
+  late final _Backoff _scheduleRetry = _Backoff(() => _disposed);
+  bool _configSubscribing = false;
+  bool _scheduleSubscribing = false;
+  Stream<List<Gameweek>> Function()? _scheduleMake;
+
   StreamSubscription<FantasyConfigState?>? _configSub;
   StreamSubscription<List<Gameweek>>? _gameweeksSub;
   StreamSubscription<W>? _weekSub;
@@ -190,6 +239,12 @@ class FantasyScheduleFeed<W> {
   /// The schedule; null until it is known (an emission, the session cache,
   /// or an error / null Config → empty).
   List<Gameweek>? get gameweeks => _gameweeks;
+
+  /// The schedule shown is EMPTY only because a read failed (the Config or
+  /// the schedule stream errored before any good value): what the deadline
+  /// is, is UNKNOWN — distinct from a real absent Config or a schedule with
+  /// no more gameweeks. Cleared by the next real answer.
+  bool get scheduleUnknown => _scheduleFromError;
 
   /// The per-week listener's last good value (null: none yet).
   W? get weekData => _weekData;
@@ -221,6 +276,17 @@ class FantasyScheduleFeed<W> {
       _syncWeeks(); // a cached schedule starts the week listener at once
       final seam = gameweekStates;
       if (seam != null) _listenSchedule(() => seam);
+      _subscribeConfig();
+    } finally {
+      _starting = false;
+    }
+  }
+
+  void _subscribeConfig() {
+    _configSub?.cancel();
+    _configSub = null;
+    _configSubscribing = true;
+    try {
       _configSub = _listenLogged<FantasyConfigState?>(
         owner: owner,
         what: 'config feed',
@@ -230,7 +296,7 @@ class FantasyScheduleFeed<W> {
         onError: _onConfigError,
       );
     } finally {
-      _starting = false;
+      _configSubscribing = false;
     }
   }
 
@@ -255,6 +321,8 @@ class FantasyScheduleFeed<W> {
 
   void dispose() {
     _disposed = true;
+    _configRetry.cancel();
+    _scheduleRetry.cancel();
     _configSub?.cancel();
     _gameweeksSub?.cancel();
     _weekSub?.cancel();
@@ -271,6 +339,7 @@ class FantasyScheduleFeed<W> {
     _config = state;
     _configLoaded = true;
     _configAbsent = state == null;
+    _configRetry.reset();
     if (state == null) {
       // Fantasy removed for the season: nothing stale may seed a revisit.
       _gameweeksSession.remove(_sessionKey);
@@ -278,7 +347,10 @@ class FantasyScheduleFeed<W> {
         _gameweeksSub?.cancel();
         _gameweeksSub = null;
         _scheduleKey = null;
+        _scheduleMake = null;
+        _scheduleRetry.cancel();
         _gameweeks = const [];
+        _scheduleFromError = false; // a REAL "no fantasy" — a fact
       }
     } else if (_derived) {
       // Weeks and deadlines move only with the lock hour and the owner's
@@ -301,34 +373,68 @@ class FantasyScheduleFeed<W> {
   }
 
   /// The LAST GOOD config stays: an error is not "fantasy removed". With no
-  /// schedule yet none can be derived — an empty one keeps gates open.
+  /// schedule yet none can be derived — an empty one keeps gates open, marked
+  /// UNKNOWN. A stream error ends the stream: re-subscribe on the back-off.
   void _onConfigError() {
     _configLoaded = true;
-    if (_derived) _gameweeks ??= const [];
+    if (_derived && _gameweeks == null) {
+      _gameweeks = const [];
+      _scheduleFromError = true;
+    }
+    if (!_configSubscribing) {
+      _configSub?.cancel();
+      _configSub = null;
+      _configRetry.retry(_subscribeConfig);
+    }
     _syncWeeks();
     _notify();
   }
 
   void _listenSchedule(Stream<List<Gameweek>> Function() make) {
     _gameweeksSub = null;
-    _gameweeksSub = _listenLogged<List<Gameweek>>(
-      owner: owner,
-      what: 'schedule feed',
-      make: make,
-      disposed: () => _disposed,
-      onData: (gws) {
-        if (_derived) _gameweeksSession[_sessionKey] = gws;
-        _gameweeks = gws;
-        _syncWeeks();
-        _notify();
-      },
-      onError: () {
-        // Never cached; a schedule already showing stays.
-        _gameweeks ??= const [];
-        _syncWeeks();
-        _notify();
-      },
-    );
+    if (!identical(_scheduleMake, make)) {
+      // A new schedule source (lock hour / overrides moved): any retry of
+      // the old one is void, and failures start a fresh back-off.
+      _scheduleRetry.cancel();
+      _scheduleRetry.reset();
+    }
+    _scheduleMake = make;
+    _scheduleSubscribing = true;
+    try {
+      _gameweeksSub = _listenLogged<List<Gameweek>>(
+        owner: owner,
+        what: 'schedule feed',
+        make: make,
+        disposed: () => _disposed,
+        onData: (gws) {
+          if (_derived) _gameweeksSession[_sessionKey] = gws;
+          _gameweeks = gws;
+          _scheduleFromError = false;
+          _scheduleRetry.reset();
+          _syncWeeks();
+          _notify();
+        },
+        onError: () {
+          // Never cached; a schedule already showing stays. None yet: the
+          // gates open on an empty schedule marked UNKNOWN.
+          if (_gameweeks == null) {
+            _gameweeks = const [];
+            _scheduleFromError = true;
+          }
+          if (!_scheduleSubscribing) {
+            _gameweeksSub?.cancel();
+            _gameweeksSub = null;
+            _scheduleRetry.retry(() {
+              if (identical(_scheduleMake, make)) _listenSchedule(make);
+            });
+          }
+          _syncWeeks();
+          _notify();
+        },
+      );
+    } finally {
+      _scheduleSubscribing = false;
+    }
   }
 
   void _syncWeeks() {
@@ -599,13 +705,7 @@ class FantasySeasonFinishedFeed {
 
   /// Back-off between re-subscriptions after a stream error; the feed gives
   /// up after the last one (the next screen open starts a fresh feed).
-  static const List<Duration> retryDelays = [
-    Duration(seconds: 2),
-    Duration(seconds: 5),
-    Duration(seconds: 15),
-    Duration(seconds: 30),
-    Duration(seconds: 60),
-  ];
+  static const List<Duration> retryDelays = kFantasyFeedRetryDelays;
 
   /// The last answer per `<sport>|<season>` (written by every real emission).
   static final Map<String, bool> _session = {};
@@ -622,8 +722,7 @@ class FantasySeasonFinishedFeed {
   bool _finished = false;
   bool _known = false;
   bool _loaded = false;
-  int _retries = 0;
-  Timer? _retryTimer;
+  late final _Backoff _retry = _Backoff(() => _disposed);
   StreamSubscription<bool>? _sub;
 
   /// The season is over (false until a real answer says so).
@@ -673,7 +772,7 @@ class FantasySeasonFinishedFeed {
           _finished = finished;
           _known = true;
           _loaded = true;
-          _retries = 0;
+          _retry.reset();
           _notify();
         },
         onError: () {
@@ -683,7 +782,7 @@ class FantasySeasonFinishedFeed {
           if (!_subscribing) {
             _sub?.cancel();
             _sub = null;
-            _scheduleRetry();
+            _retry.retry(_subscribe);
           }
           _notify();
         },
@@ -693,17 +792,9 @@ class FantasySeasonFinishedFeed {
     }
   }
 
-  void _scheduleRetry() {
-    if (_disposed || _retries >= retryDelays.length) return;
-    _retryTimer?.cancel();
-    _retryTimer = Timer(retryDelays[_retries++], () {
-      if (!_disposed) _subscribe();
-    });
-  }
-
   void dispose() {
     _disposed = true;
-    _retryTimer?.cancel();
+    _retry.cancel();
     _sub?.cancel();
   }
 

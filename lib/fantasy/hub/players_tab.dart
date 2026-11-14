@@ -1338,6 +1338,7 @@ class _MarketAddControl extends StatelessWidget {
           visualDensity: VisualDensity.compact,
         );
       case MarketAddAvailability.locked:
+      case MarketAddAvailability.deadlineUnknown:
       case MarketAddAvailability.ineligible:
       case MarketAddAvailability.positionFull:
       case MarketAddAvailability.unaffordable:

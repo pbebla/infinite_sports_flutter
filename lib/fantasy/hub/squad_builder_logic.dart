@@ -420,6 +420,29 @@ bool squadEditable({
     ) ==
     GameweekStatus.open;
 
+/// Whether the squad can be edited — three-way (review 6, I2): [unknown]
+/// when the schedule read failed under the automatic lock, so the app
+/// neither claims "locked" nor lets an edit through it could not check (the
+/// server stays the authority; the schedule feed retries).
+enum SquadEditState { open, locked, unknown }
+
+SquadEditState squadEditState({
+  required FantasyLockOverride lockOverride,
+  required List<Gameweek> gameweeks,
+  required DateTime nowUtc,
+  bool scheduleUnknown = false,
+}) {
+  if (lockOverride == FantasyLockOverride.auto &&
+      scheduleUnknown &&
+      currentGameweek(gameweeks, nowUtc) == null) {
+    return SquadEditState.unknown;
+  }
+  return squadEditable(
+          lockOverride: lockOverride, gameweeks: gameweeks, nowUtc: nowUtc)
+      ? SquadEditState.open
+      : SquadEditState.locked;
+}
+
 /// The engine's validateSquad, rendered as human sentences the builder shows
 /// inline. Formation problems come out per position ("Pick 2 defenders — you
 /// have 1"); the armband line appears only once there's a squad to captain.

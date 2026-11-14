@@ -13,6 +13,11 @@
 // timer runs. Every face is computed by [deadlineChipFace] /
 // [deadlineSlimFace] (pure, unit-tested).
 //
+// Review 6, I2: a failed schedule read is not a fact. With [scheduleUnknown]
+// (FantasyScheduleFeed.scheduleUnknown) and the automatic lock, every face
+// says "Deadline unavailable" — no made-up time, never "Season complete" or
+// "Locked". The league's override is a Config fact and is still stated.
+//
 // The tick is INFORMATION, not decoration: it keeps running under reduced
 // motion (a clock must tell the time) but nothing animates per tick, and
 // every timer cancels on dispose — a stream reconnect can never replay them.
@@ -33,6 +38,7 @@ class FantasyDeadlineChip extends StatefulWidget {
     required this.lockOverride,
     this.nowUtc,
     this.clock,
+    this.scheduleUnknown = false,
   });
 
   final List<Gameweek> gameweeks;
@@ -44,6 +50,9 @@ class FantasyDeadlineChip extends StatefulWidget {
   /// A shared ticking clock (the hub header's): when set, the chip reads its
   /// time and owns no timer of its own.
   final FantasyDeadlineClock? clock;
+
+  /// The schedule read failed ([gameweeks] is empty for that reason only).
+  final bool scheduleUnknown;
 
   @override
   State<FantasyDeadlineChip> createState() => _FantasyDeadlineChipState();
@@ -82,7 +91,8 @@ class _FantasyDeadlineChipState extends State<FantasyDeadlineChip> {
         ? TournamentColors.gold
         : Theme.of(context).colorScheme.primary;
 
-    final face = deadlineChipFace(widget.gameweeks, widget.lockOverride, _now);
+    final face = deadlineChipFace(widget.gameweeks, widget.lockOverride, _now,
+        scheduleUnknown: widget.scheduleUnknown);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -132,7 +142,8 @@ class _FantasyDeadlineChipState extends State<FantasyDeadlineChip> {
 /// source for the chip, the big countdown's fallback and (through
 /// [deadlineSlimFace]) the collapsed header's slim line.
 ({IconData icon, String title, String? detail}) deadlineChipFace(
-    List<Gameweek> gameweeks, FantasyLockOverride lockOverride, DateTime now) {
+    List<Gameweek> gameweeks, FantasyLockOverride lockOverride, DateTime now,
+    {bool scheduleUnknown = false}) {
   switch (lockOverride) {
     case FantasyLockOverride.open:
       return (
@@ -144,6 +155,14 @@ class _FantasyDeadlineChipState extends State<FantasyDeadlineChip> {
       return (icon: Icons.lock, title: 'Locked by the league', detail: null);
     case FantasyLockOverride.auto:
       final gw = currentGameweek(gameweeks, now);
+      if (gw == null && scheduleUnknown) {
+        // The read failed: say so — no time, no "complete", no "locked".
+        return (
+          icon: Icons.schedule,
+          title: kDeadlineUnavailable,
+          detail: null,
+        );
+      }
       if (gw == null) {
         return (icon: Icons.flag, title: 'Season complete', detail: null);
       }
@@ -178,6 +197,9 @@ class _FantasyDeadlineChipState extends State<FantasyDeadlineChip> {
   }
 }
 
+/// The neutral face when the schedule could not be read (review 6, I2).
+const String kDeadlineUnavailable = 'Deadline unavailable';
+
 /// The gameweek whose deadline is counting down at [now] (open under the
 /// automatic lock), or null — the big boxes and the slim line agree on it.
 Gameweek? _countingGameweek(
@@ -193,7 +215,8 @@ Gameweek? _countingGameweek(
 /// the boxes); otherwise the chip's title, naming the gameweek when the
 /// league override hides it ("GW3 · Editing open").
 ({IconData icon, String label, String? countdown}) deadlineSlimFace(
-    List<Gameweek> gameweeks, FantasyLockOverride lockOverride, DateTime now) {
+    List<Gameweek> gameweeks, FantasyLockOverride lockOverride, DateTime now,
+    {bool scheduleUnknown = false}) {
   final counting = _countingGameweek(gameweeks, lockOverride, now);
   if (counting != null) {
     final p = countdownParts(counting.lockUtc.difference(now));
@@ -205,7 +228,8 @@ Gameweek? _countingGameweek(
       countdown: p.days > 0 ? '${p.days}d $hms' : hms,
     );
   }
-  final face = deadlineChipFace(gameweeks, lockOverride, now);
+  final face = deadlineChipFace(gameweeks, lockOverride, now,
+      scheduleUnknown: scheduleUnknown);
   var label = face.title;
   if (lockOverride != FantasyLockOverride.auto) {
     final gw = currentGameweek(gameweeks, now);
@@ -248,11 +272,15 @@ class FantasyDeadlineSlimLine extends StatelessWidget {
     required this.gameweeks,
     required this.lockOverride,
     required this.clock,
+    this.scheduleUnknown = false,
   });
 
   final List<Gameweek> gameweeks;
   final FantasyLockOverride lockOverride;
   final FantasyDeadlineClock clock;
+
+  /// The schedule read failed (see [deadlineSlimFace]).
+  final bool scheduleUnknown;
 
   @override
   Widget build(BuildContext context) {
@@ -260,7 +288,8 @@ class FantasyDeadlineSlimLine extends StatelessWidget {
     return ValueListenableBuilder<DateTime>(
       valueListenable: clock,
       builder: (context, now, _) {
-        final f = deadlineSlimFace(gameweeks, lockOverride, now);
+        final f = deadlineSlimFace(gameweeks, lockOverride, now,
+            scheduleUnknown: scheduleUnknown);
         return FittedBox(
           fit: BoxFit.scaleDown,
           alignment: Alignment.centerLeft,
@@ -315,6 +344,7 @@ class FantasyDeadlineCountdown extends StatefulWidget {
     required this.lockOverride,
     this.nowUtc,
     this.clock,
+    this.scheduleUnknown = false,
   });
 
   final List<Gameweek> gameweeks;
@@ -322,6 +352,9 @@ class FantasyDeadlineCountdown extends StatefulWidget {
 
   /// Test seam: injected clock. Production leaves it null (real UTC now).
   final DateTime Function()? nowUtc;
+
+  /// The schedule read failed: the chip face says "Deadline unavailable".
+  final bool scheduleUnknown;
 
   /// A shared ticking clock (the hub header's — release report #8): when
   /// set, the countdown follows it and owns no timer, so the collapsed
@@ -377,6 +410,7 @@ class _FantasyDeadlineCountdownState extends State<FantasyDeadlineCountdown> {
         lockOverride: widget.lockOverride,
         nowUtc: widget.nowUtc,
         clock: widget.clock,
+        scheduleUnknown: widget.scheduleUnknown,
       );
     }
 
