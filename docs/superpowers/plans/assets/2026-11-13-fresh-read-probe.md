@@ -11,11 +11,9 @@ cancels itself after its first event).
 
 ## Before you start (read this)
 
-1. **Database rules.** The probe is signed out. `database.rules.json` has NO rule for `SyncProbe`,
-   so a signed-out read is denied and every step will log `ERR:...`. Before launch 1 the live rules
-   need public read on `SyncProbe` (e.g. `"SyncProbe": { ".read": true, ".write": false }`), which
-   is a deploy and needs the owner's go. Write the values through the Firebase console (admin), not
-   through the probe.
+1. **Database rules.** The probe is signed out. The LIVE rules are `database.rules.stage1.json` (root `.read: true`), so the
+   signed-out reads work today with no deploy (checked 2026-11-13: status 200). Under the stricter target rules
+   (`database.rules.json`) `SyncProbe` would need a public-read entry. Write the test values with an admin tool, never through the probe.
 2. **Same package id as the fan app.** The probe APK is `com.infinitesports.Infinite_Sports_App`.
    Installing it REPLACES the fan app on that phone, and it shares the fan app's data folder (the
    database's saved copy and `shared_preferences`). If a release/store build is installed, the
@@ -171,3 +169,25 @@ Before each launch: force-stop, set `SyncProbe/value` in the console, then launc
 
 - Turn airplane mode off, uninstall the probe, reinstall the real fan app.
 - Remove the temporary `SyncProbe` read rule if it is not kept for Task 6.
+
+## Results (emulator Pixel 7, Android 16 image, 2026-11-13 evening, run by the controller)
+
+Values A to H were written to `SyncProbe/value` before launches 1 to 8; the node was deleted afterwards.
+
+| Launch | Server value | What the probe saw | What this tells us |
+|---|---|---|---|
+| 1 | A | `once` = A after 2.1 s (waited for the connection) | With no saved copy a one-shot read waits for the server. |
+| 2 | B | `once` at start (not connected) = **A**; `once` 3 s later (connected) = **A**; `once` 3 s after that = **B** | A one-shot read answers from the saved copy. Before the connection is up it refreshes nothing. While connected it still returns the old value, and (for this tiny value) the saved copy is renewed so the NEXT read is fresh: one behind. |
+| 3 | C | waited for connected; `once` = **B**; `once` 3 s later = **C** | The saved copy survives a cold start (B came from launch 2's renewal). Connected one-shot reads are one behind. |
+| 4 | D | `onValue` event 1 = C at 80 ms (saved copy); connected at 0.9 s; event 2 = **D** about 320 ms after the connection; `once` afterwards = D | A listener that stays attached gets the server's value a few hundred ms after the connection is up. |
+| 5 | E | `onValue` event 1 = D; cancelled 300 ms later, before the connection was up; `once` = D | A short linger that ends before the connection is up renews nothing (launch 6's first read was still D). |
+| 6 | F | `once` = **D** (stale); `onValue` event 1 = D; connected; event 2 = **F**; a `once` on a never-loaded UNIQUE child returned ~60 ms after event 2; latest value at that moment = F | The barrier works: when a read of a never-loaded unique child returns, the earlier listener already holds the server's value. Cost: one round trip. |
+| 7 | G | same as 6 with a FIXED child: first barrier returned after the fresh event; the second returned in 34 ms | A fixed barrier child is answered from the saved copy the second time. The barrier child must be unique every time. |
+| 8 | H, airplane mode | every read = **G** within 16 to 121 ms; wait-for-connection and the unique barrier timed out at 8.0 s; nothing hung | Offline, everything answers from the saved copy at once; the server-first path must fall back when its bound passes. |
+
+**Also observed on the real app the same day:** `Logo Urls` and `Futsal/15/Line Ups` (several KB) stayed stale across five cold starts, i.e. the one-behind renewal seen above for a tiny value did NOT happen for them. Do not rely on one-behind.
+
+**Decisions for Task 1:**
+- A refreshing read returns the first event at once and keeps ONE shared listener per path attached until the server has answered (barrier returned) or 15 s have passed, whichever is first. A fixed short linger is useless: it can end before the connection is up.
+- A server-first read attaches the listener, waits for the connection, then for the barrier; the value at that moment is the server's. Past the bound (8 s) it returns the saved copy marked not-from-server.
+- The barrier is a `once()` on a new unique child of one public, never-written node (`SyncBarrier/<push id>`); Task 6 gives that node a public-read, no-write rule in both rules files.
