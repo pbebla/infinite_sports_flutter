@@ -121,6 +121,25 @@ List<String>? followHeader(
   );
 }
 
+/// How long the home screen's first paint waits for the fan's own
+/// registrations (way back fix round, Important 3).
+const Duration kBannerFirstPaintBound = Duration(seconds: 3);
+
+/// The registration banner's part of the first-paint wait: nothing when
+/// signed out (or nothing to wait for), else the first answer of the fan's
+/// registrations, bounded by [bound]. A failed read or the bound passing
+/// never blocks the paint (a late banner is then accepted).
+@visibleForTesting
+Future<void> bannerDataWait(Future<void>? firstAnswer,
+    {required bool signedIn, Duration bound = kBannerFirstPaintBound}) async {
+  if (!signedIn || firstAnswer == null) return;
+  try {
+    await firstAnswer.timeout(bound, onTimeout: () {});
+  } catch (_) {
+    // A failed read: paint without it.
+  }
+}
+
 /// The banner card (primary fill, white-on-primary text), both modes.
 class HomeRegistrationBanner extends StatelessWidget {
   const HomeRegistrationBanner(
@@ -223,6 +242,25 @@ class _FrontPageState extends State<FrontPage> {
   @override
   void initState() {
     super.initState();
+    // Way back: the fan's own registrations, live (signed-in fans only), so
+    // the banner can say "Finish your payment" and drops it once paid.
+    // Started BEFORE the first load: its first answer is part of the
+    // first-paint wait (bounded, fix round Important 3), so the banner is
+    // in the first painted frame instead of popping in above the matches.
+    if (signedIn) {
+      final first = Completer<void>();
+      _myRegistrationsFirst = first;
+      try {
+        _myRegistrationsSub = watchMyRegistrations().listen((m) {
+          if (!first.isCompleted) first.complete();
+          if (mounted) setState(() => _myRegistrations = m);
+        }, onError: (Object _) {
+          if (!first.isCompleted) first.complete();
+        });
+      } catch (_) {
+        if (!first.isCompleted) first.complete();
+      }
+    }
     _loadingPage = getFrontPageValues();
     // Live discovery: a tournament created (or finished/un-finished) after
     // this page loaded shows up as a home tab without restarting the app.
@@ -233,17 +271,9 @@ class _FrontPageState extends State<FrontPage> {
     // right after start) moves the league + AFC sections and the top-bar
     // header in one update, without the first-load skeleton.
     SeasonPointers.listenable.addListener(_onSeasonPointersChanged);
-    // Way back: the fan's own registrations, live (signed-in fans only), so
-    // the banner can say "Finish your payment" and drops it once paid.
-    if (signedIn) {
-      try {
-        _myRegistrationsSub = watchMyRegistrations().listen((m) {
-          if (mounted) setState(() => _myRegistrations = m);
-        }, onError: (Object _) {});
-      } catch (_) {}
-    }
   }
 
+  Completer<void>? _myRegistrationsFirst;
   StreamSubscription<MyRegistrations>? _myRegistrationsSub;
   MyRegistrations? _myRegistrations;
 
@@ -383,6 +413,9 @@ class _FrontPageState extends State<FrontPage> {
       () async {
         openRegistrations = await RegistrationService.getOpenRegistrations();
       }(),
+      // The registration banner's data (bounded at 3 s; none when signed
+      // out; instant when the answer is in the saved copy).
+      bannerDataWait(_myRegistrationsFirst?.future, signedIn: signedIn),
     ]);
     return 1;
   }

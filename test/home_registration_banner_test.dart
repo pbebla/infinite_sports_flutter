@@ -1,3 +1,5 @@
+import 'dart:async';
+
 // "My registration" way back: the home banner. A registration the fan still
 // owes money on (open OR closed) takes priority: "Finish your payment: …"
 // with the amount, opening that status page. Otherwise today's banner.
@@ -81,4 +83,52 @@ void main() {
       expect(tapped, 1);
     });
   }
+
+  // Way back fix round, Important 3: the fan's registrations are part of the
+  // home screen's first-paint wait (bounded at 3 s, skipped signed out), so
+  // the banner is in the first painted frame instead of popping in.
+  group('bannerDataWait', () {
+    test('signed out: no wait at all', () async {
+      final never = Completer<void>().future;
+      final sw = Stopwatch()..start();
+      await bannerDataWait(never, signedIn: false);
+      expect(sw.elapsedMilliseconds, lessThan(50));
+    });
+
+    test('an answer already there (saved copy): no extra wait', () async {
+      final sw = Stopwatch()..start();
+      await bannerDataWait(Future<void>.value(), signedIn: true);
+      expect(sw.elapsedMilliseconds, lessThan(50));
+    });
+
+    test('the first paint waits for an answer that arrives in time', () async {
+      final first = Completer<void>();
+      var done = false;
+      final wait = bannerDataWait(first.future,
+              signedIn: true, bound: const Duration(seconds: 1))
+          .then((_) => done = true);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(done, isFalse, reason: 'holding the first paint for it');
+      first.complete();
+      await wait;
+      expect(done, isTrue);
+    });
+
+    test('never answers: the home screen still paints after the bound',
+        () async {
+      final sw = Stopwatch()..start();
+      await bannerDataWait(Completer<void>().future,
+          signedIn: true, bound: const Duration(milliseconds: 40));
+      expect(sw.elapsedMilliseconds, greaterThanOrEqualTo(35));
+    });
+
+    test('a failed read never blocks the first paint', () async {
+      await bannerDataWait(Future<void>.error(StateError('denied')),
+          signedIn: true);
+    });
+
+    test('the production bound is 3 s', () {
+      expect(kBannerFirstPaintBound, const Duration(seconds: 3));
+    });
+  });
 }
