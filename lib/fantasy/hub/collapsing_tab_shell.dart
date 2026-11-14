@@ -144,9 +144,6 @@ class _ShellBodyState extends State<_ShellBody>
   /// The header is collapsed or on its way there.
   bool _wantCollapsed = false;
 
-  /// The tab on screen once a switch has settled — the one that answers the
-  /// route's primary scroll controller.
-  int? _activeIndex;
 
   /// Holds the tab bodies' focus, so a tab switch can drop it.
   final FocusScopeNode _bodyFocus = FocusScopeNode(debugLabel: 'hub tabs');
@@ -202,7 +199,6 @@ class _ShellBodyState extends State<_ShellBody>
     if (identical(next, _tabs)) return;
     _tabs?.removeListener(_onTabChanged);
     _tabs = next..addListener(_onTabChanged);
-    _activeIndex = next.index;
     widget.primaryScrollController?.activeTab = next.index;
   }
 
@@ -223,7 +219,6 @@ class _ShellBodyState extends State<_ShellBody>
     if (_bodyFocus.hasFocus) FocusManager.instance.primaryFocus?.unfocus();
     if (c.indexIsChanging) return;
     final i = c.index;
-    _activeIndex = i;
     widget.primaryScrollController?.activeTab = i;
     final m = _metrics[i];
     // Back to a tab left collapsed: only if it can still be left (it still
