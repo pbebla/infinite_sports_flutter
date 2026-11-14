@@ -52,7 +52,9 @@
 
 import 'dart:async';
 
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleListener;
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
@@ -73,6 +75,14 @@ const List<Duration> kFantasyFeedRetryDelays = [
   Duration(seconds: 60),
 ];
 
+/// Where a failing feed's recovery stands (re-review 6b, item 2): [none] —
+/// nothing failed (or a real answer came back); [retrying] — a retry is
+/// scheduled or in flight; [gaveUp] — the bounded retries are used up (or the
+/// stream could not even be created): only a trigger — the app returning to
+/// the foreground, the database connection coming back, or the fan's "Try
+/// again" ([FantasyScheduleFeed.restart]) — starts it again.
+enum FantasyFeedRetry { none, retrying, gaveUp }
+
 /// One bounded re-subscribe schedule ([kFantasyFeedRetryDelays]).
 class _Backoff {
   _Backoff(this._disposed);
@@ -80,24 +90,94 @@ class _Backoff {
   int _tries = 0;
   Timer? _timer;
 
+  /// A retry fired and its answer has not come back yet.
+  bool _inFlight = false;
+
+  /// A retry is scheduled or waiting for its answer.
+  bool get active => _timer != null || _inFlight;
+
   /// Runs [again] after the next delay, unless the retries are used up.
   void retry(void Function() again) {
+    _inFlight = false;
     if (_disposed() || _tries >= kFantasyFeedRetryDelays.length) return;
     _timer?.cancel();
     _timer = Timer(kFantasyFeedRetryDelays[_tries++], () {
       _timer = null;
-      if (!_disposed()) again();
+      if (_disposed()) return;
+      _inFlight = true;
+      again();
     });
   }
 
+  /// A manual / triggered attempt starts now with a fresh back-off.
+  void startNow() {
+    cancel();
+    _tries = 0;
+    _inFlight = true;
+  }
+
   /// A real answer arrived: the next failure starts the back-off afresh.
-  void reset() => _tries = 0;
+  void reset() {
+    _tries = 0;
+    _inFlight = false;
+  }
 
   void cancel() {
     _timer?.cancel();
     _timer = null;
+    _inFlight = false;
   }
 }
+
+/// Restarts a failing feed by itself (re-review 6b, item 2): when the app
+/// returns to the foreground and when the database connection comes back
+/// (`.info/connected` turning true after false). Only runs while its feed is
+/// failing; [stop] (and the feed's dispose) removes both listeners.
+class _AutoRecovery {
+  _AutoRecovery(this._onTrigger);
+  final void Function() _onTrigger;
+
+  /// Test seam replacing `.info/connected` for every feed.
+  static Stream<bool>? connectedStatesOverride;
+
+  AppLifecycleListener? _lifecycle;
+  StreamSubscription<bool>? _connected;
+  bool? _lastConnected;
+
+  bool get running => _lifecycle != null;
+
+  void start() {
+    if (running) return;
+    _lifecycle = AppLifecycleListener(onResume: _onTrigger);
+    _lastConnected = null;
+    try {
+      final source = connectedStatesOverride ??
+          FirebaseDatabase.instance
+              .ref('.info/connected')
+              .onValue
+              .map((e) => e.snapshot.value == true);
+      _connected = source.listen((connected) {
+        final was = _lastConnected;
+        _lastConnected = connected;
+        // A transition back to connected — never the first report.
+        if (connected && was == false) _onTrigger();
+      }, onError: (Object _) {});
+    } catch (_) {
+      // No database (widget tests): the foreground trigger still works.
+    }
+  }
+
+  void stop() {
+    _lifecycle?.dispose();
+    _lifecycle = null;
+    _connected?.cancel();
+    _connected = null;
+  }
+}
+
+/// Test seam: every fantasy feed's `.info/connected` source (null = real).
+set debugFantasyConnectedStates(Stream<bool>? s) =>
+    _AutoRecovery.connectedStatesOverride = s;
 
 /// `<owner>: <what> failed: <error>` — the fantasy screens' log line shape.
 void _logFailure(String owner, String what, Object error) =>
@@ -219,6 +299,9 @@ class FantasyScheduleFeed<W> {
   bool _scheduleSubscribing = false;
   Stream<List<Gameweek>> Function()? _scheduleMake;
 
+  /// Restarts the reads by itself while the schedule is unknown.
+  late final _AutoRecovery _recovery = _AutoRecovery(restart);
+
   StreamSubscription<FantasyConfigState?>? _configSub;
   StreamSubscription<List<Gameweek>>? _gameweeksSub;
   StreamSubscription<W>? _weekSub;
@@ -245,6 +328,33 @@ class FantasyScheduleFeed<W> {
   /// is, is UNKNOWN — distinct from a real absent Config or a schedule with
   /// no more gameweeks. Cleared by the next real answer.
   bool get scheduleUnknown => _scheduleFromError;
+
+  /// While [scheduleUnknown]: still retrying, or given up (re-review 6b,
+  /// item 2); [FantasyFeedRetry.none] once the schedule is known.
+  FantasyFeedRetry get scheduleRetry {
+    if (!_scheduleFromError) return FantasyFeedRetry.none;
+    return _configRetry.active || _scheduleRetry.active
+        ? FantasyFeedRetry.retrying
+        : FantasyFeedRetry.gaveUp;
+  }
+
+  /// Starts reading again now with a fresh back-off — the fan's "Try again",
+  /// and what the app returning to the foreground / the connection coming
+  /// back do by themselves. A no-op unless the schedule is unknown.
+  void restart() {
+    if (_disposed || !_started || !_scheduleFromError) return;
+    final make = _scheduleMake;
+    if (_config == null || make == null) {
+      // The Config itself never answered: read it again.
+      _configRetry.startNow();
+      _subscribeConfig();
+    } else {
+      _scheduleRetry.startNow();
+      _gameweeksSub?.cancel();
+      _listenSchedule(make);
+    }
+    _notify();
+  }
 
   /// The per-week listener's last good value (null: none yet).
   W? get weekData => _weekData;
@@ -323,6 +433,7 @@ class FantasyScheduleFeed<W> {
     _disposed = true;
     _configRetry.cancel();
     _scheduleRetry.cancel();
+    _recovery.stop();
     _configSub?.cancel();
     _gameweeksSub?.cancel();
     _weekSub?.cancel();
@@ -332,7 +443,14 @@ class FantasyScheduleFeed<W> {
   // ── Internals ────────────────────────────────────────────────────────────
 
   void _notify() {
-    if (!_disposed && !_starting) onChanged();
+    // Auto-recovery runs only while the schedule is unknown.
+    if (_disposed) return;
+    if (_scheduleFromError) {
+      _recovery.start();
+    } else {
+      _recovery.stop();
+    }
+    if (!_starting) onChanged();
   }
 
   void _onConfig(FantasyConfigState? state) {
@@ -384,7 +502,11 @@ class FantasyScheduleFeed<W> {
     }
     // An RTDB stream ends after an error: unless it answers again first,
     // re-subscribe on the back-off (the retry is dropped by the next data).
-    if (!_configSubscribing) _configRetry.retry(_subscribeConfig);
+    if (_configSubscribing) {
+      _configRetry.cancel(); // could not even subscribe: nothing in flight
+    } else {
+      _configRetry.retry(_subscribeConfig);
+    }
     _syncWeeks();
     _notify();
   }
@@ -423,7 +545,9 @@ class FantasyScheduleFeed<W> {
           }
           // The stream ends after an error: unless it answers again first,
           // re-subscribe on the back-off.
-          if (!_scheduleSubscribing) {
+          if (_scheduleSubscribing) {
+            _scheduleRetry.cancel(); // could not even subscribe
+          } else {
             _scheduleRetry.retry(() {
               if (!identical(_scheduleMake, make)) return;
               _gameweeksSub?.cancel();
@@ -727,6 +851,26 @@ class FantasySeasonFinishedFeed {
   late final _Backoff _retry = _Backoff(() => _disposed);
   StreamSubscription<bool>? _sub;
 
+  /// Restarts the read by itself while the answer is unknown after a failure
+  /// (re-review 6b, item 2: foreground, connection back).
+  late final _AutoRecovery _recovery = _AutoRecovery(restart);
+
+  /// While the flag failed with no real answer: still retrying, or given up;
+  /// [FantasyFeedRetry.none] otherwise.
+  FantasyFeedRetry get retry {
+    if (_known || !_loaded) return FantasyFeedRetry.none;
+    return _retry.active ? FantasyFeedRetry.retrying : FantasyFeedRetry.gaveUp;
+  }
+
+  /// Reads again now with a fresh back-off (a no-op once a real answer is
+  /// known) — what the foreground / connection triggers call.
+  void restart() {
+    if (_disposed || !_started || _known) return;
+    _retry.startNow();
+    _subscribe();
+    _notify();
+  }
+
   /// The season is over (false until a real answer says so).
   bool get finished => _finished;
 
@@ -781,7 +925,9 @@ class FantasySeasonFinishedFeed {
           _loaded = true; // the last good answer stays; none = unknown
           // A stream error ends the RTDB stream: drop it and try again
           // later. A synchronous failure (no stream at all) is not retried.
-          if (!_subscribing) {
+          if (_subscribing) {
+            _retry.cancel(); // could not even subscribe: nothing in flight
+          } else {
             _sub?.cancel();
             _sub = null;
             _retry.retry(_subscribe);
@@ -797,10 +943,17 @@ class FantasySeasonFinishedFeed {
   void dispose() {
     _disposed = true;
     _retry.cancel();
+    _recovery.stop();
     _sub?.cancel();
   }
 
   void _notify() {
-    if (!_disposed && !_starting) onChanged();
+    if (_disposed) return;
+    if (!_known && _loaded) {
+      _recovery.start();
+    } else {
+      _recovery.stop();
+    }
+    if (!_starting) onChanged();
   }
 }

@@ -243,4 +243,143 @@ void main() {
           'Can\'t check the deadline right now — try again in a moment.');
     });
   });
+
+  group('giving up, and starting again (re-review 6b, item 2)', () {
+    late StreamController<FantasyConfigState?> config;
+    late List<StreamController<List<Gameweek>>> schedules;
+
+    setUp(() {
+      config = StreamController<FantasyConfigState?>.broadcast(sync: true);
+      schedules = [];
+    });
+    tearDown(() => config.close());
+
+    FantasyScheduleFeed<Object> feed() {
+      final f = FantasyScheduleFeed<Object>(
+        sport: 'Futsal',
+        season: '15',
+        owner: 'test',
+        onChanged: () {},
+        configStates: config.stream,
+        gameweeksFor: (_, __) {
+          final c = StreamController<List<Gameweek>>.broadcast(sync: true);
+          schedules.add(c);
+          return c.stream;
+        },
+      );
+      return f..start();
+    }
+
+    Future<void> failUntilGivenUp(
+        WidgetTester tester, FantasyScheduleFeed<Object> f) async {
+      config.add(_cfg());
+      schedules.last.addError(StateError('down'));
+      expect(f.scheduleRetry, FantasyFeedRetry.retrying);
+      for (final d in kFantasyFeedRetryDelays) {
+        await tester.pump(d + const Duration(milliseconds: 10));
+        expect(f.scheduleRetry, FantasyFeedRetry.retrying,
+            reason: 'an attempt is in flight');
+        schedules.last.addError(StateError('down'));
+      }
+      expect(f.scheduleRetry, FantasyFeedRetry.gaveUp);
+    }
+
+    testWidgets('gives up after the last retry; restart() reads again and a '
+        'good answer makes it known', (tester) async {
+      final f = feed();
+      addTearDown(f.dispose);
+      await failUntilGivenUp(tester, f);
+      final before = schedules.length;
+      f.restart();
+      expect(schedules.length, before + 1);
+      expect(f.scheduleRetry, FantasyFeedRetry.retrying);
+      schedules.last.add(_gws(3));
+      expect(f.scheduleUnknown, isFalse);
+      expect(f.scheduleRetry, FantasyFeedRetry.none);
+    });
+
+    testWidgets('the app returning to the foreground restarts it',
+        (tester) async {
+      final f = feed();
+      addTearDown(f.dispose);
+      await failUntilGivenUp(tester, f);
+      final before = schedules.length;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      expect(schedules.length, before + 1);
+      schedules.last.add(_gws(2));
+      expect(f.scheduleUnknown, isFalse);
+    });
+
+    testWidgets('the connection coming back restarts it (never the first '
+        'report); dispose removes every listener', (tester) async {
+      final connected = StreamController<bool>.broadcast(sync: true);
+      debugFantasyConnectedStates = connected.stream;
+      addTearDown(() {
+        debugFantasyConnectedStates = null;
+        connected.close();
+      });
+      final f = feed();
+      await failUntilGivenUp(tester, f);
+      expect(connected.hasListener, isTrue);
+      final before = schedules.length;
+      connected.add(true); // the first report: no restart
+      expect(schedules.length, before);
+      connected.add(false);
+      connected.add(true); // back online
+      expect(schedules.length, before + 1);
+      f.dispose();
+      expect(connected.hasListener, isFalse);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      expect(schedules.length, before + 1, reason: 'nothing outlives it');
+    });
+
+    testWidgets('a known schedule runs no recovery listener', (tester) async {
+      final connected = StreamController<bool>.broadcast(sync: true);
+      debugFantasyConnectedStates = connected.stream;
+      addTearDown(() {
+        debugFantasyConnectedStates = null;
+        connected.close();
+      });
+      final f = feed();
+      addTearDown(f.dispose);
+      config.add(_cfg());
+      schedules.last.add(_gws(1));
+      expect(connected.hasListener, isFalse);
+      expect(f.scheduleRetry, FantasyFeedRetry.none);
+    });
+
+    testWidgets('the season-finished feed: gives up, and the foreground '
+        'restarts it', (tester) async {
+      FantasySeasonFinishedFeed.clearSessionCache();
+      final flag = StreamController<bool>.broadcast(sync: true);
+      addTearDown(flag.close);
+      final f = FantasySeasonFinishedFeed(
+        sport: 'Futsal',
+        season: '15',
+        owner: 'test',
+        onChanged: () {},
+        finishedStates: flag.stream,
+      )..start();
+      addTearDown(f.dispose);
+      flag.addError(StateError('down'));
+      for (final d in kFantasyFeedRetryDelays) {
+        await tester.pump(d + const Duration(milliseconds: 10));
+        flag.addError(StateError('down'));
+      }
+      expect(f.retry, FantasyFeedRetry.gaveUp);
+      expect(flag.hasListener, isFalse);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      expect(flag.hasListener, isTrue);
+      flag.add(false);
+      expect(f.phase, FantasySeasonPhase.running);
+      expect(f.retry, FantasyFeedRetry.none);
+    });
+  });
 }
