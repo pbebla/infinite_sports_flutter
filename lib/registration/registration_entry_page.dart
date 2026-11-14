@@ -13,7 +13,10 @@ import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 /// selector. Registering twice for the same registration is therefore
 /// impossible — the status page opens instead (spec section 7).
 class RegistrationEntryPage extends StatefulWidget {
-  const RegistrationEntryPage({super.key});
+  const RegistrationEntryPage({super.key, this.openRegistrationsOverride});
+
+  /// Test seam replacing the live open-registrations list (null = real).
+  final Stream<Map<String, RegistrationConfig>>? openRegistrationsOverride;
 
   @override
   State<RegistrationEntryPage> createState() => _RegistrationEntryPageState();
@@ -25,33 +28,51 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
   @override
   void initState() {
     super.initState();
-    _openRegs = RegistrationService.watchOpenRegistrations();
+    _openRegs = widget.openRegistrationsOverride ??
+        RegistrationService.watchOpenRegistrations();
   }
 
-  /// Fresh reads (Task 3, #74): "not registered" only counts when the server
-  /// said so — a saved copy or a failed read shows "couldn't check" instead
-  /// of sending a registered fan back into the form. ([config] comes from
-  /// the live list above.)
-  Future<void> _openRegistration(
-      String regId, RegistrationConfig config) async {
-    final mine = await RegistrationService.checkMySubmission(regId);
+  /// The registration being checked with the server (one tap at a time).
+  String? _opening;
+
+  /// Fresh reads (Task 3, #74, and Task 4's entry-page fee): the list above
+  /// is live, but its first answer can be the phone's saved copy, so the
+  /// tile only shows what is open; the config (open state, fee, paths) that
+  /// goes into the form and the payment screen is re-read SERVER-FIRST here,
+  /// together with "already registered?" (one barrier, one 8 s bound). A
+  /// saved copy or a failed read shows "couldn't check"; a registration the
+  /// server says has closed shows "Registration is closed".
+  Future<void> _openRegistration(String regId) async {
+    if (_opening != null) return;
+    setState(() => _opening = regId);
+    final checks = await Future.wait<Object>([
+      RegistrationService.checkOpenRegistration(regId),
+      RegistrationService.checkMySubmission(regId),
+    ]);
     if (!mounted) return;
+    setState(() => _opening = null);
+    final open = checks[0] as ({RegistrationConfig? config, bool checked});
+    final mine = checks[1]
+        as ({RegSubmission? submission, bool exists, bool checked});
+    final config = open.config;
     final route = registrationRoute(
-        configChecked: true,
+        configChecked: open.checked,
         config: config,
         submissionExists: mine.exists,
         submissionChecked: mine.checked);
     switch (route) {
       case RegistrationRoute.status:
         Navigator.push(context, MaterialPageRoute(builder: (_) {
-          return RegistrationStatusPage(regId: regId, config: config);
+          return RegistrationStatusPage(regId: regId, config: config!);
         }));
       case RegistrationRoute.register:
         Navigator.push(context, MaterialPageRoute(builder: (_) {
-          return RegistrationPathPage(regId: regId, config: config);
+          return RegistrationPathPage(regId: regId, config: config!);
         }));
-      case RegistrationRoute.couldNotCheck:
       case RegistrationRoute.closed:
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Registration is closed')));
+      case RegistrationRoute.couldNotCheck:
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text(kRegistrationCouldNotCheck)));
     }
@@ -110,7 +131,16 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
                 title: Text(config.label,
                     style: const TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: Text(signedIn ? feeText : 'Log in to register'),
-                onTap: () => _openRegistration(regId, config),
+                trailing: _opening == regId
+                    ? SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Theme.of(context).colorScheme.primary),
+                      )
+                    : null,
+                onTap: () => _openRegistration(regId),
               );
             },
           );

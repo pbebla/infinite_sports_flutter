@@ -7,7 +7,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart' show signedIn;
 import 'package:infinite_sports_flutter/registration/payment_screen.dart';
+import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
+import 'package:infinite_sports_flutter/registration/registration_path_page.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 
@@ -258,6 +261,66 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Pay with card'), findsNothing);
       expect(find.text('Card payments unavailable right now.'), findsOneWidget);
+    });
+  });
+
+  // Task 4 (entry-page fee): the live list's first answer can be the saved
+  // copy, so the config that reaches the form/payment is re-read
+  // server-first when the tile is tapped.
+  group("entry page passes the server's config", () {
+    final savedCopy =
+        RegistrationConfig.fromFirebase({..._openConfig, 'Fee': 50})!;
+
+    Widget page() => MaterialApp(
+          home: RegistrationEntryPage(
+            openRegistrationsOverride: Stream.value({'r1': savedCopy}),
+          ),
+        );
+
+    setUp(() => signedIn = true);
+    tearDown(() => signedIn = false);
+
+    testWidgets("the server's fee goes on, not the list's saved copy",
+        (tester) async {
+      answers['RegistrationsPublic/r1'] =
+          () => const FreshValue(_openConfig, fromServer: true);
+      answers['Registrations/r1/Submissions/u1'] =
+          () => const FreshValue(null, fromServer: true);
+      await tester.pumpWidget(page());
+      await tester.pumpAndSettle();
+      expect(find.textContaining('\$50'), findsOneWidget);
+      await tester.tap(find.byType(ListTile));
+      await tester.pumpAndSettle();
+      final path = tester
+          .widget<RegistrationPathPage>(find.byType(RegistrationPathPage));
+      expect(path.config.fee, 60);
+    });
+
+    testWidgets('an unconfirmed config: could not check, no entry',
+        (tester) async {
+      answers['RegistrationsPublic/r1'] =
+          () => const FreshValue(_openConfig, fromServer: false);
+      answers['Registrations/r1/Submissions/u1'] =
+          () => const FreshValue(null, fromServer: true);
+      await tester.pumpWidget(page());
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(ListTile));
+      await tester.pumpAndSettle();
+      expect(find.text(kRegistrationCouldNotCheck), findsOneWidget);
+      expect(find.byType(RegistrationPathPage), findsNothing);
+    });
+
+    testWidgets('closed on the server: "Registration is closed"',
+        (tester) async {
+      answers['RegistrationsPublic/r1'] = () =>
+          FreshValue({..._openConfig, 'Status': 'closed'}, fromServer: true);
+      answers['Registrations/r1/Submissions/u1'] =
+          () => const FreshValue(null, fromServer: true);
+      await tester.pumpWidget(page());
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(ListTile));
+      await tester.pumpAndSettle();
+      expect(find.text('Registration is closed'), findsOneWidget);
     });
   });
 }
