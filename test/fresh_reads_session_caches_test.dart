@@ -87,14 +87,25 @@ void main() {
     expect(FantasyLeaderboardsTab.profilesSession, isNull);
   });
 
-  test('which newer values drop the profile career cache', () {
-    expect(ProfilePage.careerPathAffected('Futsal/16/Line Ups/Lions'), isTrue);
-    expect(ProfilePage.careerPathAffected('Futsal/16/Line Ups'), isTrue);
-    expect(ProfilePage.careerPathAffected('AFC San Jose/Seasons/S1/Roster'),
-        isTrue);
-    expect(ProfilePage.careerPathAffected('Tournaments/t1'), isTrue);
-    expect(ProfilePage.careerPathAffected('PublicProfiles/u1'), isTrue);
-    expect(ProfilePage.careerPathAffected('Logo Urls'), isFalse);
-    expect(ProfilePage.careerPathAffected('Futsal/16/Teams'), isFalse);
+  test(
+      'which newer values affect a career: only what it read (second '
+      'review, Important 1)', () {
+    const reads = {
+      'PublicProfiles/u1',
+      'PublicProfiles/u1/TournamentsPlayed',
+      'Futsal/16/Line Ups/Lions',
+      'AFC San Jose/Seasons/S1/Roster',
+      'Tournaments/t1',
+    };
+    bool hit(String p) => ProfilePage.careerReadsAffected(reads, p);
+    expect(hit('Futsal/16/Line Ups/Lions'), isTrue);
+    expect(hit('Futsal/16/Line Ups'), isTrue, reason: 'an ancestor changed');
+    expect(hit('Tournaments/t1/Matches/m1'), isTrue, reason: 'below a read');
+    expect(hit('PublicProfiles/u1'), isTrue);
+    expect(hit('Futsal/16/Line Ups/Tigers'), isFalse, reason: 'another team');
+    expect(hit('Basketball/4/Line Ups/Hawks'), isFalse);
+    expect(hit('Tournaments/t2'), isFalse);
+    expect(hit('PublicProfiles/u2'), isFalse);
+    expect(hit('Logo Urls'), isFalse);
   });
 }
