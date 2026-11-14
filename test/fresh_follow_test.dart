@@ -60,4 +60,59 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     expect(FreshReads.debugNewerCallbackCount, before);
   });
+
+  group('CoalescedRefresh (second review, Minor 4)', () {
+    test('a request during a run queues exactly one more run', () async {
+      var runs = 0;
+      final gates = <Completer<void>>[];
+      final r = CoalescedRefresh(() {
+        runs++;
+        final c = Completer<void>();
+        gates.add(c);
+        return c.future;
+      });
+      r.request();
+      r.request(); // during run 1
+      r.request(); // still during run 1: coalesced
+      expect(runs, 1);
+      gates[0].complete();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(runs, 2, reason: 'one queued run, not dropped');
+      gates[1].complete();
+      await Future<void>.delayed(Duration.zero);
+      expect(runs, 2, reason: 'nothing more queued');
+    });
+
+    test('minGap spaces runs out', () async {
+      final starts = <DateTime>[];
+      final r = CoalescedRefresh(() async => starts.add(DateTime.now()),
+          minGap: const Duration(milliseconds: 40));
+      r.request();
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      r.request();
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      expect(starts, hasLength(2));
+      expect(starts[1].difference(starts[0]).inMilliseconds,
+          greaterThanOrEqualTo(35));
+    });
+
+    test('a failing run does not stop later runs; dispose stops them',
+        () async {
+      var runs = 0;
+      final r = CoalescedRefresh(() async {
+        runs++;
+        throw StateError('x');
+      });
+      r.request();
+      await Future<void>.delayed(Duration.zero);
+      r.request();
+      await Future<void>.delayed(Duration.zero);
+      expect(runs, 2);
+      r.dispose();
+      r.request();
+      await Future<void>.delayed(Duration.zero);
+      expect(runs, 2);
+    });
+  });
 }

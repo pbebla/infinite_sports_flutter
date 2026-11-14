@@ -134,4 +134,38 @@ void main() {
         findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+      'second review Minor 4: a newer value during an in-flight refresh is '
+      'not dropped (one queued refresh shows the latest)', (tester) async {
+    tester.view.physicalSize = const Size(360, 740);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    var goals = 1;
+    var loads = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: LeaderboardPage(
+        sport: 'Futsal',
+        season: '16',
+        playersLoader: () async {
+          loads++;
+          final g = goals; // the value at read time
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          return <Player>[_p('Bruno', g)];
+        },
+      ),
+    ));
+    await tester.pumpAndSettle();
+    goals = 2;
+    FreshReads.debugReportNewer('Futsal/16/Line Ups', {});
+    await tester.pump(const Duration(milliseconds: 10)); // refresh in flight
+    goals = 3;
+    FreshReads.debugReportNewer('Futsal/16/Line Ups', {});
+    FreshReads.debugReportNewer('Futsal/16/Line Ups', {}); // coalesced
+    await tester.pump(const Duration(milliseconds: 60));
+    await tester.pump(const Duration(milliseconds: 60));
+    await tester.pump();
+    expect(find.text('3'), findsOneWidget);
+    expect(loads, 3, reason: 'first load + 1 refresh + exactly 1 queued');
+  });
 }

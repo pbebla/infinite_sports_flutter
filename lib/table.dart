@@ -11,6 +11,7 @@ import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:infinite_sports_flutter/widgets/team_logo.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_launcher_icons/constants.dart';
+import 'package:infinite_sports_flutter/misc/fresh_follow.dart';
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 /// The node the top-bar Table is built from (normalized path).
@@ -44,6 +45,10 @@ class _TablePageState extends State<TablePage> {
   Map<String, TeamInfo>? _newer;
   VoidCallback? _stopNewerFollow;
 
+  /// One in-place refresh at a time; a newer value during one queues
+  /// exactly one more (second review, Minor 4 — the bug class).
+  late final CoalescedRefresh _refresh = CoalescedRefresh(_refreshInPlace);
+
   @override
   void initState() {
     super.initState();
@@ -52,23 +57,20 @@ class _TablePageState extends State<TablePage> {
     // one setState, no skeleton.
     _stopNewerFollow = FreshReads.onNewerUnder('', (path, _) {
       if (path == tableSourcePath(widget.sport, widget.season)) {
-        _refreshInPlace();
+        _refresh.request();
       }
     });
   }
 
   Future<void> _refreshInPlace() async {
-    try {
-      final table = await getSeasonTable();
-      if (mounted) setState(() => _newer = table);
-    } catch (_) {
-      // A failed re-read keeps what is on screen.
-    }
+    final table = await getSeasonTable();
+    if (mounted) setState(() => _newer = table);
   }
 
   @override
   void dispose() {
     _stopNewerFollow?.call();
+    _refresh.dispose();
     super.dispose();
   }
   static const int numItems = 6;

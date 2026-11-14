@@ -9,6 +9,7 @@ import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/model/soccergame.dart';
 import 'package:infinite_sports_flutter/scorepage.dart';
 import 'package:infinite_sports_flutter/misc/schedule_display.dart';
+import 'package:infinite_sports_flutter/misc/fresh_follow.dart';
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/widgets/forfeit_chip.dart';
@@ -52,7 +53,9 @@ class _LiveScorePageState extends State<LiveScorePage> {
   /// reads, Task 4) — shown instead of the first future's data.
   List<Game>? _newer;
   VoidCallback? _stopNewerFollow;
-  bool _refreshing = false;
+  /// One in-place refresh at a time; a newer value during one queues
+  /// exactly one more (second review, Minor 4).
+  late final CoalescedRefresh _refresh = CoalescedRefresh(_refreshInPlace);
 
   @override
   void initState() {
@@ -66,27 +69,20 @@ class _LiveScorePageState extends State<LiveScorePage> {
         ? "AFC San Jose/Seasons/${widget.season}"
         : "${widget.sport}/${widget.season}";
     _stopNewerFollow = FreshReads.onNewerUnder('', (path, _) {
-      if (path == '$node/Date' || path == '$node/Roster') _refreshInPlace();
+      if (path == '$node/Date' || path == '$node/Roster') _refresh.request();
     });
   }
 
   Future<void> _refreshInPlace() async {
-    if (_refreshing) return;
-    _refreshing = true;
-    try {
-      final list =
-          await getGames(widget.sport, widget.season, widget.date, times);
-      if (mounted) setState(() => _newer = list);
-    } catch (_) {
-      // A failed re-read keeps what is on screen.
-    } finally {
-      _refreshing = false;
-    }
+    final list =
+        await getGames(widget.sport, widget.season, widget.date, times);
+    if (mounted) setState(() => _newer = list);
   }
 
   @override
   void dispose() {
     _stopNewerFollow?.call();
+    _refresh.dispose();
     _controller.dispose();
     super.dispose();
   }

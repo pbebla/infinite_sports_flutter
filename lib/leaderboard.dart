@@ -4,6 +4,7 @@ import 'package:infinite_sports_flutter/misc/playing_position.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/misc/season_title.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
+import 'package:infinite_sports_flutter/misc/fresh_follow.dart';
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/team_logos.dart' show teamLogoUrl;
 import 'package:infinite_sports_flutter/misc/utility.dart';
@@ -64,6 +65,10 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
 
   VoidCallback? _stopNewerFollow;
 
+  /// One in-place refresh at a time; a newer value during one queues
+  /// exactly one more (second review, Minor 4 — the bug class).
+  late final CoalescedRefresh _refresh = CoalescedRefresh(_refreshInPlace);
+
   @override
   void initState() {
     super.initState();
@@ -72,27 +77,24 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     // one setState, current sort kept, no skeleton, scroll kept.
     _stopNewerFollow = FreshReads.onNewerUnder('', (path, _) {
       if (path == leaderboardSourcePath(widget.sport, widget.season)) {
-        _refreshInPlace();
+        _refresh.request();
       }
     });
   }
 
   Future<void> _refreshInPlace() async {
-    try {
-      final list = await getPlayersList();
-      if (!mounted) return;
-      setState(() {
-        players = list;
-        sortTable(sortColumnIndex ?? 3, isAscending);
-      });
-    } catch (_) {
-      // A failed re-read keeps what is on screen.
-    }
+    final list = await getPlayersList();
+    if (!mounted) return;
+    setState(() {
+      players = list;
+      sortTable(sortColumnIndex ?? 3, isAscending);
+    });
   }
 
   @override
   void dispose() {
     _stopNewerFollow?.call();
+    _refresh.dispose();
     _moreToRight.dispose();
     super.dispose();
   }

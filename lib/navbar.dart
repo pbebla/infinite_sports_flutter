@@ -24,6 +24,7 @@ import 'package:infinite_sports_flutter/signup.dart';
 import 'package:infinite_sports_flutter/support/support_form_page.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:provider/provider.dart';
+import 'package:infinite_sports_flutter/misc/fresh_follow.dart';
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
 
@@ -81,19 +82,24 @@ class _NavBarState extends State<NavBar> {
       }));
     }
     for (final path in ['RegistrationsPublic', 'Sign Ups/Sign Up Status']) {
-      _stopFollowing.add(FreshReads.onNewer(path, (_) => _refreshSignUpRow()));
+      _stopFollowing.add(FreshReads.onNewer(path, (_) => _signUpRow.request()));
     }
-    SeasonPointers.listenable.addListener(_refreshSignUpRow);
+    SeasonPointers.listenable.addListener(_signUpRow.request);
   }
 
   final List<VoidCallback> _stopFollowing = [];
+
+  /// One sign-up-row refresh at a time; a change during one queues exactly
+  /// one more (second review, Minor 4 — the bug class).
+  late final CoalescedRefresh _signUpRow = CoalescedRefresh(_refreshSignUpRow);
 
   @override
   void dispose() {
     for (final stop in _stopFollowing) {
       stop();
     }
-    SeasonPointers.listenable.removeListener(_refreshSignUpRow);
+    SeasonPointers.listenable.removeListener(_signUpRow.request);
+    _signUpRow.dispose();
     super.dispose();
   }
 
