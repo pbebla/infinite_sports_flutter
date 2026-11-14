@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
+import 'package:infinite_sports_flutter/registration/my_registrations.dart'
+    show allRegistrationsFromNode;
 import 'package:infinite_sports_flutter/misc/stream_resilience.dart';
 import 'package:infinite_sports_flutter/registration/promo_engine.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
@@ -155,6 +157,15 @@ class RegistrationService {
           .ref('Registrations/$regId/Config')
           .onValue
           .map((event) => RegistrationConfig.fromFirebase(event.snapshot.value));
+
+  /// Live {regId: config} of EVERY registration in the public mirror,
+  /// whatever its Status (way back: closed registrations stay listed there —
+  /// see my_registrations.dart). Errors are forwarded.
+  static Stream<Map<String, RegistrationConfig>> watchAllRegistrations() =>
+      FirebaseDatabase.instance
+          .ref('RegistrationsPublic')
+          .onValue
+          .map((event) => allRegistrationsFromNode(event.snapshot.value));
 
   /// Live {regId: config} stream of every open registration. Emits
   /// immediately from RTDB's local cache (if any) then on every change, so
