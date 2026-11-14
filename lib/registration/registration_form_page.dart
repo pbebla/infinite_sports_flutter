@@ -155,8 +155,8 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
     }
   }
 
-  Future<SubmitOutcome> _submitForPath(
-      Map<String, dynamic> answers, _DiscountStamp stamp) {
+  Future<SubmitOutcome> _submitForPath(Map<String, dynamic> answers,
+      _DiscountStamp stamp, Map<String, dynamic> prefill) {
     switch (widget.path) {
       case 'captain':
         return RegistrationService.submitCaptain(
@@ -169,6 +169,7 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
           discountSource: stamp.discountSource,
           discountPct: stamp.discountPct,
           eligibleFee: stamp.eligibleFee,
+          prefill: prefill,
         );
       case 'joiner':
         return RegistrationService.submitJoiner(
@@ -176,6 +177,7 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
           config: widget.config,
           team: widget.team!,
           answers: answers,
+          prefill: prefill,
         );
       default:
         return RegistrationService.submitIndividual(
@@ -187,6 +189,7 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
           discountSource: stamp.discountSource,
           discountPct: stamp.discountPct,
           eligibleFee: stamp.eligibleFee,
+          prefill: prefill,
         );
     }
   }
@@ -253,7 +256,10 @@ class _RegistrationFormPageState extends State<RegistrationFormPage> {
     final promo =
         answers.remove(kInsiderPromoAnswerKey) as InsiderPromoOutcome?;
     final stamp = await _resolveDiscountStamp(promo);
-    final outcome = await _submitForPath(answers, stamp);
+    // The write-back only writes what the fan changed from the prefill
+    // (fresh reads, Task 3, #75).
+    final outcome =
+        await _submitForPath(answers, stamp, (await _load).prefill);
     if (!mounted) return;
     switch (outcome) {
       case SubmitOutcome.ok:

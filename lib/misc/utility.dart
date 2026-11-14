@@ -964,26 +964,63 @@ Future<UserInformation?> getInformation() async
   }
 }
 
-Future<void> addUpdateInfo(UserInformation information, String phone) async
+/// The legacy LeagueForm's profile write-back (survey #57/#60), fresh reads
+/// Task 3: only the fields the fan changed from the form's prefill
+/// ([legacyInfoChanges]) are written, with update() — it used to `.set()`
+/// the whole Information node from a one-shot (maybe stale) prefill, which
+/// wrote old values back and dropped every other Information field.
+Future<void> addUpdateInfo(UserInformation information, String phone,
+    {required String sport,
+    required UserInformation before,
+    required String phoneBefore}) async
 {
   DatabaseReference newClient = FirebaseDatabase.instance.ref("Users/${FirebaseAuth.instance.currentUser!.uid}");
   try
   {
-    var client = newClient.child("/Information/");
-    Map<String, dynamic> infoList = {
-      "Age" : information.age,
-      "Height": information.height,
-      "FutsalPosition" : information.futsalPosition,
-      "BasketballPosition": information.basketballPosition
-    };
-    await client.set(infoList);
-    var phoneClient = newClient.child("/Phone Number/");
-    await phoneClient.set(phone);
+    final changes = legacyInfoChanges(
+        sport: sport,
+        before: before,
+        after: information,
+        phoneBefore: phoneBefore,
+        phoneAfter: phone);
+    if (changes.info.isNotEmpty) {
+      await newClient.child("Information").update(changes.info);
+    }
+    if (changes.phone != null) {
+      await newClient.child("Phone Number").set(changes.phone);
+    }
   }
   catch (e)
   {
 
   }
+}
+
+/// What [addUpdateInfo] writes, pure: Age and Height when changed, the
+/// position of the form's [sport] only (Basketball → BasketballPosition,
+/// otherwise FutsalPosition) when changed, and the phone when changed.
+({Map<String, Object?> info, String? phone}) legacyInfoChanges({
+  required String sport,
+  required UserInformation before,
+  required UserInformation after,
+  required String phoneBefore,
+  required String phoneAfter,
+}) {
+  final info = <String, Object?>{};
+  if (after.age != before.age) info["Age"] = after.age;
+  if (after.height != before.height) info["Height"] = after.height;
+  if (sport == "Basketball") {
+    if (after.basketballPosition != before.basketballPosition) {
+      info["BasketballPosition"] = after.basketballPosition;
+    }
+  } else if (after.futsalPosition != before.futsalPosition) {
+    info["FutsalPosition"] = after.futsalPosition;
+  }
+  final phone = phoneAfter.trim();
+  return (
+    info: info,
+    phone: phone != phoneBefore.trim() ? phone : null,
+  );
 }
 
 Future<void> signUpToPlay(String league, String season) async

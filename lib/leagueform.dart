@@ -395,7 +395,12 @@ class _LeagueFormState extends State<LeagueForm> {
         userInformation.basketballPosition = widget.oldInfo.basketballPosition;
       }
       userInformation.height = "${_heightFeetController.value.text.trim()}'${_heightInchesController.value.text.trim()}";
-      await addUpdateInfo(userInformation, _phoneController.value.text.trim());
+      // Only what the fan changed from the prefill is written (fresh
+      // reads, Task 3, #57/#60).
+      await addUpdateInfo(userInformation, _phoneController.value.text.trim(),
+          sport: widget.sport,
+          before: widget.oldInfo,
+          phoneBefore: widget.phoneNumber);
       await signUpToPlay(widget.sport, widget.season);
       if (_commentController.value.text.isNotEmpty) {
         await addComment(widget.sport, widget.season, _commentController.value.text);

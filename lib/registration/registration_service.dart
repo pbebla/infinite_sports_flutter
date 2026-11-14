@@ -334,6 +334,7 @@ class RegistrationService {
     String discountSource = '',
     double? discountPct,
     double? eligibleFee,
+    Map<String, dynamic> prefill = const {},
   }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return SubmitOutcome.failed;
@@ -360,7 +361,7 @@ class RegistrationService {
       await FirebaseDatabase.instance
           .ref('Sign Ups/${target.league}/${target.season}/NotPaid/${user.uid}')
           .set(displayName);
-      await _writeBackProfile(user.uid, config.sport, answers);
+      await _writeBackProfile(user.uid, config.sport, answers, prefill);
       return SubmitOutcome.ok;
     } catch (_) {
       return SubmitOutcome.failed;
@@ -369,38 +370,14 @@ class RegistrationService {
 
   /// Writes well-known answer keys back to the profile, using update() so
   /// unrelated fields are never clobbered (same nodes createDatabaseLocation
-  /// and addUpdateInfo in lib/misc/utility.dart write).
-  static Future<void> _writeBackProfile(
-      String uid, String sport, Map<String, dynamic> answers) async {
+  /// and addUpdateInfo in lib/misc/utility.dart write) — and only the ones
+  /// the fan changed from the form's [prefill] ([profileWriteBack]).
+  static Future<void> _writeBackProfile(String uid, String sport,
+      Map<String, dynamic> answers, Map<String, dynamic> prefill) async {
     final root = FirebaseDatabase.instance.ref('Users/$uid');
-    final rootUpdates = <String, Object?>{};
-    final firstName = answers['firstName'];
-    if (firstName is String && firstName.isNotEmpty) {
-      rootUpdates['First Name'] = firstName;
-    }
-    final lastName = answers['lastName'];
-    if (lastName is String && lastName.isNotEmpty) {
-      rootUpdates['Last Name'] = lastName;
-    }
-    final phone = answers['phone'];
-    if (phone != null && normalizePhone(phone.toString()).isNotEmpty) {
-      rootUpdates['Phone Number'] = normalizePhone(phone.toString());
-    }
-    if (rootUpdates.isNotEmpty) await root.update(rootUpdates);
-
-    final infoUpdates = <String, Object?>{};
-    final positions = answers['positions'];
-    final posField = positionsFieldForSport(sport);
-    if (positions is List && positions.isNotEmpty && posField.isNotEmpty) {
-      infoUpdates[posField] = positions.map((p) => p.toString()).join(';');
-    }
-    final age = int.tryParse(answers['age']?.toString() ?? '');
-    if (age != null) infoUpdates['Age'] = age;
-    final height = answers['height'];
-    if (height is String && height.isNotEmpty) infoUpdates['Height'] = height;
-    if (infoUpdates.isNotEmpty) {
-      await root.child('Information').update(infoUpdates);
-    }
+    final w = profileWriteBack(sport: sport, answers: answers, prefill: prefill);
+    if (w.root.isNotEmpty) await root.update(w.root);
+    if (w.info.isNotEmpty) await root.child('Information').update(w.info);
   }
 
   // -------- Teams (L1b) --------
@@ -496,6 +473,7 @@ class RegistrationService {
     String discountSource = '',
     double? discountPct,
     double? eligibleFee,
+    Map<String, dynamic> prefill = const {},
   }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return SubmitOutcome.failed;
@@ -534,7 +512,7 @@ class RegistrationService {
       await FirebaseDatabase.instance
           .ref('Sign Ups/${target.league}/${target.season}/NotPaid/${user.uid}')
           .set(displayName);
-      await _writeBackProfile(user.uid, config.sport, answers);
+      await _writeBackProfile(user.uid, config.sport, answers, prefill);
       return SubmitOutcome.ok;
     } catch (_) {
       return SubmitOutcome.failed;
@@ -550,6 +528,7 @@ class RegistrationService {
     required RegistrationConfig config,
     required RegTeam team,
     required Map<String, dynamic> answers,
+    Map<String, dynamic> prefill = const {},
   }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return SubmitOutcome.failed;
@@ -578,12 +557,62 @@ class RegistrationService {
       await FirebaseDatabase.instance
           .ref('Sign Ups/${target.league}/${target.season}/$bucket/${user.uid}')
           .set(displayName);
-      await _writeBackProfile(user.uid, config.sport, answers);
+      await _writeBackProfile(user.uid, config.sport, answers, prefill);
       return SubmitOutcome.ok;
     } catch (_) {
       return SubmitOutcome.failed;
     }
   }
+}
+
+/// What the registration write-back writes (fresh reads, Task 3, #75): only
+/// the well-known answers the fan CHANGED from the form's [prefill]. The
+/// prefill is read from `Users/<uid>` and may be the phone's saved copy; an
+/// untouched (maybe stale) value is never written back over a newer one set
+/// by the Manager or another device. A field the profile did not have is a
+/// change. Phone numbers compare normalized.
+({Map<String, Object?> root, Map<String, Object?> info}) profileWriteBack({
+  required String sport,
+  required Map<String, dynamic> answers,
+  required Map<String, dynamic> prefill,
+}) {
+  final root = <String, Object?>{};
+  final info = <String, Object?>{};
+  String text(Object? v) => v?.toString() ?? '';
+
+  for (final (key, field) in [
+    ('firstName', 'First Name'),
+    ('lastName', 'Last Name'),
+  ]) {
+    final v = answers[key];
+    if (v is String && v.isNotEmpty && v != text(prefill[key])) root[field] = v;
+  }
+  final phone = answers['phone'];
+  if (phone != null) {
+    final n = normalizePhone(phone.toString());
+    if (n.isNotEmpty && n != normalizePhone(text(prefill['phone']))) {
+      root['Phone Number'] = n;
+    }
+  }
+
+  final positions = answers['positions'];
+  final posField = positionsFieldForSport(sport);
+  if (positions is List && positions.isNotEmpty && posField.isNotEmpty) {
+    final joined = positions.map((p) => p.toString()).join(';');
+    final before = prefill['positions'];
+    final beforeJoined =
+        before is List ? before.map((p) => p.toString()).join(';') : '';
+    if (joined != beforeJoined) info[posField] = joined;
+  }
+  final age = int.tryParse(text(answers['age']));
+  if (age != null && age != int.tryParse(text(prefill['age']))) {
+    info['Age'] = age;
+  }
+  final height = answers['height'];
+  if (height is String && height.isNotEmpty && height != text(prefill['height'])) {
+    info['Height'] = height;
+  }
+  return (root: root, info: info);
 }
 
 // ---------------------------------------------------------------------------
