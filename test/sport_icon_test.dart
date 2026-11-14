@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/calendar_tab.dart';
 import 'package:infinite_sports_flutter/misc/event_utils.dart';
 import 'package:infinite_sports_flutter/misc/sport_icon.dart';
+import 'package:infinite_sports_flutter/onboarding/favorite_sports_page.dart';
 
 /// Release report #7: Flag Football match days on the calendar showed a
 /// soccer ball — the day sheet hard-coded Icons.sports_soccer for every
@@ -40,6 +41,29 @@ void main() {
       expect(
           calendarEntryIcon(const CalendarEntry(kind: CalendarKind.event)),
           Icons.event);
+    });
+  });
+
+  // Fix round 1, M2: the onboarding favourite-sports picker used its own
+  // copy of the mapping; sports now come from the shared one.
+  group('shared mapping covers the picker', () {
+    test('volleyball and pickleball are sports too', () {
+      expect(sportIcon('Volleyball'), Icons.sports_volleyball);
+      expect(sportIcon('Pickleball'), Icons.sports_tennis);
+      expect(sportIconOrNull('Food Trucks'), isNull);
+      expect(sportIcon('Food Trucks'), Icons.emoji_events);
+    });
+
+    test('favoriteCategoryIcon: sports via sportIcon, trophy for '
+        'Tournaments, a celebration for non-sport categories', () {
+      for (final s in [
+        'Futsal', 'Soccer', 'Basketball', 'Flag Football', 'Volleyball',
+        'Pickleball',
+      ]) {
+        expect(favoriteCategoryIcon(s), sportIcon(s), reason: s);
+      }
+      expect(favoriteCategoryIcon('Tournaments'), Icons.emoji_events);
+      expect(favoriteCategoryIcon('Community'), Icons.celebration);
     });
   });
 }
