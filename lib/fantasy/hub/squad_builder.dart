@@ -397,7 +397,10 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
         for (final c in alert.changes) (player: c.player, to: c.to),
       ],
       deadline: target == null ? 'the deadline' : formatAbsoluteLock(target),
-      freeThisWeek: current == null || current.number == alert.gameweek,
+      // A failed schedule read promises nothing that depends on the
+      // schedule (re-review 6b, item 3): no free swap, and "the deadline".
+      freeThisWeek: !widget.scheduleUnknown &&
+          (current == null || current.number == alert.gameweek),
     );
   }
 

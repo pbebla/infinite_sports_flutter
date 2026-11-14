@@ -2359,6 +2359,30 @@ void main() {
       });
     });
 
+    testWidgets('a failed schedule read: the squad alert promises no free '
+        'swap and names no deadline it could not read (review 6b, item 3)',
+        (tester) async {
+      await pumpHub(tester,
+          size: const Size(360, 1200),
+          gameweekStates:
+              Stream<List<Gameweek>>.error(StateError('permission-denied')),
+          nowUtc: now);
+      await land(tester, lock: FantasyLockOverride.auto);
+      alert.add(const FantasySquadAlert(gameweek: 3, changes: [
+        FantasyPositionChange(
+            player: 'Ava Striker',
+            from: FantasyPosition.att,
+            to: FantasyPosition.def),
+      ]));
+      await settle(tester);
+      expect(
+          find.text('Ava Striker moved to DEF — your team needs rearranging '
+              'before the deadline.'),
+          findsOneWidget);
+      expect(find.textContaining('free this week'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
     group('never stuck collapsed (review 6, I1)', () {
       testWidgets('News, one post (short): a slow drag never collapses',
           (tester) async {
