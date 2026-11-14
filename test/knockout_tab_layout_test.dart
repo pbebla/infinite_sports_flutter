@@ -68,8 +68,7 @@ Future<void> _pump(WidgetTester tester, List<TournamentMatch> matches,
   await tester.pumpWidget(MaterialApp(
     home: MediaQuery(
       data: MediaQueryData(
-          size: const Size(360, 800),
-          textScaler: TextScaler.linear(textScale)),
+          size: const Size(360, 800), textScaler: TextScaler.linear(textScale)),
       child: Scaffold(
         body: KnockoutTab(
           matches: matches,
@@ -97,8 +96,10 @@ void main() {
       expect(_boxOf(tester, 'QF2 home'), const Rect.fromLTWH(16, 178, 210, 96));
       expect(_boxOf(tester, 'QF3 home'), const Rect.fromLTWH(16, 292, 210, 96));
       expect(_boxOf(tester, 'QF4 home'), const Rect.fromLTWH(16, 406, 210, 96));
-      expect(_boxOf(tester, 'SF1 home'), const Rect.fromLTWH(270, 121, 210, 96));
-      expect(_boxOf(tester, 'SF2 home'), const Rect.fromLTWH(270, 349, 210, 96));
+      expect(
+          _boxOf(tester, 'SF1 home'), const Rect.fromLTWH(270, 121, 210, 96));
+      expect(
+          _boxOf(tester, 'SF2 home'), const Rect.fromLTWH(270, 349, 210, 96));
       // Final hero: 360 wide, top = centre 219 - 75 (+64).
       final hero = _boxOf(tester, 'F home');
       expect(hero.left, 524);
@@ -152,8 +153,10 @@ void main() {
       await _pump(tester, _eight(), feeders: eightFeeders);
       expect(_boxOf(tester, 'QF1 home'), const Rect.fromLTWH(16, 64, 210, 96));
       expect(_boxOf(tester, 'QF4 home'), const Rect.fromLTWH(16, 406, 210, 96));
-      expect(_boxOf(tester, 'SF1 home'), const Rect.fromLTWH(270, 121, 210, 96));
-      expect(_boxOf(tester, 'SF2 home'), const Rect.fromLTWH(270, 349, 210, 96));
+      expect(
+          _boxOf(tester, 'SF1 home'), const Rect.fromLTWH(270, 121, 210, 96));
+      expect(
+          _boxOf(tester, 'SF2 home'), const Rect.fromLTWH(270, 349, 210, 96));
       expect(_boxOf(tester, 'F home').topLeft, const Offset(524, 208));
     });
 
@@ -187,7 +190,8 @@ void main() {
               t1: 'Winner of SF1', t2: 'Winner of SF2', time: '7PM'),
         ];
 
-    test('pure layout: each SF level with its feeder QF, final midway, '
+    test(
+        'pure layout: each SF level with its feeder QF, final midway, '
         'exactly four connectors joining only real feeders', () {
       final layout = knockoutFeederLayout([
         ['qf1', 'qf2'],
@@ -205,7 +209,8 @@ void main() {
       expect(links, ['0:0>1:0', '0:1>1:1', '1:0>2:0', '1:1>2:0']);
     });
 
-    testWidgets('no two cards overlap at 360 px (text scale 1.3), each SF is '
+    testWidgets(
+        'no two cards overlap at 360 px (text scale 1.3), each SF is '
         'level with its feeder QF, the final sits midway', (tester) async {
       // No resolved teams yet (placeholders only, as live).
       await _pump(tester, s16(),
@@ -231,7 +236,8 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    test('a card with no feeder takes the next free row; crowded cards are '
+    test(
+        'a card with no feeder takes the next free row; crowded cards are '
         'pushed apart and the push carries to what they feed', () {
       final layout = knockoutFeederLayout([
         ['qf1', 'qf2'],
@@ -248,12 +254,12 @@ void main() {
       // The final sits midway between sf2 and sf3 at their pushed rows.
       expect(layout.centers[2], [219.0]);
       // No connector into sf3 (no real feeder).
-      expect(
-          layout.connectors.where((c) => c.round == 1).map((c) => c.toIndex),
+      expect(layout.connectors.where((c) => c.round == 1).map((c) => c.toIndex),
           [0, 1]);
     });
 
-    testWidgets('league tab, live S16 data: bye sides read Seed #2 / Seed #1, '
+    testWidgets(
+        'league tab, live S16 data: bye sides read Seed #2 / Seed #1, '
         'feeder sides Winner of QF1 / Winner of QF2', (tester) async {
       tester.view.physicalSize = const Size(360, 800);
       tester.view.devicePixelRatio = 1.0;

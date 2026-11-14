@@ -108,7 +108,8 @@ void main() {
       .widgetList<CachedNetworkImage>(find.byType(CachedNetworkImage))
       .map((i) => i.imageUrl);
 
-  testWidgets('an old saved copy shows shields; the fresh copy fills the '
+  testWidgets(
+      'an old saved copy shows shields; the fresh copy fills the '
       'Season 16 crest in with no restart', (tester) async {
     final source = StreamController<Map>();
     TeamLogoFeed.sourceOverride = () => source.stream;
@@ -136,8 +137,7 @@ void main() {
     debugPrint = original;
   });
 
-  test('getAllTeamLogo resolves on the FIRST event (the saved copy)',
-      () async {
+  test('getAllTeamLogo resolves on the FIRST event (the saved copy)', () async {
     final source = StreamController<Map>();
     TeamLogoFeed.sourceOverride = () => source.stream;
     var done = false;
@@ -163,8 +163,7 @@ void main() {
     await source.close();
   });
 
-  test('a source that errors leaves the map empty and never throws',
-      () async {
+  test('a source that errors leaves the map empty and never throws', () async {
     TeamLogoFeed.sourceOverride =
         () => Stream<Map>.error(StateError('permission denied'));
     await TeamLogoFeed.ensureStarted();
@@ -190,7 +189,8 @@ void main() {
     expect(teamLogos, isEmpty);
   });
 
-  test('a source that never answers gives up after the bound (empty map, '
+  test(
+      'a source that never answers gives up after the bound (empty map, '
       'no exception) and a late answer still fills in', () async {
     final source = StreamController<Map>();
     TeamLogoFeed.sourceOverride = () => source.stream;
