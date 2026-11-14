@@ -485,13 +485,17 @@ class _PaymentScreenState extends State<PaymentScreen> {
           _notice(context, kRegistrationFeeChanged),
           const SizedBox(height: 10),
         ],
-        _amountCard(context, sub, effectiveAmount),
-        const SizedBox(height: 15),
-        // Pay actions only on a confirmed, open config (second review,
-        // Important 2): closed → the existing closed wording; a failed live
-        // read → the existing "couldn't check" state with a retry.
-        if (_live.closed) ...[
-          _notice(context, 'Registration is closed'),
+        // A deleted registration offers no amount as payable.
+        if (!_live.removed) ...[
+          _amountCard(context, sub, effectiveAmount),
+          const SizedBox(height: 15),
+        ],
+        // Pay actions on any existing, confirmed config — open OR closed (an
+        // unpaid registrant still pays after sign-ups close): removed →
+        // the unavailable message; a failed live read → the existing
+        // "couldn't check" state with a retry.
+        if (_live.removed) ...[
+          _notice(context, kRegistrationUnavailable),
           const SizedBox(height: 15),
         ] else if (_live.error) ...[
           _notice(context, kRegistrationCouldNotCheck),
@@ -690,7 +694,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     );
   }
 
-  /// A short plain notice (fee changed / closed / couldn't check).
+  /// A short plain notice (fee changed / removed / couldn't check).
   Widget _notice(BuildContext context, String text) {
     final scheme = Theme.of(context).colorScheme;
     return Container(

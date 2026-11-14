@@ -14,8 +14,14 @@
 //   • a stream error keeps the last confirmed value and raises [error]: the
 //     pay actions show the existing "couldn't check" state (a failed read
 //     is not a fact) with a retry;
-//   • a registration that is closed or removed raises [closed]: the pay
-//     actions disable with the existing "Registration is closed" wording.
+//   • a CLOSED registration changes nothing here: the owner closes sign-ups
+//     to stop NEW registrations, and players who registered but have not
+//     paid still pay (the server accepts it) — so the pay actions stay and
+//     the amounts keep following the live config (correction to 4cad135;
+//     the closed wording stays only where it stops a new registration);
+//   • a REMOVED registration (the Config node is gone) raises [removed]:
+//     no amount is offered as payable and the pay actions give way to
+//     [kRegistrationUnavailable].
 
 import 'dart:async';
 
@@ -32,7 +38,7 @@ class LiveRegistrationConfig extends ChangeNotifier {
   final Stream<RegistrationConfig?> Function() _source;
   RegistrationConfig _config;
   StreamSubscription<RegistrationConfig?>? _sub;
-  bool _closed = false;
+  bool _removed = false;
   bool _error = false;
   bool _feeChanged = false;
   bool _disposed = false;
@@ -40,8 +46,8 @@ class LiveRegistrationConfig extends ChangeNotifier {
   /// The latest confirmed config (the entry-time one until the first event).
   RegistrationConfig get config => _config;
 
-  /// The registration is closed or no longer exists.
-  bool get closed => _closed;
+  /// The registration no longer exists (its Config node is gone).
+  bool get removed => _removed;
 
   /// The live read failed; [config] is the last confirmed value.
   bool get error => _error;
@@ -49,8 +55,9 @@ class LiveRegistrationConfig extends ChangeNotifier {
   /// The fee changed while the screen was open.
   bool get feeChanged => _feeChanged;
 
-  /// Pay actions are allowed: open and confirmed.
-  bool get canPay => !_closed && !_error;
+  /// Pay actions are allowed: the registration exists (open OR closed) and
+  /// its config is confirmed.
+  bool get canPay => !_removed && !_error;
 
   void start() {
     if (_sub != null || _disposed) return;
@@ -78,12 +85,13 @@ class LiveRegistrationConfig extends ChangeNotifier {
 
   void _onConfig(RegistrationConfig? next) {
     _error = false;
-    if (next == null || !next.isOpen) {
-      _closed = true;
+    if (next == null) {
+      _removed = true;
       _notify();
       return;
     }
-    _closed = false;
+    // Open or closed alike: the amounts follow the live config.
+    _removed = false;
     if (feeDiffers(_config, next)) _feeChanged = true;
     _config = next;
     _notify();
@@ -107,6 +115,11 @@ class LiveRegistrationConfig extends ChangeNotifier {
     super.dispose();
   }
 }
+
+/// The message in place of the pay actions when the registration was
+/// deleted.
+const String kRegistrationUnavailable =
+    'This registration is no longer available.';
 
 /// The notice shown when the fee changed while a screen was open.
 const String kRegistrationFeeChanged =

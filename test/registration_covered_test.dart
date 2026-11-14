@@ -217,7 +217,6 @@ void main() {
         targetType: 'league',
         sport: 'Futsal',
         season: '17',
-        status: 'open',
         fee: 60,
         paymentMode: 'perPlayer',
         stripe: true);
@@ -292,7 +291,6 @@ void main() {
         targetType: 'league',
         sport: 'Futsal',
         season: '17',
-        status: 'open',
         fee: 255,
         paymentMode: 'perPlayer',
         venmo: true,
@@ -396,7 +394,6 @@ void main() {
         targetType: 'league',
         sport: 'Futsal',
         season: '17',
-        status: 'open',
         fee: 60,
         paymentMode: 'perPlayer',
         stripe: true);

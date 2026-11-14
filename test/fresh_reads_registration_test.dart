@@ -564,15 +564,44 @@ void main() {
     });
 
     testWidgets(
-        'closed while open: pay actions disabled with the closed '
-        'wording', (tester) async {
+        'correction: closed (sign-ups closed) keeps the pay actions for '
+        'an unpaid registrant, amounts still live', (tester) async {
       final h = await pump(tester);
-      h.config.add(base.copyWithForTest(status: 'closed'));
+      h.config.add(base.copyWithForTest(status: 'closed', fee: 70));
       await tester.pump();
       await tester.pump();
-      expect(find.text('Registration is closed'), findsOneWidget);
+      expect(find.text('Registration is closed'), findsNothing);
+      expect(find.text('Pay with card'), findsOneWidget);
+      expect(find.text('Pay with Venmo'), findsOneWidget);
+      expect(find.text(r'$70'), findsOneWidget);
+      await tester.tap(find.text('Pay with Venmo'));
+      await tester.pump();
+      expect(h.launched.single.queryParameters['amount'], contains('70'));
+      await h.config.close();
+    });
+
+    testWidgets(
+        'correction: removed registration: no payable amount, the '
+        'unavailable message', (tester) async {
+      final h = await pump(tester);
+      h.config.add(null);
+      await tester.pump();
+      await tester.pump();
+      expect(find.text(kRegistrationUnavailable), findsOneWidget);
       expect(find.text('Pay with card'), findsNothing);
       expect(find.text('Pay with Venmo'), findsNothing);
+      expect(find.text(r'$60'), findsNothing);
+      await h.config.close();
+    });
+
+    testWidgets('correction: open stays as it was', (tester) async {
+      final h = await pump(tester);
+      h.config.add(base);
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Pay with card'), findsOneWidget);
+      expect(find.text(r'$60'), findsOneWidget);
+      expect(find.text(kRegistrationFeeChanged), findsNothing);
       await h.config.close();
     });
   });
@@ -611,19 +640,25 @@ void _statusPageLiveConfigTests() {
   }
 
   testWidgets(
-      'status page: a fee change shows the notice; closed disables '
-      'Complete payment', (tester) async {
+      'status page: a fee change shows the notice; closed keeps Complete '
+      'payment; removed shows the unavailable message', (tester) async {
     final config = await pump(tester);
     expect(find.text('Complete payment'), findsOneWidget);
     config.add(base.copyWithForTest(fee: 80));
     await tester.pump();
     await tester.pump();
     expect(find.text(kRegistrationFeeChanged), findsOneWidget);
-    config.add(base.copyWithForTest(status: 'closed'));
+    config.add(base.copyWithForTest(status: 'closed', fee: 80));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Complete payment'), findsOneWidget,
+        reason: 'an unpaid registrant still pays after sign-ups close');
+    expect(find.text('Registration is closed'), findsNothing);
+    config.add(null);
     await tester.pump();
     await tester.pump();
     expect(find.text('Complete payment'), findsNothing);
-    expect(find.text('Registration is closed'), findsOneWidget);
+    expect(find.text(kRegistrationUnavailable), findsOneWidget);
     await config.close();
   });
 

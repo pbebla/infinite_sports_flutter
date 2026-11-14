@@ -453,7 +453,7 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
     );
   }
 
-  /// A short plain notice (fee changed / closed / couldn't check).
+  /// A short plain notice (fee changed / removed / couldn't check).
   Widget _notice(BuildContext context, String text) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
@@ -547,8 +547,9 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
           ),
         ),
         if (owes && !_live.canPay)
-          // Second review, Important 2: no payment on a closed registration
-          // or an unconfirmed config — the existing wordings.
+          // Second review, Important 2 (+ correction): no payment on a
+          // deleted registration or an unconfirmed config. A CLOSED one
+          // keeps "Complete payment" — unpaid registrants still pay.
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(15),
@@ -557,10 +558,10 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
                 children: [
                   _notice(
                       context,
-                      _live.closed
-                          ? 'Registration is closed'
+                      _live.removed
+                          ? kRegistrationUnavailable
                           : kRegistrationCouldNotCheck),
-                  if (!_live.closed) ...[
+                  if (!_live.removed) ...[
                     const SizedBox(height: 8),
                     OutlinedButton(
                       onPressed: _live.retry,
