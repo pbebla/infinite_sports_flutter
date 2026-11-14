@@ -193,17 +193,34 @@ void main() {
     });
 
     test(
-        'a read waiting for its first event keeps the listener past the '
-        'linger bound (like once())', () async {
+        'review m3: a read whose first answer never comes is cancelled at the '
+        'linger bound and fails with a TimeoutException', () async {
       final e = f.engine(lingerFor: const Duration(milliseconds: 20));
       final p = f.path('A');
       final read = e.refreshing('A');
-      await _tick(50);
-      expect(p.live, 1, reason: 'a reader is still waiting');
-      p.emit('late');
-      expect((await read).value, 'late');
-      await _tick(5);
-      expect(p.live, 0, reason: 'answered and past the bound: cancelled');
+      await expectLater(read, throwsA(isA<TimeoutException>()));
+      expect(p.live, 0, reason: 'cancelled at the bound, always');
+      // The next read starts afresh.
+      final again = e.refreshing('A');
+      await _tick(0);
+      p.emit('now');
+      expect((await again).value, 'now');
+      e.debugReset();
+    });
+
+    test(
+        'review ordering: the barrier is only sent after the listener has '
+        'delivered its first event (proof it is attached)', () async {
+      final e = f.engine();
+      f.connection.add(true);
+      await _tick(0);
+      final read = e.refreshing('A');
+      await _tick(20);
+      expect(f.barriers, isEmpty, reason: 'no first event yet: no barrier');
+      f.path('A').emit('v');
+      await read;
+      await _tick();
+      expect(f.barriers, hasLength(1));
       e.debugReset();
     });
 
@@ -523,6 +540,20 @@ void main() {
       FreshReads.refreshingValueOverride = (path) async => 'v:$path';
       addTearDown(() => FreshReads.refreshingValueOverride = null);
       expect(await refreshingValue('/A//B'), 'v:A/B');
+    });
+  });
+
+  group('review m4: sharing key', () {
+    test('a plain reference shares by its normalized path', () {
+      expect(freshShareKey('/Futsal/16//Line Ups', plainRef: true, identity: 1),
+          'Futsal/16/Line Ups');
+    });
+
+    test('a query with parameters never shares with the plain path', () {
+      final a = freshShareKey('Users', plainRef: false, identity: 1);
+      final b = freshShareKey('Users', plainRef: false, identity: 2);
+      expect(a, isNot('Users'));
+      expect(a, isNot(b));
     });
   });
 }

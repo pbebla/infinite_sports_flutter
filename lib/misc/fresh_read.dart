@@ -95,6 +95,17 @@ class FreshValue {
 String normalizeFreshPath(String path) =>
     path.split('/').where((s) => s.isNotEmpty).join('/');
 
+/// The sharing key of a read (review m4): a plain reference shares by its
+/// normalized path; a query with parameters (orderBy/limit/equalTo — the
+/// plugin does not expose them) NEVER shares, so a filtered read can never
+/// receive an unfiltered listener's events or vice versa. Debug builds
+/// assert that only plain references are used (all of lib/ does).
+String freshShareKey(String path,
+        {required bool plainRef, required Object identity}) =>
+    plainRef
+        ? normalizeFreshPath(path)
+        : '${normalizeFreshPath(path)}#query${identityHashCode(identity)}';
+
 /// Per-user paths whose lingering listeners must not outlive a sign-out.
 bool isUserScopedPath(String path) {
   final p = normalizeFreshPath(path);
@@ -304,6 +315,18 @@ class FreshReadEngine<Q, E> {
     entry.lingerTimer = Timer(lingerFor, () {
       entry.lingerTimer = null;
       entry.lingerExpired = true;
+      // Review m3: the bound ALWAYS ends the listener. Readers still waiting
+      // for a first answer fail with a TimeoutException (callers bound or
+      // catch their reads; a failed read is not a fact). Server-first reads
+      // in progress finish on their own (shorter) bound, then it closes.
+      if (entry.firstWaiters.isNotEmpty) {
+        final waiters = List.of(entry.firstWaiters);
+        entry.firstWaiters.clear();
+        for (final w in waiters) {
+          w.completeError(TimeoutException(
+              'Fresh read ${entry.key}: no answer', lingerFor));
+        }
+      }
       _maybeClose(entry);
     });
     try {
@@ -314,7 +337,10 @@ class FreshReadEngine<Q, E> {
     } catch (error, st) {
       scheduleMicrotask(() => _fail(entry, error, st));
     }
-    _requestSync(entry);
+    // The barrier is requested at the FIRST EVENT (_onEvent), not here: an
+    // event proves the native listener is attached, so the barrier's own
+    // listen request is guaranteed to reach the database after it (review:
+    // attach order). This is the sequence the probe measured (phase 6).
     return entry;
   }
 
@@ -322,6 +348,7 @@ class FreshReadEngine<Q, E> {
     if (entry.closed) return;
     entry.latest = e;
     entry.hasValue = true;
+    _requestSync(entry); // no-op once requested
     final v = valueOf(e);
     if (entry.delivered && !freshValuesEqual(v, entry.deliveredValue)) {
       entry.deliveredValue = v;
@@ -369,7 +396,7 @@ class FreshReadEngine<Q, E> {
   }
 
   void _requestSync(_Entry<E> entry) {
-    if (entry.syncRequested) return;
+    if (entry.syncRequested || !entry.hasValue) return;
     entry.syncRequested = true;
     _barrierAfterNow().then((ok) {
       if (entry.closed) return;
@@ -496,9 +523,12 @@ class FreshReadEngine<Q, E> {
 FreshReadEngine<Query, DatabaseEvent> _firebaseEngine() =>
     FreshReadEngine<Query, DatabaseEvent>(
       valueEvents: (q) => q.onValue,
-      // Every one-shot read in lib/ is on a plain reference (no
-      // orderBy/limit); a query with modifiers would need its own key.
-      keyOf: (q) => normalizeFreshPath(q.path),
+      keyOf: (q) {
+        assert(q is DatabaseReference,
+            'fresh reads support plain references only (see freshShareKey)');
+        return freshShareKey(q.path,
+            plainRef: q is DatabaseReference, identity: q);
+      },
       valueOf: (e) => e.snapshot.value,
       onAnyNewer: (key, e) => FreshReads._dispatchNewer(key, e.snapshot.value),
       barrier: () async {
