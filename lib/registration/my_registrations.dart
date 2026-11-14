@@ -23,6 +23,7 @@
 import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:infinite_sports_flutter/misc/bounded_read.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 
@@ -119,6 +120,7 @@ Stream<MyRegistrations> watchMyRegistrations({
   String? Function()? uidOf,
   Stream<Map<String, RegistrationConfig>> Function()? configs,
   Stream<RegSubmission?> Function(String regId)? submissionFor,
+  Duration firstAnswerBound = kRevealReadTimeout,
 }) {
   final me = (uidOf ?? _signedInUid)();
   final configSource = configs ?? RegistrationService.watchAllRegistrations;
@@ -130,6 +132,13 @@ Stream<MyRegistrations> watchMyRegistrations({
   final answered = <String>{};
   final latestSub = <String, RegSubmission?>{};
   Map<String, RegistrationConfig>? latestConfigs;
+
+  // Way back fix round, Important 2: no first answer within the bound (the
+  // same 8 s checkEntry uses) is an error — the list shows "couldn't load"
+  // with Retry instead of a skeleton forever — but listening goes on, and
+  // a late answer then arrives as data.
+  Timer? firstAnswerTimer;
+  var answeredOnce = false;
 
   void emit() {
     final all = latestConfigs;
@@ -146,6 +155,9 @@ Stream<MyRegistrations> watchMyRegistrations({
         open[regId] = config;
       }
     });
+    answeredOnce = true;
+    firstAnswerTimer?.cancel();
+    firstAnswerTimer = null;
     out.add(MyRegistrations(mine: mine, openForSignUp: open));
   }
 
@@ -178,6 +190,13 @@ Stream<MyRegistrations> watchMyRegistrations({
 
   out = StreamController<MyRegistrations>(
     onListen: () {
+      firstAnswerTimer = Timer(firstAnswerBound, () {
+        firstAnswerTimer = null;
+        if (!answeredOnce && !out.isClosed) {
+          out.addError(TimeoutException(
+              'My registrations: no answer', firstAnswerBound));
+        }
+      });
       try {
         configSub = configSource().listen(onConfigs, onError: fail);
       } catch (e, st) {
@@ -185,6 +204,7 @@ Stream<MyRegistrations> watchMyRegistrations({
       }
     },
     onCancel: () async {
+      firstAnswerTimer?.cancel();
       await configSub?.cancel();
       for (final s in subSubs.values) {
         await s.cancel();

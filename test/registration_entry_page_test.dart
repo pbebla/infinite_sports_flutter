@@ -171,4 +171,19 @@ void main() {
     await pump(tester, Stream.value(MyRegistrations.empty));
     expect(find.text('No registrations are open right now.'), findsOneWidget);
   });
+
+  testWidgets(
+      'no first answer in time: could-not-load, and a late answer then '
+      'replaces it in place (still listening)', (tester) async {
+    final c = StreamController<MyRegistrations>();
+    await pump(tester, c.stream);
+    c.addError(TimeoutException('no answer'));
+    await tester.pump();
+    expect(find.text(kRegistrationsCouldNotLoad), findsOneWidget);
+    c.add(data());
+    await tester.pump();
+    expect(find.text(kRegistrationsCouldNotLoad), findsNothing);
+    expect(find.text('My registrations'), findsOneWidget);
+    await c.close();
+  });
 }

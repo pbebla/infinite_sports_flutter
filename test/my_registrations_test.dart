@@ -29,8 +29,11 @@ void main() {
     subs = {};
   });
 
-  Stream<MyRegistrations> watch({String? uid = 'u1'}) => watchMyRegistrations(
+  Stream<MyRegistrations> watch(
+          {String? uid = 'u1', Duration bound = const Duration(seconds: 8)}) =>
+      watchMyRegistrations(
         uidOf: () => uid,
+        firstAnswerBound: bound,
         configs: () => configs.stream,
         submissionFor: (regId) => subs
             .putIfAbsent(regId, () => StreamController<RegSubmission?>())
@@ -140,5 +143,77 @@ void main() {
     ], openForSignUp: const {});
     expect(regs.firstOwing!.regId, 'owes');
     expect(regs.firstOwing!.owed, 80);
+  });
+
+  // Way back fix round, Important 2: never a skeleton forever.
+  group('bounded first answer', () {
+    test(
+        'no first answer within the bound: an error (could not load), '
+        'still listening; a late answer then arrives as data', () async {
+      final events = <Object>[];
+      final sub = watch(bound: const Duration(milliseconds: 30))
+          .listen(events.add, onError: events.add);
+      configs.add({'a': _config('closed')});
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(events.single, isA<TimeoutException>());
+      subs['a']!.add(const RegSubmission(path: 'individual', answers: {}));
+      await Future<void>.delayed(Duration.zero);
+      expect(events.last, isA<MyRegistrations>());
+      expect((events.last as MyRegistrations).mine, hasLength(1));
+      await sub.cancel();
+    });
+
+    test('the mirror never answering is bounded too', () async {
+      final events = <Object>[];
+      final sub = watch(bound: const Duration(milliseconds: 30))
+          .listen(events.add, onError: events.add);
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(events.single, isA<TimeoutException>());
+      await sub.cancel();
+    });
+
+    test('one submission read that fails is an error', () async {
+      final errors = <Object>[];
+      final sub = watch().listen((_) {}, onError: errors.add);
+      configs.add({'a': _config('open'), 'b': _config('closed')});
+      await Future<void>.delayed(Duration.zero);
+      subs['a']!.add(null);
+      subs['b']!.addError(StateError('denied'));
+      await Future<void>.delayed(Duration.zero);
+      expect(errors, hasLength(1));
+      await sub.cancel();
+    });
+
+    test(
+        'a registration added to the mirror while open is held until its '
+        'submission answers (no flicker)', () async {
+      final out = <MyRegistrations>[];
+      final sub = watch().listen(out.add);
+      configs.add({'a': _config('open')});
+      await Future<void>.delayed(Duration.zero);
+      subs['a']!.add(null);
+      await Future<void>.delayed(Duration.zero);
+      expect(out, hasLength(1));
+      configs.add({'a': _config('open'), 'b': _config('closed')});
+      await Future<void>.delayed(Duration.zero);
+      expect(out, hasLength(1), reason: 'held while b has not answered');
+      subs['b']!.add(const RegSubmission(path: 'individual', answers: {}));
+      await Future<void>.delayed(Duration.zero);
+      expect(out, hasLength(2));
+      expect(out.last.mine.single.regId, 'b');
+      await sub.cancel();
+    });
+
+    test('closing the screen cancels every listener', () async {
+      final sub = watch().listen((_) {});
+      configs.add({'a': _config('open'), 'b': _config('closed')});
+      await Future<void>.delayed(Duration.zero);
+      expect(subs['a']!.hasListener, isTrue);
+      expect(subs['b']!.hasListener, isTrue);
+      await sub.cancel();
+      expect(subs['a']!.hasListener, isFalse);
+      expect(subs['b']!.hasListener, isFalse);
+      expect(configs.hasListener, isFalse);
+    });
   });
 }
