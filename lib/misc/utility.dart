@@ -9,6 +9,7 @@ import 'package:infinite_sports_flutter/misc/follow_store.dart';
 import 'package:infinite_sports_flutter/misc/forfeit.dart';
 import 'package:infinite_sports_flutter/misc/home_nav.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
+import 'package:infinite_sports_flutter/misc/season_pointers.dart';
 import 'package:infinite_sports_flutter/misc/team_logos.dart';
 import 'package:infinite_sports_flutter/model/basketballgame.dart';
 import 'package:infinite_sports_flutter/model/basketballplayer.dart';
@@ -185,12 +186,14 @@ String convertDateToDatabase(DateTime date) {
   return formattedDate + (date.year.toString());
 }
 
+/// The current league (`Current League`), from the live season pointers
+/// (season_pointers.dart: answers from the saved copy at once, follows the
+/// server). Unchanged contract: absent = "null", a failed read = the error's
+/// text.
 Future<String> getCurrentSport() async {
   try
   {
-    DatabaseReference newClient = FirebaseDatabase.instance.ref();
-    var season = (await newClient.child("Current League").once()).snapshot;
-    return season.value.toString();
+    return (await SeasonPointers.read(kCurrentLeaguePointer)).toString();
   }
   catch (e)
   {
@@ -198,12 +201,13 @@ Future<String> getCurrentSport() async {
   }
 }
 
+/// `<sport> Season`, from the live season pointers (same contract as
+/// [getCurrentSport]).
 Future<String> getCurrentSeason(currentSport) async {
   try
   {
-    DatabaseReference newClient = FirebaseDatabase.instance.ref();
-    var seasonNum = (await newClient.child(currentSport + " Season").once()).snapshot;
-    return seasonNum.value.toString();
+    return (await SeasonPointers.read(seasonPointerPath('$currentSport')))
+        .toString();
   }
   catch (e)
   {
@@ -224,12 +228,12 @@ Future<bool> isSeasonFinished(sport, season) async {
   }
 }
 
+/// `AFC San Jose/Current Season`, from the live season pointers (same
+/// contract as [getCurrentSport]).
 Future<String> getAFCCurrentSeason() async {
   try
   {
-    DatabaseReference newClient = FirebaseDatabase.instance.ref("/AFC San Jose/");
-    var seasonNum = (await newClient.child("Current Season").once()).snapshot;
-    return seasonNum.value.toString();
+    return (await SeasonPointers.read(kAfcSeasonPointer)).toString();
   }
   catch (e)
   {

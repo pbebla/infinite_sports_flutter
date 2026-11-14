@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/foundation.dart' show listEquals, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_home_banner.dart';
@@ -9,6 +9,7 @@ import 'package:infinite_sports_flutter/leaderboard.dart';
 import 'package:infinite_sports_flutter/league_detail_page.dart';
 import 'package:infinite_sports_flutter/livescore.dart';
 import 'package:infinite_sports_flutter/misc/game_day.dart';
+import 'package:infinite_sports_flutter/misc/season_pointers.dart';
 import 'package:infinite_sports_flutter/misc/tournament_service.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/registration/registration_entry_page.dart';
@@ -44,6 +45,48 @@ class _ActiveTournamentTab {
     required this.rosters,
     required this.initialDay,
   });
+}
+
+/// One league section of the Matches tab: which season, the day it opens on
+/// and whether the season is over.
+class _LeagueSection {
+  const _LeagueSection({
+    required this.sport,
+    required this.season,
+    required this.date,
+    required this.finished,
+  });
+  final String sport;
+  final String season;
+  final String date;
+  final bool finished;
+}
+
+/// What the top-bar Table/Leaderboard target ([headerNotifier]) becomes when
+/// the Matches tab's sections move from the old pointers to the new ones, or
+/// null to leave it: a header on the old league season follows the league,
+/// one on the old AFC season follows AFC, an unset one takes the league.
+/// Anything else (another selection) is left alone.
+@visibleForTesting
+List<String>? followHeader(
+  List header, {
+  required String oldSport,
+  required String oldSeason,
+  required String oldAfcSeason,
+  required String newSport,
+  required String newSeason,
+  required String newAfcSeason,
+}) {
+  final h0 = header.isNotEmpty ? '${header[0]}' : '';
+  final h1 = header.length > 1 ? '${header[1]}' : '';
+  List<String>? change(List<String> next) =>
+      (next[0] == h0 && next[1] == h1) ? null : next;
+  if (h0.isEmpty && h1.isEmpty) return change([newSport, newSeason]);
+  if (h0 == 'AFC San Jose' && h1 == oldAfcSeason) {
+    return change(['AFC San Jose', newAfcSeason]);
+  }
+  if (h0 == oldSport && h1 == oldSeason) return change([newSport, newSeason]);
+  return null;
 }
 
 class FrontPage extends StatefulWidget {
@@ -99,13 +142,110 @@ class _FrontPageState extends State<FrontPage> {
     // this page loaded shows up as a home tab without restarting the app.
     _tournamentsWatchSub =
         TournamentService.watchAllTournaments().listen(_onTournamentsChanged);
+    // Live season pointers (fresh-reads Task 2): a new league/season set
+    // while the app is open (or a stale saved copy corrected by the server
+    // right after start) moves the league + AFC sections and the top-bar
+    // header in one update, without the first-load skeleton.
+    SeasonPointers.listenable.addListener(_onSeasonPointersChanged);
   }
 
   @override
   void dispose() {
+    SeasonPointers.listenable.removeListener(_onSeasonPointersChanged);
     _onTournamentTab.dispose();
     _tournamentsWatchSub?.cancel();
     super.dispose();
+  }
+
+  int _pointerFollowGen = 0;
+
+  void _onSeasonPointersChanged() => unawaited(_followSeasonPointers());
+
+  /// Re-reads only the sections whose pointer moved, then applies them in
+  /// ONE setState and moves [headerNotifier] with them. Waits for the first
+  /// load (which may already have read the new values); a newer change
+  /// supersedes an older one still in flight.
+  Future<void> _followSeasonPointers() async {
+    final gen = ++_pointerFollowGen;
+    try {
+      await _loadingPage;
+    } catch (_) {}
+    if (!mounted || gen != _pointerFollowGen) return;
+    final now = SeasonPointers.listenable.value;
+    final leagueMoved = '${now.currentLeague}' != currentSport ||
+        '${now.currentSeason}' != currentSeason;
+    final afcMoved = '${now.afcSeason}' != currentAFCSeason;
+    if (!leagueMoved && !afcMoved) return;
+    final List<_LeagueSection?> sections;
+    try {
+      sections = await Future.wait<_LeagueSection?>([
+        leagueMoved ? _readLeagueSection() : Future.value(null),
+        afcMoved ? _readAfcSection() : Future.value(null),
+      ]);
+    } catch (e) {
+      // A failed read is not a fact: the screen stays as it is; the next
+      // pointer change or the refresh button tries again.
+      debugPrint('FrontPage: following the season pointers failed: $e');
+      return;
+    }
+    if (!mounted || gen != _pointerFollowGen) return;
+    final oldSport = currentSport;
+    final oldSeason = currentSeason;
+    final oldAfc = currentAFCSeason;
+    setState(() {
+      if (sections[0] != null) _applyLeagueSection(sections[0]!);
+      if (sections[1] != null) _applyAfcSection(sections[1]!);
+    });
+    final next = followHeader(headerNotifier.value as List,
+        oldSport: oldSport,
+        oldSeason: oldSeason,
+        oldAfcSeason: oldAfc,
+        newSport: currentSport,
+        newSeason: currentSeason,
+        newAfcSeason: currentAFCSeason);
+    if (next != null) headerNotifier.value = next;
+  }
+
+  /// The current league's section values (pointer → date + finished).
+  Future<_LeagueSection> _readLeagueSection() async {
+    final sport = await getCurrentSport();
+    final season = await getCurrentSeason(sport);
+    final both = await Future.wait<Object>([
+      getCurrentDate(sport, season),
+      isSeasonFinished(sport, season),
+    ]);
+    return _LeagueSection(
+        sport: sport,
+        season: season,
+        date: both[0] as String,
+        finished: both[1] as bool);
+  }
+
+  /// AFC San Jose's section values (pointer → date + finished).
+  Future<_LeagueSection> _readAfcSection() async {
+    final season = await getAFCCurrentSeason();
+    final both = await Future.wait<Object>([
+      getCurrentDate("AFC San Jose", season),
+      isAFCSeasonFinished(season),
+    ]);
+    return _LeagueSection(
+        sport: "AFC San Jose",
+        season: season,
+        date: both[0] as String,
+        finished: both[1] as bool);
+  }
+
+  void _applyLeagueSection(_LeagueSection s) {
+    currentSport = s.sport;
+    currentSeason = s.season;
+    currentDate = s.date;
+    isCurrentFinished = s.finished;
+  }
+
+  void _applyAfcSection(_LeagueSection s) {
+    currentAFCSeason = s.season;
+    currentAFCDate = s.date;
+    isCurrentAFCFinished = s.finished;
   }
 
   /// Reacts to a live /Tournaments update by comparing the sorted active-id
@@ -135,30 +275,10 @@ class _FrontPageState extends State<FrontPage> {
     // concurrently instead of as one long sequential chain of round trips.
     await Future.wait([
       () async {
-        currentSport = await getCurrentSport();
-        currentSeason = await getCurrentSeason(currentSport);
-        await Future.wait([
-          () async {
-            currentDate = await getCurrentDate(currentSport, currentSeason);
-          }(),
-          () async {
-            isCurrentFinished =
-                await isSeasonFinished(currentSport, currentSeason);
-          }(),
-        ]);
+        _applyLeagueSection(await _readLeagueSection());
       }(),
       () async {
-        currentAFCSeason = await getAFCCurrentSeason();
-        await Future.wait([
-          () async {
-            currentAFCDate =
-                await getCurrentDate("AFC San Jose", currentAFCSeason);
-          }(),
-          () async {
-            isCurrentAFCFinished =
-                await isAFCSeasonFinished(currentAFCSeason);
-          }(),
-        ]);
+        _applyAfcSection(await _readAfcSection());
       }(),
       _loadActiveTournaments(),
       () async {
@@ -321,8 +441,12 @@ class _FrontPageState extends State<FrontPage> {
                   // In-season Infinite Fantasy entry (P6): stream-gates
                   // ITSELF on Fantasy/<sport>/<season>/Config — renders
                   // nothing while the node is absent.
+                  // Keyed: a season pointer change remounts it on the new
+                  // season (it subscribes in initState).
                   FantasyHomeBanner(
-                      sport: currentSport, season: currentSeason),
+                      key: ValueKey('fantasy|$currentSport|$currentSeason'),
+                      sport: currentSport,
+                      season: currentSeason),
                   // P3.1 owner feedback: header opens the season hub
                   // (LeagueDetailPage), mirroring the tournament header card
                   // below. Root navigator, matching league_day_view's pushes.
@@ -373,7 +497,15 @@ class _FrontPageState extends State<FrontPage> {
                   // its own "Friday, June 12" date header, so the old
                   // standalone date line above it is gone).
                   Expanded(
-                      child: LeagueDayView(sport: currentSport, season: currentSeason, date: currentDate)
+                      child: LeagueDayView(
+                          // Keyed: a season pointer change remounts the day
+                          // list on the new season (it streams from
+                          // initState).
+                          key: ValueKey(
+                              'day|$currentSport|$currentSeason|$currentDate'),
+                          sport: currentSport,
+                          season: currentSeason,
+                          date: currentDate)
                   )
                 ]));
               }
@@ -411,7 +543,10 @@ class _FrontPageState extends State<FrontPage> {
                   Divider(color: Theme.of(context).dividerColor, thickness: 1),
                   Text(convertDatabaseDateToFormatDate(currentAFCDate), style: const TextStyle(fontWeight: FontWeight.bold)),
                   Expanded(
-                      child: LiveScorePage(sport: "AFC San Jose", season: currentAFCSeason, date: currentAFCDate, onTitleSelect: (String value) {widget.onTitleSelect(value);})
+                      child: LiveScorePage(
+                          // Keyed: follows a new AFC season pointer.
+                          key: ValueKey('afc|$currentAFCSeason|$currentAFCDate'),
+                          sport: "AFC San Jose", season: currentAFCSeason, date: currentAFCDate, onTitleSelect: (String value) {widget.onTitleSelect(value);})
                   )
                 ]));
               }

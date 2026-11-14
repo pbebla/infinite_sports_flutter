@@ -15,6 +15,7 @@ import 'package:infinite_sports_flutter/misc/insider_service.dart';
 import 'package:infinite_sports_flutter/misc/notification_router.dart';
 import 'package:infinite_sports_flutter/misc/pushnotifications.dart';
 import 'package:infinite_sports_flutter/misc/rtdb_emulator.dart';
+import 'package:infinite_sports_flutter/misc/season_pointers.dart';
 import 'package:infinite_sports_flutter/misc/server_time.dart';
 import 'package:infinite_sports_flutter/misc/theme_provider.dart';
 import 'package:infinite_sports_flutter/misc/follow_store.dart';
@@ -31,6 +32,7 @@ import 'package:infinite_sports_flutter/navbar.dart';
 import 'package:infinite_sports_flutter/navigations/current_livescore_navigation.dart';
 import 'package:infinite_sports_flutter/navigations/leagues_navigation.dart';
 import 'package:infinite_sports_flutter/navigations/tournaments_navigation.dart';
+import 'package:infinite_sports_flutter/profile/profile_page.dart';
 import 'package:infinite_sports_flutter/search_hub_page.dart';
 import 'package:infinite_sports_flutter/widgets/glass_nav_bar.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
@@ -421,12 +423,17 @@ class _MyHomePageState extends State<MyHomePage> {
     // shared requestedHomeTab notifier (lib/misc/utility.dart) instead of
     // inventing its own navigation.
     requestedHomeTab.addListener(_onRequestedHomeTab);
+    // A season pointer that moves (fresh-reads Task 2) changes which stint
+    // is "current" on every profile: the memoised careers are re-read on
+    // their next open.
+    SeasonPointers.listenable.addListener(ProfilePage.clearCareerCache);
     super.initState();
   }
 
   @override
   void dispose() {
     requestedHomeTab.removeListener(_onRequestedHomeTab);
+    SeasonPointers.listenable.removeListener(ProfilePage.clearCareerCache);
     super.dispose();
   }
 

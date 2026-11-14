@@ -54,6 +54,7 @@ import 'package:infinite_sports_flutter/fantasy/profile/fantasy_player_profile_p
 import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart'
     show isSignedInUid;
+import 'package:infinite_sports_flutter/misc/season_pointers.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 
 /// How long the profile page waits (after its own identity load) for the
@@ -278,6 +279,7 @@ class FantasyProfileSource extends ChangeNotifier {
   // tab this time", and the very next open asks again.
   static Future<FantasySeasonKey?>? _resolving;
   static DateTime? _noSeasonAt;
+  static int _noSeasonVersion = -1;
 
   /// How long a "no fantasy season" answer is trusted before asking again.
   static const Duration kNoSeasonRecheck = Duration(minutes: 5);
@@ -293,7 +295,11 @@ class FantasyProfileSource extends ChangeNotifier {
   }) {
     final clock = now ?? DateTime.now;
     final none = _noSeasonAt;
-    if (none != null && clock().difference(none) < kNoSeasonRecheck) {
+    // A season pointer that moved since the "none" was seen (a new season
+    // started) asks again at once.
+    if (none != null &&
+        _noSeasonVersion == SeasonPointers.version &&
+        clock().difference(none) < kNoSeasonRecheck) {
       return Future<FantasySeasonKey?>.value(null);
     }
     return _resolving ??= _runResolve(resolver, clock);
@@ -315,6 +321,7 @@ class FantasyProfileSource extends ChangeNotifier {
       _noSeasonAt = null; // unknown ≠ none: retried on the next open
     } else {
       _noSeasonAt = result.isNone ? clock() : null;
+      _noSeasonVersion = SeasonPointers.version;
     }
     return result.season;
   }

@@ -2,6 +2,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/league_detail_page.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
+import 'package:infinite_sports_flutter/misc/season_pointers.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
@@ -152,6 +153,93 @@ Future<List<Widget>> getSeasonTiles(sport, context) async {
     i++;
   }
   return seasons;
+}
+
+/// A league sport's season list (Leagues tab → Futsal / Basketball / Flag
+/// Football). Follows the live season pointer (fresh-reads Task 2): when
+/// `<Sport> Season` moves (Season 15 → 16) the list is rebuilt and swapped
+/// in one update — the old list stays on screen meanwhile, no skeleton
+/// flash. Only the first load shows the skeleton.
+class SeasonTilesPage extends StatefulWidget {
+  const SeasonTilesPage({super.key, required this.sport, required this.title});
+
+  final String sport;
+  final String title;
+
+  /// Test seam replacing [getSeasonTiles] (null = real).
+  @visibleForTesting
+  static Future<List<Widget>> Function(String sport, BuildContext context)?
+      tilesOverride;
+
+  @override
+  State<SeasonTilesPage> createState() => _SeasonTilesPageState();
+}
+
+class _SeasonTilesPageState extends State<SeasonTilesPage> {
+  List<Widget>? _tiles;
+  String? _season;
+  int _gen = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    SeasonPointers.listenable.addListener(_onPointers);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    SeasonPointers.listenable.removeListener(_onPointers);
+    super.dispose();
+  }
+
+  void _onPointers() {
+    final now = SeasonPointers.listenable.value.seasonFor(widget.sport);
+    if (now == null || now == _season) return;
+    _load();
+  }
+
+  Future<void> _load() async {
+    final gen = ++_gen;
+    final load = SeasonTilesPage.tilesOverride ?? getSeasonTiles;
+    try {
+      final season = await SeasonPointers.read(seasonPointerPath(widget.sport));
+      if (!mounted || gen != _gen) return;
+      final tiles = await load(widget.sport, context);
+      if (!mounted || gen != _gen) return;
+      setState(() {
+        _season = season;
+        _tiles = tiles;
+      });
+    } catch (e) {
+      // Keep the list on screen; a failed first load shows an empty list
+      // (what the old FutureBuilder showed on an error) instead of a
+      // skeleton forever.
+      debugPrint('Season list ${widget.sport}: load failed: $e');
+      if (!mounted || gen != _gen) return;
+      if (_tiles == null) setState(() => _tiles = const []);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tiles = _tiles;
+    return Scaffold(
+      appBar: AppBar(centerTitle: true, title: Text(widget.title)),
+      // Skeleton sweep (F3 Fix 2): matches the season-tile list, app bar
+      // included so it doesn't pop in once the data arrives.
+      body: tiles == null
+          ? const SkeletonList()
+          // P2.1: SeasonCards need no dividers between rows. Bottom inset
+          // clears the floating glass nav bar (PR #12 review).
+          : ListView.builder(
+              padding: EdgeInsets.fromLTRB(
+                  0, 8, 0, 8 + MediaQuery.paddingOf(context).bottom),
+              itemCount: tiles.length,
+              itemBuilder: (context, index) => tiles[index],
+            ),
+    );
+  }
 }
 
 class _LeaguesPageState extends State<LeaguesPage> {
