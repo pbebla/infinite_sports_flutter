@@ -382,3 +382,13 @@ describe('Dream Team post + schedule', () => {
     expect(shouldAutoPublish(null, 5000)).toBe(false);
   });
 });
+
+describe('parseNewsDrafts adds the "$" to bare prices (fix round 1, M4)', () => {
+  it('title and body', () => {
+    const out = parseNewsDrafts(JSON.stringify([
+      { title: 'Riser: 7.5M', body: 'Up 0.5M to 7.5M this week.', players: [] },
+    ]));
+    expect(out![0].title).toBe('Riser: $7.5M');
+    expect(out![0].body).toBe('Up $0.5M to $7.5M this week.');
+  });
+});

@@ -65,6 +65,19 @@ const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme
  *  never split — with trailing whitespace trimmed. With `wordBoundary`, a
  *  cut that lands inside a word backs up to the last whitespace, as long as
  *  that keeps at least half of [max] (one huge word is hard-cut instead). */
+/** A price-shaped token the model wrote without its "$" (1-2 digits, a
+ *  dot, one digit, "M" - e.g. "7.0M", "12.5M"), not inside a longer word or
+ *  number and not already "$"-prefixed. */
+const BARE_PRICE = /(?<![$\w.])(\d{1,2}\.\d)M(?!\w)/g;
+
+/** Deterministic guard on AI copy (fix round 1, M4): every bare price token
+ *  gets the app's leading "$" ("7.0M" -> "$7.0M"). Narrow on purpose: bare
+ *  integers, percentages, "GW12", "$7.0M" and anything inside a longer word
+ *  or number are never touched. Runs BEFORE the length clamp. */
+export function dollarPrices(text: string): string {
+  return text.replace(BARE_PRICE, (_m, n: string) => '$' + n + 'M');
+}
+
 export function clampText(
   text: string, max: number, opts: { wordBoundary?: boolean } = {},
 ): string {
@@ -268,8 +281,8 @@ export function parseNewsDrafts(text: string): NewsDraftText[] | null {
     const body = typeof m['body'] === 'string' ? m['body'].trim() : '';
     if (!title || !body) continue;
     out.push({
-      title: clampText(title, NEWS_TITLE_MAX, { wordBoundary: true }),
-      body: clampText(body, NEWS_BODY_MAX, { wordBoundary: true }),
+      title: clampText(dollarPrices(title), NEWS_TITLE_MAX, { wordBoundary: true }),
+      body: clampText(dollarPrices(body), NEWS_BODY_MAX, { wordBoundary: true }),
       players: parseDraftPlayers(m['players']),
     });
     if (out.length === 4) break;
