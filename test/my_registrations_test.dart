@@ -299,4 +299,82 @@ void main() {
           isNull);
     });
   });
+
+  // Way back fix round, Minor 2: the Manager can switch a team to "code
+  // waives payment" after an unpaid member joined (setTeamWaive). The status
+  // page then reads that team node; the list/banner/drawer follow the SAME
+  // node (RegistrationService.watchTeam), live, inside the gate.
+  group('team-code waiver for a team member', () {
+    late Map<String, StreamController<RegTeam?>> teams;
+
+    Stream<MyRegistrations> watchWithTeams() => watchMyRegistrations(
+          uidOf: () => 'u1',
+          configs: () => configs.stream,
+          submissionFor: (regId) => subs
+              .putIfAbsent(regId, () => StreamController<RegSubmission?>())
+              .stream,
+          teamFor: (regId, teamId) => teams
+              .putIfAbsent('$regId/$teamId', () => StreamController<RegTeam?>())
+              .stream,
+        );
+
+    RegTeam team({required bool waives}) => RegTeam(
+        id: 't1',
+        name: 'Lions',
+        captainUid: 'cap',
+        status: 'approved',
+        codeWaivesPayment: waives);
+
+    setUp(() => teams = {});
+
+    test('held until the team answers; a waiver means nothing is owed',
+        () async {
+      final out = <MyRegistrations>[];
+      final sub = watchWithTeams().listen(out.add);
+      configs.add({'a': _config('closed')});
+      await Future<void>.delayed(Duration.zero);
+      subs['a']!
+          .add(const RegSubmission(path: 'joiner', answers: {}, teamId: 't1'));
+      await Future<void>.delayed(Duration.zero);
+      expect(out, isEmpty, reason: 'the team has not answered');
+      teams['a/t1']!.add(team(waives: false));
+      await Future<void>.delayed(Duration.zero);
+      expect(out.last.mine.single.owed, 60);
+      teams['a/t1']!.add(team(waives: true)); // the Manager waives later
+      await Future<void>.delayed(Duration.zero);
+      expect(out.last.mine.single.owed, 0,
+          reason: 'never "You owe" where the status page says nothing');
+      expect(out.last.firstOwing, isNull);
+      await sub.cancel();
+      expect(teams['a/t1']!.hasListener, isFalse);
+    });
+
+    test('a denied team read (target rules) is null, like the status page',
+        () async {
+      final out = <MyRegistrations>[];
+      final sub = watchWithTeams().listen(out.add);
+      configs.add({'a': _config('closed')});
+      await Future<void>.delayed(Duration.zero);
+      subs['a']!
+          .add(const RegSubmission(path: 'joiner', answers: {}, teamId: 't1'));
+      await Future<void>.delayed(Duration.zero);
+      teams['a/t1']!.add(null);
+      await Future<void>.delayed(Duration.zero);
+      expect(out.last.mine.single.owed, 60);
+      await sub.cancel();
+    });
+
+    test('individuals and captains read no team', () async {
+      final out = <MyRegistrations>[];
+      final sub = watchWithTeams().listen(out.add);
+      configs.add({'a': _config('open')});
+      await Future<void>.delayed(Duration.zero);
+      subs['a']!
+          .add(const RegSubmission(path: 'captain', answers: {}, teamId: 't1'));
+      await Future<void>.delayed(Duration.zero);
+      expect(out, hasLength(1));
+      expect(teams, isEmpty);
+      await sub.cancel();
+    });
+  });
 }

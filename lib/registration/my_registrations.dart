@@ -33,25 +33,36 @@ class MyRegistration {
     required this.regId,
     required this.config,
     required this.submission,
+    this.codeWaivesPayment = false,
   });
 
   final String regId;
   final RegistrationConfig config;
   final RegSubmission submission;
 
+  /// The member's team has "code waives payment" on — read from the SAME
+  /// team node the status page reads (fix round, Minor 2).
+  final bool codeWaivesPayment;
+
   bool get paid => submission.paid;
 
   /// The status page's chip decision for this registration (fix round,
   /// Minor 1).
   ({RegistrationChipKind kind, String label, double owed, bool settled})
-      get chip => registrationChipFor(config: config, submission: submission);
+      get chip => registrationChipFor(
+          config: config,
+          submission: submission,
+          codeWaivesPayment: codeWaivesPayment);
 
   /// What the fan still owes: the SAME [discountedAmountOwed] (through
-  /// discountedTotal) the status page shows — never a second formula. A
-  /// team-code waiver makes a joiner's submission born Paid, so no team read
-  /// is needed here.
-  double get owed =>
-      paid ? 0 : discountedAmountOwed(config: config, submission: submission);
+  /// discountedTotal), with the same team-code waiver, the status page
+  /// shows — never a second formula.
+  double get owed => paid
+      ? 0
+      : discountedAmountOwed(
+          config: config,
+          submission: submission,
+          codeWaivesPayment: codeWaivesPayment);
 }
 
 /// The fan's registrations and the ones still open for sign-up.
@@ -172,11 +183,48 @@ Stream<MyRegistrations> watchMyRegistrations({
   String? Function()? uidOf,
   Stream<Map<String, RegistrationConfig>> Function()? configs,
   Stream<RegSubmission?> Function(String regId)? submissionFor,
+  Stream<RegTeam?> Function(String regId, String teamId)? teamFor,
   Duration firstAnswerBound = kRevealReadTimeout,
 }) {
   final me = (uidOf ?? _signedInUid)();
   final configSource = configs ?? RegistrationService.watchAllRegistrations;
   final subSource = submissionFor ?? RegistrationService.watchMySubmission;
+  final teamSource = teamFor ?? RegistrationService.watchTeam;
+
+  // Fix round, Minor 2: an unpaid team member's waiver comes from their
+  // team node, exactly as on the status page (RegistrationService.watchTeam;
+  // a denied read — the target rules let only the captain read
+  // Teams/<tid> — is null there and here). Answers gate the emission like
+  // the submissions do.
+  final teamIds = <String, String>{};
+  final teamSubs = <String, StreamSubscription<RegTeam?>>{};
+  final teamAnswered = <String>{};
+  final waives = <String, bool>{};
+
+  void dropTeam(String regId) {
+    teamSubs.remove(regId)?.cancel();
+    teamIds.remove(regId);
+    teamAnswered.remove(regId);
+    waives.remove(regId);
+  }
+
+  void followTeam(String regId, RegSubmission? s, void Function() emit) {
+    final teamId = (s != null && s.path == 'joiner' && !s.paid) ? s.teamId : '';
+    if (teamSubs.containsKey(regId) && teamIds[regId] == teamId) return;
+    dropTeam(regId);
+    if (teamId.isEmpty) return;
+    teamIds[regId] = teamId;
+    teamSubs[regId] = teamSource(regId, teamId).listen((team) {
+      waives[regId] = team?.codeWaivesPayment ?? false;
+      teamAnswered.add(regId);
+      emit();
+    }, onError: (Object _) {
+      // Same as the status page's degraded read: not waived.
+      waives[regId] = false;
+      teamAnswered.add(regId);
+      emit();
+    });
+  }
 
   late final StreamController<MyRegistrations> out;
   StreamSubscription<Map<String, RegistrationConfig>>? configSub;
@@ -196,13 +244,17 @@ Stream<MyRegistrations> watchMyRegistrations({
     final all = latestConfigs;
     if (all == null || out.isClosed) return;
     if (me != null && !all.keys.every(answered.contains)) return;
+    if (me != null && !teamSubs.keys.every(teamAnswered.contains)) return;
     final mine = <MyRegistration>[];
     final open = <String, RegistrationConfig>{};
     all.forEach((regId, config) {
       final submission = me == null ? null : latestSub[regId];
       if (submission != null) {
         mine.add(MyRegistration(
-            regId: regId, config: config, submission: submission));
+            regId: regId,
+            config: config,
+            submission: submission,
+            codeWaivesPayment: waives[regId] ?? false));
       } else if (config.isOpen) {
         open[regId] = config;
       }
@@ -226,6 +278,7 @@ Stream<MyRegistrations> watchMyRegistrations({
           subSubs.remove(regId)?.cancel();
           answered.remove(regId);
           latestSub.remove(regId);
+          dropTeam(regId);
         }
       }
       for (final regId in all.keys) {
@@ -233,6 +286,7 @@ Stream<MyRegistrations> watchMyRegistrations({
         subSubs[regId] = subSource(regId).listen((s) {
           latestSub[regId] = s;
           answered.add(regId);
+          followTeam(regId, s, emit);
           emit();
         }, onError: fail);
       }
@@ -262,6 +316,10 @@ Stream<MyRegistrations> watchMyRegistrations({
         await s.cancel();
       }
       subSubs.clear();
+      for (final t in teamSubs.values) {
+        await t.cancel();
+      }
+      teamSubs.clear();
     },
   );
   return out.stream;
