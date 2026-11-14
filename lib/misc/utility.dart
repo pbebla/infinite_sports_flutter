@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/firebase_auth/firebase_auth_services.dart';
 import 'package:infinite_sports_flutter/misc/follow_store.dart';
 import 'package:infinite_sports_flutter/misc/forfeit.dart';
+import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 import 'package:infinite_sports_flutter/misc/home_nav.dart';
 import 'package:infinite_sports_flutter/misc/public_profiles.dart';
 import 'package:infinite_sports_flutter/misc/season_pointers.dart';
@@ -893,14 +894,16 @@ String? convertUrlToId(String url, {bool trimWhitespaces = true}) {
   return null;
 }
 
+/// The legacy drawer's sign-up switch (0 closed, 1 Futsal, 2 Basketball,
+/// 3 other forms). Server-first (fresh reads, Task 3, #54); when the server
+/// cannot be reached in time it is today's display from the saved copy, and
+/// the sign-up write re-checks it ([checkLegacySignUp]). 0 on error.
 Future<int> getSignUpStatus() async
 {
-  DatabaseReference newClient = FirebaseDatabase.instance.ref("/Sign Ups/");
-
   try
   {
-    var event = await newClient.child("Sign Up Status").once();
-    var status = event.snapshot.value as int;
+    var read = await serverFirstValue("Sign Ups/Sign Up Status");
+    var status = read.value as int;
     return status;
   }
   catch (e)
@@ -1206,24 +1209,90 @@ Future<void> addComment(String league, String season, String comment) async
   }
 }
 
+/// Whether [user] is on the legacy sign-up list for [league] [season]
+/// (survey #58/#59). False on error, as before.
 Future<bool> isSignedUp(User user, String league, String season) async
 {
-  DatabaseReference newClient = FirebaseDatabase.instance.ref();
-  var client = newClient.child("Sign Ups/$league/$season/NotPaid/");
-  var client2 = newClient.child("Sign Ups/$league/$season/Paid/");
-
   try
   {
-    var event = await client.once();
-    var listNP = event.snapshot.value as Map;
-    event = await client2.once();
-    var listP = event.snapshot.value ?? {};
-
-    return ((listP as Map).containsKey(user.uid) || listNP.containsKey(user.uid));
+    return (await isSignedUpUid(user.uid, league, season)).signedUp;
   }
   catch (e)
   {
     return false;
+  }
+}
+
+/// [isSignedUp] by uid, server-first (fresh reads, Task 3): reads only this
+/// fan's own `NotPaid/<uid>` and `Paid/<uid>` entries (it used to download
+/// everyone's lists). `fromServer` false = today's display from the saved
+/// copy; the sign-up write re-checks ([checkLegacySignUp]). Throws on a
+/// failed read.
+Future<({bool signedUp, bool fromServer})> isSignedUpUid(
+    String uid, String league, String season) async {
+  final reads = await Future.wait([
+    serverFirstValue("Sign Ups/$league/$season/NotPaid/$uid"),
+    serverFirstValue("Sign Ups/$league/$season/Paid/$uid"),
+  ]);
+  return (
+    signedUp: reads.any((r) => r.value != null),
+    fromServer: reads.every((r) => r.fromServer),
+  );
+}
+
+/// What the legacy sign-up write may do (fresh reads, Task 3).
+enum LegacySignUpVerdict { allowed, alreadySignedUp, changed, couldNotCheck }
+
+/// The legacy sign-up status number for each league form.
+const Map<String, int> kLegacySignUpStatusFor = {'Futsal': 1, 'Basketball': 2};
+
+/// Whether signing up for [sport] [season] is still right, pure: every
+/// input must come from the server ([allFromServer]); sign-ups must still be
+/// open for this league ([status]); [season] must still be the season after
+/// the live `<sport> Season` pointer ([seasonPointer]) — a stale pointer
+/// would sign the fan up for the wrong season number; and the fan must not
+/// be on the list already (no duplicate).
+LegacySignUpVerdict legacySignUpAllowed({
+  required Object? status,
+  required Object? seasonPointer,
+  required String sport,
+  required String season,
+  required bool alreadySignedUp,
+  required bool allFromServer,
+}) {
+  if (!allFromServer) return LegacySignUpVerdict.couldNotCheck;
+  if (alreadySignedUp) return LegacySignUpVerdict.alreadySignedUp;
+  final pointer = int.tryParse('$seasonPointer');
+  final expected = pointer == null ? null : '${pointer + 1}';
+  final openFor = kLegacySignUpStatusFor[sport];
+  if (openFor == null || '$status' != '$openFor' || expected != season) {
+    return LegacySignUpVerdict.changed;
+  }
+  return LegacySignUpVerdict.allowed;
+}
+
+/// The server check the legacy sign-up write runs first (fresh reads, Task
+/// 3, #54/#58/#59/#63): status, season pointer and this fan's list entries,
+/// all server-first, together. A failed read is "could not check".
+Future<LegacySignUpVerdict> checkLegacySignUp(
+    String uid, String sport, String season) async {
+  try {
+    final reads = await Future.wait([
+      serverFirstValue("Sign Ups/Sign Up Status"),
+      serverFirstValue("$sport Season"),
+      serverFirstValue("Sign Ups/$sport/$season/NotPaid/$uid"),
+      serverFirstValue("Sign Ups/$sport/$season/Paid/$uid"),
+    ]);
+    return legacySignUpAllowed(
+      status: reads[0].value,
+      seasonPointer: reads[1].value,
+      sport: sport,
+      season: season,
+      alreadySignedUp: reads[2].value != null || reads[3].value != null,
+      allFromServer: reads.every((r) => r.fromServer),
+    );
+  } catch (e) {
+    return LegacySignUpVerdict.couldNotCheck;
   }
 }
 
@@ -1275,13 +1344,13 @@ Future<String> getSignUpWaiver() async
   }
 }
 
+/// `<league> Season` for the legacy drawer's "Sign Up for … Season N+1"
+/// (survey #63), from the live season pointers (Task 2) — the sign-up write
+/// re-checks it with the server ([checkLegacySignUp]). "" on error.
 Future<String> getSeason(league) async {
-  DatabaseReference newClient = FirebaseDatabase.instance.ref();
   try
   {
-    var event = await newClient.child(league + " Season").once();
-    var seasonNum = event.snapshot.value.toString();
-    return seasonNum;
+    return (await SeasonPointers.read(seasonPointerPath('$league'))).toString();
   }
   catch (e)
   {
@@ -1289,11 +1358,13 @@ Future<String> getSeason(league) async {
   }
 }
 
+/// The whole `Sign Ups` node, for the list of other open sign-up forms
+/// (survey #64). Server-first; today's display from the saved copy when the
+/// server cannot be reached. {} on error.
 Future<Map<dynamic, dynamic>> getOtherSignups() async {
   try {
-    DatabaseReference newClient = FirebaseDatabase.instance.ref();
-    var event = await newClient.child("Sign Ups").once();
-    var status = event.snapshot.value as Map<dynamic, dynamic>;
+    var read = await serverFirstValue("Sign Ups");
+    var status = read.value as Map<dynamic, dynamic>;
     return status;
   } catch (e) {
     return {};

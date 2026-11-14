@@ -357,6 +357,15 @@ class _LeagueFormState extends State<LeagueForm> {
   
   Future<bool> _processRegristration() async {
     try {
+      // Fresh reads (Task 3, legacy sign-ups): before anything is written,
+      // the sign-up status, the season pointer and this fan's list entries
+      // are re-checked with the server — no sign-up for the wrong season
+      // number, into a closed sign-up, twice, or on an answer the server did
+      // not confirm (the existing failure dialog says try again).
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return false;
+      final verdict = await checkLegacySignUp(uid, widget.sport, widget.season);
+      if (verdict != LegacySignUpVerdict.allowed) return false;
       var userInformation = UserInformation();
       userInformation.age = int.parse(_ageController.value.text);
       String selectedPositions = "";
