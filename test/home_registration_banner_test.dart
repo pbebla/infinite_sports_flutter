@@ -204,4 +204,45 @@ void main() {
       expect(b.title, 'Registration open: ${futsalOpen.label}');
     });
   });
+
+  // Final small round, N8: the spinner sits in the trailing slot the idle
+  // banner already reserves (a chevron), so checking never narrows the
+  // title, rewraps it, or changes the banner's height.
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    testWidgets('${mode.name} 360 px: busy keeps the banner\'s size',
+        (tester) async {
+      tester.view.physicalSize = const Size(360, 300);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      const banner = (
+        title: 'Finish your payment: Flag Football Season 4 '
+            'Spring Co-ed Division',
+        subtitle: 'You owe \$60.00 — tap to pay',
+        owing: null,
+      );
+      Future<(Size, Size)> sizes({required bool busy}) async {
+        await tester.pumpWidget(MaterialApp(
+          theme: ThemeData(brightness: Brightness.light),
+          darkTheme: ThemeData(brightness: Brightness.dark),
+          themeMode: mode,
+          home: Scaffold(
+              body: Align(
+                  alignment: Alignment.topCenter,
+                  child: HomeRegistrationBanner(
+                      banner: banner, onTap: () {}, busy: busy))),
+        ));
+        expect(tester.takeException(), isNull);
+        return (
+          tester.getSize(find.byType(HomeRegistrationBanner)),
+          tester.getSize(find.text(banner.title)),
+        );
+      }
+
+      final idle = await sizes(busy: false);
+      final busy = await sizes(busy: true);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(busy.$1, idle.$1, reason: 'same banner size');
+      expect(busy.$2, idle.$2, reason: 'same title box (no rewrap)');
+    });
+  }
 }

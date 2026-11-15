@@ -182,14 +182,20 @@ class HomeRegistrationBanner extends StatelessWidget {
           subtitle: Text(banner.subtitle,
               style:
                   TextStyle(color: scheme.onPrimary.withValues(alpha: 0.7))),
-          trailing: busy
-              ? SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: scheme.onPrimary),
-                )
-              : null,
+          // Final small round, N8: one fixed trailing slot — a chevron when
+          // idle, the spinner in its place while checking — so the title
+          // never narrows or rewraps and the banner keeps its height.
+          trailing: SizedBox(
+            width: 24,
+            height: 24,
+            child: busy
+                ? Padding(
+                    padding: const EdgeInsets.all(3),
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: scheme.onPrimary),
+                  )
+                : Icon(Icons.chevron_right, color: scheme.onPrimary),
+          ),
           onTap: busy ? null : onTap,
         ),
       ),
