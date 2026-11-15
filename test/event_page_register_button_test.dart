@@ -9,7 +9,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/eventpage.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
-import 'package:infinite_sports_flutter/registration/live_registration_config.dart';
 import 'package:infinite_sports_flutter/registration/registration_open.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
 
