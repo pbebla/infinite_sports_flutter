@@ -1,5 +1,5 @@
 import 'dart:async';
-
+import 'package:pin_code_fields/pin_code_fields.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
@@ -41,7 +41,7 @@ class JoinCodePage extends StatefulWidget {
 }
 
 class _JoinCodePageState extends State<JoinCodePage> {
-  final TextEditingController _controller = TextEditingController();
+  final PinInputController _controller = PinInputController();
   Timer? _debounce;
 
   /// Bumped on every keystroke; a lookup only applies its result while it
@@ -179,30 +179,27 @@ class _JoinCodePageState extends State<JoinCodePage> {
                 'Your captain got a 6-character code when the team was approved.',
                 textAlign: TextAlign.center),
           ),
-          PinCodeTextField(
-            appContext: context,
+          MaterialPinField(
             length: 6,
-            controller: _controller,
-            autoDisposeControllers: false,
+            pinController: _controller,
             keyboardType: TextInputType.visiblePassword,
             textCapitalization: TextCapitalization.characters,
-            animationType: AnimationType.fade,
-            backgroundColor: Colors.transparent,
             inputFormatters: [
               FilteringTextInputFormatter.allow(RegExp('[a-zA-Z0-9]')),
-              TextInputFormatter.withFunction((oldV, newV) =>
-                  newV.copyWith(text: newV.text.toUpperCase())),
+              TextInputFormatter.withFunction(
+                (oldV, newV) => newV.copyWith(text: newV.text.toUpperCase()),
+              ),
             ],
-            textStyle:
-                const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            pinTheme: PinTheme(
-              shape: PinCodeFieldShape.box,
+            theme: MaterialPinTheme(
+              shape: MaterialPinShape.outlined,
               borderRadius: BorderRadius.circular(8),
-              fieldHeight: 52,
-              fieldWidth: 44,
-              activeColor: Theme.of(context).colorScheme.primary,
-              selectedColor: Theme.of(context).colorScheme.primary,
-              inactiveColor: Theme.of(context).dividerColor,
+              cellSize: const Size(44, 52),
+              textStyle: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              entryAnimation: MaterialPinAnimation.fade,
+              fillColor: Colors.transparent,
+              filledBorderColor: Theme.of(context).colorScheme.primary,
+              focusedBorderColor: Theme.of(context).colorScheme.primary,
+              borderColor: Theme.of(context).dividerColor,
             ),
             onChanged: (_) => _onChanged(),
             onCompleted: (_) => _onCompleted(),

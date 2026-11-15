@@ -6,7 +6,6 @@
 // Run: C:\src\flutter\bin\flutter.bat test integration_test -d emulator-5554
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_config/flutter_config.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/firebase_options.dart';
 import 'package:infinite_sports_flutter/tournamentdetail.dart';
@@ -45,7 +44,6 @@ void main() {
 
   testWidgets('tournament pages never render another tournament\'s data',
       (tester) async {
-    await FlutterConfig.loadEnvVariables();
     await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform);
 

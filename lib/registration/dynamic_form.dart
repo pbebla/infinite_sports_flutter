@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart' as mui;
 import 'package:flutter/services.dart';
 import 'package:flutter_form_builder/flutter_form_builder.dart';
 import 'package:form_builder_validators/form_builder_validators.dart';
@@ -48,8 +49,8 @@ class _DynamicRegistrationFormState extends State<DynamicRegistrationForm> {
   final GlobalKey<FormBuilderState> _formKey = GlobalKey<FormBuilderState>();
   bool _submitting = false;
 
-  InputDecoration _decoration(RegQuestion q) => InputDecoration(
-        border: const OutlineInputBorder(),
+  mui.InputDecoration _decoration(RegQuestion q) => mui.InputDecoration(
+        border: const mui.OutlineInputBorder(),
         labelText: q.label,
         hintText:
             (q.type == 'linkAcknowledge' || q.hint.isEmpty) ? null : q.hint,
@@ -143,7 +144,7 @@ class _DynamicRegistrationFormState extends State<DynamicRegistrationForm> {
               (initial is String && q.options.contains(initial)) ? initial : null,
           decoration: _decoration(q),
           items: q.options
-              .map((o) => DropdownMenuItem(value: o, child: Text(o)))
+              .map((o) => mui.DropdownMenuItem(value: o, child: Text(o)))
               .toList(),
           validator: q.isRequired ? FormBuilderValidators.required() : null,
         );

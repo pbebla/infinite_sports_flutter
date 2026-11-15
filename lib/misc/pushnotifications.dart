@@ -48,9 +48,12 @@ class PushNotifications {
         );
     }
 
-    await _flutterLocalNotificationsPlugin.initialize(initializationSettings,
+    await _flutterLocalNotificationsPlugin.initialize(
+      settings: initializationSettings,
       onDidReceiveNotificationResponse: onNotificationTap,
-      onDidReceiveBackgroundNotificationResponse: onNotificationTap);
+      onDidReceiveBackgroundNotificationResponse: onNotificationTap,
+    );
+
   }
 
   static void onNotificationTap(NotificationResponse notificationResponse) {
@@ -81,7 +84,12 @@ class PushNotifications {
       );
     // Unique id per alert so a goal doesn't overwrite the kickoff in the tray.
     final id = DateTime.now().millisecondsSinceEpoch & 0x7FFFFFFF;
-    await _flutterLocalNotificationsPlugin
-      .show(id, title, body, notificationDetails, payload: payload);
+    await _flutterLocalNotificationsPlugin.show(
+      id: id,
+      title: title,
+      body: body,
+      notificationDetails: notificationDetails,
+      payload: payload,
+    );
   }
 }

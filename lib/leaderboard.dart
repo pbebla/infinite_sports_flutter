@@ -1,6 +1,6 @@
 
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/misc/playing_position.dart';
+import 'package:material_ui/material_ui.dart' as mui;
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/misc/season_title.dart';
 import 'package:infinite_sports_flutter/misc/tournament_colors.dart';
@@ -219,14 +219,14 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
   DataTable2 buildLeaderboard(StateSetter setState) {
     if (widget.sport == "Futsal") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
-        DataCell(Center(child: Text(key.number),)),
-        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: TeamLogo(url: key.teamPath.isEmpty ? null : key.teamPath, size: windowsDefaultIconSize.toDouble()/2),)),
-        DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
+        mui.DataCell(Center(child: Text(key.number),)),
+        mui.DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: TeamLogo(url: key.teamPath.isEmpty ? null : key.teamPath, size: windowsDefaultIconSize.toDouble()/2),)),
+        mui.DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           openPlayerProfileById(context, uid: key.uid, name: key.name);
         },),
-        DataCell(Text(key.goals.toString())),
-        DataCell(Text(key.assists.toString())),
-        DataCell(Text(key.saves.toString())),
+        mui.DataCell(Text(key.goals.toString())),
+        mui.DataCell(Text(key.assists.toString())),
+        mui.DataCell(Text(key.saves.toString())),
       ])).toList();
       return DataTable2(
         sortColumnIndex: sortColumnIndex,
@@ -249,15 +249,15 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
       );
     } else if (widget.sport == "Basketball") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
-        DataCell(Center(child: Text(key.number),)),
-        DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: TeamLogo(url: key.teamPath.isEmpty ? null : key.teamPath, size: windowsDefaultIconSize.toDouble()/2),)),
+        mui.DataCell(Center(child: Text(key.number),)),
+        mui.DataCell(Padding(padding: EdgeInsets.fromLTRB(5.0, 0, 5.0, 0), child: TeamLogo(url: key.teamPath.isEmpty ? null : key.teamPath, size: windowsDefaultIconSize.toDouble()/2),)),
         //DataCell(Row(children: [Text(key.number), Spacer(), ])),
-        DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
+        mui.DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           openPlayerProfileById(context, uid: key.uid, name: key.name);
         },),
-        DataCell(Text(key.total.toString())),
-        DataCell(Text(key.rebounds.toString())),
-        DataCell(Text(key.shotPercentage)),
+        mui.DataCell(Text(key.total.toString())),
+        mui.DataCell(Text(key.rebounds.toString())),
+        mui.DataCell(Text(key.shotPercentage)),
       ])).toList();
       return DataTable2(
         sortColumnIndex: sortColumnIndex,
@@ -288,22 +288,22 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
           border: Border(left: BorderSide(color: dividerColor, width: 1))
       );
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
-        DataCell(Center(child: Text(key.number),)),
-        DataCell(TeamLogo(url: key.teamPath.isEmpty ? null : key.teamPath, size: windowsDefaultIconSize.toDouble()/2)),
-        DataCell(Container(decoration: verticalDividerRight, alignment: Alignment.centerLeft, child: Padding(padding: EdgeInsets.fromLTRB(0.0, 0, 0.0, 0), child: Text(key.name.toString(), softWrap: true,)),), onTap: () {
+        mui.DataCell(Center(child: Text(key.number),)),
+        mui.DataCell(TeamLogo(url: key.teamPath.isEmpty ? null : key.teamPath, size: windowsDefaultIconSize.toDouble()/2)),
+        mui.DataCell(Container(decoration: verticalDividerRight, alignment: Alignment.centerLeft, child: Padding(padding: EdgeInsets.fromLTRB(0.0, 0, 0.0, 0), child: Text(key.name.toString(), softWrap: true,)),), onTap: () {
           openPlayerProfileById(context, uid: key.uid, name: key.name);
         },),
-        DataCell(Text(key.qbCompletionRate)),
-        DataCell(Text(key.passingTouchdowns.toString())),
-        DataCell(Text(key.passingInterceptions.toString())),
-        DataCell(Container(decoration: verticalDividerLeft, alignment: Alignment.centerRight, child: Text(key.catchRate.toString()),)),
-        DataCell(Text(key.receivingTouchdowns.toString())),
-        DataCell(Container(decoration: verticalDividerLeft, alignment: Alignment.centerRight, child: Text(key.rushingTouchdowns.toString()),)),
-        DataCell(Container(decoration: verticalDividerLeft, alignment: Alignment.centerRight, child: Text(key.sacks.toString()))),
-        DataCell(Text(key.flagPulls.toString())),
-        DataCell(Text(key.passBreakups.toString())),
-        DataCell(Text(key.interceptions.toString())),
-        DataCell(Text(key.interceptionTouchdowns.toString())),
+        mui.DataCell(Text(key.qbCompletionRate)),
+        mui.DataCell(Text(key.passingTouchdowns.toString())),
+        mui.DataCell(Text(key.passingInterceptions.toString())),
+        mui.DataCell(Container(decoration: verticalDividerLeft, alignment: Alignment.centerRight, child: Text(key.catchRate.toString()),)),
+        mui.DataCell(Text(key.receivingTouchdowns.toString())),
+        mui.DataCell(Container(decoration: verticalDividerLeft, alignment: Alignment.centerRight, child: Text(key.rushingTouchdowns.toString()),)),
+        mui.DataCell(Container(decoration: verticalDividerLeft, alignment: Alignment.centerRight, child: Text(key.sacks.toString()))),
+        mui.DataCell(Text(key.flagPulls.toString())),
+        mui.DataCell(Text(key.passBreakups.toString())),
+        mui.DataCell(Text(key.interceptions.toString())),
+        mui.DataCell(Text(key.interceptionTouchdowns.toString())),
       ])).toList();
       return DataTable2(
         fixedLeftColumns: 3,
@@ -337,14 +337,14 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     }
     else if (widget.sport == "AFC San Jose") {
       List<DataRow2> teamsList = players.map((key) => DataRow2(cells: [
-        DataCell(Text(formatPlayingPosition(key.position))),
-        DataCell(Center(child: Text(key.number),)),
-        DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
+        mui.DataCell(Text(key.position)),
+        mui.DataCell(Center(child: Text(key.number),)),
+        mui.DataCell(Text(key.name.toString(), softWrap: true,), onTap: () {
           openPlayerProfileById(context, uid: key.uid, name: key.name);
         },),
-        DataCell(Text(key.goals.toString())),
-        DataCell(Text(key.assists.toString())),
-        DataCell(Text(key.saves.toString())),
+        mui.DataCell(Text(key.goals.toString())),
+        mui.DataCell(Text(key.assists.toString())),
+        mui.DataCell(Text(key.saves.toString())),
       ])).toList();
       return DataTable2(
         sortColumnIndex: sortColumnIndex,
@@ -366,7 +366,55 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
         rows: teamsList,
       );
     }
-    return DataTable2(columns: const [DataColumn(label: Text("Error"))], rows: const []);
+    return DataTable2(columns: const [mui.DataColumn(label: Text("Error"))], rows: const []);
+  }
+
+  /// The Flag Football table is wider than any phone: a fade on the right
+  /// edge (theme surface colour) shows while more columns are off screen,
+  /// and goes once the reader reaches the last column (fix round 1, M5).
+  Widget _withScrollFade(BuildContext context, Widget table) {
+    bool onMetrics(ScrollMetrics m) {
+      if (m.axis == Axis.horizontal) {
+        _moreToRight.value = m.extentAfter > 0.5;
+      }
+      return false;
+    }
+
+    final surface = Theme.of(context).colorScheme.surface;
+    return Stack(
+      children: [
+        NotificationListener<ScrollMetricsNotification>(
+          onNotification: (n) => onMetrics(n.metrics),
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (n) => onMetrics(n.metrics),
+            child: table,
+          ),
+        ),
+        Positioned(
+          top: 0,
+          bottom: 0,
+          right: 0,
+          width: 32,
+          child: IgnorePointer(
+            child: ValueListenableBuilder<bool>(
+              valueListenable: _moreToRight,
+              builder: (context, more, _) => AnimatedOpacity(
+                opacity: more ? 1 : 0,
+                duration: const Duration(milliseconds: 150),
+                child: DecoratedBox(
+                  key: const ValueKey('leaderboard_scroll_fade'),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [surface.withValues(alpha: 0), surface],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   /// The Flag Football table is wider than any phone: a fade on the right

@@ -2,7 +2,7 @@ import 'package:data_table_2/data_table_2.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/misc/tab_swap.dart';
+import 'package:material_ui/material_ui.dart' as mui;
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/leaderboard.dart';
 import 'package:infinite_sports_flutter/misc/navigation_controls.dart';
@@ -462,13 +462,13 @@ class _ScorePageState extends State<ScorePage> {
           DataColumn2(size: ColumnSize.S, label: const Text("Assists"), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
         ], 
         rows: (teamPlayers as List).map((key) {
-          return DataRow(cells: [
-            DataCell(Center(child: Text(key.number),)),
-            DataCell(Text(key.name), onTap: () {
+          return mui.DataRow(cells: [
+            mui.DataCell(Center(child: Text(key.number),)),
+            mui.DataCell(Text(key.name), onTap: () {
               openPlayerProfileById(context, uid: key.uid, name: key.name);
             },),
-            DataCell(Text(key.goals.toString())),
-            DataCell(Text(key.assists.toString())),
+            mui.DataCell(Text(key.goals.toString())),
+            mui.DataCell(Text(key.assists.toString())),
           ]);
         }).toList(),
       );
@@ -494,17 +494,17 @@ class _ScorePageState extends State<ScorePage> {
           DataColumn2(fixedWidth: 45.0, label: Text("FTM", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(fixedWidth: 35.0, label: Text("PF", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
         ], 
-        rows: (teamPlayers as List).map((key) => DataRow(cells: [
-            DataCell(Center(child: Text(key.number),)),
-            DataCell(Text(key.name), onTap: () {
+        rows: (teamPlayers as List).map((key) => mui.DataRow(cells: [
+            mui.DataCell(Center(child: Text(key.number),)),
+            mui.DataCell(Text(key.name), onTap: () {
               openPlayerProfileById(context, uid: key.uid, name: key.name);
             },),
-            DataCell(Text(key.total.toString())),
-            DataCell(Text(key.rebounds.toString())),
-            DataCell(Text(key.twos.toString())),
-            DataCell(Text(key.threes.toString())),
-            DataCell(Text(key.ones.toString())),
-            DataCell(Text(key.fouls.toString())),
+            mui.DataCell(Text(key.total.toString())),
+            mui.DataCell(Text(key.rebounds.toString())),
+            mui.DataCell(Text(key.twos.toString())),
+            mui.DataCell(Text(key.threes.toString())),
+            mui.DataCell(Text(key.ones.toString())),
+            mui.DataCell(Text(key.fouls.toString())),
           ])).toList(),
       );
     } else if (widget.sport == "Flag Football") {
@@ -541,31 +541,31 @@ class _ScorePageState extends State<ScorePage> {
           DataColumn2(size: ColumnSize.M, label: Text("XPA", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
           DataColumn2(size: ColumnSize.M, label: Text("2PT", style: TextStyle(fontSize: Theme.of(context).textTheme.bodySmall!.fontSize)), numeric: true, onSort: (colIndex, asc) {onSort(colIndex, asc, setState);}),
         ], 
-        rows: (teamPlayers as List).map((key) => DataRow(cells: [
-            DataCell(Center(child: Text(key.number),)),
-            DataCell(Text(key.name), onTap: () {
+        rows: (teamPlayers as List).map((key) => mui.DataRow(cells: [
+            mui.DataCell(Center(child: Text(key.number),)),
+            mui.DataCell(Text(key.name), onTap: () {
               openPlayerProfileById(context, uid: key.uid, name: key.name);
             },),
-            DataCell(Text(key.qbCompletions.toString())),
-            DataCell(Text((key.qbCompletions+key.qbIncompletions).toString())),
-            DataCell(Text(key.passingTouchdowns.toString())),
-            DataCell(Text(key.passingInterceptions.toString())),
-            DataCell(Text(key.receptions.toString())),
-            DataCell(Text((key.receptions + key.receptionMisses).toString())),
-            DataCell(Text(key.receivingTouchdowns.toString())),
-            DataCell(Text(key.rushingTouchdowns.toString())),
-            DataCell(Text(key.sacks.toString())),
-            DataCell(Text(key.flagPulls.toString())),
-            DataCell(Text(key.passBreakups.toString())),
-            DataCell(Text(key.interceptions.toString())),
-            DataCell(Text(key.interceptionTouchdowns.toString())),
-            DataCell(Text(key.pointAfterTouchdownMakes.toString())),
-            DataCell(Text((key.pointAfterTouchdownMakes + key.pointAfterTouchdownMisses).toString())),
-            DataCell(Text(key.twoPointConversions.toString())),
+            mui.DataCell(Text(key.qbCompletions.toString())),
+            mui.DataCell(Text((key.qbCompletions+key.qbIncompletions).toString())),
+            mui.DataCell(Text(key.passingTouchdowns.toString())),
+            mui.DataCell(Text(key.passingInterceptions.toString())),
+            mui.DataCell(Text(key.receptions.toString())),
+            mui.DataCell(Text((key.receptions + key.receptionMisses).toString())),
+            mui.DataCell(Text(key.receivingTouchdowns.toString())),
+            mui.DataCell(Text(key.rushingTouchdowns.toString())),
+            mui.DataCell(Text(key.sacks.toString())),
+            mui.DataCell(Text(key.flagPulls.toString())),
+            mui.DataCell(Text(key.passBreakups.toString())),
+            mui.DataCell(Text(key.interceptions.toString())),
+            mui.DataCell(Text(key.interceptionTouchdowns.toString())),
+            mui.DataCell(Text(key.pointAfterTouchdownMakes.toString())),
+            mui.DataCell(Text((key.pointAfterTouchdownMakes + key.pointAfterTouchdownMisses).toString())),
+            mui.DataCell(Text(key.twoPointConversions.toString())),
           ])).toList(),
       );
     }
-    return DataTable2(columns: const [DataColumn(label: Spacer())], rows: const []);
+    return DataTable2(columns: const [mui.DataColumn(label: Spacer())], rows: const []);
   }
 
   @override

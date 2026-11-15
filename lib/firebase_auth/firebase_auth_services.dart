@@ -107,6 +107,14 @@ enum FreshAccountDeletion {
 
 class FirebaseAuthService {
 
+  static Future<void>? _googleInitFuture;
+
+  Future<void> _ensureGoogleInitialized() {
+    return _googleInitFuture ??= GoogleSignIn.instance.initialize(
+      serverClientId: _googleServerClientId,
+    );
+  }
+
   Future<User?> signUpWithEmailAndPassword(String email, String password) async {
     try {
       UserCredential credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(email: email, password: password);
@@ -136,7 +144,7 @@ class FirebaseAuthService {
     // harmless no-op for users who never went through Google sign-in, and
     // must never block/crash the (already-completed) Firebase sign-out.
     try {
-      await GoogleSignIn().signOut();
+      await GoogleSignIn.instance.signOut();
     } catch (e) {
       // ignore: avoid_print
       print(e.toString());
@@ -151,15 +159,19 @@ class FirebaseAuthService {
   /// `signInWithEmailAndPassword` above.
   Future<UserCredential?> signInWithGoogle() async {
     try {
-      final googleSignIn = GoogleSignIn(serverClientId: _googleServerClientId);
-      final account = await googleSignIn.signIn();
-      if (account == null) return null; // user cancelled the picker
-      final googleAuth = await account.authentication;
+      await _ensureGoogleInitialized();
+      final account = await GoogleSignIn.instance.authenticate();
+      final googleAuth = account.authentication;
       final credential = GoogleAuthProvider.credential(
         idToken: googleAuth.idToken,
-        accessToken: googleAuth.accessToken,
       );
       return await FirebaseAuth.instance.signInWithCredential(credential);
+    } on GoogleSignInException catch (e) {
+      if (e.code == GoogleSignInExceptionCode.canceled) {
+        return null; // user cancelled the picker
+      }
+      print(e.toString());
+      return null;
     } catch (e) {
       print(e.toString());
       return null;
@@ -388,30 +400,28 @@ class FirebaseAuthService {
   }
 
   Future<void> _reauthWithGoogle(User user) async {
-    final GoogleSignInAccount? account;
+    await _ensureGoogleInitialized();
+    final GoogleSignInAccount account;
     try {
-      account =
-          await GoogleSignIn(serverClientId: _googleServerClientId).signIn();
-    } on PlatformException catch (e) {
-      // iOS reports a closed sheet as an error rather than a null account.
-      if (e.code == GoogleSignIn.kSignInCanceledError) {
+      account = await GoogleSignIn.instance.authenticate();
+    } on GoogleSignInException catch (e) {
+      if (e.code == GoogleSignInExceptionCode.canceled) {
         throw const ReauthCancelled();
       }
       rethrow;
     }
-    if (account == null) throw const ReauthCancelled();
-    final googleAuth = await account.authentication;
+
+    final googleAuth = account.authentication;
     try {
       await user.reauthenticateWithCredential(GoogleAuthProvider.credential(
         idToken: googleAuth.idToken,
-        accessToken: googleAuth.accessToken,
       ));
     } on FirebaseAuthException catch (e) {
       if (e.code == 'user-mismatch') {
         // Sign the picker out so the next try offers the account list again
         // instead of silently reusing the wrong account.
         try {
-          await GoogleSignIn(serverClientId: _googleServerClientId).signOut();
+          await GoogleSignIn.instance.signOut();
         } catch (_) {}
         throw const ReauthFailed(
             reason: ReauthFailureReason.googleAccountMismatch);

@@ -7,8 +7,9 @@
         android:label="Infinite Sports"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
-        <meta-data android:name="com.google.android.geo.API_KEY"
-               android:value="@string/GOOGLE_MAPS_API_KEY"/>
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="${GOOGLE_MAPS_API_KEY}" />
         <!-- Push notifications: white-silhouette small icon + brand accent,
              and a high-importance channel so alerts banner-pop. -->
         <meta-data
