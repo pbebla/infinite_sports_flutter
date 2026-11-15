@@ -80,12 +80,32 @@ class NavBar extends StatefulWidget {
     final owing = firstCurrentOwing(mine,
         seasonPointer: seasonPointer ?? (_) => null,
         activeTournamentIds: activeTournamentIds);
+    // Final small round, N1: never "Sign Up for" a registration the fan
+    // already joined. In order: owing on a current one; an open one not
+    // joined (mine.openForSignUp); the old-style sign-up; all settled;
+    // anything else.
+    final legacy = signUpsOpen && !hasOpenRegistrations;
+    final unjoined = mine!.openForSignUp;
+    final String subtitle;
+    if (owing != null) {
+      subtitle = 'You owe ${formatOwed(owing.owed)}';
+    } else if (unjoined.length == 1) {
+      subtitle = 'Sign Up for ${unjoined.values.first.label}';
+    } else if (unjoined.isNotEmpty) {
+      subtitle = 'Sign Ups Open';
+    } else if (legacy) {
+      subtitle = signUpDetail;
+    } else if (mine.mine.every((m) => m.chip.settled)) {
+      subtitle = 'All paid up';
+    } else {
+      subtitle = 'View your registrations';
+    }
     return (
       title: 'My registrations',
-      subtitle: owing != null ? 'You owe ${formatOwed(owing.owed)}' : signUpDetail,
+      subtitle: subtitle,
       enabled: true,
       opensRegistrationList: true,
-      offersLegacySignUp: signUpsOpen && !hasOpenRegistrations,
+      offersLegacySignUp: legacy,
     );
   }
   return (

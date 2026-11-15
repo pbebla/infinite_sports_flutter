@@ -55,15 +55,17 @@ void main() {
     expect(r.subtitle, 'You owe ${formatOwed(60)}');
   });
 
-  test('paid up: My registrations with today\'s detail', () {
+  test('paid in the only open one: All paid up (final round N1)', () {
     final r = drawerRegistrationRow(
         signedIn: true,
         signUpsOpen: true,
-        signUpDetail: 'Sign Up for Futsal 17',
+        signUpDetail: 'Sign Up for Futsal Season 16',
         hasOpenRegistrations: true,
-        mine: _mine(paid: true));
+        mine: _mine(paid: true),
+        seasonPointer: (_) => '16');
     expect(r.title, 'My registrations');
-    expect(r.subtitle, 'Sign Up for Futsal 17');
+    expect(r.subtitle, 'All paid up',
+        reason: 'never "Sign Up for" a registration they already joined');
     expect(r.enabled, isTrue);
   });
 
@@ -98,7 +100,7 @@ void main() {
         mine: _mine(),
         seasonPointer: (_) => '17');
     expect(r.title, 'My registrations', reason: 'still reachable');
-    expect(r.subtitle, 'Sign Ups Closed');
+    expect(r.subtitle, 'View your registrations');
   });
 
   // Way back fix round, Minor 4: when the drawer row becomes "My
@@ -149,6 +151,86 @@ void main() {
       expect(r.title, 'Sign Up List');
       expect(r.opensRegistrationList, isFalse);
       expect(r.offersLegacySignUp, isFalse);
+    });
+  });
+
+  // Final small round, N1: the subtitle under "My registrations" never
+  // invites the fan to sign up for a registration they already joined.
+  group('My registrations subtitle', () {
+    const basket = RegistrationConfig(
+      targetType: 'league',
+      sport: 'Basketball',
+      season: '9',
+      status: 'open',
+      fee: 40,
+      paymentMode: 'perPlayer',
+    );
+    const flag = RegistrationConfig(
+      targetType: 'league',
+      sport: 'Flag Football',
+      season: '4',
+      status: 'open',
+      fee: 40,
+      paymentMode: 'perPlayer',
+    );
+
+    MyRegistrations withOpen(Map<String, RegistrationConfig> open,
+            {bool paid = true}) =>
+        MyRegistrations(mine: _mine(paid: paid).mine, openForSignUp: open);
+
+    test('joined one of two open: Sign Up for the other', () {
+      final r = drawerRegistrationRow(
+          signedIn: true,
+          signUpsOpen: true,
+          signUpDetail: 'Sign Ups Open',
+          hasOpenRegistrations: true,
+          mine: withOpen({'basket': basket}),
+          seasonPointer: (_) => '16');
+      expect(r.subtitle, 'Sign Up for ${basket.label}');
+    });
+
+    test('several open not joined: Sign Ups Open', () {
+      final r = drawerRegistrationRow(
+          signedIn: true,
+          signUpsOpen: true,
+          signUpDetail: 'Sign Up for Futsal Season 16',
+          hasOpenRegistrations: true,
+          mine: withOpen({'basket': basket, 'flag': flag}),
+          seasonPointer: (_) => '16');
+      expect(r.subtitle, 'Sign Ups Open');
+    });
+
+    test('owing on a current registration wins: You owe (unchanged)', () {
+      final r = drawerRegistrationRow(
+          signedIn: true,
+          signUpsOpen: true,
+          signUpDetail: 'Sign Ups Open',
+          hasOpenRegistrations: true,
+          mine: withOpen({'basket': basket}, paid: false),
+          seasonPointer: (_) => '16');
+      expect(r.subtitle, 'You owe ${formatOwed(60)}');
+    });
+
+    test('old-style sign-up offered, nothing new to join: its detail', () {
+      final r = drawerRegistrationRow(
+          signedIn: true,
+          signUpsOpen: true,
+          signUpDetail: 'Sign Up for Futsal Season 17',
+          hasOpenRegistrations: false,
+          mine: _mine(paid: true),
+          seasonPointer: (_) => '16');
+      expect(r.subtitle, 'Sign Up for Futsal Season 17');
+    });
+
+    test('an old unpaid closed registration, none current: View', () {
+      final r = drawerRegistrationRow(
+          signedIn: true,
+          signUpsOpen: false,
+          signUpDetail: 'Sign Ups Closed',
+          hasOpenRegistrations: false,
+          mine: _mine(),
+          seasonPointer: (_) => '17');
+      expect(r.subtitle, 'View your registrations');
     });
   });
 }
