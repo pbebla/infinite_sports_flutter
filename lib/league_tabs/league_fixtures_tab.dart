@@ -29,6 +29,13 @@ class LeagueFixturesTab extends StatefulWidget {
   /// Test seam for "today"; production callers leave it null (DateTime.now()).
   final DateTime? now;
 
+  /// Optional owner-held day. When [onDayPicked] is set the owner holds the
+  /// picked day: this tab shows [pickedDay] in place of its own state and
+  /// calls [onDayPicked] on a tap. When it is null the tab holds the day
+  /// itself, as before.
+  final String? pickedDay;
+  final ValueChanged<String>? onDayPicked;
+
   const LeagueFixturesTab({
     super.key,
     required this.matches,
@@ -39,6 +46,8 @@ class LeagueFixturesTab extends StatefulWidget {
     this.predictionsOpen = false,
     this.onOpenPredict,
     this.now,
+    this.pickedDay,
+    this.onDayPicked,
   });
 
   @override
@@ -57,8 +66,10 @@ class _LeagueFixturesTabState extends State<LeagueFixturesTab> {
       for (final m in widget.matches)
         if (m.matchStatus.isLive) m.date,
     };
-    final selected = (_pickedDay != null && days.contains(_pickedDay))
-        ? _pickedDay
+    final picked =
+        widget.onDayPicked != null ? widget.pickedDay : _pickedDay;
+    final selected = (picked != null && days.contains(picked))
+        ? picked
         : defaultFixturesDay(days, liveDays, now: widget.now);
 
     // No selectable day (no matches / malformed dates): plain full list —
@@ -73,7 +84,14 @@ class _LeagueFixturesTabState extends State<LeagueFixturesTab> {
           DayPillStrip(
             days: days,
             selectedDay: selected,
-            onSelect: (day) => setState(() => _pickedDay = day),
+            onSelect: (day) {
+              final owner = widget.onDayPicked;
+              if (owner != null) {
+                owner(day);
+              } else {
+                setState(() => _pickedDay = day);
+              }
+            },
           ),
         Expanded(
           child: FixturesTab(
