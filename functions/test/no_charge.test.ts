@@ -4,7 +4,7 @@
 // delay. Driven over an in-memory tree; all names and ids are made up.
 
 import { describe, expect, it, vi } from 'vitest';
-import { buildNoChargeUpdate, isGenuineSubmission, shouldStampNoCharge } from '../src/lib/no_charge';
+import { buildNoChargeUpdate, isFreshSubmission, isGenuineSubmission, shouldStampNoCharge } from '../src/lib/no_charge';
 import { handleLegacyNotPaidCreated, handleSubmissionCreated } from '../src/no_charge_watch';
 import type { RegistrationConfigLike } from '../src/lib/stripe_pay';
 
@@ -19,17 +19,25 @@ const cfg = (over: Partial<RegistrationConfigLike> = {}): RegistrationConfigLike
   targetType: 'league', sport: 'Futsal', season: '99', tournamentId: '', tournamentName: '',
   fee: 0, teamFee: 0, paymentMode: 'perPlayer', ...over,
 });
+const NOW = 1_800_000_000_000;
+const MIN = 60 * 1000;
 const sub = (path: string, paid = false) => ({ path, paid });
 
 describe('shouldStampNoCharge', () => {
   it('fee 0 individual -> true', () => {
     expect(shouldStampNoCharge(cfg(), sub('individual'))).toBe(true);
   });
-  it("paymentMode 'teamFee' individual -> true", () => {
-    expect(shouldStampNoCharge(cfg({ fee: 255, teamFee: 900, paymentMode: 'teamFee' }), sub('individual'))).toBe(true);
+  it("individual under 'teamFee' with a team fee set -> false, with TeamFee 0 -> true", () => {
+    expect(shouldStampNoCharge(cfg({ fee: 255, teamFee: 500, paymentMode: 'teamFee' }), sub('individual'))).toBe(false);
+    expect(shouldStampNoCharge(cfg({ fee: 255, teamFee: 0, paymentMode: 'teamFee' }), sub('individual'))).toBe(true);
   });
-  it("captain under 'perPlayer' -> true", () => {
-    expect(shouldStampNoCharge(cfg({ fee: 255, teamFee: 900, paymentMode: 'perPlayer' }), sub('captain'))).toBe(true);
+  it("captain under 'perPlayer' with Fee 255 -> false, with Fee 0 -> true", () => {
+    expect(shouldStampNoCharge(cfg({ fee: 255, teamFee: 900, paymentMode: 'perPlayer' }), sub('captain'))).toBe(false);
+    expect(shouldStampNoCharge(cfg({ fee: 0, teamFee: 900, paymentMode: 'perPlayer' }), sub('captain'))).toBe(true);
+  });
+  it("'both' mode needs Fee 0 and TeamFee 0", () => {
+    expect(shouldStampNoCharge(cfg({ fee: 0, teamFee: 0, paymentMode: 'both' }), sub('individual'))).toBe(true);
+    expect(shouldStampNoCharge(cfg({ fee: 0, teamFee: 100, paymentMode: 'both' }), sub('individual'))).toBe(false);
   });
   it('fee 255 individual -> false', () => {
     expect(shouldStampNoCharge(cfg({ fee: 255 }), sub('individual'))).toBe(false);
@@ -97,7 +105,7 @@ function fakeRef(tree: Tree, path: string, log: any[] = []): any {
 const baseTree = (): Tree => ({
   Registrations: { reg1: {
     Config: { Sport: 'Futsal', Season: '99', Fee: 0, PaymentMode: 'perPlayer', Methods: { venmo: true } },
-    Submissions: { uidA: { Path: 'individual', DisplayName: 'Ann Able', Paid: false } },
+    Submissions: { uidA: { Path: 'individual', DisplayName: 'Ann Able', Paid: false, SubmittedAt: NOW } },
   } },
   'Sign Ups': { Futsal: { '99': { NotPaid: { uidA: 'Ann Able' } } } },
 });
@@ -105,7 +113,7 @@ const baseTree = (): Tree => ({
 describe('handleSubmissionCreated', () => {
   it('stamps a free sign-up in ONE root update and moves the legacy entry', async () => {
     const tree = baseTree(); const writes: any[] = [];
-    expect(await handleSubmissionCreated(fakeRef(tree, '', writes), 'reg1', 'uidA')).toBe('stamped');
+    expect(await handleSubmissionCreated(fakeRef(tree, '', writes), 'reg1', 'uidA', NOW)).toBe('stamped');
     expect(writes.filter((w) => w.op === 'update')).toHaveLength(1);
     expect(writes).toHaveLength(1);
     expect(writes[0].path).toBe('');
@@ -117,59 +125,81 @@ describe('handleSubmissionCreated', () => {
   it('does not need Stripe to be enabled to stamp', async () => {
     const tree = baseTree();
     expect(tree.Registrations.reg1.Config.Methods.stripe).toBeUndefined();
-    expect(await handleSubmissionCreated(fakeRef(tree, ''), 'reg1', 'uidA')).toBe('stamped');
+    expect(await handleSubmissionCreated(fakeRef(tree, ''), 'reg1', 'uidA', NOW)).toBe('stamped');
   });
   it('never touches a submission that is already Paid', async () => {
     const tree = baseTree(); const writes: any[] = [];
     Object.assign(tree.Registrations.reg1.Submissions.uidA, { Paid: true, PaidVia: 'card', PaidAmount: 255 });
-    expect(await handleSubmissionCreated(fakeRef(tree, '', writes), 'reg1', 'uidA')).toBe('skipped');
+    expect(await handleSubmissionCreated(fakeRef(tree, '', writes), 'reg1', 'uidA', NOW)).toBe('skipped');
     expect(writes).toEqual([]);
     expect(tree.Registrations.reg1.Submissions.uidA.PaidVia).toBe('card');
   });
   it('skips a sign-up that owes money', async () => {
     const tree = baseTree(); const writes: any[] = [];
     tree.Registrations.reg1.Config.Fee = 255;
-    expect(await handleSubmissionCreated(fakeRef(tree, '', writes), 'reg1', 'uidA')).toBe('skipped');
+    expect(await handleSubmissionCreated(fakeRef(tree, '', writes), 'reg1', 'uidA', NOW)).toBe('skipped');
     expect(writes).toEqual([]);
   });
   it('skips a joiner (waiving team: left as is; normal team: owes the fee)', async () => {
     const mk = (waives: boolean) => {
       const t = baseTree();
       t.Registrations.reg1.Config.Fee = 255;
-      t.Registrations.reg1.Submissions.uidA = { Path: 'joiner', TeamId: 't1', DisplayName: 'Ann Able' };
+      t.Registrations.reg1.Submissions.uidA = { Path: 'joiner', TeamId: 't1', DisplayName: 'Ann Able', SubmittedAt: NOW };
       t.Registrations.reg1.Teams = { t1: { CodeWaivesPayment: waives } };
       return t;
     };
     const writes: any[] = [];
-    expect(await handleSubmissionCreated(fakeRef(mk(true), '', writes), 'reg1', 'uidA')).toBe('skipped');
-    expect(await handleSubmissionCreated(fakeRef(mk(false), '', writes), 'reg1', 'uidA')).toBe('skipped');
+    expect(await handleSubmissionCreated(fakeRef(mk(true), '', writes), 'reg1', 'uidA', NOW)).toBe('skipped');
+    expect(await handleSubmissionCreated(fakeRef(mk(false), '', writes), 'reg1', 'uidA', NOW)).toBe('skipped');
     expect(writes).toEqual([]);
   });
   it('skips when the config or submission is missing', async () => {
-    expect(await handleSubmissionCreated(fakeRef({}, ''), 'reg1', 'uidA')).toBe('skipped');
+    expect(await handleSubmissionCreated(fakeRef({}, ''), 'reg1', 'uidA', NOW)).toBe('skipped');
   });
   it('logs no full uid or name', async () => {
     logged.length = 0;
     const longUid = 'uidAVeryLongUid1234567890';
     const tree = baseTree();
     tree.Registrations.reg1.Submissions[longUid] = tree.Registrations.reg1.Submissions.uidA;
-    expect(await handleSubmissionCreated(fakeRef(tree, ''), 'reg1', longUid)).toBe('stamped');
+    expect(await handleSubmissionCreated(fakeRef(tree, ''), 'reg1', longUid, NOW)).toBe('stamped');
     expect(logged.length).toBeGreaterThan(0);
     const text = JSON.stringify(logged);
     expect(text).not.toContain(longUid);
     expect(text).not.toContain('Ann Able');
   });
 
+  describe('only fresh sign-ups are stamped (a restore re-creates old ones)', () => {
+    const at = async (submittedAt: unknown) => {
+      const tree = baseTree();
+      if (submittedAt === undefined) delete tree.Registrations.reg1.Submissions.uidA.SubmittedAt;
+      else tree.Registrations.reg1.Submissions.uidA.SubmittedAt = submittedAt;
+      const writes: any[] = [];
+      const r = await handleSubmissionCreated(fakeRef(tree, '', writes), 'reg1', 'uidA', NOW);
+      return { r, writes };
+    };
+    it('5 minutes old -> stamped', async () => { expect((await at(NOW - 5 * MIN)).r).toBe('stamped'); });
+    it('2 hours old -> skipped, nothing written', async () => {
+      const x = await at(NOW - 120 * MIN); expect(x.r).toBe('skipped'); expect(x.writes).toEqual([]);
+    });
+    it('phone clock 30 minutes ahead -> stamped', async () => { expect((await at(NOW + 30 * MIN)).r).toBe('stamped'); });
+    it('phone clock 2 hours ahead -> skipped', async () => { expect((await at(NOW + 120 * MIN)).r).toBe('skipped'); });
+    it('missing, text or non-finite SubmittedAt -> skipped', async () => {
+      expect((await at(undefined)).r).toBe('skipped');
+      expect((await at('1800000000000')).r).toBe('skipped');
+      expect((await at(Number.NaN)).r).toBe('skipped');
+    });
+  });
+
   describe('forged or invalid paths are never stamped', () => {
     const run = async (tree: Tree, uid = 'uidA') => {
       const writes: any[] = [];
-      const r = await handleSubmissionCreated(fakeRef(tree, '', writes), 'reg1', uid);
+      const r = await handleSubmissionCreated(fakeRef(tree, '', writes), 'reg1', uid, NOW);
       return { r, writes };
     };
     const withSub = (config: Tree, subm: Tree, teams?: Tree): Tree => {
       const t = baseTree();
       Object.assign(t.Registrations.reg1.Config, config);
-      t.Registrations.reg1.Submissions.uidA = { DisplayName: 'Ann Able', Paid: false, ...subm };
+      t.Registrations.reg1.Submissions.uidA = { DisplayName: 'Ann Able', Paid: false, SubmittedAt: NOW, ...subm };
       if (teams) t.Registrations.reg1.Teams = teams;
       return t;
     };
@@ -190,11 +220,14 @@ describe('handleSubmissionCreated', () => {
       expect((await run(withSub(cfgs, { Path: 'captain' }))).r).toBe('skipped');
       expect((await run(withSub(cfgs, { Path: 'captain', TeamId: 'nope' }, {}))).r).toBe('skipped');
     });
-    it('real captain of their own team under perPlayer is stamped', async () => {
-      const { r, writes } = await run(withSub(
-        { Fee: 255, PaymentMode: 'perPlayer', Paths: { captain: true } },
-        { Path: 'captain', TeamId: 't1' }, { t1: { CaptainUid: 'uidA' } }));
-      expect(r).toBe('stamped'); expect(writes).toHaveLength(1);
+    it('real captain of their own team under perPlayer: stamped only when Fee is 0', async () => {
+      const mk = (fee: number) => withSub(
+        { Fee: fee, PaymentMode: 'perPlayer', Paths: { captain: true } },
+        { Path: 'captain', TeamId: 't1' }, { t1: { CaptainUid: 'uidA' } });
+      const free = await run(mk(0));
+      expect(free.r).toBe('stamped'); expect(free.writes).toHaveLength(1);
+      const paid = await run(mk(255));
+      expect(paid.r).toBe('skipped'); expect(paid.writes).toEqual([]);
     });
     it('an unknown Path string under teamFee', async () => {
       const { r } = await run(withSub(
@@ -216,6 +249,16 @@ describe('handleSubmissionCreated', () => {
       const { r } = await run(withSub({ Fee: 0 }, { Path: 'joiner' }));
       expect(r).toBe('stamped');
     });
+  });
+});
+
+describe('isFreshSubmission', () => {
+  it('is within one hour either way, fails closed otherwise', () => {
+    expect(isFreshSubmission(NOW - 60 * MIN, NOW)).toBe(true);
+    expect(isFreshSubmission(NOW + 60 * MIN, NOW)).toBe(true);
+    expect(isFreshSubmission(NOW - 60 * MIN - 1, NOW)).toBe(false);
+    expect(isFreshSubmission(undefined, NOW)).toBe(false);
+    expect(isFreshSubmission(Infinity, NOW)).toBe(false);
   });
 });
 

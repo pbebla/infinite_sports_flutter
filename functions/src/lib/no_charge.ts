@@ -1,5 +1,5 @@
 // Pure "No charge" stamp logic (plan 2026-11-14-no-charge-payment-option,
-// Task 6). A brand-new sign-up that owes nothing starts out as
+// Task 6). A brand-new sign-up on a registration that costs nothing starts out as
 // Paid / PaidVia 'no charge' / PaidAmount 0. No Firebase imports.
 
 import { NO_CHARGE } from './insiders';
@@ -26,19 +26,34 @@ export function isGenuineSubmission(
   return true;
 }
 
-/** True only for a not-yet-paid sign-up that owes nothing AND is not a joiner
- *  on a code-waives-payment team (that joiner is already handled by the
- *  waiver, so it keeps its own state). Where a fee is owed, a joiner with no
- *  team owes it in full (owedCents fails closed); at fee 0 nothing is owed
- *  whatever the team, so that joiner is stamped (free is free). The caller
- *  checks [isGenuineSubmission] first. */
+/** Within one hour of the server clock, either way (the phone's clock wrote
+ *  the stamp). Anything missing or not a finite number fails closed. */
+export const FRESH_WINDOW_MS = 60 * 60 * 1000;
+export function isFreshSubmission(submittedAt: unknown, now: number): boolean {
+  if (typeof submittedAt !== 'number' || !Number.isFinite(submittedAt)) return false;
+  return Math.abs(now - submittedAt) <= FRESH_WINDOW_MS;
+}
+
+/** True only for a not-yet-paid sign-up on a registration that costs nothing
+ *  in its payment mode (perPlayer: Fee 0; teamFee: TeamFee 0; both: both 0;
+ *  a missing/unknown mode parses to perPlayer) that also owes nothing on its
+ *  path, and is not a joiner on a code-waives-payment team (already handled
+ *  by the waiver, so it keeps its own state). A path that merely happens to
+ *  owe 0 on a registration that charges money (e.g. a captain under
+ *  perPlayer) is NOT stamped. A joiner with no team at fee 0 is free. The
+ *  caller checks [isGenuineSubmission] first. */
 export function shouldStampNoCharge(
   config: RegistrationConfigLike, sub: SubmissionLike, team?: TeamLike,
 ): boolean {
   if (sub.paid) return false;
   if (owedCents(config, sub, team) !== 0) return false;
   if (sub.path === 'joiner' && team?.codeWaivesPayment) return false;
-  return true;
+  switch (config.paymentMode) {
+    case 'teamFee': return config.teamFee <= 0;
+    case 'both': return config.fee <= 0 && config.teamFee <= 0;
+    case 'perPlayer': return config.fee <= 0;
+    default: return false;
+  }
 }
 
 /** The one root multi-path update: the submission's payment fields plus the

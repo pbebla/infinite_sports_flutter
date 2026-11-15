@@ -270,8 +270,10 @@ class RegistrationService {
   /// rules let the owner overwrite their own submission while the
   /// registration is open (database.rules.stage1.json
   /// Registrations/$regId/Submissions/$uid: `.write` has no
-  /// `!data.exists()`, and `.validate` accepts Paid:false over Paid:true),
-  /// so the app refuses: an existing submission → [alreadyRegistered];
+  /// `!data.exists()`). The rules' `.validate` stops a non-admin from changing
+  /// Paid, PaidVia or PaidAmount on an existing submission, but a replace can
+  /// still reset the answers, path, team and the rest of the record, so the
+  /// app refuses: an existing submission → [alreadyRegistered];
   /// "none" not confirmed by the server → [couldNotCheck].
   static Future<SubmitOutcome> guardNewSubmission(
       String regId, String uid) async {

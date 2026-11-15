@@ -1,5 +1,5 @@
 // "No charge" auto-stamp triggers (plan 2026-11-14-no-charge-payment-option,
-// Task 6, owner-approved): a brand-new sign-up that owes nothing starts out as
+// Task 6, owner-approved): a brand-new sign-up on a registration that costs nothing starts out as
 // Paid / 'no charge' / 0. Only NEW submissions are stamped (onValueCreated);
 // nothing here ever changes an existing one, and a later fee change re-stamps
 // nobody. The Insiders watcher gives no referral credit for 'no charge'.
@@ -17,7 +17,7 @@ import type { Reference } from 'firebase-admin/database';
 import {
   parseConfigPricing, parseSubmission, parseTeam,
 } from './createRegistrationPaymentIntent';
-import { buildNoChargeUpdate, isGenuineSubmission, shouldStampNoCharge } from './lib/no_charge';
+import { buildNoChargeUpdate, isFreshSubmission, isGenuineSubmission, shouldStampNoCharge } from './lib/no_charge';
 import { legacyTarget, TeamLike } from './lib/stripe_pay';
 
 /** How long the legacy cleanup waits for a two-write move to finish. */
@@ -27,7 +27,7 @@ const uidPrefix = (uid: string): string => uid.slice(0, 6);
 const realDelay = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
 
 export async function handleSubmissionCreated(
-  root: Reference, regId: string, uid: string,
+  root: Reference, regId: string, uid: string, now: number = Date.now(),
 ): Promise<'stamped' | 'skipped'> {
   const [configSnap, subSnap] = await Promise.all([
     root.child(`Registrations/${regId}/Config`).get(),
@@ -37,6 +37,8 @@ export async function handleSubmissionCreated(
   const raw = subSnap.val();
   const submission = parseSubmission(raw);
   if (!config || !submission) return 'skipped';
+  // A backup restore re-creates old submissions: only a fresh sign-up counts.
+  if (!isFreshSubmission((raw as Record<string, unknown>)['SubmittedAt'], now)) return 'skipped';
 
   let team: TeamLike | undefined;
   const rawTeamId = (raw as Record<string, unknown>)['TeamId'];
