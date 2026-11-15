@@ -836,6 +836,16 @@ describe.each(RULES_FILES)('rules contract: registration, profile history, team 
     expect(v).not.toMatch(/\|\| root\.child\('Registrations'\)[^(]*\.child\('CodeWaivesPayment'\)\.val\(\) == true$/);
   });
 
+  it('Registrations Submissions/$uid: a non-admin can never change Paid, PaidVia or PaidAmount on an existing submission', () => {
+    const v = String(rules['Registrations']['$regId']['Submissions']['$uid']['.validate']);
+    expect(v.startsWith(
+      "root.child('Admins').child(auth.uid).exists() || ((!data.exists() || (" +
+      "newData.child('Paid').val() == data.child('Paid').val() && " +
+      "newData.child('PaidVia').val() == data.child('PaidVia').val() && " +
+      "newData.child('PaidAmount').val() == data.child('PaidAmount').val())) && (")).toBe(true);
+    expect(v.endsWith('))')).toBe(true);
+  });
+
   // Trophies, league/tournament history (mirrored to the public profile)
   // and the account-combine stamps are written by admins (Manager) and
   // Cloud Functions only. No fan-app write carries these keys (inventory in

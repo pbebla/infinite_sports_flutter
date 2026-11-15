@@ -268,7 +268,7 @@
           "$uid": {
             ".read": "auth != null && auth.uid == $uid",
             ".write": "auth != null && auth.uid == $uid && root.child('Registrations').child($regId).child('Config').child('Status').val() == 'open'",
-            ".validate": "root.child('Admins').child(auth.uid).exists() || !newData.child('Paid').exists() || newData.child('Paid').val() == false || data.child('Paid').val() == true || (newData.child('TeamId').isString() && newData.child('TeamId').val().matches(/^[A-Za-z0-9_-]+$/) && root.child('Registrations').child($regId).child('Teams').child(newData.child('TeamId').val()).child('CodeWaivesPayment').val() == true && root.child('Registrations').child($regId).child('Teams').child(newData.child('TeamId').val()).child('Status').val() == 'approved')"
+            ".validate": "root.child('Admins').child(auth.uid).exists() || ((!data.exists() || (newData.child('Paid').val() == data.child('Paid').val() && newData.child('PaidVia').val() == data.child('PaidVia').val() && newData.child('PaidAmount').val() == data.child('PaidAmount').val())) && (!newData.child('Paid').exists() || newData.child('Paid').val() == false || data.child('Paid').val() == true || (newData.child('TeamId').isString() && newData.child('TeamId').val().matches(/^[A-Za-z0-9_-]+$/) && root.child('Registrations').child($regId).child('Teams').child(newData.child('TeamId').val()).child('CodeWaivesPayment').val() == true && root.child('Registrations').child($regId).child('Teams').child(newData.child('TeamId').val()).child('Status').val() == 'approved')))"
           }
         },
         "Teams": {

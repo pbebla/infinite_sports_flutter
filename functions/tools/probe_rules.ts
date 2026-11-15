@@ -134,6 +134,18 @@ function auditRow(adminUid: string): Record<string, unknown> {
 
 const REG = 'Registrations/Reg-Probe';
 const FS = 'Fantasy/Futsal/16';
+// Existing fan submissions for the "payment fields are frozen" cases (No
+// charge payment option). Separate registrations so the sequential cases
+// cannot disturb them.
+const REG_PAID = 'Registrations/Reg-ProbePaid';
+const REG_UNPAID = 'Registrations/Reg-ProbeUnpaid';
+function existingSub(paid: boolean): Record<string, unknown> {
+  return paid
+    ? { Path: 'individual', Answers: { firstName: 'Test' }, Paid: true, PaidVia: 'no charge',
+        PaidAmount: 0, DisplayName: 'Test Fan', SubmittedAt: 1 }
+    : { Path: 'individual', Answers: { firstName: 'Test' }, Paid: false,
+        DisplayName: 'Test Fan', SubmittedAt: 1 };
+}
 
 /** RegTeam.toFirebaseMap for a new captain's team (submitCaptain). */
 function appTeam(captainUid: string): Record<string, unknown> {
@@ -148,7 +160,10 @@ function joinerSub(teamId: string): Record<string, unknown> {
 
 /** Owner-seeded data for the 2026-11-13 registration / profile / fantasy checks. */
 const SEED_2026_11_13 = {
-  Registrations: { 'Reg-Probe': {
+  Registrations: {
+    'Reg-ProbePaid': { Config: { Status: 'open' }, Submissions: { [FAN]: existingSub(true) } },
+    'Reg-ProbeUnpaid': { Config: { Status: 'open' }, Submissions: { [FAN]: existingSub(false) } },
+    'Reg-Probe': {
     Config: { Status: 'open' },
     Teams: {
       '-adminTeam': { Name: 'Approved FC', CaptainUid: 'uid_captain', Status: 'approved',
@@ -159,7 +174,8 @@ const SEED_2026_11_13 = {
       '-evil': { ...appTeam(FAN), X: { CodeWaivesPayment: true, Status: 'approved' },
         Members: { m: { CodeWaivesPayment: true, Status: 'approved' } } },
     },
-  } },
+  },
+  },
   Users: { [FAN]: { 'First Name': 'Test', Awards: { '-a1': { Title: 'Champion' } },
     Played: { '15': { Sport: 'Futsal', Team: 'Old' } } } },
   Fantasy: { Futsal: { '16': { Managers: { [FAN]: { TeamName: 'Rude Name', NameFlagged: true } } } } },
@@ -306,6 +322,24 @@ const CHECKS: Check[] = [
     who: 'fan', method: 'PUT', path: `${REG}/Submissions/${FAN}`,
     body: { Path: 'captain', Answers: { firstName: 'Test' }, TeamId: '-fanNew', Paid: false,
       DisplayName: 'Test Fan', SubmittedAt: 1 }, expect: 'allow' },
+  // No charge payment option: once a submission exists, a non-admin can
+  // never change Paid / PaidVia / PaidAmount (a No charge player must not
+  // become a Venmo player to earn referral credit).
+  { name: 'a paid fan cannot change their own PaidVia',
+    who: 'fan', method: 'PUT', path: `${REG_PAID}/Submissions/${FAN}`,
+    body: { ...existingSub(true), PaidVia: 'venmo' }, expect: 'deny' },
+  { name: 'a paid fan cannot change their own PaidAmount',
+    who: 'fan', method: 'PUT', path: `${REG_PAID}/Submissions/${FAN}`,
+    body: { ...existingSub(true), PaidAmount: 255 }, expect: 'deny' },
+  { name: 'an unpaid fan cannot add a payment method to their own submission',
+    who: 'fan', method: 'PUT', path: `${REG_UNPAID}/Submissions/${FAN}`,
+    body: { ...existingSub(false), PaidVia: 'venmo' }, expect: 'deny' },
+  { name: 'a fan can rewrite their own submission when the payment fields are unchanged',
+    who: 'fan', method: 'PUT', path: `${REG_PAID}/Submissions/${FAN}`,
+    body: { ...existingSub(true), Answers: { firstName: 'Changed' } }, expect: 'allow' },
+  { name: 'an admin can mark a submission No charge',
+    who: 'admin', method: 'PATCH', path: `${REG_UNPAID}/Submissions/${FAN}`,
+    body: { Paid: true, PaidVia: 'no charge', PaidAmount: 0 }, expect: 'allow' },
   { name: 'an admin approves a team with a waiving code (Manager approveTeam)',
     who: 'admin', method: 'PATCH', path: `${REG}/Teams/-fanNew`,
     body: { Status: 'approved', JoinCode: 'TEAM12', CodeWaivesPayment: true }, expect: 'allow' },
