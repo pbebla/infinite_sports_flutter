@@ -1,5 +1,5 @@
 // "No charge" auto-stamp (plan 2026-11-14-no-charge-payment-option, Task 6):
-// a sign-up that owes nothing starts out Paid / 'no charge' / 0, and a legacy
+// a fresh sign-up on a registration that costs nothing starts out Paid / 'no charge' / 0, and a legacy
 // NotPaid entry that lands next to a Paid one is cleaned up after a settle
 // delay. Driven over an in-memory tree; all names and ids are made up.
 

@@ -914,8 +914,13 @@ enum RegistrationChipKind { paid, covered, noCharge, pending }
 /// rule: Paid ("Paid via team code" when born paid by a team code);
 /// "Covered" only when a payment WAS owed and a discount/comp brought it
 /// to 0 ([paymentCovered]); "No charge" when an admin settled it that way
-/// ([RegSubmission.isNoCharge]) OR nothing is owed to begin with (a free
-/// registration, or an individual when only a team fee is charged);
+/// ([RegSubmission.isNoCharge]) OR nothing is owed on this player's path (a
+/// free registration, or an individual when only a team fee is charged);
+/// the server stamps the real No charge only on registrations that cost
+/// nothing in their payment mode, so a path-only-free player (a captain under
+/// perPlayer with a fee, an individual under teamFee with a team fee) sees
+/// "No charge" here but is not stamped: the Manager shows Not paid until the
+/// owner marks them;
 /// otherwise "Payment pending".
 /// [owed] is the amount the status page shows as owed (through
 /// discountedTotal); the list words a pending chip with it ("You owe $X")
@@ -957,8 +962,12 @@ enum RegistrationChipKind { paid, covered, noCharge, pending }
       settled: true,
     );
   }
-  // Nothing owed and not a comp: no fee applies to this submission. Says "No
-  // charge" (the server stamps the real Paid/No charge a moment later).
+  // Nothing owed and not a comp: no fee applies on this player's path. Says
+  // "No charge". The server stamps the real Paid/No charge only when the whole
+  // registration costs nothing in its payment mode; a path-only-free player
+  // (captain under perPlayer with a fee, individual under teamFee with a team
+  // fee) is not stamped and the Manager shows Not paid until the owner marks
+  // them.
   if (!paymentOwed(
       config: config,
       submission: submission,
