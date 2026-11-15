@@ -69,6 +69,27 @@ void main() {
     expect(r.enabled, isTrue);
   });
 
+  test('a lone No charge registration: All paid up', () {
+    final r = drawerRegistrationRow(
+        signedIn: true,
+        signUpsOpen: false,
+        signUpDetail: 'Sign Ups Closed',
+        hasOpenRegistrations: false,
+        mine: MyRegistrations(mine: [
+          MyRegistration(
+              regId: 'futsal',
+              config: _closed,
+              submission: const RegSubmission(
+                  path: 'individual',
+                  answers: {},
+                  paid: true,
+                  paidVia: 'no charge',
+                  paidAmount: 0)),
+        ], openForSignUp: const {}),
+        seasonPointer: (_) => '16');
+    expect(r.subtitle, 'All paid up');
+  });
+
   test('none of my own, an open registration: today\'s row', () {
     final r = drawerRegistrationRow(
         signedIn: true,

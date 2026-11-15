@@ -189,7 +189,7 @@ void main() {
 
   testWidgets(
       'fix round Minor 1: a free registration shows the status page chip '
-      'chip (Payment pending), never a green Covered', (tester) async {
+      'chip (No charge), never a green Covered', (tester) async {
     final free = _config('Futsal', 'open', fee: 0);
     await pump(
         tester,
@@ -199,7 +199,8 @@ void main() {
               config: free,
               submission: const RegSubmission(path: 'individual', answers: {})),
         ], openForSignUp: const {})));
-    expect(find.text('Payment pending'), findsOneWidget);
+    expect(find.text('No charge'), findsOneWidget);
+    expect(find.text('Payment pending'), findsNothing);
     expect(find.text('Covered'), findsNothing);
   });
 

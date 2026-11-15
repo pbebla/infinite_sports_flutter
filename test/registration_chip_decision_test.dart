@@ -55,21 +55,83 @@ void main() {
     expect(c.label, 'Covered');
   });
 
-  test(
-      'free registration (fee 0): the status page says Payment pending, '
-      'and so does the list (never a green Covered)', () {
+  test('free registration (fee 0): No charge, never "Payment pending"', () {
     final c =
         registrationChipFor(config: _config(fee: 0), submission: _individual);
-    expect(c.kind, RegistrationChipKind.pending);
-    expect(c.label, 'Payment pending');
+    expect(c.kind, RegistrationChipKind.noCharge);
+    expect(c.label, 'No charge');
     expect(c.owed, 0);
+    expect(c.settled, isTrue);
   });
 
-  test('an individual when only a team fee is charged: Payment pending', () {
+  test('an individual when only a team fee is charged: No charge', () {
     final c = registrationChipFor(
         config: _config(fee: 0, teamFee: 200, mode: 'teamFee'),
         submission: _individual);
+    expect(c.kind, RegistrationChipKind.noCharge);
+    final byMode = registrationChipFor(
+        config: _config(mode: 'teamFee'), submission: _individual);
+    expect(byMode.kind, RegistrationChipKind.noCharge);
+    expect(byMode.label, 'No charge');
+  });
+
+  test('paid with No charge, fee 255: noCharge, settled, owes 0', () {
+    final c = registrationChipFor(
+        config: _config(fee: 255),
+        submission: const RegSubmission(
+            path: 'individual',
+            answers: {},
+            paid: true,
+            paidVia: 'no charge',
+            paidAmount: 0));
+    expect(c.kind, RegistrationChipKind.noCharge);
+    expect(c.label, 'No charge');
+    expect(c.owed, 0);
+    expect(c.settled, isTrue);
+  });
+
+  test('isNoCharge: paid + paidVia, trimmed and case-insensitive', () {
+    expect(kPaidViaNoCharge, 'no charge');
+    const base = RegSubmission(
+        path: 'individual', answers: {}, paid: true, paidVia: ' No Charge ');
+    expect(base.isNoCharge, isTrue);
+    expect(
+        const RegSubmission(
+                path: 'individual', answers: {}, paidVia: 'no charge')
+            .isNoCharge,
+        isFalse);
+    expect(
+        const RegSubmission(
+                path: 'individual', answers: {}, paid: true, paidVia: 'venmo')
+            .isNoCharge,
+        isFalse);
+  });
+
+  test('paid by venmo stays Paid', () {
+    final c = registrationChipFor(
+        config: _config(fee: 255),
+        submission: const RegSubmission(
+            path: 'individual', answers: {}, paid: true, paidVia: 'venmo'));
+    expect(c.kind, RegistrationChipKind.paid);
+    expect(c.label, 'Paid');
+  });
+
+  test('unpaid with a kept PaidVia "no charge" and fee 255: still pending', () {
+    final c = registrationChipFor(
+        config: _config(fee: 255),
+        submission: const RegSubmission(
+            path: 'individual', answers: {}, paidVia: 'no charge'));
     expect(c.kind, RegistrationChipKind.pending);
+    expect(c.label, 'Payment pending');
+    expect(c.owed, 255);
+    expect(c.settled, isFalse);
+  });
+
+  test('unpaid individual, fee 255: pending, owed 255', () {
+    final c =
+        registrationChipFor(config: _config(fee: 255), submission: _individual);
+    expect(c.kind, RegistrationChipKind.pending);
+    expect(c.owed, 255);
   });
 
   test('a team-code waiver counts (joiner)', () {
@@ -78,7 +140,7 @@ void main() {
         submission: const RegSubmission(path: 'joiner', answers: {}),
         codeWaivesPayment: true);
     expect(c.owed, 0);
-    expect(c.kind, RegistrationChipKind.pending,
-        reason: 'paymentOwed is false: same as the status page today');
+    expect(c.kind, RegistrationChipKind.noCharge,
+        reason: 'nothing owed and not covered: No charge');
   });
 }

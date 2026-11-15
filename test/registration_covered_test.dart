@@ -137,6 +137,23 @@ void main() {
       expect(find.text('Complete payment'), findsNothing);
     });
 
+    testWidgets('a No charge registration says so: no pending, no button',
+        (tester) async {
+      await tester.pumpWidget(_status(Stream.value(const RegSubmission(
+          path: 'individual',
+          answers: {},
+          paid: true,
+          paidVia: 'no charge',
+          paidAmount: 0))));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('No charge — nothing to pay'), findsOneWidget);
+      expect(find.text('No charge'), findsOneWidget);
+      expect(find.text('Paid'), findsNothing);
+      expect(find.text('Payment pending'), findsNothing);
+      expect(find.text('Complete payment'), findsNothing);
+    });
+
     testWidgets('a 100% promo is covered too', (tester) async {
       await tester.pumpWidget(_status(Stream.value(_fullPromo)));
       await tester.pump();

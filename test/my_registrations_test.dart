@@ -303,6 +303,32 @@ void main() {
     });
   });
 
+  test('a No charge registration is never the first current owing', () {
+    final regs = MyRegistrations(mine: [
+      MyRegistration(
+          regId: 'now',
+          config: const RegistrationConfig(
+            targetType: 'league',
+            sport: 'Futsal',
+            season: '16',
+            status: 'open',
+            fee: 255,
+            paymentMode: 'perPlayer',
+          ),
+          submission: const RegSubmission(
+              path: 'individual',
+              answers: {},
+              paid: true,
+              paidVia: 'no charge',
+              paidAmount: 0)),
+    ], openForSignUp: const {});
+    expect(
+        firstCurrentOwing(regs,
+            seasonPointer: (_) => '16', activeTournamentIds: null),
+        isNull);
+    expect(regs.mine.single.chip.kind, RegistrationChipKind.noCharge);
+  });
+
   // Way back fix round, Minor 2: the Manager can switch a team to "code
   // waives payment" after an unpaid member joined (setTeamWaive). The status
   // page then reads that team node; the list/banner/drawer follow the SAME

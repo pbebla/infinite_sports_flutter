@@ -510,6 +510,16 @@ class _RegistrationStatusPageState extends State<RegistrationStatusPage> {
                   ),
                 ),
               ],
+              if (chip.kind == RegistrationChipKind.noCharge) ...[
+                const SizedBox(height: 8),
+                const Card(
+                  elevation: 2,
+                  child: ListTile(
+                    leading: Icon(Icons.check_circle, color: Colors.green),
+                    title: Text('No charge — nothing to pay'),
+                  ),
+                ),
+              ],
               if (teamCard != null) ...[
                 const SizedBox(height: 8),
                 teamCard,

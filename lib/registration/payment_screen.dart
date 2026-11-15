@@ -352,7 +352,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
           // Paid wins regardless of how it happened — card webhook, manual
           // admin flip, anything — and regardless of our own local
           // _processing flag, killing the double-pay window for good.
-          if (sub != null && sub.paid) return _paidBody(context);
+          if (sub != null && sub.paid) return _paidBody(context, noCharge: sub.isNoCharge);
           if (_processing) return _processingBody(context);
           // A failed read must not fall back to the undiscounted base fee.
           if (snapshot.hasError) return _loadFailedBody(context);
@@ -362,7 +362,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     );
   }
 
-  Widget _paidBody(BuildContext context) {
+  Widget _paidBody(BuildContext context, {bool noCharge = false}) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -372,7 +372,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
             Icon(Icons.check_circle, color: Colors.green, size: 96),
             const SizedBox(height: 24),
             Text(
-              "Payment received — you're all set.",
+              noCharge
+                  ? 'No charge — nothing to pay'
+                  : "Payment received — you're all set.",
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleLarge,
             ),

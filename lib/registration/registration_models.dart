@@ -436,10 +436,19 @@ class RegSubmission {
   /// only), so the status page renders the team card from this field.
   final String teamName; // '' on pre-B8 and non-team submissions
   final bool paid;
-  final String paidVia; // '' | 'team code' | 'card' | 'manual'
+  /// How it was paid: '' | 'team code' | 'card' | 'manual' | 'venmo' |
+  /// 'zelle' | 'cash' | 'no charge' ([kPaidViaNoCharge]; an admin settled it
+  /// with nothing to pay — always with Paid true, PaidAmount 0).
+  final String paidVia;
   final num? paidAmount; // dollars actually charged/recorded; null if unknown
   final String displayName; // account display name at submit time
   final int submittedAt; // millisecondsSinceEpoch
+
+  /// An admin settled this registration as "No charge": Paid, with nothing to
+  /// pay. Twin of the Manager app's `isNoCharge` (same name, same rule). The
+  /// player sees "No charge" instead of "Paid"; teammates still see Paid.
+  bool get isNoCharge =>
+      paid && paidVia.trim().toLowerCase() == kPaidViaNoCharge;
 
   // -- Manual payment adjustment (Infinite Insiders P1, Task M1/F1) ----
   // Written by the Manager's RegistrationService.adjustSubmissionAmount/
@@ -892,13 +901,22 @@ double discountedAmountOwed({
 /// What a registration's status chip says (way back fix round, Minor 1):
 /// THE decision the status page's top chip and the registration list's
 /// chip share, so they can never disagree.
-enum RegistrationChipKind { paid, covered, pending }
+/// The stored `PaidVia` of a "No charge" registration (twin of the Manager
+/// app's constant).
+const String kPaidViaNoCharge = 'no charge';
+
+/// The chip text for a No charge registration.
+const String kNoChargeLabel = 'No charge';
+
+enum RegistrationChipKind { paid, covered, noCharge, pending }
 
 /// The chip for [submission] under [config] — exactly the status page's
 /// rule: Paid ("Paid via team code" when born paid by a team code);
 /// "Covered" only when a payment WAS owed and a discount/comp brought it
-/// to 0 ([paymentCovered]); otherwise "Payment pending" (which includes a
-/// free registration and an individual when only a team fee is charged).
+/// to 0 ([paymentCovered]); "No charge" when an admin settled it that way
+/// ([RegSubmission.isNoCharge]) OR nothing is owed to begin with (a free
+/// registration, or an individual when only a team fee is charged);
+/// otherwise "Payment pending".
 /// [owed] is the amount the status page shows as owed (through
 /// discountedTotal); the list words a pending chip with it ("You owe $X")
 /// when it is above 0.
@@ -912,6 +930,14 @@ enum RegistrationChipKind { paid, covered, pending }
       config: config,
       submission: submission,
       codeWaivesPayment: codeWaivesPayment);
+  if (submission.isNoCharge) {
+    return (
+      kind: RegistrationChipKind.noCharge,
+      label: kNoChargeLabel,
+      owed: 0,
+      settled: true,
+    );
+  }
   if (submission.paid) {
     return (
       kind: RegistrationChipKind.paid,
@@ -927,6 +953,19 @@ enum RegistrationChipKind { paid, covered, pending }
     return (
       kind: RegistrationChipKind.covered,
       label: 'Covered',
+      owed: 0,
+      settled: true,
+    );
+  }
+  // Nothing owed and not a comp: no fee applies to this submission. Says "No
+  // charge" (the server stamps the real Paid/No charge a moment later).
+  if (!paymentOwed(
+      config: config,
+      submission: submission,
+      codeWaivesPayment: codeWaivesPayment)) {
+    return (
+      kind: RegistrationChipKind.noCharge,
+      label: kNoChargeLabel,
       owed: 0,
       settled: true,
     );

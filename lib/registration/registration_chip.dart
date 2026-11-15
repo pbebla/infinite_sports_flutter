@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 /// The registration status chip ("Paid" / "Payment pending" / "You owe $X"
-/// / "Covered"), shared by the status page and the registration list. Green
+/// / "Covered" / "No charge"), shared by the status page and the registration list. Green
 /// for settled, orange for owing, in light and dark mode.
 class RegistrationStatusChip extends StatelessWidget {
   const RegistrationStatusChip(
