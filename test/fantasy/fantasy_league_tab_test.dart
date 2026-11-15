@@ -188,12 +188,23 @@ void main() {
     expect(find.text('Ashur'), findsOneWidget);
   });
 
-  testWidgets('standings fail: the Table shows the error while Fixtures works',
-      (tester) async {
-    await tester.pumpWidget(host());
+  testWidgets(
+      'standings fail: the Table shows the error while Fixtures works; Try '
+      'again re-subscribes the standings only', (tester) async {
+    var tableListens = 0;
+    final tc = StreamController<List<TournamentTeam>>.broadcast(
+        onListen: () => tableListens++);
+    addTearDown(tc.close);
+    final base = seams();
+    await tester.pumpWidget(host(
+        s: FantasyLeagueSeams(
+      gamesStates: base.gamesStates,
+      standingsFor: (_) => tc.stream,
+      watchLogos: base.watchLogos,
+    )));
     reportLogos(const {});
     gamesC.add(games());
-    tableC.addError(StateError('boom'));
+    tc.addError(StateError('boom'));
     await tester.pumpAndSettle();
     expect(find.text('Ashur'), findsOneWidget);
     expect(find.text("Couldn't load the league"), findsNothing);
@@ -202,6 +213,17 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text("Couldn't load the league"), findsOneWidget);
     expect(find.text('Table not yet available'), findsNothing);
+
+    final tableBefore = tableListens;
+    final gamesBefore = gamesSubscribes;
+    await tester.tap(find.text('Try again'));
+    await tester.pump();
+    expect(tableListens, greaterThan(tableBefore));
+    expect(gamesSubscribes, gamesBefore);
+    tc.add(standings());
+    await tester.pumpAndSettle();
+    expect(find.text("Couldn't load the league"), findsNothing);
+    expect(find.text('Nineveh'), findsOneWidget);
   });
 
   testWidgets('no games and an empty table show the existing empty states',
@@ -220,29 +242,40 @@ void main() {
 
   testWidgets('a new season drops the old games and table and loads the new',
       (tester) async {
-    final seasonsAsked = <String>[];
-    final controllers = <String, StreamController<List<TournamentMatch>>>{};
+    final gamesAsked = <String>[];
+    final standingsAsked = <String>[];
+    final gamesCs = <String, StreamController<List<TournamentMatch>>>{};
+    final tableCs = <String, StreamController<List<TournamentTeam>>>{};
     var season = '15';
-    FantasyLeagueSeams perSeason() => FantasyLeagueSeams(
-          loadStartHour: () async => 8,
-          leagueGamesFor: (_) {
-            seasonsAsked.add(season);
-            return (controllers[season] ??=
-                    StreamController<List<TournamentMatch>>.broadcast())
-                .stream;
-          },
-          standingsFor: (_) => tableC.stream,
-          watchLogos: (onLogos) {
-            reportLogos = onLogos;
-            return () {};
-          },
-        );
-    final s = perSeason();
+    final s = FantasyLeagueSeams(
+      loadStartHour: () async => 8,
+      leagueGamesFor: (_) {
+        gamesAsked.add(season);
+        return (gamesCs[season] ??=
+                StreamController<List<TournamentMatch>>.broadcast())
+            .stream;
+      },
+      standingsFor: (_) {
+        standingsAsked.add(season);
+        return (tableCs[season] ??=
+                StreamController<List<TournamentTeam>>.broadcast())
+            .stream;
+      },
+      watchLogos: (onLogos) {
+        reportLogos = onLogos;
+        return () {};
+      },
+    );
+    addTearDown(() {
+      for (final c in [...gamesCs.values, ...tableCs.values]) {
+        c.close();
+      }
+    });
     await tester.pumpWidget(host(season: '15', s: s));
     await tester.pump();
     reportLogos(const {});
-    controllers['15']!.add(games());
-    tableC.add(standings());
+    gamesCs['15']!.add(games());
+    tableCs['15']!.add(standings());
     await tester.pumpAndSettle();
     expect(find.text('Ashur'), findsOneWidget);
 
@@ -251,9 +284,11 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400)); // the fade-out
     expect(find.byKey(const ValueKey('league_tab_skeleton')), findsOneWidget);
     expect(find.text('Ashur'), findsNothing);
-    expect(seasonsAsked, containsAllInOrder(['15', '16']));
-    reportLogos(const {});
-    controllers['16']!.add(leagueMatchesFromDateNode({
+    expect(gamesAsked, ['15', '16']);
+    reportLogos(const {}); // the new table feed subscribes once crests report
+    await tester.pump();
+    expect(standingsAsked, ['15', '16']);
+    gamesCs['16']!.add(leagueMatchesFromDateNode({
       '07242026': [
         {
           'team1': 'Lagash',
@@ -264,13 +299,31 @@ void main() {
         },
       ],
     }));
-    tableC.add(standings());
+    tableCs['16']!.add(leagueStandingsFromTeamsNode('Futsal', {
+      'Lagash': {
+        'Wins': 1, 'Draws': 0, 'Losses': 0, 'GP': 1, 'GS': 4, 'GC': 1, //
+        'GD': 3, 'Points': 3,
+      },
+    }, const {}));
     await tester.pumpAndSettle();
     expect(find.text('Lagash'), findsOneWidget);
     expect(find.text('Ashur'), findsNothing);
-    for (final c in controllers.values) {
-      await c.close();
-    }
+
+    await tester.tap(find.text('Table'));
+    await tester.pumpAndSettle();
+    expect(find.text('Lagash'), findsOneWidget);
+    expect(find.text('Nineveh'), findsNothing);
+    expect(find.text('Babylon'), findsNothing);
+  });
+
+  testWidgets('a new season: the old games are gone in the first frame',
+      (tester) async {
+    await loadAll(tester);
+    expect(find.text('Ashur'), findsOneWidget);
+    await tester.pumpWidget(host(season: '16'));
+    await tester.pump(); // the first frame of the new season, no fade time
+    expect(find.text('Ashur'), findsNothing);
+    expect(find.byKey(const ValueKey('league_tab_skeleton')), findsOneWidget);
   });
 
   for (final brightness in Brightness.values) {

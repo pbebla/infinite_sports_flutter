@@ -150,21 +150,27 @@ class _FantasyLeagueTabState extends State<FantasyLeagueTab> {
   @override
   Widget build(BuildContext context) {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    return AnimatedSwitcher(
-      duration:
-          reduceMotion ? Duration.zero : const Duration(milliseconds: 250),
-      layoutBuilder: (current, previous) => Stack(
-        fit: StackFit.expand,
-        children: [...previous, if (current != null) current],
+    // Keyed by league: on a season change the switcher is a NEW one, so the
+    // old season's content never fades out under the new skeleton.
+    return KeyedSubtree(
+      key: ValueKey('${widget.sport}|${widget.season}'),
+      child: AnimatedSwitcher(
+        duration:
+            reduceMotion ? Duration.zero : const Duration(milliseconds: 250),
+        layoutBuilder: (current, previous) => Stack(
+          fit: StackFit.expand,
+          children: [...previous, if (current != null) current],
+        ),
+        child: _ready
+            ? _content(context)
+            : const _LeagueSkeleton(key: ValueKey('league_tab_skeleton')),
       ),
-      child: _ready
-          ? _content(context)
-          : const _LeagueSkeleton(key: ValueKey('league_tab_skeleton')),
     );
   }
 
   Widget _content(BuildContext context) {
     final failed = _showTable ? _table.failed : _games.failed;
+    final empty = _showTable ? _table.standings.isEmpty : _games.games.isEmpty;
     return Column(
       key: const ValueKey('league_tab'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -187,26 +193,56 @@ class _FantasyLeagueTabState extends State<FantasyLeagueTab> {
               ? _LeagueError(
                   onRetry: _showTable ? _table.retry : _games.retry,
                 )
-              : _showTable
-                  ? LeagueTableTab(
-                      sport: widget.sport,
-                      standings: _table.standings,
-                      onOpenTeam: (name) => _openTeam(context, name),
-                    )
-                  : LeagueFixturesTab(
-                      matches: _games.games,
-                      teams: leagueCardTeams(
-                          _games.games, _table.standings, _table.logos),
-                      rosters: const {},
-                      sport: widget.sport,
-                      predictionsOpen: false,
-                      pickedDay: _pickedDay,
-                      onDayPicked: (d) => setState(() => _pickedDay = d),
-                      now: widget.now,
-                      onMatchTap: (m) => _openMatch(context, m),
-                    ),
+              : empty
+                  ? _ScrollableFace(child: _view(context))
+                  : _view(context),
         ),
       ],
+    );
+  }
+
+  Widget _view(BuildContext context) {
+    return _showTable
+        ? LeagueTableTab(
+            sport: widget.sport,
+            standings: _table.standings,
+            onOpenTeam: (name) => _openTeam(context, name),
+          )
+        : LeagueFixturesTab(
+            matches: _games.games,
+            teams:
+                leagueCardTeams(_games.games, _table.standings, _table.logos),
+            rosters: const {},
+            sport: widget.sport,
+            predictionsOpen: false,
+            pickedDay: _pickedDay,
+            onDayPicked: (d) => setState(() => _pickedDay = d),
+            now: widget.now,
+            onMatchTap: (m) => _openMatch(context, m),
+          );
+  }
+}
+
+/// Gives a face that has no list of its own (the empty states, the error)
+/// a scrollable that fills the available space. Why: CollapsingTabShell
+/// collapses the Hub header from the active tab's scroll notifications and
+/// keeps the last metrics it was told; a view with no scrollable would leave
+/// the previous list's metrics in force, so the header would stay collapsed
+/// with no way to re-open it. A scrollable that has nothing to scroll reports
+/// its metrics, and the shell's "nothing to scroll" escape re-opens the
+/// header.
+class _ScrollableFace extends StatelessWidget {
+  const _ScrollableFace({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: SizedBox(height: constraints.maxHeight, child: child),
+      ),
     );
   }
 }
@@ -219,28 +255,30 @@ class _LeagueError extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Center(
-      key: const ValueKey('league_tab_error'),
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              "Couldn't load the league",
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w800,
-                color: scheme.onSurface,
-              ),
+    return _ScrollableFace(
+        key: const ValueKey('league_tab_error'),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  "Couldn't load the league",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton(
+                    onPressed: onRetry, child: const Text('Try again')),
+              ],
             ),
-            const SizedBox(height: 12),
-            OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
-          ],
-        ),
-      ),
-    );
+          ),
+        ));
   }
 }
 
@@ -249,10 +287,11 @@ class _LeagueSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      physics: const NeverScrollableScrollPhysics(),
+    // A scrollable that fills the tab (see _ScrollableFace for why).
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-      children: const [
+      child: const Column(children: [
         SkeletonBox(width: double.infinity, height: 40, radius: 20),
         SizedBox(height: 12),
         SkeletonBox(width: double.infinity, height: 56, radius: 12),
@@ -262,7 +301,7 @@ class _LeagueSkeleton extends StatelessWidget {
         SkeletonBox(width: double.infinity, height: 84, radius: 12),
         SizedBox(height: 10),
         SkeletonBox(width: double.infinity, height: 84, radius: 12),
-      ],
+      ]),
     );
   }
 }

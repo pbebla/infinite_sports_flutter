@@ -13,7 +13,8 @@ import 'package:infinite_sports_flutter/widgets/day_pill_strip.dart';
 /// recomputed from the live match stream on every build:
 /// - default day = a live day if any, else today / nearest upcoming day,
 ///   else the season's last day ([defaultFixturesDay]);
-/// - a day the user tapped sticks for the life of the tab.
+/// - a day the user tapped sticks for the life of the tab; with an owner
+///   ([onDayPicked]) the owner holds the day instead.
 class LeagueFixturesTab extends StatefulWidget {
   final List<TournamentMatch> matches;
   final Map<String, TournamentTeam> teams;
@@ -66,8 +67,7 @@ class _LeagueFixturesTabState extends State<LeagueFixturesTab> {
       for (final m in widget.matches)
         if (m.matchStatus.isLive) m.date,
     };
-    final picked =
-        widget.onDayPicked != null ? widget.pickedDay : _pickedDay;
+    final picked = widget.onDayPicked != null ? widget.pickedDay : _pickedDay;
     final selected = (picked != null && days.contains(picked))
         ? picked
         : defaultFixturesDay(days, liveDays, now: widget.now);

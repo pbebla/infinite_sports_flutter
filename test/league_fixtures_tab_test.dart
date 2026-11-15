@@ -77,8 +77,7 @@ void main() {
     expect(find.text('Ashur'), findsNothing);
   });
 
-  testWidgets('all days in the past fall back to the last day',
-      (tester) async {
+  testWidgets('all days in the past fall back to the last day', (tester) async {
     await tester.pumpWidget(wrap(LeagueFixturesTab(
       matches: twoDayMatches(),
       teams: const {},
@@ -105,5 +104,48 @@ void main() {
     await tester.tap(find.text('Ashur'));
     await tester.pump();
     expect(tapped, ['Ashur v Akkad']);
+  });
+
+  testWidgets(
+      'with onDayPicked the owner holds the day: a tap calls it and the shown '
+      'day follows pickedDay', (tester) async {
+    final picks = <String>[];
+    Widget build(String? picked) => wrap(LeagueFixturesTab(
+          matches: twoDayMatches(),
+          teams: const {},
+          rosters: const {},
+          sport: 'Futsal',
+          now: now,
+          pickedDay: picked,
+          onDayPicked: picks.add,
+        ));
+    await tester.pumpWidget(build(null));
+    expect(find.text('Ashur'), findsOneWidget);
+    await tester.tap(find.text('3'));
+    await tester.pump();
+    expect(picks, ['07032026']);
+    // The owner did not change pickedDay: the shown day does not move.
+    expect(find.text('Ashur'), findsOneWidget);
+    expect(find.text('Babylon'), findsNothing);
+    await tester.pumpWidget(build('07032026'));
+    expect(find.text('Babylon'), findsOneWidget);
+    expect(find.text('Ashur'), findsNothing);
+  });
+
+  testWidgets('without onDayPicked a tapped day sticks as before',
+      (tester) async {
+    await tester.pumpWidget(wrap(LeagueFixturesTab(
+      matches: twoDayMatches(),
+      teams: const {},
+      rosters: const {},
+      sport: 'Futsal',
+      now: now,
+    )));
+    await tester.tap(find.text('3'));
+    await tester.pump();
+    expect(find.text('Babylon'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Babylon'), findsOneWidget);
+    expect(find.text('Ashur'), findsNothing);
   });
 }
