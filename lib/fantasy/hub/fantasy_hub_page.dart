@@ -145,6 +145,8 @@ void openFantasyHub(
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (hub.mounted) hub._openPlayerProfile(name);
     });
+    // Make sure that frame happens even if nothing else schedules one.
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 }
 

@@ -226,6 +226,49 @@ void main() {
     expect(find.text('Nineveh'), findsOneWidget);
   });
 
+  testWidgets(
+      'Try again on the Table blanks only the Table: Fixtures keeps its '
+      'cards, no full-tab skeleton', (tester) async {
+    final tc = StreamController<List<TournamentTeam>>.broadcast();
+    addTearDown(tc.close);
+    final base = seams();
+    await tester.pumpWidget(host(
+        s: FantasyLeagueSeams(
+      gamesStates: base.gamesStates,
+      standingsFor: (_) => tc.stream,
+      watchLogos: base.watchLogos,
+    )));
+    reportLogos(const {});
+    gamesC.add(games());
+    tc.addError(StateError('boom'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Table'));
+    await tester.pumpAndSettle();
+    expect(find.text("Couldn't load the league"), findsOneWidget);
+
+    await tester.tap(find.text('Try again'));
+    await tester.pump();
+    const full = ValueKey('league_tab_skeleton');
+    const view = ValueKey('league_view_skeleton');
+    expect(find.byKey(full), findsNothing);
+    expect(find.byKey(view), findsOneWidget);
+    expect(find.text('Fixtures'), findsOneWidget); // the switch stays
+
+    await tester.tap(find.text('Fixtures'));
+    await tester.pumpAndSettle();
+    expect(find.text('Ashur'), findsOneWidget);
+    expect(find.byKey(full), findsNothing);
+    expect(find.byKey(view), findsNothing);
+
+    await tester.tap(find.text('Table'));
+    await tester.pump();
+    expect(find.byKey(view), findsOneWidget);
+    tc.add(standings());
+    await tester.pumpAndSettle();
+    expect(find.byKey(view), findsNothing);
+    expect(find.text('Nineveh'), findsOneWidget);
+  });
+
   testWidgets('no games and an empty table show the existing empty states',
       (tester) async {
     await tester.pumpWidget(host());

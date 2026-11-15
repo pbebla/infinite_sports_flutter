@@ -74,6 +74,11 @@ class _FantasyLeagueTabState extends State<FantasyLeagueTab> {
   bool _showTable = false;
   String? _pickedDay;
 
+  /// True once both feeds have been ready (or a revisit was seeded from the
+  /// session): the full-tab skeleton is the FIRST load only. After that a
+  /// feed's "Try again" blanks only its own view, never the other one.
+  bool _revealed = false;
+
   @override
   void initState() {
     super.initState();
@@ -114,6 +119,7 @@ class _FantasyLeagueTabState extends State<FantasyLeagueTab> {
       _games.dispose();
       _table.dispose();
       _pickedDay = null;
+      _revealed = false;
       _startFeeds();
     }
   }
@@ -125,7 +131,10 @@ class _FantasyLeagueTabState extends State<FantasyLeagueTab> {
     super.dispose();
   }
 
-  bool get _ready => _games.ready && _table.ready;
+  bool get _ready {
+    if (!_revealed && _games.ready && _table.ready) _revealed = true;
+    return _revealed;
+  }
 
   void _openMatch(BuildContext context, TournamentMatch match) {
     final open = widget.seams.openMatch;
@@ -170,6 +179,7 @@ class _FantasyLeagueTabState extends State<FantasyLeagueTab> {
 
   Widget _content(BuildContext context) {
     final failed = _showTable ? _table.failed : _games.failed;
+    final loading = _showTable ? !_table.ready : !_games.ready;
     final empty = _showTable ? _table.standings.isEmpty : _games.games.isEmpty;
     return Column(
       key: const ValueKey('league_tab'),
@@ -193,9 +203,12 @@ class _FantasyLeagueTabState extends State<FantasyLeagueTab> {
               ? _LeagueError(
                   onRetry: _showTable ? _table.retry : _games.retry,
                 )
-              : empty
-                  ? _ScrollableFace(child: _view(context))
-                  : _view(context),
+              : loading
+                  ? const _LeagueSkeleton(
+                      key: ValueKey('league_view_skeleton'), withSwitch: false)
+                  : empty
+                      ? _ScrollableFace(child: _view(context))
+                      : _view(context),
         ),
       ],
     );
@@ -283,7 +296,11 @@ class _LeagueError extends StatelessWidget {
 }
 
 class _LeagueSkeleton extends StatelessWidget {
-  const _LeagueSkeleton({super.key});
+  const _LeagueSkeleton({super.key, this.withSwitch = true});
+
+  /// The first-load skeleton also stands in for the Fixtures/Table switch; a
+  /// single view's skeleton sits under the real switch.
+  final bool withSwitch;
 
   @override
   Widget build(BuildContext context) {
@@ -291,16 +308,18 @@ class _LeagueSkeleton extends StatelessWidget {
     return SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-      child: const Column(children: [
-        SkeletonBox(width: double.infinity, height: 40, radius: 20),
-        SizedBox(height: 12),
-        SkeletonBox(width: double.infinity, height: 56, radius: 12),
-        SizedBox(height: 12),
-        SkeletonBox(width: double.infinity, height: 84, radius: 12),
-        SizedBox(height: 10),
-        SkeletonBox(width: double.infinity, height: 84, radius: 12),
-        SizedBox(height: 10),
-        SkeletonBox(width: double.infinity, height: 84, radius: 12),
+      child: Column(children: [
+        if (withSwitch) ...const [
+          SkeletonBox(width: double.infinity, height: 40, radius: 20),
+          SizedBox(height: 12),
+        ],
+        const SkeletonBox(width: double.infinity, height: 56, radius: 12),
+        const SizedBox(height: 12),
+        const SkeletonBox(width: double.infinity, height: 84, radius: 12),
+        const SizedBox(height: 10),
+        const SkeletonBox(width: double.infinity, height: 84, radius: 12),
+        const SizedBox(height: 10),
+        const SkeletonBox(width: double.infinity, height: 84, radius: 12),
       ]),
     );
   }

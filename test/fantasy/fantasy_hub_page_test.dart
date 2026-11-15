@@ -40,6 +40,7 @@ import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/registration/payment_links.dart';
+import 'package:infinite_sports_flutter/widgets/day_pill_strip.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// One recorded call of the hub's profile opener.
@@ -3012,7 +3013,8 @@ void main() {
       await settle(tester);
 
       // Pick the earlier day (3), then tap its card.
-      await tester.tap(find.text('3'));
+      await tester.tap(find.descendant(
+          of: find.byType(DayPillStrip), matching: find.text('3')));
       await settle(tester);
       expect(find.text('Babylon'), findsOneWidget);
       expect(find.text('Ashur'), findsNothing);
@@ -3031,6 +3033,149 @@ void main() {
           FantasyHubTab.league.index);
       expect(find.text('Babylon'), findsOneWidget);
       expect(find.text('Ashur'), findsNothing);
+    });
+
+    testWidgets(
+        'journey: League tab + picked day -> pushed page -> openFantasyHub '
+        'from it -> the SAME Hub, League tab, same day', (tester) async {
+      final gamesC = StreamController<List<TournamentMatch>>.broadcast();
+      final tableC = StreamController<List<TournamentTeam>>.broadcast();
+      addTearDown(() {
+        gamesC.close();
+        tableC.close();
+      });
+      await pumpHub(
+        tester,
+        tab: FantasyHubTab.league,
+        leagueSeams: FantasyLeagueSeams(
+          gamesStates: gamesC.stream,
+          standingsFor: (_) => tableC.stream,
+          watchLogos: (onLogos) {
+            onLogos(const {});
+            return () {};
+          },
+          openMatch: (ctx, m) {
+            Navigator.of(ctx).push(MaterialPageRoute<void>(
+              builder: (_) => Scaffold(
+                body: Builder(
+                  builder: (pageCtx) => Column(children: [
+                    const Text('game page'),
+                    TextButton(
+                      key: const ValueKey('open-fantasy'),
+                      onPressed: () => openFantasyHub(
+                        pageCtx,
+                        const FantasyHubRoute(
+                          sport: 'Futsal',
+                          season: '15',
+                          initialTab: FantasyHubTab.players,
+                        ),
+                      ),
+                      child: const Text('Open Fantasy'),
+                    ),
+                  ]),
+                ),
+              ),
+            ));
+          },
+        ),
+      );
+      await land(tester);
+      gamesC.add(leagueGames());
+      tableC.add(const <TournamentTeam>[]);
+      await settle(tester);
+
+      await tester.tap(find.descendant(
+          of: find.byType(DayPillStrip), matching: find.text('3')));
+      await settle(tester);
+      expect(find.text('Ashur'), findsNothing);
+      final hubBefore = tester.state(find.byType(FantasyHubPage));
+
+      await tester.tap(find.text('Babylon'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.text('game page'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('open-fantasy')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.text('game page'), findsNothing);
+      expect(find.byType(FantasyHubPage, skipOffstage: false), findsOneWidget);
+      // The very same Hub State (it owns the shared draft), not a second one.
+      expect(identical(tester.state(find.byType(FantasyHubPage)), hubBefore),
+          isTrue);
+      expect(find.byType(FantasyLeagueTab), findsOneWidget);
+      expect(
+          DefaultTabController.of(tester.element(find.byType(TabBarView)))
+              .index,
+          FantasyHubTab.league.index);
+      expect(find.text('Babylon'), findsOneWidget);
+      expect(find.text('Ashur'), findsNothing);
+    });
+
+    testWidgets(
+        'header never sticks: collapsed on a long Fixtures list, switching '
+        'to an empty Table re-expands it', (tester) async {
+      final gamesC = StreamController<List<TournamentMatch>>.broadcast();
+      final tableC = StreamController<List<TournamentTeam>>.broadcast();
+      addTearDown(() {
+        gamesC.close();
+        tableC.close();
+      });
+      await pumpHub(
+        tester,
+        tab: FantasyHubTab.league,
+        size: const Size(360, 740),
+        gameweekStates: Stream.value([
+          for (var n = 1; n <= 5; n++)
+            Gameweek(
+              number: n,
+              date: '10${(4 + 7 * (n - 1)).toString().padLeft(2, '0')}2026',
+              lockUtc: DateTime.utc(2026, 10, 4 + 7 * (n - 1), 22),
+              opensUtc: null,
+            ),
+        ]),
+        nowUtc: () => DateTime.utc(2026, 10, 17, 12),
+        leagueSeams: FantasyLeagueSeams(
+          gamesStates: gamesC.stream,
+          standingsFor: (_) => tableC.stream,
+          watchLogos: (onLogos) {
+            onLogos(const {});
+            return () {};
+          },
+        ),
+      );
+      await land(tester, lock: FantasyLockOverride.auto);
+      gamesC.add(leagueMatchesFromDateNode({
+        '07172026': [
+          for (var i = 0; i < 14; i++)
+            {
+              'team1': 'Home $i',
+              'team2': 'Away $i',
+              'team1score': 0,
+              'team2score': 0,
+              'status': 0,
+            },
+        ],
+      }));
+      tableC.add(const <TournamentTeam>[]);
+      await settle(tester);
+
+      bool collapsed() =>
+          key('deadline_slim_countdown').evaluate().isNotEmpty &&
+          find.byType(FantasyBanner).evaluate().isEmpty;
+
+      expect(collapsed(), isFalse);
+      await tester.dragFrom(const Offset(180, 600), const Offset(0, -300));
+      await settle(tester);
+      expect(collapsed(), isTrue, reason: 'a long list collapses the header');
+
+      await tester.tap(find.text('Table'));
+      await settle(tester);
+      expect(find.text('Fixtures'), findsOneWidget);
+      expect(collapsed(), isFalse,
+          reason: 'an empty Table has nothing to scroll: header re-expands');
+      expect(tester.takeException(), isNull);
     });
   });
 }
