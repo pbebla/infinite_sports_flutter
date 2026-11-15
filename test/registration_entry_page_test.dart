@@ -254,4 +254,36 @@ void main() {
       expect(find.text('Sign Up List'), findsNothing);
     });
   });
+
+  // Final small round, N2: "Try again" on a row shows the row's spinner and
+  // keeps the one-tap guard — a second tap meanwhile starts no second check
+  // and only one status page opens.
+  testWidgets('Try again keeps the spinner and the one-tap guard',
+      (tester) async {
+    final opened = await pump(tester, Stream.value(data()));
+    final slow =
+        Completer<({RegistrationRoute route, RegistrationConfig? config})>();
+    var calls = 0;
+    RegistrationOpen.checkOverride = (regId) {
+      calls++;
+      opened.add('checked:$regId');
+      if (calls == 1) {
+        return Future.value(
+            (route: RegistrationRoute.couldNotCheck, config: null));
+      }
+      return slow.future;
+    };
+    await tester.tap(find.text(closedMine.label));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Try again'));
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsOneWidget,
+        reason: 'the retry shows the row spinner');
+    await tester.tap(find.text(closedMine.label)); // impatient second tap
+    await tester.pump();
+    expect(calls, 2, reason: 'no second check while one runs');
+    slow.complete((route: RegistrationRoute.status, config: closedMine));
+    await tester.pumpAndSettle();
+    expect(opened.where((o) => o.startsWith('status:')), ['status:futsal']);
+  });
 }

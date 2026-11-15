@@ -64,7 +64,8 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
     if (_opening != null) return;
     setState(() => _opening = regId);
     try {
-      await RegistrationOpen.open(context, regId);
+      await RegistrationOpen.open(context, regId,
+          onRetry: () => _openRegistration(regId));
     } finally {
       if (mounted) setState(() => _opening = null);
     }

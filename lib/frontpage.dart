@@ -512,17 +512,26 @@ class _FrontPageState extends State<FrontPage> {
           }));
           return;
         }
-        // Way back fix round, Important 1: confirm with the server before
-        // the status page (and its pay actions) opens — the banner's config
-        // can be the phone's saved copy.
-        setState(() => _bannerChecking = true);
-        try {
-          await RegistrationOpen.open(context, owing.regId);
-        } finally {
-          if (mounted) setState(() => _bannerChecking = false);
-        }
+        await _openOwing(owing.regId);
       },
     );
+  }
+
+  /// Way back fix round, Important 1: confirm with the server before the
+  /// status page (and its pay actions) opens — the banner's config can be
+  /// the phone's saved copy. One check at a time; "Try again" comes back
+  /// here (final small round, N2) so it gets the same spinner and guard.
+  Future<void> _openOwing(String regId) async {
+    if (_bannerChecking) return;
+    setState(() => _bannerChecking = true);
+    try {
+      await RegistrationOpen.open(context, regId,
+          onRetry: () {
+            if (mounted) _openOwing(regId);
+          });
+    } finally {
+      if (mounted) setState(() => _bannerChecking = false);
+    }
   }
 
   @override

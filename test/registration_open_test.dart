@@ -117,4 +117,42 @@ void main() {
           reason: '$path must open registrations via RegistrationOpen.open');
     }
   });
+
+  // Final small round, N2: "Try again" goes back through the CALLER's
+  // guarded handler (its spinner and one-tap guard), never around it.
+  testWidgets('Try again calls the caller\'s retry, not a bare re-check',
+      (tester) async {
+    var retries = 0;
+    RegistrationOpen.checkOverride = (regId) async {
+      checked.add(regId);
+      return (route: RegistrationRoute.couldNotCheck, config: null);
+    };
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => TextButton(
+            onPressed: () =>
+                RegistrationOpen.open(context, 'r1', onRetry: () => retries++),
+            child: const Text('tap'),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('tap'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Try again'));
+    await tester.pumpAndSettle();
+    expect(retries, 1);
+    expect(checked, ['r1'], reason: 'the caller runs the retry itself');
+  });
+
+  test('every caller wires Try again to its guarded handler', () {
+    for (final path in [
+      'lib/frontpage.dart',
+      'lib/registration/registration_entry_page.dart',
+    ]) {
+      final src = File(path).readAsStringSync();
+      expect(src.contains('onRetry:'), isTrue, reason: path);
+    }
+  });
 }

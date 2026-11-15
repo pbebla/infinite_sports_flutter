@@ -36,7 +36,11 @@ class RegistrationOpen {
 
   /// Checks [regId] with the server and follows the outcome. Completes when
   /// the check is done (callers show their spinner until then).
-  static Future<void> open(BuildContext context, String regId) async {
+  /// [onRetry] (final small round, N2): the couldn't-check snackbar's
+  /// "Try again" calls the caller's own guarded handler, so the retry gets
+  /// the same spinner and one-tap guard as the first tap.
+  static Future<void> open(BuildContext context, String regId,
+      {VoidCallback? onRetry}) async {
     final entry =
         await (checkOverride ?? RegistrationService.checkEntry)(regId);
     if (!context.mounted) return;
@@ -65,7 +69,11 @@ class RegistrationOpen {
           action: SnackBarAction(
             label: 'Try again',
             onPressed: () {
-              if (context.mounted) open(context, regId);
+              if (onRetry != null) {
+                onRetry();
+              } else if (context.mounted) {
+                open(context, regId);
+              }
             },
           ),
         ));
