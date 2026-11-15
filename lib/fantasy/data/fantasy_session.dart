@@ -11,6 +11,7 @@
 // test/fantasy/fantasy_session_test.dart pins it.
 
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
@@ -25,8 +26,10 @@ import 'package:infinite_sports_flutter/profile/fantasy_profile_source.dart';
 /// the squad-viewer profile lookups and the match tab's earning memory.
 void clearFantasySessionState() {
   FantasyService.clearSessionCaches();
+  FantasyLeagueTableFeed.clearSessionCache(); // League tab standings + crests
   FantasyLiveFeed.clearSessionCache(); // the live gameweek's last state
-  FantasyPlayersTab.clearSessionCaches(); // + games / start-hour / finished feeds
+  // + games / start-hour / finished feeds
+  FantasyPlayersTab.clearSessionCaches();
   FantasyPlayerProfilePage.clearSessionCaches(); // + schedule feed
   FantasyProfileSource.clearSessionCaches(); // + season resolution
   FantasyPlayersTab.sessionSort = MarketSort.points;

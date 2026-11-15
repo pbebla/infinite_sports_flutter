@@ -12,6 +12,10 @@
 //   [FantasyLeagueGamesFeed]: the season's legacy start hour → the league
 //   games derived with it.
 //
+//   [FantasyLeagueTableFeed]: the season's standings + crest map for the
+//   Fantasy Hub's League tab (re-subscribes with the crests; ready waits for
+//   both).
+//
 //   [FantasySeasonFinishedFeed]: the league's own `Finished` flag — the
 //   screens drop their price arrows once the season is over.
 //
@@ -62,6 +66,8 @@ import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/misc/bounded_read.dart';
 import 'package:infinite_sports_flutter/misc/feed_backoff.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
+import 'package:infinite_sports_flutter/misc/team_logos.dart';
+import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/misc/fresh_read.dart';
 
@@ -652,6 +658,8 @@ class FantasyLeagueGamesFeed {
   bool _gamesLoaded = false;
   bool _gamesHourKnown = false;
   bool _hourPending = false;
+  bool _hasGames = false; // real games ever loaded (here or session)
+  bool _failed = false;
   int? _hour; // the latest start hour read (0 = unknown)
 
   StreamSubscription<List<TournamentMatch>>? _gamesSub;
@@ -662,6 +670,29 @@ class FantasyLeagueGamesFeed {
   /// The games have landed (or failed) and no first-visit hour read is
   /// pending — joins the owner's reveal gate.
   bool get ready => _gamesLoaded && !_hourPending;
+
+  /// The latest games answer was an error and no games were ever loaded (in
+  /// this feed or the session cache): what the games are is UNKNOWN. Any
+  /// data clears it; an error after good games leaves it false.
+  bool get failed => _failed;
+
+  /// The fan's "Try again": clears [failed], goes back to not ready and
+  /// re-subscribes with the hour it has. A no-op when disposed.
+  void retry() {
+    if (_disposed || !_started) return;
+    _failed = false;
+    _gamesLoaded = _hasGames;
+    _gamesSub?.cancel();
+    _gamesSub = null;
+    final seam = gamesStates;
+    if (seam != null) {
+      _listenGames(() => seam,
+          hourKnown: () => _loadStartHour == null || (_hour ?? 0) > 0);
+    } else if (_hour != null) {
+      _applyHour(_hour!); // no hour yet: its arrival subscribes
+    }
+    _notify();
+  }
 
   /// Whether the games ON SCREEN were derived with a real start hour (fed
   /// games: whether the loaded hour is real). false → a derived time must be
@@ -681,6 +712,7 @@ class FantasyLeagueGamesFeed {
         _games = snap.games;
         _gamesHourKnown = snap.hourKnown;
         _gamesLoaded = true;
+        _hasGames = true;
       }
       final seam = gamesStates;
       if (seam != null) {
@@ -757,11 +789,173 @@ class FantasyLeagueGamesFeed {
         _games = games;
         _gamesHourKnown = hourKnown();
         _gamesLoaded = true;
+        _hasGames = true;
+        _failed = false;
         _gamesSession[_sessionKey] = (games: games, hourKnown: _gamesHourKnown);
         _notify();
       },
       onError: () {
         _gamesLoaded = true; // the last good games stay
+        if (!_hasGames) _failed = true;
+        _notify();
+      },
+    );
+  }
+}
+
+/// The season's standings and crest map behind the Fantasy Hub's League tab —
+/// the `LeagueDetailPage._subscribeStandings` + `_loadDisplaySeeds` wiring in
+/// one feed. The crests ([watchSeasonLogos], never synchronous) report first
+/// and the standings subscribe WITH them, so crests never pop in after the
+/// rows; whenever the crests change the standings re-subscribe with the new
+/// map and the rows on screen stay until the new answer arrives.
+///   • [ready]: the logos have reported once AND the standings answered (data
+///     or error) — one reveal;
+///   • [failed]: the standings errored and none were ever loaded (here or in
+///     the session cache) — an error is not "no teams"; the last good rows
+///     stay after a later error;
+///   • session cache per `<sport>|<season>`: a revisit is ready at once.
+class FantasyLeagueTableFeed {
+  FantasyLeagueTableFeed({
+    required this.sport,
+    required this.season,
+    required this.owner,
+    required this.onChanged,
+    Stream<List<TournamentTeam>> Function(Map<String, String> logos)?
+        standingsFor,
+    VoidCallback Function(void Function(Map<String, String> logos) onLogos)?
+        watchLogos,
+  })  : _standingsFor = standingsFor,
+        _watchLogos = watchLogos;
+
+  final String sport;
+  final String season;
+  final String owner;
+  final VoidCallback onChanged;
+
+  /// Test seam replacing `LeagueService.watchStandings(sport, season, logos)`.
+  final Stream<List<TournamentTeam>> Function(Map<String, String> logos)?
+      _standingsFor;
+
+  /// Test seam replacing `watchSeasonLogos(sport, season, onLogos)`; returns
+  /// the stop function.
+  final VoidCallback Function(void Function(Map<String, String> logos) onLogos)?
+      _watchLogos;
+
+  static final Map<String,
+          ({List<TournamentTeam> standings, Map<String, String> logos})>
+      _session = {};
+
+  /// Clears the shared standings cache (sign-out hygiene, tests).
+  static void clearSessionCache() => _session.clear();
+
+  String get _sessionKey => '$sport|$season';
+
+  bool _started = false;
+  bool _starting = false;
+  bool _disposed = false;
+
+  List<TournamentTeam> _standings = const [];
+  Map<String, String> _logos = const {};
+  bool _logosLoaded = false;
+  bool _answered = false; // standings data or error since (re)start
+  bool _hasStandings = false;
+  bool _failed = false;
+
+  VoidCallback? _stopLogos;
+  StreamSubscription<List<TournamentTeam>>? _sub;
+
+  List<TournamentTeam> get standings => _standings;
+  Map<String, String> get logos => _logos;
+
+  /// The logos have reported once AND the standings answered or failed.
+  bool get ready => _logosLoaded && _answered;
+
+  /// The standings errored and none were ever loaded: UNKNOWN, not empty.
+  bool get failed => _failed;
+
+  /// Seeds from the session and starts watching. Never notifies
+  /// synchronously.
+  void start() {
+    if (_started || _disposed) return;
+    _started = true;
+    _starting = true;
+    try {
+      final snap = _session[_sessionKey];
+      if (snap != null) {
+        _standings = snap.standings;
+        _logos = snap.logos;
+        _logosLoaded = true;
+        _answered = true;
+        _hasStandings = true;
+      }
+      try {
+        _stopLogos = (_watchLogos ?? _defaultWatchLogos)(_onLogos);
+      } catch (e) {
+        _logFailure(owner, 'logos feed', e);
+        _onLogos(_logos); // no crests: the rows still show
+      }
+    } finally {
+      _starting = false;
+    }
+  }
+
+  VoidCallback _defaultWatchLogos(
+          void Function(Map<String, String> logos) onLogos) =>
+      watchSeasonLogos(sport, season, onLogos);
+
+  /// The fan's "Try again": clears [failed], back to not ready, re-subscribes.
+  /// A no-op when disposed.
+  void retry() {
+    if (_disposed || !_started) return;
+    _failed = false;
+    _answered = _hasStandings;
+    if (_logosLoaded) _subscribe();
+    _notify();
+  }
+
+  void dispose() {
+    _disposed = true;
+    _stopLogos?.call();
+    _stopLogos = null;
+    _sub?.cancel();
+    _sub = null;
+  }
+
+  void _notify() {
+    if (!_disposed && !_starting) onChanged();
+  }
+
+  void _onLogos(Map<String, String> logos) {
+    if (_disposed) return;
+    _logos = logos;
+    _logosLoaded = true;
+    _subscribe(); // re-map the rows with the crests; old rows stay meanwhile
+    _notify();
+  }
+
+  void _subscribe() {
+    _sub?.cancel();
+    _sub = null;
+    final logos = _logos;
+    _sub = _listenLogged<List<TournamentTeam>>(
+      owner: owner,
+      what: 'standings feed',
+      make: () =>
+          _standingsFor?.call(logos) ??
+          LeagueService.watchStandings(sport, season, logos),
+      disposed: () => _disposed,
+      onData: (rows) {
+        _standings = rows;
+        _hasStandings = true;
+        _answered = true;
+        _failed = false;
+        _session[_sessionKey] = (standings: rows, logos: logos);
+        _notify();
+      },
+      onError: () {
+        _answered = true; // the last good rows stay
+        if (!_hasStandings) _failed = true;
         _notify();
       },
     );
