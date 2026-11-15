@@ -16,11 +16,9 @@ import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/attendee.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
 import 'package:infinite_sports_flutter/model/myuser.dart';
-import 'package:infinite_sports_flutter/registration/registration_path_page.dart';
-import 'package:infinite_sports_flutter/registration/live_registration_config.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
 import 'package:infinite_sports_flutter/registration/registration_service.dart';
-import 'package:infinite_sports_flutter/registration/registration_status_page.dart';
+import 'package:infinite_sports_flutter/registration/registration_open.dart';
 import 'package:infinite_sports_flutter/misc/ics.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:path_provider/path_provider.dart';
@@ -287,32 +285,23 @@ class _EventPageState extends State<EventPage> {
   /// come from the server — a saved copy or a failed read shows "couldn't
   /// check" instead of letting the fan in on an old fee or back into the
   /// form over an existing submission. [registrationRoute] decides.
+  ///
+  /// Final small round, N7: the routing is the shared
+  /// [RegistrationOpen.open] (the same outcomes as before), so "couldn't
+  /// check" now has a Try again — which comes back here, through this
+  /// page's own spinner and one-tap guard.
   Future<void> _register() async {
+    if (_registering) return;
     final regId = event.registrationId!;
     setState(() => _registering = true);
-    // Both checks at once: one round trip online, one bound offline.
-    final entry = await RegistrationService.checkEntry(regId);
-    if (!mounted) return;
-    setState(() => _registering = false);
-    final config = entry.config;
-    switch (entry.route) {
-      case RegistrationRoute.closed:
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Registration is closed')));
-      case RegistrationRoute.couldNotCheck:
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text(kRegistrationCouldNotCheck)));
-      case RegistrationRoute.unavailable:
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text(kRegistrationUnavailable)));
-      case RegistrationRoute.status:
-        Navigator.push(context, MaterialPageRoute(builder: (_) {
-          return RegistrationStatusPage(regId: regId, config: config!);
-        }));
-      case RegistrationRoute.register:
-        Navigator.push(context, MaterialPageRoute(builder: (_) {
-          return RegistrationPathPage(regId: regId, config: config!);
-        }));
+    try {
+      // Both checks at once (checkEntry): one round trip online, one bound
+      // offline.
+      await RegistrationOpen.open(context, regId, onRetry: () {
+        if (mounted) _register();
+      });
+    } finally {
+      if (mounted) setState(() => _registering = false);
     }
   }
 

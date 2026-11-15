@@ -9,6 +9,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/eventpage.dart';
 import 'package:infinite_sports_flutter/model/event.dart';
 import 'package:infinite_sports_flutter/registration/registration_models.dart';
+import 'package:infinite_sports_flutter/registration/live_registration_config.dart';
+import 'package:infinite_sports_flutter/registration/registration_open.dart';
+import 'package:infinite_sports_flutter/registration/registration_service.dart';
 
 Event _event() {
   final e = Event()
@@ -85,5 +88,44 @@ void main() {
     await tester.pump();
     expect(find.text('View my registration'), findsOneWidget);
     await mine.close();
+  });
+
+  // Final small round, N7: the event page's Register goes through the shared
+  // RegistrationOpen path, so "couldn't check" has a Try again (kept behind
+  // the page's own spinner and one-tap guard).
+  testWidgets('couldn\'t check offers Try again, which then opens once',
+      (tester) async {
+    const config = RegistrationConfig(
+      targetType: 'league',
+      sport: 'Futsal',
+      season: '16',
+      status: 'open',
+      fee: 60,
+      paymentMode: 'perPlayer',
+    );
+    final answers = [
+      (route: RegistrationRoute.couldNotCheck, config: null),
+      (route: RegistrationRoute.register, config: config),
+    ];
+    var checks = 0;
+    final opened = <String>[];
+    RegistrationOpen.checkOverride = (regId) async => answers[checks++];
+    RegistrationOpen.pathPageOverride = (regId, c) {
+      opened.add('path:$regId');
+      return const Scaffold(body: Text('path page'));
+    };
+    addTearDown(() {
+      RegistrationOpen.checkOverride = null;
+      RegistrationOpen.pathPageOverride = null;
+    });
+    await pump(tester, Stream.value(null));
+    await tester.tap(find.text('Register'));
+    await tester.pumpAndSettle();
+    expect(find.text(kRegistrationCouldNotCheck), findsOneWidget);
+    expect(opened, isEmpty);
+    await tester.tap(find.text('Try again'));
+    await tester.pumpAndSettle();
+    expect(checks, 2);
+    expect(opened, ['path:Futsal-16']);
   });
 }
