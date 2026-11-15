@@ -1,10 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:infinite_sports_flutter/league_match_detail.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
+import 'package:infinite_sports_flutter/misc/league_navigation.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
-import 'package:infinite_sports_flutter/misc/schedule_display.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/scorepage.dart';
@@ -107,17 +106,11 @@ class _LeagueDayViewState extends State<LeagueDayView> {
     // San Jose (and any unknown sport) keeps the legacy ScorePage (with its
     // voting UI).
     if (isLeagueEngineSport(widget.sport)) {
-      Navigator.push(
+      openLeagueMatch(
         mainContext!,
-        MaterialPageRoute(
-          builder: (_) => LeagueMatchDetailPage(
-            sport: widget.sport,
-            season: widget.season,
-            dateKey: ref.dateKey,
-            gameIndex: ref.index,
-            initialMatch: m,
-          ),
-        ),
+        sport: widget.sport,
+        season: widget.season,
+        match: m,
       );
       return;
     }
@@ -186,18 +179,9 @@ class _LeagueDayViewState extends State<LeagueDayView> {
         ),
       );
     }
-    // Logo-backed teams, plus stubs for any real team name the logo map
-    // missed, so a logo-less team still shows its name on the card (FixturesTab
-    // prints 'Seed #N' instead when the team is unresolved and the game
-    // carries a seed, as league playoff games can).
-    // Placeholders ('Winner of SF1') are skipped.
-    final teams = leagueTeamsById(const [], _logos);
-    for (final m in matches) {
-      for (final name in [m.team1Id, m.team2Id]) {
-        if (name == null || name.isEmpty || isPlaceholderTeam(name)) continue;
-        teams.putIfAbsent(name, () => leagueTeamStub(name, null));
-      }
-    }
+    // Logo-backed teams plus name-only stubs so a logo-less team keeps its
+    // name on the card.
+    final teams = leagueCardTeams(matches, const [], _logos);
     return FixturesTab(
       matches: matches,
       teams: teams,

@@ -4,15 +4,14 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
-import 'package:infinite_sports_flutter/league_match_detail.dart';
 import 'package:infinite_sports_flutter/league_tabs/league_fantasy_tab.dart';
 import 'package:infinite_sports_flutter/league_tabs/league_fixtures_tab.dart';
 import 'package:infinite_sports_flutter/league_tabs/league_player_stats_tab.dart';
 import 'package:infinite_sports_flutter/league_tabs/league_playoffs_tab.dart';
 import 'package:infinite_sports_flutter/league_tabs/league_table_tab.dart';
 import 'package:infinite_sports_flutter/league_tabs/league_teams_tab.dart';
-import 'package:infinite_sports_flutter/league_team_detail.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
+import 'package:infinite_sports_flutter/misc/league_navigation.dart';
 import 'package:infinite_sports_flutter/misc/league_playoffs_view.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
 import 'package:infinite_sports_flutter/misc/team_logos.dart';
@@ -294,33 +293,13 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
       );
 
   void _openMatch(TournamentMatch m) {
-    final ref = parseLeagueGameId(m.id);
-    if (ref == null) return;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => LeagueMatchDetailPage(
-          sport: widget.sport,
-          season: widget.season,
-          dateKey: ref.dateKey,
-          gameIndex: ref.index,
-          initialMatch: m,
-        ),
-      ),
-    );
+    openLeagueMatch(context,
+        sport: widget.sport, season: widget.season, match: m);
   }
 
   void _openTeam(String teamName) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => LeagueTeamDetailPage(
-          sport: widget.sport,
-          season: widget.season,
-          teamName: teamName,
-        ),
-      ),
-    );
+    openLeagueTeam(context,
+        sport: widget.sport, season: widget.season, teamName: teamName);
   }
 
   @override
@@ -406,7 +385,8 @@ class _LeagueDetailPageState extends State<LeagueDetailPage>
                 children: [
                   LeagueFixturesTab(
                     matches: matches,
-                    teams: _teamsById,
+                    teams: leagueCardTeams(
+                        matches, _standings ?? const [], _logos),
                     rosters: _rosters ?? const {},
                     sport: widget.sport,
                     onMatchTap: _openMatch,

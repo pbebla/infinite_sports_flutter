@@ -312,6 +312,25 @@ Map<String, String> leagueCaptainsFromTeamsNode(dynamic teamsNode) {
   return out;
 }
 
+/// [leagueTeamsById] plus a name-only stub for every real team in [matches]
+/// that has neither a standings row nor a crest, so a card shows the team's
+/// name (FixturesTab prints 'Seed #N' for an unresolved team when the game
+/// carries a seed, as playoff games can). Placeholders ('Winner of SF1') are
+/// skipped.
+Map<String, TournamentTeam> leagueCardTeams(
+    List<TournamentMatch> matches,
+    List<TournamentTeam> standings,
+    Map<String, String> logoUrls) {
+  final teams = leagueTeamsById(standings, logoUrls);
+  for (final m in matches) {
+    for (final name in [m.team1Id, m.team2Id]) {
+      if (name == null || name.isEmpty || isPlaceholderTeam(name)) continue;
+      teams.putIfAbsent(name, () => leagueTeamStub(name, null));
+    }
+  }
+  return teams;
+}
+
 /// Standings rows + the season logo map -> the `Map<teamId, team>` the
 /// tournament widgets take. Teams with a logo but no standings row (fresh
 /// seasons) get stubs so crests still render everywhere.
