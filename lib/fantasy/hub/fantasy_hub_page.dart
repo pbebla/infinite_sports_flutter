@@ -80,6 +80,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/collapsing_tab_shell.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_league_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_walkthrough.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart';
@@ -182,6 +183,7 @@ class FantasyHubPage extends StatefulWidget {
     this.publishedPicksFor,
     this.overallStandingStates,
     this.playerTotalsStates,
+    this.leagueSeams,
   });
 
   final String sport;
@@ -285,6 +287,9 @@ class FantasyHubPage extends StatefulWidget {
 
   /// Forwarded to the Players tab (replaces `FantasyService.watchPlayerTotals`).
   final Stream<Map<String, FantasyPlayerTotals>?>? playerTotalsStates;
+
+  /// Test seams forwarded to the League tab (null = production).
+  final FantasyLeagueSeams? leagueSeams;
 
   @override
   State<FantasyHubPage> createState() => _FantasyHubPageState();
@@ -1062,6 +1067,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
         newsStates: widget.newsStates,
         leaderboardsFeeds: widget.leaderboardsFeeds,
         playerTotalsStates: widget.playerTotalsStates,
+        leagueSeams: widget.leagueSeams,
         deadlineClock: _deadlineClock,
         primaryScroll: _primaryScroll,
       );
@@ -1144,6 +1150,7 @@ class _HubBody extends StatelessWidget {
     this.newsStates,
     this.leaderboardsFeeds,
     this.playerTotalsStates,
+    this.leagueSeams,
   });
 
   /// The hub's one deadline tick, shared by both header faces.
@@ -1223,6 +1230,9 @@ class _HubBody extends StatelessWidget {
   /// Test seam forwarded to the Players tab (null = the real feed).
   final Stream<Map<String, FantasyPlayerTotals>?>? playerTotalsStates;
 
+  /// Test seams forwarded to the League tab (null = production).
+  final FantasyLeagueSeams? leagueSeams;
+
   @override
   Widget build(BuildContext context) {
     // Release report #8: the header shrinks to a slim pinned bar once the
@@ -1230,7 +1240,14 @@ class _HubBody extends StatelessWidget {
     return CollapsingTabShell(
       initialIndex: initialTab.index,
       primaryScrollController: primaryScroll,
-      tabs: const ['My Team', 'Players', 'Leaderboards', 'News', 'Rules'],
+      tabs: const [
+        'My Team',
+        'Players',
+        'League',
+        'Leaderboards',
+        'News',
+        'Rules',
+      ],
       expandedHeader: Padding(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
         child: FantasyBanner(
@@ -1316,6 +1333,12 @@ class _HubBody extends StatelessWidget {
           scheduleUnknown: scheduleUnknown,
           scheduleGaveUp: onRetrySchedule != null,
           totalsStates: playerTotalsStates,
+        ),
+        // The league's fixtures and table, like the league page's own.
+        FantasyLeagueTab(
+          sport: sport,
+          season: season,
+          seams: leagueSeams ?? const FantasyLeagueSeams(),
         ),
         // Overall/gameweek standings, mini-leagues and the manager
         // squad viewer (P3d, spec §9/§10).

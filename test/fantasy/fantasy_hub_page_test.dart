@@ -28,6 +28,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/dream_team_card.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_league_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/my_team_tab.dart';
@@ -35,6 +36,9 @@ import 'package:infinite_sports_flutter/fantasy/hub/news_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/players_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/transfer_preview.dart';
+import 'package:infinite_sports_flutter/misc/league_adapters.dart';
+import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
+import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/registration/payment_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -204,6 +208,7 @@ void main() {
     // true = the recorded profile open then PUSHES a profile page and waits on
     // it, like the real opener does.
     bool profilePushes = false,
+    FantasyLeagueSeams? leagueSeams,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -234,6 +239,7 @@ void main() {
         publishedPicksFor: publishedPicksFor,
         overallStandingStates: overallStandingStates,
         playerTotalsStates: playerTotalsStates,
+        leagueSeams: leagueSeams,
         priceHistoryStates: priceHistory.stream,
         createCheckoutUrl: () async {
           checkoutCalls++;
@@ -2698,6 +2704,7 @@ void main() {
         for (final l in [
           'My Team',
           'Players',
+          'League',
           'Leaderboards',
           'News',
           'Rules'
@@ -2911,6 +2918,119 @@ void main() {
 
       await tapOpen(tester);
       expect(find.text('pushed 15'), findsOneWidget);
+    });
+  });
+
+  group('the League tab', () {
+    List<TournamentMatch> leagueGames() => leagueMatchesFromDateNode({
+          '07032026': [
+            {
+              'team1': 'Babylon',
+              'team2': 'Nineveh',
+              'team1score': 2,
+              'team2score': 1,
+              'status': 2,
+            },
+          ],
+          '07172026': [
+            {
+              'team1': 'Ashur',
+              'team2': 'Akkad',
+              'team1score': 0,
+              'team2score': 0,
+              'status': 0,
+            },
+          ],
+        });
+
+    setUp(() {
+      FantasyLeagueGamesFeed.clearSessionCache();
+      FantasyLeagueTableFeed.clearSessionCache();
+    });
+
+    testWidgets('the tab row reads My Team, Players, League, Leaderboards, '
+        'News, Rules', (tester) async {
+      await pumpHub(tester);
+      await land(tester);
+      final labels = tester
+          .widgetList<Tab>(find.byType(Tab))
+          .map((t) => t.text)
+          .toList();
+      expect(labels,
+          ['My Team', 'Players', 'League', 'Leaderboards', 'News', 'Rules']);
+      expect(FantasyHubTab.values, [
+        FantasyHubTab.myTeam,
+        FantasyHubTab.players,
+        FantasyHubTab.league,
+        FantasyHubTab.leaderboards,
+        FantasyHubTab.news,
+        FantasyHubTab.rules,
+      ]);
+    });
+
+    testWidgets('opening the Hub on FantasyHubTab.league shows the League tab',
+        (tester) async {
+      await pumpHub(tester, tab: FantasyHubTab.league);
+      await land(tester);
+      expect(find.byType(FantasyLeagueTab), findsOneWidget);
+      expect(
+          DefaultTabController.of(tester.element(find.byType(TabBarView)))
+              .index,
+          FantasyHubTab.league.index);
+    });
+
+    testWidgets(
+        'on the League tab: pick a day, tap a card, come back: still League, '
+        'same day', (tester) async {
+      final gamesC = StreamController<List<TournamentMatch>>.broadcast();
+      final tableC = StreamController<List<TournamentTeam>>.broadcast();
+      addTearDown(() {
+        gamesC.close();
+        tableC.close();
+      });
+      var opens = 0;
+      await pumpHub(
+        tester,
+        tab: FantasyHubTab.league,
+        leagueSeams: FantasyLeagueSeams(
+          gamesStates: gamesC.stream,
+          standingsFor: (_) => tableC.stream,
+          watchLogos: (onLogos) {
+            onLogos(const {});
+            return () {};
+          },
+          openMatch: (ctx, m) {
+            opens++;
+            Navigator.of(ctx).push(MaterialPageRoute<void>(
+                builder: (_) => const Scaffold(body: Text('game page'))));
+          },
+        ),
+      );
+      await land(tester);
+      gamesC.add(leagueGames());
+      tableC.add(const <TournamentTeam>[]);
+      await settle(tester);
+
+      // Pick the earlier day (3), then tap its card.
+      await tester.tap(find.text('3'));
+      await settle(tester);
+      expect(find.text('Babylon'), findsOneWidget);
+      expect(find.text('Ashur'), findsNothing);
+      await tester.tap(find.text('Babylon'));
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(opens, 1);
+      expect(find.text('game page'), findsOneWidget);
+
+      Navigator.of(tester.element(find.text('game page'))).pop();
+      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      expect(find.text('game page'), findsNothing);
+      expect(find.byType(FantasyLeagueTab), findsOneWidget);
+      expect(
+          DefaultTabController.of(tester.element(find.byType(TabBarView)))
+              .index,
+          FantasyHubTab.league.index);
+      expect(find.text('Babylon'), findsOneWidget);
+      expect(find.text('Ashur'), findsNothing);
     });
   });
 }
