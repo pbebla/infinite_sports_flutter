@@ -286,4 +286,30 @@ void main() {
     await tester.pumpAndSettle();
     expect(opened.where((o) => o.startsWith('status:')), ['status:futsal']);
   });
+
+  // Final small round, N3: once the list has shown data, a later error
+  // keeps the last good list (with a small "couldn't refresh" line); the
+  // full "Couldn't load" only when nothing was ever shown.
+  for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+    testWidgets('${mode.name} 360 px: an error after data keeps the list',
+        (tester) async {
+      final c = StreamController<MyRegistrations>();
+      addTearDown(c.close);
+      await pump(tester, c.stream, mode: mode);
+      c.add(data());
+      await tester.pump();
+      expect(find.text(closedMine.label), findsOneWidget);
+      c.addError(StateError('later read failed'));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(find.text(closedMine.label), findsOneWidget,
+          reason: 'the last good list stays');
+      expect(find.text(kRegistrationsCouldNotLoad), findsNothing);
+      expect(find.text(kRegistrationsCouldNotRefresh), findsOneWidget);
+      c.add(data()); // the stream recovers
+      await tester.pump();
+      expect(find.text(kRegistrationsCouldNotRefresh), findsNothing);
+      expect(find.text(closedMine.label), findsOneWidget);
+    });
+  }
 }

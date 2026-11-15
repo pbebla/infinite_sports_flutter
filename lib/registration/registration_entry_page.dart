@@ -11,6 +11,11 @@ import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 const String kRegistrationsCouldNotLoad =
     "Couldn't load your registrations. Try again.";
 
+/// The small line above a list that is still shown after a later read
+/// failed (final small round, N3).
+const String kRegistrationsCouldNotRefresh =
+    "Couldn't refresh — showing your last loaded registrations.";
+
 /// The registration list (home banner / drawer), LIVE, in two groups:
 ///   1. "My registrations" — every existing registration the signed-in fan
 ///      has a submission in, OPEN OR CLOSED (way back, owner-approved
@@ -52,6 +57,9 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
     _regs = _watch();
   }
 
+  /// The last list shown (kept across a later stream error, N3).
+  MyRegistrations? _lastGood;
+
   /// The registration being checked with the server (one tap at a time).
   String? _opening;
 
@@ -92,15 +100,21 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
       body: StreamBuilder<MyRegistrations>(
         stream: _regs,
         builder: (context, snapshot) {
-          if (snapshot.hasError && !snapshot.hasData) {
+          // Final small round, N3: StreamBuilder drops its data on an error,
+          // so the last good list is kept here; a later error keeps showing
+          // it (with a small "couldn't refresh" line). The full "Couldn't
+          // load" is only for an error before anything was shown.
+          if (snapshot.hasData) _lastGood = snapshot.data;
+          final refreshFailed = snapshot.hasError && _lastGood != null;
+          if (snapshot.hasError && _lastGood == null) {
             return _loadFailed();
           }
-          if (!snapshot.hasData) {
+          if (_lastGood == null) {
             // Skeleton sweep (F3 Fix 2): "sign-ups/registration list"
             // priority spot — matches the list below.
             return const SkeletonList();
           }
-          final regs = snapshot.data!;
+          final regs = _lastGood!;
           final legacy = widget.legacySignUp;
           if (regs.mine.isEmpty &&
               regs.openForSignUp.isEmpty &&
@@ -112,6 +126,14 @@ class _RegistrationEntryPageState extends State<RegistrationEntryPage> {
             padding: EdgeInsets.only(
                 bottom: 8 + MediaQuery.paddingOf(context).bottom),
             children: [
+              if (refreshFailed)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Text(kRegistrationsCouldNotRefresh,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color:
+                              Theme.of(context).colorScheme.onSurfaceVariant)),
+                ),
               if (regs.mine.isNotEmpty) ...[
                 _header(context, 'My registrations'),
                 for (final m in regs.mine) _mineTile(context, m),
