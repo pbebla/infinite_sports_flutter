@@ -798,6 +798,9 @@ const MANAGERS_VALIDATE =
   "(!data.child('NameFlagged').exists() || data.child('NameFlagged').val() != true || " +
   "newData.child('TeamName').val() != data.child('TeamName').val())))";
 
+const SUBMISSION_VALIDATE =
+  "root.child('Admins').child(auth.uid).exists() || ((!data.exists() || (newData.child('Paid').val() == data.child('Paid').val() && newData.child('PaidVia').val() == data.child('PaidVia').val() && newData.child('PaidAmount').val() == data.child('PaidAmount').val())) && (!newData.child('Paid').exists() || newData.child('Paid').val() == false || data.child('Paid').val() == true || (newData.child('TeamId').isString() && newData.child('TeamId').val().matches(/^[A-Za-z0-9_-]+$/) && root.child('Registrations').child($regId).child('Teams').child(newData.child('TeamId').val()).child('CodeWaivesPayment').val() == true && root.child('Registrations').child($regId).child('Teams').child(newData.child('TeamId').val()).child('Status').val() == 'approved')))";
+
 describe.each(RULES_FILES)('rules contract: registration, profile history, team names - %s', (file) => {
   const rules = loadRules(file)['rules'];
 
@@ -837,13 +840,11 @@ describe.each(RULES_FILES)('rules contract: registration, profile history, team 
   });
 
   it('Registrations Submissions/$uid: a non-admin can never change Paid, PaidVia or PaidAmount on an existing submission', () => {
-    const v = String(rules['Registrations']['$regId']['Submissions']['$uid']['.validate']);
-    expect(v.startsWith(
-      "root.child('Admins').child(auth.uid).exists() || ((!data.exists() || (" +
-      "newData.child('Paid').val() == data.child('Paid').val() && " +
-      "newData.child('PaidVia').val() == data.child('PaidVia').val() && " +
-      "newData.child('PaidAmount').val() == data.child('PaidAmount').val())) && (")).toBe(true);
-    expect(v.endsWith('))')).toBe(true);
+    // The WHOLE expression is pinned, so no part (admin gate, frozen payment
+    // fields, the old Paid:false / already-paid / team-code clauses) can be
+    // dropped quietly, and both files stay textually identical.
+    expect(rules['Registrations']['$regId']['Submissions']['$uid']['.validate'])
+      .toBe(SUBMISSION_VALIDATE);
   });
 
   // Trophies, league/tournament history (mirrored to the public profile)
