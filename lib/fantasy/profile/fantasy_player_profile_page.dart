@@ -175,7 +175,8 @@ class FantasyPlayerProfilePage extends StatefulWidget {
       openFullProfile;
   /// "Open in Fantasy" (from outside the hub): receives the hub route that
   /// lands on the Players tab and then THIS player's profile
-  /// ([fantasyRouteForPlayer]). null = pushes [fantasyHubPageRoute] for it.
+  /// ([fantasyRouteForPlayer]). null = [openFantasyHub]: back to a Hub already
+  /// open for this season, else pushes [fantasyHubPageRoute] for it.
   final void Function(BuildContext context, FantasyHubRoute route)?
       openInFantasy;
   final DateTime Function()? nowUtc;

@@ -118,7 +118,8 @@ class FantasyProfileSeams {
   final String? selfUidOverride;
 
   /// "Open in Fantasy": receives the hub route (Players tab + his name).
-  /// null = pushes `fantasyHubPageRoute(route)`.
+  /// null = [openFantasyHub]: back to a Hub already open for this season,
+  /// else pushes `fantasyHubPageRoute(route)`.
   final void Function(BuildContext context, FantasyHubRoute route)?
       openInFantasy;
 

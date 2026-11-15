@@ -118,7 +118,8 @@ MaterialPageRoute<void> fantasyHubPageRoute(FantasyHubRoute route) =>
 /// is above it) instead of stacking a second Hub — a second Hub would own a
 /// second squad draft, whose unsaved picks could overwrite a save made in the
 /// first. A named player's profile then opens through that Hub's own opener
-/// (with its shared draft); its current tab never changes. Otherwise pushes
+/// (with its shared draft); its current tab never changes, and
+/// `route.focusPostId` is ignored on this return branch. Otherwise pushes
 /// [routeFor] (default [fantasyHubPageRoute]).
 void openFantasyHub(
   BuildContext context,
@@ -135,7 +136,15 @@ void openFantasyHub(
   final hubRoute = hub._route!;
   navigator.popUntil((r) => identical(r, hubRoute));
   final name = route.initialPlayerName;
-  if (name != null) hub._openPlayerProfile(name);
+  if (name != null) {
+    // Deferred: a profile the Hub had open is popped by the popUntil above
+    // but its opener only clears `_openingPlayer` in a later microtask, so
+    // opening now would be dropped. By the next frame the flag has cleared
+    // (same pattern as [_openPendingPlayer]).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (hub.mounted) hub._openPlayerProfile(name);
+    });
+  }
 }
 
 class FantasyHubPage extends StatefulWidget {

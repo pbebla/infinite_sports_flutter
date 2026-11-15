@@ -19,7 +19,8 @@ class LeagueFantasyTab extends StatelessWidget {
   final String sport;
   final String season;
 
-  /// Test seam — production leaves it null and pushes the hub.
+  /// Test seam — production leaves it null and goes through [openFantasyHub]
+  /// (back to an open Hub for this season, else pushes one).
   final VoidCallback? onEnter;
 
   void _openHub(BuildContext context) {
