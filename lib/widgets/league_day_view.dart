@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/league_match_detail.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
 import 'package:infinite_sports_flutter/misc/league_service.dart';
+import 'package:infinite_sports_flutter/misc/schedule_display.dart';
 import 'package:infinite_sports_flutter/misc/utility.dart';
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/scorepage.dart';
@@ -185,9 +186,21 @@ class _LeagueDayViewState extends State<LeagueDayView> {
         ),
       );
     }
+    // Logo-backed teams, plus stubs for any real team name the logo map
+    // missed, so a logo-less team still shows its name on the card (FixturesTab
+    // prints 'Seed #N' instead when the team is unresolved and the game
+    // carries a seed, as league playoff games can).
+    // Placeholders ('Winner of SF1') are skipped.
+    final teams = leagueTeamsById(const [], _logos);
+    for (final m in matches) {
+      for (final name in [m.team1Id, m.team2Id]) {
+        if (name == null || name.isEmpty || isPlaceholderTeam(name)) continue;
+        teams.putIfAbsent(name, () => leagueTeamStub(name, null));
+      }
+    }
     return FixturesTab(
       matches: matches,
-      teams: leagueTeamsById(const [], _logos),
+      teams: teams,
       rosters: const {},
       tournamentId: '',
       sport: widget.sport,
