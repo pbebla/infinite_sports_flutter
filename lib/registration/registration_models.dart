@@ -889,9 +889,6 @@ double discountedAmountOwed({
   );
 }
 
-/// True when a fee applies to this submission but its discounted total
-/// (already in whole cents) is $0 — an admin comp to $0 or a 100% discount: "Nothing to pay — you're
-/// covered", never "Payment pending" with a $0 pay button.
 /// What a registration's status chip says (way back fix round, Minor 1):
 /// THE decision the status page's top chip and the registration list's
 /// chip share, so they can never disagree.
@@ -942,6 +939,9 @@ enum RegistrationChipKind { paid, covered, pending }
   );
 }
 
+/// True when a fee applies to this submission but its discounted total
+/// (already in whole cents) is $0 — an admin comp to $0 or a 100% discount: "Nothing to pay — you're
+/// covered", never "Payment pending" with a $0 pay button.
 bool paymentCovered({
   required RegistrationConfig config,
   required RegSubmission submission,
