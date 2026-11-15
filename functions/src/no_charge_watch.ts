@@ -17,7 +17,7 @@ import type { Reference } from 'firebase-admin/database';
 import {
   parseConfigPricing, parseSubmission, parseTeam,
 } from './createRegistrationPaymentIntent';
-import { buildNoChargeUpdate, shouldStampNoCharge } from './lib/no_charge';
+import { buildNoChargeUpdate, isGenuineSubmission, shouldStampNoCharge } from './lib/no_charge';
 import { legacyTarget, TeamLike } from './lib/stripe_pay';
 
 /** How long the legacy cleanup waits for a two-write move to finish. */
@@ -39,13 +39,15 @@ export async function handleSubmissionCreated(
   if (!config || !submission) return 'skipped';
 
   let team: TeamLike | undefined;
-  if (submission.path === 'joiner') {
-    const teamId = (raw as Record<string, unknown>)['TeamId'];
-    if (typeof teamId === 'string' && teamId.length > 0) {
-      const teamSnap = await root.child(`Registrations/${regId}/Teams/${teamId}`).get();
-      team = parseTeam(teamSnap.val()) ?? undefined;
-    }
+  const rawTeamId = (raw as Record<string, unknown>)['TeamId'];
+  const teamId = typeof rawTeamId === 'string' ? rawTeamId : '';
+  if ((submission.path === 'joiner' || submission.path === 'captain') && teamId.length > 0) {
+    const teamSnap = await root.child(`Registrations/${regId}/Teams/${teamId}`).get();
+    team = parseTeam(teamSnap.val()) ?? undefined;
   }
+  // The fan wrote Path/TeamId unvalidated: only a real, enabled path counts.
+  const rawPaths = (configSnap.val() as Record<string, unknown> | null)?.['Paths'];
+  if (!isGenuineSubmission(rawPaths, submission.path, uid, teamId, team)) return 'skipped';
   // Re-checked on the fresh read: an already-paid submission is never touched.
   if (!shouldStampNoCharge(config, submission, team)) return 'skipped';
 

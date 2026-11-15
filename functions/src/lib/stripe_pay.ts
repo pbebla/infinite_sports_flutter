@@ -26,6 +26,8 @@ export interface SubmissionLike {
 /** The subset of RegTeam fields the payment math needs. */
 export interface TeamLike {
   codeWaivesPayment: boolean;
+  /** The team's captain (Teams/<id>/CaptainUid); only the no-charge stamp reads it. */
+  captainUid?: string;
 }
 
 /** Dollars -> integer cents, rounded to the nearest cent (Stripe requires

@@ -4,7 +4,7 @@
 // delay. Driven over an in-memory tree; all names and ids are made up.
 
 import { describe, expect, it, vi } from 'vitest';
-import { buildNoChargeUpdate, shouldStampNoCharge } from '../src/lib/no_charge';
+import { buildNoChargeUpdate, isGenuineSubmission, shouldStampNoCharge } from '../src/lib/no_charge';
 import { handleLegacyNotPaidCreated, handleSubmissionCreated } from '../src/no_charge_watch';
 import type { RegistrationConfigLike } from '../src/lib/stripe_pay';
 
@@ -150,10 +150,82 @@ describe('handleSubmissionCreated', () => {
   });
   it('logs no full uid or name', async () => {
     logged.length = 0;
-    await handleSubmissionCreated(fakeRef(baseTree(), ''), 'reg1', 'uidAVeryLongUid1234567890');
+    const longUid = 'uidAVeryLongUid1234567890';
+    const tree = baseTree();
+    tree.Registrations.reg1.Submissions[longUid] = tree.Registrations.reg1.Submissions.uidA;
+    expect(await handleSubmissionCreated(fakeRef(tree, ''), 'reg1', longUid)).toBe('stamped');
+    expect(logged.length).toBeGreaterThan(0);
     const text = JSON.stringify(logged);
-    expect(text).not.toContain('uidAVeryLongUid1234567890');
+    expect(text).not.toContain(longUid);
     expect(text).not.toContain('Ann Able');
+  });
+
+  describe('forged or invalid paths are never stamped', () => {
+    const run = async (tree: Tree, uid = 'uidA') => {
+      const writes: any[] = [];
+      const r = await handleSubmissionCreated(fakeRef(tree, '', writes), 'reg1', uid);
+      return { r, writes };
+    };
+    const withSub = (config: Tree, subm: Tree, teams?: Tree): Tree => {
+      const t = baseTree();
+      Object.assign(t.Registrations.reg1.Config, config);
+      t.Registrations.reg1.Submissions.uidA = { DisplayName: 'Ann Able', Paid: false, ...subm };
+      if (teams) t.Registrations.reg1.Teams = teams;
+      return t;
+    };
+    it('forged captain on a perPlayer registration with the captain path off', async () => {
+      const { r, writes } = await run(withSub(
+        { Fee: 255, PaymentMode: 'perPlayer', Paths: { individual: true, captain: false } },
+        { Path: 'captain' }));
+      expect(r).toBe('skipped'); expect(writes).toEqual([]);
+    });
+    it('captain path on, but the named team belongs to someone else', async () => {
+      const { r } = await run(withSub(
+        { Fee: 255, PaymentMode: 'perPlayer', Paths: { captain: true } },
+        { Path: 'captain', TeamId: 't1' }, { t1: { CaptainUid: 'someoneElse' } }));
+      expect(r).toBe('skipped');
+    });
+    it('captain with no TeamId or a missing team', async () => {
+      const cfgs = { Fee: 255, PaymentMode: 'perPlayer', Paths: { captain: true } };
+      expect((await run(withSub(cfgs, { Path: 'captain' }))).r).toBe('skipped');
+      expect((await run(withSub(cfgs, { Path: 'captain', TeamId: 'nope' }, {}))).r).toBe('skipped');
+    });
+    it('real captain of their own team under perPlayer is stamped', async () => {
+      const { r, writes } = await run(withSub(
+        { Fee: 255, PaymentMode: 'perPlayer', Paths: { captain: true } },
+        { Path: 'captain', TeamId: 't1' }, { t1: { CaptainUid: 'uidA' } }));
+      expect(r).toBe('stamped'); expect(writes).toHaveLength(1);
+    });
+    it('an unknown Path string under teamFee', async () => {
+      const { r } = await run(withSub(
+        { Fee: 255, TeamFee: 900, PaymentMode: 'teamFee' }, { Path: 'wizard' }));
+      expect(r).toBe('skipped');
+    });
+    it('individual path disabled under teamFee', async () => {
+      const { r } = await run(withSub(
+        { Fee: 255, TeamFee: 900, PaymentMode: 'teamFee', Paths: { individual: false, captain: true } },
+        { Path: 'individual' }));
+      expect(r).toBe('skipped');
+    });
+    it('Paths node missing: every path counts as enabled (individual fee 0 stamped)', async () => {
+      const tree = baseTree();
+      expect(tree.Registrations.reg1.Config.Paths).toBeUndefined();
+      expect((await run(tree)).r).toBe('stamped');
+    });
+    it('a joiner at fee 0 with no team is free, so it is stamped', async () => {
+      const { r } = await run(withSub({ Fee: 0 }, { Path: 'joiner' }));
+      expect(r).toBe('stamped');
+    });
+  });
+});
+
+describe('isGenuineSubmission', () => {
+  it('mirrors Dart: non-map Paths and missing keys are enabled, only false disables', () => {
+    expect(isGenuineSubmission(null, 'individual', 'u', '')).toBe(true);
+    expect(isGenuineSubmission('x', 'individual', 'u', '')).toBe(true);
+    expect(isGenuineSubmission({}, 'joiner', 'u', '')).toBe(true);
+    expect(isGenuineSubmission({ joiner: false }, 'joiner', 'u', '')).toBe(false);
+    expect(isGenuineSubmission({ joiner: 0 }, 'joiner', 'u', '')).toBe(true);
   });
 });
 

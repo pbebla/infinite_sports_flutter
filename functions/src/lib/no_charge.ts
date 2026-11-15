@@ -7,10 +7,31 @@ import {
   owedCents, RegistrationConfigLike, SubmissionLike, TeamLike,
 } from './stripe_pay';
 
+/** The fan writes `Path` and `TeamId` unvalidated, so before trusting a
+ *  submission the path must be one of the three real ones and enabled in
+ *  Config/Paths (mirrors Dart's RegistrationConfig.fromFirebase: a missing or
+ *  non-map Paths node, or a missing key, counts as enabled; only an explicit
+ *  `false` disables). A captain must also name a team whose CaptainUid is
+ *  this uid. */
+export function isGenuineSubmission(
+  rawPaths: unknown, path: string, uid: string, teamId: string, team?: TeamLike,
+): boolean {
+  if (path !== 'individual' && path !== 'captain' && path !== 'joiner') return false;
+  const enabled = rawPaths !== null && typeof rawPaths === 'object'
+    ? (rawPaths as Record<string, unknown>)[path] !== false : true;
+  if (!enabled) return false;
+  if (path === 'captain') {
+    return teamId.length > 0 && team !== undefined && uid.length > 0 && team.captainUid === uid;
+  }
+  return true;
+}
+
 /** True only for a not-yet-paid sign-up that owes nothing AND is not a joiner
  *  on a code-waives-payment team (that joiner is already handled by the
- *  waiver, so it keeps its own state). A joiner with no team owes the full
- *  fee (owedCents fails closed), so it is never stamped. */
+ *  waiver, so it keeps its own state). Where a fee is owed, a joiner with no
+ *  team owes it in full (owedCents fails closed); at fee 0 nothing is owed
+ *  whatever the team, so that joiner is stamped (free is free). The caller
+ *  checks [isGenuineSubmission] first. */
 export function shouldStampNoCharge(
   config: RegistrationConfigLike, sub: SubmissionLike, team?: TeamLike,
 ): boolean {

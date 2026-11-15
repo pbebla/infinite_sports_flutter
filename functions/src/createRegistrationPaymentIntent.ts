@@ -81,7 +81,10 @@ function parseDiscountStamp(raw: unknown): DiscountStamp {
 export function parseTeam(raw: unknown): TeamLike | null {
   if (raw === null || typeof raw !== 'object') return null;
   const t = raw as Record<string, unknown>;
-  return { codeWaivesPayment: t['CodeWaivesPayment'] === true };
+  return {
+    codeWaivesPayment: t['CodeWaivesPayment'] === true,
+    captainUid: typeof t['CaptainUid'] === 'string' ? t['CaptainUid'] as string : '',
+  };
 }
 
 export const createRegistrationPaymentIntent = onCall(
