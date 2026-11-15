@@ -91,7 +91,7 @@ void main() {
     expect(find.text('Babylon'), findsNothing);
   });
 
-  testWidgets('tapping a team name reports that team via onTeamTap',
+  testWidgets('tapping a team name opens that match, not a team page',
       (tester) async {
     final tapped = <String>[];
     await tester.pumpWidget(wrap(LeagueFixturesTab(
@@ -100,10 +100,10 @@ void main() {
       rosters: const {},
       sport: 'Futsal',
       now: now,
-      onTeamTap: (team) => tapped.add(team.id),
+      onMatchTap: (match) => tapped.add('${match.team1Id} v ${match.team2Id}'),
     )));
     await tester.tap(find.text('Ashur'));
     await tester.pump();
-    expect(tapped, ['Ashur']);
+    expect(tapped, ['Ashur v Akkad']);
   });
 }
