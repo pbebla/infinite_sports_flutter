@@ -458,7 +458,7 @@ void _openInFantasy(
     open(context, route);
     return;
   }
-  Navigator.push(context, fantasyHubPageRoute(route));
+  openFantasyHub(context, route);
 }
 
 // ── Manager section ─────────────────────────────────────────────────────────

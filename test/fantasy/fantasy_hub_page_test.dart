@@ -32,6 +32,7 @@ import 'package:infinite_sports_flutter/fantasy/hub/leaderboards_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/my_team_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/news_tab.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/players_tab.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_draft.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/transfer_preview.dart';
 import 'package:infinite_sports_flutter/registration/payment_links.dart';
@@ -2669,6 +2670,148 @@ void main() {
       await settle(tester);
       expect(slimCountdown(), findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('openFantasyHub (Open Fantasy above an open Hub)', () {
+    FantasyHubRoute routeFor15({String? name, String season = '15'}) =>
+        FantasyHubRoute(
+          sport: 'Futsal',
+          season: season,
+          initialTab: FantasyHubTab.players,
+          initialPlayerName: name,
+        );
+
+    /// A plain page with one button that calls [openFantasyHub] from its OWN
+    /// context.
+    Route<void> testPage(
+      FantasyHubRoute route, {
+      Route<void> Function(FantasyHubRoute r)? routeFor,
+      String label = 'test page',
+    }) =>
+        MaterialPageRoute<void>(
+          builder: (_) => Scaffold(
+            body: Builder(
+              builder: (ctx) => Column(children: [
+                Text(label),
+                TextButton(
+                  key: const ValueKey('open-fantasy'),
+                  onPressed: () => openFantasyHub(ctx, route, routeFor: routeFor),
+                  child: const Text('Open Fantasy'),
+                ),
+              ]),
+            ),
+          ),
+        );
+
+    Route<void> pushedMarker(FantasyHubRoute r) => MaterialPageRoute<void>(
+        builder: (_) => Scaffold(body: Text('pushed ${r.season}')));
+
+    Future<void> pushFromHub(WidgetTester tester, Route<void> r) async {
+      Navigator.of(tester.element(find.byType(FantasyHubPage))).push(r);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    Future<void> tapOpen(WidgetTester tester) async {
+      await tester.tap(key('open-fantasy'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    int hubTabIndex(WidgetTester tester) =>
+        DefaultTabController.of(tester.element(find.byType(TabBarView))).index;
+
+    testWidgets('open Fantasy above the same season\'s Hub pops back to it: '
+        'one Hub, same tab, draft untouched', (tester) async {
+      await pumpHub(tester, tab: FantasyHubTab.players);
+      await land(tester);
+      final draftBefore = tester
+          .widget<FantasyPlayersTab>(find.byType(FantasyPlayersTab))
+          .draft;
+      await pushFromHub(tester, testPage(routeFor15()));
+      expect(find.text('test page'), findsOneWidget);
+
+      await tapOpen(tester);
+      expect(find.text('test page'), findsNothing);
+      expect(find.byType(FantasyHubPage), findsOneWidget);
+      expect(find.byType(FantasyPlayersTab), findsOneWidget);
+      expect(hubTabIndex(tester), FantasyHubTab.players.index);
+      expect(
+          identical(
+              tester
+                  .widget<FantasyPlayersTab>(find.byType(FantasyPlayersTab))
+                  .draft,
+              draftBefore),
+          isTrue);
+      expect(opened, isEmpty);
+    });
+
+    testWidgets('the Hub\'s current tab does not change', (tester) async {
+      await pumpHub(tester, tab: FantasyHubTab.rules);
+      await land(tester);
+      await pushFromHub(tester, testPage(routeFor15()));
+      await tapOpen(tester);
+      expect(find.text('test page'), findsNothing);
+      expect(hubTabIndex(tester), FantasyHubTab.rules.index);
+    });
+
+    testWidgets('with a player name it pops back and opens that player\'s '
+        'profile once', (tester) async {
+      await pumpHub(tester, tab: FantasyHubTab.players);
+      await land(tester);
+      await pushFromHub(tester, testPage(routeFor15(name: 'Ava Striker')));
+      await tapOpen(tester);
+      await settle(tester);
+      expect(find.text('test page'), findsNothing);
+      expect(find.byType(FantasyHubPage), findsOneWidget);
+      expect(opened, hasLength(1));
+      expect(opened.single.name, 'Ava Striker');
+      expect(opened.single.outside, isFalse);
+      expect(opened.single.draft, isNotNull);
+    });
+
+    testWidgets('a different season pushes a new route', (tester) async {
+      await pumpHub(tester, tab: FantasyHubTab.players);
+      await land(tester);
+      await pushFromHub(
+          tester,
+          testPage(routeFor15(season: '16'), routeFor: pushedMarker));
+      await tapOpen(tester);
+      expect(find.text('pushed 16'), findsOneWidget);
+      expect(find.byType(FantasyHubPage, skipOffstage: false), findsOneWidget);
+      expect(opened, isEmpty);
+    });
+
+    testWidgets('with no Hub open it pushes', (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(
+          builder: (ctx) => TextButton(
+            key: const ValueKey('open-fantasy'),
+            onPressed: () =>
+                openFantasyHub(ctx, routeFor15(), routeFor: pushedMarker),
+            child: const Text('Open Fantasy'),
+          ),
+        ),
+      ));
+      await tapOpen(tester);
+      expect(find.text('pushed 15'), findsOneWidget);
+    });
+
+    testWidgets('after the Hub is disposed it pushes', (tester) async {
+      await pumpHub(tester, tab: FantasyHubTab.players);
+      await land(tester);
+      // The Hub leaves the stack (replaced by the test page).
+      Navigator.of(tester.element(find.byType(FantasyHubPage))).pushReplacement(
+          testPage(routeFor15(), routeFor: pushedMarker));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(FantasyHubPage, skipOffstage: false), findsNothing);
+
+      await tapOpen(tester);
+      expect(find.text('pushed 15'), findsOneWidget);
     });
   });
 }

@@ -111,6 +111,33 @@ MaterialPageRoute<void> fantasyHubPageRoute(FantasyHubRoute route) =>
       ),
     );
 
+/// The in-app "open Fantasy" entry (the game page's Fantasy tab, a fantasy
+/// player profile's "Open in Fantasy", the Infinite profile's Fantasy tab, the
+/// league page's Fantasy tab). When a Hub for the same sport + season is
+/// already open below on [context]'s navigator, goes BACK to it (popping what
+/// is above it) instead of stacking a second Hub — a second Hub would own a
+/// second squad draft, whose unsaved picks could overwrite a save made in the
+/// first. A named player's profile then opens through that Hub's own opener
+/// (with its shared draft); its current tab never changes. Otherwise pushes
+/// [routeFor] (default [fantasyHubPageRoute]).
+void openFantasyHub(
+  BuildContext context,
+  FantasyHubRoute route, {
+  Route<void> Function(FantasyHubRoute route)? routeFor,
+}) {
+  final navigator = Navigator.of(context);
+  final hub =
+      _FantasyHubPageState._openHubFor(route.sport, route.season, navigator);
+  if (hub == null) {
+    navigator.push((routeFor ?? fantasyHubPageRoute)(route));
+    return;
+  }
+  final hubRoute = hub._route!;
+  navigator.popUntil((r) => identical(r, hubRoute));
+  final name = route.initialPlayerName;
+  if (name != null) hub._openPlayerProfile(name);
+}
+
 class FantasyHubPage extends StatefulWidget {
   const FantasyHubPage({
     super.key,
@@ -255,6 +282,40 @@ class FantasyHubPage extends StatefulWidget {
 }
 
 class _FantasyHubPageState extends State<FantasyHubPage> {
+  /// Every mounted Hub, oldest first (see [openFantasyHub]). Routes are
+  /// compared by identity, never by name.
+  static final List<_FantasyHubPageState> _open = [];
+
+  /// The newest registered Hub for [sport] + [season] whose own route is
+  /// active and belongs to [navigator], or null.
+  static _FantasyHubPageState? _openHubFor(
+      String sport, String season, NavigatorState navigator) {
+    for (final hub in _open.reversed) {
+      final route = hub._route;
+      if (route != null &&
+          hub.mounted &&
+          hub.widget.sport == sport &&
+          hub.widget.season == season &&
+          route.isActive &&
+          identical(route.navigator, navigator)) {
+        return hub;
+      }
+    }
+    return null;
+  }
+
+  /// This Hub's own route (captured once, in [didChangeDependencies]).
+  ModalRoute<dynamic>? _route;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_route == null) {
+      _route = ModalRoute.of(context);
+      if (_route != null) _open.add(this);
+    }
+  }
+
   /// Config → schedule gameweeks → the signed-in manager's finalized chips
   /// by gameweek (`History/<gw>/<uid>`, one small listener per schedule
   /// gameweek) — the shared wiring (fantasy_schedule_feed.dart): lock-hour
@@ -845,6 +906,7 @@ class _FantasyHubPageState extends State<FantasyHubPage> {
 
   @override
   void dispose() {
+    _open.remove(this);
     _schedule.dispose();
     _playersSub?.cancel();
     _managerSub?.cancel();

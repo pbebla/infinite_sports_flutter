@@ -556,7 +556,7 @@ class _FantasyPlayerProfilePageState extends State<FantasyPlayerProfilePage>
       open(context, route);
       return;
     }
-    Navigator.push(context, fantasyHubPageRoute(route));
+    openFantasyHub(context, route);
   }
 
   /// open / locked / unknown — unknown = the schedule read failed (review 6,

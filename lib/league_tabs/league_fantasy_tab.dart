@@ -6,6 +6,7 @@
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_page.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/fantasy_hub_route.dart';
 
 class LeagueFantasyTab extends StatelessWidget {
   const LeagueFantasyTab({
@@ -22,11 +23,10 @@ class LeagueFantasyTab extends StatelessWidget {
   final VoidCallback? onEnter;
 
   void _openHub(BuildContext context) {
-    Navigator.push(
+    openFantasyHub(
       context,
-      MaterialPageRoute(
-        builder: (_) => FantasyHubPage(sport: sport, season: season),
-      ),
+      FantasyHubRoute(
+          sport: sport, season: season, initialTab: FantasyHubTab.myTeam),
     );
   }
 
