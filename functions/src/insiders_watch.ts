@@ -1,6 +1,6 @@
 // Infinite Insiders referral counting/voiding watcher (Task X1). Orchestration
 // only — every decision is pure in src/lib/insiders.ts. Watches every
-// registration submission's Paid flip and maintains /Referrals,
+// registration submission's referral-credit change and maintains /Referrals,
 // /ReferredUsers (the global once-ever guard) and each Insider's counters +
 // tier, notifying the Insider by FCM token (not a topic — this is a private,
 // per-user event, unlike the tournament/league condition-based alerts in
@@ -17,7 +17,7 @@ import type { DatabaseEvent, DataSnapshot } from 'firebase-functions/v2/database
 import type { Change } from 'firebase-functions/v2';
 import type { Reference } from 'firebase-admin/database';
 import {
-  counterUpdates, decideOnPaidFlip, InsiderNotification, notificationFor,
+  counterUpdates, creditChange, decideOnPaidFlip, InsiderNotification, notificationFor,
 } from './lib/insiders';
 
 const BRAND_COLOR = '#D00000'; // infiniteSportsPrimaryColor (RGB 208,0,0)
@@ -228,7 +228,9 @@ async function handleCount(
   logger.info('insider referral counted', { regId, subId, insiderUid, referralId });
 }
 
-async function handleVoid(root: Reference, regId: string, subId: string): Promise<void> {
+async function handleVoid(
+  root: Reference, regId: string, subId: string, voidReason: string,
+): Promise<void> {
   const referredUid = subId;
   const pointerSnap = await root.child(`ReferredUsers/${referredUid}`).get();
   const referralId = pointerSnap.exists() ? String(pointerSnap.val()) : null;
@@ -277,7 +279,7 @@ async function handleVoid(root: Reference, regId: string, subId: string): Promis
   await referralRef.update({
     State: 'voided',
     VoidedAt: admin.database.ServerValue.TIMESTAMP,
-    VoidReason: 'payment reversed',
+    VoidReason: voidReason,
   });
   await root.child(`ReferredUsers/${referredUid}`).remove();
 
@@ -298,9 +300,10 @@ async function handleVoid(root: Reference, regId: string, subId: string): Promis
   logger.info('insider referral voided', { regId, subId, insiderUid, referralId });
 }
 
-/** Watches every registration submission for a Paid flip and drives the
- *  referral ledger (spec §3, §10). Fires on ANY write to a submission, so it
- *  bails immediately unless Paid actually flipped. */
+/** Watches every registration submission for a referral-credit change (Paid
+ *  flips, or a switch to/from "No charge") and drives the referral ledger
+ *  (spec §3, §10). Fires on ANY write to a submission, so it bails immediately
+ *  unless credit actually changed. */
 export const onSubmissionPaidChange = onValueWritten(
   '/Registrations/{regId}/Submissions/{subId}',
   async (event) => {
@@ -308,15 +311,17 @@ export const onSubmissionPaidChange = onValueWritten(
     const subId = String(event.params['subId']);
     const before = (event.data.before.val() ?? {}) as Record<string, unknown>;
     const after = (event.data.after.val() ?? {}) as Record<string, unknown>;
-    const wasPaid = before['Paid'] === true;
-    const isPaid = after['Paid'] === true;
-    if (wasPaid === isPaid) return; // no flip — nothing for this watcher to do
+    const change = creditChange(before, after);
+    if (!change) return; // no credit change — nothing for this watcher to do
 
     const root = dbRoot(event);
-    if (!wasPaid && isPaid) {
+    if (change === 'count') {
       await handleCount(root, regId, subId, after);
     } else {
-      await handleVoid(root, regId, subId);
+      await handleVoid(
+        root, regId, subId,
+        after['Paid'] === true ? 'marked no charge' : 'payment reversed',
+      );
     }
   },
 );

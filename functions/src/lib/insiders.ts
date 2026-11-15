@@ -83,6 +83,28 @@ export interface PaidFlipInput {
   hasCountedReferralForSubmission: boolean;
 }
 
+/** The stored `PaidVia` value for a registration the owner marked "No charge". */
+export const NO_CHARGE = 'no charge';
+
+/** True when a submission earns its referrer credit: it is Paid AND was not
+ *  settled as "No charge". Partial or unknown payment methods still count. */
+export function isReferralCredited(sub: Record<string, unknown>): boolean {
+  return sub['Paid'] === true &&
+    String(sub['PaidVia'] ?? '').trim().toLowerCase() !== NO_CHARGE;
+}
+
+/** What a submission write means for referral credit: 'count' when it newly
+ *  earns credit, 'void' when it newly loses it, null when nothing changed. */
+export function creditChange(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): 'count' | 'void' | null {
+  const was = isReferralCredited(before);
+  const is = isReferralCredited(after);
+  if (was === is) return null;
+  return is ? 'count' : 'void';
+}
+
 /**
  * Decides what a submission's Paid flip should do to the referral ledger.
  *
