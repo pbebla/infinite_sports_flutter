@@ -5,10 +5,47 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_schedule_feed.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_league_tab.dart';
 import 'package:infinite_sports_flutter/misc/league_adapters.dart';
+import 'package:infinite_sports_flutter/misc/theme_provider.dart';
+import 'package:infinite_sports_flutter/misc/utility.dart'
+    show infiniteSportsGoldColor, infiniteSportsPrimaryColor;
 import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 
 void main() {
+  group('Fixtures / Table switch style (owner 2026-11-16: picked half gold)',
+      () {
+    Future<ButtonStyle> styleIn(WidgetTester tester, ThemeData theme) async {
+      late ButtonStyle style;
+      await tester.pumpWidget(MaterialApp(
+        theme: theme,
+        home: Builder(builder: (context) {
+          style = leagueSwitchStyle(context);
+          return const SizedBox();
+        }),
+      ));
+      return style;
+    }
+
+    testWidgets('dark mode (the app theme): the picked half is the app gold',
+        (tester) async {
+      final style = await styleIn(tester, darkMode);
+      expect(style.backgroundColor!.resolve({WidgetState.selected}),
+          infiniteSportsGoldColor);
+      expect(style.foregroundColor!.resolve({WidgetState.selected}),
+          darkMode.colorScheme.onPrimary);
+      expect(style.backgroundColor!.resolve(<WidgetState>{}), isNull);
+    });
+
+    testWidgets('light mode (the app theme): the picked half is the app red',
+        (tester) async {
+      final style = await styleIn(tester, lightMode);
+      expect(style.backgroundColor!.resolve({WidgetState.selected}),
+          infiniteSportsPrimaryColor);
+      expect(style.foregroundColor!.resolve({WidgetState.selected}),
+          lightMode.colorScheme.onPrimary);
+    });
+  });
+
   final now = DateTime(2026, 7, 10);
 
   List<TournamentMatch> games() => leagueMatchesFromDateNode({

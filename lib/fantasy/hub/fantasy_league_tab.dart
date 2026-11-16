@@ -190,6 +190,10 @@ class _FantasyLeagueTabState extends State<FantasyLeagueTab> {
           child: SegmentedButton<bool>(
             key: const ValueKey('league_view_switch'),
             showSelectedIcon: false,
+            // The picked half is filled with the theme primary (the Hub's
+            // gold in dark mode), so it reads as ON — the default tonal fill
+            // looked greyed out (owner, 2026-11-16).
+            style: leagueSwitchStyle(context),
             segments: const [
               ButtonSegment(value: false, label: Text('Fixtures')),
               ButtonSegment(value: true, label: Text('Table')),
@@ -258,6 +262,23 @@ class _ScrollableFace extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The Fixtures / Table switch's style: the picked half filled with the
+/// theme primary — the same gold as the Hub's tab underline and the picked
+/// day box in dark mode, the app red in light — with its onPrimary text; the
+/// other half keeps the default look.
+@visibleForTesting
+ButtonStyle leagueSwitchStyle(BuildContext context) {
+  final scheme = Theme.of(context).colorScheme;
+  final accent = scheme.primary;
+  final onAccent = scheme.onPrimary;
+  return ButtonStyle(
+    backgroundColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected) ? accent : null),
+    foregroundColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected) ? onAccent : null),
+  );
 }
 
 class _LeagueError extends StatelessWidget {
