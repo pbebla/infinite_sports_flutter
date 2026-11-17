@@ -76,14 +76,12 @@ List<LegendEntry> legendEntriesForSport(String? leagueSportKey) {
         _soccerEntry('Penalty Goal', 'penalty goal'),
         _soccerEntry('Penalty Missed', 'penalty missed'),
         _soccerEntry('Penalty Saved', 'penalty saved'),
-        _soccerEntry('Save', 'save'),
         _soccerEntry('Assist', 'assist'),
         _soccerEntry('Substitution', 'substitution'),
         _soccerEntry('Yellow Card', 'yellow card'),
         _soccerEntry('Second Yellow', 'second yellow'),
         _soccerEntry('Red Card', 'red card'),
         _soccerEntry('Foul', 'foul'),
-        _soccerEntry('DPL', 'dpl'),
       ];
   }
 }

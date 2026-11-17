@@ -26,8 +26,8 @@ void main() {
       final entries = legendEntriesForSport(null);
       expect(entries.map((e) => e.label), [
         'Goal', 'Own Goal', 'Penalty Goal', 'Penalty Missed',
-        'Penalty Saved', 'Save', 'Assist', 'Substitution', 'Yellow Card',
-        'Second Yellow', 'Red Card', 'Foul', 'DPL',
+        'Penalty Saved', 'Assist', 'Substitution', 'Yellow Card',
+        'Second Yellow', 'Red Card', 'Foul',
       ]);
       expect(entries.every((e) => e.badge == false), isTrue);
       expect(entries.every((e) => e.asset != null), isTrue);
@@ -86,7 +86,8 @@ void main() {
       ));
       expect(find.text('Icons'), findsOneWidget);
       expect(find.text('Goal'), findsOneWidget);
-      expect(find.text('DPL'), findsOneWidget);
+      expect(find.text('DPL'), findsNothing);
+      expect(find.text('Save'), findsNothing);
       expect(find.byType(StatIcon), findsWidgets);
     });
 
@@ -159,6 +160,82 @@ void main() {
       ));
       expect(find.text('Icons'), findsOneWidget);
       expect(find.text('Free Throw Made'), findsOneWidget);
+    });
+  });
+
+  group('timeline hides Save and DPL rows', () {
+    final acts1 = {
+      "3'": [
+        {'Goal': 'Ashur', '_t': 1},
+      ],
+      "5'": [
+        {'Save': 'Keeperone', '_t': 2},
+      ],
+      "6'": [
+        {'DPL': 'Defendertwo', '_t': 3},
+      ],
+      "8'": [
+        {'Foul': 'Foulerthree', '_t': 4},
+      ],
+      "9'": [
+        {'PenSaved': 'Penkeeper', '_t': 5},
+      ],
+    };
+    final acts1t = {
+      "3'": [
+        {'goal': 'Ashur', '_t': 1},
+      ],
+      "5'": [
+        {'save': 'Keeperone', '_t': 2},
+      ],
+      "6'": [
+        {'dpl': 'Defendertwo', '_t': 3},
+      ],
+      "8'": [
+        {'foul': 'Foulerthree', '_t': 4},
+      ],
+      "9'": [
+        {'penalty saved': 'Penkeeper', '_t': 5},
+      ],
+    };
+    Future<void> pumpIt(WidgetTester tester, Map<String, dynamic> a,
+        String? sport) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final m = TournamentMatch(
+        id: 'm1', stage: 'League', label: 'League', date: '07202026',
+        team1Id: 'A', team2Id: 'B', team1Score: 1, team2Score: 0,
+        status: 2, bracketPosition: 0, team1Activity: a,
+      );
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: MatchFactsTab(
+            match: m, team1: null, team2: null,
+            team1Players: const [], team2Players: const [],
+            leagueSportKey: sport,
+          ),
+        ),
+      ));
+    }
+
+    testWidgets('league futsal', (tester) async {
+      await pumpIt(tester, acts1, 'Futsal');
+      expect(find.textContaining('Ashur'), findsWidgets);
+      expect(find.textContaining('Foulerthree'), findsWidgets);
+      expect(find.textContaining('Penkeeper'), findsWidgets);
+      expect(find.textContaining('Keeperone'), findsNothing);
+      expect(find.textContaining('Defendertwo'), findsNothing);
+      expect(find.text('DPL'), findsNothing);
+    });
+
+    testWidgets('tournament', (tester) async {
+      await pumpIt(tester, acts1t, null);
+      expect(find.textContaining('Ashur'), findsWidgets);
+      expect(find.textContaining('Foulerthree'), findsWidgets);
+      expect(find.textContaining('Penkeeper'), findsWidgets);
+      expect(find.textContaining('Keeperone'), findsNothing);
+      expect(find.textContaining('Defendertwo'), findsNothing);
     });
   });
 }
