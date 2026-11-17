@@ -346,6 +346,119 @@ How it works, in plain terms:
 - [ ] **Step 4:** `flutter test`, `flutter analyze`.
 - [ ] **Step 5: commit** `feat(settings): a pause switch for the fan app's forced updates`
 
+## Part E — owner feedback after the emulator trial (2026-11-16)
+
+> **Status:** written 2026-11-16 on Opus 5.5 for **Fable review before any code is written** (owner chose "Fable reviews first"). Tasks 1–11 above are built and reviewed; Part E changes the Manager only (fan app untouched: fans never see man-downs).
+
+### Owner decisions (Part E spec)
+
+1. Owner, verbatim: "we want numbers under attendance as well"
+2. Owner, verbatim: "when we end a first half or second half if there is a clock on a player down whether it is 1 minute or 2 mins, it should get removed automatically. i like that we have the remove button but i want it to remove automatically when we click end first half or end second half"
+3. Owner, verbatim: "for goal situation with the other man down it gives the notification but it doesnt remove the countdown from the top part. it should remove it." (Today an ended man-down stays in the panel, dimmed, with `Undo`, until its time would have run out.)
+4. Owner, verbatim: "we should have 10 second added to 1 min and 2 mins. so 2:10 or 1:10 because it takes time to communicate that to the referee and player leaving the field ... same goes for yellow card 1:10 and red card 2:10"
+5. Owner, verbatim: "if a player commits 6th or 8th foul and receives a yellow card, the player is out for 1 min for committing the foul but the team is down a player for 2 mins because it is 1 min for the yellow and 1 min for 6th or 8th foul. now if the player commits the 10th, 12th, 14th, 16th, 18th the player is out for a minute but the team is down a player for 3 minutes, 1 min for the yellow card and 2 mins for committing 10 or more fouls in one half. obviously this resets for the 2nd half. if a player receives a straight red on 6th or 8th foul, the team is down a player 3 mins and obviously the player is completely out for the game. the player who received the yellow and out for a min can substitute to come in after serving one min but the team remains down a player for another minute. remember to add 10 second buffer."
+6. Owner's choices (2026-11-16, multiple choice):
+   - Red on the 10th+ foul: **4:10** (the times add up, 2 + 2, buffer once).
+   - Buffer when a foul and a card stack: **one buffer** (2:10, 3:10, 4:10).
+   - What counts as one incident: **the same player, within 1 minute** of game time, in either order (foul then card, or card then foul).
+7. Owner, on fantasy (answered, no change): a yellow is −1 and a red −3 for every position in the live Season 16 config; a second yellow counts as a red.
+
+### Data contract additions (Manager only)
+
+`ManDown/<pushId>` gains two optional fields; old entries without them keep working:
+
+| Field | Shape | Meaning |
+|---|---|---|
+| `Card` | `'Yellow'`, `'SecondYellow'` or `'Red'` | A card that is part of this man-down (alone, or stacked on a team-foul penalty). |
+| `PlayerOutMs` | number | How long the penalized player must sit, from `StartElapsedMs`. Absent = the whole `DurationMs` (a foul-only man-down: "any player may come on in that spot" when it ends). For `Red` / `SecondYellow` the player is out for the game; `PlayerOutMs` is then absent and the row says so. |
+
+`Ended` gains `'half'` (cleared by `End 1st half`, `Start extra time` or ending the game). `Reason` keeps meaning "what started it" (`'TeamFouls'`, `'Yellow'`, `'SecondYellow'`, `'Red'`).
+
+Durations (rule time + one 10-second buffer per man-down, `kManDownBufferMs = 10000`):
+
+| Incident | Team down (`DurationMs`) | Player out (`PlayerOutMs`) |
+|---|---|---|
+| 6th or 8th foul | 1:10 | (whole time) |
+| 10th, 12th, … foul | 2:10 | (whole time) |
+| Yellow | 1:10 | 1:10 |
+| Second yellow | 1:10 | out for the game |
+| Red | 2:10 | out for the game |
+| 6th/8th foul + yellow | 2:10 | 1:10 |
+| 10th+ foul + yellow | 3:10 | 1:10 |
+| 6th/8th foul + second yellow | 2:10 | out for the game |
+| 10th+ foul + second yellow | 3:10 | out for the game |
+| 6th/8th foul + red | 3:10 | out for the game |
+| 10th+ foul + red | 4:10 | out for the game |
+
+**Stacking rule:** when a card is recorded for player P of team T (or a penalty foul for P), and T has a running man-down for the same P, started at most 60 seconds of game clock ago, that is not already stacked (it has a foul but no card, or a card but no foul), the new penalty is merged into it: `DurationMs` grows by the new penalty's rule time (no second buffer), `Foul` / `Card` are filled in, and `PlayerOutMs` is set from the table. One combined dialog replaces the two separate ones. Otherwise the new penalty starts its own man-down, as today.
+
+**Conceding a goal** ends the whole man-down, stacked or not (rulebook §8: the team "may bring its fifth player back on"). **Fable/owner: confirm** — the alternative is that a goal ends only the current part of a stacked penalty.
+
+### Global constraints (Part E additions)
+
+- Copy, exactly (Manager):
+  - Man-down row: `<Team> · <what> · #<n> <Player> · m:ss`, where `<what>` is `6th foul`, `Yellow`, `6th foul + yellow`, `10th foul + red`, etc. While the player's own time runs and is shorter than the team's, a second line: `Player can be replaced in m:ss`; for red / second yellow: `Player is out for the game`.
+  - Stacked dialog (one dialog for the whole incident): `<Team>: one player down for <m:ss>. <Player> is out for <m:ss>.` or, for red / second yellow, `<Team>: one player down for <m:ss>. <Player> is out for the game.` The time shown is the countdown time (with the buffer).
+  - Player's time up (only when it ends before the team's): `<Team>: <Player> can be replaced. Still one player down for <m:ss>.`
+  - Undo after a man-down ends: a SnackBar `Man-down ended` with action `Undo`, shown for 8 seconds. Half-end clear: `Man-downs cleared` with `Undo`.
+- The existing single-penalty dialog copy keeps the rule time (`One player down for 1:00.`); the countdown includes the buffer.
+- Ended man-downs leave the panel immediately (no dimmed rows).
+
+### Review Focus (Part E)
+
+1. **The yellow is recorded 50 seconds after the 6th foul** (still one incident) and **70 seconds after** (two separate man-downs). Test in Task 14.
+2. **The card comes first, then the 6th foul** for the same player within a minute: one stacked man-down. Test in Task 14.
+3. **A goal against a team with a stacked man-down** ends the whole thing, and `Undo` brings back the whole stacked man-down with its remaining time. Test in Task 15.
+4. **`End 1st half` with two running man-downs**, one of them stacked: both cleared, one SnackBar, `Undo` restores both. Test in Task 15.
+5. **A clock adjust in the middle of a stacked man-down** moves both the team's and the player's countdowns together. Test in Task 14.
+
+### Task 12: Jersey numbers on the attendance list
+
+**Files (Manager):** `lib/ui/shared/attendance_widgets.dart` (`_AttendanceSheet`), its callers in the three `update_*_game_detail_page.dart` pages, tests.
+
+**Interfaces:** the sheet takes `Map<String, String> numbers` like the Task 3 pickers and reuses Task 3's `jerseyLabel` / `sortByJersey` / `jerseyNumberOrNull` (`#<n> · <name>`, number order, unknown last).
+
+- [ ] Step 1: failing tests: the sheet shows `#10 · Alpha Player`; no number → name only; number order; the attendance toggle still records by name.
+- [ ] Step 2: run, expect FAIL. Step 3: implement for all three sports. Step 4: `flutter test`, `flutter analyze`.
+- [ ] Step 5: commit `feat(scoring): jersey numbers on the attendance list`
+
+### Task 13: The 10-second buffer
+
+**Files (Manager):** `lib/models/futsal_periods.dart` (constant + a helper), the man-down start paths in `lib/ui/futsal/update_futsal_game_detail_page.dart`, tests.
+
+**Interfaces:** `const int kManDownBufferMs = 10000;` and `int manDownDurationMs(Duration ruleTime)` = rule time + buffer. `foulPenaltyFor` / `manDownForCard` keep returning the RULE time (the fan twin is unchanged except for the new constant and helper, copied to keep the files twins).
+
+- [ ] Step 1: failing tests: 6th foul → `DurationMs` 70000; 10th → 130000; yellow 70000; second yellow 70000; red 130000; the dialog copy still says `1:00` / `2:00`.
+- [ ] Step 2–4 as usual (Manager + the fan twin copy, imports only).
+- [ ] Step 5: commit `feat(futsal): man-downs get a 10-second buffer`
+
+### Task 14: A foul and a card for the same player stack
+
+**Files (Manager):** `lib/models/futsal_periods.dart` (pure stacking rules), `lib/models/game.dart` (`ManDownEntry` gains `card`, `playerOutMs`), `lib/services/firebase/game_service.dart` (a `stackManDown` update), `lib/ui/futsal/man_down_panel.dart`, the futsal page, tests.
+
+**Interfaces:**
+- `ManDownStack? stackTarget(List<ManDownEntry> running, {required int team, required String player, required bool isCard, required int clockElapsedMs})`: the entry to merge into, per the stacking rule, or null.
+- `({int durationMs, int? playerOutMs}) stackedTimes({int? foulN, String? card})`: the table above (buffer once).
+- `Future<void> GameService.stackManDown(..., String id, {int? foul, String? card, required int durationMs, int? playerOutMs})`: one update on that entry.
+- The panel shows the second line from `PlayerOutMs`, and the player's time-up alert fires once per entry per device, writing nothing.
+- A clock adjust already shifts `StartElapsedMs`, so both countdowns move together; no change needed beyond a test.
+
+- [ ] Step 1: failing tests: every row of the durations table; card 50 s after the foul → stacked; 70 s → separate; card first then foul → stacked; a second card on an already-stacked entry → its own man-down; the player time-up alert at 1:10 on a 2:10 stack shows the copy once; red stack row says `Player is out for the game`; clock adjust mid-stack keeps both remaining times.
+- [ ] Step 2–4 as usual. Step 5: commit `feat(futsal): a foul and a card for the same player stack into one man-down`
+
+### Task 15: Ended man-downs leave the panel; halves clear them
+
+**Files (Manager):** `lib/ui/futsal/man_down_panel.dart`, the futsal page (`End 1st half`, `Start extra time`, ending the game, conceding, `Remove`), `lib/services/firebase/game_service.dart` (end several in one update), tests.
+
+**Interfaces:**
+- The panel lists running man-downs only.
+- `Remove`, conceding and half-end show the SnackBar with `Undo` for 8 seconds; `Undo` calls `undoManDownEnd` for each id it ended.
+- `Future<void> GameService.endManDowns(..., List<String> ids, String ended)`: one multi-path update.
+- `End 1st half`, `Start extra time` and ending the game end every running man-down with `'half'`.
+
+- [ ] Step 1: failing tests: after a goal the countdown is gone from the panel and the SnackBar shows; `Undo` brings it back with the time it would have had; `End 1st half` clears two running ones in one update and one SnackBar, `Undo` restores both; ending the game clears them; `Start extra time` clears them; `Remove` behaves the same way.
+- [ ] Step 2–4 as usual. Step 5: commit `feat(futsal): ended man-downs leave the panel; ending a half clears them`
+
 ---
 
 ## Rollout (each step needs the owner's go)
