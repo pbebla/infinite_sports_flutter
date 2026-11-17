@@ -5,9 +5,10 @@ class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
   final Widget title;
   final double height;
   final PreferredSizeWidget? bottom;
-  final Widget tableWidget;
-  final Widget leaderboardWidget;
-  const GlobalAppBar({super.key, required this.title, required this.height, this.bottom, required this.tableWidget, required this.leaderboardWidget});
+  /// Optional shortcuts; null = no action in the bar.
+  final Widget? tableWidget;
+  final Widget? leaderboardWidget;
+  const GlobalAppBar({super.key, required this.title, required this.height, this.bottom, this.tableWidget, this.leaderboardWidget});
   
   @override
   Widget build(BuildContext context) {
@@ -25,8 +26,8 @@ class GlobalAppBar extends StatelessWidget implements PreferredSizeWidget {
         },
       ),
       actions: [
-        tableWidget,
-        leaderboardWidget
+        if (tableWidget != null) tableWidget!,
+        if (leaderboardWidget != null) leaderboardWidget!,
       ],
       // Here we take the value from the MyHomePage object that was created by
       // the App.build method, and use it to set our appbar title.

@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_launcher_icons/constants.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_home_banner.dart';
 import 'package:infinite_sports_flutter/globalappbar.dart';
-import 'package:infinite_sports_flutter/leaderboard.dart';
 import 'package:infinite_sports_flutter/league_detail_page.dart';
 import 'package:infinite_sports_flutter/livescore.dart';
 import 'package:infinite_sports_flutter/misc/game_day.dart';
@@ -22,7 +21,6 @@ import 'package:infinite_sports_flutter/model/tournamentmatch.dart';
 import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/showleague.dart';
-import 'package:infinite_sports_flutter/table.dart';
 import 'package:infinite_sports_flutter/tournament_match_detail.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/fixtures_tab.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/tournament_day_view.dart';
@@ -254,10 +252,6 @@ class _FrontPageState extends State<FrontPage> {
   /// (P2.1 owner feedback: was the hardcoded "Infinite Sports").
   String get _leagueTabTitle => "$currentSport League";
 
-  // Drives whether the app-bar table/leaderboard shortcut buttons are hidden
-  // (they are league-only and make no sense on a tournament tab).
-  final ValueNotifier<bool> _onTournamentTab = ValueNotifier<bool>(false);
-
   @override
   void initState() {
     super.initState();
@@ -300,7 +294,6 @@ class _FrontPageState extends State<FrontPage> {
   void dispose() {
     SeasonPointers.listenable.removeListener(_onSeasonPointersChanged);
     _myRegistrationsSub?.cancel();
-    _onTournamentTab.dispose();
     _tournamentsWatchSub?.cancel();
     super.dispose();
   }
@@ -546,50 +539,6 @@ class _FrontPageState extends State<FrontPage> {
         appBar: GlobalAppBar(
           title: Image.asset('assets/infinite_mark.png', height: 32),
           height: AppBar().preferredSize.height,
-          tableWidget: ValueListenableBuilder<bool>(
-            valueListenable: _onTournamentTab,
-            builder: (context, onTournament, _) {
-              if (onTournament) return const SizedBox.shrink();
-              return ValueListenableBuilder(
-                valueListenable: headerNotifier,
-                builder: (context, value, child) {
-                  return IconButton(
-                    onPressed: () {
-                      Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
-                        initialEntries: [OverlayEntry(
-                            builder: (context) {
-                              return TablePage(sport: value[0], season: value[1]);
-                            })],
-                      )));
-                    },
-                    icon: const ImageIcon(AssetImage('assets/table.png')),
-                  );
-                },
-              );
-            },
-          ),
-          leaderboardWidget: ValueListenableBuilder<bool>(
-            valueListenable: _onTournamentTab,
-            builder: (context, onTournament, _) {
-              if (onTournament) return const SizedBox.shrink();
-              return ValueListenableBuilder(
-                valueListenable: headerNotifier,
-                builder: (context, value, child) {
-                  return IconButton(
-                    onPressed: () {
-                      Navigator.push(mainContext!, MaterialPageRoute(builder: (_) => Overlay(
-                        initialEntries: [OverlayEntry(
-                            builder: (context) {
-                              return LeaderboardPage(sport: value[0], season: value[1]);
-                            })],
-                      )));
-                    },
-                    icon: const ImageIcon(AssetImage('assets/leader.png')),
-                  );
-                },
-              );
-            },
-          ),
         ),
         body: FutureBuilder(
             future: _loadingPage,
@@ -854,15 +803,13 @@ class _FrontPageState extends State<FrontPage> {
   /// the SAME fields the tab bodies were just built from (review fix m2: the
   /// header changes in the same update as the games).
   void _applyHeaderFor(int index) {
-    _onTournamentTab.value = tabIsTournament[index];
     List<String>? next;
     if (tabKeys[index] == 'league') {
       next = [currentSport, currentSeason];
     } else if (tabKeys[index] == 'afc') {
       next = ["AFC San Jose", currentAFCSeason];
     }
-    // A tournament tab leaves headerNotifier unchanged: the table and
-    // leaderboard buttons it feeds are hidden there (_onTournamentTab).
+    // A tournament tab leaves headerNotifier unchanged.
     if (next != null && !listEquals(headerNotifier.value as List, next)) {
       headerNotifier.value = next;
     }
