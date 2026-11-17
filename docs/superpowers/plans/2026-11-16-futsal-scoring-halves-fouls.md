@@ -392,7 +392,7 @@ Durations (rule time + one 10-second buffer per man-down, `kManDownBufferMs = 10
 
 **Stacking rule:** when a card is recorded for player P of team T (or a penalty foul for P), and T has a running man-down for the same P, started at most 60 seconds of game clock ago, that is not already stacked (it has a foul but no card, or a card but no foul), the new penalty is merged into it: `DurationMs` grows by the new penalty's rule time (no second buffer), `Foul` / `Card` are filled in, and `PlayerOutMs` is set from the table. One combined dialog replaces the two separate ones. Otherwise the new penalty starts its own man-down, as today.
 
-**Conceding a goal** ends the whole man-down, stacked or not (rulebook §8: the team "may bring its fifth player back on"). **Fable/owner: confirm** — the alternative is that a goal ends only the current part of a stacked penalty.
+**Conceding a goal** ends the whole man-down, stacked or not (rulebook §8: the team "may bring its fifth player back on"), and its countdown leaves the panel at once. **Owner confirmed 2026-11-16:** "yes when goal is scored the other team can bring a player in and time goes away plus the thing i mentioned on the top showing the count down."
 
 ### Global constraints (Part E additions)
 
