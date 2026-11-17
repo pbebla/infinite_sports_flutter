@@ -19,6 +19,14 @@ void main() {
       const c = MatchClock(startedAtMs: 5000, pausedAccumMs: 0, pausedAtMs: null);
       expect(c.elapsedAt(1000), Duration.zero);
     });
+    test('negative pausedAccumMs (added time) gives the larger elapsed while running', () {
+      const c = MatchClock(startedAtMs: 1000000, pausedAccumMs: -60000, pausedAtMs: null);
+      expect(c.elapsedAt(1600000), const Duration(milliseconds: 660000));
+    });
+    test('negative pausedAccumMs (added time) gives the larger elapsed while paused', () {
+      const c = MatchClock(startedAtMs: 1000000, pausedAccumMs: -60000, pausedAtMs: 1300000);
+      expect(c.elapsedAt(9999999), const Duration(milliseconds: 360000));
+    });
     test('isPaused reflects pausedAt presence', () {
       expect(const MatchClock(startedAtMs: 0, pausedAccumMs: 0, pausedAtMs: 5).isPaused, true);
       expect(const MatchClock(startedAtMs: 0, pausedAccumMs: 0, pausedAtMs: null).isPaused, false);
@@ -46,6 +54,12 @@ void main() {
       expect(c!.startedAtMs, 1000);
       expect(c.pausedAccumMs, 200);
       expect(c.pausedAtMs, 3000);
+    });
+    test('parses a negative PausedAccumMs (int and string)', () {
+      final asInt = MatchClock.fromMap({'StartedAt': 1000000, 'PausedAccumMs': -60000});
+      expect(asInt!.pausedAccumMs, -60000);
+      final asString = MatchClock.fromMap({'StartedAt': 1000000, 'PausedAccumMs': '-60000'});
+      expect(asString!.pausedAccumMs, -60000);
     });
     test('missing PausedAt means running', () {
       final c = MatchClock.fromMap({'StartedAt': 1000});
