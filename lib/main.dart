@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -35,9 +36,12 @@ import 'package:infinite_sports_flutter/navigations/leagues_navigation.dart';
 import 'package:infinite_sports_flutter/navigations/tournaments_navigation.dart';
 import 'package:infinite_sports_flutter/profile/profile_page.dart';
 import 'package:infinite_sports_flutter/search_hub_page.dart';
+import 'package:infinite_sports_flutter/update/store_update_check.dart';
+import 'package:infinite_sports_flutter/update/update_gate.dart';
 import 'package:infinite_sports_flutter/widgets/glass_nav_bar.dart';
 import 'package:infinite_sports_flutter/widgets/skeleton.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
@@ -100,11 +104,55 @@ Future<void> main() async {
   pendingLaunchMessage = await FirebaseMessaging.instance.getInitialMessage();
   SharedPreferences prefs = await SharedPreferences.getInstance();
   darkModeEnabled = resolveDarkModeDefault(prefs.getBool('darkMode'));
-  runApp(ChangeNotifierProvider(create: (context) => ThemeProvider(darkModeEnabled), child: const MyApp()));
+  // Part D (forced updates): a fan a store check already told to update
+  // sees the Update screen in the first frame. Both reads are on the phone
+  // (no network); the store check itself runs after the first frame.
+  final cachedBlockedBuild = prefs.getString(kBlockedBuildPrefKey);
+  final installedBuild = await _installedBuild();
+  runApp(
+    ChangeNotifierProvider(
+      create: (context) => ThemeProvider(darkModeEnabled),
+      child: MyApp(
+        updateChecker: _storeUpdateCheckerForThisPlatform(),
+        installedBuild: installedBuild,
+        cachedBlockedBuild: cachedBlockedBuild,
+      ),
+    ),
+  );
+}
+
+/// The installed `version+build` (e.g. `5.0.0+30`); empty if unreadable,
+/// which never starts the app blocked.
+Future<String> _installedBuild() async {
+  try {
+    final info = await PackageInfo.fromPlatform().timeout(
+      const Duration(seconds: 2),
+    );
+    return '${info.version}+${info.buildNumber}';
+  } catch (_) {
+    return '';
+  }
+}
+
+/// Google Play's in-app update check on Android, Apple's lookup on iPhone;
+/// any other platform never requires an update.
+StoreUpdateChecker _storeUpdateCheckerForThisPlatform() {
+  if (Platform.isIOS) return IosStoreUpdateChecker();
+  if (Platform.isAndroid) return AndroidStoreUpdateChecker();
+  return const NeverRequiredUpdateChecker();
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  const MyApp({
+    super.key,
+    required this.updateChecker,
+    required this.installedBuild,
+    this.cachedBlockedBuild,
+  });
+
+  final StoreUpdateChecker updateChecker;
+  final String installedBuild;
+  final String? cachedBlockedBuild;
 
   // This widget is the root of your application.
   @override
@@ -113,6 +161,15 @@ class MyApp extends StatelessWidget {
       title: 'Infinite Sports',
       theme: Provider.of<ThemeProvider>(context).themeData,
       home: const AuthGate(),
+      // Above the Navigator: while an update is required (and forced
+      // updates are not paused) the whole app is replaced by the
+      // "Update required" screen.
+      builder: (context, child) => UpdateGate(
+        checker: updateChecker,
+        installedBuild: installedBuild,
+        cachedBlockedBuild: cachedBlockedBuild,
+        child: child ?? const SizedBox.shrink(),
+      ),
     );
   }
 }
