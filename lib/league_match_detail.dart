@@ -24,6 +24,7 @@ import 'package:infinite_sports_flutter/model/tournamentplayer.dart';
 import 'package:infinite_sports_flutter/model/tournamentteam.dart';
 import 'package:infinite_sports_flutter/tournament_tabs/match_facts_tab.dart';
 import 'package:infinite_sports_flutter/widgets/forfeit_chip.dart';
+import 'package:infinite_sports_flutter/widgets/futsal_period_labels.dart';
 import 'package:infinite_sports_flutter/widgets/live_clock.dart';
 import 'package:infinite_sports_flutter/widgets/match_share_button.dart';
 import 'package:infinite_sports_flutter/widgets/score_text.dart';
@@ -246,6 +247,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
           // Running match clock from the game node's Clock (P1). Older
           // games without a Clock shrink this to nothing.
           MatchClockText(clock: match.clock),
+          FutsalHalfLabel(match: match),
         ],
       );
     } else if (isFinished) {
@@ -289,7 +291,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
       );
     }
 
-    Widget teamColumn(TournamentTeam? team, String? fallbackName) {
+    Widget teamColumn(TournamentTeam? team, String? fallbackName, int side) {
       final placeholder =
           fallbackName != null && isPlaceholderTeam(fallbackName);
       final column = Column(
@@ -309,6 +311,7 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
             overflow: TextOverflow.ellipsis,
             maxLines: 2,
           ),
+          FutsalTeamFouls(match: match, team: side),
         ],
       );
       // Real teams (not 'Winner of SF1' placeholders) tap through to the
@@ -357,12 +360,12 @@ class _LeagueMatchDetailPageState extends State<LeagueMatchDetailPage> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Expanded(child: teamColumn(team1, match.team1Id)),
+                  Expanded(child: teamColumn(team1, match.team1Id, 1)),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     child: scoreWidget,
                   ),
-                  Expanded(child: teamColumn(team2, match.team2Id)),
+                  Expanded(child: teamColumn(team2, match.team2Id, 2)),
                 ],
               ),
               if (!isLive) ...[

@@ -59,7 +59,7 @@ class LeagueService {
       {int startHour = 0}) {
     return _ref('/$sport/$season/Date').onValue.map((event) =>
         leagueMatchesFromDateNode(event.snapshot.value,
-            startHour: startHour));
+            startHour: startHour, sport: sport));
   }
 
   /// Live stream of ONE date's games (P2.1: the Matches-tab league day view
@@ -70,7 +70,7 @@ class LeagueService {
       {int startHour = 0}) {
     return _ref('/$sport/$season/Date/$dateKey').onValue.map((event) =>
         leagueMatchesFromDateNode({dateKey: event.snapshot.value},
-            startHour: startHour));
+            startHour: startHour, sport: sport));
   }
 
   /// Live stream of ONE game node. null while the node is missing.
@@ -87,6 +87,7 @@ class LeagueService {
         index: gameIndex,
         raw: v,
         startHour: startHour,
+        sport: sport,
       );
     });
   }

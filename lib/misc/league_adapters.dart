@@ -18,6 +18,7 @@
 import 'dart:ui' show Color;
 
 import 'package:infinite_sports_flutter/misc/forfeit.dart';
+import 'package:infinite_sports_flutter/misc/futsal_periods.dart';
 import 'package:infinite_sports_flutter/misc/match_clock.dart';
 import 'package:infinite_sports_flutter/misc/match_location.dart';
 import 'package:infinite_sports_flutter/misc/parse_helpers.dart';
@@ -77,6 +78,7 @@ TournamentMatch leagueMatchFromGameMap({
   required int index,
   required Map<dynamic, dynamic> raw,
   int startHour = 0,
+  String sport = 'Futsal',
 }) {
   // Minute-keyed activity buckets arrive as Maps, or as Lists when Firebase
   // collapses small integer-ish keys; normalize to the Map<String, dynamic>
@@ -125,6 +127,11 @@ TournamentMatch leagueMatchFromGameMap({
     bracketPosition: index,
     // Spec §8a: the Manager's explicit Forfeit mark (1 | 2), never inferred.
     forfeitedBy: parseForfeitedBy(raw[kForfeitedByKey]),
+    // Futsal halves: only a futsal game the Manager has stamped with a
+    // `Period`. Old games and other sports stay null (nothing new shown).
+    periodInfo: sport == 'Futsal' && raw['Period'] != null
+        ? FutsalPeriodInfo.fromGame(raw)
+        : null,
   );
 }
 
@@ -132,7 +139,7 @@ TournamentMatch leagueMatchFromGameMap({
 /// Dates hold Lists (normal) or index-keyed Maps (Firebase hole collapsing);
 /// either way the ORIGINAL index is preserved so ids stay addressable.
 List<TournamentMatch> leagueMatchesFromDateNode(dynamic dateNode,
-    {int startHour = 0}) {
+    {int startHour = 0, String sport = 'Futsal'}) {
   final out = <TournamentMatch>[];
   if (dateNode is! Map) return out;
   dateNode.forEach((dateKey, games) {
@@ -143,6 +150,7 @@ List<TournamentMatch> leagueMatchesFromDateNode(dynamic dateNode,
           index: index,
           raw: raw,
           startHour: startHour,
+          sport: sport,
         ));
       }
     }
