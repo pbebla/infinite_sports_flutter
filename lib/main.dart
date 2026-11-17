@@ -167,8 +167,8 @@ class MyApp extends StatelessWidget {
       theme: Provider.of<ThemeProvider>(context).themeData,
       home: const AuthGate(),
       // Above the Navigator: while an update is required (and forced
-      // updates are not paused) the whole app is replaced by the
-      // "Update required" screen.
+      // updates are not paused) the "Update required" screen covers the
+      // whole app, which stays mounted underneath (no taps, no semantics).
       builder: (context, child) => UpdateGate(
         checker: updateChecker,
         installedBuild: installedBuild,

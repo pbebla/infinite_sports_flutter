@@ -48,7 +48,8 @@ class UpdateGate extends StatefulWidget {
     this.now,
   });
 
-  /// The app (the Navigator), shown unless an update is required.
+  /// The app (the Navigator). Always mounted; while an update is required it
+  /// sits under the Update screen with no taps, focus or semantics.
   final Widget child;
   final StoreUpdateChecker checker;
 
@@ -185,13 +186,34 @@ class _UpdateGateState extends State<UpdateGate> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    if (!_blocked) return widget.child;
+    final blocked = _blocked;
     final openStore = widget.checker.openStore;
-    return UpdateRequiredPage(
-      onUpdate: _startUpdate,
-      onOpenStore: openStore == null
-          ? null
-          : () => unawaited(openStore().catchError((Object _) {})),
+    // The app stays mounted (always the first child, so blocking and
+    // unblocking never rebuild it): a mid-session block keeps its Navigator,
+    // open pages, half-typed forms and mainContext. While blocked it gets no
+    // taps, no keyboard focus and no semantics, and the opaque Update screen
+    // covers it.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        ExcludeFocus(
+          excluding: blocked,
+          child: IgnorePointer(
+            ignoring: blocked,
+            child: ExcludeSemantics(
+              excluding: blocked,
+              child: widget.child,
+            ),
+          ),
+        ),
+        if (blocked)
+          UpdateRequiredPage(
+            onUpdate: _startUpdate,
+            onOpenStore: openStore == null
+                ? null
+                : () => unawaited(openStore().catchError((Object _) {})),
+          ),
+      ],
     );
   }
 }

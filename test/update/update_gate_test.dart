@@ -76,6 +76,7 @@ void main() {
     String? cachedBlockedBuild,
     ThemeData? theme,
     Size size = const Size(360, 640),
+    Widget home = const Scaffold(body: Text(_home)),
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -90,7 +91,7 @@ void main() {
         now: () => clock,
         child: child ?? const SizedBox.shrink(),
       ),
-      home: const Scaffold(body: Text(_home)),
+      home: home,
     ));
   }
 
@@ -101,28 +102,83 @@ void main() {
   }
 
   final updateScreen = find.text('Update required');
-  final homeApp = find.text(_home);
+
+  /// The app is usable: on screen and it takes taps. While blocked it stays
+  /// mounted underneath the Update screen ([find.text] still finds it), so
+  /// "not usable" is what proves the screen covers it.
+  final homeApp = find.text(_home).hitTestable();
 
   testWidgets(
-      'required: the Update screen shows and the child is not in '
-      'the tree', (tester) async {
+      'required: the Update screen covers the app, which stays mounted '
+      'underneath with no taps and no semantics', (tester) async {
+    final semantics = tester.ensureSemantics();
     checker.required = true;
     await mount(tester);
     await tester.pumpAndSettle();
 
     expect(updateScreen, findsOneWidget);
     expect(find.byType(UpdateRequiredPage), findsOneWidget);
-    expect(homeApp, findsNothing);
+    expect(find.text(_home), findsOneWidget, reason: 'still mounted');
+    expect(homeApp, findsNothing, reason: 'gets no taps');
+    expect(find.semantics.byLabel(_home), findsNothing,
+        reason: 'hidden from screen readers');
+    expect(find.semantics.byLabel('Update required'), findsOneWidget);
     expect(checker.checks, 1);
+    semantics.dispose();
   });
 
-  testWidgets('not required: the child shows', (tester) async {
+  testWidgets('not required: the child shows, takes taps and is in semantics',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
     await mount(tester);
     await tester.pumpAndSettle();
 
     expect(homeApp, findsOneWidget);
+    expect(find.semantics.byLabel(_home), findsOneWidget);
     expect(updateScreen, findsNothing);
     expect(checker.checks, 1);
+    semantics.dispose();
+  });
+
+  testWidgets(
+      'a block mid-session keeps the app mounted: a pushed page and a '
+      'half-typed form are still there when the block ends', (tester) async {
+    final paused = {
+      'PausedUntil': _now.add(const Duration(days: 7)).millisecondsSinceEpoch,
+    };
+    checker.required = true;
+    await mount(
+      tester,
+      home: Builder(
+        builder: (context) => Scaffold(
+          body: TextButton(
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => const Scaffold(body: TextField()))),
+            child: const Text('Open form'),
+          ),
+        ),
+      ),
+    );
+    pause.add(paused);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open form'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'half-typed');
+    await tester.pump();
+
+    // The Manager turns forced updates back on: blocked mid-session.
+    pause.add(null);
+    await tester.pumpAndSettle();
+    expect(updateScreen, findsOneWidget);
+    expect(find.text('half-typed'), findsOneWidget, reason: 'still mounted');
+    expect(find.byType(TextField).hitTestable(), findsNothing);
+
+    // Paused again: the same page and the typed text are back.
+    pause.add(paused);
+    await tester.pumpAndSettle();
+    expect(updateScreen, findsNothing);
+    expect(find.text('half-typed').hitTestable(), findsOneWidget);
+    expect(find.text('Open form'), findsNothing);
   });
 
   testWidgets('the checker throws: the child shows (fails open)',
