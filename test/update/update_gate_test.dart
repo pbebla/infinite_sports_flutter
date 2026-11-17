@@ -39,8 +39,14 @@ class _FakeChecker extends StoreUpdateChecker {
         storeUrl: required ? 'https://store.example.test/app' : null);
   }
 
+  /// When set, startUpdate() waits on it (Play's update flow still open).
+  Completer<void>? starting;
+
   @override
-  Future<void> startUpdate(UpdateNeed need) async => started.add(need);
+  Future<void> startUpdate(UpdateNeed need) async {
+    started.add(need);
+    await starting?.future;
+  }
 
   @override
   Future<void> Function()? get openStore =>
@@ -208,6 +214,30 @@ void main() {
   });
 
   testWidgets(
+      'two quick taps on Update start the update once; it re-arms when '
+      'the update flow ends', (tester) async {
+    checker
+      ..required = true
+      ..starting = Completer<void>();
+    await mount(tester);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Update'));
+    await tester.pump();
+    await tester.tap(find.text('Update'));
+    await tester.pump();
+    expect(checker.started, hasLength(1));
+
+    // The fan backs out of Play's update: the button works again.
+    checker.starting!.complete();
+    await tester.pumpAndSettle();
+    checker.starting = null;
+    await tester.tap(find.text('Update'));
+    await tester.pumpAndSettle();
+    expect(checker.started, hasLength(2));
+  });
+
+  testWidgets(
       'Open Google Play shows only when the checker offers it, and '
       'opens the store', (tester) async {
     checker.required = true;
@@ -333,6 +363,62 @@ void main() {
       expect(homeApp, findsOneWidget);
       final prefs = await SharedPreferences.getInstance();
       expect(prefs.containsKey(kBlockedBuildPrefKey), isFalse);
+    });
+
+    testWidgets(
+        'required while paused: nothing saved, so the next start shows the '
+        'app (no Update-screen flash during a pause)', (tester) async {
+      final pausedNode = {
+        'PausedUntil': _now.add(const Duration(days: 7)).millisecondsSinceEpoch,
+      };
+      checker.required = true;
+      await mount(tester);
+      pause.add(pausedNode);
+      await tester.pumpAndSettle();
+      expect(homeApp, findsOneWidget);
+
+      var prefs = await SharedPreferences.getInstance();
+      expect(prefs.containsKey(kBlockedBuildPrefKey), isFalse);
+
+      // A later foreground check (still paused) saves nothing either.
+      await backToForeground(tester);
+      prefs = await SharedPreferences.getInstance();
+      expect(prefs.containsKey(kBlockedBuildPrefKey), isFalse);
+
+      // Next cold start, with whatever was saved, before any answer.
+      await tester.pumpWidget(const SizedBox());
+      checker.pending = Completer<UpdateNeed>();
+      await mount(tester,
+          cachedBlockedBuild: prefs.getString(kBlockedBuildPrefKey));
+      expect(homeApp, findsOneWidget);
+      expect(updateScreen, findsNothing);
+      checker.pending!.complete(const UpdateNeed(required: true));
+      pause.add(pausedNode);
+      await tester.pumpAndSettle();
+      expect(homeApp, findsOneWidget);
+    });
+
+    testWidgets('a pause that arrives after a required check clears the save',
+        (tester) async {
+      checker.required = true;
+      await mount(tester);
+      await tester.pumpAndSettle();
+      var prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(kBlockedBuildPrefKey), _installed);
+
+      pause.add({
+        'PausedUntil': _now.add(const Duration(days: 7)).millisecondsSinceEpoch,
+      });
+      await tester.pumpAndSettle();
+      prefs = await SharedPreferences.getInstance();
+      expect(prefs.containsKey(kBlockedBuildPrefKey), isFalse);
+
+      // Forced updates back on: blocked again, saved again.
+      pause.add(null);
+      await tester.pumpAndSettle();
+      expect(updateScreen, findsOneWidget);
+      prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString(kBlockedBuildPrefKey), _installed);
     });
   });
 

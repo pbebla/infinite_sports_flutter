@@ -78,6 +78,10 @@ class _UpdateGateState extends State<UpdateGate> with WidgetsBindingObserver {
   bool _checking = false;
   DateTime? _lastCheckStarted;
 
+  /// An update is starting (Play's flow may be open): further taps on
+  /// `Update` are ignored so it can never run twice.
+  bool _starting = false;
+
   DateTime _now() => (widget.now ?? DateTime.now)();
 
   bool get _paused =>
@@ -104,18 +108,22 @@ class _UpdateGateState extends State<UpdateGate> with WidgetsBindingObserver {
       return; // no pause switch readable: forced updates stay on
     }
     _pauseSub = states.listen(
-      (node) {
-        if (mounted) setState(() => _pauseNode = node);
-      },
-      onError: (Object _) {
-        if (mounted) setState(() => _pauseNode = null);
-      },
+      (node) => _onPauseNode(node),
+      onError: (Object _) => _onPauseNode(null),
     );
+  }
+
+  void _onPauseNode(Object? node) {
+    if (!mounted) return;
+    setState(() => _pauseNode = node);
+    unawaited(_rememberBlocked());
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
+    // Back from the store (or Play's update flow): `Update` works again.
+    _starting = false;
     // A pause that ran out while the app was away takes effect now.
     setState(() {});
     final last = _lastCheckStarted;
@@ -138,13 +146,17 @@ class _UpdateGateState extends State<UpdateGate> with WidgetsBindingObserver {
     _checking = false;
     if (!mounted) return;
     setState(() => _need = need);
-    await _remember(need.required);
+    await _rememberBlocked();
   }
 
-  Future<void> _remember(bool required) async {
+  /// Saves the installed build only while the fan is really blocked
+  /// (required and not paused); clears it otherwise. So a pause never makes
+  /// a cold start flash the Update screen.
+  Future<void> _rememberBlocked() async {
+    final blocked = _blocked;
     try {
       final prefs = await SharedPreferences.getInstance();
-      if (required && widget.installedBuild.isNotEmpty) {
+      if (blocked && widget.installedBuild.isNotEmpty) {
         await prefs.setString(kBlockedBuildPrefKey, widget.installedBuild);
       } else {
         await prefs.remove(kBlockedBuildPrefKey);
@@ -153,7 +165,15 @@ class _UpdateGateState extends State<UpdateGate> with WidgetsBindingObserver {
   }
 
   void _startUpdate() {
-    unawaited(widget.checker.startUpdate(_need).catchError((Object _) {}));
+    if (_starting) return;
+    _starting = true;
+    Future<void> run() async {
+      try {
+        await widget.checker.startUpdate(_need);
+      } catch (_) {}
+    }
+
+    unawaited(run().whenComplete(() => _starting = false));
   }
 
   @override

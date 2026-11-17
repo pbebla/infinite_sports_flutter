@@ -107,7 +107,12 @@ Future<void> main() async {
   // Part D (forced updates): a fan a store check already told to update
   // sees the Update screen in the first frame. Both reads are on the phone
   // (no network); the store check itself runs after the first frame.
-  final cachedBlockedBuild = prefs.getString(kBlockedBuildPrefKey);
+  String? cachedBlockedBuild;
+  try {
+    cachedBlockedBuild = prefs.getString(kBlockedBuildPrefKey);
+  } catch (_) {
+    cachedBlockedBuild = null; // unreadable: start unblocked (fails open)
+  }
   final installedBuild = await _installedBuild();
   runApp(
     ChangeNotifierProvider(
