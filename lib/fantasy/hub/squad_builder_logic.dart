@@ -73,10 +73,81 @@ List<SquadSlot> buildSlots(FantasyConfig cfg) => [
 /// Court coordinates (0..1 fractions) for the STARTER slots, aligned with
 /// [buildSlots] order: GK row near the top goal, DEF mid, ATT low. Each row
 /// spreads its slots evenly.
-List<({double x, double y})> starterOffsets(FantasyConfig cfg) {
+List<({double x, double y})> starterOffsets(FantasyConfig cfg) =>
+    // Owner feedback: defenders and attackers were huddled too close; GK sat
+    // too far off the goal.
+    //
+    // Rows as far apart as the frame allows (release report #10: at 360 px
+    // the old 0.02 / 0.44 / 0.87 rows let a 2-line name box run into the
+    // photos of the row below). After pitchAssetPerspective these land at ~0
+    // / 0.5 / ~1 of the court's height: the GK chip tops out at the far
+    // goal, the ATT chip bottoms out at the near edge, DEF sits midway — and
+    // [courtHeightFor] grows the court whenever even that is not a full chip
+    // apart (narrow phones, large text).
+    _starterRows(
+      cfg,
+      gkY: kStarterRowGkY,
+      defY: kStarterRowDefY,
+      defSpread: 0.24,
+      attY: kStarterRowAttY,
+      attSpread: 0.26,
+    );
+
+/// Flat-y of the three starter rows ([starterOffsets]); outside 0..1 on
+/// purpose so the asset mapping puts GK / ATT on the frame's edges.
+const double kStarterRowGkY = -0.06;
+const double kStarterRowDefY = 0.5;
+const double kStarterRowAttY = 1.06;
+
+/// Which arrangement of the starter rows a court uses.
+enum StarterLayout {
+  /// The in-app courts (My Team, the squad builder, the Dream Team card):
+  /// [starterOffsets], the court growing taller whenever its rows would not
+  /// be a whole chip apart ([courtHeightFor]).
+  app,
+
+  /// The Team of the Week share image: [storyStarterOffsets] on a court
+  /// exactly the artwork's own height (the 9:16 canvas caps it).
+  story,
+}
+
+/// The share image's starter rows (owner 2026-11-17: on the shared story an
+/// attacker's photo covered the defender above him — "the defenders are too
+/// inside ... forwards just tiny bit come down"). The story's court cannot
+/// grow, and three rows of chips stacked straight down do not fit on its
+/// grass. So the defenders go out toward the touchlines — far enough that
+/// their photos pass BESIDE the keeper's name box — and step up, so the
+/// attackers' whole chips fit below their name boxes; the keeper and
+/// attackers step in from the frame's edges so every photo and name box
+/// stays on the grass (never on the gold rim, never off the pitch). Measured
+/// against real font metrics, two-line names in every row, with and without
+/// the live tag (test/fantasy/share_court_layout_test.dart). Tuned for the
+/// futsal 1-2-2; any other shape keeps the app rows.
+List<({double x, double y})> storyStarterOffsets(FantasyConfig cfg) {
+  if (cfg.startersGk != 1 || cfg.startersDef != 2 || cfg.startersAtt != 2) {
+    return starterOffsets(cfg);
+  }
+  return _starterRows(
+    cfg,
+    gkY: 0.08,
+    defY: 0.39,
+    defSpread: 0.43,
+    attY: 0.95,
+    attSpread: 0.26,
+  );
+}
+
+/// GK, DEF, ATT rows in [buildSlots] order; each row spreads its slots
+/// evenly over ±spread (half the row's total x-width) around the center.
+List<({double x, double y})> _starterRows(
+  FantasyConfig cfg, {
+  required double gkY,
+  required double defY,
+  required double defSpread,
+  required double attY,
+  required double attSpread,
+}) {
   final out = <({double x, double y})>[];
-  // [spread] = half the row's total x-width (owner feedback: defenders and
-  // attackers were huddled too close; GK sat too far off the goal).
   void row(int count, double y, double spread) {
     if (count == 1) {
       out.add((x: 0.5, y: y));
@@ -87,24 +158,11 @@ List<({double x, double y})> starterOffsets(FantasyConfig cfg) {
     }
   }
 
-  // Rows as far apart as the frame allows (release report #10: at 360 px the
-  // old 0.02 / 0.44 / 0.87 rows let a 2-line name box run into the photos
-  // of the row below). After pitchAssetPerspective these land at ~0 / 0.5 /
-  // ~1 of the court's height: the GK chip tops out at the far goal, the ATT
-  // chip bottoms out at the near edge, DEF sits midway — and
-  // [courtHeightFor] grows the court whenever even that is not a full chip
-  // apart (narrow phones, large text).
-  row(cfg.startersGk, kStarterRowGkY, 0);
-  row(cfg.startersDef, kStarterRowDefY, 0.24);
-  row(cfg.startersAtt, kStarterRowAttY, 0.26);
+  row(cfg.startersGk, gkY, 0);
+  row(cfg.startersDef, defY, defSpread);
+  row(cfg.startersAtt, attY, attSpread);
   return out;
 }
-
-/// Flat-y of the three starter rows ([starterOffsets]); outside 0..1 on
-/// purpose so the asset mapping puts GK / ATT on the frame's edges.
-const double kStarterRowGkY = -0.06;
-const double kStarterRowDefY = 0.5;
-const double kStarterRowAttY = 1.06;
 
 /// The court's height for [width]: the pitch's natural height
 /// (`width / aspect`), grown just enough that consecutive rows — whose

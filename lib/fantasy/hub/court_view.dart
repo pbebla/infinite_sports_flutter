@@ -14,7 +14,8 @@
 // darker greens in dark mode, brighter in light.
 //
 // Starter slots sit ON the pitch (GK far row, DEF mid, ATT near — fractions
-// from squad_builder_logic.starterOffsets, perspective-mapped); the bench
+// from squad_builder_logic.starterOffsets, perspective-mapped; the Team of
+// the Week share image passes StarterLayout.story for its own rows); the bench
 // lives BELOW on its own visually-distinct surface labeled from the live
 // config ("Bench · 50% points").
 
@@ -68,6 +69,7 @@ class FantasyCourtView extends StatelessWidget {
     this.chipAvatarSize = 58,
     this.showPrices = true,
     this.priceOf,
+    this.starterLayout = StarterLayout.app,
   });
 
   final FantasyConfig config;
@@ -116,6 +118,11 @@ class FantasyCourtView extends StatelessWidget {
   /// price (read-only viewers of a stored squad).
   final int Function(SquadPick pick)? priceOf;
 
+  /// Where the starters stand: the in-app rows (default), or the Team of
+  /// the Week share image's own ([StarterLayout.story] — only the story
+  /// passes it).
+  final StarterLayout starterLayout;
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -137,9 +144,11 @@ class FantasyCourtView extends StatelessWidget {
     // Perspective-mapped slot rows: the mapping matches whichever pitch is
     // rendered (the asset's measured geometry, or the painter's trapezoid),
     // so hit zones always match the drawn grass.
-    final offsets = starterOffsets(config)
-        .map(useNeonPitchAsset ? pitchAssetPerspective : pitchPerspective)
-        .toList(growable: false);
+    final story = starterLayout == StarterLayout.story;
+    final offsets =
+        (story ? storyStarterOffsets(config) : starterOffsets(config))
+            .map(useNeonPitchAsset ? pitchAssetPerspective : pitchPerspective)
+            .toList(growable: false);
     final starterCount = offsets.length;
 
     final slotStack = Stack(
@@ -167,12 +176,17 @@ class FantasyCourtView extends StatelessWidget {
     // Measured from THIS widget's constraints (a Column child would only
     // ever see an unbounded height).
     return LayoutBuilder(builder: (context, constraints) {
-      var height = courtHeightFor(
-        width: constraints.maxWidth,
-        aspect: aspect,
-        rowFractions: rowFractions,
-        chipHeight: chipHeight,
-      );
+      // The story rows interleave (photos pass beside the row above) on the
+      // artwork's own height — growing by the stacked-rows rule would not
+      // apply to them.
+      var height = story
+          ? constraints.maxWidth / aspect
+          : courtHeightFor(
+              width: constraints.maxWidth,
+              aspect: aspect,
+              rowFractions: rowFractions,
+              chipHeight: chipHeight,
+            );
       if (constraints.hasBoundedHeight && height > constraints.maxHeight) {
         height = constraints.maxHeight;
       }
