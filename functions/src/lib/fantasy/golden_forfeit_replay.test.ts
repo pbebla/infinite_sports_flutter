@@ -151,6 +151,12 @@ describe('golden forfeit replay (cross-engine contract, spec §8a)', () => {
         .map((slot) => slot.playerId);
       expect(promoted.sort(), `${name} auto-subs`)
         .toEqual([...(exp['autoSubbedIn'] as string[])].sort());
+      // Which starter each auto-sub covered (only on the promoted slot).
+      const replaces: Record<string, string> = {};
+      for (const slot of result.slots) {
+        if ('replacesId' in slot) replaces[slot.playerId] = slot.replacesId!;
+      }
+      expect(replaces, `${name} replaces`).toEqual(exp['replaces']);
     }
   });
 

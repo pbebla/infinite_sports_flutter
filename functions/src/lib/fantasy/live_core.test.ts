@@ -84,6 +84,7 @@ interface BreakdownRow {
   countedTenths: number;
   multiplier: number;
   autoSubbedIn: boolean;
+  replaces?: string;
 }
 
 /** The Live node (Meta aside) that gw's finalize output implies at full
@@ -134,6 +135,7 @@ function expectedFromFinalize(fin: FinalizeOutput): Omit<LiveOutput, 'Meta'> {
         c: b.countedTenths,
         x: b.multiplier,
         ...(b.autoSubbedIn ? { s: true as const } : {}),
+        ...(b.replaces !== undefined ? { r: b.replaces } : {}),
       })),
     };
   }
@@ -889,6 +891,8 @@ describe('computeLiveWeek: player numbers', () => {
     expect(out.Squads['u'].T).toBe(380);
     expect(out.Squads['u'].Slots.find((s) => s.p === 'Vic'))
       .toStrictEqual({ p: 'Vic', c: 25, x: 1 });
+    // The pending starter Paz is not replaced: no slot carries r.
+    expect(out.Squads['u'].Slots.some((s) => 'r' in s)).toBe(false);
     // GK slot stays empty (Pia has not played). DEF Vic 5, Dot 1; ATT Leo
     // 12, then Lana and Tom tie on 7 (name asc).
     expect(out.TeamOfWeek).toStrictEqual([
@@ -979,7 +983,7 @@ describe('computeLiveWeek: board and squads', () => {
     });
   });
 
-  it('Squads: net tenths after the hit, whole points, slots in pick order; s only on an auto-sub', () => {
+  it('Squads: net tenths after the hit, whole points, slots in pick order; s and r only on an auto-sub', () => {
     // e: Abe (absent, Lions done for the day) starts -> bench DEF Vic on in
     // FULL 50. 0 + 0 + 10 + 240 + 70 + 50 + 35 = 405, minus a 4-point hit
     // = 365 -> W 36.
@@ -1002,7 +1006,7 @@ describe('computeLiveWeek: board and squads', () => {
         { p: 'Dot', c: 10, x: 1 },
         { p: 'Leo', c: 240, x: 2 },
         { p: 'Lana', c: 70, x: 1 },
-        { p: 'Vic', c: 50, x: 1, s: true },
+        { p: 'Vic', c: 50, x: 1, s: true, r: 'Abe' },
         { p: 'Tom', c: 35, x: 1 },
       ],
     });

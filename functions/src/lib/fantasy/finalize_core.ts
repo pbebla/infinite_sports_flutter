@@ -55,9 +55,11 @@
 // - History/<gw>/<uid> = engine FantasySquad.toMap (squadFromMap-compatible:
 //   picks/captainId/viceId/chip — the client's squadsByWeekForUid reads just
 //   these) PLUS { TotalTenths:int, Breakdown:[{playerId, countedTenths,
-//   multiplier, autoSubbedIn}] }. TotalTenths is the NET squad-week tenths
-//   (gross countedTenths sum minus transferCost*10) — the single source the
-//   Overall board resums from on later reruns. A source node carrying a
+//   multiplier, autoSubbedIn, replaces?}] } (replaces = the absent starter's
+//   playerId, written only on the bench row that came on for him).
+//   TotalTenths is the NET squad-week tenths (gross countedTenths sum
+//   minus transferCost*10) — the single source the Overall board resums
+//   from on later reruns. A source node carrying a
 //   numeric realizedTenths (the lock judge's running sale profit/loss, FPL
 //   selling — squad_integrity.ts) passes it on, invalid rows included.
 //
@@ -630,6 +632,8 @@ export function scoreWeekCore(input: WeekCoreInput): WeekCoreOutput {
         countedTenths: s.countedTenths,
         multiplier: s.multiplier,
         autoSubbedIn: s.autoSubbedIn,
+        // The starter an auto-sub covered — only on that bench row.
+        ...(s.replacesId !== undefined ? { replaces: s.replacesId } : {}),
       })),
     };
     scoredValid++;

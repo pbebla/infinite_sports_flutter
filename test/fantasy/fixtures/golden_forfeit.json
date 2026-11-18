@@ -58,7 +58,11 @@
     "DREAM TEAM (checked by the TS finalize replay only — pickDreamTeam is",
     "server-side): played players only, points desc then name asc. GK: Hal 2",
     "(Luca 1, Finn 1; Tom did not play). DEF: Hana 14, Faye 3. ATT: Fred 7,",
-    "Hugo 7 (name order). Nobody from the forfeiting team can appear."
+    "Hugo 7 (name order). Nobody from the forfeiting team can appear.",
+    "",
+    "REPLACES (bench player who came on -> the starter he covered): split",
+    "Lara->Tess (Theo's ATT cover Lena was absent: no pairing); noband",
+    "Faye->Tess (the absent GK Tom has no bench cover)."
   ],
   "config": "futsalDefault",
   "players": [
@@ -200,6 +204,7 @@
         "armband": "Leo",
         "armbandMultiplier": 3,
         "autoSubbedIn": [ "Lara" ],
+        "replaces": { "Lara": "Tess" },
         "countedTenths": {
           "Luca": 10, "Tess": 0, "Faye": 30, "Theo": 0, "Leo": 30,
           "Lara": 10, "Lena": 0
@@ -210,6 +215,7 @@
         "armband": null,
         "armbandMultiplier": 1,
         "autoSubbedIn": [ "Faye" ],
+        "replaces": { "Faye": "Tess" },
         "countedTenths": {
           "Tom": 0, "Tess": 0, "Hana": 140, "Hugo": 70, "Fred": 70,
           "Faye": 30, "Leo": 5

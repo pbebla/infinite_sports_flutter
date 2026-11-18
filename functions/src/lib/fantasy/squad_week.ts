@@ -19,6 +19,9 @@ export interface SlotResult {
   multiplier: number; // 1 normal, 2 captain, 3 triple captain
   autoSubbedIn: boolean;
   played: boolean;
+  /** Set only on a promoted (auto-subbed-in) bench slot: the absent
+   *  starter he covered. The key is absent on every other slot. */
+  replacesId?: string;
 }
 
 export interface SquadWeekResult {
@@ -47,14 +50,17 @@ export function scoreSquadWeek(
   // Auto-subs: each absent starter is covered by the first unused bench
   // player of the SAME position who played (spec §2). Covering bench scores
   // FULL; uncovered bench scores half (or full on Bench Boost).
-  const promoted = new Set<string>();
+  // promoted maps each covering bench player to the starter he covered
+  // (starters walked in pick order, so the FIRST absent starter of a
+  // position gets the first bench cover).
+  const promoted = new Map<string, string>();
   for (const starter of squadStarters(squad)) {
     if (of(starter.playerId).played) continue;
     for (const b of squadBench(squad)) {
       if (b.position === starter.position &&
         !promoted.has(b.playerId) &&
         of(b.playerId).played) {
-        promoted.add(b.playerId);
+        promoted.set(b.playerId, starter.playerId);
         break;
       }
     }
@@ -90,6 +96,7 @@ export function scoreSquadWeek(
       // non-multiples, e.g. -155/10 -> trunc -15, floor -16).
       counted = Math.trunc((w.points * mult * cfg.benchFactorPercent) / 10);
     }
+    const replacesId = promoted.get(p.playerId);
     slots.push({
       playerId: p.playerId,
       position: p.position,
@@ -99,6 +106,7 @@ export function scoreSquadWeek(
       multiplier: p.playerId === armband && w.played ? capMult : 1,
       autoSubbedIn: promoted.has(p.playerId),
       played: w.played,
+      ...(replacesId !== undefined ? { replacesId } : {}),
     });
   }
   return { slots };

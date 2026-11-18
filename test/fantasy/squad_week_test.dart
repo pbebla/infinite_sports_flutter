@@ -102,4 +102,44 @@ void main() {
     final r = scoreSquadWeek(squad(chip: 'benchBoost'), m, cfg);
     expect(r.slot('d3').countedTenths, 0);
   });
+  test('replacesId: the bench DEF who came on records the absent DEF starter',
+      () {
+    final m = wk({
+      'g1': (6, true), 'd1': (5, true), 'd2': (0, false),
+      'a1': (10, true), 'a2': (3, true), 'd3': (7, true), 'a3': (2, true),
+    });
+    final r = scoreSquadWeek(squad(), m, cfg);
+    expect(r.slot('d3').autoSubbedIn, isTrue);
+    expect(r.slot('d3').replacesId, 'd2');
+    // Only the promoted slot carries it.
+    expect([for (final s in r.slots) if (s.replacesId != null) s.playerId],
+        ['d3']);
+    expect(r.slot('d3').countedTenths, 70);
+  });
+  test('replacesId: two absent DEF starters, one bench DEF -> the FIRST in '
+      'pick order', () {
+    final m = wk({
+      'g1': (6, true), 'd1': (0, false), 'd2': (0, false),
+      'a1': (10, true), 'a2': (3, true), 'd3': (7, true), 'a3': (2, true),
+    });
+    final r = scoreSquadWeek(squad(captain: 'a1', vice: 'a2'), m, cfg);
+    expect(r.slot('d3').replacesId, 'd1');
+    expect(r.slots.where((s) => s.replacesId != null).length, 1);
+    expect(r.slot('d2').replacesId, isNull);
+  });
+  test('replacesId: nobody played for the absent starter -> no pairing', () {
+    final m = wk({
+      'g1': (6, true), 'd1': (5, true), 'd2': (0, false),
+      'a1': (10, true), 'a2': (3, true), 'd3': (0, false), 'a3': (2, true),
+    });
+    final r = scoreSquadWeek(squad(), m, cfg);
+    expect(r.slots.where((s) => s.replacesId != null), isEmpty);
+  });
+  test('replacesId: everyone played -> no pairing; bench boost does not pair',
+      () {
+    expect(scoreSquadWeek(squad(), allPlay, cfg)
+        .slots.where((s) => s.replacesId != null), isEmpty);
+    expect(scoreSquadWeek(squad(chip: 'benchBoost'), allPlay, cfg)
+        .slots.where((s) => s.replacesId != null), isEmpty);
+  });
 }

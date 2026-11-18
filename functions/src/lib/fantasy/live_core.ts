@@ -86,10 +86,11 @@
 //   base weeks, 3 weeks in all; a week the player is missing from counts
 //   0; no weeks = 0). Ppg (tenths) = Games 0 ? 0 : round(10 x Total /
 //   Games). Own = round(100 x holders / valid squads scored), 0 when none.
-// - Live/Squads/<uid> = { T, W, Slots:[{p, c, x, s?:true}] } — T = net
+// - Live/Squads/<uid> = { T, W, Slots:[{p, c, x, s?:true, r?}] } — T = net
 //   tenths (History TotalTenths), W = wholePoints(T), one slot per pick in
 //   pick order from the Breakdown: p playerId, c countedTenths, x
-//   multiplier, s only when auto-subbed in. An invalid squad has no
+//   multiplier, s only when auto-subbed in, r (Breakdown `replaces`) the
+//   starter that auto-sub covered, only on that slot. An invalid squad has no
 //   Breakdown: Slots [] (RTDB drops the empty list; readers default it).
 //   Malformed squads (squadFromMap throws) appear nowhere, as in finalize.
 // - Live/TeamOfWeek = [{name, position, points}] — pickDreamTeam over the
@@ -198,6 +199,9 @@ export interface LiveSlot {
   c: number;
   x: number;
   s?: true;
+  /** The starter this auto-sub covered (Breakdown `replaces`); only set
+   *  together with s. */
+  r?: string;
 }
 
 export interface LiveSquad {
@@ -227,6 +231,7 @@ interface BreakdownRow {
   countedTenths: number;
   multiplier: number;
   autoSubbedIn: boolean;
+  replaces?: string;
 }
 
 /** The teams that still have a not-started (status 0) game today. */
@@ -462,6 +467,7 @@ export function computeLiveWeek(input: LiveInput): LiveOutput {
         c: b.countedTenths,
         x: b.multiplier,
         ...(b.autoSubbedIn ? { s: true as const } : {}),
+        ...(b.replaces !== undefined ? { r: b.replaces } : {}),
       })),
     };
   }

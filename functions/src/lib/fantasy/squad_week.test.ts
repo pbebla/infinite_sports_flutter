@@ -123,6 +123,44 @@ describe('squad_week', () => {
     const r = scoreSquadWeek(squad({ chip: 'benchBoost' }), m, cfg);
     expect(slotOf(r, 'd3').countedTenths).toBe(0);
   });
+  it('replacesId: the bench DEF who came on records the absent DEF starter', () => {
+    const m = wk({
+      g1: [6, true], d1: [5, true], d2: [0, false],
+      a1: [10, true], a2: [3, true], d3: [7, true], a3: [2, true],
+    });
+    const r = scoreSquadWeek(squad(), m, cfg);
+    expect(slotOf(r, 'd3').autoSubbedIn).toBe(true);
+    expect(slotOf(r, 'd3').replacesId).toBe('d2');
+    // Only the promoted slot carries it; the key is absent everywhere else.
+    expect(r.slots.filter((s) => 'replacesId' in s).map((s) => s.playerId))
+      .toEqual(['d3']);
+    // Scores unchanged by the new field.
+    expect(slotOf(r, 'd3').countedTenths).toBe(70);
+  });
+  it('replacesId: two absent DEF starters, one bench DEF -> the FIRST in pick order', () => {
+    const m = wk({
+      g1: [6, true], d1: [0, false], d2: [0, false],
+      a1: [10, true], a2: [3, true], d3: [7, true], a3: [2, true],
+    });
+    const r = scoreSquadWeek(squad({ captain: 'a1', vice: 'a2' }), m, cfg);
+    expect(slotOf(r, 'd3').replacesId).toBe('d1');
+    expect(r.slots.filter((s) => s.replacesId !== undefined)).toHaveLength(1);
+    expect('replacesId' in slotOf(r, 'd2')).toBe(false);
+  });
+  it('replacesId: nobody played for the absent starter -> no pairing anywhere', () => {
+    const m = wk({
+      g1: [6, true], d1: [5, true], d2: [0, false],
+      a1: [10, true], a2: [3, true], d3: [0, false], a3: [2, true],
+    });
+    const r = scoreSquadWeek(squad(), m, cfg);
+    expect(r.slots.filter((s) => 'replacesId' in s)).toEqual([]);
+  });
+  it('replacesId: everyone played -> no pairing; bench boost does not pair', () => {
+    expect(scoreSquadWeek(squad(), allPlay, cfg).slots
+      .filter((s) => 'replacesId' in s)).toEqual([]);
+    expect(scoreSquadWeek(squad({ chip: 'benchBoost' }), allPlay, cfg).slots
+      .filter((s) => 'replacesId' in s)).toEqual([]);
+  });
   it('negative bench points truncate toward zero like Dart ~/', () => {
     // -3 pts on the half bench: -3*1*50 = -150, ~/10 = -15 (golden pins this);
     // a non-multiple like -31*50=-1550... use points -31: trunc(-155)= -155?
