@@ -122,6 +122,88 @@ void main() {
     expect(draft.captainId, 'Def One');
   });
 
+  group('substitute (a starter and a bench player of one position)', () {
+    // fullSquad slots: 0 GK, 1-2 DEF, 3-4 ATT, 5 bench DEF, 6 bench ATT.
+    SquadDraftController armed({String captainId = 'GK One',
+        String viceId = 'Def One'}) {
+      final d = SquadDraftController(
+          config: cfg,
+          initial: fullSquad(captainId: captainId, viceId: viceId));
+      d.setTransferContext(
+          state: TransferStateView(
+              free: 2,
+              countFromGw: 5,
+              countFrom: [for (final p in fullSquad().picks) p.playerId]),
+          answered: true,
+          editingGw: 5);
+      return d;
+    }
+
+    test('candidates are the other side of the bench line, same position', () {
+      final d = armed();
+      expect(d.substituteCandidates(1), [5]);
+      expect(d.substituteCandidates(2), [5]);
+      expect(d.substituteCandidates(5), [1, 2]);
+      expect(d.substituteCandidates(3), [6]);
+      expect(d.substituteCandidates(6), [3, 4]);
+      expect(d.substituteCandidates(0), isEmpty);
+      d.removeAt(5);
+      expect(d.substituteCandidates(1), isEmpty);
+      expect(d.substituteCandidates(5), isEmpty);
+    });
+
+    test('swaps the picks; money, prices and transfers stay put', () {
+      final d = armed();
+      final spent = d.spentTenths;
+      final left = d.remainingTenths;
+      var notified = 0;
+      d.addListener(() => notified++);
+      expect(d.substitute(3, 6), isNull);
+      expect(notified, 1);
+      expect(d.dirty, isTrue);
+      expect(d.picks[3]!.playerId, 'Bench Att');
+      expect(d.picks[3]!.bench, isFalse);
+      expect(d.picks[6]!.playerId, 'Att One');
+      expect(d.picks[6]!.bench, isTrue);
+      expect(d.picks[3]!.priceTenths, 50);
+      expect(d.picks[6]!.priceTenths, 50);
+      expect(d.spentTenths, spent);
+      expect(d.remainingTenths, left);
+      expect(d.transferPreview.used, 0);
+      expect(d.transferPreview.costPoints, 0);
+      expect(validateSquad(d.squad, cfg), isEmpty);
+    });
+
+    test('benching the captain hands the armband to the player coming on',
+        () {
+      final d = armed(captainId: 'Def One', viceId: 'Att One');
+      expect(d.substitute(1, 5), 'Bench Def is now your captain.');
+      expect(d.captainId, 'Bench Def');
+      expect(d.viceId, 'Att One');
+      expect(d.picks[1]!.playerId, 'Bench Def');
+      expect(validateSquad(d.squad, cfg), isEmpty);
+    });
+
+    test('benching the vice hands the armband to the player coming on', () {
+      final d = armed(captainId: 'GK One', viceId: 'Att Two');
+      expect(d.substitute(6, 4), 'Bench Att is now your vice-captain.');
+      expect(d.viceId, 'Bench Att');
+      expect(d.captainId, 'GK One');
+    });
+
+    test('an invalid pair throws and changes nothing', () {
+      final d = armed();
+      expect(() => d.substitute(1, 2), throwsArgumentError); // two starters
+      expect(() => d.substitute(1, 6), throwsArgumentError); // two positions
+      expect(() => d.substitute(0, 5), throwsArgumentError); // GK vs DEF
+      expect(() => d.substitute(5, 6), throwsArgumentError); // two bench
+      d.removeAt(5);
+      d.markSaved();
+      expect(() => d.substitute(1, 5), throwsArgumentError); // empty slot
+      expect(d.dirty, isFalse);
+    });
+  });
+
   test('syncConfig reshapes slots and re-maps picks; non-formation tweaks '
       'stay silent', () {
     final draft = SquadDraftController(config: cfg, initial: fullSquad());
