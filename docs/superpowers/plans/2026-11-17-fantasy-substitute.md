@@ -180,7 +180,7 @@ Older rows have no `replaces`/`r`. That includes GW1, which was finalized before
 ## Rollout (each step needs the owner's go)
 
 1. Fan build on the emulator for the owner to try Substitute on his own squad, and Save before the deadline.
-2. Functions deploy of the scoring functions: the groups `fantasyFutsal`, `fantasyBasketball` and `fantasyFlagFootball` (each holds that sport's finalize and live triggers, `functions/src/index.ts:375-389`) and `fantasyLifecycleSweep` (`fantasy_lifecycle.ts:38`). It is additive: store apps ignore `replaces` / `r`. From then on, live and newly finalized weeks carry them.
+2. Functions deploy of the scoring functions: the groups `fantasyFutsal`, `fantasyBasketball` and `fantasyFlagFootball` (each holds that sport's finalize and live triggers, `functions/src/index.ts:375-389`), `fantasyLifecycleSweep` (`fantasy_lifecycle.ts:38`) and `onFantasyVoidWritten` (`functions/src/index.ts:401`; voiding or un-voiding a week re-settles it through the same scoring code). It is additive: store apps ignore `replaces` / `r`. From then on, live and newly finalized weeks carry them.
 3. Fan app: merge `zaya-fantasy-subs` into `zaya-review-fixes` for PR #18, with the share-image fix. iPhone simulator checks: Substitute on a starter and on a bench player; the captain SnackBar; an auto-sub drawn on the pitch.
 
 ## Not in this plan
