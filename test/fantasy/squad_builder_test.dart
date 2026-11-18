@@ -2714,8 +2714,8 @@ void main() {
         'Def Two',
         'Bench Att',
       ]);
-      // No armband moved — nothing to say.
-      expect(find.byType(SnackBar), findsNothing);
+      // No armband moved: the save reminder alone (final review I2).
+      expect(find.text('Swapped. Tap Save squad to keep it.'), findsOneWidget);
       expect(saveEnabled(tester), isFalse); // no money context: shared draft
     });
 
@@ -2772,6 +2772,37 @@ void main() {
       expect(ids(draft)[2], 'Bench Def');
       expect(ids(draft)[5], 'Def Two');
       expect(ids(draft)[1], 'Def One');
+      // The sheet path also says it is not saved yet (final review I2).
+      expect(find.text('Swapped. Tap Save squad to keep it.'), findsOneWidget);
+    });
+
+    // Final review M2: the tile names its counterpart before the sheet
+    // opens; if that slot holds someone else by the tap, nothing happens.
+    testWidgets('the one-tap Substitute refuses when the named counterpart '
+        'was replaced while the sheet was open', (tester) async {
+      final draft = draftOf(fullSquad());
+      addTearDown(draft.dispose);
+      await pumpBuilder(tester, draft: draft);
+
+      await openChip(tester, 'Def Two');
+      expect(find.text('Substitute with Bench Def'), findsOneWidget);
+      // A stream adopt / another surface puts a different DEF on the bench.
+      draft.setPickAt(
+          5,
+          SquadPick(
+              playerId: 'Dana Wall',
+              position: FantasyPosition.def,
+              priceTenths: 50,
+              bench: true));
+      await tester.pump();
+      final before = ids(draft);
+
+      await tester.tap(find.byKey(const ValueKey('action_substitute')));
+      await tester.pumpAndSettle();
+      expect(ids(draft), before);
+      expect(ids(draft)[2], 'Def Two');
+      expect(ids(draft)[5], 'Dana Wall');
+      expect(find.text('Swapped. Tap Save squad to keep it.'), findsNothing);
     });
 
     testWidgets('dismissing the substitute sheet changes nothing',
@@ -2803,7 +2834,10 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('action_substitute')));
       await tester.pumpAndSettle();
 
-      expect(find.text('Bench Att is now your captain.'), findsOneWidget);
+      expect(
+          find.text(
+              'Bench Att is now your captain. Tap Save squad to keep it.'),
+          findsOneWidget);
       expect(draft.captainId, 'Bench Att');
       expect(find.byKey(const ValueKey('captain_ring_Bench Att')),
           findsOneWidget);
@@ -2825,7 +2859,10 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('substitute_row_Def One')));
       await tester.pumpAndSettle();
 
-      expect(find.text('Bench Def is now your vice-captain.'), findsOneWidget);
+      expect(
+          find.text('Bench Def is now your vice-captain. '
+              'Tap Save squad to keep it.'),
+          findsOneWidget);
       expect(draft.viceId, 'Bench Def');
     });
 

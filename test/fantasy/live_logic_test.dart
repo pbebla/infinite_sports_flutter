@@ -549,6 +549,27 @@ void main() {
                 .rows,
             isEmpty,
             reason: 'no locked squad on screen owns the rows');
+        // Invalid: live (a squad with no slots) and settled (the marker),
+        // even with the locked squad on screen.
+        expect(
+            resolve(
+                    sources: LockedWeekSources(
+                        live: liveState(),
+                        liveSquad: const LiveSquad(
+                            totalTenths: 0, week: 0, slots: []),
+                        published: published))
+                .rows,
+            isEmpty);
+        expect(
+            resolve(
+                    sources: LockedWeekSources(
+                        history: HistoryWeek(
+                            totalTenths: 0,
+                            invalid: true,
+                            slots: [slot('Ava', 1)],
+                            squad: published)))
+                .rows,
+            isEmpty);
         final partial = resolve(
             sources: LockedWeekSources(
                 live: liveState(),

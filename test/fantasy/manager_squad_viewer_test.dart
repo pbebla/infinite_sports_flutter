@@ -1262,6 +1262,39 @@ void main() {
         expect(find.textContaining(' pts'), findsNothing);
       });
 
+      // Final review M1: a Substitute after editing reopened keeps the same
+      // players but a different bench — not the locked squad.
+      testWidgets(
+          '"Now" with the same players but two bench flags swapped shows no '
+          'points', (tester) async {
+        final substituted = FantasySquad(
+          picks: const [
+            SquadPick(
+                playerId: 'Pub Keeper',
+                position: FantasyPosition.gk,
+                priceTenths: 50),
+            SquadPick(
+                playerId: 'Pub Striker',
+                position: FantasyPosition.att,
+                priceTenths: 70,
+                bench: true),
+            SquadPick(
+                playerId: 'Bench Att',
+                position: FantasyPosition.att,
+                priceTenths: 40),
+          ],
+          captainId: 'Bench Att',
+          viceId: 'Pub Keeper',
+        );
+        await pumpPoints(tester, isSelf: true, initialSquad: substituted);
+        await land(tester, live: liveWeek2(), squad: week2Points());
+        await frames(tester);
+
+        expect(find.text('Current squad'), findsOneWidget);
+        expect(strip(), findsNothing);
+        expect(find.textContaining(' pts'), findsNothing);
+      });
+
       testWidgets('"Now" with no live week shows no points', (tester) async {
         await pumpPoints(tester, isSelf: true, initialSquad: crew());
         await land(tester, live: FantasyLiveState.none, squad: null);

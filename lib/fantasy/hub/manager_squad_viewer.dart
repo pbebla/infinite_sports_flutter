@@ -539,6 +539,8 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
   /// on your own "Now" face, the week being played — but only when "Now" IS
   /// the squad that was locked for it (same picks): the live points belong to
   /// that squad and are never drawn on a different one. null = no points.
+  /// "Same" means the same players on the same side of the bench line: a
+  /// Substitute keeps the players but changes the lineup (final review M1).
   int? _pointsWeek(Map<int, FantasySquad> weeks) {
     final picked = _selectedWeek;
     if (picked != null) return picked;
@@ -548,10 +550,13 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
     final locked = weeks[live];
     final now = _liveSquad;
     if (locked == null || now == null) return null;
-    Set<String> ids(FantasySquad s) => {for (final p in s.picks) p.playerId};
-    final a = ids(now);
-    final b = ids(locked);
-    return a.length == b.length && a.containsAll(b) ? live : null;
+    Map<String, bool> benchOf(FantasySquad s) =>
+        {for (final p in s.picks) p.playerId: p.bench};
+    final a = benchOf(now);
+    final b = benchOf(locked);
+    final same = a.length == b.length &&
+        b.entries.every((e) => a.containsKey(e.key) && a[e.key] == e.value);
+    return same ? live : null;
   }
 
   /// [week]'s points, through My Team's own resolver — null while the Voided

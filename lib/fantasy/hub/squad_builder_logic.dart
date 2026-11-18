@@ -111,15 +111,15 @@ enum StarterLayout {
   story,
 }
 
-/// The share image's starter rows (owner 2026-11-17: on the shared story an
-/// attacker's photo covered the defender above him — "the defenders are too
-/// inside ... forwards just tiny bit come down"). The story's court cannot
-/// grow, and three rows of chips stacked straight down do not fit on its
-/// grass. So the defenders go out toward the touchlines — far enough that
-/// their photos pass BESIDE the keeper's name box — and step up, so the
-/// attackers' whole chips fit below their name boxes; the keeper and
-/// attackers step in from the frame's edges so every photo and name box
-/// stays on the grass (never on the gold rim, never off the pitch). Measured
+/// The share image's starter rows (owner 2026-11-17: "the defenders are too
+/// inside ... forwards just tiny bit come down"). On the app rows the story
+/// put the keeper's photo on the gold rim and hung the attackers' boxes off
+/// the bottom of the pitch; the story's court cannot grow to make room. So
+/// the keeper and attackers step in from the frame's edges, keeping every
+/// photo and name box on the grass (never on the gold rim, never off the
+/// pitch), and the defenders spread wide toward the touchlines, as the owner
+/// asked — far enough that their photos pass BESIDE the keeper's name box —
+/// and step up, so the attackers' whole chips fit below them. Measured
 /// against real font metrics, two-line names in every row, with and without
 /// the live tag (test/fantasy/share_court_layout_test.dart). Tuned for the
 /// futsal 1-2-2; any other shape keeps the app rows.

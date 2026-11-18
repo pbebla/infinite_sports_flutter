@@ -298,6 +298,10 @@ Future<SquadChipAction?> showSquadChipActions(
 }) {
   return showModalBottomSheet<SquadChipAction>(
     context: context,
+    // Six tiles (with Substitute) outgrow the default 9/16 cap on a small
+    // phone (final review I1): scroll-controlled, capped like the substitute
+    // sheet, the tiles scroll — the sheet still hugs them when they fit.
+    isScrollControlled: true,
     showDragHandle: true,
     builder: (sheetContext) {
       final scheme = Theme.of(sheetContext).colorScheme;
@@ -312,47 +316,57 @@ Future<SquadChipAction?> showSquadChipActions(
             onTap: () => Navigator.of(sheetContext).pop(action),
           );
       return SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
-              child: Text(
-                playerName,
-                textAlign: TextAlign.center,
-                softWrap: true,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: scheme.onSurface,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.72),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+                  child: Text(
+                    playerName,
+                    textAlign: TextAlign.center,
+                    softWrap: true,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: scheme.onSurface,
+                    ),
+                  ),
                 ),
-              ),
+                // Viewing a profile is always allowed — the first item
+                // (round 3).
+                if (showProfile)
+                  tile(const ValueKey('action_profile'), Icons.person_outline,
+                      'Player profile', SquadChipAction.profile),
+                // Armbands are starter-only: bench chips simply never offer
+                // them (spec §2 — the kind way to enforce the invariant).
+                if (!bench && !isCaptain)
+                  tile(const ValueKey('action_make_captain'), Icons.copyright,
+                      'Make Captain', SquadChipAction.makeCaptain,
+                      color: accent),
+                if (!bench && !isVice)
+                  tile(const ValueKey('action_make_vice'),
+                      Icons.verified_outlined, 'Make Vice-Captain',
+                      SquadChipAction.makeVice),
+                if (substituteLabel != null)
+                  tile(const ValueKey('action_substitute'), Icons.swap_vert,
+                      substituteLabel, SquadChipAction.substitute),
+                // Owner decision 4: "Replace" (it sells him for a market
+                // pick), so it is never mistaken for the free Substitute
+                // above.
+                tile(const ValueKey('action_swap'), Icons.swap_horiz,
+                    'Replace', SquadChipAction.swap),
+                tile(const ValueKey('action_remove'),
+                    Icons.person_remove_outlined, 'Remove',
+                    SquadChipAction.remove,
+                    color: fantasyDownRed(context)),
+                const SizedBox(height: 4),
+              ],
             ),
-            // Viewing a profile is always allowed — the first item (round 3).
-            if (showProfile)
-              tile(const ValueKey('action_profile'), Icons.person_outline,
-                  'Player profile', SquadChipAction.profile),
-            // Armbands are starter-only: bench chips simply never offer
-            // them (spec §2 — the kind way to enforce the invariant).
-            if (!bench && !isCaptain)
-              tile(const ValueKey('action_make_captain'), Icons.copyright,
-                  'Make Captain', SquadChipAction.makeCaptain,
-                  color: accent),
-            if (!bench && !isVice)
-              tile(const ValueKey('action_make_vice'), Icons.verified_outlined,
-                  'Make Vice-Captain', SquadChipAction.makeVice),
-            if (substituteLabel != null)
-              tile(const ValueKey('action_substitute'), Icons.swap_vert,
-                  substituteLabel, SquadChipAction.substitute),
-            // Owner decision 4: "Replace" (it sells him for a market pick),
-            // so it is never mistaken for the free Substitute above.
-            tile(const ValueKey('action_swap'), Icons.swap_horiz, 'Replace',
-                SquadChipAction.swap),
-            tile(const ValueKey('action_remove'), Icons.person_remove_outlined,
-                'Remove', SquadChipAction.remove,
-                color: fantasyDownRed(context)),
-            const SizedBox(height: 4),
-          ],
+          ),
         ),
       );
     },

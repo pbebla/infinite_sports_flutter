@@ -334,6 +334,11 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
     // Substitute (ticket #5): one counterpart = a direct swap named on the
     // tile; several = the substitute sheet; none = no tile.
     final counterparts = _draft.substituteCandidates(i);
+    // Who each counterpart slot holds as the tile is labelled: the tap must
+    // still mean that player (final review M2).
+    final counterpartIds = {
+      for (final c in counterparts) c: _draft.picks[c]!.playerId,
+    };
     final action = await showSquadChipActions(
       context,
       playerName: pick.playerId,
@@ -356,7 +361,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       case SquadChipAction.makeVice:
         _draft.makeVice(pick.playerId);
       case SquadChipAction.substitute:
-        await _substitute(i, pick, counterparts);
+        await _substitute(i, pick, counterpartIds);
       case SquadChipAction.swap:
         await _pickInto(i, outgoing: pick);
       case SquadChipAction.remove:
@@ -365,36 +370,41 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
   }
 
   /// Substitute: trade places with the one [counterparts] slot at once, or
-  /// with the one picked on the substitute sheet. Free and not a transfer —
-  /// a draft edit saved by Save squad. A passed armband is said out loud.
+  /// with the one picked on the substitute sheet. [counterparts] maps each
+  /// counterpart slot to the player it held when the choice was shown. Free
+  /// and not a transfer — a draft edit saved by Save squad, so every
+  /// substitution ends with the save reminder (final review I2), after the
+  /// passed-armband sentence when there is one.
   Future<void> _substitute(
-      int i, SquadPick pick, List<int> counterparts) async {
+      int i, SquadPick pick, Map<int, String> counterparts) async {
     int? other;
     if (counterparts.length == 1) {
-      other = counterparts.single;
+      other = counterparts.keys.single;
     } else {
       other = await showSubstituteSheet(
         context,
         playerName: pick.playerId,
         candidates: [
-          for (final c in counterparts)
-            (
-              slot: c,
-              name: _draft.picks[c]!.playerId,
-              position: _draft.slots[c].position,
-            ),
+          for (final MapEntry(key: c, value: id) in counterparts.entries)
+            (slot: c, name: id, position: _draft.slots[c].position),
         ],
       );
     }
     if (other == null || !mounted) return;
-    // The deadline may have passed while the sheet was open, or the draft
-    // changed under it (a stream adopt): re-check before editing.
+    // The deadline may have passed while a sheet was open, or the draft
+    // changed under it (a stream adopt): re-check before editing — the
+    // same player here, and the chosen slot still holding the player the
+    // tile or row named.
     if (!_editable ||
         _draft.picks[i]?.playerId != pick.playerId ||
+        _draft.picks[other]?.playerId != counterparts[other] ||
         !_draft.substituteCandidates(i).contains(other)) {
       return;
     }
-    _announceArmband(_draft.substitute(i, other));
+    final armband = _draft.substitute(i, other);
+    _announceArmband(armband == null
+        ? 'Swapped. Tap Save squad to keep it.'
+        : '$armband Tap Save squad to keep it.');
   }
 
   /// "Swap" on the Needs-a-new-spot strip: pick a replacement for the hole
@@ -455,7 +465,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
 
   /// An armband side effect is SAID out loud — a removed/replaced captain or
   /// vice, or one passed on by a Substitute; nothing happens silently (spec
-  /// §2 kindness rule).
+  /// §2 kindness rule). Also carries the Substitute's save reminder.
   void _announceArmband(String? message) {
     if (message == null || !mounted) return;
     ScaffoldMessenger.of(context)

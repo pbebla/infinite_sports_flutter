@@ -64,6 +64,18 @@ void main() {
     expect(placed[1]!.playerId, 'Dax Dunn');
   });
 
+  // Final review M3: corrupt data pairing two positions never swaps a
+  // defender into an attacker slot (he would be labelled ATT).
+  test('a cross-position pair moves nothing: badge only', () {
+    final d = autoSubDisplay(slots, placed, [
+      row('Ari Ames'),
+      row('Ben Def', sub: true, replaces: 'Ari Ames'),
+    ]);
+    expect(ids(d.slotPicks), ids(placed));
+    expect(d.subbedIn, {'Ben Def'});
+    expect(d.subbedOut, isEmpty);
+  });
+
   test(
       'two absent starters, one sub: only the recorded pair moves (Review '
       'Focus 3)', () {

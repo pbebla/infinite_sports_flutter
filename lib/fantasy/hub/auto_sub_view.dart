@@ -18,7 +18,8 @@ import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
 /// What the court draws for a scored week.
 ///
 /// For every row with a [LiveSlot.replacesId] whose starter stands in a
-/// starter slot and whose bench player sits in a bench slot of [slots], the
+/// starter slot and whose bench player sits in a bench slot of the same
+/// position in [slots], the
 /// two picks trade slot positions (a copy — [slotPicks] is untouched); the
 /// bench player goes in `subbedIn` and the starter in `subbedOut`.
 ///
@@ -54,7 +55,12 @@ import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
     if (sub < 0) continue; // not in the squad on screen
     if (replaced != null && !subbedOut.contains(replaced)) {
       final starter = indexOf(replaced);
-      if (starter >= 0 && slots[sub].bench && !slots[starter].bench) {
+      // Same position only: corrupt data never puts a defender in an
+      // attacker's slot (final review M3).
+      if (starter >= 0 &&
+          slots[sub].bench &&
+          !slots[starter].bench &&
+          slots[sub].position == slots[starter].position) {
         final pick = picks[sub];
         picks[sub] = picks[starter];
         picks[starter] = pick;
