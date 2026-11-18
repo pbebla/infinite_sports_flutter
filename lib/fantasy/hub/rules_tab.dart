@@ -296,12 +296,25 @@ class _RulesBody extends StatelessWidget {
         ),
         _Section(
           title: 'Auto-subs, captain & bench',
-          child: _Body(
-            'If a starter does not appear, the bench player of the same '
-            'position automatically steps in and scores FULL points that '
-            'week. Otherwise the bench scores ${cfg.benchFactorPercent}% of '
-            'their points. If your captain does not appear, the '
-            'vice-captain\'s points count ×${cfg.captainMultiplier} instead.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _Body(
+                'If a starter does not appear, the bench player of the same '
+                'position automatically steps in and scores FULL points that '
+                'week. Otherwise the bench scores ${cfg.benchFactorPercent}% '
+                'of their points. If your captain does not appear, the '
+                'vice-captain\'s points count ×${cfg.captainMultiplier} '
+                'instead.',
+              ),
+              const SizedBox(height: 10),
+              // Ticket #5: the free Substitute on the My Team court.
+              const _Body(
+                'Before the deadline you can Substitute a starter and a bench '
+                'player in the same position. It\'s free and it is not a '
+                'transfer.',
+              ),
+            ],
           ),
         ),
         _Section(

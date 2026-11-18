@@ -95,6 +95,21 @@ void main() {
     await tester.pumpWidget(const SizedBox()); // dispose chip timer
   });
 
+  // Ticket #5: the Auto-subs section explains the free Substitute.
+  testWidgets('Auto-subs: the Substitute sentence', (tester) async {
+    final controller = await pumpRules(tester);
+    expect(find.text('Auto-subs, captain & bench'), findsOneWidget);
+    expect(
+        find.text('Before the deadline you can Substitute a starter and a '
+            'bench player in the same position. It\'s free and it is not a '
+            'transfer.'),
+        findsOneWidget);
+    // The auto-sub explanation stays.
+    expect(find.textContaining('automatically steps in'), findsOneWidget);
+    await controller.close();
+    await tester.pumpWidget(const SizedBox());
+  });
+
   // Plan 2026-11-03: a first team is free and never banks — the Transfers
   // section says so first, then the usual allowance, all from the live config.
   testWidgets('Transfers: a first team is free, then the config\'s weekly '

@@ -326,10 +326,13 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
     if (player == null || !mounted) return;
     final message = _draft.setPickAt(
         i, _draft.newPick(player, bench: _draft.slots[i].bench));
-    _announceArmbandLoss(message);
+    _announceArmband(message);
   }
 
   Future<void> _chipActions(int i, SquadPick pick) async {
+    // Substitute (ticket #5): one counterpart = a direct swap named on the
+    // tile; several = the substitute sheet; none = no tile.
+    final counterparts = _draft.substituteCandidates(i);
     final action = await showSquadChipActions(
       context,
       playerName: pick.playerId,
@@ -337,6 +340,11 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       isCaptain: pick.playerId == _draft.captainId,
       isVice: pick.playerId == _draft.viceId,
       showProfile: widget.onOpenPlayer != null,
+      substituteLabel: switch (counterparts.length) {
+        0 => null,
+        1 => 'Substitute with ${_draft.picks[counterparts.single]!.playerId}',
+        _ => 'Substitute',
+      },
     );
     if (action == null || !mounted) return;
     switch (action) {
@@ -346,11 +354,46 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
         _draft.makeCaptain(pick.playerId);
       case SquadChipAction.makeVice:
         _draft.makeVice(pick.playerId);
+      case SquadChipAction.substitute:
+        await _substitute(i, pick, counterparts);
       case SquadChipAction.swap:
         await _pickInto(i, outgoing: pick);
       case SquadChipAction.remove:
-        _announceArmbandLoss(_draft.removeAt(i));
+        _announceArmband(_draft.removeAt(i));
     }
+  }
+
+  /// Substitute: trade places with the one [counterparts] slot at once, or
+  /// with the one picked on the substitute sheet. Free and not a transfer —
+  /// a draft edit saved by Save squad. A passed armband is said out loud.
+  Future<void> _substitute(
+      int i, SquadPick pick, List<int> counterparts) async {
+    int? other;
+    if (counterparts.length == 1) {
+      other = counterparts.single;
+    } else {
+      other = await showSubstituteSheet(
+        context,
+        playerName: pick.playerId,
+        candidates: [
+          for (final c in counterparts)
+            (
+              slot: c,
+              name: _draft.picks[c]!.playerId,
+              position: _draft.slots[c].position,
+            ),
+        ],
+      );
+    }
+    if (other == null || !mounted) return;
+    // The deadline may have passed while the sheet was open, or the draft
+    // changed under it (a stream adopt): re-check before editing.
+    if (!_editable ||
+        _draft.picks[i]?.playerId != pick.playerId ||
+        !_draft.substituteCandidates(i).contains(other)) {
+      return;
+    }
+    _announceArmband(_draft.substitute(i, other));
   }
 
   /// "Swap" on the Needs-a-new-spot strip: pick a replacement for the hole
@@ -361,7 +404,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
     if (slot == null) {
       // Unreachable for a position change (the move always leaves a hole);
       // removing is the honest fallback.
-      _announceArmbandLoss(_draft.removeUnplaced(pick.playerId));
+      _announceArmband(_draft.removeUnplaced(pick.playerId));
       return;
     }
     final player = await showSquadPickerSheet(
@@ -375,7 +418,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
       moneyReady: _draft.moneyReady,
     );
     if (player == null || !mounted) return;
-    _announceArmbandLoss(_draft.swapUnplaced(pick.playerId, slot,
+    _announceArmband(_draft.swapUnplaced(pick.playerId, slot,
         _draft.newPick(player, bench: _draft.slots[slot].bench)));
   }
 
@@ -409,9 +452,10 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
     );
   }
 
-  /// A removed/swapped-out captain or vice is SAID out loud — nothing
-  /// happens silently (spec §2 kindness rule).
-  void _announceArmbandLoss(String? message) {
+  /// An armband side effect is SAID out loud — a removed/replaced captain or
+  /// vice, or one passed on by a Substitute; nothing happens silently (spec
+  /// §2 kindness rule).
+  void _announceArmband(String? message) {
     if (message == null || !mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -611,7 +655,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
               enabled: editable,
               onSwap: _swapUnplaced,
               onRemove: (pick) =>
-                  _announceArmbandLoss(_draft.removeUnplaced(pick.playerId)),
+                  _announceArmband(_draft.removeUnplaced(pick.playerId)),
             ),
           ],
           const SizedBox(height: 14),

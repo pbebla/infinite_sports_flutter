@@ -1647,6 +1647,50 @@ void main() {
           'after this week.');
     });
 
+    // Review Focus 2 (ticket #5): Substitute is free and is not a transfer.
+    testWidgets('Substitute then Save: the bench flags swap, still 0 '
+        'transfers, the same money left', (tester) async {
+      final draft = draftWith(state: counted());
+      await pumpBuilder(tester, draft: draft);
+      await tester.pump();
+      expect(lineText(tester).data, '0 of 2 free transfers used');
+      final leftBefore = tester
+          .widget<Text>(find.byKey(const ValueKey('budget_left')))
+          .data;
+      final remainingBefore = draft.remainingTenths;
+
+      await tester.tap(find.byKey(const ValueKey('squad_chip_Att Two')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('action_substitute')));
+      await tester.pumpAndSettle();
+
+      expect(lineText(tester).data, '0 of 2 free transfers used');
+      expect(
+          tester.widget<Text>(find.byKey(const ValueKey('budget_left'))).data,
+          leftBefore);
+      expect(draft.remainingTenths, remainingBefore);
+      expect(saveEnabled(tester), isTrue);
+
+      await tapSave(tester);
+      // No "Take a points hit?" — nothing costs anything.
+      expect(find.text('Take a points hit?'), findsNothing);
+      expect(savedSquads, hasLength(1));
+      final saved = savedSquads.single;
+      bool benched(String id) =>
+          saved.picks.firstWhere((p) => p.playerId == id).bench;
+      expect(benched('Att Two'), isTrue);
+      expect(benched('Bench Att'), isFalse);
+      // Every other flag, price, armband and the chip are untouched.
+      expect(saved.bench.map((p) => p.playerId).toSet(),
+          {'Bench Def', 'Att Two'});
+      expect(saved.picks.where((p) => !p.bench), hasLength(5));
+      expect(saved.picks.map((p) => p.priceTenths).toSet(), {50});
+      expect(saved.captainId, 'GK One');
+      expect(saved.viceId, 'Def One');
+      expect(saved.chip, isNull);
+      expect(find.text('Squad saved — good luck!'), findsOneWidget);
+    });
+
     testWidgets('sits directly under the budget bar, above the court',
         (tester) async {
       final draft = draftWith(state: counted());
@@ -2621,5 +2665,274 @@ void main() {
       expect(find.text('Voided · this week counts 0'), findsOneWidget);
       expect(find.text('Final · 34 pts · #5'), findsNothing);
     });
+  });
+
+  // Ticket #5: Substitute swaps a starter and a bench player of the same
+  // position for free. Slots: 0 GK, 1–2 DEF, 3–4 ATT, 5 bench DEF, 6 bench
+  // ATT.
+  group('substitute (ticket #5)', () {
+    SquadDraftController draftOf(FantasySquad squad) => SquadDraftController(
+        config: FantasyConfig.futsalDefault(), initial: squad);
+
+    List<String?> ids(SquadDraftController d) =>
+        [for (final p in d.picks) p?.playerId];
+
+    Future<void> openChip(WidgetTester tester, String id) async {
+      await tester.tap(find.byKey(ValueKey('squad_chip_$id')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a starting DEF: "Substitute with <bench DEF>" swaps them at '
+        'once, with no second sheet', (tester) async {
+      final draft = draftOf(fullSquad());
+      addTearDown(draft.dispose);
+      await pumpBuilder(tester, draft: draft);
+
+      await openChip(tester, 'Def Two');
+      final tile = find.byKey(const ValueKey('action_substitute'));
+      expect(tile, findsOneWidget);
+      expect(
+          find.descendant(
+              of: tile, matching: find.text('Substitute with Bench Def')),
+          findsOneWidget);
+      final icon = tester.widget<Icon>(
+          find.descendant(of: tile, matching: find.byType(Icon)));
+      expect(icon.icon, Icons.swap_vert);
+
+      await tester.tap(tile);
+      await tester.pumpAndSettle();
+      expect(find.text('Substitute Def Two'), findsNothing);
+      expect(find.byKey(const ValueKey('action_substitute')), findsNothing);
+      expect(ids(draft), [
+        'GK One',
+        'Def One',
+        'Bench Def',
+        'Att One',
+        'Att Two',
+        'Def Two',
+        'Bench Att',
+      ]);
+      // No armband moved — nothing to say.
+      expect(find.byType(SnackBar), findsNothing);
+      expect(saveEnabled(tester), isFalse); // no money context: shared draft
+    });
+
+    testWidgets('the goalkeeper has no Substitute (there is no bench keeper)',
+        (tester) async {
+      await pumpBuilder(tester, initialSquad: fullSquad());
+      await openChip(tester, 'GK One');
+      expect(find.byKey(const ValueKey('action_make_vice')), findsOneWidget);
+      expect(find.byKey(const ValueKey('action_substitute')), findsNothing);
+    });
+
+    testWidgets('the bench DEF: "Substitute" opens the sheet with both '
+        'starting DEFs; picking one swaps them', (tester) async {
+      final draft = draftOf(fullSquad());
+      addTearDown(draft.dispose);
+      await pumpBuilder(tester, draft: draft);
+
+      await openChip(tester, 'Bench Def');
+      final tile = find.byKey(const ValueKey('action_substitute'));
+      expect(find.descendant(of: tile, matching: find.text('Substitute')),
+          findsOneWidget);
+      await tester.tap(tile);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Substitute Bench Def'), findsOneWidget);
+      expect(find.text("Pick who swaps places. It's free and not a transfer."),
+          findsOneWidget);
+      expect(find.byKey(const ValueKey('substitute_row_Def One')),
+          findsOneWidget);
+      expect(find.byKey(const ValueKey('substitute_row_Def Two')),
+          findsOneWidget);
+      // Only the same position: no attacker, no keeper.
+      expect(find.byKey(const ValueKey('substitute_row_Att One')),
+          findsNothing);
+      expect(find.byKey(const ValueKey('substitute_row_GK One')), findsNothing);
+      // Each row says the position.
+      expect(
+          find.descendant(
+              of: find.byKey(const ValueKey('substitute_row_Def One')),
+              matching: find.text('Defender')),
+          findsOneWidget);
+      // Rows run in slot order.
+      expect(
+          tester
+              .getTopLeft(find.byKey(const ValueKey('substitute_row_Def One')))
+              .dy,
+          lessThan(tester
+              .getTopLeft(find.byKey(const ValueKey('substitute_row_Def Two')))
+              .dy));
+
+      await tester.tap(find.byKey(const ValueKey('substitute_row_Def Two')));
+      await tester.pumpAndSettle();
+      expect(find.text('Substitute Bench Def'), findsNothing);
+      expect(ids(draft)[2], 'Bench Def');
+      expect(ids(draft)[5], 'Def Two');
+      expect(ids(draft)[1], 'Def One');
+    });
+
+    testWidgets('dismissing the substitute sheet changes nothing',
+        (tester) async {
+      final draft = draftOf(fullSquad());
+      addTearDown(draft.dispose);
+      await pumpBuilder(tester, draft: draft);
+      final before = ids(draft);
+
+      await openChip(tester, 'Bench Def');
+      await tester.tap(find.byKey(const ValueKey('action_substitute')));
+      await tester.pumpAndSettle();
+      expect(find.text('Substitute Bench Def'), findsOneWidget);
+      await tester.tapAt(const Offset(10, 10)); // the scrim
+      await tester.pumpAndSettle();
+      expect(find.text('Substitute Bench Def'), findsNothing);
+      expect(ids(draft), before);
+      expect(draft.dirty, isFalse);
+    });
+
+    // Review Focus 1.
+    testWidgets('benching the captain passes the armband and says so',
+        (tester) async {
+      final draft = draftOf(fullSquad(captainId: 'Att One'));
+      addTearDown(draft.dispose);
+      await pumpBuilder(tester, draft: draft);
+
+      await openChip(tester, 'Att One');
+      await tester.tap(find.byKey(const ValueKey('action_substitute')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Bench Att is now your captain.'), findsOneWidget);
+      expect(draft.captainId, 'Bench Att');
+      expect(find.byKey(const ValueKey('captain_ring_Bench Att')),
+          findsOneWidget);
+      expect(ids(draft)[3], 'Bench Att');
+      expect(ids(draft)[6], 'Att One');
+      // The armband stays valid: no armband sentence inline.
+      expect(find.text('Choose a captain.'), findsNothing);
+    });
+
+    testWidgets('benching the vice through the sheet passes it too',
+        (tester) async {
+      final draft = draftOf(fullSquad()); // vice Def One
+      addTearDown(draft.dispose);
+      await pumpBuilder(tester, draft: draft);
+
+      await openChip(tester, 'Bench Def');
+      await tester.tap(find.byKey(const ValueKey('action_substitute')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('substitute_row_Def One')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Bench Def is now your vice-captain.'), findsOneWidget);
+      expect(draft.viceId, 'Bench Def');
+    });
+
+    testWidgets('a locked court offers no Substitute', (tester) async {
+      await pumpBuilder(tester,
+          lockOverride: FantasyLockOverride.locked, initialSquad: fullSquad());
+      await openChip(tester, 'Def Two');
+      expect(find.byKey(const ValueKey('action_substitute')), findsNothing);
+      await openChip(tester, 'Bench Def');
+      expect(find.byKey(const ValueKey('action_substitute')), findsNothing);
+    });
+
+    testWidgets('a bench player with no starter of his position offers no '
+        'Substitute', (tester) async {
+      await pumpBuilder(tester,
+          initialSquad: FantasySquad(
+            picks: [
+              pick('GK One', FantasyPosition.gk),
+              pick('Att One', FantasyPosition.att),
+              pick('Att Two', FantasyPosition.att),
+              pick('Bench Def', FantasyPosition.def, bench: true),
+              pick('Bench Att', FantasyPosition.att, bench: true),
+            ],
+            captainId: 'GK One',
+            viceId: 'Att One',
+          ));
+      await openChip(tester, 'Bench Def');
+      expect(find.byKey(const ValueKey('action_remove')), findsOneWidget);
+      expect(find.byKey(const ValueKey('action_substitute')), findsNothing);
+    });
+
+    testWidgets('tile order: profile, captain, vice, Substitute, Replace, '
+        'Remove', (tester) async {
+      await pumpBuilder(tester,
+          initialSquad: fullSquad(), onOpenPlayer: (_) {});
+      await openChip(tester, 'Att Two');
+      double y(String key) =>
+          tester.getTopLeft(find.byKey(ValueKey(key))).dy;
+      final order = [
+        'action_profile',
+        'action_make_captain',
+        'action_make_vice',
+        'action_substitute',
+        'action_swap',
+        'action_remove',
+      ];
+      for (var i = 1; i < order.length; i++) {
+        expect(y(order[i - 1]), lessThan(y(order[i])),
+            reason: '${order[i - 1]} must sit above ${order[i]}');
+      }
+    });
+
+    // Owner decision 4: the market tile reads Replace; the strip keeps Swap.
+    testWidgets('the market tile reads "Replace" and still opens the market '
+        'picker', (tester) async {
+      await pumpBuilder(tester, initialSquad: fullSquad());
+      await openChip(tester, 'Def Two');
+      final replace = find.byKey(const ValueKey('action_swap'));
+      expect(find.descendant(of: replace, matching: find.text('Replace')),
+          findsOneWidget);
+      expect(find.text('Swap'), findsNothing);
+      expect(
+          tester
+              .widget<Icon>(
+                  find.descendant(of: replace, matching: find.byType(Icon)))
+              .icon,
+          Icons.swap_horiz);
+      await tester.tap(replace);
+      await tester.pumpAndSettle();
+      expect(find.text('Pick a defender'), findsOneWidget);
+      expect(find.byKey(const ValueKey('picker_row_Dana Wall')),
+          findsOneWidget);
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets('the substitute sheet fits 360 px with long names in '
+          '${brightness.name} mode', (tester) async {
+        const long = 'Maximiliano Alejandro Fernández-Castellanos de la Vega';
+        final draft = draftOf(FantasySquad(
+          picks: [
+            pick('GK One', FantasyPosition.gk),
+            pick('$long Uno', FantasyPosition.def),
+            pick('$long Dos', FantasyPosition.def),
+            pick('Att One', FantasyPosition.att),
+            pick('Att Two', FantasyPosition.att),
+            pick('$long Tres', FantasyPosition.def, bench: true),
+            pick('Bench Att', FantasyPosition.att, bench: true),
+          ],
+          captainId: 'GK One',
+          viceId: 'Att One',
+        ));
+        addTearDown(draft.dispose);
+        await pumpBuilder(tester,
+            draft: draft,
+            size: const Size(360, 1900),
+            brightness: brightness);
+        await openChip(tester, '$long Tres');
+        await tester.tap(find.byKey(const ValueKey('action_substitute')));
+        await tester.pumpAndSettle();
+        expect(find.text('Substitute $long Tres'), findsOneWidget);
+        expect(find.byKey(const ValueKey('substitute_row_$long Uno')),
+            findsOneWidget);
+        expect(tester.takeException(), isNull);
+        // Uses the theme's surface colours, not a fixed light fill.
+        final title =
+            tester.widget<Text>(find.text('Substitute $long Tres'));
+        final context = tester.element(find.text('Substitute $long Tres'));
+        expect(title.style?.color, Theme.of(context).colorScheme.onSurface);
+      });
+    }
   });
 }
