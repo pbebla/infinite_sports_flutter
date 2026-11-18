@@ -37,6 +37,41 @@ void main() {
         closeTo(100 + 106 / 0.5, 1e-9));
   });
 
+  test('appCourtLayout: rows stand on the grass, grown to fit inside it', () {
+    final flat = starterOffsets(FantasyConfig.futsalDefault());
+    for (final chipH in [100.0, 160.0]) {
+      final chips = List.filled(5, Size(96, chipH));
+      final out = appCourtLayout(width: 336, chips: chips, flat: flat);
+      final top = out.height * (pitchAssetTopY + pitchAssetRimTop);
+      final bottom = out.height * pitchAssetBottomY;
+      expect(out.height, greaterThanOrEqualTo(336 / pitchAssetAspect));
+      // Keeper at the far edge, attackers at the near edge, DEF midway.
+      expect(out.origins[0].dy, closeTo(top + kCourtGrassMargin, 1e-9));
+      expect(out.origins[3].dy + chipH,
+          closeTo(bottom - kCourtGrassMargin, 1e-9));
+      final gapAbove = out.origins[1].dy - (out.origins[0].dy + chipH);
+      final gapBelow = out.origins[3].dy - (out.origins[1].dy + chipH);
+      expect(gapAbove, closeTo(gapBelow, 1e-9));
+      expect(gapAbove, greaterThanOrEqualTo(kCourtRowGap - 1e-9));
+      // Inside the touchlines at each chip's top edge.
+      for (var i = 0; i < 5; i++) {
+        final o = out.origins[i];
+        final half = 336 * pitchAssetHalfAt(o.dy / out.height);
+        expect(o.dx, greaterThanOrEqualTo(168 - half));
+        expect(o.dx + 96, lessThanOrEqualTo(168 + half));
+      }
+    }
+    // A bounded parent caps the height.
+    expect(
+        appCourtLayout(
+                width: 336,
+                chips: List.filled(5, const Size(96, 160)),
+                flat: flat,
+                maxHeight: 300)
+            .height,
+        300);
+  });
+
   for (final brightness in Brightness.values) {
     for (final width in [360.0, 320.0]) {
       for (final (label, chipWidth, avatar, pad) in [

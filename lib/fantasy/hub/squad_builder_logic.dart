@@ -5,6 +5,9 @@
 // reassignment, lock state and the human-sentence rendering of the engine's
 // validateSquad issues.
 
+import 'dart:math' as math;
+import 'dart:ui' show Offset, Size;
+
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
@@ -73,17 +76,19 @@ List<SquadSlot> buildSlots(FantasyConfig cfg) => [
 /// Court coordinates (0..1 fractions) for the STARTER slots, aligned with
 /// [buildSlots] order: GK row near the top goal, DEF mid, ATT low. Each row
 /// spreads its slots evenly.
+///
+/// The in-app pitch-asset court ([appCourtLayout]) takes only the rows'
+/// ORDER and each slot's x from these; it stands the rows by the chips' real
+/// extent on the drawn grass (owner 2026-11-17: the keeper's photo sat on the
+/// gold rim and the attackers' boxes hung off the near edge). The flat y
+/// values still drive the painter fallback and the story's non-futsal shapes.
 List<({double x, double y})> starterOffsets(FantasyConfig cfg) =>
     // Owner feedback: defenders and attackers were huddled too close; GK sat
     // too far off the goal.
     //
     // Rows as far apart as the frame allows (release report #10: at 360 px
     // the old 0.02 / 0.44 / 0.87 rows let a 2-line name box run into the
-    // photos of the row below). After pitchAssetPerspective these land at ~0
-    // / 0.5 / ~1 of the court's height: the GK chip tops out at the far
-    // goal, the ATT chip bottoms out at the near edge, DEF sits midway — and
-    // [courtHeightFor] grows the court whenever even that is not a full chip
-    // apart (narrow phones, large text).
+    // photos of the row below).
     _starterRows(
       cfg,
       gkY: kStarterRowGkY,
@@ -93,8 +98,9 @@ List<({double x, double y})> starterOffsets(FantasyConfig cfg) =>
       attSpread: 0.26,
     );
 
-/// Flat-y of the three starter rows ([starterOffsets]); outside 0..1 on
-/// purpose so the asset mapping puts GK / ATT on the frame's edges.
+/// Flat-y of the three starter rows ([starterOffsets]). The in-app court only
+/// reads their order ([appCourtLayout]); the Align-placed courts (the painter
+/// fallback, the story's non-futsal shapes) map them as before.
 const double kStarterRowGkY = -0.06;
 const double kStarterRowDefY = 0.5;
 const double kStarterRowAttY = 1.06;
@@ -102,8 +108,8 @@ const double kStarterRowAttY = 1.06;
 /// Which arrangement of the starter rows a court uses.
 enum StarterLayout {
   /// The in-app courts (My Team, the squad builder, the Dream Team card):
-  /// [starterOffsets], the court growing taller whenever its rows would not
-  /// be a whole chip apart ([courtHeightFor]).
+  /// [appCourtLayout] — every chip on the drawn grass, the court growing
+  /// taller whenever its rows would not fit there a whole chip apart.
   app,
 
   /// The Team of the Week share image: [storyStarterOffsets] on a court
@@ -229,6 +235,98 @@ const double pitchAssetHalfBottom = 0.474;
   final half =
       pitchAssetHalfTop + (pitchAssetHalfBottom - pitchAssetHalfTop) * o.y;
   return (x: 0.5 + (o.x - 0.5) * (half / 0.5), y: y);
+}
+
+/// The gold rim's thickness at the far end: the grass itself starts this far
+/// (image fraction) below [pitchAssetTopY] (measured off the artwork; the
+/// share-layout test uses the same figure).
+const double pitchAssetRimTop = 0.011;
+
+/// Clear grass kept between a chip and the pitch's edges, and the least
+/// space between two starter rows (logical px).
+const double kCourtGrassMargin = 4;
+const double kCourtRowGap = 6;
+
+/// The pitch artwork's half-width (image-width fraction) at image-height
+/// fraction [f] — the touchlines narrow toward the far end.
+double pitchAssetHalfAt(double f) {
+  final t = ((f - pitchAssetTopY) / (pitchAssetBottomY - pitchAssetTopY))
+      .clamp(0.0, 1.0);
+  return pitchAssetHalfTop + (pitchAssetHalfBottom - pitchAssetHalfTop) * t;
+}
+
+/// The in-app court on the pitch artwork (owner 2026-11-17: "players
+/// positions are so far out they are out of the soccer field"): stands the
+/// starter rows by the chips' REAL sizes so every chip — photo and name box —
+/// lies on the drawn grass:
+///
+/// * the first row's (keeper's) top at the grass's far edge + margin, the
+///   last row's (attackers') bottom at the near edge − margin, the rows
+///   between spaced evenly in what is left (DEF midway);
+/// * the court [width] / [aspect] tall, grown just enough that the rows fit
+///   INSIDE the grass at least [gap] apart (release report #10: a name box
+///   never touches the next row's photo), capped by [maxHeight];
+/// * each chip centred on its perspective-mapped x ([pitchAssetPerspective]
+///   at the depth it actually stands), then kept inside the touchlines at
+///   its top edge (the narrower end) + margin.
+///
+/// [flat] is [starterOffsets] (row order + x), [chips] each starter's size,
+/// in the same order. Returns the court's height and each chip's top-left.
+({double height, List<Offset> origins}) appCourtLayout({
+  required double width,
+  required List<Size> chips,
+  required List<({double x, double y})> flat,
+  double maxHeight = double.infinity,
+  double aspect = pitchAssetAspect,
+  double margin = kCourtGrassMargin,
+  double gap = kCourtRowGap,
+}) {
+  assert(chips.length == flat.length);
+  final rowYs = flat.map((o) => o.y).toSet().toList()..sort();
+  final rowOf = [for (final o in flat) rowYs.indexOf(o.y)];
+  final rowH = List<double>.filled(rowYs.length, 0);
+  for (var i = 0; i < chips.length; i++) {
+    if (chips[i].height > rowH[rowOf[i]]) rowH[rowOf[i]] = chips[i].height;
+  }
+  const topF = pitchAssetTopY + pitchAssetRimTop;
+  const bottomF = pitchAssetBottomY;
+  final rowsTotal = rowH.fold<double>(0, (a, b) => a + b);
+  final needed =
+      rowsTotal + gap * math.max(0, rowYs.length - 1) + 2 * margin;
+  var height = math.max(width / aspect, needed / (bottomF - topF));
+  if (height > maxHeight) height = maxHeight;
+
+  final top = height * topF + margin;
+  final bottom = height * bottomF - margin;
+  final rowTop = List<double>.filled(rowYs.length, 0);
+  if (rowYs.length == 1) {
+    rowTop[0] = (top + bottom - rowH[0]) / 2;
+  } else if (rowYs.isNotEmpty) {
+    final step = (bottom - top - rowsTotal) / (rowYs.length - 1);
+    var y = top;
+    for (var r = 0; r < rowYs.length; r++) {
+      rowTop[r] = y;
+      y += rowH[r] + step;
+    }
+  }
+
+  final origins = <Offset>[];
+  for (var i = 0; i < chips.length; i++) {
+    final size = chips[i];
+    final y = rowTop[rowOf[i]];
+    final depth = (y + size.height / 2) / height;
+    final cx =
+        width * (0.5 + (flat[i].x - 0.5) * (pitchAssetHalfAt(depth) / 0.5));
+    final halfTop = width * pitchAssetHalfAt(y / height);
+    final minLeft = width / 2 - halfTop + margin;
+    final maxLeft = width / 2 + halfTop - margin - size.width;
+    var left = cx - size.width / 2;
+    left = maxLeft < minLeft
+        ? (width - size.width) / 2
+        : left.clamp(minLeft, maxLeft);
+    origins.add(Offset(left, y));
+  }
+  return (height: height, origins: origins);
 }
 
 /// Lays a saved squad into the fixed slots: each pick lands in the first

@@ -21,7 +21,9 @@
 
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/player_chip.dart';
@@ -192,6 +194,44 @@ class FantasyCourtView extends StatelessWidget {
         chipAvatarSize, MediaQuery.textScalerOf(context));
     final rowFractions = [for (final o in offsets) o.y.clamp(0.0, 1.0)];
 
+    final bench = slots.length > starterCount
+        ? [
+            const SizedBox(height: 10),
+            _BenchSurface(
+              label: 'Bench · ${config.benchFactorPercent}% points',
+              children: [
+                for (var i = starterCount; i < slots.length; i++)
+                  _slotWidget(i),
+              ],
+            ),
+          ]
+        : const <Widget>[];
+
+    // The in-app courts on the artwork: rows stood by the chips' real size,
+    // every chip on the drawn grass ([appCourtLayout]; owner 2026-11-17).
+    if (!story && useNeonPitchAsset) {
+      return Column(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: _AppCourt(
+              flat: starterOffsets(config),
+              children: [
+                // Transparent outside the pitch's gold boundary — the
+                // surround is the theme's own card surface.
+                ColoredBox(
+                  color: surround,
+                  child: Image.asset(kNeonPitchAsset, fit: BoxFit.fill),
+                ),
+                for (var i = 0; i < starterCount; i++) _slotWidget(i),
+              ],
+            ),
+          ),
+          ...bench,
+        ],
+      );
+    }
+
     // Measured from THIS widget's constraints (a Column child would only
     // ever see an unbounded height).
     return LayoutBuilder(builder: (context, constraints) {
@@ -248,16 +288,7 @@ class FantasyCourtView extends StatelessWidget {
           ),
           // No bench slots (the Dream Team's 5-starter mini mode) = no bench
           // surface at all — an empty labelled shelf would just be noise.
-          if (slots.length > starterCount) ...[
-            const SizedBox(height: 10),
-            _BenchSurface(
-              label: 'Bench · ${config.benchFactorPercent}% points',
-              children: [
-                for (var i = starterCount; i < slots.length; i++)
-                  _slotWidget(i),
-              ],
-            ),
-          ],
+          ...bench,
         ],
       );
     });
@@ -294,6 +325,105 @@ class FantasyCourtView extends StatelessWidget {
       avatarSize: chipAvatarSize,
     );
   }
+}
+
+/// The in-app court on the pitch artwork: the first child is the pitch
+/// (filling the court), the rest the starter chips in [starterOffsets]
+/// order. Lays the chips out first, then sizes itself and stands them with
+/// [appCourtLayout] from their REAL sizes — so a taller nameplate (large
+/// text, a wrapped price line) grows the court instead of leaving the grass
+/// or covering the next row.
+class _AppCourt extends MultiChildRenderObjectWidget {
+  const _AppCourt({required this.flat, required super.children});
+
+  final List<({double x, double y})> flat;
+
+  @override
+  _RenderAppCourt createRenderObject(BuildContext context) =>
+      _RenderAppCourt(flat);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderAppCourt renderObject) {
+    renderObject.flat = flat;
+  }
+}
+
+class _AppCourtParentData extends ContainerBoxParentData<RenderBox> {}
+
+class _RenderAppCourt extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _AppCourtParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, _AppCourtParentData> {
+  _RenderAppCourt(this._flat);
+
+  List<({double x, double y})> _flat;
+  set flat(List<({double x, double y})> value) {
+    if (listEquals(value, _flat)) return;
+    _flat = value;
+    markNeedsLayout();
+  }
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _AppCourtParentData) {
+      child.parentData = _AppCourtParentData();
+    }
+  }
+
+  List<RenderBox> get _chips {
+    final out = <RenderBox>[];
+    var child = firstChild == null ? null : childAfter(firstChild!);
+    while (child != null) {
+      out.add(child);
+      child = childAfter(child);
+    }
+    return out;
+  }
+
+  ({double height, List<Offset> origins}) _layout(
+      BoxConstraints constraints, List<Size> chipSizes) {
+    return appCourtLayout(
+      width: constraints.maxWidth,
+      maxHeight: constraints.maxHeight,
+      chips: chipSizes,
+      flat: _flat.take(chipSizes.length).toList(growable: false),
+    );
+  }
+
+  @override
+  Size computeDryLayout(covariant BoxConstraints constraints) {
+    final loose = BoxConstraints(maxWidth: constraints.maxWidth);
+    final sizes = [for (final c in _chips) c.getDryLayout(loose)];
+    return constraints.constrain(
+        Size(constraints.maxWidth, _layout(constraints, sizes).height));
+  }
+
+  @override
+  void performLayout() {
+    final loose = BoxConstraints(maxWidth: constraints.maxWidth);
+    final chips = _chips;
+    for (final c in chips) {
+      c.layout(loose, parentUsesSize: true);
+    }
+    final placed = _layout(constraints, [for (final c in chips) c.size]);
+    size = constraints.constrain(Size(constraints.maxWidth, placed.height));
+    final pitch = firstChild;
+    if (pitch != null) {
+      pitch.layout(BoxConstraints.tight(size));
+      (pitch.parentData! as _AppCourtParentData).offset = Offset.zero;
+    }
+    for (var i = 0; i < chips.length; i++) {
+      (chips[i].parentData! as _AppCourtParentData).offset = placed.origins[i];
+    }
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) =>
+      defaultPaint(context, offset);
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      defaultHitTestChildren(result, position: position);
 }
 
 /// The bench's own surface — visually distinct from the pitch so "these two

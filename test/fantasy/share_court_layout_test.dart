@@ -215,9 +215,8 @@ void main() {
     }
   });
 
-  // The in-app courts never change: chip boxes (relative to the pitch) are
-  // pinned to the values the default layout produced before the share
-  // image got its own layout.
+  // The in-app courts never move with the share layout: chip boxes
+  // (relative to the pitch) are pinned to the default layout's values.
   group('in-app courts keep their layout exactly (the default layout)', () {
     const squadNames = [
       'Kit Moreno',
@@ -290,33 +289,35 @@ void main() {
       };
     }
 
-    // Recorded from the default layout before the share layout existed
-    // (left, top, right, bottom relative to the pitch; 'court' = its size).
+    // Recorded from the default layout once it stood every chip on the
+    // grass (owner 2026-11-17, appCourtLayout; the earlier pins had the
+    // keeper on the far rim and the attackers off the near edge) — left,
+    // top, right, bottom relative to the pitch; 'court' = its size.
     const dreamTeam360 = {
-      'court': [0.0, 0.0, 336.0, 408.1875],
-      'Kit Moreno': [129.0, 0.6561, 207.0, 120.0561],
-      'Alexandros Papadopoulos': [78.9067, 144.3938, 156.9067, 263.7938],
-      'Yara Haddad': [179.0933, 144.3938, 257.0933, 263.7938],
-      'Alex Rivera': [64.2893, 288.1314, 142.2893, 407.5314],
-      'Annabel Vasconcelos': [193.7107, 288.1314, 271.7107, 407.5314],
+      'court': [0.0, 0.0, 336.0, 430.8499],
+      'Kit Moreno': [129.0, 32.6946, 207.0, 152.0946],
+      'Alexandros Papadopoulos': [63.6235, 158.0946, 141.6235, 277.4946],
+      'Yara Haddad': [194.3765, 158.0946, 272.3765, 277.4946],
+      'Alex Rivera': [50.2226, 283.4946, 128.2226, 402.8946],
+      'Annabel Vasconcelos': [207.7774, 283.4946, 285.7774, 402.8946],
     };
     const dreamTeam320Large = {
-      'court': [0.0, 0.0, 296.0, 429.7219],
-      'Kit Moreno': [109.0, 0.6712, 187.0, 134.9881],
-      'Alexandros Papadopoulos': [66.6731, 147.7025, 144.6731, 282.0195],
-      'Yara Haddad': [151.3269, 147.7025, 229.3269, 282.0195],
-      'Alex Rivera': [54.3219, 294.7338, 132.3219, 429.0508],
-      'Annabel Vasconcelos': [163.6781, 294.7338, 241.6781, 429.0508],
+      'court': [0.0, 0.0, 296.0, 481.8306],
+      'Kit Moreno': [109.0, 36.0899, 187.0, 170.4069],
+      'Alexandros Papadopoulos': [51.4064, 176.4069, 129.4064, 310.7239],
+      'Yara Haddad': [166.5936, 176.4069, 244.5936, 310.7239],
+      'Alex Rivera': [39.5969, 316.7239, 117.5969, 451.0409],
+      'Annabel Vasconcelos': [178.4031, 316.7239, 256.4031, 451.0409],
     };
     const squadBuilder360 = {
-      'court': [0.0, 0.0, 336.0, 419.4909],
-      'Kit Moreno': [120.0, 0.6477, 216.0, 135.0477],
-      'Alexandros Papadopoulos': [73.4016, 142.5455, 169.4016, 276.9455],
-      'Yara Haddad': [166.5984, 142.5455, 262.5984, 276.9455],
-      'Alex Rivera': [59.8040, 284.4432, 155.8040, 418.8432],
-      'Annabel Vasconcelos': [180.1960, 284.4432, 276.1960, 418.8432],
-      'Bench Defender': [53.0, 464.4909, 149.0, 598.8909],
-      'Bench Attacker': [187.0, 464.4909, 283.0, 598.8909],
+      'court': [0.0, 0.0, 336.0, 482.1144],
+      'Kit Moreno': [120.0, 36.1088, 216.0, 170.5088],
+      'Alexandros Papadopoulos': [54.6235, 176.5088, 150.6235, 310.9088],
+      'Yara Haddad': [185.3765, 176.5088, 281.3765, 310.9088],
+      'Alex Rivera': [41.2181, 316.9088, 137.2181, 451.3088],
+      'Annabel Vasconcelos': [198.7819, 316.9088, 294.7819, 451.3088],
+      'Bench Defender': [53.0, 527.1144, 149.0, 661.5144],
+      'Bench Attacker': [187.0, 527.1144, 283.0, 661.5144],
     };
 
     for (final (label, width, chipWidth, avatar, bench, scale, expected) in [
