@@ -72,6 +72,7 @@ import 'package:infinite_sports_flutter/fantasy/data/fantasy_service.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/auto_sub_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/badge_shelf.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/leaderboard_logic.dart';
@@ -682,6 +683,10 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
         if (p.photoUrl != null) p.name: p.photoUrl,
     };
     final slots = buildSlots(widget.config);
+    // The week's auto-subs (display only), from the points model's rows —
+    // the same rule as My Team's locked court (auto_sub_view).
+    final autoSubs = autoSubDisplay(
+        slots, picksToSlots(squad, slots), points?.rows ?? const []);
     final chip = chipLabel(squad?.chip);
 
     return SingleChildScrollView(
@@ -753,13 +758,17 @@ class _ManagerSquadViewerPageState extends State<ManagerSquadViewerPage> {
             FantasyCourtView(
               config: widget.config,
               slots: slots,
-              slotPicks: picksToSlots(squad, slots),
+              slotPicks: autoSubs.slotPicks,
               captainId: squad.captainId,
               viceId: squad.viceId,
               // The real armband: ×3 on a Triple Captain week.
               captainMultiplier: captainMultiplierFor(squad, widget.config),
               // Each player's counted points for the week shown.
-              weekPointsFor: points?.chipTextFor,
+              // A starter an auto-sub replaced reads Out.
+              weekPointsFor:
+                  subbedOutChipText(points?.chipTextFor, autoSubs.subbedOut),
+              subbedIn: autoSubs.subbedIn,
+              subbedOut: autoSubs.subbedOut,
               onSlotTap: null,
               onPlayerTap: widget.onOpenPlayer,
               photoUrlFor: (id) => photoByName[id],

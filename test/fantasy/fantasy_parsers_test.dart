@@ -1028,6 +1028,34 @@ void main() {
       expect(slots[2].multiplier, 0);
     });
 
+    // Task 4 (substitute plan): the starter an auto-sub replaced, written
+    // only on the bench player who came on; older rows carry none.
+    test('reads `replaces` into replacesId (null when absent or blank)', () {
+      final slots = historyBreakdownFromNode([
+        row('Gil Post', 0, 1),
+        {...row('Bea Bench', 40, 1, sub: true), 'replaces': 'Gil Post'},
+        row('Old Sub', 30, 1, sub: true), // scored before the pairing
+        {...row('Blank', 10, 1, sub: true), 'replaces': '  '},
+      ]);
+      expect(slots[0].replacesId, isNull);
+      expect(slots[1].replacesId, 'Gil Post');
+      expect(slots[1].autoSubbedIn, isTrue);
+      expect(slots[2].replacesId, isNull);
+      expect(slots[2].autoSubbedIn, isTrue);
+      expect(slots[3].replacesId, isNull);
+    });
+
+    test('the live node\'s short key `r` reads into replacesId too', () {
+      final slots = liveSlotsFromNode([
+        {'p': 'Gil Post', 'c': 0, 'x': 1},
+        {'p': 'Bea Bench', 'c': 40, 'x': 1, 's': true, 'r': 'Gil Post'},
+        {'p': 'Old Sub', 'c': 30, 'x': 1, 's': true},
+      ]);
+      expect(slots[0].replacesId, isNull);
+      expect(slots[1].replacesId, 'Gil Post');
+      expect(slots[2].replacesId, isNull);
+    });
+
     test('tolerates the index-keyed map shape and the whole History entry',
         () {
       final asMap = historyBreakdownFromNode({

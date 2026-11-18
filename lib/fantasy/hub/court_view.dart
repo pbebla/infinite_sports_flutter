@@ -44,6 +44,16 @@ Color fantasyDownRed(BuildContext context) =>
         ? const Color(0xFFFF5252)
         : const Color(0xFFD32F2F);
 
+/// The fantasy "up" green — [fantasyDownRed]'s pair, first used for the
+/// locked court's "came on" badge (a filled disc under a white arrow, on the
+/// pitch artwork and on the bench surface). A brighter green in dark mode, a
+/// deeper one in light, so the disc reads on both surfaces and the white
+/// arrow on it stays clear.
+Color fantasyUpGreen(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFF43A047)
+        : const Color(0xFF2E7D32);
+
 /// Owner's pick: render his "Neon Gold Isometric Soccer Pitch" artwork as the
 /// pitch instead of the code-drawn trapezoid. Flip to false to fall back to
 /// the painter (kept intact below).
@@ -70,6 +80,8 @@ class FantasyCourtView extends StatelessWidget {
     this.showPrices = true,
     this.priceOf,
     this.starterLayout = StarterLayout.app,
+    this.subbedIn = const {},
+    this.subbedOut = const {},
   });
 
   final FantasyConfig config;
@@ -122,6 +134,13 @@ class FantasyCourtView extends StatelessWidget {
   /// the Week share image's own ([StarterLayout.story] — only the story
   /// passes it).
   final StarterLayout starterLayout;
+
+  /// The locked views' auto-sub badges (auto_sub_view.autoSubDisplay): the
+  /// players who came on as a substitute ("came on", green) and the starters
+  /// they replaced ("went off", the down red). Empty everywhere else — the
+  /// editable court and the share images never pass them.
+  final Set<String> subbedIn;
+  final Set<String> subbedOut;
 
   @override
   Widget build(BuildContext context) {
@@ -266,6 +285,8 @@ class FantasyCourtView extends StatelessWidget {
       isVice: pick.playerId == viceId,
       captainMultiplier: captainMultiplier,
       weekPoints: weekPointsFor?.call(pick.playerId),
+      subbedIn: subbedIn.contains(pick.playerId),
+      subbedOut: subbedOut.contains(pick.playerId),
       onTap: onSlotTap != null
           ? () => onSlotTap!(i)
           : (onPlayerTap == null ? null : () => onPlayerTap!(pick.playerId)),

@@ -47,6 +47,7 @@ import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/auto_sub_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/chip_row.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/deadline_chip.dart'
@@ -529,6 +530,13 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
     // rewrites after finalize and which keeps a chip the lock voided. Until
     // it has loaded the court is the draft's and shows no points lines.
     final lockedSquad = locked?.squad;
+    // The week's auto-subs (display only): the sub drawn on the pitch in
+    // the absent starter's slot, the starter on the bench reading Out. Only
+    // the locked squad has rows; the editable court never moves anything.
+    final autoSubs = lockedSquad == null
+        ? null
+        : autoSubDisplay(_draft.slots,
+            picksToSlots(lockedSquad, _draft.slots), locked!.rows);
     // The chip on screen: the locked squad's (null = none — a voided chip
     // included) once it has loaded, else the draft's.
     final shownChip = lockedSquad != null ? lockedSquad.chip : _draft.chip;
@@ -622,9 +630,7 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
           FantasyCourtView(
             config: widget.config,
             slots: _draft.slots,
-            slotPicks: lockedSquad == null
-                ? _draft.picks
-                : picksToSlots(lockedSquad, _draft.slots),
+            slotPicks: autoSubs?.slotPicks ?? _draft.picks,
             captainId: lockedSquad?.captainId ?? _draft.captainId,
             viceId: lockedSquad?.viceId ?? _draft.viceId,
             // The REAL armband multiplier: ×3 while Triple Captain is the
@@ -634,7 +640,11 @@ class _FantasySquadBuilderState extends State<FantasySquadBuilder> {
             // Locked: each chip carries that player's counted points (live or
             // settled) — nothing while editing is open, and only for a squad
             // the lines belong to (the resolver's chipTexts).
-            weekPointsFor: locked?.chipTextFor,
+            // A starter an auto-sub replaced reads Out (auto_sub_view).
+            weekPointsFor: subbedOutChipText(
+                locked?.chipTextFor, autoSubs?.subbedOut ?? const {}),
+            subbedIn: autoSubs?.subbedIn ?? const {},
+            subbedOut: autoSubs?.subbedOut ?? const {},
             onSlotTap: editable ? _onSlotTap : null,
             // Locked: viewing a profile is still allowed (filled chips only;
             // empty slots stay inert).

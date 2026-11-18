@@ -13,12 +13,14 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:infinite_sports_flutter/fantasy/data/chip_usage.dart';
+import 'package:infinite_sports_flutter/fantasy/data/fantasy_live.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_parsers.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_player.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/gameweeks.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/selling.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/squad.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/live_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/live_pill.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder.dart';
@@ -2932,6 +2934,213 @@ void main() {
             tester.widget<Text>(find.text('Substitute $long Tres'));
         final context = tester.element(find.text('Substitute $long Tres'));
         expect(title.style?.color, Theme.of(context).colorScheme.onSurface);
+      });
+    }
+  });
+
+  // Task 4 (substitute plan): the locked court shows the auto-sub. Display
+  // only: the sub is drawn on the pitch in the absent starter's place with
+  // his points and a "came on" badge; the starter sits on the bench reading
+  // Out with a "went off" badge. The models come from the hub's own resolver.
+  group('the locked court shows the auto-sub', () {
+    const week = 3;
+    LivePlayer lp(LivePlayerStatus st) =>
+        LivePlayer(pts: 0, st: st, total: 0, form: 0, ppg: 0, games: 0, own: 0);
+    LiveSlot row(String id, int tenths,
+            {bool sub = false, String? replaces, int x = 1}) =>
+        LiveSlot(
+            playerId: id,
+            countedTenths: tenths,
+            multiplier: x,
+            autoSubbedIn: sub,
+            replacesId: replaces);
+
+    // Def One did not play; Bench Def came on for him (full points).
+    List<LiveSlot> pairedRows({bool pairing = true}) => [
+          row('GK One', 60, x: 2),
+          row('Def One', 0),
+          row('Def Two', 20),
+          row('Att One', 30),
+          row('Att Two', 10),
+          row('Bench Def', 40,
+              sub: true, replaces: pairing ? 'Def One' : null),
+          row('Bench Att', 5),
+        ];
+
+    LockedWeekModel liveModel(List<LiveSlot> rows,
+            {LivePlayerStatus defOne = LivePlayerStatus.out,
+            LivePlayerStatus? defTwo}) =>
+        resolveLockedWeek(
+          week: week,
+          uid: 'me',
+          voidedWeeks: const {},
+          sources: LockedWeekSources(
+            live: FantasyLiveState(
+              meta: const LiveMeta(gw: week, state: LiveState.live),
+              board: const {'me': LiveBoardRow(o: 90, r: 5)},
+              players: {
+                for (final r in rows) r.playerId: lp(LivePlayerStatus.done),
+                'Def One': lp(defOne),
+                if (defTwo != null) 'Def Two': lp(defTwo),
+              },
+            ),
+            liveSquad: LiveSquad(totalTenths: 165, week: 16, slots: rows),
+            published: fullSquad(),
+          ),
+        );
+
+    LockedWeekModel settledModel(List<LiveSlot> rows) => resolveLockedWeek(
+          week: week,
+          uid: 'me',
+          voidedWeeks: const {},
+          sources: LockedWeekSources(
+            history: HistoryWeek(
+                totalTenths: 165, slots: rows, squad: fullSquad()),
+            overall: const OverallStanding(rank: 4),
+          ),
+        );
+
+    Finder chip(String id) => find.byKey(ValueKey('squad_chip_$id'));
+    Finder onChip(String id, String text) =>
+        find.descendant(of: chip(id), matching: find.text(text));
+    // Starters stand on the pitch, above the bench surface's label.
+    bool onPitch(WidgetTester tester, String id) =>
+        tester.getCenter(chip(id)).dy <
+        tester.getTopLeft(find.textContaining('Bench ·')).dy;
+
+    Future<void> pumpLocked(WidgetTester tester, LockedWeekModel model,
+        {Brightness brightness = Brightness.light,
+        Size size = const Size(420, 1900)}) async {
+      await pumpBuilder(tester,
+          lockOverride: FantasyLockOverride.locked,
+          initialSquad: fullSquad(),
+          lockedWeek: model,
+          size: size,
+          brightness: brightness);
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+
+    void expectSwapped(WidgetTester tester, {required String subText}) {
+      expect(onPitch(tester, 'Bench Def'), isTrue);
+      expect(onPitch(tester, 'Def One'), isFalse);
+      expect(onChip('Bench Def', subText), findsOneWidget);
+      expect(onChip('Def One', 'Out'), findsOneWidget);
+      expect(find.byKey(const ValueKey('sub_on_badge_Bench Def')),
+          findsOneWidget);
+      expect(find.byKey(const ValueKey('sub_off_badge_Def One')),
+          findsOneWidget);
+      expect(find.byKey(const ValueKey('sub_off_badge_Bench Def')),
+          findsNothing);
+      expect(find.byKey(const ValueKey('sub_on_badge_Def One')), findsNothing);
+      // Nobody else moved.
+      expect(onPitch(tester, 'Def Two'), isTrue);
+      expect(onPitch(tester, 'Bench Att'), isFalse);
+    }
+
+    testWidgets(
+        'live week: the sub is on the pitch with his points and the "came '
+        'on" badge; the starter is on the bench with Out and "went off"',
+        (tester) async {
+      final semantics = tester.ensureSemantics();
+      await pumpLocked(tester, liveModel(pairedRows()));
+      expectSwapped(tester, subText: '4 pts');
+      expect(find.bySemanticsLabel('Came on as a substitute'), findsOneWidget);
+      expect(find.bySemanticsLabel('Did not play'), findsOneWidget);
+      semantics.dispose();
+    });
+
+    testWidgets(
+        'live week before the rows carry the sub: nothing moves, no badge '
+        '(Review Focus 5)', (tester) async {
+      await pumpLocked(
+          tester,
+          liveModel([
+            row('GK One', 60, x: 2),
+            row('Def One', 0),
+            row('Def Two', 20),
+            row('Att One', 30),
+            row('Att Two', 10),
+            row('Bench Def', 20), // bench factor, not came on
+            row('Bench Att', 5),
+          ], defOne: LivePlayerStatus.pending));
+      expect(onPitch(tester, 'Def One'), isTrue);
+      expect(onPitch(tester, 'Bench Def'), isFalse);
+      expect(onChip('Def One', 'Not started'), findsOneWidget);
+      expect(find.byKey(const ValueKey('sub_on_badge_Bench Def')),
+          findsNothing);
+      expect(find.byKey(const ValueKey('sub_off_badge_Def One')), findsNothing);
+    });
+
+    testWidgets(
+        'settled week from History: the same swap, and the starter reads Out '
+        '(not the settled "0 pts")', (tester) async {
+      await pumpLocked(tester, settledModel(pairedRows()));
+      expectSwapped(tester, subText: '4 pts');
+      expect(onChip('Def One', '0 pts'), findsNothing);
+    });
+
+    testWidgets(
+        'a week scored before the pairing existed: nothing moves, the bench '
+        'player keeps his place with the "came on" badge (Review Focus 4)',
+        (tester) async {
+      await pumpLocked(tester, settledModel(pairedRows(pairing: false)));
+      expect(onPitch(tester, 'Def One'), isTrue);
+      expect(onPitch(tester, 'Bench Def'), isFalse);
+      expect(onChip('Bench Def', '4 pts'), findsOneWidget);
+      expect(find.byKey(const ValueKey('sub_on_badge_Bench Def')),
+          findsOneWidget);
+      expect(find.byKey(const ValueKey('sub_off_badge_Def One')), findsNothing);
+    });
+
+    testWidgets(
+        'two absent defenders, one sub: only the recorded pair moves; the '
+        'other absent starter stays on the pitch reading Out (Review Focus 3)',
+        (tester) async {
+      final rows = pairedRows();
+      rows[2] = row('Def Two', 0);
+      await pumpLocked(tester,
+          liveModel(rows, defTwo: LivePlayerStatus.out));
+      expect(onPitch(tester, 'Bench Def'), isTrue);
+      expect(onPitch(tester, 'Def One'), isFalse);
+      expect(onChip('Def One', 'Out'), findsOneWidget);
+      expect(onPitch(tester, 'Def Two'), isTrue);
+      expect(onChip('Def Two', 'Out'), findsOneWidget);
+      expect(find.byKey(const ValueKey('sub_off_badge_Def Two')), findsNothing);
+    });
+
+    testWidgets(
+        'the editable builder never moves anything or shows a badge',
+        (tester) async {
+      // Editing open: the hub hands no model, and even a stale one is ignored.
+      await pumpBuilder(tester,
+          initialSquad: fullSquad(), lockedWeek: liveModel(pairedRows()));
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(onPitch(tester, 'Def One'), isTrue);
+      expect(onPitch(tester, 'Bench Def'), isFalse);
+      expect(find.byKey(const ValueKey('sub_on_badge_Bench Def')),
+          findsNothing);
+      expect(find.byKey(const ValueKey('sub_off_badge_Def One')), findsNothing);
+    });
+
+    for (final brightness in Brightness.values) {
+      testWidgets(
+          'badges at 360 px in ${brightness.name} mode: no overflow, green on '
+          'and the down red off', (tester) async {
+        await pumpLocked(tester, settledModel(pairedRows()),
+            brightness: brightness, size: const Size(360, 1900));
+        expect(tester.takeException(), isNull);
+        expectSwapped(tester, subText: '4 pts');
+        final context = tester.element(chip('Bench Def'));
+        Color fill(String key) {
+          final box = tester.widget<Container>(find.descendant(
+              of: find.byKey(ValueKey(key)),
+              matching: find.byType(Container)).first);
+          return (box.decoration! as BoxDecoration).color!;
+        }
+
+        expect(fill('sub_on_badge_Bench Def'), fantasyUpGreen(context));
+        expect(fill('sub_off_badge_Def One'), fantasyDownRed(context));
+        expect(fantasyUpGreen(context), isNot(fantasyDownRed(context)));
       });
     }
   });

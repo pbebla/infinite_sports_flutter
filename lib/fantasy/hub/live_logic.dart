@@ -302,10 +302,18 @@ class LockedWeekModel {
     required this.view,
     this.chipTexts = const {},
     this.squad,
+    this.rows = const [],
   });
 
   final LockedWeekView view;
   final Map<String, String> chipTexts;
+
+  /// The scored slot rows the chip texts were built from (the live squad's
+  /// while live, History's Breakdown once settled), filtered to the players
+  /// in [squad] — the court reads who came on for whom from them
+  /// (auto_sub_view.autoSubDisplay). Empty whenever no lines are shown
+  /// (voided, invalid, waiting, unknown, no locked squad).
+  final List<LiveSlot> rows;
 
   /// The squad that was locked for the week (PublishedPicks while live,
   /// History once settled): the court's picks, armband and chip.
@@ -349,7 +357,8 @@ LockedWeekModel resolveLockedWeek({
       : (history?.squad ?? sources.published);
 
   LockedWeekModel model(LockedWeekView view,
-      [Map<String, String> texts = const {}]) {
+      [Map<String, String> texts = const {},
+      List<LiveSlot> rows = const []]) {
     // A line only belongs to a player in the squad on screen.
     final ids = {
       for (final p in locked?.picks ?? const <SquadPick>[]) p.playerId
@@ -361,6 +370,10 @@ LockedWeekModel resolveLockedWeek({
         for (final e in texts.entries)
           if (ids.contains(e.key)) e.key: e.value,
       },
+      rows: [
+        for (final row in rows)
+          if (ids.contains(row.playerId)) row,
+      ],
     );
   }
 
@@ -376,6 +389,7 @@ LockedWeekModel resolveLockedWeek({
       LockedWeekView.live(
           weekPoints: squad.week, rank: row?.r, movement: row?.m),
       _chipTexts(squad.slots, (id) => live.players[id]?.st),
+      squad.slots,
     );
   }
 
@@ -388,6 +402,7 @@ LockedWeekModel resolveLockedWeek({
         LockedWeekView.settled(
             weekPoints: tenths ~/ 10, rank: sources.overall?.rank),
         _chipTexts(history.slots, (_) => LivePlayerStatus.done),
+        history.slots,
       );
     }
   }

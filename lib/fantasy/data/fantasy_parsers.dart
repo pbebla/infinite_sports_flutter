@@ -728,10 +728,11 @@ Map<String, FantasyManager> managersFromNode(Object? node) {
 // ── Per-player points of a squad week (live everywhere, Task 4) ────────────
 // The SAME slot rows live in two places, written by the same scoring core
 // (finalize_core.ts scoreWeekCore): settled in `History/<gw>/<uid>.Breakdown`
-// = [{playerId, countedTenths, multiplier, autoSubbedIn}] (finalize; unread
-// by the app before the live work) and live in `Live/Squads/<uid>.Slots` =
-// [{p, c, x, s?}] (live_core.ts) — one model, so a squad screen renders a
-// past week and the live week with the same code. One row per pick, in pick
+// = [{playerId, countedTenths, multiplier, autoSubbedIn, replaces?}]
+// (finalize; unread by the app before the live work) and live in
+// `Live/Squads/<uid>.Slots` = [{p, c, x, s?, r?}] (live_core.ts; replaces / r
+// = the starter an auto-sub came on for, on the sub's row only) — one model,
+// so a squad screen renders a past week and the live week with the same code. One row per pick, in pick
 // order. An invalid squad has no rows (RTDB drops the empty list).
 
 /// One squad slot's points for a gameweek: what the player counted for the
@@ -747,6 +748,7 @@ class LiveSlot {
     required this.countedTenths,
     required this.multiplier,
     this.autoSubbedIn = false,
+    this.replacesId,
   });
 
   final String playerId;
@@ -761,6 +763,12 @@ class LiveSlot {
 
   /// Filled by an automatic substitution this week.
   final bool autoSubbedIn;
+
+  /// The starter this bench player came on for (`replaces` in History, `r`
+  /// live) — only on the sub's own row. null on every other row and on rows
+  /// scored before the pairing was recorded (an [autoSubbedIn] row may lack
+  /// it).
+  final String? replacesId;
 }
 
 /// A list-ish node's children in index order: a List as-is, an index-keyed
@@ -789,7 +797,7 @@ List<LiveSlot> historyBreakdownFromNode(Object? node) {
   return [
     for (final raw in _rowsInOrder(rows))
       if (_slotFromRow(raw, 'playerId', 'countedTenths', 'multiplier',
-              'autoSubbedIn')
+              'autoSubbedIn', 'replaces')
           case final slot?)
         slot,
   ];
@@ -869,21 +877,23 @@ OverallStanding? overallStandingFromNode(Object? node) {
 /// rules as [historyBreakdownFromNode] over the live node's short keys.
 List<LiveSlot> liveSlotsFromNode(Object? node) => [
       for (final raw in _rowsInOrder(node))
-        if (_slotFromRow(raw, 'p', 'c', 'x', 's') case final slot?) slot,
+        if (_slotFromRow(raw, 'p', 'c', 'x', 's', 'r') case final slot?) slot,
     ];
 
-LiveSlot? _slotFromRow(
-    Object? raw, String id, String tenths, String multiplier, String sub) {
+LiveSlot? _slotFromRow(Object? raw, String id, String tenths,
+    String multiplier, String sub, String replaces) {
   if (raw is! Map) return null;
   final playerId = raw[id]?.toString().trim() ?? '';
   final counted = tolerantInt(raw[tenths]);
   final x = tolerantInt(raw[multiplier]);
   if (playerId.isEmpty || counted == null || x == null) return null;
+  final replacedId = raw[replaces]?.toString().trim() ?? '';
   return LiveSlot(
     playerId: playerId,
     countedTenths: counted,
     multiplier: x,
     autoSubbedIn: raw[sub] == true,
+    replacesId: replacedId.isEmpty ? null : replacedId,
   );
 }
 

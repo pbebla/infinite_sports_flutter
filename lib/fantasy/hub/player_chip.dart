@@ -15,6 +15,8 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:infinite_sports_flutter/fantasy/data/fantasy_format.dart';
+import 'package:infinite_sports_flutter/fantasy/hub/court_view.dart'
+    show fantasyDownRed, fantasyUpGreen;
 import 'package:infinite_sports_flutter/fantasy/hub/fantasy_banner.dart';
 import 'package:infinite_sports_flutter/fantasy/hub/squad_builder_logic.dart';
 import 'package:infinite_sports_flutter/fantasy/engine/fantasy_config.dart';
@@ -93,6 +95,8 @@ class FantasyPlayerChip extends StatelessWidget {
     this.onTap,
     this.width = 96,
     this.avatarSize = 58,
+    this.subbedIn = false,
+    this.subbedOut = false,
   });
 
   final String name;
@@ -125,6 +129,13 @@ class FantasyPlayerChip extends StatelessWidget {
 
   /// Photo avatar diameter — owner: "clear image, can't have them tiny".
   final double avatarSize;
+
+  /// The locked court's auto-sub badge on the photo's TOP-LEFT corner (the
+  /// armband owns the top-right): [subbedIn] = came on as a substitute
+  /// (green up arrow), [subbedOut] = the starter he replaced (down-red down
+  /// arrow). Both false = no badge (every other court).
+  final bool subbedIn;
+  final bool subbedOut;
 
   @override
   Widget build(BuildContext context) {
@@ -169,6 +180,24 @@ class FantasyPlayerChip extends StatelessWidget {
                       filled: isCaptain,
                       accent: accent,
                     ),
+                  ),
+                if (subbedIn || subbedOut)
+                  Positioned(
+                    top: -2,
+                    left: -2,
+                    child: subbedIn
+                        ? _SubBadge(
+                            key: ValueKey('sub_on_badge_$name'),
+                            icon: Icons.arrow_upward,
+                            color: fantasyUpGreen(context),
+                            label: 'Came on as a substitute',
+                          )
+                        : _SubBadge(
+                            key: ValueKey('sub_off_badge_$name'),
+                            icon: Icons.arrow_downward,
+                            color: fantasyDownRed(context),
+                            label: 'Did not play',
+                          ),
                   ),
               ],
             ),
@@ -284,6 +313,44 @@ class _ArmbandBadge extends StatelessWidget {
               ? (isDark ? Colors.black : scheme.onPrimary)
               : scheme.onSurfaceVariant,
         ),
+      ),
+    );
+  }
+}
+
+/// The auto-sub corner badge: a filled disc (green on, down red off) under a
+/// white arrow, ringed in the theme's surface so it lifts off the photo, the
+/// pitch artwork and the bench surface in both themes. Same size as the
+/// armband badge opposite it.
+class _SubBadge extends StatelessWidget {
+  const _SubBadge({
+    super.key,
+    required this.icon,
+    required this.color,
+    required this.label,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      label: label,
+      container: true,
+      child: Container(
+        width: 17,
+        height: 17,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color,
+          border: Border.all(color: scheme.surface, width: 1),
+        ),
+        // Decorative: the label above says it.
+        child: Icon(icon, size: 12, color: Colors.white),
       ),
     );
   }

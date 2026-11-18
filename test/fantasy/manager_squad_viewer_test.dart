@@ -1287,5 +1287,91 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     }
+
+    // Task 4 (substitute plan): the squad viewer shows the auto-sub like the
+    // locked My Team — the sub on the pitch with his points and a "came on"
+    // badge, the absent starter on the bench reading Out with "went off".
+    group('the auto-sub on the court', () {
+      LiveSlot subRow({String? replaces = 'Pub Striker'}) => LiveSlot(
+          playerId: 'Bench Att',
+          countedTenths: 90,
+          multiplier: 1,
+          autoSubbedIn: true,
+          replacesId: replaces);
+
+      Finder chipOf(String id) => byKey('squad_chip_$id');
+      bool onPitch(WidgetTester tester, String id) =>
+          tester.getCenter(chipOf(id)).dy <
+          tester.getTopLeft(find.textContaining('Bench ·')).dy;
+      Finder onChip(String id, String text) =>
+          find.descendant(of: chipOf(id), matching: find.text(text));
+
+      void expectSwapped(WidgetTester tester) {
+        expect(onPitch(tester, 'Bench Att'), isTrue);
+        expect(onPitch(tester, 'Pub Striker'), isFalse);
+        expect(onChip('Pub Striker', 'Out'), findsOneWidget);
+        expect(byKey('sub_on_badge_Bench Att'), findsOneWidget);
+        expect(byKey('sub_off_badge_Pub Striker'), findsOneWidget);
+      }
+
+      testWidgets('live week: the recorded pair trades places', (tester) async {
+        await pumpPoints(tester);
+        await land(tester,
+            live: liveWeek2(bench: LivePlayerStatus.done),
+            squad: LiveSquad(totalTenths: 130, week: 13, slots: [
+              slot('Pub Keeper', 40),
+              slot('Pub Striker', 0),
+              subRow(),
+            ]));
+        expectSwapped(tester);
+        expect(onChip('Bench Att', '9 pts'), findsOneWidget);
+      });
+
+      testWidgets('settled week from History: the same, Out not "0 pts"',
+          (tester) async {
+        await pumpPoints(tester);
+        await land(tester,
+            gw2: settled(crew(), tenths: 130, slots: [
+              slot('Pub Keeper', 40),
+              slot('Pub Striker', 0),
+              subRow(),
+            ]));
+        expect(find.text('Gameweek 2 squad'), findsOneWidget);
+        expectSwapped(tester);
+        expect(onChip('Bench Att', '9 pts'), findsOneWidget);
+        expect(onChip('Pub Striker', '0 pts'), findsNothing);
+      });
+
+      testWidgets(
+          'a week scored before the pairing: nothing moves, "came on" badge '
+          'only', (tester) async {
+        await pumpPoints(tester);
+        await land(tester,
+            gw2: settled(crew(), tenths: 130, slots: [
+              slot('Pub Keeper', 40),
+              slot('Pub Striker', 0),
+              subRow(replaces: null),
+            ]));
+        expect(onPitch(tester, 'Pub Striker'), isTrue);
+        expect(onPitch(tester, 'Bench Att'), isFalse);
+        expect(byKey('sub_on_badge_Bench Att'), findsOneWidget);
+        expect(byKey('sub_off_badge_Pub Striker'), findsNothing);
+      });
+
+      for (final brightness in Brightness.values) {
+        testWidgets('360 px, ${brightness.name}: no overflow', (tester) async {
+          await pumpPoints(tester,
+              size: const Size(360, 1300), brightness: brightness);
+          await land(tester,
+              gw2: settled(crew(), tenths: 130, slots: [
+                slot('Pub Keeper', 40),
+                slot('Pub Striker', 0),
+                subRow(),
+              ]));
+          expect(tester.takeException(), isNull);
+          expectSwapped(tester);
+        });
+      }
+    });
   });
 }
