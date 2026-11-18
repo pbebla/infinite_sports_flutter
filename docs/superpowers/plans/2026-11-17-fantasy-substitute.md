@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Status:** written 2026-11-17 on Opus 5.5. **Reviewed, amended and APPROVED by Fable 5.2 on 2026-11-17** (see "Fable review" at the end). Ready to build once the owner answers decision 4. Not built.
+> **Status:** written 2026-11-17 on Opus 5.5. **Reviewed, amended and APPROVED by Fable 5.2 on 2026-11-17** (see "Fable review" at the end). Owner confirmed decision 4 and said go on 2026-11-17 ("yes rename it to replace, go ahead and build it"). Ready to build.
 
 **Goal:** Let a fantasy manager swap a starter and a bench player of the same position for free before the deadline, and show the automatic substitutions that already happen in scoring on the pitch.
 
@@ -27,7 +27,7 @@
    - **Already built:** scoring has done the substitution since launch (`functions/src/lib/fantasy/squad_week.ts`, Dart twin `lib/fantasy/engine/squad_week.dart`). An absent starter is covered by the first bench player of the same position who played, at FULL points. If the captain did not play, the vice gets the armband. The Rules tab explains it.
    - **Missing:** the pitch does not show it. The sub stays drawn on the bench and the absent starter on the pitch.
    - **Decided (owner left it to us): the sub goes back to the bench after the week.** This is how scoring works today, because the saved squad never changes and the swap applies only to that week's points. It matches the fantasy game players know. The absent starter may be back next week, and nobody's lineup changes behind their back. No code is needed for this; the pitch shows the swap only for the week it happened.
-4. **Recommended, owner to confirm in his review:** rename the chip action `Swap` (which sells the player and opens the market) to `Replace`, so it is not mistaken for the free Substitute. That mix-up is what ticket #5 describes. The "Needs a new spot" strip keeps its own `Swap` button; that is a different flow.
+4. **Owner confirmed 2026-11-17 ("yes rename it to replace"):** rename the chip action `Swap` (which sells the player and opens the market) to `Replace`, so it is not mistaken for the free Substitute. That mix-up is what ticket #5 describes. The "Needs a new spot" strip keeps its own `Swap` button; that is a different flow.
 
 ## Data contract (additive)
 
@@ -45,7 +45,7 @@ Older rows have no `replaces`/`r`. That includes GW1, which was finalized before
 - Copy, exactly (fan app):
   - Chip action, when the tapped player has exactly ONE counterpart: `Substitute with <Counterpart>`. Tapping it swaps the two at once, with no second sheet. Today's formation has one bench defender and one bench attacker, so every starter is this case.
   - Chip action, when he has several counterparts (a bench player has two starters of his position): `Substitute`, which opens the sheet below.
-  - The Substitute tile sits above the market tile, with `Icons.swap_vert`. With owner decision 4 confirmed, the market tile `Swap` reads `Replace`; its icon and behaviour stay.
+  - The Substitute tile sits above the market tile, with `Icons.swap_vert`. The market tile `Swap` now reads `Replace` (owner decision 4); its icon and behaviour stay.
   - The sheet: title `Substitute <Name>`, line under it `Pick who swaps places. It's free and not a transfer.` Each row shows the candidate's name and position.
   - Armband passed: SnackBar `<Name> is now your captain.` or `<Name> is now your vice-captain.`
   - Rules tab, added to the "Auto-subs, captain & bench" section: `Before the deadline you can Substitute a starter and a bench player in the same position. It's free and it is not a transfer.`
@@ -115,7 +115,7 @@ Older rows have no `replaces`/`r`. That includes GW1, which was finalized before
   - After Save, the stored squad has the swapped bench flags and the transfer line still reads 0 transfers (Review Focus 2).
   - A locked court offers no Substitute.
   - The Rules tab shows the new sentence.
-  - With owner decision 4 confirmed, the old `Swap` tile reads `Replace` and still opens the market picker. Update the tests that pinned `Swap`, and keep the strip's `Swap`.
+  - The old `Swap` tile reads `Replace` and still opens the market picker (owner decision 4). Update the tests that pinned `Swap`, and keep the strip's `Swap`.
 - [ ] **Step 2:** run, expect FAIL.
 - [ ] **Step 3:** implement.
 - [ ] **Step 4:** `flutter test`, `flutter analyze`.
@@ -192,7 +192,7 @@ Older rows have no `replaces`/`r`. That includes GW1, which was finalized before
 
 ## Fable review (2026-11-17)
 
-Checked against the fan repo at `zaya-fantasy-subs` (`3bd0b29` plus the share-image work in progress), the server functions and the Manager. Verdict: **approved with the amendments below, all written into the plan above.** One answer is still needed from the owner: decision 4 (rename `Swap` to `Replace`).
+Checked against the fan repo at `zaya-fantasy-subs` (`3bd0b29` plus the share-image work in progress), the server functions and the Manager. Verdict: **approved with the amendments below, all written into the plan above.** The owner has since confirmed decision 4 (rename `Swap` to `Replace`).
 
 1. **One tap, not two.** The formation has one bench defender and one bench attacker, so every starter has exactly one possible substitute. The draft would have opened a second sheet listing that one name. The action now reads `Substitute with <Name>` and swaps at once; the sheet opens only when there is a real choice (a bench player has two starters of his position).
 2. **The armband passes without a false alarm.** The draft said only "the armband passes". The existing helper for a removed player reports a LOST armband, which would have told the manager to pick a new captain right after the app picked one. The swap now moves the armband directly and says `<Name> is now your captain.`
