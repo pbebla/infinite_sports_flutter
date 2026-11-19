@@ -73,6 +73,7 @@ dependencies:
   sign_in_with_apple: ^8.1.0
   package_info_plus: ^10.2.2
   google_maps_flutter_ios_sdk9: ^2.19.0
+  in_app_update: ^5.0.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

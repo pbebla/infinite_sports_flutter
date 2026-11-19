@@ -417,54 +417,6 @@ class _LeaderboardPageState extends State<LeaderboardPage> {
     );
   }
 
-  /// The Flag Football table is wider than any phone: a fade on the right
-  /// edge (theme surface colour) shows while more columns are off screen,
-  /// and goes once the reader reaches the last column (fix round 1, M5).
-  Widget _withScrollFade(BuildContext context, Widget table) {
-    bool onMetrics(ScrollMetrics m) {
-      if (m.axis == Axis.horizontal) {
-        _moreToRight.value = m.extentAfter > 0.5;
-      }
-      return false;
-    }
-
-    final surface = Theme.of(context).colorScheme.surface;
-    return Stack(
-      children: [
-        NotificationListener<ScrollMetricsNotification>(
-          onNotification: (n) => onMetrics(n.metrics),
-          child: NotificationListener<ScrollNotification>(
-            onNotification: (n) => onMetrics(n.metrics),
-            child: table,
-          ),
-        ),
-        Positioned(
-          top: 0,
-          bottom: 0,
-          right: 0,
-          width: 32,
-          child: IgnorePointer(
-            child: ValueListenableBuilder<bool>(
-              valueListenable: _moreToRight,
-              builder: (context, more, _) => AnimatedOpacity(
-                opacity: more ? 1 : 0,
-                duration: const Duration(milliseconds: 150),
-                child: DecoratedBox(
-                  key: const ValueKey('leaderboard_scroll_fade'),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [surface.withValues(alpha: 0), surface],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(

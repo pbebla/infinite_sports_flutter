@@ -24,7 +24,6 @@ import 'dart:async';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_config/flutter_config.dart';
 import 'package:infinite_sports_flutter/firebase_options.dart';
 import 'package:infinite_sports_flutter/misc/bounded_read.dart';
 import 'package:infinite_sports_flutter/misc/rtdb_emulator.dart';
@@ -70,7 +69,6 @@ Future<void> main() async {
   // Same database start-up order as lib/main.dart: env config, Firebase,
   // emulator switch, server-time listener, on-disk cache. Nothing else.
   try {
-    await FlutterConfig.loadEnvVariables();
     await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform);
     connectRtdbEmulatorIfRequested(FirebaseDatabase.instance);
